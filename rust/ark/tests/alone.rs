@@ -32,7 +32,6 @@ fn eve_alone() -> Peer {
     }
     assert_eq!(confirmed.len(), 2, "alone, eve confirms her own intents");
     assert!(eve.pending.is_empty() && eve.log().head().0 == 2);
-    assert_eq!(eve.confirmed_hash(), eve.store.state_hash());
     assert_eq!(pos_of(&eve.store, &road(), "t5"), Some(1));
     eve
 }

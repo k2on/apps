@@ -235,7 +235,6 @@ impl Net {
                 let lost = ark::log::Durable {
                     rows: c.log.confirmed_rows(),
                     logged: vec![],
-                    parts: vec![],
                     local: c.log.local,
                     pending: vec![],
                 };

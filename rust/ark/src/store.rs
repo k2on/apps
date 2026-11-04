@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::format::{put_key, Encode};
+use crate::format::Encode;
 use crate::hash::{add256, sha256, sub256, EntryHash, SchemaHash, StateHash};
 use crate::log::{Logged, Rows as KvRows, Seq};
 use crate::schema::{Parsed, Schema, Space, Table};
@@ -77,6 +77,20 @@ impl Change {
     pub fn table(&self) -> &str {
         match self {
             Change::Add { table, .. } | Change::Remove { table, .. } | Change::Edit { table, .. } => table,
+        }
+    }
+
+    /// The same change, each row as `f` makes it.
+    pub fn map(&self, mut f: impl FnMut(&[u8]) -> Vec<u8>) -> Change {
+        let table = self.table().to_string();
+        match self {
+            Change::Add { row, .. } => Change::Add { table, row: f(row) },
+            Change::Remove { row, .. } => Change::Remove { table, row: f(row) },
+            Change::Edit { old, new, .. } => Change::Edit {
+                table,
+                old: f(old),
+                new: f(new),
+            },
         }
     }
 
@@ -167,8 +181,8 @@ pub struct Store {
     shash: SchemaHash,
     tables: Vec<Rows>,
     space: Space,
-    /// The log's table: sequence's bytes to the row.
-    log: BTreeMap<Vec<u8>, LogRow>,
+    /// The log: the row it stands on, then its entries, in order.
+    log: Vec<Logged>,
 }
 
 impl PartialEq for Store {
@@ -178,109 +192,50 @@ impl PartialEq for Store {
 }
 impl Eq for Store {}
 
-/// Per table, the leaves undoing some changes adds to its digest and
-/// takes from it ([`Store::undo_of`]).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Undo(Vec<(usize, [u8; 32], [u8; 32])>);
-
-impl Undo {
-    /// Digests, in schema order, with the changes undone.
-    pub fn apply(&self, digests: &mut [[u8; 32]]) {
-        for (t, plus, minus) in &self.0 {
-            add256(&mut digests[*t], plus);
-            sub256(&mut digests[*t], minus);
-        }
-    }
-}
-
-/// The log as its table holds it, read (§1.6). Every peer's log stands on
-/// a first row; the entries are the rows after it.
-#[derive(Clone, Copy)]
-pub struct Log<'a>(&'a BTreeMap<Vec<u8>, LogRow>);
-
-/// A row of the log's table, and its sequence, state and hash, taken from
-/// the entry it was read or written as.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LogRow {
-    bytes: Vec<u8>,
-    ends: (Seq, StateHash, EntryHash),
-}
-
-impl LogRow {
-    fn of(l: &Logged, bytes: Vec<u8>) -> LogRow {
-        LogRow {
-            ends: (l.seq, l.state, l.hash),
-            bytes,
-        }
-    }
-}
-
-impl PartialEq for Log<'_> {
-    fn eq(&self, other: &Log) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl std::fmt::Debug for Log<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_list().entries(self.0.values().map(read)).finish()
-    }
-}
-
-fn read(b: &LogRow) -> Logged {
-    Logged::from_bytes(&b.bytes).expect("a row of the log reads")
-}
-
-/// A sequence's key in the log's table.
-fn seq_key(seq: Seq) -> Vec<u8> {
-    let mut k = vec![];
-    put_key(&seq, &mut k);
-    k
-}
+/// The log, read (§1.6): the row it stands on, then its entries, one per
+/// sequence.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Log<'a>(&'a [Logged]);
 
 impl<'a> Log<'a> {
     /// The row the log stands on.
     pub fn base(&self) -> Logged {
-        read(self.0.values().next().expect("a log stands on a row"))
+        self.0[0].clone()
     }
 
     pub fn base_seq(&self) -> Seq {
-        self.0.values().next().expect("a log stands on a row").ends.0
-    }
-
-    fn last(&self) -> (Seq, StateHash, EntryHash) {
-        self.0.values().next_back().expect("a log stands on a row").ends
+        self.0[0].seq
     }
 
     /// The last sequence and the chain's hash there.
     pub fn head(&self) -> (Seq, EntryHash) {
-        let (n, _, h) = self.last();
-        (n, h)
+        let l = self.0.last().expect("a log stands on a row");
+        (l.seq, l.hash)
     }
 
-    pub fn head_state(&self) -> StateHash {
-        self.last().1
+    fn index(&self, seq: Seq) -> Option<usize> {
+        usize::try_from(seq - self.base_seq()).ok().filter(|i| *i < self.0.len())
     }
 
     /// The entry at `seq`, above the row the log stands on.
     pub fn at(&self, seq: Seq) -> Option<Logged> {
-        (seq > self.base_seq()).then(|| self.0.get(&seq_key(seq)).map(read)).flatten()
+        self.index(seq).filter(|i| *i > 0).map(|i| self.0[i].clone())
     }
 
     /// Whether this log has `hash` at `seq`: one history up to there.
     pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        self.0.get(&seq_key(seq)).is_some_and(|b| b.ends.2 == *hash)
+        self.index(seq).is_some_and(|i| self.0[i].hash == *hash)
     }
 
     /// The entries after `seq`, in order.
     pub fn after(&self, seq: Seq) -> impl Iterator<Item = Logged> + 'a {
-        let from = seq_key(seq.max(self.base_seq()));
-        self.0.range((Bound::Excluded(from), Bound::Unbounded)).map(|(_, b)| read(b))
+        let from = self.index(seq.max(self.base_seq())).map_or(self.0.len(), |i| i + 1);
+        self.0[from..].iter().cloned()
     }
 
     /// Every entry above the row the log stands on.
     pub fn entries(&self) -> Vec<Logged> {
-        self.after(Seq::MIN).collect()
+        self.0[1..].to_vec()
     }
 }
 
@@ -326,7 +281,7 @@ impl Store {
             schema,
             tables,
             space,
-            log: BTreeMap::new(),
+            log: vec![],
         }
     }
 
@@ -335,80 +290,52 @@ impl Store {
         Log(&self.log)
     }
 
-    /// One write to the store, the log's table's included: a row of the
-    /// schema's judged as [`Store::apply`] judges it, a row of the log's by
-    /// the chain — added at either end only when it links onto the row
-    /// beside it (any row starts an empty table), removed only at either
-    /// end, never edited.
-    pub fn apply_kv(&mut self, c: &Change) -> Result<(), Refusal> {
-        let row = match c {
-            _ if c.table() != LOG => return self.apply(c),
-            Change::Edit { .. } => return Err(Refusal::new("the log is not edited")),
-            Change::Add { row, .. } | Change::Remove { row, .. } => row,
-        };
-        let l = Logged::from_bytes(row)?;
-        let key = seq_key(l.seq);
-        let (first, last) = (self.log.first_key_value(), self.log.last_key_value());
-        let ok = match c {
-            Change::Add { .. } => match (first, last) {
-                (Some((_, f)), Some((_, b))) => {
-                    let (n, _, h) = b.ends;
-                    l.seq == n + 1 && l.links(&h) || read(f).seq == l.seq + 1 && read(f).links(&l.hash)
-                }
-                _ => true,
-            },
-            _ => self.log.get(&key).map(|r| &r.bytes) == Some(row) && (first.map(|f| f.0) == Some(&key) || last.map(|b| b.0) == Some(&key)),
-        };
-        if !ok {
-            return Err(Refusal(format!("{LOG}: entry {} is not an end of the chain", l.seq)));
-        }
-        match c {
-            Change::Add { .. } => {
-                self.log.insert(key, LogRow::of(&l, row.clone()));
+    /// The log emptied and these rows, in order, written to it: each after
+    /// the first linking onto the one before it (§1.6).
+    pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), Refusal> {
+        self.log.clear();
+        for row in rows {
+            let l = Logged::from_bytes(&row)?;
+            if let Some(b) = self.log.last().filter(|b| l.seq != b.seq + 1 || !l.links(&b.hash)) {
+                return Err(Refusal(format!("{LOG}: entry {} does not link onto {}", l.seq, b.seq)));
             }
-            _ => {
-                self.log.remove(&key);
-            }
+            self.log.push(l);
         }
         Ok(())
     }
 
-    /// The log's table emptied and these rows, in order, written to it.
-    pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), Refusal> {
-        self.log.clear();
-        rows.into_iter()
-            .try_for_each(|row| self.apply_kv(&Change::Add { table: LOG.into(), row }))
-    }
-
-    /// A logged entry appended as its row of the log's table, as a peer
-    /// opens its log (§1.6): the entry must link onto the head, and
-    /// `facts` — its own, as this store's schema reads them — apply, all or
-    /// none.
+    /// A logged entry appended, as a peer opens its log (§1.6): the entry
+    /// must link onto the head, and `facts` — its own, as this store's
+    /// schema reads them — apply, all or none.
     pub fn append(&mut self, l: &Logged, facts: &[Change]) -> Result<(), Refusal> {
         let (n, h) = self.log().head();
         if l.seq != n + 1 || !l.links(&h) {
             return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
         }
         self.apply_all(facts)?;
-        self.log_push(l, l.to_bytes());
+        self.log_push(l);
         Ok(())
     }
 
-    /// An entry added at the head of the log as its row, `row`, by a peer
-    /// that chained it onto the head, or checked that it links there.
-    pub(crate) fn log_push(&mut self, l: &Logged, row: Vec<u8>) {
-        self.log.insert(seq_key(l.seq), LogRow::of(l, row));
+    /// An entry added at the head of the log by a peer that chained it
+    /// onto the head, or checked that it links there.
+    pub(crate) fn log_push(&mut self, l: &Logged) {
+        self.log.push(l.clone());
     }
 
-    /// The log's rows above `seq` deleted, newest first.
+    /// The log's entries above `seq` deleted.
     pub fn log_truncate(&mut self, seq: Seq) {
-        self.log.split_off(&seq_key(seq + 1));
+        if let Some(i) = self.log().index(seq) {
+            self.log.truncate(i + 1);
+        }
     }
 
     /// The horizon: the log's rows below `seq` deleted, so that it stands
     /// on the row there.
     pub fn log_horizon(&mut self, seq: Seq) {
-        self.log = self.log.split_off(&seq_key(seq));
+        if let Some(i) = self.log().index(seq) {
+            self.log.drain(..i);
+        }
     }
 
     pub fn space(&self) -> Space {
@@ -460,49 +387,6 @@ impl Store {
 
     pub fn state_hash(&self) -> StateHash {
         self.hash_of(self.tables.iter().map(|r| r.digest))
-    }
-
-    /// What undoing `changes` does to the tables' digests, summed per
-    /// table: worked out once for changes [`Store::hash_beside`] is asked
-    /// past many times.
-    pub fn undo_of<'a>(&self, changes: impl IntoIterator<Item = &'a Change>) -> Undo {
-        let mut u: Vec<(usize, [u8; 32], [u8; 32])> = vec![];
-        for c in changes {
-            let Ok(t) = self.find(c.table()) else { continue };
-            let i = u.iter().position(|x| x.0 == t).unwrap_or_else(|| {
-                u.push((t, [0; 32], [0; 32]));
-                u.len() - 1
-            });
-            let (_, plus, minus) = &mut u[i];
-            match c {
-                Change::Add { table, row } => add256(minus, &Store::leaf(table, row)),
-                Change::Remove { table, row } => add256(plus, &Store::leaf(table, row)),
-                Change::Edit { table, old, new } => {
-                    add256(minus, &Store::leaf(table, new));
-                    add256(plus, &Store::leaf(table, old));
-                }
-            }
-        }
-        Undo(u)
-    }
-
-    /// The state hash the store would have with `undone` undone, by the
-    /// digests' arithmetic alone: what a replica checks a confirmed state
-    /// by while its pending changes stay applied.
-    pub fn hash_beside<'a>(&self, undone: impl IntoIterator<Item = &'a Undo>) -> StateHash {
-        let mut ds = self.digests();
-        undone.into_iter().for_each(|u| u.apply(&mut ds));
-        self.hash_with(&ds)
-    }
-
-    /// The tables' digests, in schema order.
-    pub fn digests(&self) -> Vec<[u8; 32]> {
-        self.tables.iter().map(|r| r.digest).collect()
-    }
-
-    /// The state hash these digests, in schema order, give.
-    pub fn hash_with(&self, digests: &[[u8; 32]]) -> StateHash {
-        self.hash_of(digests.iter().copied())
     }
 
     /// A row's key, and its entry in each of its table's indexes: what a
@@ -695,7 +579,7 @@ impl Store {
     /// last: what a peer makes durable whole.
     pub fn kv_rows(&self) -> KvRows {
         let mut rows = self.snapshot_rows();
-        rows.push((LOG.into(), self.log.values().map(|r| r.bytes.clone()).collect()));
+        rows.push((LOG.into(), self.log.iter().map(Encode::to_bytes).collect()));
         rows
     }
 
@@ -762,29 +646,18 @@ impl Store {
     }
 
     /// The rows of `table` from `from` to `to` (none: its end) replaced by
-    /// `rows`, as some schema of this one wrote them, judging nothing: how a
+    /// `rows`, judging nothing: how a
     /// replica filling holds a range it was sent, whose neighbours it may
-    /// not hold yet. What moved, as changes; and whether a row was another
-    /// schema's. A table this schema lacks is none of its.
-    pub(crate) fn replace(&mut self, table: &str, from: &[u8], to: Option<&[u8]>, rows: &[Vec<u8>]) -> Result<(Vec<Change>, bool), Refusal> {
-        let Ok(t) = self.find(table) else {
-            return Ok((vec![], true));
-        };
+    /// not hold yet. What moved, as changes. A table this schema lacks is
+    /// none of its.
+    pub(crate) fn replace(&mut self, table: &str, from: &[u8], to: Option<&[u8]>, rows: &[Vec<u8>]) -> Result<Vec<Change>, Refusal> {
+        let Ok(t) = self.find(table) else { return Ok(vec![]) };
         let schema = self.schema.clone();
         let tab = &schema.tables[t];
-        let mut other = false;
         let mut sent = BTreeMap::new();
         for row in rows {
-            let (row, p) = match tab.parse(row) {
-                Ok(p) => (row.clone(), p),
-                Err(e) => {
-                    let (r, o) = tab.fit(row).map_err(|_| e)?;
-                    other |= o;
-                    let p = tab.parse(&r)?;
-                    (r, p)
-                }
-            };
-            sent.insert(p.key.clone(), (row, p));
+            let p = tab.parse(row)?;
+            sent.insert(p.key.clone(), (row.clone(), p));
         }
         let hi = to.map_or(Bound::Unbounded, Bound::Excluded);
         let held: Vec<Vec<u8>> = self.tables[t]
@@ -800,7 +673,7 @@ impl Store {
         for (k, row) in sent {
             out.extend(self.force(t, &k, Some(row))?);
         }
-        Ok((out, other))
+        Ok(out)
     }
 
     /// Changes applied as they are, judging nothing but each row's bytes:

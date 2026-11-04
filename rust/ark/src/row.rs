@@ -197,10 +197,7 @@ impl Describe for Change {
 impl Describe for Logged {
     fn describe() -> Type {
         let (entry, facts, b) = (Entry::describe(), Vec::<Change>::describe(), Type::Bytes);
-        Type::Record(
-            "Logged".into(),
-            fields! { seq: Type::Int, entry: entry, facts: facts, state: b.clone(), hash: b },
-        )
+        Type::Record("Logged".into(), fields! { seq: Type::Int, entry: entry, facts: facts, hash: b })
     }
 }
 

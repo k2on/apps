@@ -20,17 +20,17 @@
 //! **Effects are values.** A [`Procedure`] reads the store and returns its
 //! changes; the machine applies them. A replica runs code for its own
 //! pending intents only (that is the optimistic view) and applies every
-//! confirmed entry by its facts, checking the state hash the entry carries
-//! against its own: a difference is a divergence, healed from a snapshot.
+//! confirmed entry by its facts, each a row as it was and as it is: facts
+//! that do not apply to what a replica holds are a divergence, healed by a
+//! fill. An entry carries the authority's state hash after it, which a
+//! replica takes as it is.
 //!
 //! **The rebase.** Confirmed entries arriving under pending intents: undo
-//! the pending changes newest-first, apply each entry's facts and check
-//! its state, then re-run the intents still pending over the new store,
-//! once for the page, and record their new changes. When an entry is the
-//! oldest pending intent itself and its facts are what the preview did,
-//! nothing moves: its state is checked beside the rest by the digests'
-//! arithmetic ([`Store::hash_beside`]). A view is told every change made,
-//! rebases included, as `Output::Changes`.
+//! the pending changes newest-first, apply each entry's facts, then re-run
+//! the intents still pending over the new store, once for the page, and
+//! record their new changes. When an entry is the oldest pending intent
+//! itself and its facts are what the preview did, nothing moves. A view is
+//! told every change made, rebases included, as `Output::Changes`.
 //!
 //! **The authority** judges each pushed intent once — dedupe by `(origin,
 //! local)`, a gap in a replica's pushes waits for them in order — stamps it
@@ -48,13 +48,10 @@
 //! and pushes them again ([`Peer::close_gap`]). A device is never stuck
 //! behind an intent nobody holds.
 //!
-//! **A schema grows** (§1.2). Facts and snapshot rows another schema of a
-//! table wrote are read under this one ([`crate::schema::Table::fit`]). A
-//! log opened under a wider schema keeps its chain as recorded, checked by
-//! its hashes, and its store's digests are the wider schema's
-//! ([`Peer::foreign`] marks what it did not derive; a `Hello` below that is
-//! answered with the snapshot). A replica whose authority runs another
-//! schema takes each confirmed state as the entry says ([`Peer::faith`]).
+//! **A schema grows** (§1.2). A log opened under a prefix-extension of the
+//! schema it was written under reads its rows and its entries' facts under
+//! this one ([`crate::schema::Table::fit`]). A replica runs its
+//! authority's schema.
 //!
 //! **A fill** is how a replica the log cannot page is sent the rows: in
 //! parts of about [`PART`] bytes, the tables a domain sends [`Peer::later`]
@@ -65,23 +62,21 @@
 //! before that head was sent before it, so a replica at that head takes
 //! the ranges whole and is right there. Entries come as they are logged,
 //! their facts put as they are over rows not all sent yet; nothing is
-//! judged. With the last part the store's state is checked: the
-//! authority's says every row is the authority's, judged where it was
-//! written, so the store is not judged again (one of rows another schema
-//! wrote is, whole). A filling replica makes each part durable as it is
-//! taken ([`Record::Part`]), the last the fill's end, and its place
-//! beside its rows ([`FILL`]), so one reopened goes on where it was; its own intents are
-//! the authority's to judge, one its store refuses pending unrun.
+//! judged. A replica makes nothing durable while filling, and the store
+//! whole when the last part is taken: one reopened mid-fill fills again.
+//! Its own intents are the authority's to judge, one its store refuses
+//! pending unrun. A union fed by a scope, and the volatile space, are sent
+//! as fills too.
 //!
 //! **Partial sync is a view** (§1.8). A connection the driver says is fed
 //! by a scope (`Input::Feed`) is served its union: the rows its scope —
 //! a [`Scope`], its own kind of function, asked of a table's row — holds,
 //! under the connection's identity. At
 //! its `Hello` the authority takes the union from its store and sends it as
-//! a snapshot at the head; every entry after is sent to it alone
+//! a fill of one part at the head; every entry after is sent to it alone
 //! (`Output::To`) with the facts the scope's filter makes of the entry's
 //! ([`scoped`]), the union's state hash after them, and a
-//! chain of its own from that snapshot. `Fanout` is for connections fed
+//! chain of its own from that fill. `Fanout` is for connections fed
 //! whole. The replica is the same machine: it applies facts like every
 //! replica, its own intents previewed over what it holds and confirmed by
 //! the authority's facts, a difference being the authority's answer. A
@@ -106,7 +101,7 @@
 //! A device says what it is in its `Hello` ([`Peer::device`]); its
 //! `on_join` and `on_leave` are entries the authority authors through
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
-//! `Hello` with a hash the authority lacks, answered with a snapshot. A
+//! `Hello` with a hash the authority lacks, answered with a fill. A
 //! volatile authority forgets on restart what each origin last pushed, so
 //! there a push past a gap is taken, and one that comes after it is
 //! refused as overtaken: what was live then is gone. It keeps the verdicts
@@ -125,9 +120,9 @@ use std::sync::Arc;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Cursor, Durable, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Snapshot, Span};
+use crate::log::{Cursor, Durable, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Span};
 use crate::schema::{Schema, Space};
-use crate::store::{Change, Log, Store, Undo, LOG};
+use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
 
 /// How many logged entries a `Page` carries at most.
@@ -284,31 +279,13 @@ pub struct Who {
 pub struct Pending {
     pub entry: Entry,
     pub changes: Vec<Change>,
-    /// What undoing `changes` does to the digests, worked out once.
-    undo: Memo<Undo>,
 }
 
 impl Pending {
     pub fn new(entry: Entry, changes: Vec<Change>) -> Pending {
-        Pending {
-            entry,
-            changes,
-            undo: Memo::default(),
-        }
+        Pending { entry, changes }
     }
 }
-
-/// A value worked out when first asked for, not part of what holds it.
-#[derive(Clone, Debug, Default)]
-struct Memo<T>(std::sync::OnceLock<T>);
-
-impl<T> PartialEq for Memo<T> {
-    fn eq(&self, _: &Memo<T>) -> bool {
-        true
-    }
-}
-
-impl<T> Eq for Memo<T> {}
 
 /// What an authority keeps beside its log: every intent it judged and how;
 /// each origin's last `local` and the actor it is bound to; and, for a
@@ -418,7 +395,7 @@ pub enum Output {
 
 /// A change as a machine tells it: with the span of the entry that made it
 /// (the one run, the one confirmed, the pending one undone), and none for
-/// a whole state's difference (a snapshot, a divergence, an open).
+/// a whole state's difference (a fill, a divergence, an open).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Told {
     pub by: Option<Span>,
@@ -458,7 +435,8 @@ pub struct Peer {
     /// drew.
     pub origin: Origin,
     pub local: i64,
-    /// Where a confirmed entry's state was not this peer's own.
+    /// Where a confirmed entry did not apply here: each time, the peer was
+    /// filled again from nothing.
     pub diverged: Vec<Seq>,
     /// The cursor a `Hello` is outstanding at.
     asked: Option<Seq>,
@@ -469,22 +447,12 @@ pub struct Peer {
     /// The version of the domain this peer runs, in every `Hello` beside
     /// its schema's hash: what an operator reads a fleet's spread by.
     pub version: String,
-    /// The last entry whose state is not this peer's own derivation: one
-    /// logged under another schema (§1.2). An authority answers a `Hello`
-    /// below it with the snapshot at its head.
-    pub foreign: Option<Seq>,
-    /// A replica whose authority runs another schema: the state a
-    /// confirmed entry carries is taken as it says.
-    pub faith: bool,
-    /// Whether the fill under way was asked for at a divergence met twice
-    /// (a `Hello` at -1): its state, if not one this schema makes, is taken
-    /// as it says, as a snapshot asked so is ([`Peer::close_fill`]).
-    pub fill_on_faith: bool,
     /// The tables an authority sends last in a fill, after every other:
     /// what a replica can be without for a while.
     pub later: Vec<String>,
-    /// A replica filling: where its next part begins.
-    pub fill: Option<Fill>,
+    /// A replica filling: where its next part begins. Nothing is made
+    /// durable until the fill is done.
+    pub fill: Option<Cursor>,
     /// The part a replica filling has asked for and not been sent.
     more: Option<Cursor>,
     /// How many bytes of rows a replica would have each part of a fill
@@ -493,19 +461,6 @@ pub struct Peer {
     /// What each connection asked so of an authority, by session.
     parts: BTreeMap<String, usize>,
 }
-
-/// A replica's fill as it stands (§1.7): where the next part begins, and
-/// whether a row it was sent was another schema's. Kept beside the rows,
-/// as the one row of [`FILL`].
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Fill {
-    pub next: Cursor,
-    pub other: bool,
-}
-
-/// The table a replica's [`Fill`] is kept in, beside the log's: not the
-/// schema's, and never sent.
-pub const FILL: &str = "_fill";
 
 /// How many bytes of rows a fill's part carries, about: past it, the
 /// part ends at the row after; a row is never cut. What a device taking
@@ -517,55 +472,20 @@ pub const PART: usize = 256 << 10;
 /// fill is more asking than rows.
 pub const MIN_PART: usize = 4 << 10;
 
-/// Facts as some schema wrote them, read under `schema`: rows completed or
-/// cut to their prefix, changes to tables it lacks dropped; and whether any
-/// was another schema's.
-fn fit(schema: &Schema, facts: &[Change]) -> (Vec<Change>, bool) {
-    let other = std::cell::Cell::new(false);
-    let row = |t: &crate::schema::Table, r: &Vec<u8>| match t.fit(r) {
-        Ok((r, o)) => {
-            other.set(other.get() | o);
-            r
-        }
-        Err(_) => r.clone(),
+/// Facts as some schema wrote them, read under `schema` (§1.2): rows
+/// completed or cut to their prefix, changes to tables it lacks dropped.
+fn fit(schema: &Schema, facts: &[Change]) -> Vec<Change> {
+    let fitted = |c: &Change| match schema.table(c.table()) {
+        Some((_, t)) => Some(c.map(|r| t.fit(r).map_or_else(|_| r.to_vec(), |(r, _)| r))),
+        None => (c.table() == LOG).then(|| c.clone()),
     };
-    let mut out = vec![];
-    for c in facts {
-        let Some((_, t)) = schema.table(c.table()) else {
-            match c.table() == LOG {
-                true => out.push(c.clone()),
-                false => other.set(true),
-            }
-            continue;
-        };
-        out.push(match c {
-            Change::Add { table, row: r } => Change::Add {
-                table: table.clone(),
-                row: row(t, r),
-            },
-            Change::Remove { table, row: r } => Change::Remove {
-                table: table.clone(),
-                row: row(t, r),
-            },
-            Change::Edit { table, old, new } => Change::Edit {
-                table: table.clone(),
-                old: row(t, old),
-                new: row(t, new),
-            },
-        });
-    }
-    (out, other.get())
+    facts.iter().filter_map(fitted).collect()
 }
 
 /// A store with an empty log: one standing on the empty chain.
 fn started(mut store: Store) -> Store {
-    let base = Snapshot {
-        seq: 0,
-        hash: EntryHash::default(),
-        state: store.state_hash(),
-        rows: vec![],
-    };
-    store.start_log([base.base().to_bytes()]).expect("a first row starts a log");
+    let base = Logged::base(0, EntryHash::default());
+    store.start_log([base.to_bytes()]).expect("a first row starts a log");
     store
 }
 
@@ -590,9 +510,6 @@ impl Peer {
             served: BTreeMap::new(),
             device: None,
             version: String::new(),
-            foreign: None,
-            faith: false,
-            fill_on_faith: false,
             later: vec![],
             fill: None,
             more: None,
@@ -623,41 +540,36 @@ impl Peer {
     /// whole.
     pub fn confirmed_rows(&self) -> Rows {
         if self.pending.is_empty() {
-            return self.kv(&self.store);
+            return self.store.kv_rows();
         }
         let mut s = self.store.clone();
         s.undo(self.pending.iter().flat_map(|p| &p.changes)).expect("a pending change undoes");
-        self.kv(&s)
-    }
-
-    /// `store`'s rows and its log's, and this peer's fill's.
-    fn kv(&self, store: &Store) -> Rows {
-        let mut rows = store.kv_rows();
-        rows.extend(self.fill.as_ref().map(|f| (FILL.to_string(), vec![f.to_bytes()])));
-        rows
+        s.kv_rows()
     }
 
     /// A logged entry made part of the log, its facts already applied, and
-    /// durable as its row of the log's table alone: the facts are in it.
+    /// durable as its row of the log's table alone: the facts are in it —
+    /// unless filling, when nothing is durable until the fill is done.
     /// The entry links onto the head: this peer chained it, or checked it.
     fn logged(&mut self, l: &Logged, o: &mut Out) {
         debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
         let row = l.to_bytes();
-        o.out.push(Output::Persist(Record::logged(&row)));
-        self.store.log_push(l, row);
+        if self.fill.is_none() {
+            o.out.push(Output::Persist(Record::logged(&row)));
+        }
+        self.store.log_push(l);
     }
 
     fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
         Store::from_rows(self.store.schema_arc().clone(), self.space, rows).map(|(s, _)| s)
     }
 
-    /// A snapshot's rows as some schema wrote them, read under this
-    /// peer's (§1.2), and a log standing on `log`; and whether the rows were
-    /// another schema's ([`Store::from_rows`]).
-    fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<(Store, bool), Refusal> {
-        let (mut s, other) = Store::from_rows(self.store.schema_arc().clone(), self.space, rows)?;
+    /// Rows as some schema wrote them, read under this peer's (§1.2), and a
+    /// log standing on `log`.
+    fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<Store, Refusal> {
+        let mut s = self.of_rows(rows)?;
         s.start_log(log)?;
-        Ok((s, other))
+        Ok(s)
     }
 
     /// The id this peer's next intent will have (§1.6).
@@ -667,11 +579,6 @@ impl Peer {
 
     pub fn is_authority(&self) -> bool {
         matches!(self.role, Role::Authority { .. })
-    }
-
-    /// The confirmed state's hash: the head's.
-    pub fn confirmed_hash(&self) -> crate::hash::StateHash {
-        self.log().head_state()
     }
 
     fn journal(&mut self) -> &mut Journal {
@@ -825,13 +732,11 @@ impl Peer {
             Err(why) => Err(why.0),
             Ok(facts) => {
                 let (n, prev) = self.log().head();
-                let state = self.store.state_hash();
-                let hash = Logged::chain(&prev, n + 1, &entry, &facts, &state);
+                let hash = Logged::chain(&prev, n + 1, &entry, &facts);
                 let l = Logged {
                     seq: n + 1,
                     entry,
                     facts,
-                    state,
                     hash,
                 };
                 self.logged(&l, o);
@@ -886,15 +791,14 @@ impl Peer {
             // A peer's intents, each a push.
             (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
-            (Frame::Snapshot { snapshot, .. }, false, _) => self.reset(snapshot, o),
             (Frame::More { from, .. }, true, _) if scoped.is_none() => o.send(Frame::Part {
                 space: self.space,
-                part: self.part(Some(from), most),
+                part: part(&self.store, &self.fill_order(), self.log().head(), Some(from), most),
             }),
             (Frame::Part { part, .. }, false, _) => self.take(part, o),
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
                 // At or below where this peer stands, an intent still pending
-                // here is in the state it holds (a snapshot carried it).
+                // here is in the state it holds (a fill carried it).
                 Verdict::Ok { seq } if seq <= self.log().head().0 && self.settle(&id, o) => o.out.push(Output::Confirmed(id)),
                 Verdict::Refused { why } if self.settle(&id, o) => o.out.push(Output::Refused { id, why }),
                 Verdict::Gap { last } => self.close_gap(last, o),
@@ -905,29 +809,16 @@ impl Peer {
     }
 
     /// A `Hello` at `(cursor, hash)`: the pages from there when this log has
-    /// that hash there, the snapshot at the head when it does not — a fill's
-    /// first part, of about `most` bytes, for the durable space.
+    /// that hash there, and a fill's first part, of about `most` bytes, when
+    /// it does not.
     fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, most: usize, o: &mut Out) {
-        let has = self.foreign.is_none_or(|f| cursor >= f)
-            && match hash {
-                Some(h) => self.log().has(cursor, &h),
-                None => cursor == 0 && self.log().base_seq() == 0,
-            };
-        if !has && self.space == Space::Durable {
-            return o.send(Frame::Part {
-                space: self.space,
-                part: self.part(None, most),
-            });
-        }
+        let has = match hash {
+            Some(h) => self.log().has(cursor, &h),
+            None => cursor == 0 && self.log().base_seq() == 0,
+        };
         if !has {
-            let (seq, hash) = self.log().head();
-            let snapshot = Snapshot {
-                seq,
-                hash,
-                state: self.store.state_hash(),
-                rows: self.store.snapshot_rows(),
-            };
-            return o.send(Frame::Snapshot { space: self.space, snapshot });
+            let part = part(&self.store, &self.fill_order(), self.log().head(), None, most);
+            return o.send(Frame::Part { space: self.space, part });
         }
         for page in self.log().after(cursor).collect::<Vec<_>>().chunks(PAGE) {
             o.send(Frame::Page {
@@ -946,59 +837,6 @@ impl Peer {
         first.into_iter().chain(later).collect()
     }
 
-    /// The part of a fill from `from` (none: the first, from the rows'
-    /// start), of the rows as they stand at the head: ranges in
-    /// [`Peer::fill_order`], each table's in key order, until about `most`
-    /// bytes of rows; and where the next begins, unless none is left. A
-    /// cursor at a table this peer lacks begins the fill again.
-    fn part(&self, from: Option<Cursor>, most: usize) -> Part {
-        let order = self.fill_order();
-        let at = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
-        let (start, key) = match (at, from) {
-            (Some(i), Some(c)) => (i, c.key),
-            _ => (0, vec![]),
-        };
-        let (mut ranges, mut size, mut next) = (vec![], 0, None);
-        for (i, table) in order.iter().enumerate().skip(start) {
-            let from = if i == start { key.clone() } else { vec![] };
-            let (mut rows, mut to) = (vec![], None);
-            for (k, r) in self.store.keyed_from(table, &from) {
-                if size >= most {
-                    to = Some(k.to_vec());
-                    break;
-                }
-                size += r.len();
-                rows.push(r.to_vec());
-            }
-            ranges.push(Range {
-                table: table.clone(),
-                from,
-                to: to.clone(),
-                rows,
-            });
-            next = match (to, order.get(i + 1)) {
-                (Some(key), _) => Some(Cursor { table: table.clone(), key }),
-                (None, Some(t)) if size >= most => Some(Cursor {
-                    table: t.clone(),
-                    key: vec![],
-                }),
-                _ => None,
-            };
-            if next.is_some() {
-                break;
-            }
-        }
-        let (seq, hash) = self.log().head();
-        Part {
-            seq,
-            hash,
-            state: self.store.state_hash(),
-            first: at.is_none(),
-            ranges,
-            next,
-        }
-    }
-
     /// A scope's verdict on a row of `table`, for the connection it serves.
     fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
         let s = &self.served[session];
@@ -1008,7 +846,7 @@ impl Peer {
 
     /// A `Hello` from a connection fed by a scope: nothing when it stands at
     /// the head of what it was sent, and otherwise its union, afresh, as a
-    /// snapshot at the head.
+    /// fill of one part at the head.
     fn serve_scoped(&mut self, session: &str, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
         let head = self.log().head();
         if self.served[session].head == Some(head) && hash == Some(head.1) && cursor == head.0 {
@@ -1030,16 +868,10 @@ impl Peer {
         let Ok(union) = self.of_rows(&rows) else {
             return;
         };
-        let (seq, hash) = head;
-        let snapshot = Snapshot {
-            seq,
-            hash,
-            state: union.state_hash(),
-            rows: union.snapshot_rows(),
-        };
+        let part = part(&union, &self.fill_order(), head, None, usize::MAX);
         let s = self.served.get_mut(session).unwrap();
         (s.union, s.head) = (union, Some(head));
-        let bytes = Frame::Snapshot { space: self.space, snapshot }.enc();
+        let bytes = Frame::Part { space: self.space, part }.enc();
         o.out.push(Output::To {
             session: session.into(),
             bytes,
@@ -1061,14 +893,12 @@ impl Peer {
                 s.head = None;
                 continue;
             };
-            let state = s.union.state_hash();
-            let hash = Logged::chain(&prev, l.seq, &l.entry, &facts, &state);
+            let hash = Logged::chain(&prev, l.seq, &l.entry, &facts);
             s.head = Some((l.seq, hash));
             let logged = vec![Logged {
                 seq: l.seq,
                 entry: l.entry.clone(),
                 facts,
-                state,
                 hash,
             }];
             let bytes = Frame::Page {
@@ -1129,10 +959,11 @@ impl Peer {
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.
-    /// The pending intents are undone at the first entry that is not the
-    /// oldest of them as previewed, every entry's facts are applied and
-    /// its state and chain checked, and the intents still pending run
-    /// again once, after the page.
+    /// An entry that is the oldest pending intent as it was previewed moves
+    /// nothing. At the first that is not, the pending intents are undone,
+    /// each entry's facts applied — put as they are while filling — and the intents
+    /// still pending run again once, after the page. Facts that do not
+    /// apply are a divergence, healed by a fill.
     fn confirm(&mut self, ls: Vec<Logged>, o: &mut Out) {
         let mut undone = false;
         for l in ls {
@@ -1147,79 +978,23 @@ impl Peer {
                 }
                 return self.ask(o);
             }
-            // Filling, an entry's facts are put as they are over rows not
-            // all sent yet, and its state is checked once the fill is done.
-            if self.fill.is_some() {
-                if !undone {
-                    self.undo_pending(o);
-                    undone = true;
-                }
-                let (facts, other) = fit(self.store.schema_arc(), &l.facts);
-                let Ok(moved) = self.store.force_all(&facts) else {
-                    self.redo_pending(o);
-                    return self.diverge(l.seq, o);
-                };
-                o.tell(Some(l.entry.span()), moved);
-                self.fill.as_mut().expect("filling").other |= other;
-                if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
-                    self.pending.remove(i);
-                }
-                if l.entry.origin == self.origin {
-                    o.out.push(Output::Confirmed(l.entry.id));
-                }
-                self.asked = None;
-                self.logged(&l, o);
-                continue;
-            }
-            // Facts of another schema are read under this one, and the
-            // state the entry says is taken as it says (§1.2). Facts are
-            // fitted only when they are not this schema's as they are,
-            // which comparing them to the preview or applying them says: a
-            // row is read once.
-            let schema = self.store.schema_arc().clone();
-            let own = self.pending.first().is_some_and(|p| p.entry.id == l.entry.id);
-            let mut fitted = None;
-            let previewed = !undone
-                && own
-                && (self.pending[0].changes == l.facts || {
-                    let f = fit(&schema, &l.facts);
-                    let same = self.pending[0].changes == f.0;
-                    fitted = Some(f);
-                    same
-                });
+            let previewed = !undone && self.pending.first().is_some_and(|p| p.entry.id == l.entry.id && p.changes == l.facts);
             if previewed {
-                let other = fitted.is_some_and(|f| f.1);
-                let trust = self.faith || other;
-                let store = &self.store;
-                let undone = self.pending[1..].iter().map(|p| p.undo.0.get_or_init(|| store.undo_of(&p.changes)));
-                let same = store.hash_beside(undone) == l.state;
-                if !same && !trust {
-                    return self.diverge(l.seq, o);
-                }
-                self.faith = other || self.faith && !same;
                 self.pending.remove(0);
             } else {
                 if !undone {
                     self.undo_pending(o);
                     undone = true;
                 }
-                let apply = |store: &mut Store, (f, o): (Vec<Change>, bool)| {
-                    let a = store.apply_all(&f).is_ok();
-                    (f, o, a)
+                let moved = match self.fill {
+                    Some(_) => self.store.force_all(&l.facts).ok(),
+                    None => self.store.apply_all(&l.facts).ok().map(|_| l.facts.clone()),
                 };
-                let (facts, other, applied) = match fitted {
-                    Some(f) => apply(&mut self.store, f),
-                    None if self.store.apply_all(&l.facts).is_ok() => (l.facts.clone(), false, true),
-                    None => apply(&mut self.store, fit(&schema, &l.facts)),
-                };
-                let trust = self.faith || other;
-                let same = applied && self.store.state_hash() == l.state;
-                if !applied || !same && !trust {
+                let Some(moved) = moved else {
                     self.redo_pending(o);
                     return self.diverge(l.seq, o);
-                }
-                self.faith = other || self.faith && !same;
-                o.tell(Some(l.entry.span()), facts);
+                };
+                o.tell(Some(l.entry.span()), moved);
                 if let Some(i) = self.pending.iter().position(|p| p.entry.id == l.entry.id) {
                     self.pending.remove(i);
                 }
@@ -1255,12 +1030,10 @@ impl Peer {
         }
     }
 
-    /// The state an entry says is not this peer's: start again from nothing,
-    /// which the authority answers with what it has — the snapshot at its
-    /// head (a cursor below every log's) when this entry diverged before,
-    /// as one logged under a schema this one only shares tables with does.
+    /// Facts that do not apply here: start again from nothing, asking the
+    /// authority at a cursor below every log's, which it answers with a
+    /// fill (§1.7).
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
-        let cursor = if self.diverged.contains(&seq) { -1 } else { 0 };
         (self.fill, self.more) = (None, None);
         self.diverged.push(seq);
         self.undo_pending(o);
@@ -1268,37 +1041,8 @@ impl Peer {
         o.tell(None, self.store.diff(&fresh));
         self.store = fresh;
         self.redo_pending(o);
-        self.asked = Some(cursor);
-        o.send(self.hello(cursor, None));
-    }
-
-    /// A snapshot: the store becomes its rows, the log stands on it, the
-    /// pending intents run again on top and are pushed again.
-    fn reset(&mut self, s: Snapshot, o: &mut Out) {
-        // One this history passed is a late copy, but a volatile authority
-        // that restarted is behind its replicas: they go back to it.
-        let (n, _) = self.log().head();
-        if (s.seq == n || s.seq < n && self.space == Space::Durable) && self.log().has(s.seq, &s.hash) {
-            return;
-        }
-        let new = self.on_fit(&s.rows, [s.base().to_bytes()]);
-        let Ok(new) = new else {
-            return;
-        };
-        let (new, other) = new;
-        let same = new.state_hash() == s.state;
-        if !same && !other {
-            return;
-        }
-        (self.faith, self.foreign) = (!same, (!same).then_some(s.seq));
-        (self.fill, self.more) = (None, None);
-        self.undo_pending(o);
-        o.tell(None, self.store.diff(&new));
-        self.store = new;
-        o.persist(Record::Rows(self.store.kv_rows()));
-        self.asked = None;
-        self.redo_pending(o);
-        self.repush(o);
+        self.asked = Some(-1);
+        o.send(self.hello(-1, None));
     }
 
     /// A part of a fill. The first begins one: the store emptied, the log
@@ -1306,11 +1050,11 @@ impl Peer {
     /// for, at the head — every entry the authority logged before it was
     /// sent before it — or it is passed by: past a gap, the head asked for
     /// again, and the part. Its ranges replace what the store held in
-    /// them, judging nothing (a row may name one not sent yet); it is made
-    /// durable, appended, and the next asked for. The last is the fill
-    /// done: every row the authority's at the head, its state checked
-    /// ([`Peer::close_fill`]). The pending intents run
-    /// again on top of each.
+    /// them, judging nothing (a row may name one not sent yet: every row is
+    /// the authority's, judged where it was written). The last is the fill
+    /// done, and the store made durable whole; until then nothing is, so a
+    /// peer reopened mid-fill fills again. The pending intents run again on
+    /// top of each.
     fn take(&mut self, p: Part, o: &mut Out) {
         let (n, h) = self.log().head();
         let asked = self.more.take();
@@ -1329,102 +1073,41 @@ impl Peer {
         self.undo_pending(o);
         if p.first {
             let mut fresh = Store::new(self.store.schema_arc().clone(), self.space);
-            let base = Snapshot {
-                seq: p.seq,
-                hash: p.hash,
-                state: p.state,
-                rows: vec![],
-            };
-            fresh.start_log([base.base().to_bytes()]).expect("a first row starts a log");
+            fresh
+                .start_log([Logged::base(p.seq, p.hash).to_bytes()])
+                .expect("a first row starts a log");
             o.tell(None, self.store.diff(&fresh));
             self.store = fresh;
-            (self.faith, self.foreign) = (false, None);
-            self.fill_on_faith = self.asked == Some(-1);
-            self.fill = Some(Fill {
-                next: Cursor::default(),
-                other: false,
-            });
         }
-        let mut other = false;
         for r in &p.ranges {
             match self.store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows) {
-                Ok((moved, o2)) => {
-                    o.tell(None, moved);
-                    other |= o2;
-                }
+                Ok(moved) => o.tell(None, moved),
                 Err(_) => {
                     self.redo_pending(o);
                     return self.diverge(p.seq, o);
                 }
             }
         }
-        let fill = self.fill.as_mut().expect("filling");
-        fill.other |= other;
-        let done = match p.next.clone() {
-            Some(next) => {
-                fill.next = next;
-                match p.first {
-                    true => o.persist(Record::Rows(self.kv(&self.store))),
-                    false => o.persist(Record::Part(p.clone())),
-                }
-                self.ask_more(o);
-                Ok(())
-            }
-            None => self.filled(&p, o),
-        };
+        self.fill = p.next.clone();
+        match self.fill {
+            Some(_) => self.ask_more(o),
+            None => o.persist(Record::Rows(self.store.kv_rows())),
+        }
         self.redo_pending(o);
         if p.first {
             self.asked = None;
             self.repush(o);
         }
-        if done.is_err() {
-            self.diverge(p.seq, o);
-        }
-    }
-
-    /// A fill's last part taken, the pending intents undone, and the fill
-    /// closed ([`Peer::close_fill`]): made durable by the part appended —
-    /// the end of the fill, which an open reads as it does — or, the rows
-    /// judged again, whole.
-    fn filled(&mut self, last: &Part, o: &mut Out) -> Result<(), ()> {
-        match self.close_fill(last.seq, last.state)? {
-            false => o.persist(Record::Part(last.clone())),
-            true => o.persist(Record::Rows(self.store.kv_rows())),
-        }
-        Ok(())
-    }
-
-    /// A fill done: its state the authority's at `seq`, which says every
-    /// row is the authority's — judged there as it was written — so there
-    /// is nothing to judge here; or, the rows another schema's (§1.2), the
-    /// store judged whole and taken as the part says. Whether it was built
-    /// again; or not done: the state is another, and the fill begins again.
-    fn close_fill(&mut self, seq: Seq, state: crate::hash::StateHash) -> Result<bool, ()> {
-        let other = self.fill.take().is_some_and(|f| f.other);
-        if self.store.state_hash() == state {
-            (self.faith, self.foreign) = (false, None);
-            return Ok(false);
-        }
-        if !other && !std::mem::take(&mut self.fill_on_faith) {
-            return Err(());
-        }
-        let (log, rows): (Rows, Rows) = self.store.kv_rows().into_iter().partition(|(t, _)| t == LOG);
-        let Ok((store, _)) = self.on_fit(&rows, log.into_iter().flat_map(|(_, rs)| rs)) else {
-            return Err(());
-        };
-        (self.faith, self.foreign) = (true, Some(seq));
-        self.store = store;
-        Ok(true)
     }
 
     /// The next part of a fill asked for, unless one is asked already.
     fn ask_more(&mut self, o: &mut Out) {
-        let Some(f) = &self.fill else { return };
+        let Some(next) = &self.fill else { return };
         if self.more.is_none() {
-            self.more = Some(f.next.clone());
+            self.more = Some(next.clone());
             o.send(Frame::More {
                 space: self.space,
-                from: f.next.clone(),
+                from: next.clone(),
             });
         }
     }
@@ -1537,7 +1220,7 @@ impl Peer {
             Role::Replica => None,
         };
         let n = n.clamp(base, fork.map_or(head, |(f, _)| f.min(head)));
-        if n == base {
+        if n == base || self.fill.is_some() {
             return;
         }
         self.store.log_horizon(n);
@@ -1553,32 +1236,28 @@ impl Peer {
     /// checked as a chain, and the log's rows appended since, in order, each
     /// linking onto the head and its facts applied, all or none, up to the
     /// first that does not — the store is then made durable whole again,
-    /// without it. A state is never
-    /// derived again here, and the store's digests are this schema's. An
-    /// entry whose state is not what its facts give here was logged under
-    /// another schema ([`Peer::foreign`]). The pending intents run again on
+    /// without it. A fill under way begins again from nothing. The pending intents run again on
     /// top.
     fn open(&mut self, d: Durable, o: &mut Out) {
         self.undo_pending(o);
         self.pending.clear();
+        let filling = self.fill.take().is_some();
+        self.more = None;
         let (log, rows): (Rows, Rows) = d.rows.into_iter().partition(|(t, _)| t == LOG);
-        let (fill, rows): (Rows, Rows) = rows.into_iter().partition(|(t, _)| t == FILL);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
-        (self.fill, self.more) = (None, None);
-        let filling = fill.into_iter().flat_map(|(_, rs)| rs).next().map(|f| Fill::from_bytes(&f));
-        if let Some(fill) = filling {
-            if let Ok(fill) = fill {
-                self.refill(fill, &rows, log, d.logged, d.parts, o);
-            }
-        } else if let Ok((mut store, _)) = self.on_fit(&rows, log) {
+        let opened = match filling {
+            true => Ok(self.blank()),
+            false => self.on_fit(&rows, log),
+        };
+        if let Ok(mut store) = opened {
             // Every entry read once: those the rows hold, from their rows,
             // and those appended, as their records were read; facts fitted
             // only when they are not this schema's as they are.
             let schema = store.schema_arc().clone();
             let mut entries = store.log().entries();
             let (n, held) = (d.logged.len(), entries.len());
-            for l in d.logged {
-                if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts).0).is_err() {
+            for l in d.logged.into_iter().filter(|_| !filling) {
+                if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts)).is_err() {
                     break;
                 }
                 entries.push(l);
@@ -1586,8 +1265,6 @@ impl Peer {
             if entries.len() - held < n {
                 o.persist(Record::Rows(store.kv_rows()));
             }
-            let foreign = foreign(&store, &entries);
-            (self.foreign, self.faith) = (foreign, foreign.is_some_and(|f| f == store.log().head().0));
             o.tell(None, self.store.diff(&store));
             self.store = store;
             if let Role::Authority { journal } = &mut self.role {
@@ -1601,87 +1278,56 @@ impl Peer {
         self.pending = d.pending.into_iter().map(|entry| Pending::new(entry, vec![])).collect();
         self.redo_pending(o);
     }
-
-    /// A replica's fill opened as it last stood: its rows, judging nothing,
-    /// and what was appended since in the order it was taken — each entry
-    /// put as it is, each part at its sequence, after the entries at or
-    /// below it — up to the first that does not read; the fill on from the
-    /// last part's next, or done where the last closed it.
-    fn refill(&mut self, mut fill: Fill, rows: &Rows, log: impl IntoIterator<Item = Vec<u8>>, logged: Vec<Logged>, parts: Vec<Part>, o: &mut Out) {
-        let Ok((mut store, _)) = Store::of_rows(self.store.schema_arc().clone(), self.space, rows, false) else {
-            return;
-        };
-        if store.start_log(log).is_err() {
-            return;
-        }
-        // A part taken. The last closes the fill where its state is the
-        // store's then — the part appended once it was, the state its
-        // fill was done at — or begins it again.
-        fn take(store: &mut Store, p: Part, fill: &mut Fill, closed: &mut bool) -> Result<(), Refusal> {
-            if p.seq != store.log().head().0 {
-                return Err(Refusal::new("a part not at the head"));
-            }
-            for r in &p.ranges {
-                fill.other |= store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows)?.1;
-            }
-            *closed = p.next.is_none() && store.state_hash() == p.state;
-            fill.next = p.next.unwrap_or_default();
-            Ok(())
-        }
-        let mut closed = false;
-        let (all, mut read) = (logged.len() + parts.len(), 0);
-        let mut parts = parts.into_iter().peekable();
-        'read: for l in logged {
-            while let Some(p) = parts.next_if(|p| p.seq < l.seq) {
-                if take(&mut store, p, &mut fill, &mut closed).is_err() {
-                    break 'read;
-                }
-                read += 1;
-            }
-            let (n, h) = store.log().head();
-            let (facts, other) = fit(store.schema_arc(), &l.facts);
-            if l.seq != n + 1 || !l.links(&h) || store.force_all(&facts).is_err() {
-                break;
-            }
-            fill.other |= other;
-            store.log_push(&l, l.to_bytes());
-            read += 1;
-        }
-        if read == all - parts.len() {
-            for p in parts.by_ref() {
-                if take(&mut store, p, &mut fill, &mut closed).is_err() {
-                    break;
-                }
-                read += 1;
-            }
-        }
-        o.tell(None, self.store.diff(&store));
-        (self.store, self.fill) = (store, (!closed).then_some(fill));
-        if closed {
-            (self.faith, self.foreign) = (false, None);
-        }
-        // What did not read is cut, so nothing is appended after it.
-        if read < all {
-            o.persist(Record::Rows(self.kv(&self.store)));
-        }
-    }
 }
 
-/// The last entry of a store's log whose state is not what its rows give
-/// under this schema, read from the head down by undoing each entry's
-/// facts from the tables' digests (§1.3's arithmetic, no row read): one
-/// logged under another schema (§1.2); the row the log stands on when only
-/// it is. `entries` are the log's, read.
-fn foreign(store: &Store, entries: &[Logged]) -> Option<Seq> {
-    let mut ds = store.digests();
-    for l in entries.iter().rev() {
-        if store.hash_with(&ds) != l.state {
-            return Some(l.seq);
+/// The part of `store`'s fill from `from` (none: the first, from the
+/// rows' start), of its rows as they stand at `head`: ranges in `order`, each table's in key order, until about `most`
+/// bytes of rows; and where the next begins, unless none is left. A
+/// cursor at a table this peer lacks begins the fill again.
+fn part(store: &Store, order: &[String], head: (Seq, EntryHash), from: Option<Cursor>, most: usize) -> Part {
+    let at = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
+    let (start, key) = match (at, from) {
+        (Some(i), Some(c)) => (i, c.key),
+        _ => (0, vec![]),
+    };
+    let (mut ranges, mut size, mut next) = (vec![], 0, None);
+    for (i, table) in order.iter().enumerate().skip(start) {
+        let from = if i == start { key.clone() } else { vec![] };
+        let (mut rows, mut to) = (vec![], None);
+        for (k, r) in store.keyed_from(table, &from) {
+            if size >= most {
+                to = Some(k.to_vec());
+                break;
+            }
+            size += r.len();
+            rows.push(r.to_vec());
         }
-        store.undo_of(&l.facts).apply(&mut ds);
+        ranges.push(Range {
+            table: table.clone(),
+            from,
+            to: to.clone(),
+            rows,
+        });
+        next = match (to, order.get(i + 1)) {
+            (Some(key), _) => Some(Cursor { table: table.clone(), key }),
+            (None, Some(t)) if size >= most => Some(Cursor {
+                table: t.clone(),
+                key: vec![],
+            }),
+            _ => None,
+        };
+        if next.is_some() {
+            break;
+        }
     }
-    let base = store.log().base();
-    (store.hash_with(&ds) != base.state).then_some(base.seq)
+    let (seq, hash) = head;
+    Part {
+        seq,
+        hash,
+        first: at.is_none(),
+        ranges,
+        next,
+    }
 }
 
 /// A scope's verdict on a row of a table.

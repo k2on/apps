@@ -158,7 +158,7 @@ fn a_change_to_the_other_space_is_refused() {
 }
 
 /// An authority restarted from nothing: the replica's `Hello` names a hash
-/// it lacks and is answered with its snapshot, and the replica's next
+/// it lacks and is answered with a fill of its store, and the replica's next
 /// intent — its second, the first lost with the old authority — is taken.
 /// Falsified by keeping the durable gap rule in the volatile space: the
 /// second wave waited for a first that would never come.
@@ -173,7 +173,10 @@ fn a_restarted_authority_resyncs_and_takes_the_gap() {
     let mut fresh = authority();
     let o = live.step(Input::Connected);
     let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&s[..], [Frame::Snapshot { space: Space::Volatile, .. }]), "{s:?}");
+    assert!(
+        matches!(&s[..], [Frame::Part { space: Space::Volatile, part }] if part.first && part.next.is_none()),
+        "{s:?}"
+    );
     live.step(down(&s[0]));
     assert!(live.store.get("here", &here_key("alice-session")).is_none(), "the restart lost the wave");
     let o = live.step(waving("laptop"));

@@ -266,34 +266,27 @@ fn what_is_logged_during_a_fill_is_taken() {
     assert!(playlists(&alice).iter().any(|p| p.name == "unsent"));
 }
 
-/// A replica reopened during its fill holds what it had taken and goes on
-/// from where it was: no part is sent it twice; reopened once it is done,
-/// it is done, the authority's store, and asks for nothing. Falsified by a
-/// part not made durable: the reopened replica began the fill again; and
-/// by the last part not made durable: the done replica was filling.
+/// A replica reopened during its fill made nothing durable of it: it holds
+/// what it held before (here nothing) and fills again, to the authority's
+/// store; reopened once it is done, it is done, and asks for nothing.
+/// Falsified by a part made durable as it is taken: the reopened replica
+/// held a library cut short and took it for whole; and by the last part not
+/// made durable: the done replica filled again.
 #[test]
-fn a_fill_reopened_goes_on_where_it_was() {
+fn a_fill_reopened_begins_again() {
     let mut server = server();
     library(&mut server);
     let mut alice = alice();
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, Some(2));
-    let (had, taken) = (playlists(&alice).len(), wire.parts);
+    assert!(alice.fill.is_some() && !playlists(&alice).is_empty(), "part way");
     let mut alice = Instance::new(replica(), Some(alice.into_disk()));
     let stored = alice.stored();
     alice.step(Input::Open(stored));
-    assert_eq!(playlists(&alice).len(), had, "what it had taken, held");
-    assert!(alice.fill.is_some(), "and filling");
+    assert!(playlists(&alice).is_empty() && alice.fill.is_none(), "nothing of it held");
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, None);
     same(&alice, &server);
-    let total = {
-        let (mut s, mut a) = (server_with_library(), self::alice());
-        let mut w = connect(&mut a);
-        w.run(&mut s, &mut a, None);
-        w.parts
-    };
-    assert_eq!(taken + wire.parts, total, "no part sent twice");
     let mut alice = Instance::new(replica(), Some(alice.into_disk()));
     let stored = alice.stored();
     alice.step(Input::Open(stored));
@@ -301,12 +294,6 @@ fn a_fill_reopened_goes_on_where_it_was() {
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, None);
     assert_eq!(wire.parts, 0, "nothing asked for");
-}
-
-fn server_with_library() -> Machine {
-    let mut s = server();
-    library(&mut s);
-    s
 }
 
 /// An intent made during a fill: previewed over what is held, or, naming a

@@ -65,48 +65,10 @@ fn the_rows_fold_every_write_before() {
         let want = Stored {
             rows: Some(rows),
             logged: (3..5).map(row).collect(),
-            parts: vec![],
         };
         assert_eq!(d.load().unwrap(), want);
         d.put("blob", b"\x00\x01").unwrap();
         assert_eq!(d.get("blob").unwrap().as_deref(), Some(&b"\x00\x01"[..]));
         assert_eq!(d.get("nothing").unwrap(), None);
     }
-}
-
-/// A directory holding a log of the format before the log was a table
-/// (`snapshot`, `chain`) does not open as an empty one. Falsified by
-/// `load` reading only `kv` and `writes`: it opened empty.
-#[test]
-fn the_format_before_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("chain"), [0, 0, 0, 1, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("before the log was a table"), "{err}");
-}
-
-/// A directory of the format that journaled every write — each entry's
-/// facts, the rows they wrote and its row of the log's table, in `writes`
-/// — is refused with a message, never read as one with no entries since
-/// its rows. Falsified by `load` not looking for `writes`: it opened on
-/// `kv` alone and lost the entry.
-#[test]
-fn the_format_that_journaled_every_write_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("kv"), Record::Rows(vec![]).enc()).unwrap();
-    std::fs::write(dir.path().join("writes"), [0, 0, 0, 2, 0, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("journaled every write"), "{err}");
-}
-
-/// A directory that kept a peer's own state in blobs of its own (here a
-/// device's `pending` journal) is refused, not opened as one with nothing
-/// pending. Falsified by `load` not looking for them: it opened, and the
-/// pending intents were lost.
-#[test]
-fn the_format_of_side_blobs_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("pending"), [0, 0, 0, 1, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("in blobs (pending)"), "{err}");
 }

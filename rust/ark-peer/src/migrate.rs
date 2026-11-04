@@ -6,22 +6,20 @@
 //! is not, an authority — a server, or a device alone since its fork —
 //! migrates them ([`migrate`]): its log folded into its rows under the
 //! schema it was written under, the rows read through the domain's
-//! migrations ([`ark::migrate`]), and written whole as a snapshot one past
-//! the head, so every replica, wherever it stands, is behind it and is sent
-//! it whole; each origin's last `local` among the entries it folds is its
+//! migrations ([`ark::migrate`]), and written whole one past the head, so
+//! every replica, wherever it stands, is behind it and is filled; each origin's last `local` among the entries it folds is its
 //! journal's, as a horizon moving keeps it. What it stood on before is kept beside it, named by that
 //! schema's hash (`kv.<hash>`, `log.<hash>`). A replica's rows are its
 //! authority's to send again: it starts empty instead ([`kept`]), its
-//! pending intents and its origin kept. A disk with rows and no schema
-//! beside them was written before disks kept one: an authority reads it as
-//! its own schema's, as it always did, and a replica starts empty.
+//! pending intents and its origin kept. A disk that says no schema is
+//! read as this one's.
 
 use std::io;
 use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::hash::EntryHash;
-use ark::log::{Record, Snapshot};
+use ark::log::Record;
 use ark::migrate::Migration;
 use ark::schema::{compat, Schema, Space};
 use ark::store::Store;
@@ -48,11 +46,7 @@ pub fn put_schema(disk: &mut dyn Disk, schema: &Schema) -> io::Result<()> {
 /// Whether a replica's rows read under `schema` as they are: written under
 /// it, or one it grows from. `schema` is the disk's from then on.
 pub fn kept(disk: &mut dyn Disk, schema: &Schema) -> io::Result<bool> {
-    let had = disk.get("kv")?.is_some() || disk.get("log")?.is_some_and(|l| !l.is_empty());
-    let kept = match stored(disk)? {
-        Some(was) => compat(&was, schema).is_ok(),
-        None => !had,
-    };
+    let kept = stored(disk)?.is_none_or(|was| compat(&was, schema).is_ok());
     put_schema(disk, schema)?;
     Ok(kept)
 }
@@ -87,14 +81,10 @@ pub fn migrate(disk: &mut dyn Disk, to: &Arc<Schema>, steps: &[Migration]) -> io
     let rows = ark::migrate::migrate(&was, &rows, to, steps)
         .map_err(|e| io::Error::other(e.0))?
         .expect("a schema not grown from is migrated");
-    let (store, _) = Store::from_rows(to.clone(), Space::Durable, &rows).map_err(|e| io::Error::other(e.0))?;
-    let snapshot = Snapshot {
-        seq: seq + 1,
-        hash: EntryHash::of(&[&hash.0[..], b"migrated to", &to.hash().0].concat()),
-        state: store.state_hash(),
-        rows,
-    };
-    // The journal rebuilt each origin's last from the entries; the snapshot
+    Store::from_rows(to.clone(), Space::Durable, &rows).map_err(|e| io::Error::other(e.0))?;
+    let migrated = EntryHash::of(&[&hash.0[..], b"migrated to", &to.hash().0].concat());
+    let rows = ark::log::standing(rows, seq + 1, migrated);
+    // The journal rebuilt each origin's last from the entries; the rows
     // holds none, so the journal keeps them, or every device's next intent
     // is past a gap.
     let last = entries.into_iter().map(|l| (l.entry.origin, l.entry.actor, l.entry.local));
@@ -106,7 +96,7 @@ pub fn migrate(disk: &mut dyn Disk, to: &Arc<Schema>, steps: &[Migration]) -> io
             disk.put(&name, &b)?;
         }
     }
-    disk.record(&Record::Rows(snapshot.kv_rows()).to_bytes())?;
+    disk.record(&Record::Rows(rows).to_bytes())?;
     put_schema(disk, to)?;
     Ok(true)
 }

@@ -19,9 +19,7 @@
 //!   there (made, empty, when there is none): a crash mid-write leaves a torn tail, never a wrong entry. The
 //!   rows of the schema's tables are not journaled: the peer writes them
 //!   again as it opens, from each entry's facts, each entry linking onto
-//!   the one before it, and writes `kv` whole when one does not. A replica
-//!   filling appends each part of its fill there too ([`Record::Part`]),
-//!   read back beside the entries.
+//!   the one before it, and writes `kv` whole when one does not.
 //!
 //! A server keeps its schema beside them, as JSON ([`SCHEMA`]): what reads
 //! the rows without its domain compiled in reads them under it.
@@ -30,18 +28,13 @@
 //! (`local`), in this same format under the names `local.kv` and
 //! `local.log` ([`crate::Shared`]).
 //!
-//! A disk holding the blobs of a format before — the log not yet a table
-//! (`snapshot`, `chain`), every write journaled (`writes`), or a peer's own
-//! state in blobs of their own (`journal`, `live`, `pending`, `origin`,
-//! `fork`, `joining`, `who`) — is refused, never read as empty.
-
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use ark::format::Encode;
-use ark::log::{Logged, Part, Record, Rows};
+use ark::log::{Logged, Record, Rows};
 
 /// The blob a server's schema is in, beside its log.
 pub const SCHEMA: &str = "schema.json";
@@ -52,7 +45,6 @@ pub const SCHEMA: &str = "schema.json";
 pub struct Stored {
     pub rows: Option<Rows>,
     pub logged: Vec<Logged>,
-    pub parts: Vec<Part>,
 }
 
 /// Where a peer's durable records go: named blobs, and the format over them.
@@ -72,35 +64,20 @@ pub trait Disk: Send {
     /// of `log` cut.
     fn load(&mut self) -> io::Result<Stored> {
         let kv = self.get("kv")?;
-        if kv.is_none() && (self.get("snapshot")?.is_some() || self.get("chain")?.is_some()) {
-            let why = "a log of the format before the log was a table (snapshot, chain): not read";
-            return Err(io::Error::other(why));
-        }
-        if self.get("writes")?.is_some() {
-            let why = "a log of the format that journaled every write (writes), not the log's rows alone: not read";
-            return Err(io::Error::other(why));
-        }
-        for old in ["journal", "live", "pending", "origin", "fork", "joining", "who"] {
-            if self.get(old)?.is_some() {
-                let why = format!("a disk of the format that kept a peer's own state in blobs ({old}), not rows: not read");
-                return Err(io::Error::other(why));
-            }
-        }
         let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
         let rows = kv.and_then(|b| match Record::dec(&b) {
             Ok(Record::Rows(r)) => Some(r),
             _ => None,
         });
         let (records, at) = framed::<Record>(&log);
-        let (mut logged, mut parts) = (vec![], vec![]);
-        for r in records {
-            match r {
-                Record::Logged(l) => logged.push(l),
-                Record::Part(p) => parts.push(p),
-                Record::Rows(_) => break,
-            }
-        }
-        let s = Stored { rows, logged, parts };
+        let logged = records.into_iter().map_while(|r| match r {
+            Record::Logged(l) => Some(l),
+            Record::Rows(_) => None,
+        });
+        let s = Stored {
+            rows,
+            logged: logged.collect(),
+        };
         if at < log.len() || !had {
             self.put("log", &log[..at])?;
         }

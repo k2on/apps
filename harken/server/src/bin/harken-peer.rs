@@ -675,7 +675,7 @@ impl Headless {
             Cmd::Hash => self.peer.with(|p| {
                 Answer::default()
                     .set("cursor", json!(p.cursor()))
-                    .set("hash", json!(p.log.confirmed_hash().hex()))
+                    .set("hash", json!(confirmed(&p.log).hex()))
                     .set("view", json!(p.log.store.state_hash().hex()))
             }),
             Cmd::Wait { cursor, timeout } => {
@@ -1395,4 +1395,12 @@ mod tests {
         let h = Headless::open(&f, harken()).unwrap();
         assert_eq!(h.peer.status().pending, 1, "the intent was on disk");
     }
+}
+
+/// The state hash of what the server confirmed: the store with the pending
+/// intents' changes undone.
+fn confirmed(m: &ark::peer::Peer) -> ark::hash::StateHash {
+    let mut s = m.store.clone();
+    let _ = s.undo(m.pending.iter().flat_map(|p| &p.changes));
+    s.state_hash()
 }

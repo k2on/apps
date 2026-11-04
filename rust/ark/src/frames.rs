@@ -5,7 +5,6 @@
 //! ```text
 //! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
 //! Page    { space, from, logged: [Logged] }
-//! Snapshot{ space, snapshot }
 //! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } | Gap { last } }
 //! Telemetry { events: [Event] }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
@@ -74,7 +73,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Cursor, Entry, EntryId, Logged, Part, Seq, Snapshot};
+use crate::log::{Cursor, Entry, EntryId, Logged, Part, Seq};
 use crate::schema::Space;
 use crate::Refusal;
 
@@ -92,10 +91,6 @@ pub enum Frame {
         space: Space,
         from: Seq,
         logged: Vec<Logged>,
-    },
-    Snapshot {
-        space: Space,
-        snapshot: Snapshot,
     },
     Verdict {
         space: Space,
@@ -196,7 +191,6 @@ impl Frame {
         match self {
             Frame::Hello { space, .. }
             | Frame::Page { space, .. }
-            | Frame::Snapshot { space, .. }
             | Frame::Verdict { space, .. }
             | Frame::Part { space, .. }
             | Frame::More { space, .. }

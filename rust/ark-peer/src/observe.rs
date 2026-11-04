@@ -74,9 +74,6 @@ fn frame(peer: &str, sp: Space, dir: &str, conn: Option<ConnId>, bytes: &[u8]) {
                 debug!(target: "ark", peer, space = space(sp), dir, conn, from, "page");
             }
         }
-        Frame::Snapshot { snapshot, .. } => {
-            debug!(target: "ark", peer, space = space(sp), dir, conn, seq = snapshot.seq, "snapshot")
-        }
         Frame::Part { part, .. } => {
             let rows: usize = part.ranges.iter().map(|r| r.rows.len()).sum();
             let first = part.first;

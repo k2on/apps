@@ -157,11 +157,6 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
     }
     assert!(done.len() > 1000 && done.iter().any(|c| matches!(c, Change::Edit { .. })));
     let full = s.state_hash();
-    assert_eq!(
-        s.hash_beside([&s.undo_of(done.iter().rev())]),
-        empty.state_hash(),
-        "the digests' arithmetic undoes it too"
-    );
     for c in done.iter().rev() {
         s.apply(&c.inverse()).unwrap();
     }
@@ -295,16 +290,15 @@ fn compat_is_a_prefix_extension() {
     assert_eq!(old.tables[1].fit(&row).unwrap(), (row, false));
 }
 
-/// The log is a table whose invariant is the chain (§1.6): a row is added
-/// only at an end it links onto, removed only at an end, never edited; a
-/// write to it through `apply`, the door a function's facts take, is
-/// refused; and it is in neither the state hash nor a snapshot sent.
-/// Falsified by `apply_kv` taking a `Remove` of any row of the log: the
-/// middle entry came out.
+/// The log's invariant is the chain (§1.6): rows are read into it only
+/// when each links onto the one before; it is cut at the head or at the
+/// horizon; a write to it through `apply`, the door a function's facts
+/// take, is refused; and it is in neither the state hash nor a fill sent.
+/// Falsified by `start_log` not checking links: the forged entry was read.
 #[test]
 fn the_log_is_a_table_whose_rows_are_a_chain() {
     use ark::format::Encode;
-    use ark::hash::{EntryHash, StateHash};
+    use ark::hash::EntryHash;
     use ark::log::{Entry, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
@@ -316,48 +310,39 @@ fn the_log_is_a_table_whose_rows_are_a_chain() {
             local: seq,
             ..Entry::default()
         };
-        let state = StateHash([seq as u8; 32]);
-        let hash = Logged::chain(&prev, seq, &entry, &[], &state);
+        let hash = Logged::chain(&prev, seq, &entry, &[]);
         prev = hash;
         chain.push(Logged {
             seq,
             entry,
             facts: vec![],
-            state,
             hash,
         });
     }
-    let row = |l: &Logged| l.to_bytes();
-    let add = |l: &Logged| Change::Add {
-        table: LOG.into(),
-        row: row(l),
-    };
-    let remove = |l: &Logged| Change::Remove {
-        table: LOG.into(),
-        row: row(l),
-    };
-    s.start_log([row(&chain[1])]).unwrap();
-    s.apply_kv(&add(&chain[2])).unwrap();
-    s.apply_kv(&add(&chain[0])).expect("added at the front, linking");
-    assert!(s.apply_kv(&add(&chain[2])).is_err(), "not at an end");
+    let rows_of = |ls: &[Logged]| ls.iter().map(Encode::to_bytes).collect::<Vec<_>>();
     let mut gap = chain[3].clone();
     gap.seq = 4;
-    assert!(s.apply_kv(&add(&gap)).is_err(), "a gap");
+    assert!(s.start_log(rows_of(&[chain[1].clone(), gap])).is_err(), "a gap");
     let mut other = chain[3].clone();
-    other.state = StateHash([9; 32]);
-    assert!(s.apply_kv(&add(&other)).is_err(), "it does not link");
-    s.apply_kv(&add(&chain[3])).unwrap();
-    assert!(s.apply_kv(&remove(&chain[1])).is_err(), "the middle stays");
-    let edit = Change::Edit {
+    other.hash = EntryHash([9; 32]);
+    assert!(
+        s.start_log(rows_of(&[chain[1].clone(), chain[2].clone(), other])).is_err(),
+        "it does not link"
+    );
+    s.start_log(rows_of(&chain[1..])).unwrap();
+    assert_eq!(s.log().entries(), chain[2..].to_vec());
+    let add = Change::Add {
         table: LOG.into(),
-        old: row(&chain[3]),
-        new: row(&chain[3]),
+        row: chain[3].to_bytes(),
     };
-    assert!(s.apply_kv(&edit).is_err(), "never edited");
-    assert!(s.apply(&add(&chain[3])).is_err(), "not a table a fact names");
-    assert_eq!(s.log().entries(), chain[1..].to_vec());
-    s.apply_kv(&remove(&chain[0])).expect("the horizon moves");
-    s.apply_kv(&remove(&chain[3])).expect("the head comes off");
+    assert!(s.apply(&add).is_err(), "not a table a fact names");
+    s.log_truncate(2);
     assert_eq!((s.log().base(), s.log().head()), (chain[1].clone(), (2, chain[2].hash)));
+    s.log_horizon(2);
+    assert_eq!(
+        (s.log().base(), s.log().head()),
+        (chain[2].clone(), (2, chain[2].hash)),
+        "the horizon moves"
+    );
     assert_eq!((s.state_hash(), s.snapshot_rows()), (hash, rows), "not in the hash or a snapshot sent");
 }

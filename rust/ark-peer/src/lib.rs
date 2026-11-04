@@ -906,7 +906,6 @@ impl Peer {
         let durable = Durable {
             rows: self.log.confirmed_rows(),
             logged: vec![],
-            parts: vec![],
             local: if other { pending.len() as i64 } else { self.log.local },
             pending,
         };

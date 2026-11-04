@@ -151,8 +151,8 @@ fn a_replica_of_the_schema_before_starts_empty_its_pending_kept() {
 }
 
 /// Whether a replica's rows are kept: an empty disk's, and those of a
-/// schema this one grows from; not those of one it does not, nor rows with
-/// no schema beside them. Falsified by rows without a schema read as kept.
+/// schema this one grows from; not those of one it does not. Falsified by
+/// `kept` not comparing the schemas: the retitled rows were kept.
 #[test]
 fn a_replica_keeps_rows_of_a_schema_it_grows_from() {
     use ark_peer::migrate::kept;
@@ -161,7 +161,6 @@ fn a_replica_keeps_rows_of_a_schema_it_grows_from() {
     assert!(kept(&mut Memory::default(), &demo).unwrap(), "an empty disk");
     let mut d = Memory::default();
     d.put("kv", b"rows").unwrap();
-    assert!(!kept(&mut d, &demo).unwrap(), "rows, and no schema beside them");
     assert!(kept(&mut d, &demo).unwrap(), "rows of this schema");
     assert!(!kept(&mut d, &new).unwrap(), "rows of a schema not grown from");
 }

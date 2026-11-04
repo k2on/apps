@@ -8,9 +8,10 @@
 //! directory as it is, or comes with a migration that does, or writes a
 //! new fixture beside it with a note of what moved; this one stays.
 //!
-//! Written again once, when entries took their cause (`Entry::cause`,
-//! docs/plan-observe.md): that change started every log afresh, by
-//! decision, rather than migrating one.
+//! Written again when entries took their cause (`Entry::cause`,
+//! docs/plan-observe.md), and when they stopped carrying a state hash:
+//! each change started every log afresh, by decision, rather than
+//! migrating one.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -55,9 +56,9 @@ fn config() -> Config {
 /// appended moves it though nothing on the disk did: `sign_in.picture`,
 /// defaulted, took it from `9781dcf4…`, the hash the fixture was written
 /// with.
-const TOKEN: &str = "c3d0755a76b5a48571c12ae1b690ebed.e0d2394e21051a98976bd9d4d1f10569192f49f49b56c0d235ed92ed3273d0a1";
+const TOKEN: &str = "2744d85ff02a88b6165713ade801370c.30e4bfad4051d0e44924b2b63800f655740ed684824ef89f5d79850ffb8c697f";
 const HEAD: i64 = 72;
-const STATE: &str = "710d712e81d1469987f08d80d37c0a1f0c386b03bd2e60f166bd62d86be01624";
+const STATE: &str = "44b6aa8e29495ea8efbc13c656813b576fb647933549c657779f9a5cd036a193";
 const N: usize = 70;
 
 fn fixture() -> PathBuf {
@@ -127,11 +128,8 @@ fn write() {
 
 /// The fixture opens: the key reads back and verifies the token it signed,
 /// the session row judges it alice's, the hub's log holds the chain and
-/// the rows it held, and the replica its origin and nothing pending. The
-/// replica was written before a disk kept its schema beside it
-/// (`ark_peer::migrate`), so it holds none of the rows it was sent and is
-/// sent them again; its origin is still the one its entries were authored
-/// from. Falsified by a byte changed in `log/kv`
+/// the rows it held, and the replica its chain to the last entry it was
+/// sent, the rows, its origin and nothing pending. Falsified by a byte changed in `log/kv`
 /// (`p42` as `q42`): the hub's state hash differed; in `log/log` (its one
 /// record's length): the record was cut as a torn tail, the head 71; in
 /// `session.key`: the old token was not judged.
@@ -159,8 +157,8 @@ fn an_old_data_directory_opens() {
         .map(|e| e.entry.origin)
         .collect();
     let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()), false);
-    assert_eq!(device.log.log().head().0, 0, "the replica's chain: none, to be sent again");
-    assert!(held(&device.log.store).is_empty(), "nor its rows");
+    assert_eq!(device.log.log().head().0, HEAD - 1, "the replica's chain, before bob's sign-in");
+    assert_eq!(held(&device.log.store), names(), "and its rows");
     assert!(device.log.pending.is_empty(), "nothing pending");
     let replica = device.local.read::<ark_peer::local::Local, _>(ark_peer::local::replica).unwrap();
     assert!(!origins.is_empty() && origins.iter().all(|o| *o == replica.origin), "its origin");

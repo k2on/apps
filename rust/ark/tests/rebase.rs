@@ -58,7 +58,7 @@ fn scenario() -> Scenario {
         Some(demo::playlist_row(&pid(), "Favorites", "alice")),
         "the name was trimmed"
     );
-    assert!(alice.pending.is_empty() && alice.confirmed_hash() == bob.confirmed_hash());
+    assert!(alice.pending.is_empty() && alice.log().head() == bob.log().head());
     // step 2: alice goes dark; bob adds two tracks, alice one alone
     for t in ["t1", "t2"] {
         let o = bob.step(mutate(ADD, pair_input(&pid(), t), 2));
@@ -74,7 +74,7 @@ fn scenario() -> Scenario {
     let told: usize = batches[1..].iter().map(|b| changes(&alice.step(down(b))).len()).sum();
     assert_eq!(told, 6, "each landing undoes hers, lands bob's and puts hers back");
     assert_eq!(pos_of(&alice.store, &pid(), "t9"), Some(3), "after the rebase alice's track is third");
-    assert_eq!(alice.confirmed_hash(), bob.confirmed_hash());
+    assert_eq!(alice.log().head(), bob.log().head());
     // alice comes back: hello, and her intent pushed again
     let o = alice.step(Input::Connected);
     assert!(matches!(sends(&o)[..], [Frame::Hello { cursor: 3, .. }, Frame::Page { .. }]));
@@ -219,19 +219,20 @@ fn step_3_by_facts_alone() {
     assert_eq!(r.log(), s.server.log());
 }
 
-/// An entry whose state is not what its facts give this peer is a
+/// An entry whose facts do not apply to what this peer holds is a
 /// divergence at that sequence: the peer starts again from nothing and the
-/// authority's pages heal it. Falsified by not comparing the state after
-/// the facts in `confirm`: the forged entry was kept, and the replica's
-/// chain was not the authority's.
+/// authority's fill heals it. Falsified by `confirm` putting facts as they
+/// are outside a fill: the forged entry was kept, and the replica's chain
+/// was not the authority's.
 #[test]
 fn a_divergence_is_found_at_its_entry_and_healed() {
     let s = scenario();
     let (l1, mut l2) = (logged(&s.batches[0]), logged(&s.batches[1]));
-    if let Change::Add { row, .. } = &mut l2.facts[0] {
-        *row = demo::item_row(&pid(), "t1", 7);
-    }
-    l2.hash = Logged::chain(&l1.hash, 2, &l2.entry, &l2.facts, &l2.state);
+    l2.facts = vec![Change::Remove {
+        table: "item".into(),
+        row: demo::item_row(&pid(), "t1", 7),
+    }];
+    l2.hash = Logged::chain(&l1.hash, 2, &l2.entry, &l2.facts);
     let mut carol = replica("carol", demo::cas());
     carol.step(down(&s.batches[0]));
     let o = carol.step(down(&Frame::Page {
@@ -241,12 +242,15 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     }));
     assert_eq!(carol.diverged, vec![2]);
     let hello = sends(&o);
-    assert!(matches!(hello[..], [Frame::Hello { cursor: 0, hash: None, .. }]));
+    assert!(matches!(hello[..], [Frame::Hello { cursor: -1, hash: None, .. }]));
     let mut server = s.server.clone();
-    for f in sends(&server.step(up(&who("carol"), &hello[0]))) {
-        carol.step(down(&f));
+    let mut up_frames = hello;
+    while !up_frames.is_empty() {
+        let back: Vec<Frame> = up_frames.drain(..).flat_map(|f| sends(&server.step(up(&who("carol"), &f)))).collect();
+        up_frames = back.iter().flat_map(|f| sends(&carol.step(down(f)))).collect();
     }
-    assert_eq!((carol.log(), carol.store.state_hash().hex()), (s.server.log(), FINAL.into()));
+    let healed = (carol.log().head(), carol.store.state_hash().hex());
+    assert_eq!(healed, (s.server.log().head(), FINAL.into()), "filled at the head");
 }
 
 /// Compaction: the horizon at 2; a hello at 0 is answered with a fill a
@@ -398,7 +402,6 @@ fn a_peer_opens_from_what_it_persisted() {
         "the rows stop where they stop linking, and the store is written whole"
     );
     assert_eq!(opened.log(), s.bob.log());
-    assert_eq!(opened.confirmed_hash().hex(), FINAL);
     assert_eq!(pos_of(&opened.store, &pid(), "t5"), Some(4));
 }
 
@@ -441,9 +444,8 @@ impl Procedure for Counted {
 
 /// A page is one rebase: bob's N = 4 entries land on alice in one `Batch`
 /// under her K = 3 pending intents, and her intents run K times — not K
-/// for every entry — while every entry's state is still checked (one with
-/// a wrong state diverges at its own seq) and she is told her changes
-/// undone once, bob's facts, and hers again: 3 + 4 + 3. Her tracks land
+/// for every entry — and she is told her changes undone once, bob's facts,
+/// and hers again: 3 + 4 + 3. Her tracks land
 /// after bob's, the confirmed state is bob's. Falsified by undoing and
 /// running the pending intents again per entry, as before: 12 runs.
 #[test]
@@ -474,19 +476,12 @@ fn a_page_rebases_once() {
         from: 1,
         logged,
     };
-    let mut wrong = alice.clone();
     runs.store(0, Ordering::Relaxed);
-    let o = alice.step(down(&batch(page.clone())));
+    let o = alice.step(down(&batch(page)));
     assert_eq!(runs.load(Ordering::Relaxed), 3, "the pending intents ran once for the page");
     assert_eq!(changes(&o).len(), 3 + 4 + 3);
-    assert_eq!((alice.pending.len(), alice.confirmed_hash()), (3, bob.confirmed_hash()));
+    assert_eq!((alice.pending.len(), alice.log().head()), (3, bob.log().head()));
     assert_eq!(pos_of(&alice.store, &pid(), "a1"), Some(5), "hers after bob's four");
-    let mut l3 = page[2].clone();
-    l3.state = page[1].state;
-    l3.hash = Logged::chain(&page[1].hash, l3.seq, &l3.entry, &l3.facts, &l3.state);
-    page[2] = l3;
-    wrong.step(down(&batch(page)));
-    assert_eq!(wrong.diverged, vec![4], "the third entry's state is checked");
 }
 
 /// What a session pushes behind a held intent is a gap: the authority

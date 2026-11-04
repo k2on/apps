@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 
 use ark::frames::{Frame, Verdict};
-use ark::log::{Durable, Snapshot};
+use ark::log::Durable;
 use ark::peer::{Feed, Input, Journal, Peer as Machine, Role, Who};
 use ark::row::Bytes;
 use ark::schema::Space;
@@ -171,8 +171,7 @@ impl Peer {
     pub fn close(&mut self) {
         let Some(live) = &self.live else { return };
         let (seq, hash) = live.log().head();
-        let (state, rows) = (live.store.state_hash(), live.store.snapshot_rows());
-        let rows = Snapshot { seq, hash, state, rows }.kv_rows();
+        let rows = ark::log::standing(live.store.snapshot_rows(), seq, hash);
         self.keep(|db| {
             db.volatile.scan().iter().try_for_each(|k| db.volatile.remove(k))?;
             let rows = rows.into_iter().flat_map(|(table, rs)| rs.into_iter().map(move |r| (table.clone(), r)));

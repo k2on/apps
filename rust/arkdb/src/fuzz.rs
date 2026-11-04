@@ -227,9 +227,6 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
     let mut s = hub.store.clone();
     s.undo(entries.iter().flat_map(|l| &l.facts))
         .map_err(|r| format!("the log's facts do not undo: {r}"))?;
-    if s.state_hash() != hub.log().base().state {
-        return Err("the store at the horizon is not the state the log stands on".into());
-    }
     for l in &entries {
         let p = g.module.functions.get(&l.entry.func).ok_or("an entry of no function")?;
         let ran = p
@@ -237,9 +234,6 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
             .map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
         if ran != l.facts {
             return Err(format!("entry {} runs again to other facts", l.seq));
-        }
-        if s.state_hash() != l.state {
-            return Err(format!("entry {}'s state is not its facts'", l.seq));
         }
         let w = net.logins.get(&l.entry.session).ok_or(format!("entry {} of no login", l.seq))?;
         if (&w.actor, &w.roles) != (&l.entry.actor, &l.entry.roles) {

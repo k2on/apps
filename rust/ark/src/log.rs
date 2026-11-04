@@ -1,17 +1,17 @@
 //! §1.6 The log, chained: each entry an intent, logged with the facts it
-//! had, the state hash after it and the hash of the chain to it.
+//! had and the hash of the chain to it.
 //!
 //! ```text
 //! Entry  { id, actor, session, origin, local, roles, func, input, now }
-//! Logged { seq, entry, facts, state, hash }
-//! hash = sha256(prev.hash ‖ enc([seq, entry, facts, state]))
+//! Logged { seq, entry, facts, hash }
+//! hash = sha256(prev.hash ‖ enc([seq, entry, facts]))
 //! ```
 //!
 //! **The log is a table.** Its entries are the rows of the store's `_log`
 //! table ([`crate::store::LOG`]), keyed by sequence, each row a
 //! [`Logged`]'s encoding; the chain is that table's invariant, judged at
 //! every write to it ([`Logged::links`]), and its first row is the one the
-//! log stands on (the horizon, or a snapshot's head), not checked. What a
+//! log stands on (the horizon, or a fill's head), not checked. What a
 //! peer makes durable is the store's rows whole, the log's table's among
 //! them, and the rows appended to the log's table since ([`Record`]): an
 //! entry's facts are in its row, so the rows they write to the schema's
@@ -21,7 +21,7 @@
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
 //! paged from there by an authority that has that hash at that sequence
-//! and is sent a snapshot by one that does not.
+//! and is filled by one that does not.
 //!
 //! **Deterministic ids.** An entry's id is `sha256(len(origin) ‖ origin ‖
 //! local)[..16]`, the length and `local` eight bytes big-endian: `origin` is sixteen bytes a replica draws once,
@@ -34,15 +34,14 @@
 //! replica's pushes; `actor`, `session` and `roles` are what the authority
 //! stamps from the connection it judged the entry on.
 //!
-//! **Snapshots and the horizon.** A [`Snapshot`] is `(seq, hash, state,
-//! rows in key order)`, what an authority sends; a log stands on it as a
-//! first row of its table with no entry ([`Snapshot::base`]). The horizon
+//! **The horizon.** A log stands on a first row of its table with no entry
+//! ([`Logged::base`]): where it began, a fill's head, or the horizon, which
 //! is a delete of the rows below it.
 
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
-use crate::hash::{sha256, EntryHash, StateHash};
+use crate::hash::{sha256, EntryHash};
 use crate::store::Change;
 use crate::Refusal;
 
@@ -221,67 +220,52 @@ pub struct Logged {
     pub seq: Seq,
     pub entry: Entry,
     pub facts: Vec<Change>,
-    pub state: StateHash,
     pub hash: EntryHash,
 }
 
 impl Logged {
     /// The hash of the chain to an entry, from the one before it.
-    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change], state: &StateHash) -> EntryHash {
-        let b = crate::format::encode(&(seq, entry, facts, state)).expect("an entry serializes");
+    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change]) -> EntryHash {
+        let b = crate::format::encode(&(seq, entry, facts)).expect("an entry serializes");
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
     /// An intent not yet sequenced, as a peer pages it (§1.11): at
-    /// sequence 0, with no facts and zero hashes.
+    /// sequence 0, with no facts and a zero hash.
     pub fn intent(entry: Entry) -> Logged {
-        let (state, hash) = Default::default();
+        Logged::base(0, EntryHash::default()).with(entry)
+    }
+
+    /// The row a log stands on at `(seq, hash)`: no entry, no facts.
+    pub fn base(seq: Seq, hash: EntryHash) -> Logged {
         Logged {
-            seq: 0,
-            entry,
+            seq,
+            entry: Entry::default(),
             facts: vec![],
-            state,
             hash,
         }
     }
 
+    fn with(self, entry: Entry) -> Logged {
+        Logged { entry, ..self }
+    }
+
     /// Whether this links onto `prev`.
     pub fn links(&self, prev: &EntryHash) -> bool {
-        self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts, &self.state)
-    }
-}
-
-/// The state at a sequence: the chain's hash and the state hash there, and
-/// the durable rows, table by table in schema order, each in key order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub seq: Seq,
-    pub hash: EntryHash,
-    pub state: StateHash,
-    #[serde(with = "crate::format::raw_tables")]
-    pub rows: Vec<(String, Vec<Vec<u8>>)>,
-}
-
-impl Snapshot {
-    /// The first row of a log standing on this snapshot: its sequence,
-    /// state and hash, and no entry.
-    pub fn base(&self) -> Logged {
-        let mut l = Logged::intent(Entry::default());
-        (l.seq, l.state, l.hash) = (self.seq, self.state, self.hash);
-        l
-    }
-
-    /// The store's rows as a log standing on this snapshot holds them: the
-    /// snapshot's, then the log's table with its first row.
-    pub fn kv_rows(&self) -> Rows {
-        let mut rows = self.rows.clone();
-        rows.push((crate::store::LOG.into(), vec![self.base().to_bytes()]));
-        rows
+        self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts)
     }
 }
 
 /// A store's rows, by table.
 pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
+
+/// A store's rows and a log standing on `(seq, hash)` beside them: what a
+/// store made durable whole at that head holds, every entry before it
+/// folded in.
+pub fn standing(mut rows: Rows, seq: Seq, hash: EntryHash) -> Rows {
+    rows.push((crate::store::LOG.into(), vec![Logged::base(seq, hash).to_bytes()]));
+    rows
+}
 
 /// Where a fill stands: at `table`'s first row whose key is `key` or past
 /// it, every row before it sent.
@@ -305,14 +289,13 @@ pub struct Range {
 }
 
 /// A part of a fill (§1.7): ranges of the authority's rows as they stood at
-/// `(seq, hash)`, with the state there, each range's rows replacing what a
+/// `(seq, hash)`, each range's rows replacing what a
 /// replica held in it; the first part of a fill begins it from nothing,
 /// and the last says no `next`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Part {
     pub seq: Seq,
     pub hash: EntryHash,
-    pub state: StateHash,
     pub first: bool,
     pub ranges: Vec<Range>,
     pub next: Option<Cursor>,
@@ -331,14 +314,12 @@ impl Part {
 /// What a peer makes durable, one record per `Persist` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
-/// into; or a part of a fill, appended, its rows written again as a peer
-/// opens beside the entries, by its sequence.
+/// into.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
     Rows(#[serde(with = "crate::format::raw_tables")] Rows),
-    Part(Part),
 }
 
 impl Record {
@@ -366,9 +347,7 @@ impl Record {
 /// What a peer is opened from: its store's rows as they were last written
 /// whole — the log's table's among them — and the rows appended to the
 /// log's table since, in order, whose facts write the rest again; its own
-/// intents still pending; and the last `local` it drew. A replica filling
-/// has the parts of the fill appended since too, each after the entries at
-/// or below its sequence.
+/// intents still pending; and the last `local` it drew.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Durable {
     #[serde(with = "crate::format::raw_tables")]
@@ -376,6 +355,4 @@ pub struct Durable {
     pub logged: Vec<Logged>,
     pub pending: Vec<Entry>,
     pub local: i64,
-    #[serde(default)]
-    pub parts: Vec<Part>,
 }

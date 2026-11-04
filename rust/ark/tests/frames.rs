@@ -5,8 +5,8 @@ mod demo;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Reply, Verdict};
-use ark::hash::{EntryHash, SchemaHash, StateHash};
-use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
+use ark::hash::{EntryHash, SchemaHash};
+use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
 
@@ -46,14 +46,7 @@ fn every_frame() -> Vec<Frame> {
         seq: 3,
         entry: entry.clone(),
         facts: facts.clone(),
-        state: StateHash([7; 32]),
         hash: EntryHash([0; 32]),
-    };
-    let snapshot = Snapshot {
-        seq: 9,
-        hash: EntryHash([1; 32]),
-        state: StateHash([0; 32]),
-        rows: vec![("item".into(), vec![br#"{"k":0}"#.to_vec(), b"{}".to_vec()]), ("p".into(), vec![])],
     };
     let id = entry.id;
     vec![
@@ -101,10 +94,6 @@ fn every_frame() -> Vec<Frame> {
             space: Space::Durable,
             from: 0,
             logged: vec![],
-        },
-        Frame::Snapshot {
-            space: Space::Durable,
-            snapshot,
         },
         Frame::More {
             space: Space::Durable,
