@@ -255,6 +255,11 @@ jobs:
     needs: [android, ios]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    # One writer of the branch at a time, with app-screens.yaml's publish,
+    # whose apps/ this keeps.
+    concurrency:
+      group: screens-branch
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
