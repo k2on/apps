@@ -138,17 +138,15 @@ impl Instance {
     /// What its disk holds, to open from: empty, the failure said, when it
     /// does not read.
     pub fn stored(&mut self) -> Durable {
-        let stored = self.disk.as_mut().map_or(Ok(Default::default()), |d| d.load());
+        let stored = self.disk.as_mut().map(|d| d.load()).transpose();
         let s = stored.unwrap_or_else(|e| {
             self.failure = Some(e.to_string());
-            Default::default()
+            None
         });
-        let rows = s.rows.unwrap_or_else(|| self.machine.confirmed_rows());
-        Durable {
-            rows,
-            logged: s.logged,
+        s.unwrap_or_else(|| Durable {
+            rows: self.machine.confirmed_rows(),
             ..Durable::default()
-        }
+        })
     }
 
     /// One input to its machine, what it made durable written, its log

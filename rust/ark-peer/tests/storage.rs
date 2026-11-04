@@ -4,8 +4,8 @@
 //! the log not a table, every write journaled, or a peer's own state in
 //! blobs of its own — is refused.
 
+use ark::log::Durable;
 use ark::log::{Entry, Logged, Record};
-use ark_peer::disk::Stored;
 use ark_peer::{Disk, Files, Memory};
 
 /// The `k`-th entry of the log (the disk does not link them: opening is
@@ -62,9 +62,10 @@ fn the_rows_fold_every_write_before() {
         let rows = vec![("t".to_string(), vec![br#"{"k":1}"#.to_vec()])];
         d.record(&Record::Rows(rows.clone()).enc()).unwrap();
         persist(d, 3..5);
-        let want = Stored {
-            rows: Some(rows),
+        let want = Durable {
+            rows,
             logged: (3..5).map(row).collect(),
+            ..Durable::default()
         };
         assert_eq!(d.load().unwrap(), want);
         d.put("blob", b"\x00\x01").unwrap();

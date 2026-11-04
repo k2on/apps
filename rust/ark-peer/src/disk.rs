@@ -37,7 +37,7 @@ use ark::format::Encode;
 use std::sync::Arc;
 
 use ark::dynamic::Tables;
-use ark::log::{Logged, Record, Rows};
+use ark::log::{Durable, Record};
 use ark::schema::{compat, Schema, Space};
 
 /// The blob a disk's schema is in, beside its log: what its rows are, to
@@ -96,14 +96,6 @@ pub fn import(disk: &mut dyn Disk, from: &Schema, schema: Arc<Schema>, tables: &
     put_schema(disk, &schema)
 }
 
-/// The store made durable, read back: its rows as last written whole, and
-/// the log's rows appended since.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Stored {
-    pub rows: Option<Rows>,
-    pub logged: Vec<Logged>,
-}
-
 /// Where a peer's durable records go: named blobs, and the format over them.
 pub trait Disk: Send {
     fn get(&mut self, name: &str) -> io::Result<Option<Vec<u8>>>;
@@ -117,23 +109,25 @@ pub trait Disk: Send {
         Box::new(crate::files::Memory::default())
     }
 
-    /// The store's rows and the log's rows after them, read; a torn tail
-    /// of `log` cut.
-    fn load(&mut self) -> io::Result<Stored> {
+    /// What the store made durable is opened from: its rows as last written
+    /// whole (none written, a log standing on the empty chain) and the log's
+    /// rows appended since, read; a torn tail of `log` cut.
+    fn load(&mut self) -> io::Result<Durable> {
         let kv = self.get("kv")?;
         let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
-        let rows = kv.and_then(|b| match Record::dec(&b) {
-            Ok(Record::Rows(r)) => Some(r),
-            _ => None,
-        });
+        let rows = match kv.map(|b| Record::dec(&b)) {
+            Some(Ok(Record::Rows(r))) => r,
+            _ => ark::log::standing(vec![], 0, Default::default()),
+        };
         let (records, at) = framed::<Record>(&log);
         let logged = records.into_iter().map_while(|r| match r {
             Record::Logged(l) => Some(l),
             Record::Rows(_) => None,
         });
-        let s = Stored {
+        let s = Durable {
             rows,
             logged: logged.collect(),
+            ..Durable::default()
         };
         if at < log.len() || !had {
             self.put("log", &log[..at])?;
