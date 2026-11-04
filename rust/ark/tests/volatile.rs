@@ -128,7 +128,10 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
     for frame in s.iter().chain(&f) {
         assert!(log.step(down(frame)).is_empty(), "the durable machine takes nothing of {frame:?}");
         let out = live.step(down(frame));
-        assert!(!out.iter().any(|x| matches!(x, Output::Persist(_))), "nothing volatile is made durable");
+        assert!(
+            !out.iter().any(|x| matches!(x, Output::Send(ark::peer::To::Disk, _))),
+            "nothing volatile is made durable"
+        );
     }
     assert_eq!((log.pending.len(), live.pending.len()), (1, 0));
     assert_eq!(log.store.state_hash(), durable_hash);
@@ -244,7 +247,7 @@ fn a_replica_folds_its_confirmed_rows() {
     log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
     let o = log.compact(i64::MAX);
     let rows = o.iter().find_map(|x| match x {
-        Output::Persist(b) => match ark::log::Record::dec(b) {
+        Output::Send(ark::peer::To::Disk, b) => match ark::log::Record::dec(b) {
             Ok(ark::log::Record::Rows(r)) => Some(r),
             _ => None,
         },

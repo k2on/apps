@@ -6,7 +6,7 @@
 //! with the connection's verified identity. What the machine says goes:
 //! a frame `Send` back to that connection, to all — every connection fed
 //! the log whole, or, for the volatile space, every connection that said
-//! `Hello` in it — or to the connections of a session; and `Persist` to the
+//! `Hello` in it — or to the connections of a session; and `Send(To::Disk)` to the
 //! disk **first** — nothing a step says is delivered until its records are
 //! written, and while a write fails every delivery waits with it, in
 //! order, for a write that succeeds ([`Peer::failure`]).

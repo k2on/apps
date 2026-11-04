@@ -32,7 +32,7 @@ use ark::Refusal;
 use crate::{draw_origin, now_ms, Disk};
 
 /// One machine and what keeps it (§1.7): its disk, when it has one —
-/// opened from what the disk holds, every `Persist` written in order (and,
+/// opened from what the disk holds, every `Send(To::Disk)` written in order (and,
 /// while a write fails, kept to write again, the failure said). A [`Peer`](crate::Peer) is two of these
 /// wired together; one alone is a schema's tables on a machine never
 /// linked, read and written through a `Db<S>` of its schema's struct.
@@ -127,7 +127,7 @@ impl Instance {
 
     fn took(&mut self, out: &[Output]) {
         for o in out {
-            if let Output::Persist(b) = o {
+            if let Output::Send(ark::peer::To::Disk, b) = o {
                 self.unwritten.push(b.clone());
             }
         }

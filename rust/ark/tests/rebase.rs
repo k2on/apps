@@ -261,7 +261,7 @@ fn compaction_and_the_horizon() {
     let mut server = scenario().server;
     let h2 = server.log().at(2).unwrap().hash;
     let o = server.compact(2);
-    assert!(o.iter().all(|x| matches!(x, Output::Persist(_))));
+    assert!(o.iter().all(|x| matches!(x, Output::Send(To::Disk, _))));
     assert_eq!(server.log().base_seq(), 2);
     let hello = |cursor, hash| Frame::Hello {
         space: ark::schema::Space::Durable,
@@ -362,7 +362,7 @@ fn a_peer_opens_from_what_it_persisted() {
     let mut r = replica("bob", demo::cas());
     for f in &s.batches {
         for o in r.step(down(f)) {
-            if let Output::Persist(b) = o {
+            if let Output::Send(To::Disk, b) = o {
                 records.push(b);
             }
         }
@@ -393,7 +393,7 @@ fn a_peer_opens_from_what_it_persisted() {
     let folded: Vec<Record> = out
         .iter()
         .filter_map(|o| match o {
-            Output::Persist(b) => Some(Record::dec(b).unwrap()),
+            Output::Send(To::Disk, b) => Some(Record::dec(b).unwrap()),
             _ => None,
         })
         .collect();

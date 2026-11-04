@@ -4,15 +4,15 @@
 //! ```text
 //! Role  = Replica | Authority { journal }
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
-//! Output= Send(Back | All | Session) | Changes(by span) | Persist | Settled(id, Ok | Err(why))
+//! Output= Send(Back | All | Session | Disk) | Changes(by span) | Settled(id, Ok | Err(why))
 //! ```
 //!
 //! Sans-io: [`Peer::step`] takes one input and says what to do — no
 //! socket, clock or file is inside. A hub, a client, a simulator and a
 //! trace player are drivers that feed it and route what it says: a frame
 //! `Send` back where the input came from (a replica's upstream), to every
-//! connection, or to one session's; `Persist` to the disk before anything after it is
-//! sent: a row appended to the store's `_log` table, which is the log
+//! connection, or to one session's; and a record `Send` to the disk, written
+//! before anything after it is sent: a row appended to the store's `_log` table, which is the log
 //! (§1.6) and holds the entry's facts, or the store's rows whole. `from` on a frame is the identity the driver verified for its
 //! connection; an authority judges and stamps by it.
 //!
@@ -322,11 +322,10 @@ pub enum Input {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Output {
-    /// A frame, and where it goes.
+    /// A frame, or a record ([`Record`]), and where it goes.
     Send(To, Vec<u8>),
     /// What changed, each change with the span of the entry that made it.
     Changes(Vec<Told>),
-    Persist(Vec<u8>),
     /// What became of an intent of this peer's own: confirmed, or refused
     /// and why.
     Settled(EntryId, Result<(), String>),
@@ -334,12 +333,14 @@ pub enum Output {
 
 /// Where a frame goes: back where the input came from (a replica's
 /// upstream, or the connection a frame came on), to every connection fed
-/// the log whole, or to the connections of one session fed by a scope.
+/// the log whole, or to the connections of one session fed by a scope; and
+/// where a record goes, the disk, before anything after it is sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum To {
     Back,
     All,
     Session(String),
+    Disk,
 }
 
 /// A change as a machine tells it: with the span of the entry that made it
@@ -365,7 +366,7 @@ impl Out {
         self.told.extend(changes.into_iter().map(|change| Told { by, change }));
     }
     fn persist(&mut self, r: Record) {
-        self.out.push(Output::Persist(r.enc()));
+        self.out.push(Output::Send(To::Disk, r.enc()));
     }
 }
 
@@ -517,7 +518,7 @@ impl Peer {
         debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
         let row = l.to_bytes();
         if self.fill.is_none() {
-            o.out.push(Output::Persist(Record::logged(&row)));
+            o.out.push(Output::Send(To::Disk, Record::logged(&row)));
         }
         self.store.log_push(l);
     }
@@ -569,7 +570,7 @@ impl Peer {
             o.out.insert(0, Output::Changes(o.told));
         }
         if self.space == Space::Volatile {
-            o.out.retain(|x| !matches!(x, Output::Persist(_)));
+            o.out.retain(|x| !matches!(x, Output::Send(To::Disk, _)));
         }
         o.out
     }

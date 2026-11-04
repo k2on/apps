@@ -1,4 +1,4 @@
-//! The store on disk (§1.6, §1.7's `Persist`): what a peer made durable,
+//! The store on disk (§1.6, §1.7's `Send(To::Disk)`): what a peer made durable,
 //! read back on open. The log is a table of the store, so the store's rows
 //! and the log's rows appended since are the one format; an entry's facts
 //! are in its row, and are on disk once.
@@ -10,9 +10,9 @@
 //!
 //! - `kv`: the store's rows whole ([`Record::Rows`]), the log's table's
 //!   among them, written (to a temporary file, then renamed) when a
-//!   `Persist` carries them, which also empties `log`: every entry before
+//!   `Send(To::Disk)` carries them, which also empties `log`: every entry before
 //!   is folded into them.
-//! - `log`: every [`Record::Logged`] a `Persist` carried — a row of the
+//! - `log`: every [`Record::Logged`] a `Send(To::Disk)` carried — a row of the
 //!   log's table, one logged entry with its facts — appended, each as a
 //!   four-byte big-endian length and the record's bytes. On open they are
 //!   read up to the first record that does not read, and the blob is cut
@@ -129,7 +129,7 @@ pub trait Disk: Send {
         Ok(s)
     }
 
-    /// One `Persist`: the store's rows whole, or one of the log's appended.
+    /// One `Send(To::Disk)`: the store's rows whole, or one of the log's appended.
     fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
         if Record::is_rows(bytes) {
             self.put("kv", bytes)?;

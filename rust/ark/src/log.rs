@@ -326,13 +326,13 @@ impl Part {
     }
 }
 
-/// What a peer makes durable, one record per `Persist` (§1.7): a logged
+/// What a peer makes durable, one record per `Send(To::Disk)` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
 /// into. A peer opens from its records in order (`Input::Open`): the
 /// store's rows as last written whole, the rows appended to the log's
 /// table since, whose facts write the rest again, and what a device's
-/// driver keeps of it beside them (`Pending`, never a `Persist`): its own
+/// driver keeps of it beside them (`Pending`, never a `Send(To::Disk)`): its own
 /// intents still pending, each with its preview's changes as its facts,
 /// the head of the log those were made at (none: they are run again), and
 /// the last `local` it drew.
