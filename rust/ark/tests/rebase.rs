@@ -168,7 +168,10 @@ fn step_1_an_authority_sequences_the_transcript() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
-            &[Output::Send(To::Back, Frame::push(ark::schema::Space::Durable, [l.entry.clone()]).enc())],
+            &[Output::Send(
+                To::Back,
+                Frame::push(ark::schema::Space::Durable, 0, [l.entry.clone()]).enc(),
+            )],
         );
         assert!(matches!(verdicts(&acks)[..], [Some(Verdict::At { seq, .. })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
@@ -241,7 +244,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     assert_eq!(carol.diverged, vec![2]);
     let hello = sends(&o);
     // The fill begun again: its first part asked for.
-    assert!(matches!(&hello[..], [Frame::More { from, .. }] if *from == Cursor::default()));
+    assert!(matches!(&hello[..], [Frame::Hello { cursor: 2, fill: Some(from), .. }] if *from == Cursor::default()));
     let mut server = s.server.clone();
     let mut up_frames = hello;
     while !up_frames.is_empty() {
@@ -267,12 +270,13 @@ fn compaction_and_the_horizon() {
         space: ark::schema::Space::Durable,
         cursor,
         hash: Some(hash),
+        fill: None,
         schema: Default::default(),
         most: ark::peer::PART as u64,
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", demo::only(&[]));
-    assert!(matches!(&at0[..], [Frame::Part { part, .. }] if part.first && part.next.is_none()));
+    assert!(matches!(&at0[..], [Frame::Part { from: None, next: None, .. }]));
     r.step(down(&at0[0]));
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
     let at2 = sends(&server.step(up(&who("x"), &hello(2, h2))));
@@ -491,7 +495,8 @@ fn a_page_rebases_once() {
 /// are; once the authority runs the function the next connection's pushes
 /// are judged in order. Falsified by one not judged passing its `local`: the
 /// playlist after it was sequenced at 2, before the track. And by
-/// `close_gap` renumbering whenever told of a gap: the held one moved.
+/// a push saying its pending begin after the one before it rather than
+/// before the first: the held one was passed.
 #[test]
 fn what_comes_behind_a_held_intent_is_a_gap() {
     let mut server = authority(demo::only(&[CREATE]));

@@ -67,7 +67,7 @@ Absent { hash, why }                  server: not for you, or not here yet
 ```
 
 Each chunk is at most `files::CHUNK` (1 MiB, well under a socket's frame
-limit), and each is asked for by a `Want` — pull, like `Part`/`More` — so
+limit), and each is asked for by a `Want` — pull, like a fill's parts — so
 neither end holds more than a chunk of a file in its outbox.
 
 **Up** (a file this device made). `Peer::put_file(bytes, media)` writes the

@@ -3,11 +3,10 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, schema, most }
+//! Hello   { space, cursor, hash: Option<EntryHash>, fill: Option<{ table, key }>, schema, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
-//! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
-//! More    { space, from: { table, key }, most }
+//! Part    { space, seq, hash, from: Option<{ table, key }>, rows: [(table, [row])], next }
 //! Call    { id, name, input }
 //! Reply   { id, reply: Ok { output } | Refused { why } }
 //! Offer   { hash, size }
@@ -20,21 +19,24 @@
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
 //! zero hashes ([`Logged::intent`]) — a push being a page of one; what it
-//! did with no server is pushed so too, as intents (§1.7). A `Verdict` answers
+//! did with no server is pushed so too, as intents (§1.7) — and its `from`
+//! the `local` its pending intents begin after: what its origin had up to
+//! there, it no longer holds. A `Verdict` answers
 //! one intent: refused, or where its origin stands — the last `local` of
 //! it the authority judged, and its head: an intent at or below that last
 //! is in the log at or below the head; one past it was not judged (past a
 //! gap, or naming a function the authority does not run).
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
-//! `Hello` its log cannot page — the first, from its rows' start — and to
-//! each `More`, the part from where it says, of rows as they stand when
-//! the authority answers. A replica asks for each part once it holds the
-//! one before. A `Hello` and a `More` say how big a replica would have the
-//! frames it is sent — a part, `most` bytes of rows at most, or a page,
-//! `most` bytes of entries — one that takes them on the thread it draws on
-//! asks for small ones, and is sent more of them — up to
-//! [`crate::peer::PART`].
+//! `Hello` its log cannot page — the first, from its rows' start (no
+//! `from`) — and, after the pages, to one that says where its fill stands
+//! (`fill`): the part from there, of rows as they stand when the authority
+//! answers, each table's from where the part begins to where the next
+//! does. A replica asks for each part once it holds the one before. A
+//! `Hello` says how big a replica would have the frames it is sent — a
+//! part, `most` bytes of rows at most, or a page, `most` bytes of entries —
+//! one that takes them on the thread it draws on asks for small ones, and
+//! is sent more of them — up to [`crate::peer::PART`].
 //!
 //! `Call` and `Reply` are no machine's either: a device's call of a
 //! function its server's program registered by name (ark-peer's
@@ -72,7 +74,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Cursor, Entry, EntryId, Logged, Part, Seq};
+use crate::log::{Cursor, Entry, EntryId, Logged, Rows, Seq};
 use crate::schema::Space;
 use crate::Refusal;
 
@@ -82,6 +84,8 @@ pub enum Frame {
         space: Space,
         cursor: Seq,
         hash: Option<EntryHash>,
+        /// Where its fill stands, filling: the part from there is asked.
+        fill: Option<Cursor>,
         schema: SchemaHash,
         most: u64,
     },
@@ -95,14 +99,16 @@ pub enum Frame {
         id: EntryId,
         verdict: Verdict,
     },
+    /// Rows as they stood at `(seq, hash)`, by table, from `from` (none:
+    /// the first part, from nothing) to `next` (none: the last).
     Part {
         space: Space,
-        part: Part,
-    },
-    More {
-        space: Space,
-        from: Cursor,
-        most: u64,
+        seq: Seq,
+        hash: EntryHash,
+        from: Option<Cursor>,
+        #[serde(with = "crate::format::raw_tables")]
+        rows: Rows,
+        next: Option<Cursor>,
     },
     Call {
         id: u64,
@@ -161,9 +167,8 @@ pub struct Event {
 /// An authority's answer to one intent: refused, or where its origin
 /// stands — `last`, the last `local` of it judged, with the log at `seq`.
 /// One at or below `last` is in the log, at or below `seq`; one past it is
-/// not judged, and stays pending on the device, which numbers its pending
-/// on from `last` when it no longer holds the ones between (§1.7). What
-/// its journal keeps is the refusals.
+/// not judged, and stays pending on the device (§1.7). What its journal
+/// keeps is the refusals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
     At { seq: Seq, last: i64 },
@@ -182,11 +187,7 @@ impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
         match self {
-            Frame::Hello { space, .. }
-            | Frame::Page { space, .. }
-            | Frame::Verdict { space, .. }
-            | Frame::Part { space, .. }
-            | Frame::More { space, .. } => *space,
+            Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Verdict { space, .. } | Frame::Part { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
             Frame::Call { .. }
             | Frame::Reply { .. }
@@ -206,10 +207,11 @@ impl Frame {
         )
     }
 
-    /// A peer's intents, not yet sequenced, as a page.
-    pub fn push(space: Space, entries: impl IntoIterator<Item = Entry>) -> Frame {
+    /// A peer's intents, not yet sequenced, as a page: its pending
+    /// beginning after `from`.
+    pub fn push(space: Space, from: i64, entries: impl IntoIterator<Item = Entry>) -> Frame {
         let logged = entries.into_iter().map(|e| Logged::intent(e, vec![])).collect();
-        Frame::Page { space, from: 0, logged }
+        Frame::Page { space, from, logged }
     }
 
     pub fn enc(&self) -> Vec<u8> {

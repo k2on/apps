@@ -166,8 +166,8 @@ fn a_fill_comes_in_parts_the_later_tables_last() {
     same(&alice, &server);
 }
 
-/// A replica that asks for small parts (`most`, in its `Hello` and each
-/// `More`) is sent them: the
+/// A replica that asks for small parts (`most`, in each `Hello`) is sent
+/// them: the
 /// demo's 40 KB playlists one a part where it would be sent several, each
 /// part's rows past the size only by its last; filled, it is the
 /// authority's store all the same. Falsified by the authority sending
@@ -184,8 +184,8 @@ fn a_replica_is_sent_parts_as_small_as_it_asks() {
         // The frames carried by hand, each part weighed on its way down.
         loop {
             if let Some(f) = wire.down.pop_front() {
-                if let Frame::Part { part, .. } = &f {
-                    let rows = part.ranges.iter().flat_map(|r| &r.rows);
+                if let Frame::Part { rows, .. } = &f {
+                    let rows = rows.iter().flat_map(|(_, rs)| rs);
                     let (sizes, last) = (rows.clone().map(Vec::len).sum::<usize>(), rows.last().map_or(0, Vec::len));
                     biggest = biggest.max(sizes - last);
                     wire.parts += 1;

@@ -29,7 +29,7 @@ pub fn named(name: &str) -> Vec<u8> {
 /// by its session, pushed: the frame's bytes.
 pub fn push(who: &Who, local: i64, func: &str, input: Vec<u8>) -> Vec<u8> {
     let entry = Entry::new(who, Origin::named(&who.session), local, func, input, local);
-    Frame::push(Space::Durable, [entry]).enc()
+    Frame::push(Space::Durable, 0, [entry]).enc()
 }
 
 /// A device of `token`'s login (or one of nobody's when it proves none)

@@ -699,7 +699,7 @@ impl Peer {
         self.frames.clear();
         // Where this device's own intents stand, beside where the server
         // has them (`arkdb origins`): a first pending past the server's
-        // last + 1 is a gap, answered and closed (`Verdict::At`).
+        // last + 1 is a gap, which its pushes say and the server passes.
         let first = self.log.pending.front().map(|p| p.entry.local);
         tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
         // What it is, before its `Hello`s, to a call nobody answers.

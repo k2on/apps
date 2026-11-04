@@ -310,6 +310,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         space: Space::Volatile,
         cursor: 0,
         hash: None,
+        fill: None,
         schema: Default::default(),
         most: ark::peer::PART as u64,
     };

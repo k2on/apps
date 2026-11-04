@@ -3,8 +3,8 @@
 //! one — its frames name their space, its store hashes its own tables, it
 //! makes nothing durable, a change to the other space is refused, and a
 //! volatile authority that restarted runs the log's rules: it answers a
-//! `Hello` it lacks the hash for with a fill, and holds a session's pushes
-//! past the gap its restart made until they are numbered on from it.
+//! `Hello` it lacks the hash for with a fill, and passes the gap its
+//! restart made as a session's pushes say they begin past it.
 
 #[path = "demo.rs"]
 mod demo;
@@ -166,9 +166,9 @@ fn a_change_to_the_other_space_is_refused() {
 /// An authority restarted from nothing runs the log's rules: the
 /// replica's `Hello` names a hash it lacks and is answered with a fill of
 /// its store, and the replica's next intent — its second, the first lost
-/// with the old authority — is held, numbered on from where its origin
-/// stands there, and taken. Falsified by a replica passing by a first part
-/// at a point of its log: it kept the lost wave.
+/// with the old authority — is taken at once, its push saying its pending
+/// begin after 1. Falsified by a replica passing by a first part at a
+/// point of its log: it kept the lost wave.
 #[test]
 fn a_restarted_authority_fills_and_holds_the_gap() {
     let (mut server, mut live) = (authority(), peer(Role::Replica, "alice", Space::Volatile));
@@ -181,17 +181,22 @@ fn a_restarted_authority_fills_and_holds_the_gap() {
     let o = live.step(Input::Connected);
     let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
     assert!(
-        matches!(&s[..], [Frame::Part { space: Space::Volatile, part }] if part.first && part.next.is_none()),
+        matches!(
+            &s[..],
+            [Frame::Part {
+                space: Space::Volatile,
+                from: None,
+                next: None,
+                ..
+            }]
+        ),
         "{s:?}"
     );
     live.step(down(&s[0]));
     assert!(live.store.get("here", &here_key("alice-session")).is_none(), "the restart lost the wave");
     let o = live.step(waving("laptop"));
-    let (s, _) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { last: 0, .. })]), "{s:?}");
-    let o = live.step(down(&s[0]));
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
-    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { seq: 1, .. })]), "{s:?}");
+    assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { seq: 1, last: 2 })]), "{s:?}");
     live.step(down(&f[0]));
     assert!(live.pending.is_empty() && live.store == fresh.store);
 }

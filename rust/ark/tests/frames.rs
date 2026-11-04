@@ -54,6 +54,7 @@ fn every_frame() -> Vec<Frame> {
             space: Space::Durable,
             cursor: 0,
             hash: None,
+            fill: None,
             schema: SchemaHash([0; 32]),
             most: ark::peer::PART as u64,
         },
@@ -61,11 +62,15 @@ fn every_frame() -> Vec<Frame> {
             space: Space::Volatile,
             cursor: 4,
             hash: Some(EntryHash([0xFF; 32])),
+            fill: Some(Cursor {
+                table: "item".into(),
+                key: vec![0, 1],
+            }),
             schema: SchemaHash([2; 32]),
-            most: ark::peer::PART as u64,
+            most: 16 << 10,
         },
-        Frame::push(Space::Volatile, [entry.clone()]),
-        Frame::push(Space::Durable, [entry.clone(), entry]),
+        Frame::push(Space::Volatile, 0, [entry.clone()]),
+        Frame::push(Space::Durable, 0, [entry.clone(), entry]),
         Frame::Verdict {
             space: Space::Durable,
             id,
@@ -93,13 +98,16 @@ fn every_frame() -> Vec<Frame> {
             from: 0,
             logged: vec![],
         },
-        Frame::More {
+        Frame::Part {
             space: Space::Durable,
-            from: Cursor {
+            seq: 3,
+            hash: EntryHash([1; 32]),
+            from: Some(Cursor {
                 table: "item".into(),
                 key: vec![0, 1],
-            },
-            most: 16 << 10,
+            }),
+            rows: vec![("item".into(), vec![br#"{"k":0}"#.to_vec()]), ("p".into(), vec![])],
+            next: None,
         },
         Frame::Call {
             id: 7,

@@ -45,28 +45,29 @@
 //! first; one at or below `last` is in the log, and one past a gap or
 //! naming no function here is not judged — its `local` not passed, so one
 //! pushed after it is not judged either. A device's intent at or below
-//! `last` is confirmed; a device whose oldest pending intent is
-//! `last + 1` waits, and pushes it again on its next connection; one past
-//! it no longer holds the ones between — its disk lost them, or the
-//! authority's log is older than the one that judged them — and numbers its
-//! pending intents on from `last` and pushes them again
-//! ([`Peer::close_gap`]). A device is never stuck
-//! behind an intent nobody holds.
+//! `last` is confirmed. A push says where its device's pending intents
+//! begin (its page's `from`, the `local` before the first): the ones of
+//! its origin up to there it no longer holds — its disk lost them, or the
+//! authority's log is older than the one that judged them — and they are
+//! passed, so a device is never stuck behind an intent nobody holds, and
+//! an intent's number, and the ids it draws, never change.
 //!
-//! **A schema grows** (§1.2). A peer reads the rows and facts of any schema
-//! its own grows from or into ([`crate::schema::Table::fit`]), so a replica
-//! of an older or a newer build than its authority syncs with it. A schema
+//! **A schema grows** (§1.2). A peer's store reads the rows and facts of
+//! any schema its own grows from or into ([`crate::schema::Table::fit`],
+//! [`Store::apply_facts`]), so a replica of an older or a newer build than
+//! its authority syncs with it. A schema
 //! only grows: rows move within it by an export, a transform and an import
 //! ([`crate::dynamic`]).
 //!
 //! **A fill** is how a replica the log cannot page is sent the rows: in
 //! parts of about [`PART`] bytes, the tables a domain sends later
-//! after the rest, each part asked for (`More`) once the one before is
-//! held, so what the authority logs meanwhile is never behind more than a
-//! part. A part is no frozen snapshot: it is the rows of its key ranges as
-//! they stand at the authority's head when it is sent, and every entry
-//! before that head was sent before it, so a replica at that head takes
-//! the ranges whole and is right there. Entries come as they are logged,
+//! after the rest, each part asked for (a `Hello` saying where the fill
+//! stands) once the one before is held, so what the authority logs
+//! meanwhile is never behind more than a part. A part is no frozen
+//! snapshot: it is the rows of its key ranges as they stand at the
+//! authority's head when it is sent, and every entry before that head was
+//! sent before it, so a replica at that head puts its rows and is right
+//! there. Entries come as they are logged,
 //! their facts put as they are over rows not all sent yet; nothing is
 //! judged. A replica makes nothing durable while filling, and the store
 //! whole when the last part is taken: one reopened mid-fill fills again.
@@ -111,9 +112,8 @@
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
 //! `Hello` with a hash the authority lacks, answered with a fill. It runs
 //! the log's rules: a volatile authority restarted from nothing has a
-//! chain its replicas lack, so each is filled from it, and judges none of
-//! their pushes past what it judged until they number them on from its
-//! `last`.
+//! chain its replicas lack, so each is filled from it, and passes what
+//! their pushes say they no longer hold, as a durable one does.
 //!
 //! **The horizon** is moved by the machine as its [`Fold`] says, after a
 //! step, in either role, up to the head: a replica's pending
@@ -127,8 +127,8 @@ use crate::domain::Domain;
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
-use crate::log::{Cursor, Entry, EntryId, Logged, Origin, Part, Range, Record, Rows, Seq, Span};
-use crate::schema::{Schema, Space};
+use crate::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Rows, Seq, Span};
+use crate::schema::Space;
 use crate::store::{Change, Log, Store, LOG};
 use crate::Refusal;
 
@@ -398,21 +398,18 @@ pub struct Peer {
     /// Where a confirmed entry did not apply here: each time, the peer was
     /// filled again from nothing.
     pub diverged: Vec<Seq>,
-    /// The cursor a `Hello` is outstanding at.
-    asked: Option<Seq>,
+    /// The cursor a `Hello` is outstanding at, and the fill's it asked.
+    asked: Option<(Seq, Option<Cursor>)>,
     /// The connections an authority serves by a scope, by session.
     pub served: BTreeMap<String, Served>,
     /// When it folds its log (none: never).
     pub fold: Option<Fold>,
-    /// A replica filling: where its next part begins. Nothing is made
-    /// durable until the fill is done.
+    /// A replica filling: where its next part begins (the start: none
+    /// taken yet). Nothing is made durable until the fill is done.
     pub fill: Option<Cursor>,
-    /// The part a replica filling has asked for and not been sent.
-    more: Option<Cursor>,
     /// How many bytes a replica would have each frame it is sent of rows or
     /// entries carry — a part of a fill, a page of the log — and each page
-    /// of its own pushes, about, said in each `Hello` and `More`; none:
-    /// [`PART`].
+    /// of its own pushes, about, said in each `Hello`; none: [`PART`].
     pub part: Option<usize>,
 }
 
@@ -420,7 +417,7 @@ pub struct Peer {
 /// most, about: past it, the frame ends at the row or the entry after; none
 /// is cut, and each frame holds one. What a device taking frames on a
 /// thread of its own is sent; one taking them on the thread it draws on
-/// asks for less ([`Peer::part`]): a `Hello` and a `More` say.
+/// asks for less ([`Peer::part`]): its `Hello` says.
 pub const PART: usize = 256 << 10;
 
 /// `items` in pages of about `most` bytes, each as `weight` says: a page
@@ -437,31 +434,13 @@ fn pages<T>(items: &[T], most: usize, weight: impl Fn(&T) -> usize) -> Vec<&[T]>
     out
 }
 
-/// Facts as some schema wrote them, read under `schema` (§1.2): rows
-/// completed or cut to their prefix, changes to tables it lacks dropped.
-fn fit(schema: &Schema, facts: &[Change]) -> Vec<Change> {
-    let fitted = |c: &Change| match schema.table(c.table()) {
-        Some((_, t)) => Some(c.map(|r| t.fit(r).unwrap_or_else(|_| r.to_vec()))),
-        None => (c.table() == LOG).then(|| c.clone()),
-    };
-    facts.iter().filter_map(fitted).collect()
-}
-
-/// A store with an empty log: one standing on the empty chain.
-fn started(mut store: Store) -> Store {
-    let base = Logged::base(0, EntryHash::default());
-    store.start_log([base.to_bytes()]).expect("a first row starts a log");
-    store
-}
-
 impl Peer {
     /// A peer from empty; its origin named by its session's bytes until
     /// its driver gives it the one it drew ([`Origin`]).
     pub fn new(domain: Arc<Domain>, role: Role, me: Who) -> Peer {
-        let store = started(Store::new(domain.schema.clone(), Space::Durable));
         let origin = Origin::named(&me.session);
-        Peer {
-            store,
+        let mut p = Peer {
+            store: Store::new(domain.schema.clone(), Space::Durable),
             domain,
             feed: None,
             pending: VecDeque::new(),
@@ -476,9 +455,10 @@ impl Peer {
             served: BTreeMap::new(),
             fold: None,
             fill: None,
-            more: None,
             part: None,
-        }
+        };
+        p.store = p.blank();
+        p
     }
 
     /// This peer over `space`'s tables (§1.9), from empty.
@@ -490,7 +470,14 @@ impl Peer {
 
     /// An empty store of this peer's space, its log empty.
     fn blank(&self) -> Store {
-        started(Store::new(self.store.schema_arc().clone(), self.space))
+        self.standing(0, EntryHash::default())
+    }
+
+    /// An empty store of this peer's space, its log standing on `(seq, hash)`.
+    fn standing(&self, seq: Seq, hash: EntryHash) -> Store {
+        let mut s = Store::new(self.store.schema_arc().clone(), self.space);
+        s.start_log([Logged::base(seq, hash).to_bytes()]).expect("a first row starts a log");
+        s
     }
 
     /// The log, as the store's table holds it (§1.6).
@@ -662,7 +649,8 @@ impl Peer {
             }
             run => {
                 self.local = local;
-                o.send(Frame::push(self.space, [entry.clone()]));
+                let from = self.pending.front().map_or(local, |p| p.entry.local) - 1;
+                o.send(Frame::push(self.space, from, [entry.clone()]));
                 self.pending.push_back(Logged::intent(entry, run.unwrap_or_default()));
             }
         }
@@ -740,36 +728,37 @@ impl Peer {
         let most = |most: u64| (most as usize).clamp(1, PART);
         match (f, self.is_authority(), from) {
             (Frame::Hello { cursor, hash, .. }, true, Some(who)) if scoped => self.serve_scoped(who, scope.unwrap(), cursor, hash, o),
-            (Frame::Hello { cursor, hash, most: m, .. }, true, from) => {
+            (
+                Frame::Hello {
+                    cursor, hash, fill, most: m, ..
+                },
+                true,
+                from,
+            ) => {
                 if let Some(w) = from {
                     self.served.remove(&w.session);
                 }
-                self.serve(cursor, hash, most(m), o)
+                self.serve(cursor, hash, fill, most(m), o)
             }
             // A peer's intents, each a push.
-            (Frame::Page { logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, l.entry, o)),
+            (Frame::Page { from, logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, from, l.entry, o)),
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
-            // A union fed by a scope is one part: asked for again, it is
-            // sent afresh.
-            (Frame::More { .. }, true, Some(who)) if scoped => {
-                self.served.remove(&who.session);
-                self.serve_scoped(who, scope.unwrap(), 0, None, o)
-            }
-            (Frame::More { from, most: m, .. }, true, _) => o.send(Frame::Part {
-                space: self.space,
-                part: part(&self.store, &self.fill_order(), self.log().head(), Some(from), most(m)),
-            }),
-            (Frame::Part { part, .. }, false, _) => self.take(part, o),
+            (
+                Frame::Part {
+                    seq, hash, from, rows, next, ..
+                },
+                false,
+                _,
+            ) => self.take((seq, hash), from, rows, next, o),
             (Frame::Verdict { id, verdict, .. }, false, _) => match verdict {
                 // In the log at or below where this peer stands, an intent
                 // still pending here is in the state it holds (a fill carried
-                // it); and past where its origin stands, a gap is closed.
+                // it).
                 Verdict::At { seq, last } => {
                     let taken = seq <= self.log().head().0 && self.pending.iter().any(|p| p.entry.id == id && p.entry.local <= last);
                     if taken && self.settle(&id, o) {
                         o.out.push(Output::Settled(id, Ok(())));
                     }
-                    self.close_gap(last, o)
                 }
                 Verdict::Refused { why } if self.settle(&id, o) => {
                     tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
@@ -782,24 +771,27 @@ impl Peer {
     }
 
     /// A `Hello` at `(cursor, hash)`: the pages from there, each of about
-    /// `most` bytes, when this log has that hash there, and a fill's first
-    /// part, of about `most` bytes, when it does not.
-    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, most: usize, o: &mut Out) {
+    /// `most` bytes, when this log has that hash there, and then, when its
+    /// fill stands at `fill`, the part from there; a fill's first part when
+    /// it does not. A part is of about `most` bytes of rows.
+    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, fill: Option<Cursor>, most: usize, o: &mut Out) {
         let has = match hash {
             Some(h) => self.log().has(cursor, &h),
             None => cursor == 0 && self.log().base_seq() == 0,
         };
-        if !has {
-            let part = part(&self.store, &self.fill_order(), self.log().head(), None, most);
-            return o.send(Frame::Part { space: self.space, part });
+        if has {
+            let after: Vec<Logged> = self.log().after(cursor).collect();
+            for page in pages(&after, most, Logged::weight) {
+                o.send(Frame::Page {
+                    space: self.space,
+                    from: page[0].seq - 1,
+                    logged: page.to_vec(),
+                });
+            }
         }
-        let after: Vec<Logged> = self.log().after(cursor).collect();
-        for page in pages(&after, most, Logged::weight) {
-            o.send(Frame::Page {
-                space: self.space,
-                from: page[0].seq - 1,
-                logged: page.to_vec(),
-            });
+        if !has || fill.is_some() {
+            let from = fill.filter(|_| has);
+            o.send(part(self.space, &self.store, &self.fill_order(), self.log().head(), from, most));
         }
     }
 
@@ -854,10 +846,9 @@ impl Peer {
         let Ok(union) = self.of_rows(&rows) else {
             return;
         };
-        let part = part(&union, &self.fill_order(), head, None, usize::MAX);
+        let bytes = part(self.space, &union, &self.fill_order(), head, None, usize::MAX).enc();
         let s = self.served.get_mut(session).unwrap();
         (s.union, s.head) = (union, Some(head));
-        let bytes = Frame::Part { space: self.space, part }.enc();
         o.out.push(Output::Send(To::Session(session.into()), bytes));
     }
 
@@ -894,11 +885,11 @@ impl Peer {
         }
     }
 
-    /// A pushed intent judged, and the verdict sent back: every push is
-    /// answered.
-    fn push(&mut self, who: &Who, entry: Entry, o: &mut Out) {
+    /// A pushed intent judged, its device's pending beginning past `from`,
+    /// and the verdict sent back: every push is answered.
+    fn push(&mut self, who: &Who, from: i64, entry: Entry, o: &mut Out) {
         let id = entry.id;
-        let verdict = self.verdict_on(who, entry, o);
+        let verdict = self.verdict_on(who, from, entry, o);
         o.send(Frame::Verdict {
             space: self.space,
             id,
@@ -906,7 +897,7 @@ impl Peer {
         });
     }
 
-    fn verdict_on(&mut self, who: &Who, mut entry: Entry, o: &mut Out) -> Verdict {
+    fn verdict_on(&mut self, who: &Who, from: i64, mut entry: Entry, o: &mut Out) -> Verdict {
         let head = self.log().head().0;
         let j = self.journal();
         if let Some(why) = j.refused.get(&entry.id) {
@@ -916,12 +907,16 @@ impl Peer {
             let why = "an id that is not its own, or from an origin of another actor".into();
             return Verdict::Refused { why };
         }
+        // What its device no longer holds pending is nowhere: passed.
+        let from = from.min(entry.local - 1);
+        if from > j.last_of(&entry.origin) {
+            j.pass(entry.origin, &who.actor, from);
+        }
         let last = j.last_of(&entry.origin);
         // Not the next of its origin, or naming no function here: where its
         // origin stands. At or below the last and not refused, it is in the
         // log at or below the head — every entry up to which this connection
-        // is sent before the verdict; past it, not judged, for a device that
-        // lost the ones between to go on from.
+        // is sent before the verdict; past it, not judged.
         let known = self.domain.fns.contains_key(&entry.func);
         if entry.local != last + 1 || !known {
             match entry.local > last {
@@ -966,15 +961,11 @@ impl Peer {
                     self.undo_pending(o);
                     undone = true;
                 }
-                let schema = self.store.schema_arc().clone();
                 let moved = match self.fill {
-                    Some(_) => self.store.force_all(&fit(&schema, &l.facts)).ok(),
-                    None => match self.store.apply_all(&l.facts) {
-                        Ok(()) => Some(l.facts.clone()),
-                        Err(_) => Some(fit(&schema, &l.facts)).filter(|f| self.store.apply_all(f).is_ok()),
-                    },
+                    Some(_) => self.store.force_all(&l.facts),
+                    None => self.store.apply_facts(&l.facts),
                 };
-                let Some(moved) = moved else {
+                let Ok(moved) = moved else {
                     self.redo_pending(o);
                     return self.diverge(l.seq, o);
                 };
@@ -996,22 +987,21 @@ impl Peer {
         }
     }
 
+    /// A `Hello` where this peer stands, and where its fill does, unless
+    /// one is asked there already.
     fn ask(&mut self, o: &mut Out) {
         let (n, h) = self.log().head();
-        if self.asked != Some(n) {
-            self.asked = Some(n);
-            o.send(self.hello(n, Some(h)));
-        }
-    }
-
-    /// A `Hello` at `cursor`: where this peer stands, and what it runs.
-    fn hello(&self, cursor: Seq, hash: Option<EntryHash>) -> Frame {
-        Frame::Hello {
-            space: self.space,
-            cursor,
-            hash,
-            schema: self.store.schema_hash(),
-            most: self.most(),
+        let at = Some((n, self.fill.clone()));
+        if self.asked != at {
+            self.asked = at;
+            o.send(Frame::Hello {
+                space: self.space,
+                cursor: n,
+                hash: Some(h),
+                fill: self.fill.clone(),
+                schema: self.store.schema_hash(),
+                most: self.most(),
+            });
         }
     }
 
@@ -1020,124 +1010,85 @@ impl Peer {
         self.part.unwrap_or(PART) as u64
     }
 
-    /// Facts that do not apply here: the fill begun again, from nothing —
-    /// its first part asked for (§1.7).
+    /// Facts that do not apply here at `seq`: the fill begun again, from
+    /// nothing — the store emptied, its log standing at `seq` on nothing the
+    /// authority has, so that its `Hello` is sent a first part (§1.7).
     fn diverge(&mut self, seq: Seq, o: &mut Out) {
         tracing::warn!(target: "ark", seq, "diverged");
         self.diverged.push(seq);
         self.undo_pending(o);
-        let fresh = self.blank();
+        let fresh = self.standing(seq, EntryHash::default());
         o.tell(None, self.store.diff(&fresh));
         self.store = fresh;
         self.redo_pending(o);
-        (self.fill, self.more, self.asked) = (Some(Cursor::default()), None, None);
-        self.ask_more(o);
+        (self.fill, self.asked) = (Some(Cursor::default()), None);
+        self.ask(o);
     }
 
-    /// A part of a fill. The first begins one — unless this peer stands
-    /// where it was taken, filled already — the store emptied, the log
-    /// standing on where the part was taken: an authority is always right,
-    /// one restarted behind its replicas too. Any other is the one asked
-    /// for, at the head — every entry the authority logged before it was
-    /// sent before it — or it is passed by: past a gap, the head asked for
-    /// again, and the part. Its ranges replace what the store held in
-    /// them, judging nothing (a row may name one not sent yet: every row is
-    /// the authority's, judged where it was written). The last is the fill
-    /// done, and the store made durable whole; until then nothing is, so a
-    /// peer reopened mid-fill fills again. The pending intents run again on
-    /// top of each.
-    fn take(&mut self, p: Part, o: &mut Out) {
-        let (n, h) = self.log().head();
-        let asked = self.more.take();
-        if p.first {
-            if self.fill.is_none() && (p.seq, p.hash) == (n, h) {
+    /// A part of a fill, taken at `(seq, hash)`. The first (`from` none)
+    /// begins one — unless this peer stands where it was taken, filled
+    /// already — the store emptied, the log standing on where the part was
+    /// taken: an authority is always right, one restarted behind its
+    /// replicas too. Any other is the one from where the fill stands, at the
+    /// head — every entry the authority logged before it was sent before it
+    /// — or it is passed by: past a gap, the head asked for again, and the
+    /// part. Its rows are put as they are, judging nothing (a row may name
+    /// one not sent yet: every row is the authority's, judged where it was
+    /// written): what the store held of the rows' ranges is what the entries
+    /// since the fill began wrote there, and the authority's rows at its
+    /// head hold that too. The last is the fill done, and the store made
+    /// durable whole; until then nothing is, so a peer reopened mid-fill
+    /// fills again. The pending intents run again on top of each.
+    fn take(&mut self, at: (Seq, EntryHash), from: Option<Cursor>, rows: Rows, next: Option<Cursor>, o: &mut Out) {
+        let first = from.is_none();
+        if first {
+            if self.fill.is_none() && at == self.log().head() {
                 return;
             }
-        } else if self.fill.is_none() || asked.is_none() || asked != p.from() {
-            self.more = asked;
+        } else if self.fill.is_none() || from != self.fill {
             return;
-        } else if (n, h) != (p.seq, p.hash) {
+        } else if at != self.log().head() {
             self.asked = None;
-            self.ask(o);
-            return self.ask_more(o);
+            return self.ask(o);
         }
         self.undo_pending(o);
-        if p.first {
-            let mut fresh = Store::new(self.store.schema_arc().clone(), self.space);
-            fresh
-                .start_log([Logged::base(p.seq, p.hash).to_bytes()])
-                .expect("a first row starts a log");
+        if first {
+            let fresh = self.standing(at.0, at.1);
             o.tell(None, self.store.diff(&fresh));
-            self.store = fresh;
+            (self.store, self.asked) = (fresh, None);
         }
-        for r in &p.ranges {
-            match self.store.replace(&r.table, &r.from, r.to.as_deref(), &r.rows) {
+        for (table, rows) in &rows {
+            match self.store.put_rows(table, rows) {
                 Ok(moved) => o.tell(None, moved),
                 Err(_) => {
                     self.redo_pending(o);
-                    return self.diverge(p.seq, o);
+                    return self.diverge(at.0, o);
                 }
             }
         }
-        self.fill = p.next.clone();
-        if self.fill.is_none() {
-            tracing::info!(target: "ark", seq = p.seq, "filled");
-        }
+        self.fill = next;
         match self.fill {
-            Some(_) => self.ask_more(o),
-            None => o.persist(Record::Rows(self.store.kv_rows())),
+            Some(_) => self.ask(o),
+            None => {
+                tracing::info!(target: "ark", seq = at.0, "filled");
+                o.persist(Record::Rows(self.store.kv_rows()))
+            }
         }
         self.redo_pending(o);
-        if p.first {
-            self.asked = None;
+        if first {
             self.repush(o);
         }
     }
 
-    /// The next part of a fill asked for, unless one is asked already.
-    fn ask_more(&mut self, o: &mut Out) {
-        let Some(next) = &self.fill else { return };
-        if self.more.is_none() {
-            self.more = Some(next.clone());
-            o.send(Frame::More {
-                space: self.space,
-                from: next.clone(),
-                most: self.most(),
-            });
-        }
-    }
-
+    /// Its pending intents pushed again, in pages, each saying where they
+    /// begin.
     fn repush(&mut self, o: &mut Out) {
         let most = self.most() as usize;
+        let from = self.pending.front().map_or(0, |p| p.entry.local - 1);
         for page in pages(self.pending.make_contiguous(), most, Logged::weight) {
-            o.out.push(Output::Send(
-                To::Back,
-                Frame::push(self.space, page.iter().map(|p| p.entry.clone())).enc(),
-            ));
+            let push = Frame::push(self.space, from, page.iter().map(|p| p.entry.clone()));
+            o.out.push(Output::Send(To::Back, push.enc()));
         }
-    }
-
-    /// The authority has judged this origin's intents up to `last` and no
-    /// further. Pending from `last + 1` on, this device is pushing them in
-    /// order (or the authority holds the first): it waits. Pending from
-    /// past it, the ones between are nowhere — lost from this device's
-    /// disk, or judged by a log the authority no longer is — and nothing
-    /// would ever fill them: the intents pending are this origin's from
-    /// `last + 1` on, run again (an intent's ids are drawn from its own),
-    /// and pushed again. None of them has been judged: the authority's last
-    /// is below them all.
-    fn close_gap(&mut self, last: i64, o: &mut Out) {
-        if self.pending.front().is_none_or(|p| p.entry.local <= last + 1) {
-            return;
-        }
-        self.undo_pending(o);
-        for (n, p) in self.pending.iter_mut().enumerate() {
-            p.entry.local = last + 1 + n as i64;
-            p.entry.id = EntryId::of(self.origin, p.entry.local);
-        }
-        self.local = last + self.pending.len() as i64;
-        self.redo_pending(o);
-        self.repush(o);
     }
 
     // * Lifecycle
@@ -1146,12 +1097,10 @@ impl Peer {
         if self.is_authority() {
             return;
         }
+        // What was asked on the connection before is not coming.
         self.asked = None;
         self.ask(o);
         self.repush(o);
-        // What was asked on the connection before is not coming.
-        self.more = None;
-        self.ask_more(o);
     }
 
     /// Moves the horizon to `n` now, whatever its [`Fold`] says: what a
@@ -1200,7 +1149,6 @@ impl Peer {
         self.undo_pending(o);
         self.pending.clear();
         let filling = self.fill.take().is_some();
-        self.more = None;
         let (log, rows): (Rows, Rows) = rows.into_iter().partition(|(t, _)| t == LOG);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
         let opened = match filling {
@@ -1212,9 +1160,8 @@ impl Peer {
             // and those appended, as their records were read.
             let mut entries = store.log().entries();
             let (n, held) = (logged.len(), entries.len());
-            let schema = store.schema_arc().clone();
             for l in logged.into_iter().filter(|_| !filling) {
-                if store.append(&l, &l.facts).is_err() && store.append(&l, &fit(&schema, &l.facts)).is_err() {
+                if store.append(&l).is_err() {
                     break;
                 }
                 entries.push(l);
@@ -1250,51 +1197,45 @@ impl Peer {
 }
 
 /// The part of `store`'s fill from `from` (none: the first, from the
-/// rows' start), of its rows as they stand at `head`: ranges in `order`, each table's in key order, until about `most`
-/// bytes of rows; and where the next begins, unless none is left. A
-/// cursor at a table this peer lacks begins the fill again.
-fn part(store: &Store, order: &[String], head: (Seq, EntryHash), from: Option<Cursor>, most: usize) -> Part {
-    let at = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
-    let (start, key) = match (at, from) {
-        (Some(i), Some(c)) => (i, c.key),
-        _ => (0, vec![]),
-    };
-    let (mut ranges, mut size, mut next) = (vec![], 0, None);
-    for (i, table) in order.iter().enumerate().skip(start) {
-        let from = if i == start { key.clone() } else { vec![] };
-        let (mut rows, mut to) = (vec![], None);
-        for (k, r) in store.keyed_from(table, &from) {
+/// rows' start), of its rows as they stand at `head`: tables in `order`,
+/// each's rows in key order, until about `most` bytes of rows; and where
+/// the next begins, unless none is left. A cursor at a table this peer
+/// lacks begins the fill again.
+fn part(space: Space, store: &Store, order: &[String], (seq, hash): (Seq, EntryHash), from: Option<Cursor>, most: usize) -> Frame {
+    let start = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
+    let from = from.filter(|_| start.is_some());
+    let (mut rows, mut size, mut next) = (vec![], 0, None);
+    for (i, table) in order.iter().enumerate().skip(start.unwrap_or(0)) {
+        let key = from.as_ref().filter(|_| Some(i) == start).map_or(&[][..], |c| &c.key[..]);
+        let mut held = vec![];
+        for (k, r) in store.keyed_from(table, key) {
             if size >= most {
-                to = Some(k.to_vec());
+                next = Some(Cursor {
+                    table: table.clone(),
+                    key: k.to_vec(),
+                });
                 break;
             }
             size += r.len();
-            rows.push(r.to_vec());
+            held.push(r.to_vec());
         }
-        ranges.push(Range {
-            table: table.clone(),
-            from,
-            to: to.clone(),
-            rows,
-        });
-        next = match (to, order.get(i + 1)) {
-            (Some(key), _) => Some(Cursor { table: table.clone(), key }),
-            (None, Some(t)) if size >= most => Some(Cursor {
+        rows.push((table.clone(), held));
+        if next.is_none() && size >= most {
+            next = order.get(i + 1).map(|t| Cursor {
                 table: t.clone(),
                 key: vec![],
-            }),
-            _ => None,
-        };
+            });
+        }
         if next.is_some() {
             break;
         }
     }
-    let (seq, hash) = head;
-    Part {
+    Frame::Part {
+        space,
         seq,
         hash,
-        first: at.is_none(),
-        ranges,
+        from,
+        rows,
         next,
     }
 }

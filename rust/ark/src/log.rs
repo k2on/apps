@@ -291,41 +291,6 @@ pub struct Cursor {
     pub key: Vec<u8>,
 }
 
-/// Every row of `table` whose key is `from` or past it and before `to`
-/// (none: to the table's end), as the authority held them.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Range {
-    pub table: String,
-    #[serde(with = "crate::format::raw")]
-    pub from: Vec<u8>,
-    pub to: Option<Vec<u8>>,
-    #[serde(with = "crate::format::raw_list")]
-    pub rows: Vec<Vec<u8>>,
-}
-
-/// A part of a fill (§1.7): ranges of the authority's rows as they stood at
-/// `(seq, hash)`, each range's rows replacing what a
-/// replica held in it; the first part of a fill begins it from nothing,
-/// and the last says no `next`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Part {
-    pub seq: Seq,
-    pub hash: EntryHash,
-    pub first: bool,
-    pub ranges: Vec<Range>,
-    pub next: Option<Cursor>,
-}
-
-impl Part {
-    /// Where it begins: its first range's start.
-    pub fn from(&self) -> Option<Cursor> {
-        self.ranges.first().map(|r| Cursor {
-            table: r.table.clone(),
-            key: r.from.clone(),
-        })
-    }
-}
-
 /// What a peer makes durable, one record per `Send(To::Disk)` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded

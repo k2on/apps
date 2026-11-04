@@ -162,6 +162,7 @@ fn fanout(c: usize) -> usize {
         space: Space::Durable,
         cursor: head,
         hash: Some(hash),
+        fill: None,
         schema: Default::default(),
         most: ark::peer::PART as u64,
     }

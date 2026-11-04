@@ -304,16 +304,31 @@ impl Store {
     }
 
     /// A logged entry appended, as a peer opens its log (§1.6): the entry
-    /// must link onto the head, and `facts` — its own, as this store's
-    /// schema reads them — apply, all or none.
-    pub fn append(&mut self, l: &Logged, facts: &[Change]) -> Result<(), Refusal> {
+    /// must link onto the head, and its facts apply ([`Store::apply_facts`]).
+    pub fn append(&mut self, l: &Logged) -> Result<(), Refusal> {
         let (n, h) = self.log().head();
         if l.seq != n + 1 || !l.links(&h) {
             return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
         }
-        self.apply_all(facts)?;
+        self.apply_facts(&l.facts)?;
         self.log_push(l);
         Ok(())
+    }
+
+    /// Facts as some schema this one grows from or into wrote them, applied,
+    /// all or none (§1.2): as they are, or else each row read under this
+    /// one ([`Table::fit`]) and the changes to a table it lacks dropped.
+    /// What was applied.
+    pub fn apply_facts(&mut self, facts: &[Change]) -> Result<Vec<Change>, Refusal> {
+        if self.apply_all(facts).is_ok() {
+            return Ok(facts.to_vec());
+        }
+        let fit = |c: &Change| {
+            let (_, t) = self.schema.table(c.table())?;
+            Some(c.map(|r| t.fit(r).unwrap_or_else(|_| r.to_vec())))
+        };
+        let fitted: Vec<Change> = facts.iter().filter_map(fit).collect();
+        self.apply_all(&fitted).map(|_| fitted)
     }
 
     /// An entry added at the head of the log by a peer that chained it
@@ -633,36 +648,11 @@ impl Store {
         })
     }
 
-    /// The rows of `table` from `from` to `to` (none: its end) replaced by
-    /// `rows`, as some schema of this one wrote them, judging nothing: how a
-    /// replica filling holds a range it was sent, whose neighbours it may
-    /// not hold yet. What moved, as changes. A table this schema lacks is
-    /// none of its.
-    pub(crate) fn replace(&mut self, table: &str, from: &[u8], to: Option<&[u8]>, rows: &[Vec<u8>]) -> Result<Vec<Change>, Refusal> {
-        let Ok(t) = self.find(table) else { return Ok(vec![]) };
-        let schema = self.schema.clone();
-        let tab = &schema.tables[t];
-        let mut sent = BTreeMap::new();
-        for row in rows {
-            let row = tab.fit(row)?;
-            let p = tab.parse(&row)?;
-            sent.insert(p.key.clone(), (row, p));
-        }
-        let hi = to.map_or(Bound::Unbounded, Bound::Excluded);
-        let held: Vec<Vec<u8>> = self.tables[t]
-            .rows
-            .range::<[u8], _>((Bound::Included(from), hi))
-            .map(|(k, _)| k.clone())
-            .filter(|k| !sent.contains_key(k))
-            .collect();
-        let mut out = vec![];
-        for k in held {
-            out.extend(self.force(t, &k, None)?);
-        }
-        for (k, row) in sent {
-            out.extend(self.force(t, &k, Some(row))?);
-        }
-        Ok(out)
+    /// `rows` of `table` put, each under its key, judging nothing: how a
+    /// replica filling holds the rows it was sent, whose neighbours it may
+    /// not hold yet. What moved, as changes.
+    pub(crate) fn put_rows(&mut self, table: &str, rows: &[Vec<u8>]) -> Result<Vec<Change>, Refusal> {
+        rows.iter().filter_map(|r| self.force_row(table, r, false).transpose()).collect()
     }
 
     /// Changes applied as they are, judging nothing but each row's bytes:
@@ -670,19 +660,26 @@ impl Store {
     /// whatever was held — how a replica filling takes an entry's facts
     /// over rows it may not all hold yet. What moved, as changes.
     pub(crate) fn force_all(&mut self, cs: &[Change]) -> Result<Vec<Change>, Refusal> {
-        let mut out = vec![];
-        for c in cs {
-            let Ok(t) = self.find(c.table()) else { continue };
-            let tab = &self.schema.tables[t];
+        let force = |c: &Change| {
             let (row, gone) = match c {
                 Change::Add { row, .. } | Change::Edit { new: row, .. } => (row, false),
                 Change::Remove { row, .. } => (row, true),
             };
-            let p = tab.parse(row)?;
-            let key = p.key.clone();
-            out.extend(self.force(t, &key, (!gone).then(|| (row.clone(), p)))?);
-        }
-        Ok(out)
+            self.force_row(c.table(), row, gone).transpose()
+        };
+        cs.iter().filter_map(force).collect()
+    }
+
+    // A row as some schema of this one wrote it ([`Table::fit`]) written
+    // under its key — or, `gone`, its key's row taken away — judging
+    // nothing; a table this schema lacks is none of its.
+    fn force_row(&mut self, table: &str, row: &[u8], gone: bool) -> Result<Option<Change>, Refusal> {
+        let Ok(t) = self.find(table) else { return Ok(None) };
+        let tab = &self.schema.tables[t];
+        let row = tab.fit(row)?;
+        let p = tab.parse(&row)?;
+        let key = p.key.clone();
+        self.force(t, &key, (!gone).then_some((row, p)))
     }
 
     // A key's row written as `row`, parsed already (none: gone), judging
