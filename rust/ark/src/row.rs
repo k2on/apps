@@ -402,11 +402,6 @@ pub fn column_or_default<T: Describe + Default + Serialize>(name: &str) -> Colum
 pub trait Input: Value + Describe {
     fn check(self) -> Result<Self, Vec<(String, String)>>;
 
-    /// Each refined field's refinements, as a form says them beside it.
-    fn checks() -> Vec<(String, Vec<String>)> {
-        vec![]
-    }
-
     /// [`Input::check`], the first failure its refusal.
     fn refine(self) -> Result<Self, Refusal> {
         self.check().map_err(|mut fs| Refusal(fs.remove(0).1))

@@ -63,12 +63,6 @@ pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("mutator", attr.into(), item.into()))
 }
 
-/// `#[query("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`.
-#[proc_macro_attribute]
-pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("query", attr.into(), item.into()))
-}
-
 /// `#[view("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
 /// Refusal>`, a query kept up to date.
 #[proc_macro_attribute]

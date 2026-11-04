@@ -85,7 +85,8 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
   Volatile>` it writes the live space's tables (§1.9) and its intents
   are on that space: a peer's `mutate` sends each to the space its
   function writes.
-- **A query** (`#[query]`) is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`.
+- **A query** (`Domain::query`, as a job's `due` is) is `fn(&Ctx, &Db<S>,
+  I) -> Result<T, Refusal>`, answered once.
 - **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date.
 - **A scope** (`#[scope]`) says per table which rows a connection fed by
   it holds (§1.8).

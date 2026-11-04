@@ -2,7 +2,6 @@
 //! generator writes from the domain now (`arkdb gen`): regenerating moves
 //! nothing. `ARK_WRITE_GEN=1` writes them instead.
 
-use ark::domain::Catalog;
 use arkdb::gen::{kotlin, swift, walk};
 
 const KOTLIN: &str = "../android/app/src/main/kotlin/dev/money/android/gen/Money.kt";
@@ -42,7 +41,7 @@ const TYPED: &[&str] = &[
 /// JSON.
 #[test]
 fn the_phones_types_are_the_domains() {
-    let w = walk("money", &Catalog::of(&money_domain::domain())).typed("uniffi.money_domain", TYPED);
+    let w = walk("money", &money_domain::domain()).typed("uniffi.money_domain", TYPED);
     held(KOTLIN, kotlin::write(&w, "dev.money.android.gen"));
     held(SWIFT, swift::write(&w));
 }

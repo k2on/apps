@@ -15,9 +15,9 @@
 //! extensions, and a view of its rows is read typed, through its view
 //! object (`<T>View`), with no JSON per row ([`Walked::typed`]).
 //!
-//! A domain is walked as `ark::domain::Catalog` describes it: its
-//! schema — every table a row type, named as the table — and every
-//! function's name, kind, input and answer.
+//! A domain is walked as it registers itself: its schema — every table a
+//! row type, named as the table — and every function's name, kind, space,
+//! input and answer.
 
 pub mod kotlin;
 pub mod swift;
@@ -25,7 +25,7 @@ pub mod swift;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use ark::domain::{Catalog, Described, Kind};
+use ark::domain::{Domain, Function, Kind};
 use ark::row::Type;
 use ark::schema::Space;
 
@@ -272,17 +272,17 @@ fn named(t: &Type, into: &mut BTreeMap<String, Type>) {
     fields.into_iter().for_each(|f| named(f, into));
 }
 
-/// The domain `name` as `catalog` describes it, walked.
-pub fn walk(name: &str, catalog: &Catalog) -> Walked {
+/// The domain `d`, called `name`, walked.
+pub fn walk(name: &str, d: &Domain) -> Walked {
     let (mut types, mut live) = (BTreeMap::new(), vec![]);
-    for t in &catalog.schema.tables {
+    for t in &d.schema.tables {
         let row = Type::Record(camel(&t.name, true), t.columns.iter().map(|c| (c.name.clone(), c.ty.clone())).collect());
         if t.space == Space::Volatile {
             live.push((t.name.clone(), camel(&t.name, true)));
         }
         named(&row, &mut types);
     }
-    let fns: Vec<&Described> = catalog.functions.iter().filter(|f| f.kind != Kind::Scope).collect();
+    let fns: Vec<&Function> = d.fns.values().filter(|f| f.kind != Kind::Scope).collect();
     let last = |n: &str| n.rsplit('.').next().unwrap_or(n).to_string();
     let stubs = fns
         .iter()
@@ -311,24 +311,14 @@ pub fn walk(name: &str, catalog: &Catalog) -> Walked {
 }
 
 /// `arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]`: DOMAIN is one of
-/// this crate's (`demo`, `room`) or a file holding a domain's `Catalog` as
-/// JSON (`{"catalog": …}` or the catalog alone); the source to stdout.
+/// this crate's (`demo`, `room`; an app's crate walks its own, as
+/// `harken/ffi/tests/gen.rs` does); the source to stdout.
 pub fn main(args: &[String]) -> Result<String, String> {
     let [lang, domain, rest @ ..] = args else {
         return Err("arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]".into());
     };
-    let catalog = match crate::demo::named(domain) {
-        Some(d) => Catalog::of(&d),
-        None => {
-            let text = std::fs::read_to_string(domain).map_err(|e| format!("{domain}: {e}"))?;
-            let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{domain}: {e}"))?;
-            serde_json::from_value(v.get("catalog").unwrap_or(&v).clone()).map_err(|e| format!("{domain}: {e}"))?
-        }
-    };
-    let stem = std::path::Path::new(domain)
-        .file_stem()
-        .map_or(domain.clone(), |s| s.to_string_lossy().into());
-    let w = walk(rest.first().unwrap_or(&stem), &catalog);
+    let d = crate::demo::named(domain).ok_or_else(|| format!("no domain {domain} here: demo or room"))?;
+    let w = walk(rest.first().unwrap_or(domain), &d);
     match lang.as_str() {
         "kotlin" => Ok(kotlin::write(&w, rest.get(1).map_or("dev.arkdb.gen", String::as_str))),
         "swift" => Ok(swift::write(&w)),

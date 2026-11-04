@@ -318,10 +318,10 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
 /// One field's refinements, attribute by attribute: each rule's check —
 /// the words for its failing the attribute's `why`, or its own — and how a
 /// form says it beside the field.
-fn rules(f: &syn::Field) -> syn::Result<(Vec<TokenStream>, Vec<String>)> {
+fn rules(f: &syn::Field) -> syn::Result<Vec<TokenStream>> {
     let name = f.ident.as_ref().unwrap();
     let label = name.to_string();
-    let (mut out, mut said) = (vec![], vec![]);
+    let mut out = vec![];
     let lit = |k: &Ident, e: &Expr, form: &str| match e {
         Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Ok(s.value()),
         _ => err(k.span(), &format!("{k} = \"{form}\"")),
@@ -331,7 +331,6 @@ fn rules(f: &syn::Field) -> syn::Result<(Vec<TokenStream>, Vec<String>)> {
             Item::Is(n, Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })) if n == "why" => Some(s.value()),
             _ => None,
         });
-        let quoted = why.as_ref().map_or(String::new(), |w| format!(" (\u{201c}{w}\u{201d})"));
         let words = |default: TokenStream| match &why {
             Some(w) => quote!(::std::string::String::from(#w)),
             None => default,
@@ -351,31 +350,22 @@ fn rules(f: &syn::Field) -> syn::Result<(Vec<TokenStream>, Vec<String>)> {
         };
         let invalid = |t: TokenStream| quote!((!#t).then(|| ::std::string::String::from("is not valid")));
         for it in &group {
-            let (r, s) = match it {
-                Item::Flag(k) if k == "trim" => (quote!(self.#name = ::ark::row::Trim::trimmed(self.#name);), "trimmed".into()),
-                Item::Flag(k) if k == "non_empty" => (fail(quote!(::ark::row::non_empty(&self.#name))), format!("non-empty{quoted}")),
+            let r = match it {
+                Item::Flag(k) if k == "trim" => quote!(self.#name = ::ark::row::Trim::trimmed(self.#name);),
+                Item::Flag(k) if k == "non_empty" => fail(quote!(::ark::row::non_empty(&self.#name))),
                 Item::Is(k, e) if k == "len" => {
                     let Some((lo, hi)) = bounds(&lit(k, e, "lo..=hi")?) else {
                         return err(k.span(), "len = \"lo..=hi\", \"lo..hi\" or \"lo..\"");
                     };
-                    let chars = |n: usize| if n == 1 { "char" } else { "chars" };
-                    let s = match (lo, hi) {
-                        (lo, usize::MAX) => format!("min {lo} {}{quoted}", chars(lo)),
-                        (0, hi) => format!("max {hi} {}{quoted}", chars(hi)),
-                        (lo, hi) => format!("{lo} to {hi} {}{quoted}", chars(hi)),
-                    };
-                    (fail(quote!(::ark::row::within(&self.#name, #lo, #hi))), s)
+                    fail(quote!(::ark::row::within(&self.#name, #lo, #hi)))
                 }
                 Item::Is(k, e) if k == "range" => {
-                    let (text, r): (String, Expr) = (lit(k, e, "lo..=hi")?, syn::parse_str(&lit(k, e, "lo..=hi")?)?);
-                    (
-                        fail(invalid(quote!((#r).contains(&self.#name)))),
-                        why.clone().unwrap_or_else(|| format!("in {text}")),
-                    )
+                    let r: Expr = syn::parse_str(&lit(k, e, "lo..=hi")?)?;
+                    fail(invalid(quote!((#r).contains(&self.#name))))
                 }
                 Item::Is(k, e) if k == "check" => {
                     let c: Expr = syn::parse_str(&lit(k, e, "|x| …")?)?;
-                    (fail(invalid(quote!((#c)(&self.#name)))), why.clone().unwrap_or_else(|| "refined".into()))
+                    fail(invalid(quote!((#c)(&self.#name))))
                 }
                 Item::Is(k, _) if k == "why" => continue,
                 _ => {
@@ -386,10 +376,9 @@ fn rules(f: &syn::Field) -> syn::Result<(Vec<TokenStream>, Vec<String>)> {
                 }
             };
             out.push(r);
-            said.push(s);
         }
     }
-    Ok((out, said))
+    Ok(out)
 }
 
 /// `"1..=80"`, `"0..120"`, `"1.."` as inclusive bounds.
@@ -411,13 +400,8 @@ pub fn input(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let fields = fields_of(&input)?;
     let mut per = vec![];
-    let mut checks = vec![];
     for f in &fields.named {
-        let (r, s) = rules(f)?;
-        if !s.is_empty() {
-            let n = f.ident.as_ref().unwrap().to_string();
-            checks.push(quote!((#n.to_string(), vec![#(#s.to_string()),*])));
-        }
+        let r = rules(f)?;
         per.push(quote! {
             #[allow(unused_mut, unused_assignments)]
             let mut ok = true;
@@ -429,10 +413,6 @@ pub fn input(input: DeriveInput) -> syn::Result<TokenStream> {
         #describe
 
         impl ::ark::row::Input for #name {
-            fn checks() -> ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<::std::string::String>)> {
-                vec![#(#checks),*]
-            }
-
             #[allow(unused_mut)]
             fn check(mut self) -> ::std::result::Result<Self, ::std::vec::Vec<(::std::string::String, ::std::string::String)>> {
                 let mut fails: ::std::vec::Vec<(::std::string::String, ::std::string::String)> = vec![];

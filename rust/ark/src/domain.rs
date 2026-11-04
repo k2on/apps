@@ -3,15 +3,16 @@
 //! A [`Domain`] is what a crate of plain Rust registers: the schema its
 //! `#[derive(Schema)]` struct is, and per name — `playlists.add_to_playlist`
 //! — a function and its input's type description. `#[mutator(..)]`,
-//! `#[query(..)]`, `#[view(..)]` and `#[scope(..)]` only register a
-//! function by name ([`register!`]); what it does is the Rust.
+//! `#[view(..)]` and `#[scope(..)]` only register a function by name
+//! ([`register!`]); what it does is the Rust.
 //!
 //! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>`:
 //!   the machine of the space it writes (`P`, durable unless it says
 //!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it as
 //!   a [`Procedure`], its input read and refined first ([`Input`]);
-//! - a **query** is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered
-//!   over a store;
+//! - a **query** ([`Domain::query`]: a kind's due jobs, who is signed
+//!   in) is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered over a
+//!   store;
 //! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
 //!   kept up to date ([`crate::plan::View`]) or answered afresh;
 //! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
@@ -39,7 +40,7 @@ use crate::store::{Change, Store};
 use crate::Refusal;
 
 /// What a function is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Mutator,
     Query,
@@ -54,12 +55,19 @@ pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, 
 /// An input's refinements over its encoding: every field that fails, and why.
 pub type Check = Arc<dyn Fn(&[u8]) -> Result<(), Vec<(String, String)>> + Send + Sync>;
 
-/// One function of a domain, by name: what it is ([`Described`], which it
-/// derefs to), and what runs it.
+/// One function of a domain, by name — what a generator reads (`arkdb
+/// gen`) — and what runs it.
 #[derive(Clone)]
 pub struct Function {
-    pub described: Described,
-    /// What the machine runs: a mutator's, a live transition's.
+    pub name: String,
+    pub kind: Kind,
+    /// The space a mutator writes, and its intents are on.
+    pub space: Space,
+    /// What it takes, as a form reads it.
+    pub input: Type,
+    /// What it answers, a query's or a view's element.
+    pub output: Option<Type>,
+    /// What the machine runs: a mutator's.
     pub proc: Option<Arc<dyn Procedure>>,
     /// What a scope holds (§1.8).
     pub scope: Option<peer::Scope>,
@@ -68,25 +76,14 @@ pub struct Function {
     pub check: Check,
 }
 
-impl std::ops::Deref for Function {
-    type Target = Described;
-    fn deref(&self) -> &Described {
-        &self.described
-    }
-}
-
 /// A function taking `I` that runs nothing yet: what each kind is made from.
 fn function<I: Input>(name: &str, kind: Kind, output: Option<Type>) -> Function {
-    let (input, checks) = (I::describe(), I::checks());
     Function {
-        described: Described {
-            name: name.into(),
-            kind,
-            space: Space::Durable,
-            input,
-            output,
-            checks,
-        },
+        name: name.into(),
+        kind,
+        space: Space::Durable,
+        input: I::describe(),
+        output,
         proc: None,
         scope: None,
         ask: None,
@@ -209,7 +206,7 @@ impl Domain {
             proc: Some(Arc::new(Mutate { f })),
             ..function::<I>(name, Kind::Mutator, None)
         };
-        f.described.space = P::SPACE;
+        f.space = P::SPACE;
         self.add(f)
     }
 
@@ -322,47 +319,6 @@ impl Domain {
         let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
         let w = f.watch.as_ref().ok_or_else(|| Refusal(format!("{name} is not a view")))?;
         w(store, ctx, input)
-    }
-}
-
-/// A domain described (§1.16), what a generator reads: its schema, and per
-/// function its name, its kind, and the descriptions of its input, of what
-/// it answers and of its input's refinements — what a form is drawn from.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Catalog {
-    pub schema: Schema,
-    pub functions: Vec<Described>,
-}
-
-/// One function, described.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Described {
-    pub name: String,
-    pub kind: Kind,
-    /// The space a mutator writes, and its intents are on.
-    #[serde(default)]
-    pub space: Space,
-    /// What it takes, as a form reads it.
-    pub input: Type,
-    /// What it answers, a query's or a view's element.
-    pub output: Option<Type>,
-    /// Each refined field of the input, and its refinements as a form says
-    /// them.
-    pub checks: Vec<(String, Vec<String>)>,
-}
-
-impl Catalog {
-    /// A domain's, as it registers its functions.
-    pub fn of(d: &Domain) -> Catalog {
-        let functions = d.fns.values().map(|f| f.described.clone()).collect();
-        Catalog {
-            schema: (*d.schema).clone(),
-            functions,
-        }
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Described> {
-        self.functions.iter().find(|f| f.name == name)
     }
 }
 
