@@ -1,0 +1,5 @@
+{
+  "bytes": "05000a61726b2e6465766963650570686f6e65",
+  "frame": {"Call":{"id":0,"input":[112,104,111,110,101],"name":"ark.device"}},
+  "name": "client-call-durable"
+}

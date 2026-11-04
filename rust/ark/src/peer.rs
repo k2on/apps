@@ -104,8 +104,8 @@
 //! connection, every frame of its log naming its space. Its store hashes and
 //! snapshots those tables only; it makes nothing durable; an intent whose
 //! changes touch a table of the other space is refused, in either space.
-//! A device says what it is in its `Hello` ([`Peer::device`]); its
-//! `on_join` and `on_leave` are entries the authority authors through
+//! A device says what it is in a call at each connection
+//! ([`crate::frames::DEVICE`]); its `on_join` and `on_leave` are entries the authority authors through
 //! `Mutate`, as the driver sees connections come and go. `resync` is a
 //! `Hello` with a hash the authority lacks, answered with a fill. It runs
 //! the log's rules: a volatile authority restarted from nothing has a
@@ -400,8 +400,6 @@ pub struct Peer {
     pub served: BTreeMap<String, Served>,
     /// When it folds its log (none: never).
     pub fold: Option<Fold>,
-    /// What this device says it is, in every `Hello` (§1.9).
-    pub device: Option<Vec<u8>>,
     /// A replica filling: where its next part begins. Nothing is made
     /// durable until the fill is done.
     pub fill: Option<Cursor>,
@@ -473,7 +471,6 @@ impl Peer {
             asked: None,
             served: BTreeMap::new(),
             fold: None,
-            device: None,
             fill: None,
             more: None,
             part: None,
@@ -1003,7 +1000,6 @@ impl Peer {
             space: self.space,
             cursor,
             hash,
-            device: self.device.clone(),
             schema: self.store.schema_hash(),
             most: self.most(),
         }

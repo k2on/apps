@@ -114,7 +114,6 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
             space: ark::schema::Space::Durable,
             cursor: 0,
             hash: None,
-            device: None,
             schema: Default::default(),
             most: ark::peer::PART as u64,
         },

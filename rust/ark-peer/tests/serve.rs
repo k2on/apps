@@ -301,14 +301,19 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();
     let c = hub.accept(alice.clone());
+    let device = Frame::Call {
+        id: 0,
+        name: ark::frames::DEVICE.into(),
+        input: arkdb::demo::Arrival { name: "phone".into() }.to_bytes(),
+    };
     let hello = Frame::Hello {
         space: Space::Volatile,
         cursor: 0,
         hash: None,
-        device: Some(arkdb::demo::Arrival { name: "phone".into() }.to_bytes()),
         schema: Default::default(),
         most: ark::peer::PART as u64,
     };
+    hub.frame(c, device.enc(), 1);
     hub.frame(c, hello.enc(), 1);
     hub.mutate_at("room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2).unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();

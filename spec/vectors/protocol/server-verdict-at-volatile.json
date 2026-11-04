@@ -1,5 +1,5 @@
 {
-  "bytes": "020110635b50cf29691a28fef1371b8cc8d7d0000c02",
-  "frame": {"Verdict":{"id":"635b50cf29691a28fef1371b8cc8d7d0","space":"volatile","verdict":{"At":{"last":1,"seq":6}}}},
+  "bytes": "020110635b50cf29691a28fef1371b8cc8d7d0000802",
+  "frame": {"Verdict":{"id":"635b50cf29691a28fef1371b8cc8d7d0","space":"volatile","verdict":{"At":{"last":1,"seq":4}}}},
   "name": "server-verdict-at-volatile"
 }

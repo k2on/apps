@@ -15,8 +15,8 @@
 //! (`Config::feed`): whole, or by a scope (§1.8), which the authority asks
 //! of the same function (`Peer::feed`) at the connection's `Hello`.
 //!
-//! **Devices** (§1.9). A connection's volatile `Hello` may say what its
-//! device is; the server authors the live domain's `on_join` on what it
+//! **Devices** (§1.9). A connection may say what its device is, in a call
+//! before its `Hello`s (`ark::frames::DEVICE`); the server authors the live domain's `on_join` on what it
 //! said, as the connection's login, when a session's first such connection
 //! says it, and `on_leave` when its last closes, so a device on two
 //! connections is one device. On a restart the
@@ -246,6 +246,11 @@ impl Peer {
                 crate::observe::collect(events.collect());
                 return vec![];
             }
+            if name == ark::frames::DEVICE {
+                let input = input.clone();
+                self.arrive(c, &input, now);
+                return self.release();
+            }
         }
         if let Frame::Call { id, name, input } = f {
             // No machine's: whoever drives the server runs it
@@ -266,18 +271,12 @@ impl Peer {
         if f.is_file() {
             return self.file_frame(c, f);
         }
-        let (space, device) = match &f {
-            Frame::Hello { space, device, .. } => {
-                conn.hello[*space as usize] = true;
-                (*space, device.clone())
-            }
-            f => (f.space(), None),
-        };
+        let space = f.space();
+        if let Frame::Hello { .. } = f {
+            conn.hello[space as usize] = true;
+        }
         let from = Some(conn.who.clone());
         self.route(space, Some(c), Input::Frame { from, bytes });
-        if let Some(d) = device.filter(|_| space == Space::Volatile) {
-            self.arrive(c, &d, now);
-        }
         self.release()
     }
 

@@ -3262,18 +3262,15 @@ pub mod ha {
             };
             let domain = &self.hosted.domain;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                let mut p =
-                    Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile);
-                let said = Device {
-                    can_play: true,
-                    id: entity.into(),
-                    kind: Kind::Speaker.name().into(),
-                    name: name.into(),
-                    user: user.into(),
-                };
-                p.device = Some(said.to_bytes());
-                p
+                Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile)
             });
+            let said = Device {
+                can_play: true,
+                id: entity.into(),
+                kind: Kind::Speaker.name().into(),
+                name: name.into(),
+                user: user.into(),
+            };
             let (to, wake, key) = (self.frames.0.clone(), self.waker.clone(), k.clone());
             let c = self.hub.connect(
                 who,
@@ -3282,7 +3279,13 @@ pub mod ha {
                     to.send((key.clone(), b)).is_ok()
                 }),
             );
-            let out = peer.step(Input::Connected);
+            // What it is, before its `Hello`s, as a device's driver says it.
+            let (id, name, input) = (0, ark::frames::DEVICE.into(), said.to_bytes());
+            let mut out = vec![Output::Send(
+                To::Back,
+                ark::frames::Frame::Call { id, name, input }.enc(),
+            )];
+            out.extend(peer.step(Input::Connected));
             self.standing.insert(k, c);
             self.send(c, out);
         }

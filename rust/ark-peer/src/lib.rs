@@ -118,7 +118,8 @@ pub const TRACE_MS: i64 = 30_000;
 /// schema and its functions by name (§1.16, §1.9); as a server, how each
 /// connection is fed (§1.8), the entries each space keeps above its horizon
 /// (all of them when none), and the functions of its own a device may call
-/// over its link (`calls`); as a device, what its live `Hello` says it is
+/// over its link (`calls`); as a device, what it says it is at each
+/// connection (a call before its `Hello`s, `ark::frames::DEVICE`)
 /// and the live functions it relays as ephemeral, and how often.
 ///
 /// A server authors the live domain's `on_join` (a function whose name's
@@ -268,7 +269,7 @@ fn machine(d: &Arc<Domain>, role: Role, me: &Who, origin: Option<Origin>, space:
 fn live_of(config: &Config, me: &Who, origin: Origin, opens: u64) -> Option<Instance> {
     let live = config.live.as_ref()?;
     let mut p = machine(live, Role::Replica, me, Some(live_origin(origin, opens)), Space::Volatile);
-    (p.device, p.fold) = (config.device.clone(), Some(Fold::REPLICA));
+    p.fold = Some(Fold::REPLICA);
     Some(p)
 }
 
@@ -716,6 +717,17 @@ impl Peer {
         // last + 1 is a gap, answered and closed (`Verdict::At`).
         let first = self.log.pending.front().map(|p| p.entry.local);
         tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
+        // What it is, before its `Hello`s, to a call nobody answers.
+        if let Some(input) = self.config.live.as_ref().and(self.config.device.clone()) {
+            self.frames.push(
+                Frame::Call {
+                    id: 0,
+                    name: ark::frames::DEVICE.into(),
+                    input,
+                }
+                .enc(),
+            );
+        }
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
         self.files_connected();

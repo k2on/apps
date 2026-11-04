@@ -266,7 +266,6 @@ fn compaction_and_the_horizon() {
         space: ark::schema::Space::Durable,
         cursor,
         hash: Some(hash),
-        device: None,
         schema: Default::default(),
         most: ark::peer::PART as u64,
     };

@@ -3,7 +3,7 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, most }
+//! Hello   { space, cursor, hash: Option<EntryHash>, schema, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
 //! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
@@ -44,7 +44,9 @@
 //! log (a password for the server alone). It is answered once, while the
 //! connection that made it is up, and is not sent again. What a device says
 //! of itself is shipped as one ([`EVENTS`]), which every server collects
-//! and answers nothing.
+//! and answers nothing; and what it is, as one at each connection before
+//! its `Hello`s ([`DEVICE`]): the bytes its server authors its `on_join`
+//! from, answered nothing.
 //!
 //! `Offer`, `Want`, `Chunk`, `Have` and `Absent` are no machine's either:
 //! the bytes of the files rows name (`crate::file`, docs/plan-files.md),
@@ -61,9 +63,7 @@
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
-//! `device` is what a device says it is, the bytes the authority authors
-//! its `on_join` from (the driver's to read); `schema` is the hash of the
-//! schema the peer runs. A frame
+//! `schema` is the hash of the schema the peer runs. A frame
 //! is its bytes in the value format, serde's derived form (`crate::format`;
 //! `tests/frames.rs` holds every frame to
 //! reading back as itself).
@@ -82,7 +82,6 @@ pub enum Frame {
         space: Space,
         cursor: Seq,
         hash: Option<EntryHash>,
-        device: Option<Vec<u8>>,
         schema: SchemaHash,
         most: u64,
     },
@@ -141,6 +140,11 @@ pub enum Frame {
 /// its input a page of [`Event`]s, which every server collects and answers
 /// nothing — no machine's, and no app's to register.
 pub const EVENTS: &str = "ark.events";
+
+/// The call a device says what it is by, at each connection before its
+/// `Hello`s (§1.9): its input the bytes its server's live space authors
+/// `on_join` from — the driver's to read, no machine's — answered nothing.
+pub const DEVICE: &str = "ark.device";
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
 /// loud (`error`, `warn`, `info`, `debug`, `trace`), what (`msg`), and its
