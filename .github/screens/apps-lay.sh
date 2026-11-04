@@ -19,5 +19,5 @@ for at in "$new"/*/*/; do
   rm -rf "${tree:?}/$a/$phone"
   mkdir -p "$tree/$a"
   cp -r "$at" "$tree/$a/$phone"
-  rm -f "$tree/$a/$phone/stuck.png"
+  rm -f "$tree/$a/$phone"/stuck.png "$tree/$a/$phone"/stuck.tree.txt
 done

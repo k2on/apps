@@ -9,9 +9,12 @@
 #
 #   app-android.sh <out> <apk> <app> [server URL]
 #
-# A step is {"tap": "<label>"} (what says it, as uiautomator reads the
-# screen), {"type": "<text>"} or {"wait": <seconds>}. Writes
-# <out>/device.json and <out>/<theme>/<id>.png.
+# A step is {"tap": "<label>"} — what says it or its id, in the screen's
+# accessibility tree, as uiautomator reads it (ui.py) — with an optional
+# "role" ("tab", "button", "field", "text") to prefer when several say
+# it; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# <out>/<theme>/<id>.png, and beside each the tree it was taken from,
+# <id>.tree.txt (ui.py --tree), which is what a step can name.
 set -euo pipefail
 out=$1
 apk=$2
@@ -27,11 +30,11 @@ mkdir -p "$out"
 dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 
 # Tap what says `text` (or, as `--field`, the first text field), waiting
-# up to `seconds` for it to be there.
+# up to `seconds` for it to be there; of several, the `role` one.
 tap() {
-  local text=$1 seconds=${2:-20} at
+  local text=$1 seconds=${2:-20} role=${3:-} at
   for _ in $(seq 1 "$seconds"); do
-    if at=$(dump | python3 -I "$here/ui.py" "$text"); then
+    if at=$(dump | python3 -I "$here/ui.py" "$text" $role); then
       # shellcheck disable=SC2086
       adb shell input tap $at
       return 0
@@ -40,6 +43,7 @@ tap() {
   done
   echo "::error::$app: nothing on the screen says '$text'"
   adb exec-out screencap -p > "$out/stuck.png" || true
+  dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
   return 1
 }
 
@@ -49,12 +53,11 @@ says() { dump | python3 -I "$here/ui.py" "$1" >/dev/null; }
 # A step of a shot, as JSON.
 step() {
   local s=$1
-  case $(jq -r 'keys[0]' <<< "$s") in
-    tap) tap "$(jq -r .tap <<< "$s")" ;;
-    type) adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')" ;;
-    wait) sleep "$(jq -r .wait <<< "$s")" ;;
-    *) echo "::error::$app: no such step: $s"; return 1 ;;
-  esac
+  if jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")"
+  elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
+  elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
+  else echo "::error::$app: no such step: $s"; return 1
+  fi
 }
 
 open_app() {
@@ -125,5 +128,6 @@ for theme in light dark; do
     done < <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
     adb exec-out screencap -p > "$out/$theme/$id.png"
+    dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
   done 3< <(jq -c '.shots[]' "$shots")
 done
