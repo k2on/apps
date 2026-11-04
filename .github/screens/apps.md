@@ -94,7 +94,9 @@ After `build` or `ios` finishes, from that run's artifacts:
 - **On a pull request**: `build` builds the APKs whose inputs differ from
   what main published, and `ios` builds the simulator apps for any branch
   push. The shots go to the branch `screens-pr-<number>`, and one comment on
-  the PR, kept up to date, shows each changed or new shot beside main's.
+  the PR, kept up to date, has a row for each screen that changed or is new
+  on either phone: Android's on main and on the PR, then the iPhone's on
+  main and on the PR, so both phones' before and after are side by side.
   `ios` runs on pushes to this repository's branches, so a fork's PR gets
   its Android shots only.
 
