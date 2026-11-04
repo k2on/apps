@@ -68,7 +68,7 @@ impl Server {
             auth: None,
             web: None,
             routes: Router::new(),
-            keepalive: Duration::from_secs(20),
+            keepalive: crate::settings::KEEPALIVE,
         }
     }
 

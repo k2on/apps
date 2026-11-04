@@ -2,7 +2,7 @@
 //! and keeps its log, how people sign in, where a browser reaches it, its
 //! web build, its keepalive and the log it keeps, and who holds which role —
 //! read from the environment under an app's prefix
-//! ([`Serve::from_env`]: `HARKEN_DATA`, `HARKEN_OIDC_ISSUER`, …), so that
+//! ([`Serve::from_vars`]: `HARKEN_DATA`, `HARKEN_OIDC_ISSUER`, …), so that
 //! what is any app's server is configured once, here, and an app reads
 //! only what is its own beside it.
 
@@ -32,7 +32,7 @@ pub enum SignIn {
 pub const KEEPALIVE: Duration = Duration::from_secs(20);
 
 /// How many entries the log keeps above its snapshot, unless told.
-pub const RETAIN: usize = 10_000;
+const RETAIN: usize = 10_000;
 
 /// Everything any app's server is told.
 #[derive(Clone, Debug)]
@@ -93,7 +93,8 @@ impl Serve {
         }
     }
 
-    /// Read the environment under `prefix` (`HARKEN`):
+    /// Read the environment under `prefix` (`HARKEN`), each variable
+    /// looked up by `var` (`std::env::var`, or a test's); blank is unset:
     ///
     /// ```text
     /// _DATA                     where the state lives (default: the temp dir)
@@ -109,11 +110,6 @@ impl Serve {
     /// _RETAIN_ENTRIES           entries kept above the snapshot (10000)
     /// _ROLES                    who holds which role: `library=alice,bob;admin=alice`
     /// ```
-    pub fn from_env(prefix: &str, listen: &str) -> Result<Serve> {
-        Serve::from_vars(prefix, listen, |k| std::env::var(k).ok())
-    }
-
-    /// [`Serve::from_env`] over any lookup; blank is unset.
     pub fn from_vars(prefix: &str, listen: &str, var: impl Fn(&str) -> Option<String>) -> Result<Serve> {
         let name = |k: &str| format!("{prefix}_{k}");
         let env = |k: &str| var(&name(k)).filter(|v| !v.trim().is_empty());
