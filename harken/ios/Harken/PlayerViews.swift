@@ -53,6 +53,8 @@ struct MiniPlayer: View {
                     Text("Not Playing").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            // The buttons in the words' colour, not the tint: as Android's bar.
+            .foregroundStyle(.primary)
             .padding(.horizontal, Space.m)
             .frame(maxHeight: .infinity)
             .overlay(alignment: .bottom) { if s.now != nil && !compact { Hairline().padding(.horizontal, Space.l) } }
@@ -190,7 +192,9 @@ struct FullPlayer: View {
         .padding(.vertical, Space.s)
         .background {
             if let now = s.now {
+                // Square, as every cover, made big enough to cover the screen.
                 CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
+                    .aspectRatio(1, contentMode: .fill)
                     .blur(radius: 80)
                     .opacity(0.45)
                     .ignoresSafeArea()
@@ -226,17 +230,17 @@ struct Scrubber: View {
                 if let c = ChaptersEntry.at(chapters, Int64(at * total)), !c.title.isEmpty {
                     Text(c.title).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Slider(value: Binding(get: { min(max(at, 0), 1) }, set: { v in
+                // No handle (ArkUI's `Bar`), as Android's.
+                Bar(value: at, fill: .gold, enabled: s.durationMs > 0, onValue: { v in
                     dragging = v
                     model.scrub(Int64(v * total))
-                }), in: 0...1, onEditingChanged: { editing in
-                    if !editing, let d = dragging {
+                }, onDone: {
+                    if let d = dragging {
                         model.seek(Int64(d * total))
                         dragging = nil
                     }
                 })
-                .disabled(s.durationMs <= 0)
-                .tint(.gold)
+                .accessibilityLabel("Position")
                 HStack {
                     Text(Spell.clock(Int64(at * total)))
                     Spacer()
@@ -328,17 +332,14 @@ struct VolumeSlider: View {
             Button(action: onMute) { Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 28) }
                 .foregroundStyle(muted ? .secondary : .primary)
                 .accessibilityLabel(muted ? "Unmute \(about)" : "Mute \(about)")
-            Slider(value: Binding(get: { shown }, set: { v in
+            Bar(value: shown, fill: muted ? .secondary : .gold, onValue: { v in
                 dragging = true
                 shown = v
                 onLevel(Int((v * 100).rounded()))
-            }), in: 0...1, onEditingChanged: { editing in
-                if !editing {
-                    dragging = false
-                    onDone()
-                }
+            }, onDone: {
+                dragging = false
+                onDone()
             })
-            .tint(muted ? .secondary : .gold)
             .accessibilityLabel("Volume of \(about)")
         }
         .onAppear { shown = Double(level) / 100 }

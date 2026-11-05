@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,28 +65,22 @@ public fun VolumeSlider(
                 modifier = Modifier.size(22.dp),
             )
         }
-        Slider(
+        // No handle, as the iPhone's: the track is the control (`Bar`).
+        Bar(
             value = shown.value.coerceIn(0f, 1f),
-            onValueChange = {
+            onValue = {
                 dragging = true
                 scope.launch { shown.snapTo(it) }
                 onLevel((it * 100).roundToInt())
             },
-            onValueChangeFinished = {
+            onDone = {
                 dragging = false
                 onDone()
             },
             enabled = enabled,
-            colors =
-                SliderDefaults.colors(
-                    thumbColor =
-                        if (quiet) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.primary,
-                    activeTrackColor =
-                        if (quiet) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
-                ),
+            fill = if (quiet) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            track = MaterialTheme.colorScheme.outlineVariant,
+            label = about,
             modifier = Modifier.weight(1f),
         )
     }

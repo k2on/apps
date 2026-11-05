@@ -46,7 +46,9 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("Library")
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // A bar of the page's own: what scrolls under it softens there, as
+        // under the navigation bar (`safeAreaBar`, not an inset).
+        .safeAreaBar(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 SwiftUI.Picker("Show", selection: $tab) {
                     // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.

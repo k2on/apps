@@ -74,8 +74,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -95,6 +93,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.arkui.Bar
 import dev.arkui.Cover
 import dev.arkui.Glyph
 import dev.arkui.Recompositions
@@ -220,7 +219,7 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
     val now = state.now ?: return
     Recompositions.hit("MiniPlayer")
     Column(modifier) {
-        Row(Modifier.padding(start = Space.s, end = Space.xs).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = Space.s, end = Space.xs).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             if (art) Cover(seedOf(now), now.art, 40.dp, Modifier.size(40.dp), corner = 4.dp) else Spacer(Modifier.size(40.dp))
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
@@ -256,7 +255,9 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
 @Composable
 private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
     val at by position.collectAsStateWithLifecycle()
-    BoxWithConstraints(Modifier.fillMaxWidth().height(2.dp).padding(horizontal = Space.s)) {
+    // Inside the bar, clear of its rounded corners, rounded at its ends: as the iPhone's, under
+    // the words rather than along the bar's very edge, where its corners cut it.
+    BoxWithConstraints(Modifier.padding(start = Space.l, end = Space.l, bottom = Space.xs).fillMaxWidth().height(2.dp).clip(CircleShape)) {
         // Counted here, where the position is read: a tick recomposes this and not even the
         // function around it.
         Recompositions.hit("Progress")
@@ -469,23 +470,18 @@ private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: S
     var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
     val at = dragging ?: ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f)
-    Slider(
+    Bar(
         value = at,
-        onValueChange = {
+        onValue = {
             dragging = it
             controls.scrub((it * total).toLong())
         },
-        onValueChangeFinished = {
+        onDone = {
             dragging?.let { controls.seek((it * total).toLong()) }
             dragging = null
         },
         enabled = state.durationMs > 0,
-        colors =
-            SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
-            ),
+        label = "Position",
     )
     val gone = (at * total).toLong()
     Row(Modifier.fillMaxWidth()) {

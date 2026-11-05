@@ -115,13 +115,21 @@ struct CoverView: View {
 
     var body: some View {
         let shape = round ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        ZStack {
-            Square(seed: seed)
-            if let i = image ?? (url.isEmpty ? nil : Covers.shared.cached(url, side: side)) {
-                Image(uiImage: i).resizable().scaledToFill()
+        // Square whatever the picture's own shape: the square is what has the
+        // size (the space it is given, made square), and the picture fills it
+        // over the derived square and is cut to it. A picture laid out by
+        // itself, filled, is as big as its own shape is, and a cover wider
+        // than it is tall was drawn wide.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { Square(seed: seed) }
+            .overlay {
+                if let i = image ?? (url.isEmpty ? nil : Covers.shared.cached(url, side: side)) {
+                    Image(uiImage: i).resizable().scaledToFill()
+                }
             }
-        }
-        .clipShape(shape)
+            .clipShape(shape)
+            .contentShape(shape)
         .task(id: url) {
             image = nil
             if url.isEmpty { return }
