@@ -3481,6 +3481,8 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::HARKEN);
+    // Whether to move, asked of the system now rather than in a frame.
+    arkui::motion::reduced();
     // What this device does goes to its server (docs/plan-observe.md).
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 

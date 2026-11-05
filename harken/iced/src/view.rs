@@ -192,7 +192,7 @@ impl App {
         // out once closed. While a row of it is held, one layer over all
         // of it follows the pointer and hears it let go, wherever that is.
         if let Some(sheet) = self.queue_sheet.filter(|s| !s.gone(now)) {
-            let dim = sheet.at_pace(arkui::dialog::DIMMING, now);
+            let dim = arkui::dialog::dimmed(&sheet, now);
             layers = layers
                 .push(arkui::dialog::backdrop(Message::CloseQueue, Message::Swallow, dim))
                 .push(self.view_queue(self.queue_panel, arkui::sheet::open(&sheet, now)));
@@ -431,7 +431,7 @@ impl App {
             library = library.push(text(said.clone()).size(12).style(style::faint(0.55)));
         }
         let page = column![
-            container(text("Settings").size(28).font(hero::BOLD)).padding(Padding {
+            container(arkui::line::title("Settings")).padding(Padding {
                 top: PAGE_PADDING,
                 bottom: 18.0,
                 ..Padding::ZERO
@@ -450,7 +450,7 @@ impl App {
         let l = self.layout();
         let title = if self.shows_kind() == "sermon" { "Sermons" } else { "Podcasts" };
         let add = self.ringed(&l, Mark::Add, icon::tinted(glyphs::PLUS, 16.0, |p| p.background.base.text).into(), false);
-        let bar = row![text(title).size(28).font(hero::BOLD), add].spacing(10).align_y(Alignment::Center);
+        let bar = row![arkui::line::title(title), add].spacing(10).align_y(Alignment::Center);
         let mut page = column![bar].spacing(18);
         for (k, s) in self.unread_feeds() {
             page = page.push(self.view_unread(&l, k, s));
@@ -727,7 +727,7 @@ impl App {
     ) -> Element<'a, Message> {
         let mut words = column![].spacing(4).width(Length::Fill);
         if let Some(line) = over.filter(|o| !o.is_empty()) {
-            words = words.push(self.name(l, Mark::Over, line.to_uppercase(), 11.0, |t| style::faint(0.6)(t)));
+            words = words.push(self.name(l, Mark::Over, line, 11.0, |t| style::faint(0.6)(t)));
         }
         words = words.push(
             text(drawable(title).into_owned())
@@ -800,7 +800,7 @@ impl App {
         // filled behind it, so the colour paired with a fill would be dark
         // on dark.
         let mut words = column![
-            text(label.to_uppercase()).size(10).style(style::faint(0.5)),
+            text(label.to_string()).size(10).style(style::faint(0.5)),
             text(drawable(&title).into_owned())
                 .size(17)
                 .wrapping(text::Wrapping::Word)
@@ -910,7 +910,7 @@ impl App {
             let d = &details[start];
             if headings && !d.work.is_empty() {
                 let ms: i64 = rows[start..end].iter().map(|i| i.duration_ms).sum();
-                let composer = self.name(l, Mark::Composer(start), d.composer.to_uppercase(), 10.0, |t| style::faint(0.5)(t));
+                let composer = self.name(l, Mark::Composer(start), d.composer.clone(), 10.0, |t| style::faint(0.5)(t));
                 let work = self.opens(
                     l,
                     Mark::Work(start),
@@ -959,7 +959,7 @@ impl App {
         if !label.is_empty() {
             foot = foot.push(
                 column![
-                    text("RECORD LABEL").size(10).style(style::faint(0.5)),
+                    text("Record label").size(10).style(style::faint(0.5)),
                     text(label.to_string()).size(13).style(style::accent)
                 ]
                 .spacing(2)
@@ -1050,7 +1050,7 @@ impl App {
         let l = self.layout();
         let rows = self.peer.rows();
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
-        let mut small = format!("PLAYLIST  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "track"));
+        let mut small = format!("Playlist  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "track"));
         if ms > 0 {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
         }
@@ -1068,7 +1068,7 @@ impl App {
         let show = self.peer.shows().iter().find(|s| s.id == id);
         let rows = self.peer.rows();
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
-        let kind = if id.starts_with("sermon/") { "SERMONS" } else { "PODCAST" };
+        let kind = if id.starts_with("sermon/") { "Sermons" } else { "Podcast" };
         let mut small = format!("{kind}  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "episode"));
         if ms > 0 {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
@@ -1139,7 +1139,7 @@ impl App {
                 .filter(|s| !s.is_empty())
                 .collect();
             if !over.is_empty() {
-                words = words.push(text(over.join("  \u{b7}  ").to_uppercase()).size(11).style(tone(true)));
+                words = words.push(text(over.join("  \u{b7}  ")).size(11).style(tone(true)));
             }
             words = words.push(
                 text(drawable(&item.title).into_owned())
@@ -1297,7 +1297,7 @@ impl App {
         let said = self.cue_now();
         let focused = self.has_keys(Pane::Tracks);
         let cursor = self.page_cursor();
-        let mut head = column![text("TRANSCRIPT").size(11).style(style::faint(0.6))]
+        let mut head = column![text("Transcript").size(11).style(style::faint(0.6))]
             .spacing(4)
             .width(Length::Fill);
         let track = self.now().map(|n| n.track().clone());
@@ -1345,7 +1345,7 @@ impl App {
             // Whoever says it, over the first of their lines in a row.
             let before = i.checked_sub(1).map(|b| cues[b].speaker.as_str());
             if !c.speaker.is_empty() && before != Some(c.speaker.as_str()) {
-                let who = text(c.speaker.to_uppercase()).size(11).style(style::faint(0.55));
+                let who = text(c.speaker.clone()).size(11).style(style::faint(0.55));
                 // A voice told apart is named by a click on its name.
                 let who: Element<'_, Message> = match c.voice.is_empty() {
                     true => who.into(),
@@ -1510,7 +1510,7 @@ impl App {
                 let art_path = art.or(person.as_ref().map(|p| p.art.as_str())).unwrap_or_default();
                 let side = self.cover_side();
                 let picture = self.picture(name, art_path, side, side / 2.0);
-                page = page.push(self.view_cover(&l, name, picture, None, name, "", "", kind.to_uppercase()));
+                page = page.push(self.view_cover(&l, name, picture, None, name, "", "", kind.to_string()));
                 None
             }
         };
@@ -1611,9 +1611,9 @@ impl App {
         let work = p.works().iter().find(|w| w.id == id);
         let composer = work.map(|w| w.composer.clone()).unwrap_or_default();
         let mut head = column![].spacing(4).width(Length::Fill);
-        // Whose it is, in small capitals, the way back to them.
+        // Whose it is, in a quieter line, the way back to them.
         if !composer.is_empty() {
-            let crumb = format!("{}  \u{203A}", composer.to_uppercase());
+            let crumb = format!("{}  \u{203A}", composer);
             head = head.push(self.name(&l, Mark::Over, crumb, 12.0, |t| style::faint(0.6)(t)));
         }
         head = head.push(
@@ -1886,15 +1886,12 @@ impl App {
                     // page's name is (`docs/plan-db.md` D4).
                     // Cut rather than run on past the page, and the count
                     // after it keeps its room: the title gives way.
-                    Line::new(
-                        match (&p.source, &p.search) {
-                            (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
-                            _ => p.source.title().to_string(),
-                        },
-                        22.0,
-                        Cut::Middle,
-                        |theme| arkui::theme::of(theme).background.base.text,
-                    )
+                    // The page's title, as money's month is: one look for both.
+                    arkui::line::title(match (&p.source, &p.search) {
+                        (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
+                        _ => p.source.title().to_string(),
+                    })
+                    .cut(Cut::Middle)
                     .gives_way(),
                     text(format!("{} {}", p.rows().len(), plural(p.rows().len() as i64, "track")))
                         .size(12)

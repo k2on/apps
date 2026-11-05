@@ -318,7 +318,7 @@ impl App {
         let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
-            container(mono(place_of(r).to_uppercase(), 15, ink)).center_x(Length::Fill),
+            container(mono(place_of(r), 15, ink)).center_x(Length::Fill),
             container(mono(r.date.clone(), 12, faded)).center_x(Length::Fill),
             rule(),
         ]
@@ -349,7 +349,7 @@ impl App {
         }
         paper = paper
             .push(rule())
-            .push(row![mono("TOTAL".into(), 13, ink).width(Length::Fill), mono(money(-r.total), 13, ink)]);
+            .push(row![mono("Total".into(), 13, ink).width(Length::Fill), mono(money(-r.total), 13, ink)]);
         if let Some(p) = photo.filter(|p| p.state != "sure") {
             paper = paper.push(container(mono(format!("read: {}", p.state), 10, faded)).center_x(Length::Fill));
         }

@@ -84,7 +84,7 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     };
     let words = container(
         column![
-            text(kind.to_uppercase()).size(12).style(white(0.85)),
+            text(kind.to_string()).size(12).style(white(0.85)),
             text(name.to_string()).size(40).font(BOLD).style(white(1.0)),
         ]
         .spacing(2),
@@ -191,7 +191,7 @@ pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, o
     });
     let mut words = column![].spacing(2).width(Length::Fill);
     if !e.over.is_empty() {
-        words = words.push(text(e.over.to_uppercase()).size(10).style(style::faint(0.5)));
+        words = words.push(text(e.over.clone()).size(10).style(style::faint(0.5)));
     }
     // The line under is drawn even empty, so a row of entries lines up.
     words = words.push(title).push(text(e.under.clone()).size(11).style(style::faint(0.5)));
