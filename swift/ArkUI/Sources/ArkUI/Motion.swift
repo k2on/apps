@@ -30,7 +30,7 @@ extension EnvironmentValues {
 
 extension View {
     /// `animation` when `value` changes, or under Reduce Motion the short
-    /// ease that stands in for it.
+    /// fade that stands in for it.
     public func motion<V: Equatable>(_ animation: Animation, value: V) -> some View {
         modifier(MotionAnimation(animation: animation, value: value))
     }
@@ -40,10 +40,28 @@ extension View {
         modifier(MotionTransition(transition: transition))
     }
 
+    /// A figure that rolls to its new digits (`.numericText()`) when `value`
+    /// changes — a month stepped — on `Springs.move`, or under Reduce Motion
+    /// the short fade. Only this figure: what is around it changes at once,
+    /// so a step does not set a whole list moving.
+    public func rolls<V: Equatable>(on value: V) -> some View {
+        contentTransition(.numericText()).motion(Springs.move, value: value)
+    }
+
     /// Scaled by `scale`, unless motion is reduced: a press, a lift, a
     /// cover that rests while its sound is paused.
     public func motionScale(_ scale: CGFloat, anchor: UnitPoint = .center) -> some View {
         modifier(MotionScale(scale: scale, anchor: anchor))
+    }
+}
+
+extension AnyTransition {
+    /// What appears in place, a chip or a badge: it fades in growing from
+    /// `MotionTokens.enterScale` (0.95), never from nothing as a bare
+    /// `.scale` does, and goes the same way back. Under Reduce Motion
+    /// `.motionTransition` makes it a fade.
+    public static var enter: AnyTransition {
+        .scale(scale: MotionTokens.enterScale).combined(with: .opacity)
     }
 }
 
@@ -77,7 +95,8 @@ private struct MotionScale: ViewModifier {
 }
 
 /// What a card, a cover or a chip does under the finger: the instant it is
-/// touched, before it is let go, it gives a little — 0.97 of itself, a
+/// touched, before it is let go, it gives a little — `MotionTokens.press`
+/// of itself, a
 /// touch dimmer — and springs back, critically damped, when the finger
 /// lifts or slides off. Under Reduce Motion it only dims.
 public struct PressStyle: ButtonStyle {
@@ -94,10 +113,10 @@ public struct PressStyle: ButtonStyle {
         var body: some View {
             let down = configuration.isPressed
             configuration.label
-                .scaleEffect(down && !still ? 0.97 : 1)
+                .scaleEffect(down && !still ? MotionTokens.press : 1)
                 .opacity(down ? 0.8 : 1)
                 // Down at once, so the touch is answered as it lands; back up on a spring.
-                .animation(down ? Springs.fade : Springs.size, value: down)
+                .animation(down ? nil : Springs.size, value: down)
         }
     }
 }

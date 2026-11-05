@@ -32,6 +32,12 @@ pub const GIVE: f32 = 0.12;
 pub const PRESS: f32 = 0.97;
 /// The least a thing scales from when it enters.
 pub const ENTER_SCALE: f32 = 0.95;
+/// How hard a drag past its edge pulls back: Apple's rubber band's constant.
+pub const RUBBER_BAND: f32 = 0.55;
+/// How large a row held to be dragged grows.
+pub const LIFT: f32 = 1.02;
+/// How small a cover rests while what it plays is paused.
+pub const RESTING: f32 = 0.9;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

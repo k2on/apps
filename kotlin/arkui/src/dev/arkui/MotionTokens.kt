@@ -33,4 +33,10 @@ public object MotionTokens {
     public const val PRESS: Float = 0.97f
     /** The least a thing scales from when it enters. */
     public const val ENTER_SCALE: Float = 0.95f
+    /** How hard a drag past its edge pulls back: Apple's rubber band's constant. */
+    public const val RUBBER_BAND: Float = 0.55f
+    /** How large a row held to be dragged grows. */
+    public const val LIFT: Float = 1.02f
+    /** How small a cover rests while what it plays is paused. */
+    public const val RESTING: Float = 0.9f
 }

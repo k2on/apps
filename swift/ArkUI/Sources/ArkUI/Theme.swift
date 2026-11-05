@@ -37,31 +37,44 @@ public enum Space {
     public static let corner: CGFloat = 8
 }
 
-/// The numbers everything moves by, Android's (`ui/Springs.kt`): one
-/// stiffness, 700 at unit mass, critically damped — a thing put somewhere
-/// lands there without passing it, as Apple's own moves do — and a little
-/// under that, 0.8, only for a thing that was thrown: let go by a finger
-/// still moving (`released`), which hands the spring its speed, so what it
-/// overshoots by is the throw's. SwiftUI's `spring(response:dampingFraction:)`
-/// takes the same spring as its period, `2π/√(k/m)`: 0.2375 s.
+/// The springs everything moves by, made of arkui's motion tokens
+/// (`MotionTokens`, arkui/theme.toml `[motion]`), so they are Android's
+/// (`Springs.kt`) and the desktop's to the number: one stiffness, 700 at
+/// unit mass, critically damped — a thing put somewhere lands there without
+/// passing it, as Apple's own moves do — and a little under that, 0.8, only
+/// for a thing that was thrown: let go by a finger still moving
+/// (`released`), which hands the spring its speed, so what it overshoots by
+/// is the throw's. SwiftUI's `spring(response:dampingFraction:)` takes the
+/// same spring as its period, `2π/√(k/m)`: `MotionTokens.response`.
 ///
-/// Under Reduce Motion (`\.reducesMotion`) each is `reduced(_:)` into a
-/// short ease with no overshoot.
+/// Under Reduce Motion (`\.reducesMotion`) each is `reduced(_:)` into
+/// `calm`, a short cross-fade's spring with no overshoot.
 public enum Springs {
-    public static let stiffness: Double = 700
-    public static let response: Double = 2 * Double.pi / stiffness.squareRoot()
+    public static let stiffness: Double = MotionTokens.stiffness
+    public static let response: Double = MotionTokens.response
     /// Where a thing is. No overshoot: nothing threw it.
-    public static let move = Animation.spring(response: response, dampingFraction: 1)
+    public static let move = Animation.spring(response: response, dampingFraction: MotionTokens.move)
     /// How large a thing is: a scale, a clip, a dim. No overshoot.
-    public static let size = Animation.spring(response: response, dampingFraction: 1)
-    /// Something going, quickly: critically damped at 2500, about 150 ms.
-    public static let fade = Animation.spring(response: 2 * Double.pi / 2500.0.squareRoot(), dampingFraction: 1)
+    public static let size = Animation.spring(response: response, dampingFraction: MotionTokens.size)
+    /// Something going, quickly: critically damped at the fade's stiffness, about 150 ms.
+    public static let fade = Animation.spring(response: MotionTokens.fadeResponse, dampingFraction: 1)
     /// What a thrown thing lands on: a whisper of overshoot, the throw's.
-    public static let momentum: Double = 0.8
-    /// Let go faster than this, in points a second, a thing was thrown.
-    public static let thrown: Double = 300
-    /// What stands in for a move under Reduce Motion: short, and it never passes where it goes.
-    public static let calm = Animation.easeInOut(duration: 0.2)
+    public static let momentum: Double = MotionTokens.momentum
+    /// Let go faster than this, in points a second, a thing was thrown:
+    /// the shared flick (`MotionTokens.flick`), Android's `Springs.FLICK`.
+    public static let thrown: Double = MotionTokens.flick
+    /// What stands in for a move under Reduce Motion: `fade`, Android's
+    /// `Springs.fade()` — short, critically damped, so it never passes
+    /// where it goes, and a spring, so it turns where it is if sent again.
+    public static let calm = fade
+    /// The most a settle may take, in seconds (`MotionTokens.capMs`). SwiftUI
+    /// springs are not cut short; it is here so a caller that waits on a
+    /// settle waits no longer than Android's `Capped` would.
+    public static let cap: Double = Double(MotionTokens.capMs) / 1000
+    /// A back gesture's preview: at most this share of what it previews…
+    public static let preview: Double = MotionTokens.preview
+    /// …and this much of the gesture brings it 63% of the way.
+    public static let give: Double = MotionTokens.give
 
     /// What a thing a finger let go of springs on from `from` to `to`, the
     /// finger going at `velocity` (points a second, along the same axis):
@@ -77,7 +90,7 @@ public enum Springs {
 
 extension Animation {
     /// This one, or under Reduce Motion (`\.reducesMotion`, read by the
-    /// view that animates) the short ease that stands in for it.
+    /// view that animates) the short fade that stands in for it (`Springs.calm`).
     public func reduced(_ still: Bool) -> Animation { still ? Springs.calm : self }
 }
 

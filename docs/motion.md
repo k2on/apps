@@ -97,13 +97,13 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 | Stiffness / response | `Springs.STIFFNESS` 700 (unit mass) | `Springs.stiffness` 700, `Springs.response` = 2π/√700 ≈ 0.2375 s | per module: `SMOOTH` 0.35 s, `dialog::SPRING` 0.3, `sheet::SPRING` 0.4, `reorder::SLIDING` 0.3, `swipe::BACK` 0.22 |
 | A move, nothing threw it | `Springs.MOVE` 1.0, `Springs.move()` | `Springs.move` (damping 1) | `SMOOTH` (damping 1.0) |
 | A move a flick threw | `Springs.MOMENTUM` 0.8, chosen by `Springs.settle(velocity, density, reduced)` | `Springs.momentum` 0.8, chosen by `Springs.released(velocity:from:to:)` | `reorder::SETTLING` 0.85 |
-| What counts as a flick | `Springs.FLICK` 500 dp/s, `Springs.isFlick` | `Springs.thrown` 300 pt/s | `reorder` hands on speed unless held still for 60 ms |
+| What counts as a flick | `Springs.FLICK` 500 dp/s, `Springs.isFlick` | `Springs.thrown` 500 pt/s | `reorder` hands on speed unless held still for 60 ms |
 | A size, clip or dim | `Springs.SIZE` 1.0, `Springs.size()` | `Springs.size` | — (scale and veil ride a `Shown`) |
 | Something going, quickly | `Springs.fade()`, `FADE_STIFFNESS` 2500 (≈150 ms) | `Springs.fade` (≈150 ms) | `FADE` (response 0.15 s) |
 | The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | — (closed form; `LAST_FRAME` 50 ms past rest) |
 | Where a flick lands | `Springs.project`, `Springs.nearest`, `DECELERATION` 0.998, `SNAPPY` 0.99 | `Momentum.project`, `Momentum.target`, `Momentum.normal`/`snappy` | — |
 | Velocity as the spring wants it | `Animatable.animateTo(…, initialVelocity)` in px/s | `Momentum.relative(_:from:to:)` (share of the gap per second) | `Slide::moving_at(speed)` in px/s |
-| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12 | — | `swipe::band(x)`, `STRETCH` 180 px |
+| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12 | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `swipe::band(x)`, `STRETCH` 180 px |
 | No coasting after a fling | `Springs.noDecay()` | — | — |
 | Reduced motion | `reducedMotion()`, `LocalReducedMotion`, `ReducedMotion.ALWAYS_ANIMATE`, `unlessReduced(spec)`, `keepMotion()` | `\.reducesMotion`, `Motion.alwaysAnimate`, `.motion(_:value:)`, `.motionTransition(_:)`, `.motionScale(_:)`, `Animation.reduced(_:)`, `Springs.calm` | `motion::reduced()`, `ALWAYS_ANIMATE`, `ARK_REDUCE_MOTION`, `Spring::or_instant`, `Shown::new` (becomes `FADE`) |
 | Press | `Modifier.pressable(press = Press.Give \| Press.Highlight)`, `Press.SCALE` 0.97, `Press.HIGHLIGHT` 0.1 | `.buttonStyle(.press)`, `.buttonStyle(.pressRow)` | the widget's pressed colour; no scale |
@@ -135,9 +135,9 @@ spring instead, because the spring is interruptible and the curve is not:
 
 Where a tween is genuinely needed — a platform API that takes nothing else —
 the tween goes into the shared library as a named token beside the springs,
-with the reason in its doc comment, and is an ease-out. SwiftUI's
-`Springs.calm` (an ease-in-out of 0.2 s, reduced motion's stand-in) is the
-one such token today.
+with the reason in its doc comment, and is an ease-out. There is none
+today: SwiftUI's `Springs.calm`, reduced motion's stand-in, is `Springs.fade`,
+the same critically damped spring as Compose's `Springs.fade()`.
 
 ## What Moves, and What Doesn't
 
