@@ -18,8 +18,10 @@ fn out(r: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
 /// `#[ark(index(a, b))]`, `#[ark(unique(a, b))]` (each `as NAME`
 /// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct. A
 /// column appended with `#[serde(default)]` takes its type's default in a
-/// row written before it.
-#[proc_macro_derive(Row, attributes(ark))]
+/// row written before it. A row whose `state` field is an
+/// `ark::effect::Job<T>` is a job (`ark::effect::Effect`), `#[effect(lease_ms
+/// = .., retry_ms = .., role = "..", owner = field)]` optionally.
+#[proc_macro_derive(Row, attributes(ark, effect))]
 pub fn row(input: TokenStream) -> TokenStream {
     out(domain::row(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
@@ -38,14 +40,6 @@ pub fn input(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Describe, attributes(ark))]
 pub fn describe(input: TokenStream) -> TokenStream {
     out(domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)))
-}
-
-/// `#[derive(Effect)]`: a row whose `state` field is an `ark::effect::Job<T>`
-/// as a job (`ark::effect::Effect`), `#[effect(lease_ms = .., retry_ms = ..,
-/// role = "..", owner = field)]` optionally.
-#[proc_macro_derive(Effect, attributes(effect))]
-pub fn effect(input: TokenStream) -> TokenStream {
-    out(domain::effect(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
 
 /// `#[derive(Schema)]`: a struct of tables, each field a row type, as the

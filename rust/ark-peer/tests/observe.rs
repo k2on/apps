@@ -13,7 +13,7 @@ use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[effect(lease_ms = 150, retry_ms = 150, owner = owner)]
 pub struct Fetch {
     #[ark(key)]

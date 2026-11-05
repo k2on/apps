@@ -12,7 +12,7 @@
 //!                                       └─────────◄──claim (now ≥ retry)───┘
 //! ```
 //!
-//! `#[derive(Effect)]` on a row with a `state: Job<T>` field writes
+//! `#[derive(Row)]` on a row with a `state: Job<T>` field writes
 //! [`Effect`]; [`Effect::register`] adds `<table>.claim {id, by}`,
 //! `<table>.finish {id, by, outcome}` and `<table>.cancel {id}` to a
 //! domain, and the view `<table>.due`: the rows a claim would take now
@@ -69,7 +69,7 @@ impl<T> Job<T> {
     }
 }
 
-/// A row that is a job (`#[derive(Effect)]`).
+/// A row that is a job: one whose `state` is a [`Job`] (`#[derive(Row)]`).
 pub trait Effect: Row<Space = Durable> {
     /// What it comes to when it is done.
     type Outcome: Value + Describe;

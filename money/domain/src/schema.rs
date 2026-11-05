@@ -369,7 +369,7 @@ pub struct Charge {
 /// file, the transaction it was taken for when it was, and reading it — a
 /// job (`ark::effect`) the server's importer claims, runs `receipt-ocr`
 /// on and finishes with the receipt it wrote.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[ark(index(txn_id))]
 #[effect(role = crate::BANK, lease_ms = 600_000, retry_ms = 60_000)]
 pub struct Photo {

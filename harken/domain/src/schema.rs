@@ -226,7 +226,7 @@ pub struct ListeningScrub {
 /// A look the library is asked to take at its media directory (`paths`
 /// under it, or the whole of it): a job (`ark::effect`) the scanner's
 /// handler claims and does, done with what it read and authored.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[effect(role = crate::LIBRARY, lease_ms = 600_000)]
 pub struct Look {
     #[ark(key)]

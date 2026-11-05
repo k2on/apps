@@ -9,7 +9,7 @@ use ark::effect::{Cancel, Claim, Finish, Job};
 use ark::prelude::*;
 use ark::store::Store;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
 #[effect(lease_ms = 100, retry_ms = 50, role = "worker", owner = owner)]
 pub struct Fetch {
     #[ark(key)]

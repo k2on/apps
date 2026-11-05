@@ -47,6 +47,6 @@ pub mod prelude {
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, scan_from, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
-    pub use ark_macros::{mutator, scope, view, Describe, Effect, Input, Row, Schema};
+    pub use ark_macros::{mutator, scope, view, Describe, Input, Row, Schema};
     pub use serde::{Deserialize, Serialize};
 }

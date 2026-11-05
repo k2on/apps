@@ -196,7 +196,7 @@ pub mod jobs {
     use ark::effect::Job;
     use ark::prelude::*;
 
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     pub struct Fetch {
         #[ark(key)]
         pub id: String,

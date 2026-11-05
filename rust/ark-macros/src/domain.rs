@@ -135,12 +135,12 @@ fn describe(input: &DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// `Effect` for a row: its `state: Job<T>` field, and what `#[effect(..)]`
-/// says — the lease and the retry (a minute each by default), the role a
-/// claim needs, the field naming its owner.
-pub fn effect(input: DeriveInput) -> syn::Result<TokenStream> {
+/// `Effect` for a row whose `state` field is a `Job<T>` — a job — and
+/// what `#[effect(..)]` says: the lease and the retry (a minute each by
+/// default), the role a claim needs, the field naming its owner. Nothing
+/// for any other row.
+fn effect(input: &DeriveInput, fields: &syn::FieldsNamed, keys: &[&Ident], key_tys: &[&Type]) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let fields = fields_of(&input)?;
     let state = fields.named.iter().find(|f| f.ident.as_ref().is_some_and(|i| i == "state"));
     let outcome = state.and_then(|f| match &f.ty {
         Type::Path(p) => match &p.path.segments.last()?.arguments {
@@ -150,14 +150,14 @@ pub fn effect(input: DeriveInput) -> syn::Result<TokenStream> {
         _ => None,
     });
     let Some(outcome) = outcome else {
-        return err(name.span(), "a job is a row with a `state: Job<T>` field");
+        return match items_of(&input.attrs, "effect")?.is_empty() {
+            true => Ok(quote!()),
+            false => err(name.span(), "a job is a row with a `state: Job<T>` field"),
+        };
     };
-    let keyed = |f: &&syn::Field| matches!(items(&f.attrs), Ok(i) if i.iter().flatten().any(|i| matches!(i, Item::Flag(k) if k == "key")));
-    let keys: Vec<&syn::Field> = fields.named.iter().filter(keyed).collect();
-    let [key] = keys[..] else {
+    let ([key], [key_ty]) = (keys, key_tys) else {
         return err(name.span(), "a job is keyed by one column");
     };
-    let (key, key_ty) = (key.ident.as_ref().unwrap(), &key.ty);
     let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
     for it in items_of(&input.attrs, "effect")?.into_iter().flatten() {
         match it {
@@ -277,8 +277,10 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
         .iter()
         .map(|(i, t)| quote!(::ark::schema::Ref { column: #i, table: <#t as ::ark::row::Row>::TABLE.into() }));
     let describe = describe(&input)?;
+    let effect = effect(&input, fields, key_names, key_tys)?;
     Ok(quote! {
         #describe
+        #effect
 
         impl ::ark::row::Row for #name {
             const TABLE: &'static str = #table;
