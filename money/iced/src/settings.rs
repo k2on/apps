@@ -85,7 +85,7 @@ impl App {
             }
         };
         let page = column![
-            container(text("Settings").size(28).font(hero::BOLD)).padding(Padding {
+            container(crate::view::page_title("Settings")).padding(Padding {
                 bottom: 4.0,
                 ..Padding::ZERO
             }),
