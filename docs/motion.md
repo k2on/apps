@@ -162,16 +162,16 @@ which the desktop apps open from the keyboard all day.
 | Press on a cover, card, tile | gives to 0.97 at once | back on `Springs.size` | `Press.Give`, `.press` | rows never shrink (below) |
 | Press on a row | highlight at once | fades on `Springs.fade` | `Press.Highlight`, `.pressRow` | a full-width row moving reads as the list jumping |
 | Page from its cover (hero, zoom) | grows out of what was tapped | shrinks back into it | `Springs.move` / system zoom | the origin is the tapped thing, always |
-| Page with nothing to grow from | rises a little and fades | fades | `Springs.move` | restored pages, deep links |
-| Tab switch | at once | at once | none | tabs are peers; a slide or zoom implies depth that isn't there |
+| Page with nothing to grow from | rises a little and fades | fades | `Springs.move`; Compose `Transitions.pushIn`/`popOut` (a `SHIFT` slide) | restored pages, deep links |
+| Tab switch | at once | at once | none (Compose `EnterTransition.None`, `Transitions.none`) | tabs are peers; a slide or zoom implies depth that isn't there |
 | Sheet | from its edge | to the same edge | system sheet; iced `sheet::SPRING` | use the platform's sheet wherever it exists |
 | Dialog, command box opened by click | fades and grows from 0.95 | the same, reversed | iced `dialog::SPRING` | modals stay centred; opened from the keyboard, no motion |
 | Menu, popover | grows out of its trigger | shrinks back into it | Compose `GlassMorph`, SwiftUI `Menu` | never from the centre, never from scale 0 |
 | Toast | from its edge | to the same edge, a little faster | `Springs.move` | iced shows it at once; see Materials |
 | A list's rows on load | none | — | — | content the user visits daily is already there |
-| A row added or removed | the others close the gap as it fades | together, not after | `animateItem(placementSpec)`, SwiftUI `List` | the leaving row stops taking space at once |
-| Content swapped in place | cross-fade | cross-fade | `Springs.fade` | add an 8 pt shift only if direction matters |
-| Stepper (month) | slides in from the side it was stepped toward | out the other side | `Springs.move` | direction-aware; fast repeated stepping should not queue |
+| A row added or removed | the others close the gap as it fades | together, not after | Compose `reflowing()` (or `animateItem` on `Springs.slide()`), SwiftUI `List` | the leaving row stops taking space at once |
+| Content swapped in place | cross-fade | cross-fade | `Springs.fade`, Compose `Transitions.crossFade()` | add an 8 pt shift only if direction matters |
+| Stepper (month) | slides in from the side it was stepped toward | out the other side | `Springs.move`, Compose `Transitions.stepped` | direction-aware; fast repeated stepping should not queue |
 | A number changing on a user's act | rolls | — | `.contentTransition(.numericText())`, tabular figures | not on load, not on refresh |
 | Charts | draw in once on first show | — | `Springs.size` | never redraw from zero on refresh |
 | Something appearing (a chip, a badge) | fades and grows from 0.9–0.97 | the reverse | `Springs.size` | never from scale 0 |

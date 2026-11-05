@@ -6,7 +6,6 @@
 // phone and nowhere else.
 package dev.harken.android
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,11 +34,13 @@ import dev.arkui.CoverCard
 import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.Heading
+import dev.arkui.Press
 import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
 import dev.arkui.TabTitle
+import dev.arkui.pressable
 import dev.arkui.rememberDestinationListState
 
 /** What a needle found, in three groups. */
@@ -110,7 +111,7 @@ fun SearchScreen(
                     item { Heading("Recent Searches", action = "Clear", onAction = onForget) }
                     items(recent, key = { "recent:$it" }) { r ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { onNeedle(r) }.padding(horizontal = Space.page).height(48.dp),
+                            Modifier.fillMaxWidth().pressable(onClick = { onNeedle(r) }, press = Press.Highlight).padding(horizontal = Space.page).height(48.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Glyph(Glyphs.Search, null, size = 18.dp)

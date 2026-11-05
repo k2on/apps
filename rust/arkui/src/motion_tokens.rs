@@ -32,6 +32,10 @@ pub const GIVE: f32 = 0.12;
 pub const PRESS: f32 = 0.97;
 /// The least a thing scales from when it enters.
 pub const ENTER_SCALE: f32 = 0.95;
+/// How far a page or a step slides as it comes or goes, as a share of its width.
+pub const SHIFT: f32 = 0.2;
+/// How small a cover is drawn while what it plays is paused.
+pub const PAUSED_SCALE: f32 = 0.9;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

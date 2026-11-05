@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.arkui.Space
+import dev.arkui.reflowing
 import uniffi.money_domain.TxnLine
 
 /**
@@ -149,7 +150,7 @@ fun ActivityScreen(ledger: Ledger) {
                     TxnRow(
                         t,
                         showAccount = true,
-                        modifier = Modifier.animateItem().padding(horizontal = Space.page).clip(inCard(i, review.size)),
+                        modifier = reflowing().padding(horizontal = Space.page).clip(inCard(i, review.size)),
                         divided = i > 0,
                         onClick = if (needs) { { filing = listOf(t.id) } } else null,
                     )

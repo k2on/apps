@@ -17,7 +17,6 @@
 package dev.arkui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.InteractionSource
@@ -51,7 +50,7 @@ public class Press private constructor(private val scale: Float, private val hig
 
     public companion object {
         /** How small a pressed cover or card is drawn. */
-        public const val SCALE: Float = 0.97f
+        public const val SCALE: Float = MotionTokens.PRESS
 
         /** How strong a pressed row's highlight is, of the content colour. */
         public const val HIGHLIGHT: Float = 0.1f
@@ -106,7 +105,7 @@ private class PressNode(
                         down = (down - 1).coerceAtLeast(0)
                         if (down == 0)
                             launch {
-                                amount.animateTo(0f, spring(Springs.SIZE, Springs.STIFFNESS, 0.001f))
+                                amount.animateTo(0f, Springs.size())
                             }
                     }
                 }

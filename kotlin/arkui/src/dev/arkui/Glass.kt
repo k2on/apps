@@ -248,7 +248,7 @@ public fun GlassMorph(
         else
             p.animateTo(
                 if (expanded) 1f else 0f,
-                if (reduced) Springs.fade() else spring(Springs.MOVE, Springs.STIFFNESS, REST))
+                if (reduced) Springs.fade() else Springs.move())
     }
     val m = remember(space) { Morph(p).also { space.morphs += it } }
     m.reduced = reduced
@@ -278,10 +278,7 @@ private val LocalGlass: ProvidableCompositionLocal<GlassSpace?> = staticComposit
 }
 
 /** How close a spring of a rectangle, in pixels, counts as there. */
-private val Settled = Rect(0.5f, 0.5f, 0.5f, 0.5f)
-
-/** How close the morph's 0..1, as there. */
-private const val REST = 0.001f
+private val Settled = Rect(Springs.REST_PX, Springs.REST_PX, Springs.REST_PX, Springs.REST_PX)
 
 /** How dark what is under an open menu gets. */
 private const val MENU_DIM = 0.12f
