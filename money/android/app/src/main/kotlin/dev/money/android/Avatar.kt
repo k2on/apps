@@ -85,23 +85,7 @@ object Faces {
      * `picture` as its version (`v`), so a new picture is a new address — ark-auth's
      * `picture_url`, letter for letter. Empty when there is no picture or no server.
      */
-    fun url(server: String, user: String, picture: String): String {
-        if (picture.isEmpty() || server.isEmpty()) return ""
-        // FNV-1a: a version, not a secret.
-        var h = 0x811c9dc5.toInt()
-        for (b in picture.toByteArray(Charsets.UTF_8)) h = (h xor (b.toInt() and 0xff)) * 0x01000193
-        return server.trimEnd('/') + "/auth/picture?user=" + encode(user) + "&v=" + "%08x".format(h)
-    }
-
-    /** A query value, encoded as ark-auth encodes one: everything but the unreserved characters. */
-    private fun encode(s: String): String {
-        val out = StringBuilder()
-        for (b in s.toByteArray(Charsets.UTF_8)) {
-            val c = (b.toInt() and 0xff).toChar()
-            if (c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c in "-_.~") out.append(c) else out.append("%%%02X".format(b.toInt() and 0xff))
-        }
-        return out.toString()
-    }
+    fun url(server: String, user: String, picture: String): String = dev.arkui.Pictures.url(server, user, picture)
 
     /** A picture already decoded, without waiting. */
     fun cached(url: String): ImageBitmap? = memory.get(url)

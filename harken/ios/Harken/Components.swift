@@ -526,7 +526,7 @@ struct AccountMenu: View {
         } label: {
             Group {
                 if let l = model.login {
-                    Avatar(name: Logins.name(l), picture: l.picture, side: 32)
+                    Avatar(name: Logins.name(l), picture: Pictures.url(server: model.server, user: l.user, picture: l.picture), side: 32)
                 } else {
                     Image(systemName: "person.crop.circle")
                 }

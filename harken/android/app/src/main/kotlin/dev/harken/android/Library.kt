@@ -232,11 +232,14 @@ class Library(private val session: ArkSession) {
 
     val email: String = session.login.email
 
-    /** Their provider's picture of them, or empty. */
-    val picture: String = session.login.picture
-
     /** The server, as the onboarding found it. */
     val server: String = session.server
+
+    /**
+     * Where their picture is loaded from: the server's `/auth/picture`, never the login's own
+     * address, which a phone cannot always load (a dev server's is a file there); empty for none.
+     */
+    val picture: String = dev.arkui.Pictures.url(session.server, session.login.user, session.login.picture)
 
     val status: StateFlow<SessionStatus> = session.status
 
