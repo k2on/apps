@@ -3,8 +3,8 @@
 //!
 //! Lifted from harken's, where the rules were paid for. **One highlight, not
 //! two**: the sidebar's cursor *is* what the page is showing, so the row
-//! under it is marked whether or not the sidebar has the keyboard, and lit
-//! (the accent, [`style::entry`]) only while it has. A heading is drawn when
+//! under it is marked whether or not the sidebar has the keyboard: the
+//! focus's rounded ground ([`style::entry`]), fainter while it has not. A heading is drawn when
 //! the group changes rather than stored as a row, so the cursor's row `n`
 //! and the reader's are the same and the keyboard walks a plain column
 //! ([`crate::vim::Grid::column`]).
@@ -16,6 +16,8 @@
 use iced::widget::{column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::fit::Cut;
+use crate::line::Line;
 use crate::{icon, style, theme};
 
 /// What a window that has a sidebar usually makes it, edge included.
@@ -41,16 +43,13 @@ pub fn lit(i: usize, cursor: usize, focused: bool) -> bool {
 }
 
 /// A tally on a row's right: how many are in the place.
-pub fn count<'a, M: 'a>(n: i64, lit: bool) -> Element<'a, M> {
+pub fn count<'a, M: 'a>(n: i64, _lit: bool) -> Element<'a, M> {
     text(n.to_string())
         .size(10)
         .style(move |t| {
             let p = theme::of(t);
             text::Style {
-                color: Some(match lit {
-                    true => p.primary.base.text.scale_alpha(0.7),
-                    false => p.background.base.text.scale_alpha(0.5),
-                }),
+                color: Some(p.background.base.text.scale_alpha(0.5)),
             }
         })
         .into()
@@ -77,20 +76,15 @@ pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: 
         under = item.heading;
         let on_cursor = i == cursor;
         let lit = lit(i, cursor, focused);
-        let mut line = row![
-            icon::line(item.glyph, lit),
-            text(item.label)
-                .size(13)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::None)
-                .style(move |theme| text::Style {
-                    color: Some(style::entry_text(theme, lit)),
-                }),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        // The label takes what the trailing leaves and is cut to it, from
+        // the middle, so a card's mask is kept (`Chase Sap…••4417`): a
+        // `Wrapping::None` text would draw at full length, under the balance.
+        let label = Line::new(item.label, 13.0, Cut::Middle, move |theme| style::entry_text(theme, lit));
+        let mut line = row![icon::line(item.glyph, lit), container(label).width(Length::Fill)]
+            .spacing(6)
+            .align_y(Alignment::Center);
         if let Some(trailing) = item.trailing {
-            line = line.push(trailing);
+            line = line.push(container(trailing).padding(Padding::ZERO.left(4)));
         }
         side = side.push(
             mouse_area(

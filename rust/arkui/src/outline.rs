@@ -206,6 +206,13 @@ pub fn progress(sizes: &[usize], n: usize) -> f32 {
     }
 }
 
+/// Which line row `n` is drawn on, headings counted, and how many lines
+/// there are: what [`crate::scroll::follow`] keeps in view.
+pub fn line_of(sizes: &[usize], n: usize) -> (usize, usize) {
+    let all = lines(sizes);
+    (all.iter().position(|l| *l == Line::Row(n)).unwrap_or(0), all.len())
+}
+
 /// What a keyboard shift of rows `first..=last` one place `down` (or up)
 /// does, by the numbers they were drawn with.
 #[derive(Debug, Clone, PartialEq, Eq)]

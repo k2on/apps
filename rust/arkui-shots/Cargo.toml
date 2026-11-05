@@ -1,0 +1,20 @@
+[package]
+name = "arkui-shots"
+version = "0.1.0"
+description = "A desktop window photographed for the apps' screenshots: the app's own iced application run headless as iced runs it, driven by its shots.json, drawn by wgpu with no window."
+edition.workspace = true
+license.workspace = true
+
+# Knows nothing about any app, as arkui does not: an app hands over its
+# `iced::application`, and this runs it. Native only; an app depends on it
+# for the desktop alone.
+
+[dependencies]
+iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# The headless runtime: the app's boot, updates, tasks and subscriptions as
+# iced's shell runs them, with no window (`Emulator`).
+iced_test = "0.14"
+# Each shot written as a PNG.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# The app's shots.json.
+serde_json = { workspace = true }

@@ -81,7 +81,96 @@ pub enum Action {
     /// A sequence the application registered with [`Keys::bind`] — `cc`,
     /// `cg` — typed whole.
     Bound(&'static str),
+    /// `zz`, `zt` and `zb`: the list scrolled so the cursor's row is in
+    /// the middle, at the top or at the foot, the cursor where it was.
+    Scroll(crate::scroll::Place),
 }
+
+/// One thing the keys do, as the which-key panel says it
+/// ([`crate::which`]): the keys typed, exactly (`gg`, `zz`, `<C-d>`), and
+/// what they do in a few words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Binding {
+    pub keys: &'static str,
+    pub what: &'static str,
+}
+
+/// What a prefix is the start of, as the which-key panel names it beside
+/// its first key: `g`, go to; `z`, scroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Group {
+    pub key: &'static str,
+    pub what: &'static str,
+}
+
+/// Everything the grammar itself does, in the order the panel lists it.
+/// [`Keys::character`] and [`Keys::press`] are what it describes; the
+/// test beside them presses every sequence here and expects an action.
+pub const GRAMMAR: &[Binding] = &[
+    Binding { keys: "j", what: "down" },
+    Binding { keys: "k", what: "up" },
+    Binding {
+        keys: "h",
+        what: "left, or the pane that way",
+    },
+    Binding {
+        keys: "l",
+        what: "right, or the pane that way",
+    },
+    Binding { keys: "gg", what: "first" },
+    Binding { keys: "G", what: "last" },
+    Binding {
+        keys: "zz",
+        what: "scroll: the cursor in the middle",
+    },
+    Binding {
+        keys: "zt",
+        what: "scroll: the cursor at the top",
+    },
+    Binding {
+        keys: "zb",
+        what: "scroll: the cursor at the foot",
+    },
+    Binding {
+        keys: "<C-d>",
+        what: "a page down",
+    },
+    Binding {
+        keys: "<C-u>",
+        what: "a page up",
+    },
+    Binding { keys: "<C-o>", what: "back" },
+    Binding {
+        keys: "<C-i>",
+        what: "forward",
+    },
+    Binding {
+        keys: "<Enter>",
+        what: "open",
+    },
+    Binding { keys: "o", what: "open" },
+    Binding {
+        keys: "<Tab>",
+        what: "the next pane",
+    },
+    Binding { keys: "/", what: "search" },
+    Binding {
+        keys: "n",
+        what: "next match",
+    },
+    Binding {
+        keys: "N",
+        what: "match before",
+    },
+    Binding { keys: "v", what: "select" },
+    Binding {
+        keys: "<Esc>",
+        what: "drop what is half-typed",
+    },
+];
+
+/// The grammar's prefixes.
+pub const GROUPS: &[Group] = &[Group { key: "g", what: "go to" }, Group { key: "z", what: "scroll" }];
 
 /// What [`Keys`] is in the middle of.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -285,9 +374,25 @@ impl Keys {
             };
         }
 
+        if self.pending == Some('z') {
+            self.pending = None;
+            self.count = None;
+            use crate::scroll::Place;
+            return match c {
+                "z" => Some(Action::Scroll(Place::Middle)),
+                "t" => Some(Action::Scroll(Place::Top)),
+                "b" => Some(Action::Scroll(Place::Bottom)),
+                _ => None,
+            };
+        }
+
         match c {
             "g" => {
                 self.pending = Some('g');
+                None
+            }
+            "z" => {
+                self.pending = Some('z');
                 None
             }
             "j" => Some(Action::Move(Motion::Down(self.take_count()))),
@@ -560,6 +665,18 @@ impl Page {
             t => (row as f32 / (t - 1) as f32).clamp(0.0, 1.0),
         }
     }
+
+    /// Which row of the page cell `at` is drawn on, and how many rows the
+    /// page draws, every block's counted in order: what
+    /// [`crate::scroll::follow`] keeps in view.
+    pub fn line(&self, at: usize) -> (usize, usize) {
+        let total: usize = self.sections.iter().map(Section::rows).sum();
+        let Some((s, p)) = self.find(at) else {
+            return (0, total);
+        };
+        let before: usize = self.sections[..s].iter().map(Section::rows).sum();
+        (before + p / self.sections[s].columns.max(1), total)
+    }
 }
 
 /// Every key press no widget took, for the grammar.
@@ -608,6 +725,49 @@ mod tests {
             c => Key::Character(c.into()),
         };
         keys.press(&key, Modifiers::default())
+    }
+
+    /// A binding's keys as presses: `<C-d>` chorded, `<Enter>` named, the
+    /// rest a character each.
+    fn type_out(keys: &mut Keys, seq: &str) -> Option<Action> {
+        if let Some(c) = seq.strip_prefix("<C-").and_then(|r| r.strip_suffix('>')) {
+            return keys.press(&Key::Character(c.into()), Modifiers::CTRL);
+        }
+        if seq.starts_with('<') {
+            return press(keys, seq);
+        }
+        let mut last = None;
+        for c in seq.chars() {
+            last = press(keys, &c.to_string());
+        }
+        last
+    }
+
+    /// `zz`, `zt` and `zb` are vim's: the cursor's row put in the middle, at
+    /// the top, at the foot. Falsified by dropping the `z` prefix: `z` was
+    /// an application's key and `zz` two of them.
+    #[test]
+    fn z_scrolls_the_cursor_to_the_middle_top_and_foot() {
+        use crate::scroll::Place;
+        let mut keys = Keys::new();
+        assert_eq!(press(&mut keys, "z"), None, "a prefix");
+        assert_eq!(keys.pending(), "z");
+        assert_eq!(press(&mut keys, "z"), Some(Action::Scroll(Place::Middle)));
+        assert_eq!(type_out(&mut keys, "zt"), Some(Action::Scroll(Place::Top)));
+        assert_eq!(type_out(&mut keys, "zb"), Some(Action::Scroll(Place::Bottom)));
+        assert_eq!(keys.pending(), "");
+    }
+
+    /// Every sequence the which-key panel lists for the grammar does
+    /// something, so the panel cannot list a key that is not there.
+    /// Falsified by listing `zq`: it was typed and came to nothing.
+    #[test]
+    fn every_binding_of_the_grammar_is_a_command() {
+        for b in GRAMMAR {
+            let mut keys = Keys::new();
+            let got = type_out(&mut keys, b.keys);
+            assert!(got.is_some() || b.keys == "/", "{:?} came to nothing", b.keys);
+        }
     }
 
     /// The count is the part that is easy to get wrong: it accumulates across

@@ -73,18 +73,14 @@ impl Tone {
 }
 
 /// The pill an available amount is drawn in: a wash of its tone, the text
-/// in the tone itself. On a `lit` row the tone is the accent's text
-/// colour instead: a tone drawn on the accent is a pairing nobody chose.
-pub fn pill(tone: Tone, lit: bool) -> impl Fn(&Theme) -> container::Style {
+/// in the tone itself, the same on the cursor's row as off it (the cursor
+/// is a faint wash, which a tone reads on either way).
+pub fn pill(tone: Tone, _lit: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {
-        let c = match lit {
-            true => of(theme).primary.base.text,
-            false => tone.color(theme),
-        };
+        let c = tone.color(theme);
         container::Style {
             background: Some(Background::Color(c.scale_alpha(if tone == Tone::Zero { 0.18 } else { 0.2 }))),
             text_color: Some(match tone {
-                _ if lit => c,
                 Tone::Zero => of(theme).background.base.text.scale_alpha(0.75),
                 _ => c,
             }),
@@ -157,34 +153,12 @@ pub fn input(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
-/// A button that reads as words in the accent until it is pointed at.
-pub fn link(theme: &Theme, status: button::Status) -> button::Style {
-    let p = of(theme);
-    let text_color = match status {
-        button::Status::Hovered | button::Status::Pressed => p.primary.strong.color,
-        button::Status::Disabled => p.background.base.text.scale_alpha(0.4),
-        button::Status::Active => p.primary.base.color,
-    };
-    button::Style {
-        background: None,
-        text_color,
-        ..button::Style::default()
-    }
-}
-
-/// A button one of a few is chosen in: filled when chosen.
+/// A button one of a few is chosen in: the chosen one's words in the
+/// accent, the rest in the text colour; no fill and no border on either.
 pub fn choice(chosen: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| match chosen {
         true => arkui::style::action(theme, status),
-        false => {
-            let mut s = arkui::style::quiet(theme, status);
-            s.border = Border {
-                radius: 6.0.into(),
-                width: 1.0,
-                color: of(theme).background.base.text.scale_alpha(0.2),
-            };
-            s
-        }
+        false => arkui::style::quiet(theme, status),
     }
 }
 
@@ -203,15 +177,8 @@ pub fn progress(tone: Tone) -> impl Fn(&Theme) -> progress_bar::Style {
     }
 }
 
-/// A group's heading in the budget: a card a step off the page, its rows
-/// hanging under it.
-pub fn group_card(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(of(theme).background.base.text.scale_alpha(0.06))),
-        border: Border {
-            radius: 10.0.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
-    }
+/// A group's heading in the budget: its words in bold say what it is, on
+/// no ground of its own, as no row has one but the cursor's.
+pub fn group_card(_theme: &Theme) -> container::Style {
+    container::Style::default()
 }

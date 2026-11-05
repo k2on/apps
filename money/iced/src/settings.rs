@@ -6,7 +6,7 @@
 use arkui::account::{Account, Who};
 use arkui::{hero, style};
 use iced::widget::{column, container, scrollable, text};
-use iced::{Element, Length, Padding};
+use iced::{Element, Length, Padding, Task};
 
 use crate::view::{dim, quiet, PAD};
 use crate::{live, App, Message, Page};
@@ -29,6 +29,30 @@ impl App {
         let mut a = Account::signed_in(&who, Message::SignOut);
         a.entries.insert(0, settings);
         Some(a)
+    }
+
+    /// Where the signed-in person's picture is loaded from: the server's
+    /// `/auth/picture`, as harken's window asks it. None for the demo, while
+    /// nobody is signed in, or when their provider has no picture of them.
+    pub fn account_picture_url(&self) -> Option<String> {
+        let server = self.server.as_ref()?;
+        let login = server.login.as_ref()?;
+        ark_auth::picture_url(&server.url, &login.user.id, &login.user.picture)
+    }
+
+    /// The picture the account button draws over the initials, once it has
+    /// arrived.
+    pub fn account_picture(&self) -> Option<&iced::widget::image::Handle> {
+        self.pictures.handle(&self.account_picture_url()?)
+    }
+
+    /// Ask for the signed-in person's picture; the cache knows it was asked
+    /// for, so every update after asks nothing.
+    pub fn want_picture(&mut self) -> Task<Message> {
+        match self.account_picture_url().and_then(|url| self.pictures.want(url)) {
+            Some(t) => t.map(Message::Picture),
+            None => Task::none(),
+        }
     }
 
     /// The session revoked through the domain and forgotten here; the

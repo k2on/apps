@@ -71,12 +71,14 @@ pub(crate) fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
         .into()
 }
 
+/// Words in the accent that do something, underlined when pointed at.
 pub(crate) fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
-    button(text(label.into()).size(12)).on_press(msg).padding(0).style(look::link).into()
+    arkui::button::link(label, 12.0, msg)
 }
 
+/// The icon button both windows draw (`arkui::button::icon`).
 fn glyph_button<'a>(shape: &'static [u8], msg: Message) -> Element<'a, Message> {
-    button(icon::plain(shape, false)).on_press(msg).padding(4).style(style::quiet).into()
+    arkui::button::icon(shape, msg)
 }
 
 /// What an account is, drawn beside it in the sidebar.
@@ -90,16 +92,15 @@ fn glyph(a: &AccountLine) -> &'static [u8] {
     }
 }
 
-/// An amount as the sidebar shows one: red below nothing, and in the lit
-/// entry's own colour on it.
+/// An amount as the sidebar shows one: red below nothing, the same on the
+/// cursor's entry as off it.
 fn balance<'a>(cents: i64, lit: bool) -> Element<'a, Message> {
     text(money(cents))
         .size(12)
         .style(move |theme| text::Style {
-            color: Some(match (lit, cents < 0) {
-                (true, _) => style::entry_text(theme, true),
-                (false, true) => arkui::theme::of(theme).danger.base.color,
-                (false, false) => style::entry_text(theme, false).scale_alpha(0.75),
+            color: Some(match cents < 0 {
+                true => arkui::theme::of(theme).danger.base.color,
+                false => style::entry_text(theme, lit).scale_alpha(0.75),
             }),
         })
         .into()
@@ -151,11 +152,18 @@ impl App {
         // opens Settings and signs out.
         if let Some(account) = self.account() {
             layers = layers.push(
-                container(arkui::account::button(&account, None, Message::AccountMenu))
+                container(arkui::account::button(&account, self.account_picture(), Message::AccountMenu))
                     .width(Length::Fill)
                     .padding(PAD)
                     .align_x(Alignment::End),
             );
+        }
+        // What the keys can do next, at the bottom right, over the page.
+        if let Some(prefix) = self.which.showing() {
+            let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
+            if !entries.is_empty() {
+                layers = layers.push(arkui::which::view(prefix, &entries, 36.0));
+            }
         }
         if let Some(m) = &self.modal {
             layers = layers
@@ -278,21 +286,15 @@ impl App {
     }
 
     /// A count in a bubble: what needs looking at.
-    fn badge<'a>(&self, n: usize, lit: bool) -> Element<'a, Message> {
+    fn badge<'a>(&self, n: usize, _lit: bool) -> Element<'a, Message> {
         container(text(n.to_string()).size(10).style(move |theme| text::Style {
-            color: Some(match lit {
-                true => arkui::theme::of(theme).primary.base.color,
-                false => arkui::theme::of(theme).primary.base.text,
-            }),
+            color: Some(arkui::theme::of(theme).primary.base.text),
         }))
         .padding([1, 6])
         .style(move |theme| {
             let p = arkui::theme::of(theme);
             container::Style {
-                background: Some(iced::Background::Color(match lit {
-                    true => p.primary.base.text,
-                    false => p.primary.base.color,
-                })),
+                background: Some(iced::Background::Color(p.primary.base.color)),
                 border: iced::Border {
                     radius: 8.0.into(),
                     ..iced::Border::default()
@@ -1099,11 +1101,10 @@ impl App {
             Cleared::Cleared => (glyphs::TICKED, Some(false)),
             Cleared::Reconciled => (glyphs::TICK, None),
         };
-        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match (lit, t.cleared) {
-            (true, _) => p.primary.base.text,
-            (false, Cleared::Uncleared) => p.background.base.text.scale_alpha(0.35),
-            (false, Cleared::Cleared) => p.success.base.color,
-            (false, Cleared::Reconciled) => p.primary.base.color,
+        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match t.cleared {
+            Cleared::Uncleared => p.background.base.text.scale_alpha(0.35),
+            Cleared::Cleared => p.success.base.color,
+            Cleared::Reconciled => p.primary.base.color,
         }))
         .padding(2)
         .style(style::quiet);
@@ -1115,10 +1116,9 @@ impl App {
         if !t.receipt.is_empty() || t.photos > 0 {
             let read = !t.receipt.is_empty();
             end = end.push(
-                button(icon::tinted(glyphs::RECEIPT, icon::SIZE, move |p| match (lit, read) {
-                    (true, _) => p.primary.base.text,
-                    (false, true) => p.background.base.text.scale_alpha(0.7),
-                    (false, false) => p.background.base.text.scale_alpha(0.35),
+                button(icon::tinted(glyphs::RECEIPT, icon::SIZE, move |p| match read {
+                    true => p.background.base.text.scale_alpha(0.7),
+                    false => p.background.base.text.scale_alpha(0.35),
                 }))
                 .on_press(Message::EditTxn(t.id))
                 .padding(2)
@@ -1132,13 +1132,7 @@ impl App {
         mouse_area(
             table::row(line, on_cursor, focused, odd)
                 .center_y(Length::Fixed(TXN_ROW))
-                .style(move |theme| {
-                    let mut s = style::row(theme, on_cursor, focused, odd);
-                    if !t.approved && !on_cursor {
-                        s.background = Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.08)));
-                    }
-                    s
-                }),
+                .style(move |theme| style::row(theme, on_cursor, focused, odd)),
         )
         .on_press(Message::TxnClick(t.id))
         .into()
