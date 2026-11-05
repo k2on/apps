@@ -52,7 +52,10 @@ struct AccountsView: View {
                     HStack {
                         Text(shelf.kind.rawValue)
                         Spacer()
-                        if shelf.kind != .closed { CentsText(shelf.total) }
+                        // Below nothing in the error's red, as a group's total in the budget is.
+                        if shelf.kind != .closed {
+                            CentsText(shelf.total).foregroundStyle(shelf.total < 0 ? Color.error : Color.quiet)
+                        }
                     }
                 }
             }
