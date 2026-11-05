@@ -11,6 +11,9 @@ out=$1
 apps=$2
 device=$3
 shift 3
+# The driver, built by the first app and run by every one after (app-ios.sh).
+DRIVER=${DRIVER:-$(mktemp -d)}
+export DRIVER
 failed=0
 for a in "$@"; do
   app=$(find "$apps/simulator-$a" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)

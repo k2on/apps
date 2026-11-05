@@ -29,11 +29,16 @@ mkdir -p "$out"
 xcrun simctl install booted "$bundle_app"
 xcrun simctl status_bar booted override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
 
-# The driver, built once.
-derived=$(mktemp -d)
-(cd "$here/drive-ios" && xcodegen generate >/dev/null)
-xcodebuild build-for-testing -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
-  -destination "id=$udid" -derivedDataPath "$derived" CODE_SIGNING_ALLOWED=NO -quiet
+# The driver, built once: in $DRIVER when set, where the app taken before
+# this one on the same simulator left it built (apps-ios.sh), so it is not
+# built again; nothing in it is any one app's.
+derived=${DRIVER:-$(mktemp -d)}
+if ! [ -f "$derived/built" ]; then
+  (cd "$here/drive-ios" && xcodegen generate >/dev/null)
+  xcodebuild build-for-testing -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
+    -destination "id=$udid" -derivedDataPath "$derived" CODE_SIGNING_ALLOWED=NO -quiet
+  touch "$derived/built"
+fi
 
 # The simulator in `theme`, as it says back (ios.sh says why).
 appearance() {

@@ -19,16 +19,27 @@
 # ios starts (the iPhone, which builds the commit itself, beside ios). Android takes
 # that run's own APKs: one is there only when its inputs moved and it was
 # built (and so offered on F-Droid). The iPhone takes nix's build at that
-# run's commit, of every app: one whose inputs have not moved is the cache's
-# (Cachix), and Xcode need not even be put in the store for it. The desktop
-# as soon as build has started, the same way: nix's build at that commit,
-# the cache's when unchanged. An app none takes is not taken again; what
+# run's commit, of each app whose shots would differ from those kept: what
+# they are taken from hashed on Linux (ios-inputs.sh: the app's store path,
+# evaluated, and what takes the shots), and held against the hash kept
+# beside the branch's shots (<app>/ios/inputs), main's or the PR's own. An
+# app whose hash is the same is not taken, and no Mac is asked for when no
+# app's moved; the rest are taken on one Mac, in turn. The desktop as soon
+# as build has started: nix's build at that commit, the cache's when
+# unchanged. An app none takes is not taken again; what
 # the branch has of it stays.
 #
 # **The screenshots' own scripts changed.** A push to main that moves only
 # what takes the shots (.github/screens/, an app's screens/, this file)
 # takes every app again: each APK as the F-Droid repository offers it (its
-# index's newest for the package), each iPhone app as nix builds main.
+# index's newest for the package), each iPhone app as nix builds main (of
+# those whose hash moved: an Android script moves none).
+#
+# **A pull request no longer open** is taken nothing of: a run queued behind
+# others (a Mac's queue is often an hour) can start after its PR was merged
+# or closed. `which` asks, and asks no Mac then; the iPhone's job asks again
+# when it starts, and if the PR has gone, does nothing, and nothing is
+# compared.
 #
 # **On main, published**: to the `screens` branch beside the docs' shots, as
 # apps/<app>/<phone>/<theme>/<id>.png with apps/<app>/manifest.json. **On a
@@ -43,7 +54,9 @@
 # artifacts (an APK installed on an emulator); the iPhone and the desktop
 # build the PR's commit, only for a branch of this repository, with a token
 # that can only read, and pushing nothing to the cache (only main's iPhone
-# run does; build.yaml pushes the desktop's).
+# run does; build.yaml pushes the desktop's). `which` evaluates the PR's
+# flake (ios-inputs.sh) and builds nothing of it, with a token that can only
+# read.
 name: app-screens
 
 on:
@@ -67,7 +80,16 @@ on:
       # What the servers are seeded with.
       - "*/seed/**"
       - ".github/workflows/app-screens.yaml"
+  # By hand: every app again, from what was published. Or, given a pull
+  # request's number, that PR's iPhone shots, at its head, of each app whose
+  # hash moved (none of its build's runs needed): after a Mac's run failed,
+  # or to try this file as a branch has it, on that branch's PR.
   workflow_dispatch:
+    inputs:
+      pr:
+        description: "A pull request's number: its iPhone shots, not every app's"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -77,7 +99,7 @@ permissions:
 concurrency:
   # An event of its own: ios's `completed` must not cancel the iPhone's
   # shots its `requested` started.
-  group: app-screens-${{ github.event.workflow_run.name || 'published' }}-${{ github.event.action || 'run' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  group: app-screens-${{ github.event.workflow_run.name || 'published' }}-${{ github.event.action || 'run' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ inputs.pr }}
   cancel-in-progress: true
 
 env:
@@ -95,9 +117,18 @@ jobs:
   which:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
+    # It reads, and evaluates the commit's flake (ios-inputs.sh), building
+    # nothing of it: no more than that.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       mode: ${{ steps.which.outputs.mode }}
       pr: ${{ steps.which.outputs.pr }}
+      # The commit taken, and its branch (the iPhone's taken one at a time on it).
+      sha: ${{ steps.which.outputs.sha }}
+      branch: ${{ steps.which.outputs.branch }}
       android: ${{ steps.which.outputs.android }}
       ios: ${{ steps.which.outputs.ios }}
       desktop: ${{ steps.which.outputs.desktop }}
@@ -105,8 +136,13 @@ jobs:
       android-json: ${{ steps.which.outputs.android-json }}
       ios-json: ${{ steps.which.outputs.ios-json }}
       desktop-json: ${{ steps.which.outputs.desktop-json }}
+      # Each iPhone app taken, and the hash of what it is taken from
+      # (ios-inputs.sh), as a JSON object: kept beside its shots.
+      ios-inputs: ${{ steps.which.outputs.ios-inputs }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # The apps, as the flake lists them (`publish`): each phone's, of those
       # with <app>/screens/shots.json, and the desktop's, of those whose
       # shots.json has `desktop`.
@@ -122,25 +158,111 @@ jobs:
           ACTION: ${{ github.event.action }}
           PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          BY_HAND: ${{ github.event_name == 'workflow_dispatch' }}
+          INPUT_PR: ${{ inputs.pr }}
         run: |
           repo=${{ github.repository }}
-          pr=
+          pr="" mode="" sha=$SHA branch=${BRANCH:-$GITHUB_REF_NAME}
+          android="" ios="" desktop="" inputs='{}'
           # Each list also as JSON, for the jobs' matrices.
           lists() {
             for k in android ios desktop; do
               printf '%s-json=%s\n' "$k" "$(tr ' ' '\n' <<< "${!k}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
             done
           }
-          # The scripts moved, or a run by hand: every app, from what was published.
-          # An app whose shots.json has the desktop's shots.
-          desktop() { [ -f "$1/screens/shots.json" ] && jq -e '.desktop.shots | length > 0' "$1/screens/shots.json" > /dev/null; }
-          if [ -z "$RUN" ]; then
-            android="" ios="" desktop=""
-            for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do if [ -f "$a/screens/shots.json" ]; then android="$android $a"; fi; done
-            for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi; done
-            for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do if desktop "$a"; then desktop="$desktop $a"; fi; done
+          # What was decided, as the jobs read it. Nothing for this event
+          # (ios's end, a PR's build ending, a PR closed, nothing moved):
+          # nothing to do, publish included.
+          said() {
             android=${android# } ios=${ios# } desktop=${desktop# }
-            { echo "mode=release"; echo "pr="; echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; lists; } | tee -a "$GITHUB_OUTPUT"
+            [ -n "$android$ios$desktop" ] || mode=
+            {
+              echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
+              echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
+              lists
+            } | tee -a "$GITHUB_OUTPUT"
+          }
+          shots() { [ -f "$1/screens/shots.json" ]; }
+          # An app whose shots.json has the desktop's shots.
+          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/screens/shots.json" > /dev/null; }
+          iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
+          # The hash kept beside an app's iPhone shots on a branch
+          # (<dir>/ios/inputs), or nothing: none kept, or no such branch.
+          kept() {
+            local h
+            h=$(gh api -H "Accept: application/vnd.github.raw" "repos/$repo/contents/$2/ios/inputs?ref=$1" 2> /dev/null) || return 0
+            grep -x '[0-9a-f]\{32\}' <<< "$h" || true
+          }
+          # Of the iPhone apps named, those to take: each whose hash
+          # (ios-inputs.sh, of the commit's flake, evaluated) is not that of
+          # the shots kept for it. On a PR, its own last shots' (on
+          # screens-pr-<number>), or main's when it has none of its own or
+          # its own are main's (the comment then shows main's, "not
+          # rebuilt"); on main, those published. Each said, and why.
+          iphone() {
+            [ $# -gt 0 ] || return 0
+            local src=$RUNNER_TEMP/src a hash main mine
+            git init -q "$src"
+            git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$sha"
+            git -C "$src" checkout -q FETCH_HEAD
+            while read -r a hash; do
+              main=$(kept screens "apps/$a") mine=""
+              if [ "$mode" = pr ]; then mine=$(kept "screens-pr-$pr" "$a"); fi
+              if [ "$hash" = - ]; then
+                echo "$a (iPhone): what it is taken from could not be said; taken"
+              elif [ "$mode" = pr ] && [ "$hash" = "$mine" ]; then
+                echo "$a (iPhone): $hash, as this PR's last shots; not taken"
+                continue
+              elif [ "$mode" = pr ] && [ "$hash" = "$main" ] && { [ -z "$mine" ] || [ "$mine" = "$main" ]; }; then
+                echo "$a (iPhone): $hash, as main's; not taken (the comment shows main's)"
+                continue
+              elif [ "$mode" = release ] && [ "$hash" = "$main" ]; then
+                echo "$a (iPhone): $hash, as published; not taken"
+                continue
+              else
+                ours=""
+                if [ "$mode" = pr ]; then ours=", this PR's ${mine:-none}"; fi
+                echo "$a (iPhone): $hash, moved (main's ${main:-none}$ours); taken"
+              fi
+              ios="$ios $a"
+              inputs=$(jq -c --arg a "$a" --arg h "$hash" '. + {($a): $h}' <<< "$inputs")
+            done < <(bash .github/screens/ios-inputs.sh . "$src" "$@")
+          }
+
+          # By hand, for a pull request: its iPhone shots, at its head, if
+          # it is open, into main, and of a branch of this repository's.
+          if [ "$BY_HAND" = true ] && [ -n "$INPUT_PR" ]; then
+            pr=$INPUT_PR
+            read -r state base head sha branch < <(gh api "repos/$repo/pulls/$pr" --jq '"\(.state) \(.base.ref) \(.head.repo.full_name) \(.head.sha) \(.head.ref)"')
+            if [ "$state" != open ]; then
+              echo "#$pr is $state: nothing to take"
+            elif [ "$base" != main ]; then
+              echo "#$pr is into $base, not main: its iPhone's are not taken"
+            elif [ "$head" != "$repo" ]; then
+              echo "#$pr is of $head: its code is not built here"
+            else
+              mode="pr"
+              # shellcheck disable=SC2046
+              iphone $(iphones)
+            fi
+            said
+            exit 0
+          fi
+          # The scripts moved, or a run by hand: every app, from what was
+          # published; the iPhone's, by hand every one, after a push those
+          # whose hash moved.
+          if [ -z "$RUN" ]; then
+            mode=release
+            for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then android="$android $a"; fi; done
+            for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do if desktop "$a"; then desktop="$desktop $a"; fi; done
+            if [ "$BY_HAND" = true ]; then
+              for a in $(iphones); do ios="$ios $a"; done
+            else
+              # shellcheck disable=SC2046
+              iphone $(iphones)
+            fi
+            said
             exit 0
           fi
           if [ "$BRANCH" = main ] && [ "$EVENT" = push ]; then
@@ -154,38 +276,47 @@ jobs:
             pr=${PR:-$(gh api "repos/$repo/pulls?state=open&head=$OWNER:$BRANCH" --jq '.[0].number // empty')}
             mode=${pr:+pr}
           fi
+          # A PR's only while it is open: this run may have waited behind
+          # others until after it was merged or closed. And its base: the
+          # iPhone's are taken only for a PR into main.
+          base=
+          if [ "$mode" = pr ]; then
+            read -r state base < <(gh api "repos/$repo/pulls/$pr" --jq '"\(.state) \(.base.ref)"')
+            if [ "$state" != open ]; then
+              echo "#$pr is $state: nothing to take"
+              mode=
+            fi
+          fi
           made=
           if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ]; then
             made=$(gh api "repos/$repo/actions/runs/$RUN/artifacts" --paginate --jq '.artifacts[] | select(.expired | not) | .name')
           fi
           # Every app with shots, and of those what this run built: an APK
-          # in build's run; every iPhone app after ios's, and every desktop
-          # window as build starts, as nix has it.
-          android="" ios="" desktop=""
-          for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
-            [ -f "$a/screens/shots.json" ] || continue
-            # Main's: what the ended run built. A PR's: every app, from the
-            # run's start, each waiting for its APK (or for none).
-            if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
-            if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" = pr ]; then android="$android $a"; fi
-          done
-          # The iPhone's only for main and for a pull request into main: a
-          # Mac is the scarce runner, and a piece of work merged into a
-          # larger branch is shot again when that branch's pull request
-          # runs. Android's and the desktop's (Linux) are shot for every one.
-          base=
-          if [ "$mode" = pr ]; then base=$(gh api "repos/$repo/pulls/$pr" --jq .base.ref); fi
-          for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do
-            [ "$mode" != pr ] || [ "$base" = main ] || continue
-            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = requested ] && [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi
-          done
-          for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do
-            if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && desktop "$a"; then desktop="$desktop $a"; fi
-          done
-          android=${android# } ios=${ios# } desktop=${desktop# }
-          # Nothing for this event (ios's end, a PR's build ending): nothing to do, publish included.
-          [ -n "$android$ios$desktop" ] || mode=
-          { echo "mode=$mode"; echo "pr=$pr"; echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; lists; } | tee -a "$GITHUB_OUTPUT"
+          # in build's run; each iPhone app whose hash moved as ios starts,
+          # and every desktop window as build starts, as nix has it.
+          if [ -n "$mode" ]; then
+            for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
+              shots "$a" || continue
+              # Main's: what the ended run built. A PR's: every app, from the
+              # run's start, each waiting for its APK (or for none).
+              if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
+              if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" = pr ]; then android="$android $a"; fi
+            done
+            # The iPhone's only for main and for a pull request into main: a
+            # Mac is the scarce runner, and a piece of work merged into a
+            # larger branch is shot again when that branch's pull request
+            # runs. Android's and the desktop's (Linux) are shot for every
+            # one. And only of a branch of this repository's: a fork's flake
+            # is not even evaluated.
+            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = requested ] && [ "$HEAD_REPO" = "$repo" ] && { [ "$mode" != pr ] || [ "$base" = main ]; }; then
+              # shellcheck disable=SC2046
+              iphone $(iphones)
+            fi
+            for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do
+              if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && desktop "$a"; then desktop="$desktop $a"; fi
+            done
+          fi
+          said
 
   # A job per app, at once: each its own emulator.
   android:
@@ -310,38 +441,70 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
+  # Every iPhone app on one Mac, in turn: the scarce runner, which a job per
+  # app had waiting in the queue twice, each paying its own Xcode, nix's
+  # install, the servers' builds and a simulator's boot. Here they are paid
+  # once: one simulator booted, every app built (ios-build.sh) and its
+  # server started under the boot, then each app taken in turn on it
+  # (apps-ios.sh), the driver built once for all. One that fails to build
+  # or to be taken is said, the others still taken and kept, and the job
+  # fails at its end. Each app's shots are its own <app>/ios/ in the
+  # artifact, as a job each had them.
   ios:
     needs: which
     # Built from the run's own commit, so only a run of this repository's.
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
-    strategy:
-      fail-fast: false
-      matrix:
-        app: ${{ fromJSON(needs.which.outputs.ios-json) }}
-    name: ios (${{ matrix.app }})
     runs-on: macos-15
-    # As Android's: one of each app's at a time on a branch. On main a push
-    # that moves the scripts and starts ios would otherwise take the
-    # iPhone's shots twice, a macOS runner each.
+    # One at a time on a branch: a newer commit's (or the same commit's
+    # again, from another event: on main a push that moves the scripts and
+    # starts ios) takes over from the one going, rather than a second Mac.
     concurrency:
-      group: app-screens-ios-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      group: app-screens-ios-${{ needs.which.outputs.branch }}
       cancel-in-progress: true
-    timeout-minutes: 120
+    timeout-minutes: 150
     # It builds the commit's code, one step of it outside nix's sandbox
     # (flake.nix, `iosSimulator`): it can read and nothing more, and only
     # main's run pushes to the cache.
     permissions:
       contents: read
+      pull-requests: read
+    outputs:
+      # `false` when its PR had been merged or closed by the time a Mac took
+      # it up: nothing was taken, and nothing is compared.
+      open: ${{ steps.open.outputs.open }}
     env:
-      APPS: ${{ matrix.app }}
-      SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+      APPS: ${{ needs.which.outputs.ios }}
+      INPUTS: ${{ needs.which.outputs.ios-inputs }}
+      SOURCE: ${{ needs.which.outputs.sha }}
+      PR: ${{ needs.which.outputs.pr }}
       PUSH: ${{ needs.which.outputs.mode == 'release' }}
     steps:
+      # The queue for a Mac can be an hour: a PR merged or closed meanwhile
+      # is taken nothing of. Every step after says `open`, so the job ends
+      # here, in seconds and not failed.
+      - id: open
+        name: The pull request, still open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=true
+          if [ -n "$PR" ]; then
+            # Not known (the API not answering): taken, as before it asked.
+            state=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .state) || state=open
+            if [ "$state" != open ]; then
+              open=false
+              echo "::notice::#$PR is $state now: nothing taken"
+            fi
+          fi
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+
       # The scripts, main's; and the commit whose apps are built, beside them.
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - if: steps.open.outputs.open == 'true'
+        uses: actions/checkout@v4
+      - if: steps.open.outputs.open == 'true'
+        uses: actions/checkout@v4
         with:
           ref: ${{ env.SOURCE }}
           path: src
@@ -349,11 +512,14 @@ jobs:
 
       # The Xcode the flake pins (flake.nix, `xcode`): its simulators boot
       # here, and if an app must be built, it is put in the store as it is.
-      - name: The pinned Xcode
+      - if: steps.open.outputs.open == 'true'
+        name: The pinned Xcode
         run: bash .github/xcode-pinned.sh src
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest.
-      - name: Start booting a simulator
+      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
+      # for every app: each is installed on it in turn.
+      - if: steps.open.outputs.open == 'true'
+        name: Start booting a simulator
         run: |
           bash .github/screens/meanwhile.sh start boot bash -c '
             device=$(xcrun simctl list devices available -j | jq -r "
@@ -365,7 +531,8 @@ jobs:
 
       # Relaxed: every build is sandboxed but the one that says __noChroot
       # (the app's own xcodebuild, flake.nix says why).
-      - uses: cachix/install-nix-action@v31
+      - if: steps.open.outputs.open == 'true'
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             sandbox = relaxed
@@ -373,16 +540,18 @@ jobs:
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 
       # Main's builds go to the cache; Xcode never (Apple's licence).
-      - if: env.PUSH == 'true' && vars.CACHIX_NAME != ''
+      - if: steps.open.outputs.open == 'true' && env.PUSH == 'true' && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "Xcode_"
 
-      # The app's server, as nix builds it (its server.sh): the cache's once
-      # main's run has pushed it, or else built, under the app's build.
-      - name: Start the server
+      # Each app's server, as nix builds it (its server.sh), all at once, each
+      # on its own port: the cache's once main's run has pushed it, or else
+      # built, under the apps' build.
+      - if: steps.open.outputs.open == 'true'
+        name: Start the servers
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
             for a in $APPS; do
@@ -390,45 +559,80 @@ jobs:
             done'
 
       # Each app as nix has it at the commit (ios-build.sh): the cache's, or
-      # built, with Xcode put in the store first only then.
-      - name: The apps, built by nix
-        # One that fails is said; the others are still taken.
+      # built, with Xcode put in the store first only then (once, for all).
+      - if: steps.open.outputs.open == 'true'
+        id: build
+        name: The apps, built by nix
+        # One that fails is said; the others are still taken, and the job
+        # fails at its end.
         continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
-      - name: The server, and the driver's tools
+      - if: steps.open.outputs.open == 'true'
+        name: The servers, and the driver's tools
         run: |
           # XcodeGen from the flake (the cache's), as every other tool here: no Homebrew.
           bash .github/screens/tools.sh get xcodegen
           bash .github/screens/meanwhile.sh wait servers
 
-      - name: The simulator, booted
+      - if: steps.open.outputs.open == 'true'
+        name: The simulator, booted
         run: bash .github/screens/meanwhile.sh wait boot
 
-      - name: Capture
+      # Each app in turn on the one simulator (apps-ios.sh); one that fails
+      # is said, and the others still taken.
+      - if: steps.open.outputs.open == 'true'
+        name: Capture
         env:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
 
+      # Beside each app's shots, taken whole, the hash of what they were
+      # taken from (`which`, ios-inputs.sh): the next run that has the same
+      # takes none. One taken in part keeps none, and is taken again.
+      - if: always() && steps.open.outputs.open == 'true'
+        name: What each app's shots were taken from
+        run: |
+          for a in $APPS; do
+            at=$RUNNER_TEMP/out/$a/ios
+            hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
+            if [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
+              echo "$hash" > "$at/inputs"
+              echo "$a: $hash"
+            else
+              echo "$a: not taken whole; no hash kept"
+            fi
+          done
+
       # The driver's results (its log, and the test's recording of the
-      # screen), when a capture failed: what to look at.
+      # screen), when a capture failed: what to look at, each app's its own.
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() && steps.open.outputs.open == 'true'
         with:
-          name: ios-driver-results-${{ matrix.app }}
+          name: ios-driver-results
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore
 
-      - name: The servers' logs
-        if: always()
+      - if: always() && steps.open.outputs.open == 'true'
+        name: The servers' logs
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
 
+      # Every app's in one artifact, each its own <app>/ios/: compare and
+      # publish lay the app-screens-* artifacts over each other as one tree.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.open.outputs.open == 'true'
         with:
-          name: app-screens-ios-${{ matrix.app }}
+          name: app-screens-ios
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
+
+      # The build of one app failed, and the others were taken: the job fails
+      # now that they are kept.
+      - if: always() && steps.build.outcome == 'failure'
+        name: Every app built
+        run: |
+          echo "::error::an iPhone app did not build (The apps, built by nix, says which)"
+          exit 1
 
   # The desktop windows: each app's built by nix at the run's commit, as the
   # iPhone's are, and photographed with no window (arkui-shots) on Linux.
@@ -561,8 +765,9 @@ jobs:
   # A PR's, compared with main's and shown on the PR.
   compare:
     needs: [which, android, ios, desktop]
-    # Only when this run took something: a run with no build of its own says nothing.
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' && (needs.which.outputs.android != '' || needs.which.outputs.ios != '' || needs.which.outputs.desktop != '') }}
+    # Only when this run took something: a run with no build of its own says
+    # nothing. Nor one whose PR had gone by the time the iPhone's Mac came.
+    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' && needs.ios.outputs.open != 'false' && (needs.which.outputs.android != '' || needs.which.outputs.ios != '' || needs.which.outputs.desktop != '') }}
     runs-on: ubuntu-latest
     # The PR's comment and its branch, one run at a time.
     concurrency:
@@ -570,17 +775,32 @@ jobs:
       cancel-in-progress: false
     env:
       PR: ${{ needs.which.outputs.pr }}
+      # The commit taken: the run's, or by hand the PR's head.
+      SHA: ${{ needs.which.outputs.sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      # Still open, as `which` found it? The phones' jobs can take long
+      # enough for it to be merged or closed meanwhile: then its branch and
+      # its comment are left as they are.
+      - id: open
+        name: The pull request, still open
+        run: |
+          state=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .state) || state=open
+          [ "$state" = open ] || echo "::notice::#$PR is $state now: nothing compared"
+          echo "open=$([ "$state" = open ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - if: steps.open.outputs.open == 'true'
+        uses: actions/checkout@v4
       # ImageMagick from the flake's nixpkgs, as every tool these jobs use, not the image's apt.
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: actions/download-artifact@v4
+      - if: steps.open.outputs.open == 'true'
+        uses: DeterminateSystems/nix-installer-action@main
+      - if: steps.open.outputs.open == 'true'
+        uses: actions/download-artifact@v4
         with:
           pattern: app-screens-*
           merge-multiple: true
           path: ${{ runner.temp }}/new
-      - name: Compare, and keep the images on the PR's branch
+      - if: steps.open.outputs.open == 'true'
+        name: Compare, and keep the images on the PR's branch
         run: |
           PATH="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#imagemagick)/bin:$PATH"
           main="$RUNNER_TEMP/main"
@@ -605,7 +825,8 @@ jobs:
           git add -A
           git commit -q --allow-empty -m "app screens for #$PR at $SHA"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "screens-pr-$PR"
-      - name: The PR's comment
+      - if: steps.open.outputs.open == 'true'
+        name: The PR's comment
         run: |
           body="$RUNNER_TEMP/comment.md"
           id=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
