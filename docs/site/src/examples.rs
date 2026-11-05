@@ -305,7 +305,7 @@ pub fn notes(component: &str) -> &'static [&'static str] {
             "A sheet slides in from beyond the window's edge on a spring and back out the way it came; closed as it slides in, it turns back from where it is.",
         ],
         "command" => &["Ctrl+K opens it from anywhere; ↑ and ↓ walk what it found, ⏎ chooses, <Esc> or a click on the dimmed page closes it."],
-        "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way over reorder::SLIDING."],
+        "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way on reorder::SLIDING, a spring."],
         "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
@@ -891,7 +891,7 @@ fn command_(c: Canvas) -> Picture {
 }
 
 fn reorder_(c: Canvas) -> Picture {
-    use arkui::reorder::{list, Reorder, SLIDING};
+    use arkui::reorder::{list, Reorder};
     let entry = |name: &str, lit: bool| -> El<'static> {
         panel::entry(None, panel::label(name.to_string(), lit), None)
             .height(panel::ENTRY)
@@ -907,7 +907,10 @@ fn reorder_(c: Canvas) -> Picture {
     let rows = names.iter().enumerate().map(|(i, n)| entry(n, i == 1)).collect();
     c.paint(
         panel::panel(
-            column![panel::title("Up next".into()), list(rows, panel::ENTRY, Some(&drag), None, at + SLIDING)],
+            column![
+                panel::title("Up next".into()),
+                list(rows, panel::ENTRY, Some(&drag), None, at + std::time::Duration::from_secs(2))
+            ],
             240.0,
         )
         .into(),
