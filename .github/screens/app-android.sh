@@ -14,7 +14,8 @@
 # "role" ("tab", "button", "field", "text") to prefer when several say
 # it, "where": "bottom" for the lowest of them on the screen, and "unless":
 # "<label>" to skip the step when that is on the screen already (what it
-# opens is open); {"await": "<label>"} waits for that label to be there (`a|b`, either); {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# opens is open); {"await": "<label>"} waits for that label to be there (`a|b`, either);
+# {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 set -euo pipefail
@@ -59,7 +60,9 @@ step() {
   local s=$1 done
   done=$(jq -r '.unless // ""' <<< "$s")
   if [ -n "$done" ] && says "$done"; then return 0; fi
-  if jq -e 'has("await")' <<< "$s" > /dev/null; then
+  if jq -e 'has("relaunch")' <<< "$s" > /dev/null; then
+    open_app
+  elif jq -e 'has("await")' <<< "$s" > /dev/null; then
     local label i one
     label=$(jq -r '.await' <<< "$s")
     # `a|b`: either will do.
@@ -149,7 +152,9 @@ for theme in light dark; do
     echo "$app android $theme $id"
     open_app
     while read -r s; do
-      [ -n "$s" ] && step "$s"
+      # A step that fails fails the capture (as the iPhone's test does):
+      # under `set -e`, a failure inside `a && b` would be passed over.
+      if [ -n "$s" ]; then step "$s" || { echo "::error::$app android $theme $id: step $s failed"; exit 1; }; fi
     done < <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
     adb exec-out screencap -p > "$out/$theme/$id.png"
