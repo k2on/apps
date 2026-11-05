@@ -19,6 +19,10 @@ mkdir -p "$dir"
 # to fill in.
 ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/screens/shots.json")
 export ARK_DEV_USER
+# …and the picture they wear (a file, from the repository's root): the
+# screens show a face, not only initials (nix/demo/README.md).
+picture=$(jq -r '.server.picture // empty' "$app/screens/shots.json")
+if [ -n "$picture" ]; then ARK_DEV_PICTURE=$(realpath "$picture"); export ARK_DEV_PICTURE; fi
 bash "$app/screens/server.sh" "$dir" "127.0.0.1:$port"
 
 health() { curl -sf "http://127.0.0.1:$port/healthz" || true; }

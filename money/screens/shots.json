@@ -2,7 +2,8 @@
   "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
   "server": {
     "port": 8788,
-    "user": "alex"
+    "user": "alex",
+    "picture": "nix/demo/alex.jpg"
   },
   "shots": [
     {
