@@ -36,8 +36,10 @@ pub const ENTER_SCALE: f32 = 0.95;
 pub const RUBBER_BAND: f32 = 0.55;
 /// How large a row held to be dragged grows.
 pub const LIFT: f32 = 1.02;
-/// How small a cover rests while what it plays is paused.
-pub const RESTING: f32 = 0.9;
+/// How far a page or a step slides as it comes or goes, as a share of its width.
+pub const SHIFT: f32 = 0.2;
+/// How small a cover is drawn while what it plays is paused.
+pub const PAUSED_SCALE: f32 = 0.9;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

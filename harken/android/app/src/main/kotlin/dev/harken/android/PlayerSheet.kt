@@ -15,7 +15,6 @@
 package dev.harken.android
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -51,7 +50,7 @@ val BAR_SHADOW = 6.dp
 fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, position: StateFlow<Long>, tabs: Dp, scrubbing: StateFlow<Long?> = nobody()) {
     val now = state.now ?: return
     val seed = now.album.ifEmpty { now.title }
-    val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(spring(Springs.MOVE, Springs.STIFFNESS)), label = "cover")
+    val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
     val spec = remember { ExpandingCardSpec(bigCorner = COVER_CORNER, bigShadow = COVER_SHADOW, glass = true, shadow = BAR_SHADOW) }
     ExpandingCard(
         sheet,

@@ -37,6 +37,8 @@ public object MotionTokens {
     public const val RUBBER_BAND: Float = 0.55f
     /** How large a row held to be dragged grows. */
     public const val LIFT: Float = 1.02f
-    /** How small a cover rests while what it plays is paused. */
-    public const val RESTING: Float = 0.9f
+    /** How far a page or a step slides as it comes or goes, as a share of its width. */
+    public const val SHIFT: Float = 0.2f
+    /** How small a cover is drawn while what it plays is paused. */
+    public const val PAUSED_SCALE: Float = 0.9f
 }

@@ -161,7 +161,7 @@ struct FullPlayer: View {
                     // three share it and the cover is a third of it.
                     .layoutPriority(1)
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
-                    .motionScale(s.playing ? 1 : MotionTokens.resting)
+                    .motionScale(s.playing ? 1 : MotionTokens.pausedScale)
                     .motion(Springs.move, value: s.playing)
             }
             Spacer(minLength: 0)

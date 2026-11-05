@@ -265,5 +265,8 @@ enter-scale = 0.95
 rubber-band = 0.55
 # A row held to be dragged into another order: how large it lifts.
 lift = 1.02
-# A cover while what it plays is paused: how small it rests.
-resting = 0.9
+# How far a page or a step slides as it comes or goes, as a share of its
+# width: enough to say which way it went, not a trip across the screen.
+shift = 0.2
+# A cover while what it plays is paused: a step back, still plainly itself.
+paused-scale = 0.9

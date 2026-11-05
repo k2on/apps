@@ -12,8 +12,9 @@ package dev.harken.android
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,10 @@ import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.arkui.Cover
 import dev.arkui.SheetRow
+import dev.arkui.Springs
+import dev.arkui.reflowing
+import dev.arkui.Press
+import dev.arkui.pressable
 import dev.arkui.Space
 import dev.arkui.VolumeSlider
 import dev.arkui.quiet
@@ -297,7 +302,7 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
     Column(Modifier.fillMaxWidth().let { if (at) it.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)) else it }) {
         Row(
             Modifier.fillMaxWidth()
-                .let { if (r.takeable) it.clickable { actions.pick(r) } else it }
+                .let { if (r.takeable) it.pressable(onClick = { actions.pick(r) }, press = Press.Highlight) else it }
                 .padding(horizontal = Space.l)
                 .height(60.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -393,13 +398,15 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
             keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             modifier = Modifier.fillMaxWidth().padding(horizontal = Space.xl).focusRequester(focus),
         )
-        AnimatedVisibility(visible = said != null) {
+        // What the directory says fades in where it is said; the list under it makes room at once rather
+        // than every row being laid out again each frame of a growing gap.
+        AnimatedVisibility(visible = said != null, enter = fadeIn(Springs.fade()), exit = fadeOut(Springs.fade())) {
             Text(said.orEmpty(), style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.m))
         }
         LazyColumn(Modifier.fillMaxWidth(), state = rememberTransientListState(), contentPadding = PaddingValues(top = Space.s, bottom = Space.l)) {
             items(rows, key = { it.feed }) { s ->
                 // Each comes in, and goes, gently, as the answers for the words change under it.
-                FoundShow(s, Directory.following(s, feeds), onFollow = { onFollow(s.feed) }, modifier = Modifier.animateItem())
+                FoundShow(s, Directory.following(s, feeds), onFollow = { onFollow(s.feed) }, modifier = reflowing())
             }
         }
     }
@@ -419,7 +426,7 @@ private fun FoundShow(s: Directory.Found, following: Boolean, onFollow: () -> Un
             if (s.author.isNotEmpty()) Text(s.author, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(Space.s))
-        Crossfade(following, label = "following") { on ->
+        Crossfade(following, animationSpec = Springs.fade(), label = "following") { on ->
             if (on) {
                 Row(Modifier.height(40.dp).padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Glyphs.Tick, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))

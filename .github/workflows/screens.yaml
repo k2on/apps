@@ -37,7 +37,12 @@ on:
       - ".github/screens/tools.sh"
       - ".github/screens/manifest.py"
       - ".github/workflows/screens.yaml"
+  # Pull requests into main only: the recordings are the docs site's, which
+  # main publishes, and a branch's pull request into another branch (a
+  # piece of work merged into a larger one) is recorded when that one
+  # reaches main. Each run is a Mac's half hour.
   pull_request:
+    branches: [main]
     paths: *paths
   workflow_dispatch:
 

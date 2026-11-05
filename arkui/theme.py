@@ -45,7 +45,8 @@ MOTION = {
     "enter-scale": "The least a thing scales from when it enters.",
     "rubber-band": "How hard a drag past its edge pulls back: Apple's rubber band's constant.",
     "lift": "How large a row held to be dragged grows.",
-    "resting": "How small a cover rests while what it plays is paused.",
+    "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
+    "paused-scale": "How small a cover is drawn while what it plays is paused.",
 }
 
 # The roles of one side, in the order they are written, and each one's

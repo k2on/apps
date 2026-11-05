@@ -37,8 +37,10 @@ public enum MotionTokens {
     public static let rubberBand: Double = 0.55
     /// How large a row held to be dragged grows.
     public static let lift: Double = 1.02
-    /// How small a cover rests while what it plays is paused.
-    public static let resting: Double = 0.9
+    /// How far a page or a step slides as it comes or goes, as a share of its width.
+    public static let shift: Double = 0.2
+    /// How small a cover is drawn while what it plays is paused.
+    public static let pausedScale: Double = 0.9
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.

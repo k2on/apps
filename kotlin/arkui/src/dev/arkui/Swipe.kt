@@ -31,11 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -57,7 +56,7 @@ public fun SwipeToAct(
     row: @Composable () -> Unit,
 ) {
     val act by rememberUpdatedState(onAct)
-    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val state =
         rememberSwipeToDismissBoxState(
             confirmValueChange = { v ->
@@ -65,9 +64,10 @@ public fun SwipeToAct(
                 // Never left dismissed: the row comes home, and the list says whether it stays.
                 false
             })
-    // The tick, once, as the swipe passes the point where letting go acts.
+    // The tick, once, as the swipe passes the point where letting go acts: a threshold crossed is
+    // a selection stepping, not a long press.
     LaunchedEffect(state.targetValue) {
-        if (state.targetValue == SwipeToDismissBoxValue.StartToEnd) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (state.targetValue == SwipeToDismissBoxValue.StartToEnd) view.perform(Feedback.Selection)
     }
     SwipeToDismissBox(
         state = state,
@@ -79,12 +79,14 @@ public fun SwipeToAct(
             },
         backgroundContent = {
             val armed = state.targetValue == SwipeToDismissBoxValue.StartToEnd
-            val grow by animateFloatAsState(if (armed) 1.15f else 0.85f, label = "swipe-glyph")
+            // The glyph comes up to its size as the swipe arms, from a little under it, never past
+            // it; with motion reduced it is simply at its size, the colour behind it saying enough.
+            val grow by animateFloatAsState(if (armed) 1f else Springs.ENTER_SCALE, unlessReduced(Springs.size()), label = "swipe-glyph")
             Row(
                 Modifier.fillMaxSize().background(container).padding(horizontal = Space.xl),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Start) {
-                    Icon(icon, contentDescription = null, tint = onContainer, modifier = Modifier.scale(grow))
+                    Icon(icon, contentDescription = null, tint = onContainer, modifier = Modifier.graphicsLayer { scaleX = grow; scaleY = grow })
                     Spacer(Modifier.width(Space.m))
                     Text(label, color = onContainer, style = MaterialTheme.typography.labelLarge)
                 }

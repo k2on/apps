@@ -17,7 +17,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +81,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.arkdb.ffi.Id
+import dev.arkui.pressable
+import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import dev.arkui.Tokens
@@ -285,7 +286,7 @@ private fun PhotoRow(p: PhotoLine, onShow: () -> Unit) {
         headlineContent = { Text(if (p.state == "failed") "Photo" else "Photo of the receipt") },
         supportingContent = { Text(words) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClickLabel = "Show", onClick = onShow),
+        modifier = Modifier.pressable(onClickLabel = "Show", onClick = onShow, press = Press.Highlight),
     )
 }
 
@@ -344,7 +345,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
                         supportingContent = { Text("${Dates.long(r.date)} · ${r.items} items") },
                         trailingContent = { Text(a.format(abs(r.total))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable(onClickLabel = "Attach") { onPick(r) },
+                        modifier = Modifier.pressable(onClickLabel = "Attach", onClick = { onPick(r) }, press = Press.Highlight),
                     )
                 }
             }

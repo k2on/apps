@@ -9,7 +9,6 @@ package dev.money.android
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +68,7 @@ import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
+import dev.arkui.reflowing
 import dev.arkui.Stat
 import dev.arkui.SwipeToAct
 import uniffi.money_domain.Cleared
@@ -176,7 +176,7 @@ fun LazyListScope.days(rows: List<TxnLine>, today: String, showAccount: Boolean,
                 t,
                 showAccount,
                 swipe,
-                Modifier.animateItem().padding(horizontal = Space.page).clip(inCard(i, ts.size)),
+                reflowing().padding(horizontal = Space.page).clip(inCard(i, ts.size)),
                 divided = i > 0)
         }
     }
@@ -302,7 +302,7 @@ private fun ClearedMark(t: TxnLine) {
             Box(
                 Modifier.size(20.dp)
                     .clip(CircleShape)
-                    .clickable(onClickLabel = if (on) "Mark uncleared" else "Mark cleared") { book.setCleared(t.id, !on) }
+                    .pressable(onClickLabel = if (on) "Mark uncleared" else "Mark cleared", onClick = { book.setCleared(t.id, !on) })
                     .semantics { stateDescription = if (on) "Cleared" else "Uncleared" },
                 contentAlignment = Alignment.Center,
             ) {

@@ -287,7 +287,7 @@ public struct Pager: View {
                     .id(title)
                     .motionTransition(Self.slide(way))
             }
-            .frame(minWidth: 150)
+            .frame(minWidth: Self.width)
             .clipped()
             .motion(Springs.move, value: title)
             Button { steps += 1; go(.trailing, forward) } label: { Image(systemName: "chevron.right") }
@@ -318,13 +318,18 @@ public struct Pager: View {
         }
     }
 
+    /// The least room the name has between the chevrons.
+    static let width: CGFloat = 150
+
     /// The name coming in from `way`'s side and leaving by the other, as
-    /// Android's Stepper; with no way, a cross-fade.
+    /// Android's Stepper (`Transitions.stepped`): fading as it slides the
+    /// shared shift (`MotionTokens.shift`) of its width, enough to say which
+    /// way it went. With no way, a cross-fade.
     static func slide(_ way: Edge?) -> AnyTransition {
         guard let way else { return .opacity }
-        let away: Edge = way == .trailing ? .leading : .trailing
-        return .asymmetric(insertion: .move(edge: way).combined(with: .opacity),
-                           removal: .move(edge: away).combined(with: .opacity))
+        let by = CGFloat(MotionTokens.shift) * width * (way == .trailing ? 1 : -1)
+        return .asymmetric(insertion: .offset(x: by).combined(with: .opacity),
+                           removal: .offset(x: -by).combined(with: .opacity))
     }
 }
 #endif
