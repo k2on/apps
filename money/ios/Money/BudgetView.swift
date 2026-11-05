@@ -232,7 +232,7 @@ struct BudgetView: View {
                                 Button { present(.move(l.categoryId)) } label: {
                                     Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
                                 }
-                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.indigo)
+                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.chart[1])
                             }
                         }
                         .contextMenu { menu(l) }

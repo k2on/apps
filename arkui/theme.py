@@ -77,6 +77,10 @@ def load():
                 assert name in accent[side], f"accent.{a}.{side} has no {name}"
     for a, accent in t["accent"].items():
         assert accent["art"] in t["art"], f"accent.{a} names art {accent['art']}, which is not there"
+    assert len(t["chart"]["light"]) == len(t["chart"]["dark"]), "chart has a different number of colours on each side"
+    for side in ("light", "dark"):
+        for c in t["chart"][side]:
+            rgb(c)
     return t
 
 
@@ -160,6 +164,10 @@ def contrast(t):
                 add(fg, bg, 4.5)
             for fg, bg in rule["large"]:
                 add(fg, bg, 3.0)
+        # The chart's colours are every app's: read once, as shared pairs.
+        for i, c in enumerate(t["chart"][side]):
+            for bg in rule["chart"]:
+                pairs.append((side, "shared", f"chart-{i}", bg, c, shared[bg], ratio(c, shared[bg]), 3.0))
     return pairs
 
 
@@ -222,6 +230,19 @@ def kotlin(t):
     out.append("")
     out.append("    /** How much of the cover shows through behind the full player. */")
     out.append(f"    public fun washOpacity(dark: Boolean): Float = if (dark) {t['wash']['dark']}f else {t['wash']['light']}f")
+    out.append("}")
+    out.append("")
+    out.append("/** A chart's colours, in the order its parts take them: the largest first. */")
+    out.append("public object ChartColors {")
+    for side in ("light", "dark"):
+        out.append(f"    public val {side.capitalize()}: List<Color> =")
+        out.append("        listOf(")
+        for c in t["chart"][side]:
+            out.append(f"            {kotlin_color(c)},")
+        out.append("        )")
+        out.append("")
+    out.append("    /** The side asked for. */")
+    out.append("    public fun of(dark: Boolean): List<Color> = if (dark) Dark else Light")
     out.append("}")
     out.append("")
     out.append("/** One side of an app's accent. */")
@@ -377,6 +398,14 @@ def swift_core(t):
     out.append(f"    public static func washOpacity(dark: Bool) -> Double {{ dark ? {t['wash']['dark']} : {t['wash']['light']} }}")
     out.append("}")
     out.append("")
+    out.append("/// A chart's colours, in the order its parts take them: the largest first.")
+    out.append("public enum ChartTokens {")
+    out.append("    public static let series: [Sides] = [")
+    for lc, dc in zip(t["chart"]["light"], t["chart"]["dark"]):
+        out.append(f"        Sides(light: {swift_hex(lc)}, dark: {swift_hex(dc)}),")
+    out.append("    ]")
+    out.append("}")
+    out.append("")
     out.append("/// An app's accent: the one colour that is the app's own, and the squares it draws.")
     out.append("public struct AccentSet: Equatable, Sendable {")
     for name, doc in ACCENT.items():
@@ -450,6 +479,11 @@ def swift_ui(t):
         out.append(f"    /// {doc}")
         out.append(f"    public static var {camel(name)}: Color {{ Accent.color {{ $0.{camel(name)} }} }}")
     out.append("}")
+    out.append("")
+    out.append("extension Color {")
+    out.append("    /// A chart's colours, in the order its parts take them: the largest first.")
+    out.append("    public static let chart: [Color] = ChartTokens.series.map { Color($0) }")
+    out.append("}")
     return "\n".join(out) + "\n"
 
 
@@ -491,6 +525,13 @@ def rust(t):
             out.append(f"    /// {doc}")
             out.append(f"    pub const {screaming(name)}: Color = {rust_rgb(colors[name])};")
         out.append("}")
+        out.append("")
+    for side in ("light", "dark"):
+        out.append(f"/// A chart's colours on the {side} side, in the order its parts take them: the largest first.")
+        out.append(f"pub const CHART_{side.upper()}: [Color; {len(t['chart'][side])}] = [")
+        for c in t["chart"][side]:
+            out.append(f"    {rust_rgb(c)},")
+        out.append("];")
         out.append("")
     for art, sets in t["art"].items():
         for side in ("light", "dark"):

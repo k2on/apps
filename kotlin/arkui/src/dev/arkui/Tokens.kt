@@ -134,6 +134,32 @@ public object Tokens {
     public fun washOpacity(dark: Boolean): Float = if (dark) 0.25f else 0.25f
 }
 
+/** A chart's colours, in the order its parts take them: the largest first. */
+public object ChartColors {
+    public val Light: List<Color> =
+        listOf(
+            Color(0xFF17734A),
+            Color(0xFF2F6DB5),
+            Color(0xFFA86A00),
+            Color(0xFF7A55C4),
+            Color(0xFFB8457E),
+            Color(0xFF0E7C7B),
+        )
+
+    public val Dark: List<Color> =
+        listOf(
+            Color(0xFF5FD394),
+            Color(0xFF7FB2F0),
+            Color(0xFFF0B85A),
+            Color(0xFFB9A0F5),
+            Color(0xFFF29AC6),
+            Color(0xFF4FCDC9),
+        )
+
+    /** The side asked for. */
+    public fun of(dark: Boolean): List<Color> = if (dark) Dark else Light
+}
+
 /** One side of an app's accent. */
 @Immutable
 public class AccentColors internal constructor(

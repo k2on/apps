@@ -133,7 +133,6 @@ public struct HeroFigure<Footer: View>: View {
             Text(caption)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.quiet)
-                .textCase(.uppercase)
             CentsText(cents)
                 .font(.system(size: 44, weight: .bold, design: .rounded))
                 .foregroundStyle(tint == .neutral ? Color.ink : tint.color)

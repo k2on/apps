@@ -136,7 +136,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(vertical = Space.s)) {
                 TextButton(onClick = { typing = ReceiptDraft.of(r, ledger.items[r.id].orEmpty(), txn) }) { Text("Edit") }
                 if (photo != null) TextButton(onClick = { showing = photo.file }) { Text("Photo") }
-                if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take off") }
+                if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take Off") }
             }
         }
         for (p in reading) PhotoRow(p, onShow = { showing = p.file })
@@ -154,16 +154,16 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
                 leadingIcon = { Icon(Glyphs.Scan, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             AssistChip(
                 onClick = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                label = { Text("Choose photo") },
+                label = { Text("Choose Photo") },
                 leadingIcon = { Icon(Glyphs.Photo, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             AssistChip(
                 onClick = { typing = ReceiptDraft.blank(txn, date, amount) },
-                label = { Text("Type it") },
+                label = { Text("Type It") },
                 leadingIcon = { Icon(Glyphs.Write, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             if (ledger.unmatched.isNotEmpty()) {
                 AssistChip(
                     onClick = { attaching = true },
-                    label = { Text("Attach one") },
+                    label = { Text("Attach One") },
                     leadingIcon = { Icon(Glyphs.Receipt, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             }
         }
@@ -335,7 +335,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
     val near = unmatched.sortedWith(compareBy({ abs(it.total - amount) }, { abs((Dates.millis(it.date) ?: 0) - (Dates.millis(date) ?: 0)) })).take(30)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Attach a receipt") },
+        title = { Text("Attach a Receipt") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 for (r in near) {

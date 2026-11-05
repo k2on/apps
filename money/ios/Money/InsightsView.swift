@@ -84,8 +84,9 @@ struct InsightsView: View {
         .toolbar { ToolbarItem(placement: .topBarLeading) { AccountButton() } }
     }
 
-    /// The groups' colours, in the order the most spent takes them.
-    static let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .yellow, .indigo, .red, .mint, .brown, .cyan]
+    /// The groups' colours, in the order the most spent takes them: the
+    /// theme's chart palette (arkui/theme.toml), the Android app's too.
+    static let palette: [Color] = Color.chart
 
     private func share(_ part: Int64, _ whole: Int64) -> String {
         guard whole > 0 else { return "" }

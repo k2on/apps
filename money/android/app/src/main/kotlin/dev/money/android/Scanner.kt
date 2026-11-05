@@ -151,7 +151,7 @@ fun Scanner(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     Column(Modifier.align(Alignment.Center).padding(Space.xl), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("money needs the camera to scan a receipt.", color = Color.White)
                         Spacer(Modifier.height(Space.l))
-                        Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow the camera") }
+                        Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow the Camera") }
                         TextButton(onClick = onDismiss) { Text("Not now", color = Color.White) }
                     }
                 else -> {}

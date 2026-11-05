@@ -163,11 +163,11 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                 SegmentedButton(
                                     selected = !inflow,
                                     onClick = { inflow = false },
-                                    shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Money out") }
+                                    shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("Money Out") }
                                 SegmentedButton(
                                     selected = inflow,
                                     onClick = { inflow = true },
-                                    shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Money in") }
+                                    shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("Money In") }
                             }
                             Spacer(Modifier.height(Space.m))
                             AmountField(
@@ -213,7 +213,7 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                             if (f.bankSaid.isNotEmpty()) {
                                 // The bank's own words for it, whole and selectable: what the payee was made from.
                                 ListItem(
-                                    overlineContent = { Text("Bank description") },
+                                    overlineContent = { Text("Bank Description") },
                                     headlineContent = { SelectionContainer { Text(f.bankSaid) } },
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 )

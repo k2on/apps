@@ -74,6 +74,18 @@ public enum Tokens {
     public static func washOpacity(dark: Bool) -> Double { dark ? 0.25 : 0.25 }
 }
 
+/// A chart's colours, in the order its parts take them: the largest first.
+public enum ChartTokens {
+    public static let series: [Sides] = [
+        Sides(light: 0x17734A, dark: 0x5FD394),
+        Sides(light: 0x2F6DB5, dark: 0x7FB2F0),
+        Sides(light: 0xA86A00, dark: 0xF0B85A),
+        Sides(light: 0x7A55C4, dark: 0xB9A0F5),
+        Sides(light: 0xB8457E, dark: 0xF29AC6),
+        Sides(light: 0x0E7C7B, dark: 0x4FCDC9),
+    ]
+}
+
 /// An app's accent: the one colour that is the app's own, and the squares it draws.
 public struct AccentSet: Equatable, Sendable {
     /// The accent: a filled button, a slider, a selected tab.
