@@ -328,11 +328,7 @@ impl App {
                 Some(c) => self.peer.category_name(c).unwrap_or_else(|| i.category.clone()),
                 None => "file it".into(),
             };
-            let tint = if i.category_id.is_some() {
-                faded
-            } else {
-                arkui::tokens::light::CAUTION
-            };
+            let tint = if i.category_id.is_some() { faded } else { arkui::tokens::light::CAUTION };
             let line = column![
                 row![mono(i.name.clone(), 12, ink).width(Length::Fill), mono(money(-i.amount), 12, ink)].spacing(8),
                 mono(
