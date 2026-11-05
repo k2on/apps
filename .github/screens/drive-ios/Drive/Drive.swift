@@ -121,7 +121,10 @@ final class Drive: XCTestCase {
             sleep(1)
         }
         if allow.exists { allow.tap() }
-        // The server's page, in the system's web sheet. It is drawn by
+        // The server signs in its own user (ARK_DEV_USER, app-server.sh) and
+        // the sheet comes straight back: the server's page is gone.
+        if field.waitForNonExistence(timeout: 30) { return }
+        // A server that asks instead: its page, in the system's web sheet. It is drawn by
         // Safari's view service, a process of its own, and nothing of that
         // process is touched: tapping its element makes XCUITest bring it up
         // as an app, which takes the sheet away and the sign-in with it (the
@@ -129,11 +132,8 @@ final class Drive: XCTestCase {
         // (`autofocus`), so the name is typed as the app's keyboard input,
         // then sent with Go; a field the app's own hierarchy shows is tapped
         // first.
-        let seen = Date().addingTimeInterval(30)
-        let field = app.webViews.textFields.firstMatch
-        while Date() < seen && !field.exists && !app.keyboards.firstMatch.exists { sleep(1) }
-        sleep(2)
-        if field.exists && field.isHittable { field.tap() }
+        let name = app.webViews.textFields.firstMatch
+        if name.exists && name.isHittable { name.tap() }
         app.typeText(user + "\n")
     }
 

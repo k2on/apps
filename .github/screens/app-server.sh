@@ -14,6 +14,11 @@ app=$1
 dir=$2
 port=$(jq -r '.server.port' "$app/screens/shots.json")
 mkdir -p "$dir"
+# Who its dev sign-in signs in when a login names nobody (ark-auth): the
+# phone's sign-in sheet then opens and comes straight back, with no page
+# to fill in.
+ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/screens/shots.json")
+export ARK_DEV_USER
 bash "$app/screens/server.sh" "$dir" "127.0.0.1:$port"
 
 health() { curl -sf "http://127.0.0.1:$port/healthz" || true; }
