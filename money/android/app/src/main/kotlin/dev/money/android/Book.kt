@@ -615,7 +615,7 @@ private constructor(
      * A change by the domain's function as it is, said as `what` when refused: what the server's
      * importer does, which a test stands in for (the demo holds its role).
      */
-    internal fun change(what: String, f: (Money) -> Unit) = act(what, f)
+    internal fun change(what: String, f: (Money) -> Unit) = act(what, f = f)
 
     /**
      * Ask the bank for anything new. The demo's bank answers at once; a server's importer is asked
