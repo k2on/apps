@@ -101,7 +101,8 @@ below).
 - **`apps-android.sh`**, **`apps-ios.sh`**: each app in turn, so one that
   fails does not stop the others.
 - **`published.sh`**: each APK as the F-Droid repository offers it, for a
-  run that builds nothing.
+  run that builds nothing; **`await-apk.sh`**: an APK from a `build` run
+  still going, as soon as it is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
   the cache's when its inputs have not moved, with the runner's Xcode put
   in the store only when something must be built.
@@ -115,21 +116,30 @@ below).
 
 ## When it runs
 
-After `build` or `ios` finishes, from that run's artifacts:
+Each app is a job of its own on each phone, so the apps are taken at once.
+Each job starts its app's server first, in the background (its
+`server.sh`, nix's build of the server: the cache's, or built while the
+rest goes on), under whatever is slow anyway: the app's build on the
+iPhone, the system image and the emulator's boot on Android.
 
-- **On main**: an APK is there only when its inputs moved and it went to
-  F-Droid, and only once the deploy has succeeded. Every iPhone app is
-  built by nix at the commit `ios` ran on, an unchanged one taken from the
-  cache. Each phone taken whole replaces what the `screens` branch had at
+- **On main**: Android once `build` has ended and its deploy has
+  succeeded, from that run's APKs: an APK is there only when its inputs
+  moved and it went to F-Droid. The iPhone as soon as `ios` has started,
+  every app built by nix at that commit, an unchanged one the cache's.
+  Each phone taken whole replaces what the `screens` branch had at
   `apps/<app>/<phone>/`.
-- **On a pull request**: `build` builds the APKs whose inputs differ from
-  what main published, and the iPhone apps are built by nix at the PR's
-  commit (after `ios` runs for a push to the PR's branch). The shots go to the branch `screens-pr-<number>`, and one comment on
-  the PR, kept up to date, has a row for each screen that changed or is new
-  on either phone: Android's on main and on the PR, then the iPhone's on
-  main and on the PR, so both phones' before and after are side by side.
-  `ios` runs on pushes to this repository's branches, so a fork's PR gets
-  its Android shots only.
+- **On a pull request**: both phones as soon as their run starts. `build`
+  builds the APKs whose inputs differ from what main published, and each
+  app's job, its emulator booted and its server up meanwhile, takes its
+  APK the moment the run uploads it (`await-apk.sh`), before the run's
+  tests have ended; an app with no new APK is passed over. The iPhone apps
+  are built by nix at the PR's commit, beside `ios`. The shots go to the
+  branch `screens-pr-<number>`, and one comment on the PR, kept up to
+  date, has a row for each screen that changed or is new on either phone:
+  Android's on main and on the PR, then the iPhone's on main and on the
+  PR, so both phones' before and after are side by side. `ios` runs on
+  pushes to this repository's branches, so a fork's PR gets its Android
+  shots only.
 
 - **When only the screenshots' scripts change** (`.github/screens/`, an
   app's `screens/`, the workflow) on main, every app is taken again: each
