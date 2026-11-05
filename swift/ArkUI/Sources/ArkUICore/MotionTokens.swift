@@ -33,6 +33,10 @@ public enum MotionTokens {
     public static let press: Double = 0.97
     /// The least a thing scales from when it enters.
     public static let enterScale: Double = 0.95
+    /// How hard a drag past its edge pulls back: Apple's rubber band's constant.
+    public static let rubberBand: Double = 0.55
+    /// How large a row held to be dragged grows.
+    public static let lift: Double = 1.02
     /// How far a page or a step slides as it comes or goes, as a share of its width.
     public static let shift: Double = 0.2
     /// How small a cover is drawn while what it plays is paused.

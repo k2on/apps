@@ -90,14 +90,25 @@ struct TrackRow<Leading: View>: View {
     var body: some View {
         let playing = model.playingId == track.id.hex
         HStack(spacing: Space.m) {
-            leading().frame(width: Space.thumb, height: Space.thumb)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(track.title).font(.body).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(1)
-                Text(under).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
+            // The row plays, lit under the finger as it lands (`.pressRow`).
+            // Its menu is beside the button, not in its label: a menu inside
+            // a button's label leaves both answering one touch, so a tap on
+            // the "…" could play the song as well as open the menu.
+            Button(action: onPlay) {
+                HStack(spacing: Space.m) {
+                    leading().frame(width: Space.thumb, height: Space.thumb)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title).font(.body).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(1)
+                        Text(under).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    // Its file not on the server yet: how its download goes, in place of its length.
+                    Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+                }
+                .frame(minHeight: 64)
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 0)
-            // Its file not on the server yet: how its download goes, in place of its length.
-            Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+            .buttonStyle(.pressRow)
             Menu { TrackActions(track: track, from: from) } label: {
                 Image(systemName: "ellipsis").frame(width: 32, height: 44).contentShape(Rectangle())
             }
@@ -105,10 +116,7 @@ struct TrackRow<Leading: View>: View {
             .foregroundStyle(.quiet)
         }
         .frame(minHeight: 64)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onPlay)
         .contextMenu { TrackActions(track: track, from: from) }
-        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -143,13 +151,17 @@ struct EpisodeRow: View {
         let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
         let over = Spell.facts([show, day])
         VStack(alignment: .leading, spacing: Space.xs) {
-            if !over.isEmpty {
-                Text(over).font(.caption.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
+            // The words let a touch through to the row's button behind them.
+            Group {
+                if !over.isEmpty {
+                    Text(over).font(.caption.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
+                }
+                Text(track.title).font(.headline).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(2)
+                if let about = detail?.description, !about.isEmpty {
+                    Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(3)
+                }
             }
-            Text(track.title).font(.headline).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(2)
-            if let about = detail?.description, !about.isEmpty {
-                Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(3)
-            }
+            .allowsHitTesting(false)
             if !people.isEmpty {
                 PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
                     .padding(.top, 2)
@@ -172,7 +184,7 @@ struct EpisodeRow: View {
                 .tint(Color.accent)
                 .accessibilityLabel(said.isEmpty ? "Play \(track.title)" : "Play \(track.title), \(said)")
                 if !others.isEmpty {
-                    Text(others).font(.caption).foregroundStyle(.quiet).lineLimit(1)
+                    Text(others).font(.caption).foregroundStyle(.quiet).lineLimit(1).allowsHitTesting(false)
                 }
                 Spacer(minLength: 0)
                 Menu { TrackActions(track: track, from: from) } label: {
@@ -186,11 +198,21 @@ struct EpisodeRow: View {
                 ProgressView(value: Double(min(m.positionMs, whole)), total: Double(whole))
                     .tint(Color.accent)
                     .accessibilityLabel("\(Spell.left(track.durationMs, m))")
+                    .allowsHitTesting(false)
             }
         }
         .padding(.vertical, Space.s)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onPlay)
+        // Tapped anywhere, it plays, and lights as the finger lands
+        // (`.pressRow`): the button is behind the row, not around it, so
+        // the play button, the people and the menu laid over it each take
+        // their own touch, and a tap on the "…" opens the menu without
+        // playing. Its play button says the same to VoiceOver, so this one
+        // is hidden from it.
+        .background {
+            Button(action: onPlay) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.pressRow)
+                .accessibilityHidden(true)
+        }
         .contextMenu { TrackActions(track: track, from: from) }
         .accessibilityElement(children: .contain)
     }

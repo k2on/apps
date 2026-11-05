@@ -133,23 +133,31 @@ private struct DeviceLine: View {
         let lit = (row.ticked || row.group) && !row.away
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack(spacing: Space.l) {
-                Image(systemName: symbol(forDevice: row.kind, name: row.name)).frame(width: 24)
-                VStack(alignment: .leading) {
-                    Text(row.name).lineLimit(1)
-                    if let u = row.under { Text(u).font(.caption).foregroundStyle(.quiet) }
+                // The device is picked by its row, lit under the finger as it
+                // lands (`.pressRow`); joining it to the group is a button
+                // beside the row's, not in its label, so it does not pick too.
+                Button(action: pick) {
+                    HStack(spacing: Space.l) {
+                        Image(systemName: symbol(forDevice: row.kind, name: row.name)).frame(width: 24)
+                        VStack(alignment: .leading) {
+                            Text(row.name).lineLimit(1)
+                            if let u = row.under { Text(u).font(.caption).foregroundStyle(.quiet) }
+                        }
+                        Spacer()
+                        if row.group { Image(systemName: "waveform").accessibilityLabel("Playing") }
+                        else if row.ticked { Image(systemName: "checkmark").accessibilityLabel("Playing here") }
+                    }
+                    .contentShape(Rectangle())
                 }
-                Spacer()
+                .buttonStyle(.pressRow)
+                .disabled(!row.takeable)
                 if let join = row.join {
                     Button { model.join(row) } label: { Image(systemName: join ? "plus.circle" : "minus.circle") }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(join ? "Add \(row.name) to the group" : "Take \(row.name) out of the group")
                 }
-                if row.group { Image(systemName: "waveform").accessibilityLabel("Playing") }
-                else if row.ticked { Image(systemName: "checkmark").accessibilityLabel("Playing here") }
             }
             .foregroundStyle(lit ? Color.accentText : (row.takeable ? .ink : .quiet))
-            .contentShape(Rectangle())
-            .onTapGesture { if row.takeable { pick() } }
             if let v = row.volume {
                 VolumeSlider(level: v, muted: row.muted, about: row.name, onLevel: { model.level(row, $0) }, onDone: { model.volumeDone() }, onMute: { model.mute(row) })
                     .padding(.leading, 40)
@@ -277,13 +285,16 @@ struct FollowSheet: View {
                     }
                     ForEach(found) { f in
                         OfferedRow(found: f, following: following.contains(f.feed)) { model.follow(kind, f.feed) }
-                            .motionTransition(.opacity.combined(with: .move(edge: .bottom)))
+                            // Only a fade: an answer comes with every pause in the
+                            // typing, and rows rising each time would be the list
+                            // jumping under the words being typed.
+                            .motionTransition(.opacity)
                     }
                 }
             }
             .listStyle(.plain)
-            .motion(Springs.move, value: found)
-            .motion(Springs.move, value: answered)
+            .motion(Springs.fade, value: found)
+            .motion(Springs.fade, value: answered)
             .navigationTitle(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -336,16 +347,16 @@ private struct OfferedRow: View {
                 Label("Following", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.accentText)
-                    .motionTransition(.scale.combined(with: .opacity))
+                    .motionTransition(.enter)
             } else {
                 Button("Follow", action: follow)
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
                     .tint(Color.accent)
-                    .motionTransition(.scale.combined(with: .opacity))
+                    .motionTransition(.enter)
             }
         }
-        .motion(Springs.move, value: following)
+        .motion(Springs.size, value: following)
         .sensoryFeedback(.success, trigger: following)
     }
 }

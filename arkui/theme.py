@@ -43,6 +43,8 @@ MOTION = {
     "give": "How much of the gesture brings the preview 63% of the way.",
     "press": "How small a pressed cover or chip gives.",
     "enter-scale": "The least a thing scales from when it enters.",
+    "rubber-band": "How hard a drag past its edge pulls back: Apple's rubber band's constant.",
+    "lift": "How large a row held to be dragged grows.",
     "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
     "paused-scale": "How small a cover is drawn while what it plays is paused.",
 }

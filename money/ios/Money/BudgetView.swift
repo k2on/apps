@@ -60,10 +60,12 @@ struct BudgetView: View {
         List {
             Section {
                 VStack(spacing: Space.l) {
+                    // A step changes the month at once; only its figures roll, as its
+                    // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                     Pager(model.monthName,
-                          home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move.reduced(still)) { model.showThisMonth() } },
-                          back: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(-1) } },
-                          forward: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(1) } })
+                          home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
+                          back: { model.stepMonth(-1) },
+                          forward: { model.stepMonth(1) })
                     ready(s.summary)
                 }
                 .listRowInsets(EdgeInsets())
@@ -162,7 +164,7 @@ struct BudgetView: View {
                     .foregroundStyle(l.hidden ? Color.quiet : Color.ink)
                     .lineLimit(1)
                 Spacer(minLength: Space.s)
-                Pill(cents: l.available, tint: Tone.of(l).tint)
+                Pill(cents: l.available, tint: Tone.of(l).tint).rolls(on: model.snapshot.month)
             }
             .padding(.leading, Space.xl + Space.s)
             .accessibilityElement(children: .ignore)
@@ -221,7 +223,7 @@ struct BudgetView: View {
                 ForEach(g.lines) { l in
                     // A month its rule assigns offers neither: the domain
                     // refuses assigning it and moving money to or from it.
-                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l) }
+                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l, month: model.snapshot.month) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if Ruled.editable(l) {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
@@ -263,7 +265,7 @@ struct BudgetView: View {
                             .monospacedDigit()
                             .foregroundStyle(Color.caution)
                     } else {
-                        CentsText(g.available).font(.subheadline.weight(.semibold))
+                        CentsText(g.available).font(.subheadline.weight(.semibold)).rolls(on: model.snapshot.month)
                             .foregroundStyle(g.available < 0 ? Color.error : Color.quiet)
                     }
                 }
@@ -332,6 +334,8 @@ struct BudgetView: View {
 /// a category that spent more on a card than it had says so in amber.
 struct CategoryRow: View {
     let line: BudgetLine
+    /// The month its figures are of: they roll when it is stepped.
+    let month: String
 
     var body: some View {
         let tone = Tone.of(line)
@@ -344,7 +348,7 @@ struct CategoryRow: View {
                         .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
                         .lineLimit(1)
                     Spacer(minLength: Space.s)
-                    Pill(cents: line.available, tint: tone.tint)
+                    Pill(cents: line.available, tint: tone.tint).rolls(on: month)
                 }
                 if card {
                     payment

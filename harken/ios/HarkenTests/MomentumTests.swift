@@ -34,4 +34,14 @@ final class MomentumTests: XCTestCase {
         XCTAssertEqual(Momentum.relative(-500, from: 100, to: 0), 5)
         XCTAssertEqual(Momentum.relative(500, from: 1, to: 1), 0)
     }
+
+    /// Past an edge, a drag is drawn less and less far: about half the way
+    /// at first, never as far as the room it has, and the drag's own way.
+    func testADragPastItsEdgeIsRubberBanded() {
+        XCTAssertTrue(abs(Momentum.band(10, limit: 800) - 5.46) < 0.01)
+        XCTAssertTrue(Momentum.band(10_000, limit: 800) < 800)
+        XCTAssertEqual(Momentum.band(-100, limit: 800), -Momentum.band(100, limit: 800))
+        XCTAssertEqual(Momentum.band(0, limit: 800), 0)
+        XCTAssertEqual(Momentum.band(50, limit: 0), 0)
+    }
 }

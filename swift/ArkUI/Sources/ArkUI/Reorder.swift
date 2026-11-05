@@ -81,7 +81,7 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
             if let held, let item = order.first(where: { $0.0 == held })?.1 {
                 row(item, ReorderHandle(changed: { _ in }, ended: { _ in }))
                     .background(.background)
-                    .scaleEffect(lifted && !still ? 1.02 : 1)
+                    .scaleEffect(lifted && !still ? MotionTokens.lift : 1)
                     .shadow(color: .black.opacity(lifted ? 0.18 : 0), radius: 12, y: 4)
                     .offset(y: settling ? top(of: held, in: order.map(\.0)) : liftedTop(order.map(\.0)))
                     .allowsHitTesting(false)

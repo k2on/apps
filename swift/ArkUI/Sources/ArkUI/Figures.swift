@@ -260,6 +260,9 @@ public struct Pager: View {
     let home: (() -> Void)?
     let homeLabel: String
     @State private var steps = 0
+    /// Which way the last step went: forward brings the next name in from
+    /// the right, back from the left; home, whose way is not known here, fades.
+    @State private var way: Edge? = nil
 
     /// `home`, when given, is offered as `homeLabel` ("Today").
     public init(_ title: String, homeLabel: String = "Today", home: (() -> Void)? = nil, back: @escaping () -> Void, forward: @escaping () -> Void) {
@@ -272,25 +275,61 @@ public struct Pager: View {
 
     public var body: some View {
         HStack(spacing: Space.s) {
-            Button { steps -= 1; back() } label: { Image(systemName: "chevron.left") }
+            Button { steps -= 1; go(.leading, back) } label: { Image(systemName: "chevron.left") }
                 .accessibilityLabel("Previous")
-            Text(title)
-                .font(.headline)
-                .contentTransition(.numericText(value: Double(steps)))
-                .frame(minWidth: 150)
-                .motion(Springs.move, value: title)
-            Button { steps += 1; forward() } label: { Image(systemName: "chevron.right") }
+            ZStack {
+                // A new name for each title, so a step slides the old one out
+                // and the new one in rather than changing one in place; a
+                // step taken mid-slide turns the spring where it is drawn.
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .id(title)
+                    .motionTransition(Self.slide(way))
+            }
+            .frame(minWidth: Self.width)
+            .clipped()
+            .motion(Springs.move, value: title)
+            Button { steps += 1; go(.trailing, forward) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel("Next")
             if let home {
-                Button(homeLabel, action: home)
+                Button(homeLabel) { steps += 1; go(nil, home) }
                     .font(.subheadline.weight(.semibold))
-                    .motionTransition(.opacity.combined(with: .scale))
+                    .motionTransition(.enter)
             }
         }
         .buttonStyle(.glass)
+        // "Today" comes and goes with the step that leaves or reaches home.
+        .motion(Springs.size, value: home == nil)
         .sensoryFeedback(.selection, trigger: steps)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
+    }
+
+    /// A step `to` that side. The way is set before the step, so the name
+    /// that leaves is drawn knowing it as well as the one that comes
+    /// (docs/motion.md, Choreography): a view that goes takes the transition
+    /// it was last drawn with, so when the way turns, the step waits the one
+    /// frame it takes to draw the old name with the new way.
+    private func go(_ to: Edge?, _ step: @escaping () -> Void) {
+        if way == to { step() } else {
+            way = to
+            DispatchQueue.main.async(execute: step)
+        }
+    }
+
+    /// The least room the name has between the chevrons.
+    static let width: CGFloat = 150
+
+    /// The name coming in from `way`'s side and leaving by the other, as
+    /// Android's Stepper (`Transitions.stepped`): fading as it slides the
+    /// shared shift (`MotionTokens.shift`) of its width, enough to say which
+    /// way it went. With no way, a cross-fade.
+    static func slide(_ way: Edge?) -> AnyTransition {
+        guard let way else { return .opacity }
+        let by = CGFloat(MotionTokens.shift) * width * (way == .trailing ? 1 : -1)
+        return .asymmetric(insertion: .offset(x: by).combined(with: .opacity),
+                           removal: .offset(x: -by).combined(with: .opacity))
     }
 }
 #endif

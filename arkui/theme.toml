@@ -260,6 +260,11 @@ give = 0.12
 press = 0.97
 # The least a thing scales from when it enters: never from nothing.
 enter-scale = 0.95
+# A drag past its edge is drawn (x · d · c) / (d + c · |x|) past it, d the
+# room it is dragged in: Apple's rubber band, and this its c.
+rubber-band = 0.55
+# A row held to be dragged into another order: how large it lifts.
+lift = 1.02
 # How far a page or a step slides as it comes or goes, as a share of its
 # width: enough to say which way it went, not a trip across the screen.
 shift = 0.2
