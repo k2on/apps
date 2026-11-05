@@ -109,7 +109,18 @@ final class Drive: XCTestCase {
         // on Continue while the keyboard is up can go to the keyboard's
         // leaving rather than to the button. Continue only if, a few seconds
         // on, the page has still not moved.
-        field.typeText(server + "\n")
+        // Typed, then read back, and only then sent: Go straight after the
+        // last key can reach a page whose field has not yet taken that key
+        // (harken's, which says each to its model, lost the last digit of
+        // the port). Typed again, cleared first, until the field says it.
+        for _ in 0..<3 {
+            field.typeText(server)
+            sleep(1)
+            if (field.value as? String) == server { break }
+            let had = (field.value as? String)?.count ?? 0
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: had + 4))
+        }
+        field.typeText("\n")
         sleep(4)
         let next = app.buttons["Continue"]
         if field.exists && next.exists && next.isEnabled && next.isHittable { next.tap() }
