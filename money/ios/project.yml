@@ -64,6 +64,9 @@ targets:
         # The receipt scanner (VisionKit's document camera), and a receipt's photo chosen from the library.
         NSCameraUsageDescription: Money scans a paper receipt so your server can read its items.
         NSPhotoLibraryUsageDescription: Money reads a photo of a receipt you choose so your server can read its items.
+        # ProMotion: without it an app's own animation (a spring, a drag's
+        # settle) is held to 60 Hz on an iPhone that draws at 120.
+        CADisableMinimumFrameDurationOnPhone: true
         # A server at home often speaks plain http:// and ws://; the person typed its address.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
