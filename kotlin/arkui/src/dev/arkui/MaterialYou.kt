@@ -63,6 +63,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.ui.unit.IntOffset
 
 /** The expressive shapes: corners that grow with the thing they round. */
 public val ExpressiveShapes: Shapes =
@@ -228,6 +230,9 @@ public fun Stepper(
     modifier: Modifier = Modifier,
     order: Int = 0,
 ) {
+    // A tick each step, as the iPhone's stepper gives one (`.sensoryFeedback(.selection)`).
+    SensoryFeedback(Feedback.Selection, order)
+    val reduced = reducedMotion()
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         FilledTonalIconButton(onClick = onPrevious) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = previousLabel)
@@ -235,10 +240,16 @@ public fun Stepper(
         AnimatedContent(
             targetState = label to order,
             transitionSpec = {
-                val forward = targetState.second >= initialState.second
-                val d = if (forward) 1 else -1
-                (slideInHorizontally { w -> d * w / 3 } + fadeIn()) togetherWith
-                    (slideOutHorizontally { w -> -d * w / 3 } + fadeOut())
+                // The new title comes in from the side it was stepped toward, on arkui's
+                // critically damped springs; with motion reduced, it only cross-fades.
+                if (reduced) fadeIn(Springs.fade()) togetherWith fadeOut(Springs.fade())
+                else {
+                    val forward = targetState.second >= initialState.second
+                    val d = if (forward) 1 else -1
+                    val slide = spring(Springs.MOVE, Springs.STIFFNESS, IntOffset.VisibilityThreshold)
+                    (slideInHorizontally(slide) { w -> d * w / 3 } + fadeIn(Springs.size())) togetherWith
+                        (slideOutHorizontally(slide) { w -> -d * w / 3 } + fadeOut(Springs.fade()))
+                }
             },
             label = "stepper",
             modifier = Modifier.weight(1f, fill = false).widthIn(min = 160.dp),

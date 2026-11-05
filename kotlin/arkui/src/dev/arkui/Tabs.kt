@@ -115,6 +115,7 @@ public fun <T : Any> TabStack(
     content: @Composable (T) -> Unit,
 ) {
     val holder = rememberSaveableStateHolder()
+    motion.reduced = reducedMotion()
     val tabs = if (motion.tabBacking && shown != first) listOf(first, shown) else listOf(shown)
     val density = LocalDensity.current
     val inset = with(density) { PageMotion.PREVIEW_INSET.toPx() }
@@ -165,6 +166,13 @@ public fun <T : Any> TabStack(
                             }
                             motion.tabFrames++
                             val q = v / Springs.PREVIEW
+                            // Reduced motion: the tab stays where it is and only fades, a little
+                            // under the finger and the rest of the way once let go.
+                            if (motion.reduced) {
+                                motion.tabDrawnScale = 1f
+                                alpha = (1f - 0.3f * q) * (1f - c)
+                                return@graphicsLayer
+                            }
                             val s = 1f - v - TAB_GOING * c
                             motion.tabDrawnScale = s
                             val aside = q * (size.width / 20f - inset).coerceAtLeast(0f)

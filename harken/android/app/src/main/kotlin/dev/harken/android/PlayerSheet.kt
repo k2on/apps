@@ -27,6 +27,7 @@ import dev.arkui.ExpandingCardSpec
 import dev.arkui.ExpandingCardState
 import dev.arkui.Springs
 import dev.arkui.rememberExpandingCard
+import dev.arkui.unlessReduced
 import kotlinx.coroutines.flow.StateFlow
 
 /** The player's card: how far up it is, and the drag that moves it (`ark-ui`'s). */
@@ -50,7 +51,7 @@ val BAR_SHADOW = 6.dp
 fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, position: StateFlow<Long>, tabs: Dp, scrubbing: StateFlow<Long?> = nobody()) {
     val now = state.now ?: return
     val seed = now.album.ifEmpty { now.title }
-    val scale by animateFloatAsState(coverScale(state.playing), spring(Springs.MOVE, Springs.STIFFNESS), label = "cover")
+    val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(spring(Springs.MOVE, Springs.STIFFNESS)), label = "cover")
     val spec = remember { ExpandingCardSpec(bigCorner = COVER_CORNER, bigShadow = COVER_SHADOW, glass = true, shadow = BAR_SHADOW) }
     ExpandingCard(
         sheet,

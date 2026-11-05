@@ -115,9 +115,12 @@ import dev.arkui.VolumeSlider
 import dev.arkui.quiet
 import dev.arkui.rememberReorder
 import dev.arkui.rememberTransientListState
+import dev.arkui.unlessReduced
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import dev.arkui.pressable
+import dev.arkui.Press
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -334,7 +337,7 @@ fun FullFace(
             // rounded, lifted, and a little smaller while paused.
             if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
             else if (now != null) {
-                val scale by animateFloatAsState(coverScale(state.playing), spring(Springs.MOVE, Springs.STIFFNESS), label = "cover")
+                val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(spring(Springs.MOVE, Springs.STIFFNESS)), label = "cover")
                 Cover(
                     seedOf(now),
                     now.art,
@@ -795,7 +798,7 @@ private suspend fun LazyListState.centre(index: Int, glide: Boolean) {
 
 @Composable
 private fun QueueRow(p: Playing, current: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
         Cover(seedOf(p), p.art, 40.dp, Modifier.size(40.dp), corner = 4.dp)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
