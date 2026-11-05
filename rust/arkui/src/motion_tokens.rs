@@ -32,6 +32,8 @@ pub const GIVE: f32 = 0.12;
 pub const PRESS: f32 = 0.97;
 /// The least a thing scales from when it enters.
 pub const ENTER_SCALE: f32 = 0.95;
+/// How far a thing that comes in where it stays rises as it comes: a nudge.
+pub const RISE: f32 = 8.0;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

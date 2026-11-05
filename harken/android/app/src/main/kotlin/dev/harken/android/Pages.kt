@@ -29,12 +29,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.DropdownMenu
@@ -67,6 +63,7 @@ import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.MoreButton
 import dev.arkui.PinnedBar
+import dev.arkui.PinnedPage
 import dev.arkui.Recompositions
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -137,27 +134,6 @@ private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
     }
 
 /**
- * A page's list under its bar, pinned over it ([PinnedBar]): back, and once the header — the list's
- * first item — has gone up under the bar, `title` beside its `art` there, which take the list back
- * to its top. A page whose first thing is a picture under the status bar is `under` it.
- */
-@Composable
-private fun Paged(
-    list: LazyListState,
-    title: String,
-    onBack: () -> Unit,
-    art: (@Composable (Dp) -> Unit)?,
-    under: Boolean = false,
-    actions: @Composable RowScope.() -> Unit = {},
-    content: LazyListScope.() -> Unit,
-) {
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = if (under) 0.dp else PinnedBar.HEIGHT), content = content)
-        PinnedBar(list, title, onBack, under = under, art = art, actions = actions)
-    }
-}
-
-/**
  * An album's page, laid out as a catalogue lays one out: the cover beside its title and who played
  * it, then its tracks under the works they are movements of, and at the foot when it came out, how
  * long it runs and who put it out. A record of no works (a pop record) is the same page with no
@@ -171,7 +147,7 @@ fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, T
     val name = album?.name ?: tracks.firstNotNullOfOrNull { details[it.id]?.album } ?: ""
     val creator = album?.creator ?: tracks.firstOrNull()?.creator ?: ""
     val (by, small) = Catalogue.albumBy(album, creator)
-    Paged(list, name, act::back, art = { side -> Cover(name, album?.art ?: "", side, Modifier.size(side), corner = 4.dp) }) {
+    PinnedPage(list, name, act::back, art = { side -> Cover(name, album?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             CoverHeader(
                 seed = name,
@@ -260,7 +236,7 @@ fun ArtistPage(
     }
     // Their face in the bar once their header has gone: the portrait, or the banner cropped round.
     val face = listOf(artist?.art, composer?.art, person?.art, banner).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
-    Paged(list, name, act::back, art = { side -> Cover(name, face, side, Modifier.size(side), round = true) }, under = banner.isNotEmpty()) {
+    PinnedPage(list, name, act::back, art = { side -> Cover(name, face, side, Modifier.size(side), round = true) }, under = banner.isNotEmpty()) {
         if (banner.isNotEmpty()) {
             item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name) }
             if (works.isEmpty() && tracks.isNotEmpty()) {
@@ -375,7 +351,7 @@ private fun WebLink(link: String) {
 fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, act: Do) {
     Recompositions.hit("WorkPage")
     val composer = work?.composer.orEmpty()
-    Paged(rememberDestinationListState("work"), work?.title.orEmpty(), act::back, art = null) {
+    PinnedPage(rememberDestinationListState("work"), work?.title.orEmpty(), act::back, art = null) {
         item {
             Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.l)) {
                 if (composer.isNotEmpty()) {
@@ -393,7 +369,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
         item { HorizontalDivider(Modifier.padding(horizontal = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         if (recordings.isEmpty()) {
             item { Text("No recordings of it yet.", style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(Space.page)) }
-            return@Paged
+            return@PinnedPage
         }
         val first = recordings[0]
         item(key = "featured") {
@@ -446,7 +422,7 @@ fun RecordingPage(
     val who = take?.let(Catalogue::who).orEmpty()
     val year = take?.recorded ?: 0
     val titled = Catalogue.recordingTitle(work, who)
-    Paged(rememberDestinationListState("recording"), titled, act::back, art = { side -> Cover(id, take?.art ?: "", side, Modifier.size(side), corner = 4.dp) }) {
+    PinnedPage(rememberDestinationListState("recording"), titled, act::back, art = { side -> Cover(id, take?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             CoverHeader(
                 seed = id,
@@ -529,11 +505,11 @@ fun ShowPage(
     // Each row's, found once rather than by every row as it scrolls in.
     val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
     val guestsBy = remember(people) { people.mapValues { OnEpisode.guests(it.value) } }
-    Paged(
+    PinnedPage(
         rememberDestinationListState("show"),
         title,
         act::back,
-        art = { side -> Cover(title, show?.art ?: "", side, Modifier.size(side), corner = 4.dp) },
+        art = { side -> Cover(title, show?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) },
         actions = { if (feed != null) ShowMenu(title, feed, onUnfollow) },
     ) {
         item {
@@ -786,7 +762,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
     Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
-    Paged(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = 4.dp) }) {
+    PinnedPage(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             PageHeader(
                 cover = { Cover(name, "", Space.header, Modifier.size(Space.header)) },

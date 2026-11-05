@@ -33,6 +33,8 @@ public enum MotionTokens {
     public static let press: Double = 0.97
     /// The least a thing scales from when it enters.
     public static let enterScale: Double = 0.95
+    /// How far a thing that comes in where it stays rises as it comes: a nudge.
+    public static let rise: Double = 8.0
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.

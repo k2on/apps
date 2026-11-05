@@ -260,3 +260,6 @@ give = 0.12
 press = 0.97
 # The least a thing scales from when it enters: never from nothing.
 enter-scale = 0.95
+# How far a thing that comes in where it stays rises as it comes (dp, pt or
+# logical px): a page's header, small, into its bar. A nudge, not a journey.
+rise = 8.0

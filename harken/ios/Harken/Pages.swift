@@ -34,11 +34,9 @@ private struct CataloguePage<Art: View, Head: View, Content: View>: View {
 
     /// Whether the banner is still under the status bar.
     @State private var pictured = true
-    /// How tall the header is, and whether it has scrolled up out of view.
+    /// How tall the header is: past it, it is small in the bar.
     @State private var tall: CGFloat = .greatestFiniteMagnitude
-    @State private var gone = false
     @State private var position = ScrollPosition(edge: .top)
-    @Environment(\.reducesMotion) private var still
 
     var body: some View {
         let under: Edge.Set = hero ? .top : []
@@ -47,7 +45,7 @@ private struct CataloguePage<Art: View, Head: View, Content: View>: View {
         let over = hero && pictured
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                head().onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                head().inlineHeaderFold($tall)
                 content()
             }
             .padding(.bottom, Space.xl)
@@ -60,16 +58,9 @@ private struct CataloguePage<Art: View, Head: View, Content: View>: View {
         } action: { _, now in
             pictured = now
         }
-        // Gone once all of it is under the bar; a banner, once it is past
-        // the status bar too, where the bar's own glass comes back.
-        .onScrollGeometryChange(for: Bool.self) { g in
-            g.contentOffset.y + g.contentInsets.top >= (hero ? fold : tall)
-        } action: { _, now in
-            gone = now
-        }
-        .inlineHeader(title, shown: gone, onTop: {
-            withAnimation(Springs.move.reduced(still)) { position.scrollTo(edge: .top) }
-        }, art: art)
+        // Small in the bar once all of the header is under it; a banner's,
+        // once it is past the status bar too, where the bar's glass comes back.
+        .inlineHeader(title, fold: hero ? fold : tall, onTop: { position.scrollTo(edge: .top) }, art: art)
         .toolbarBackgroundVisibility(over ? .hidden : .automatic, for: .navigationBar)
         .toolbarColorScheme(over ? .dark : nil, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -122,7 +113,7 @@ struct AlbumPage: View {
         let toCreator: (() -> Void)? = creator.isEmpty ? nil : { open(.page(.artist(creator))) }
         let art = RowCover.url(model, album?.art ?? "")
         CataloguePage(title: name) {
-            CoverView(seed: name, url: art, side: InlineHeader<EmptyView>.side, corner: 4)
+            CoverView(seed: name, url: art, side: InlineArt.side, corner: InlineArt.corner)
         } head: {
             RecordHeader(title: name, by: performer ?? creator, onBy: performer == nil ? toCreator : nil,
                          small: small, onSmall: performer == nil ? nil : toCreator, canPlay: !tracks.isEmpty,
@@ -194,7 +185,7 @@ struct ArtistPage: View {
         let by = Catalogue.initials(name)
         CataloguePage(hero: !banner.isEmpty, title: name) {
             // Their face: the portrait, or else the banner cropped round.
-            CoverView(seed: name, url: RowCover.url(model, portrait.isEmpty ? banner : portrait), side: InlineHeader<EmptyView>.side, round: true)
+            CoverView(seed: name, url: RowCover.url(model, portrait.isEmpty ? banner : portrait), side: InlineArt.side, round: true)
         } head: {
             if !banner.isEmpty {
                 Banner(url: RowCover.url(model, banner), kind: kicker, name: name)
@@ -366,7 +357,7 @@ struct RecordingPage: View {
         let title = work == nil ? who : Catalogue.title(work)
         let art = RowCover.url(model, take?.art ?? "")
         CataloguePage(title: title) {
-            CoverView(seed: id, url: art, side: InlineHeader<EmptyView>.side, corner: 4)
+            CoverView(seed: id, url: art, side: InlineArt.side, corner: InlineArt.corner)
         } head: {
             RecordHeader(over: composer, onOver: composer.isEmpty ? nil : { open(.page(.artist(composer))) },
                          title: title, by: work == nil ? "" : who,
@@ -418,11 +409,8 @@ struct ShowPage: View {
     let id: String
     @StateObject private var holding: Holding
     @EnvironmentObject private var model: Model
-    /// How tall the header is, and whether it has scrolled up out of view:
-    /// then it is small in the bar.
+    /// How tall the header is: past it, it is small in the bar.
     @State private var tall: CGFloat = .greatestFiniteMagnitude
-    @State private var gone = false
-    @Environment(\.reducesMotion) private var still
     private static let head = "head"
 
     init(model: Model, id: String) {
@@ -447,7 +435,7 @@ struct ShowPage: View {
                 }
                 .listRowSeparator(.hidden)
                 .id(Self.head)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                .inlineHeaderFold($tall)
                 // Who hosts it, once: the newest episode's hosts, as its feed names them.
                 let hosts = PeopleEntry.hosts(episodes.first.flatMap { model.people[$0.id] } ?? [])
                 if !hosts.isEmpty {
@@ -509,16 +497,8 @@ struct ShowPage: View {
             }
             .listStyle(.plain)
             .scrollEdges()
-            // Gone once all of the header is under the bar.
-            .onScrollGeometryChange(for: Bool.self) { g in
-                g.contentOffset.y + g.contentInsets.top >= tall
-            } action: { _, now in
-                gone = now
-            }
-            .inlineHeader(title, shown: gone, onTop: {
-                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(Self.head, anchor: .top) }
-            }) {
-                CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: InlineHeader<EmptyView>.side, corner: 4)
+            .inlineHeader(title, fold: tall, onTop: { proxy.scrollTo(Self.head, anchor: .top) }) {
+                CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: InlineArt.side, corner: InlineArt.corner)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -548,11 +528,8 @@ struct PlaylistPage: View {
     let id: Id
     @StateObject private var holding: Holding
     @EnvironmentObject private var model: Model
-    /// How tall the header is, and whether it has scrolled up out of view:
-    /// then it is small in the bar.
+    /// How tall the header is: past it, it is small in the bar.
     @State private var tall: CGFloat = .greatestFiniteMagnitude
-    @State private var gone = false
-    @Environment(\.reducesMotion) private var still
     private static let head = "head"
 
     init(model: Model, id: Id) {
@@ -574,7 +551,7 @@ struct PlaylistPage: View {
                 }
                 .listRowSeparator(.hidden)
                 .id(Self.head)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                .inlineHeaderFold($tall)
                 if playlist == nil {
                     ContentUnavailableView("This playlist is gone", systemImage: "music.note.list", description: Text("It was taken off this server, or it isn't yours."))
                         .listRowSeparator(.hidden)
@@ -592,16 +569,8 @@ struct PlaylistPage: View {
             }
             .listStyle(.plain)
             .scrollEdges()
-            // Gone once all of the header is under the bar.
-            .onScrollGeometryChange(for: Bool.self) { g in
-                g.contentOffset.y + g.contentInsets.top >= tall
-            } action: { _, now in
-                gone = now
-            }
-            .inlineHeader(name, shown: gone, onTop: {
-                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(Self.head, anchor: .top) }
-            }) {
-                CoverView(seed: name, url: "", side: InlineHeader<EmptyView>.side, corner: 4)
+            .inlineHeader(name, fold: tall, onTop: { proxy.scrollTo(Self.head, anchor: .top) }) {
+                CoverView(seed: name, url: "", side: InlineArt.side, corner: InlineArt.corner)
             }
         }
         .navigationBarTitleDisplayMode(.inline)

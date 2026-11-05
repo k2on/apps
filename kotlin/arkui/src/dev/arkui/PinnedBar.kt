@@ -11,12 +11,13 @@
 // It follows where the list is, not a one-shot: whether the header is gone
 // is read from the list as it scrolls, and the copy springs toward that,
 // so a scroll back and forth past the fold turns it around wherever it is.
-// The art and the title are one object and move as one, critically damped
-// (`Springs.size`: nothing threw them, so nothing overshoots), a rise of
-// [RISE] and a fade, transform and alpha only. Under reduced motion they
-// only fade, on the quick fade spring. The bar's ground is decoration: it
-// only fades, solid under the bar and then a soft edge into the list
-// below it rather than a hairline, and only while something is under it.
+// The art and the title are one object and move as one, on `Springs.move`
+// (critically damped: nothing threw them, so nothing overshoots), a rise of
+// [RISE] (the theme's `rise`) and a fade, transform and alpha only. Under
+// reduced motion (`reducedMotion`) they only fade, on `Springs.fade`. The
+// bar's ground is decoration: it only fades, solid under the bar and then a
+// soft edge into the list below it rather than a hairline, and only while
+// something is under it.
 //
 // The list keeps its place at rest: it is given [PinnedBar.HEIGHT] of top
 // padding where the bar used to be its first item, so nothing has moved
@@ -26,10 +27,8 @@
 // comes in with the copy, when the picture has gone up past it.
 package dev.arkui
 
-import android.animation.ValueAnimator
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -42,6 +41,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -77,8 +80,11 @@ public object PinnedBar {
     /** The side of the header's art in the bar. */
     public val ART: Dp = 28.dp
 
-    /** How far the copy rises as it comes in: a nudge, not a journey. */
-    public val RISE: Dp = 8.dp
+    /** The corners of a square cover at [ART]; a face is round. */
+    public val CORNER: Dp = 4.dp
+
+    /** How far the copy rises as it comes in: arkui/theme.toml's `rise`. */
+    public val RISE: Dp = MotionTokens.RISE.dp
 
     /** How far the soft edge under the bar runs into the list. */
     public val EDGE: Dp = 16.dp
@@ -118,13 +124,13 @@ public fun PinnedBar(
     val density = LocalDensity.current
     val top = if (under) WindowInsets.statusBars.asPaddingValues().calculateTopPadding() else 0.dp
     val foot = with(density) { if (under) (top + PinnedBar.HEIGHT).roundToPx() else 0 }
-    val still = remember { calm() }
+    val still = reducedMotion()
     val scope = rememberCoroutineScope()
     val gone by remember(list, foot) { derivedStateOf { PinnedBar.gone(list, foot) } }
     // A page under the bar has its picture there until the header goes, so its ground comes with
     // the copy; any other has the list under it as soon as it scrolls.
     val edged by remember(list, foot, under) { derivedStateOf { if (under) PinnedBar.gone(list, foot) else PinnedBar.scrolled(list) } }
-    val shown = animateFloatAsState(if (gone) 1f else 0f, if (still) Springs.fade() else Springs.size(), label = "compact")
+    val shown = animateFloatAsState(if (gone) 1f else 0f, if (still) Springs.fade() else Springs.move(), label = "compact")
     val ground = animateFloatAsState(if (edged) 1f else 0f, Springs.fade(), label = "ground")
     // Composed only while any of it shows: at rest the bar is what it always was.
     val present by remember(list, foot) { derivedStateOf { gone || shown.value > 0f } }
@@ -154,9 +160,11 @@ public fun PinnedBar(
                                 alpha = p
                                 translationY = if (still) 0f else (1f - p) * rise
                             }
-                            .clickable(onClickLabel = "Scroll to top", role = Role.Button) {
-                                scope.launch { if (still) list.scrollToItem(0) else list.animateScrollToItem(0) }
-                            }
+                            .pressable(
+                                onClick = { scope.launch { if (still) list.scrollToItem(0) else list.animateScrollToItem(0) } },
+                                onClickLabel = "Scroll to top",
+                                role = Role.Button,
+                            )
                             .padding(vertical = Space.s, horizontal = Space.xs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -185,17 +193,36 @@ public fun PinnedBar(
 @Composable
 private fun ShadedBack(onBack: () -> Unit, ground: State<Float>) {
     Box(
-        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = "Back" },
+        Modifier.size(48.dp).clip(CircleShape).pressable(onClick = onBack, role = Role.Button).semantics { contentDescription = "Back" },
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - ground.value }.background(SHADE))
+        Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - ground.value }.background(MaterialTheme.colorScheme.scrim.copy(alpha = SHADE)))
         Icon(ArkGlyphs.Back, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp).graphicsLayer { alpha = 1f - ground.value })
         Icon(ArkGlyphs.Back, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp).graphicsLayer { alpha = ground.value })
     }
 }
 
-private val SHADE = Color(0x99000000)
+// The shade a picture's back sits on: the scheme's scrim, as a banner's top is shaded.
+private const val SHADE: Float = 0.6f
 
-// Whether motion is reduced: Android's one switch for it, "Remove animations" (the animator
-// duration scale at 0). Read once per bar; where there is no system to ask (a test's renderer), not.
-private fun calm(): Boolean = runCatching { !ValueAnimator.areAnimatorsEnabled() }.getOrDefault(false)
+/**
+ * A page that is a list under its [PinnedBar]: the list, padded where the bar is (or, [under] the
+ * status bar, not), and the bar over it, its back, `actions`, and once the list's first item — the
+ * page's header — has gone up under it, `title` beside `art`. What an app's page about something
+ * (a record, a person, an account) is drawn in.
+ */
+@Composable
+public fun PinnedPage(
+    list: LazyListState,
+    title: String,
+    onBack: () -> Unit,
+    art: (@Composable (Dp) -> Unit)? = null,
+    under: Boolean = false,
+    actions: @Composable RowScope.() -> Unit = {},
+    content: LazyListScope.() -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = if (under) 0.dp else PinnedBar.HEIGHT), content = content)
+        PinnedBar(list, title, onBack, under = under, art = art, actions = actions)
+    }
+}

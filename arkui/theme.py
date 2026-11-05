@@ -43,6 +43,7 @@ MOTION = {
     "give": "How much of the gesture brings the preview 63% of the way.",
     "press": "How small a pressed cover or chip gives.",
     "enter-scale": "The least a thing scales from when it enters.",
+    "rise": "How far a thing that comes in where it stays rises as it comes: a nudge.",
 }
 
 # The roles of one side, in the order they are written, and each one's

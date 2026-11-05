@@ -33,4 +33,6 @@ public object MotionTokens {
     public const val PRESS: Float = 0.97f
     /** The least a thing scales from when it enters. */
     public const val ENTER_SCALE: Float = 0.95f
+    /** How far a thing that comes in where it stays rises as it comes: a nudge. */
+    public const val RISE: Float = 8.0f
 }
