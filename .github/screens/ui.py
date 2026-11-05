@@ -1,7 +1,7 @@
 """An Android screen's accessibility tree, from `uiautomator dump`'s XML: where
 to tap, or the tree itself to read.
 
-    adb exec-out uiautomator dump /dev/tty | python3 -I ui.py <text> [role]
+    adb exec-out uiautomator dump /dev/tty | python3 -I ui.py <text> [role] [bottom]
     ... | python3 -I ui.py --field
     ... | python3 -I ui.py --tree
 
@@ -13,7 +13,8 @@ that only contain <text>; among them, one of the `role` asked for (`tab`,
 `button`, `field`, `text`), then one that can be pressed (it, or what holds
 it, is clickable), since a page's heading and its button often say the
 same. A role is a preference, never a filter: a step that names one still
-finds what it found without.
+finds what it found without. With `bottom`, of all that match, the one
+lowest on the screen: a mini player saying the title a row above it says.
 
 --field is the first text field. --tree prints the screen as an outline,
 a node a line, indented by depth, with what a step can name it by: what
@@ -109,9 +110,12 @@ if want == "--field":
     found = [n for n in nodes if n.get("class") == "android.widget.EditText" and shown(n)]
 else:
     asked = sys.argv[2] if len(sys.argv) > 2 else ""
+    lowest = len(sys.argv) > 3 and sys.argv[3] == "bottom"
     exact = [n for n in nodes if want in names(n) and shown(n)]
     found = exact or [n for n in nodes if any(want in s for s in names(n) if s) and shown(n)]
     found.sort(key=lambda n: (bool(asked) and role(n) != asked, not pressable(n)))
+    if lowest:
+        found.sort(key=lambda n: -bounds(n)[3])
 if not found:
     sys.exit(1)
 print(centre(found[0]))
