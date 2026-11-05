@@ -66,7 +66,25 @@ final class Drive: XCTestCase {
                     try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
                     throw error
                 }
-                XCTAssertTrue(field.waitForNonExistence(timeout: 60), "signed in, past the server's page")
+                // Signed in only once the app is past both the server's page and
+                // its "Sign In" page (both apps title it so), the system's
+                // "wants to use … to sign in" allowed again if it asks: the
+                // server's page goes as soon as the sign-in starts, and
+                // stopping the app then leaves it waiting for a sign-in that
+                // never comes (harken's first run).
+                let signing = app.staticTexts["Sign In"]
+                let allow = springboard.buttons["Continue"]
+                let until = Date().addingTimeInterval(90)
+                while Date() < until && (field.exists || signing.exists) {
+                    if allow.exists { allow.tap() }
+                    sleep(1)
+                }
+                if field.exists || signing.exists {
+                    let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
+                    try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+                    XCTFail("not signed in after 90 seconds; stuck.tree.txt is what was there")
+                    return
+                }
                 sleep(3)
             }
         }
