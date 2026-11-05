@@ -23,7 +23,7 @@ on:
     inputs:
       sandbox:
         description: "nix's sandbox: strict (true) or relaxed"
-        default: "true"
+        default: relaxed
   push:
     paths:
       - ".github/workflows/xcode-strict.yaml"
@@ -60,13 +60,17 @@ jobs:
           # path is a path a build may read, nothing more): the OS's own
           # cryptexes, where parts of the system now live; the private
           # frameworks Xcode installs system-wide (CoreDevice); and the user
-          # database. Run eight, with those: no crash, but MobileDevice (which
+          # database. (Run nine, strict with all of those: xcodebuild's file
+          # watcher falls again, as the sandbox denies DiskArbitration and
+          # other services, which no sandbox path can grant. So relaxed:
+          # only the app's own xcodebuild, __noChroot, goes outside.)
+          # Run eight, with those: no crash, but MobileDevice (which
           # CoreDevice loads) blocked where it really is, under /Library/Apple;
           # the cryptex where it really is, under /System/Volumes/Preboot; and
           # the system's version and logging settings. Runs five to seven were relaxed: a derivation's own
           # sandbox rules turned out not to be applied at all.
           extra_nix_config: |
-            sandbox = ${{ github.event.inputs.sandbox || 'true' }}
+            sandbox = ${{ github.event.inputs.sandbox || 'relaxed' }}
             extra-sandbox-paths = /System/Cryptexes /System/Volumes/Preboot/Cryptexes /Library/Developer/PrivateFrameworks /Library/Apple/System/Library/PrivateFrameworks /System/Library/CoreServices/SystemVersion.bundle /System/Library/CoreServices/SystemVersion.plist /System/Library/Preferences/Logging /private/etc/passwd /private/etc/group
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
