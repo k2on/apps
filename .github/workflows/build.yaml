@@ -212,11 +212,11 @@ jobs:
       # The hosted image carries ~30 GB of toolchains this build never uses;
       # the nix store, a JDK, gradle's state, the Android NDK targets and the
       # aapt2 build want the room.
+      # In the background: deleting them takes a minute and a half, and the
+      # build wants the room only once nix and the SDK are in.
       - name: Free disk space
         if: steps.seen.outputs.cache-hit != 'true'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          df -h /
+        run: nohup sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost > /dev/null 2>&1 &
 
       - if: steps.seen.outputs.cache-hit != 'true'
         uses: DeterminateSystems/nix-installer-action@main
@@ -268,13 +268,85 @@ jobs:
           path: ${{ matrix.apk.file }}
           if-no-files-found: error
 
-      # Remember these inputs as published. Saved only once the APK exists,
-      # so a failed build is tried again on the next push.
-      # Only main's: a PR's APK is published nowhere.
+  # Each APK's unit tests, beside its build rather than inside it: the APK
+  # is up (for its screenshots) while they run. An APK goes to F-Droid only
+  # once its tests have passed (deploy reads `tested-<app>`).
+  tests:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        apk: ${{ fromJSON(needs.plan.outputs.apks) }}
+    name: tests (${{ matrix.apk.name }})
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Built, and so tested, before under these inputs: nothing to do.
+      - id: seen
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/cache/restore@v4
+        with:
+          path: apk-seen
+          key: apk-${{ matrix.apk.name }}-${{ matrix.apk.key }}
+          lookup-only: true
+
+      - name: Free disk space
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: nohup sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost > /dev/null 2>&1 &
+
+      - if: steps.seen.outputs.cache-hit != 'true'
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - if: steps.seen.outputs.cache-hit != 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "(android-sdk-for-gradle|platform-35_r01\\.zip|build-tools_r35_linux\\.zip)"
+
+      # The APK job's store, read and not written: one job keeps it.
+      - if: steps.seen.outputs.cache-hit != 'true'
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'rust/Cargo.lock', format('{0}/android/deps.json', matrix.apk.name)) }}
+          restore-prefixes-first-match: nix-apk-${{ matrix.apk.name }}-${{ runner.os }}-
+          save: false
+
+      - name: Test ${{ matrix.apk.name }}
+        id: test
+        if: steps.seen.outputs.cache-hit != 'true'
+        run: nix build .#${{ matrix.apk.tests }} --print-build-logs --no-link
+
+      - if: steps.test.outcome == 'success'
+        run: mkdir -p tested && echo "${{ matrix.apk.name }}" > "tested/${{ matrix.apk.name }}"
+      - if: steps.test.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tested-${{ matrix.apk.name }}
+          path: tested
+
+      # Remember these inputs as published, so the next push does not build
+      # them again: only main's (a PR's APK is published nowhere), and only
+      # once both the tests and the APK's build have succeeded, so either
+      # failing is tried again on the next push.
       - name: Mark these inputs as built
-        if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main'
-        run: mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
-      - if: steps.build.outcome == 'success' && github.ref == 'refs/heads/main'
+        id: mark
+        if: steps.test.outcome == 'success' && github.ref == 'refs/heads/main'
+        run: |
+          job="apk (${{ matrix.apk.name }})"
+          for _ in $(seq 1 120); do
+            state=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
+              --jq ".jobs[] | select(.name == \"$job\") | .conclusion // \"\"")
+            [ -n "$state" ] && break
+            sleep 15
+          done
+          [ "$state" = success ] || { echo "the APK's build did not succeed ($state); not marked"; exit 0; }
+          mkdir -p apk-seen && git rev-parse HEAD > apk-seen/commit
+          echo "built=true" >> "$GITHUB_OUTPUT"
+      - if: steps.mark.outputs.built == 'true'
         uses: actions/cache/save@v4
         with:
           path: apk-seen
@@ -284,7 +356,8 @@ jobs:
   # never race to create the same release. The keys are public, so the APKs
   # install anywhere and belong nowhere public (harken/android/README.md).
   release:
-    needs: apk
+    # Released only once every APK's tests have passed.
+    needs: [apk, tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -299,7 +372,7 @@ jobs:
           generate_release_notes: true
 
   deploy:
-    needs: [plan, page, apk]
+    needs: [plan, page, apk, tests]
     # Every page, or none: Pages deploys the site whole, so a page that failed
     # would vanish from it. A failed APK does not hold the site back: it goes
     # up with the repository as it was, plus whichever APKs did build.
@@ -327,6 +400,20 @@ jobs:
           pattern: apk-*
           merge-multiple: true
           path: ${{ runner.temp }}/apk
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: tested-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/tested
+      # Of those, only the ones whose tests passed.
+      - name: Only tested APKs
+        run: |
+          shopt -s nullglob
+          for f in "$RUNNER_TEMP"/apk/*.apk; do
+            a=$(basename "$f" .apk)
+            [ -f "$RUNNER_TEMP/tested/$a" ] || { echo "::warning::$a's tests did not pass; its APK is not deployed"; rm -f "$f"; }
+          done
 
       - name: Lay out the pages
         env:
