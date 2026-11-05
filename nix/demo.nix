@@ -5,13 +5,13 @@
 # (`<app>/screens/server.sh`). The directory is left behind, and its path
 # said, so a second run starts from the seed again rather than from what the
 # first one did.
-{ writeShellApplication, coreutils, name, seed, server, listen, env }:
+{ writeShellApplication, coreutils, name, seed, server, listen, env, seedArgs ? "" }:
 writeShellApplication {
   name = "${name}-demo";
   runtimeInputs = [ coreutils seed server ];
   text = ''
     dir=$(mktemp -d -t ${name}-demo.XXXXXX)
-    ${name}-seed "$dir"
+    ${name}-seed ${seedArgs} "$dir"
     echo "${name}-demo: seeded in $dir" >&2
     ${env} exec ${name}-server "''${1:-${listen}}"
   '';
