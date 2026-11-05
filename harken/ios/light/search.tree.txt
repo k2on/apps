@@ -1,0 +1,81 @@
+Attributes: Application, 0x103a35080, pid: 69699, label: 'Harken'
+Element subtree:
+ →Application, 0x103a35080, pid: 69699, label: 'Harken'
+    Window (Main), 0x103a45e70, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x103a3c830, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x103a3c410, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x103b46f40, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x103b45010, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x103b46be0, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103b45e00, {{0.0, 0.0}, {402.0, 874.0}}
+                  Other, 0x103b45a80, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x103b472c0, {{0.0, 0.0}, {402.0, 874.0}}
+                      Other, 0x103b464f0, {{0.0, 0.0}, {402.0, 874.0}}
+                        Other, 0x103b46170, {{0.0, 0.0}, {402.0, 874.0}}
+                          Other, 0x103b45700, {{0.0, 0.0}, {402.0, 874.0}}
+                            NavigationBar, 0x103b45390, {{0.0, 62.0}, {402.0, 106.0}}, identifier: 'Search'
+                              Other, 0x103b3a310, {{330.0, 66.0}, {52.0, 36.0}}, label: 'Account'
+                                Other, 0x103b40470, {{330.0, 66.0}, {52.0, 36.0}}
+                                  Button, 0x103b407b0, {{330.0, 66.0}, {52.0, 36.0}}, label: 'Account'
+                                    Button, 0x103b44900, {{330.0, 66.0}, {52.0, 36.0}}
+                                      StaticText, 0x103b3dde0, {{340.0, 68.0}, {32.0, 32.0}}, label: 'Account'
+                              StaticText, 0x103b40100, {{16.0, 119.7}, {111.7, 40.7}}, label: 'Search'
+                            Other, 0x103b39f90, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103b39c10, {{0.0, 0.0}, {402.0, 874.0}}
+                                Other, 0x103b3ebf0, {{0.0, 0.0}, {402.0, 874.0}}
+                                  Other, 0x103b44230, {{0.0, 0.0}, {402.0, 874.0}}
+                                    CollectionView, 0x103b41890, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x103b40e70, {{0.0, -1580.0}, {402.0, 3713.3}}
+                                      Other, 0x103b40b00, {{0.0, 0.0}, {402.0, 874.0}}
+                                        Other, 0x103b43b60, {{0.0, 0.0}, {402.0, 170.8}}
+                                        Other, 0x103b42610, {{0.0, 677.2}, {402.0, 196.8}}
+                                      Other, 0x103b43ed0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Cell, 0x103b430d0, {{0.0, 168.0}, {402.0, 217.3}}
+                                        Other, 0x103b437c0, {{0.0, 168.0}, {402.0, 217.3}}
+                                          Other, 0x103b41f50, {{0.0, 168.0}, {402.0, 217.3}}
+                                        Other, 0x103b422b0, {{0.0, 168.0}, {402.0, 217.3}}
+                                          Other, 0x103b5a190, {{0.0, 168.0}, {402.0, 217.3}}
+                                            Other, 0x103b5abb0, {{0.0, 168.0}, {402.0, 217.3}}
+                                              Image, 0x103b5b270, {{178.0, 202.3}, {46.0, 46.3}}, identifier: 'magnifyingglass', label: 'Search'
+                                              StaticText, 0x103b5b5c0, {{104.2, 202.3}, {193.7, 91.0}}, label: 'Search your library'
+                                              StaticText, 0x103b5a860, {{64.7, 296.3}, {272.7, 38.0}}, label: 'Find a song by its title, or everything by somebody, as you type.'
+                                      Other, 0x103b5a4e0, {{369.0, 116.0}, {30.0, 626.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x103b5b940, {{396.0, 732.0}, {3.0, 7.0}}
+                                      Other, 0x103b72f50, {{369.0, 116.0}, {30.0, 626.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x103b79ce0, {{396.0, 732.0}, {3.0, 7.0}}
+                            Other, 0x103b7a060, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103b7a3e0, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103b7b190, {{0.0, 742.0}, {402.0, 132.0}}
+                  Other, 0x103b7b4e0, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x103b7a730, {{28.0, 742.0}, {346.0, 48.0}}
+                      Other, 0x103b7aaa0, {{28.0, 742.0}, {346.0, 48.0}}
+                        Other, 0x103b7adf0, {{28.0, 742.0}, {346.0, 48.0}}
+                          Other, 0x103b732d0, {{28.0, 742.0}, {346.0, 48.0}}
+                            Image, 0x103b74a80, {{53.0, 757.7}, {10.3, 17.0}}, identifier: 'music.note', label: 'Song'
+                            StaticText, 0x103b78bb0, {{88.0, 757.0}, {78.3, 18.0}}, label: 'Not Playing'
+                    TabBar, 0x103b78f30, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar'
+                      Other, 0x103b792a0, {{28.0, 798.0}, {48.0, 48.0}}
+                        Other, 0x103b79600, {{28.0, 798.0}, {48.0, 48.0}}
+                          Button, 0x103b79970, {{28.0, 798.0}, {48.0, 48.0}}, label: 'Home', value: Collapsed
+                            Image, 0x103b74de0, {{35.3, 808.0}, {33.3, 28.0}}, identifier: 'house.fill', label: 'home'
+                      Other, 0x103b76590, {{319.0, 791.0}, {62.0, 62.0}}
+                    Other, 0x103b76900, {{88.0, 798.0}, {286.0, 48.0}}
+                      Other, 0x103b76f90, {{88.0, 798.0}, {286.0, 48.0}}
+                        Other, 0x103b780a0, {{88.0, 798.0}, {286.0, 48.0}}
+                        SearchField, 0x103b772e0, {{88.0, 798.0}, {286.0, 48.0}}, label: 'Songs, albums, artists', placeholderValue: 'Songs, albums, artists'
+                          Image, 0x103b77d50, {{101.0, 812.3}, {20.3, 18.7}}, identifier: 'magnifyingglass', label: 'Search'
+                  Other, 0x103b77640, {{0.0, 742.0}, {402.0, 132.0}}
+                    Other, 0x103b779c0, {{0.0, 742.0}, {402.0, 132.0}}
+                      Other, 0x103b76c50, {{0.0, 742.0}, {402.0, 132.0}}
+                        Other, 0x103b75490, {{0.0, 742.0}, {402.0, 132.0}}
+                          Other, 0x103b75ef0, {{0.0, 742.0}, {402.0, 132.0}}
+                            Other, 0x103b76240, {{0.0, 742.0}, {402.0, 139.0}}
+                        Other, 0x103b75820, {{0.0, 742.0}, {402.0, 132.0}}
+                          Other, 0x103b75ba0, {{0.0, 742.0}, {402.0, 139.0}}
+Path to element:
+ →Application, 0x103a35080, pid: 69699, label: 'Harken'
+Query chain:
+ →Find: Application 'us.koon.harken'
+  Output: {
+    Application, 0x103a377c0, pid: 69699, label: 'Harken'
+  }
