@@ -56,11 +56,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -177,15 +180,17 @@ public fun PinnedBar(
 }
 
 // A back over a picture: light on a shade while the picture is under it, the bar's own once its
-// ground has come in. Two layers cross-fading, so only alpha moves.
+// ground has come in. Two layers cross-fading, so only alpha moves. The whole 48 dp circle is the
+// button, where the banner's own back was.
 @Composable
 private fun ShadedBack(onBack: () -> Unit, ground: State<Float>) {
-    IconButton(onClick = onBack) {
-        Box(contentAlignment = Alignment.Center) {
-            Box(Modifier.size(40.dp).graphicsLayer { alpha = 1f - ground.value }.background(SHADE, CircleShape))
-            Icon(ArkGlyphs.Back, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp).graphicsLayer { alpha = 1f - ground.value })
-            Icon(ArkGlyphs.Back, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp).graphicsLayer { alpha = ground.value })
-        }
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onBack).semantics { contentDescription = "Back" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.matchParentSize().graphicsLayer { alpha = 1f - ground.value }.background(SHADE))
+        Icon(ArkGlyphs.Back, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp).graphicsLayer { alpha = 1f - ground.value })
+        Icon(ArkGlyphs.Back, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp).graphicsLayer { alpha = ground.value })
     }
 }
 
