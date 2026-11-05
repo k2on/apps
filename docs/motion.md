@@ -649,3 +649,16 @@ git diff "$base"... -U0 -- '*.kt' '*.swift' '*.rs' > /tmp/motion.diff
 13. **Said, not assumed.** The commit says what was verified by tests or
     screenshots and what has not been felt on a device — flick it,
     interrupt it, reverse it, run it slow.
+
+## One Source for Every Value
+
+Every number in this document is written once, in `arkui/theme.toml`'s
+`[motion]`, and `nix run .#update-theme` writes it into each toolkit:
+`dev.arkui.MotionTokens` (Kotlin), `MotionTokens` in ArkUICore (Swift) and
+`arkui::motion_tokens` (Rust). Kotlin's springs take the stiffness; Swift
+and Rust take the response worked out from it, 2π/√stiffness, so a spring
+is the same spring everywhere. `checks.theme` fails when a generated file
+is not what the TOML makes. The libraries' `Springs` and `arkui::motion`
+are built on these tokens, and the apps use the libraries, never a number
+of their own: a value an app needs that is not there is added to the TOML,
+and a motion one app has that another could use moves into arkui.
