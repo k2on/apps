@@ -16,6 +16,8 @@
 use iced::widget::{column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::fit::Cut;
+use crate::line::Line;
 use crate::{icon, style, theme};
 
 /// What a window that has a sidebar usually makes it, edge included.
@@ -77,20 +79,15 @@ pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: 
         under = item.heading;
         let on_cursor = i == cursor;
         let lit = lit(i, cursor, focused);
-        let mut line = row![
-            icon::line(item.glyph, lit),
-            text(item.label)
-                .size(13)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::None)
-                .style(move |theme| text::Style {
-                    color: Some(style::entry_text(theme, lit)),
-                }),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        // The label takes what the trailing leaves and is cut to it, from
+        // the middle, so a card's mask is kept (`Chase Sap…••4417`): a
+        // `Wrapping::None` text would draw at full length, under the balance.
+        let label = Line::new(item.label, 13.0, Cut::Middle, move |theme| style::entry_text(theme, lit));
+        let mut line = row![icon::line(item.glyph, lit), container(label).width(Length::Fill)]
+            .spacing(6)
+            .align_y(Alignment::Center);
         if let Some(trailing) = item.trailing {
-            line = line.push(trailing);
+            line = line.push(container(trailing).padding(Padding::ZERO.left(4)));
         }
         side = side.push(
             mouse_area(
