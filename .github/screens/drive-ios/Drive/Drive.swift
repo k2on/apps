@@ -24,6 +24,7 @@ struct Shot: Decodable {
         var tap: String?
         var role: String?
         var `where`: String?
+        var unless: String?
         var type: String?
         var wait: Double?
     }
@@ -75,6 +76,10 @@ final class Drive: XCTestCase {
             app.launch()
             sleep(2)
             for step in shot.steps {
+                // A step that is done already: what it opens is on the screen.
+                if let done = step.unless, app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", done, done)).firstMatch.waitForExistence(timeout: 2) {
+                    continue
+                }
                 if let label = step.tap {
                     let c = step.where == "bottom" ? lowest(app, label) : control(app, label, role: step.role)
                     if !c.waitForExistence(timeout: 30) {
@@ -108,7 +113,6 @@ final class Drive: XCTestCase {
         sleep(4)
         let next = app.buttons["Continue"]
         if field.exists && next.exists && next.isEnabled && next.isHittable { next.tap() }
-        let safari = XCUIApplication(bundleIdentifier: "com.apple.SafariViewService")
         let allow = springboard.buttons["Continue"]
         let open = app.buttons["Sign In"]
         let until = Date().addingTimeInterval(30)
@@ -117,21 +121,20 @@ final class Drive: XCTestCase {
             sleep(1)
         }
         if allow.exists { allow.tap() }
-        let name = try first(timeout: 30, [
-            safari.webViews.textFields.firstMatch,
-            app.webViews.textFields.firstMatch,
-            springboard.webViews.textFields.firstMatch,
-            app.textFields["a name"],
-        ])
-        name.tap()
-        name.typeText(user)
-        // The page's own button, else the keyboard's Go.
-        let send = try? first(timeout: 3, [
-            safari.webViews.buttons["sign in"],
-            app.webViews.buttons["sign in"],
-            springboard.webViews.buttons["sign in"],
-        ])
-        if let send { send.tap() } else { name.typeText("\n") }
+        // The server's page, in the system's web sheet. It is drawn by
+        // Safari's view service, a process of its own, and nothing of that
+        // process is touched: tapping its element makes XCUITest bring it up
+        // as an app, which takes the sheet away and the sign-in with it (the
+        // screen goes black). The page puts its field in focus itself
+        // (`autofocus`), so the name is typed as the app's keyboard input,
+        // then sent with Go; a field the app's own hierarchy shows is tapped
+        // first.
+        let seen = Date().addingTimeInterval(30)
+        let field = app.webViews.textFields.firstMatch
+        while Date() < seen && !field.exists && !app.keyboards.firstMatch.exists { sleep(1) }
+        sleep(2)
+        if field.exists && field.isHittable { field.tap() }
+        app.typeText(user + "\n")
     }
 
     /// Of every element that says `label`, the lowest on the screen, once
@@ -156,15 +159,6 @@ final class Drive: XCTestCase {
             let button = app.buttons[label].firstMatch
             return button.exists ? button : app.descendants(matching: .any)[label].firstMatch
         }
-    }
-
-    private func first(timeout: TimeInterval, _ candidates: [XCUIElement]) throws -> XCUIElement {
-        let until = Date().addingTimeInterval(timeout)
-        while Date() < until {
-            if let e = candidates.first(where: { $0.exists }) { return e }
-            sleep(1)
-        }
-        throw NSError(domain: "Drive", code: 2, userInfo: [NSLocalizedDescriptionKey: "no sign-in page appeared"])
     }
 
     private func value(_ name: String) throws -> String {

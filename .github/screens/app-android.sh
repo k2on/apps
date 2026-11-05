@@ -12,7 +12,9 @@
 # A step is {"tap": "<label>"} — what says it or its id, in the screen's
 # accessibility tree, as uiautomator reads it (ui.py) — with an optional
 # "role" ("tab", "button", "field", "text") to prefer when several say
-# it, and "where": "bottom" for the lowest of them on the screen; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# it, "where": "bottom" for the lowest of them on the screen, and "unless":
+# "<label>" to skip the step when that is on the screen already (what it
+# opens is open); {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 set -euo pipefail
@@ -54,7 +56,9 @@ says() { dump | python3 -I "$here/ui.py" "$1" >/dev/null; }
 
 # A step of a shot, as JSON.
 step() {
-  local s=$1
+  local s=$1 done
+  done=$(jq -r '.unless // ""' <<< "$s")
+  if [ -n "$done" ] && says "$done"; then return 0; fi
   if jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
   elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
   elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
