@@ -42,6 +42,9 @@ tungstenite = { version = "0.24", default-features = false, features = ["handsha
 # Searching the podcast directory, blocking on a thread of its own, as
 # arkui fetches a picture.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
+# (.github/screens/apps.md): this same application, run headless.
+arkui-shots = { path = "../../rust/arkui-shots" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach: without it wgpu finds no backend and

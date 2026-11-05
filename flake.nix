@@ -1325,8 +1325,8 @@
           # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
           # into the F-Droid repository (and onto a tag's release), an
           # iPhone app to TestFlight (ios.yaml); and each app with
-          # <name>/screens/shots.json is photographed on the phones it is
-          # listed for (app-screens.yaml). Adding one is adding it here; the
+          # <name>/screens/shots.json is photographed on the phones and the
+          # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #
           # `key` is what says whether it changed: its derivation's hash,
@@ -1377,6 +1377,10 @@
                 (iphone "harken" "Harken" { })
                 (iphone "money" "Money" { test = true; })
               ];
+              # The desktop windows (`<name>-iced`), published nowhere yet but
+              # photographed beside the phones (app-screens.yaml), each built
+              # by nix at the commit.
+              desktop = map (name: { inherit name; package = "${name}-iced"; key = key self.packages.${pkgs.system}."${name}-iced"; }) [ "harken" "money" ];
             };
 
           # A laptop's cargo builds four crates at a time, not one a core:

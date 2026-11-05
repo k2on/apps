@@ -265,6 +265,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkui-shots"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "iced_test",
+ "image",
+ "serde_json",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2232,6 +2242,7 @@ dependencies = [
  "ark-auth",
  "ark-peer",
  "arkui",
+ "arkui-shots",
  "harken-domain",
  "harken-player",
  "harken-seed",
@@ -3548,6 +3559,7 @@ dependencies = [
  "ark-auth",
  "ark-peer",
  "arkui",
+ "arkui-shots",
  "iced",
  "iced_test",
  "money-domain",

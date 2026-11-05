@@ -2361,14 +2361,20 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::MONEY);
-    iced::application(App::boot, App::update, App::view)
+    let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((1200.0, 760.0))
         .font(arkui::hero::FIRA_SANS_BOLD)
         // A receipt's paper is monospace, and the system's may not draw.
-        .font(arkui::fonts::FIRA_MONO)
-        .run()
+        .font(arkui::fonts::FIRA_MONO);
+    // The screenshots' run (.github/screens/apps.md): this application, its
+    // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(shots) = arkui_shots::asked() {
+        shots.run(app);
+    }
+    app.run()
 }
 
 /// A group as the budget draws it: every line it sums, and the rows the

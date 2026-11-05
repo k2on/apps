@@ -107,6 +107,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "arkui-shots" = rec {
+      packageId = "arkui-shots";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-shots";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-domain" = rec {
       packageId = "harken-domain";
       build = internal.buildRustCrateWithFeatures {
@@ -1121,6 +1131,36 @@ rec {
             name = "iced_test";
             packageId = "iced_test";
             target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+        ];
+
+      };
+      "arkui-shots" = rec {
+        crateName = "arkui-shots";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-shots; };
+        libName = "arkui_shots";
+        dependencies = [
+          {
+            name = "iced";
+            packageId = "iced";
+            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
+          }
+          {
+            name = "iced_test";
+            packageId = "iced_test";
+          }
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "png" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
           }
         ];
 
@@ -7073,6 +7113,11 @@ rec {
             packageId = "arkui";
           }
           {
+            name = "arkui-shots";
+            packageId = "arkui-shots";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "harken-domain";
             packageId = "harken-domain";
           }
@@ -11121,6 +11166,11 @@ rec {
           {
             name = "arkui";
             packageId = "arkui";
+          }
+          {
+            name = "arkui-shots";
+            packageId = "arkui-shots";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
             name = "iced";

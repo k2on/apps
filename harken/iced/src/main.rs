@@ -3454,10 +3454,16 @@ pub fn main() -> iced::Result {
     // What this device does goes to its server (docs/plan-observe.md).
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
-    iced::application(App::boot, App::update, App::view)
+    let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))
-        .font(arkui::hero::FIRA_SANS_BOLD)
-        .run()
+        .font(arkui::hero::FIRA_SANS_BOLD);
+    // The screenshots' run (.github/screens/apps.md): this application, its
+    // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(shots) = arkui_shots::asked() {
+        shots.run(app);
+    }
+    app.run()
 }

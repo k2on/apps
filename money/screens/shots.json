@@ -1,5 +1,5 @@
 {
-  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
+  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken. `desktop` is the iced window's (rust/arkui-shots): its size, and its shots, each clicking what a text on the screen says. Its accounts are Checking's register, its transactions all accounts'.",
   "server": {
     "port": 8788,
     "user": "alex",
@@ -42,5 +42,46 @@
         }
       ]
     }
-  ]
+  ],
+  "desktop": {
+    "window": [
+      1440,
+      900
+    ],
+    "scale": 2,
+    "shots": [
+      {
+        "id": "budget",
+        "steps": [
+          {
+            "click": "Budget"
+          }
+        ]
+      },
+      {
+        "id": "accounts",
+        "steps": [
+          {
+            "click": "Checking"
+          }
+        ]
+      },
+      {
+        "id": "transactions",
+        "steps": [
+          {
+            "click": "All Accounts"
+          }
+        ]
+      },
+      {
+        "id": "insights",
+        "steps": [
+          {
+            "click": "Reflect"
+          }
+        ]
+      }
+    ]
+  }
 }
