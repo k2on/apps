@@ -40,7 +40,7 @@
           "where": "bottom"
         },
         {
-          "await": "Pause"
+          "await": "Pause|Close the player"
         },
         {
           "tap": "Für Elise",

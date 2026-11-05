@@ -105,8 +105,10 @@ final class Drive: XCTestCase {
                 if let done = step.unless, app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", done, done)).firstMatch.waitForExistence(timeout: 2) {
                     continue
                 }
+                // `a|b`: either will do.
                 if let label = step.waitFor {
-                    let there = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch
+                    let each = label.split(separator: "|").map(String.init)
+                    let there = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier IN %@", each, each)).firstMatch
                     XCTAssertTrue(there.waitForExistence(timeout: 20), "\(label) came, for \(shot.id)")
                 }
                 if let label = step.tap {

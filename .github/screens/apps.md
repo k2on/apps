@@ -45,12 +45,13 @@ All of it is in `<app>/screens/`:
   "<text>"}` types into what has focus; `{"wait": <seconds>}` waits.
   `"where": "bottom"` on a tap takes the lowest on the screen of all that
   match, and `"unless": "<label>"` skips a step when that label is on the
-  screen already; `{"await": "<label>"}` waits (up to 20 s) until it is.
+  screen already; `{"await": "<label>"}` waits (up to 20 s) until it is (`a|b`: either).
   harken's `player` shot is all three: the lowest "Für Elise"
   (the mini player, if one is playing; else Recently added's, which plays
-  it), then, once something plays ("Pause", the mini player's or the
-  player's), the mini player, unless the player is open already ("Close
-  the player" is its button).
+  it), then, once something plays ("Pause") or the player is open
+  ("Close the player", its button), the mini player, unless the player is
+  open already. A song left paused (the app is stopped between shots)
+  opens a player saying Play, not Pause.
 
   **Write steps from the accessibility tree, not by guessing.** Every shot
   is saved with the tree of the screen it was taken from, beside its
