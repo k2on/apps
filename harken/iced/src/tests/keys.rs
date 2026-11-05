@@ -20,42 +20,34 @@ fn album(name: &str) -> App {
     app
 }
 
-/// `k` from the first movement climbs to the work's heading, then the
-/// Play button and the orchestra in the header; `l` from a movement reaches
-/// the orchestra under it; `<Enter>` on the work's title opens the work.
-/// Falsified by giving the page only its main list (`layout` answering
-/// `Page::single`): `k` from the first movement goes nowhere.
+/// The keys walk the rows and the items, and not the names and buttons
+/// around them: from the first movement `k` and `l` go nowhere (the work's
+/// heading, the Play button and the orchestra under it are the pointer's),
+/// and `j` from the last movement reaches the people on the record, whose
+/// `<Enter>` opens their page. Falsified by `Mark::reachable` answering
+/// true for every mark: `k` climbed to the work's heading.
 #[test]
-fn every_link_on_an_album_is_a_key_away() {
+fn the_keys_walk_rows_and_items_not_links() {
     let mut app = album("The Four Seasons");
     let l = app.layout();
-    let work = l.cell(Mark::Work(0)).expect("the first concerto's title is a cell");
-    let composer = l.cell(Mark::Composer(0)).expect("…and its composer");
-    let play = l.cell(Mark::Play).expect("the Play button");
-    assert!(l.cell(Mark::Person(0)).is_some(), "the people on it");
+    assert!(l.cell(Mark::Work(0)).is_some(), "the concerto's title still opens it");
+    assert!(l.cell(Mark::Play).is_some(), "…and the Play button plays");
+    let face = l.cell(Mark::Person(0)).expect("the people on it");
 
     assert_eq!(app.at(Pane::Tracks), 0);
     press(&mut app, "k");
-    assert_eq!(app.at(Pane::Tracks), composer, "up from the first movement: its heading");
+    assert_eq!(app.at(Pane::Tracks), 0, "nothing above the first movement is walked onto");
     press(&mut app, "l");
-    assert_eq!(app.at(Pane::Tracks), work);
-    press(&mut app, "k");
-    assert_eq!(app.at(Pane::Tracks), play, "then the Play button");
+    assert_eq!(app.at(Pane::Tracks), 0, "nor who played it, beside it");
 
     press(&mut app, "G");
     assert_eq!(app.at(Pane::Tracks), app.peer.rows().len() - 1, "G is still the last movement");
-    press(&mut app, "g");
-    press(&mut app, "g");
-    press(&mut app, "l");
-    assert_eq!(Some(app.at(Pane::Tracks)), l.cell(Mark::Performer(0, 0)), "l reaches who played it");
-
-    let _ = app.update(Message::HoverAt(work));
-    app.keyed = None;
-    let _ = app.update(Message::HoverAt(work));
+    press(&mut app, "j");
+    assert_eq!(app.at(Pane::Tracks), face, "then the faces under the list");
     let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Enter), Modifiers::empty()));
     assert!(
-        matches!(app.peer.source, Source::Work(..)),
-        "<Enter> on the title opens the work: {:?}",
+        matches!(app.peer.source, Source::Artist(..)),
+        "<Enter> on a face opens them: {:?}",
         app.peer.source
     );
 }
@@ -103,4 +95,30 @@ fn a_featured_play_is_a_key_away() {
     let _ = app.update(Message::HoverAt(play));
     let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Enter), Modifiers::empty()));
     assert!(!app.queue.is_empty(), "<Enter> on the Play queues it");
+}
+
+/// A prefix half typed opens the which-key panel once its delay goes by,
+/// listing what follows it; finishing it closes the panel, and `zz` leaves
+/// the cursor on its row. `?` opens the panel for every key, and `<Esc>`
+/// closes it. Falsified by `?` still toggling the old keymap page: nothing
+/// was showing.
+#[test]
+fn a_prefix_shows_what_can_follow_it() {
+    let mut app = album("The Four Seasons");
+    press(&mut app, "j");
+    press(&mut app, "z");
+    assert_eq!(app.which.showing(), None, "not before the delay");
+    let key = app.which.waiting().expect("a timer for the panel");
+    let _ = app.update(Message::WhichDue(key));
+    assert_eq!(app.which.showing(), Some("z"));
+    let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS], "z");
+    assert!(entries.iter().any(|(k, what)| k == "z" && what.contains("middle")), "{entries:?}");
+    press(&mut app, "z");
+    assert_eq!(app.which.showing(), None, "zz done: gone");
+    assert_eq!(app.at(Pane::Tracks), 1, "the cursor stays on its row");
+
+    press(&mut app, "?");
+    assert_eq!(app.which.showing(), Some(""), "every key");
+    let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Escape), Modifiers::empty()));
+    assert_eq!(app.which.showing(), None);
 }

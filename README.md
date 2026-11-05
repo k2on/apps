@@ -3,6 +3,16 @@
 ArkDB — a local-first sync engine with one runtime, Rust, whose domain is
 a crate of plain Rust every peer links — and harken, the first app on it.
 
+## harken
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/k2on/apps/screens/apps/harken/hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/k2on/apps/screens/apps/harken/hero-light.png">
+  <img alt="Harken on a laptop, an Android phone and an iPhone" src="https://raw.githubusercontent.com/k2on/apps/screens/apps/harken/hero-light.png">
+</picture>
+
+## The repository
+
 - `rust/ark` — the kernel and the specification (`spec/README.md`
   indexes its modules): the value format (postcard by default, JSON as a
   feature; JSON is the human form) and memcomparable keys, the schema and
@@ -42,12 +52,22 @@ a crate of plain Rust every peer links — and harken, the first app on it.
 - `docs/plan-v5.md` — the design, how it landed and what it measures
   (Part 3); `docs/arkdb.md` is the history it superseded.
 
+## money
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/k2on/apps/screens/apps/money/hero-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/k2on/apps/screens/apps/money/hero-light.png">
+  <img alt="Money on a laptop, an Android phone and an iPhone" src="https://raw.githubusercontent.com/k2on/apps/screens/apps/money/hero-light.png">
+</picture>
+
 `money/` is a second app on ArkDB: a household's budget, YNAB's way —
 `domain/` (accounts, categories, the month, transactions, and the Plaid
 import ArkOS's `money-sync` did for Actual Budget, as a mutator) and
 `iced/`, a demo client on a seeded household with no server. Everyone a
 server's OpenID provider lets in shares one budget. `money/README.md`
 says what is built and what is not.
+
+## The rest
 
 Each app's demo data is its `seed/` (`money/seed`, `harken/seed`): a
 crate beside the app's own, not in it (`money-seed`, `harken-seed`), that
