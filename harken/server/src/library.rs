@@ -471,7 +471,7 @@ impl Prints {
             }
             Ok(())
         });
-        if let Some(e) = kept.err().map(|r| r).or(self.local.failure.clone()) {
+        if let Some(e) = kept.err().or(self.local.failure.clone()) {
             eprintln!("harken-server: library: cannot keep the prints: {e}");
         }
     }

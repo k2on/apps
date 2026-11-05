@@ -81,7 +81,7 @@ pub fn export(disk: &mut dyn Disk) -> io::Result<(Schema, Tables)> {
     if let Some(why) = read.failure {
         return Err(io::Error::other(why));
     }
-    let tables = ark::dynamic::tables(&read.store).map_err(|e| io::Error::other(e))?;
+    let tables = ark::dynamic::tables(&read.store).map_err(io::Error::other)?;
     Ok((schema, tables))
 }
 
@@ -93,7 +93,7 @@ pub fn import(disk: &mut dyn Disk, from: &Schema, schema: Arc<Schema>, tables: &
     if disk.get("kv")?.is_some() || disk.get("log")?.is_some_and(|l| !l.is_empty()) {
         return Err(io::Error::other("an import is into a disk that holds no rows"));
     }
-    let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(|e| io::Error::other(e))?;
+    let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(io::Error::other)?;
     let rows = ark::log::standing(store.snapshot_rows(), 0, Default::default());
     disk.record(&Record::Rows(rows).to_bytes())?;
     put_schema(disk, &schema)
