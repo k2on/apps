@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.platform.compositionContext
 import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
@@ -93,6 +94,7 @@ public fun reducedMotion(): Boolean = LocalReducedMotion.current ?: ReducedMotio
  * whose animations read that scale. Everything composed under it — a sheet's or a menu's window
  * too, which take their parent's recomposer — moves by it.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 public fun ComponentActivity.keepMotion() {
     val root = window.decorView.findViewById<ViewGroup>(android.R.id.content) ?: return
     val scale =
