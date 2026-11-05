@@ -4,7 +4,8 @@
 #
 #   published.sh android <dir> <app>...   each APK as the F-Droid repository
 #                                         offers it ($FDROID, its index's
-#                                         newest for the app's package), at
+#                                         newest for the package whose id
+#                                         ends in .<app>), at
 #                                         <dir>/apk-<app>/<app>.apk
 #
 # The iPhone's needs no such thing: nix builds it, or has it cached
@@ -19,7 +20,9 @@ case $phone in
   android)
     index=$(curl -fsSL --retry 3 "$FDROID/index-v1.json") || { echo "::error::no F-Droid index at $FDROID"; exit 1; }
     for a in "$@"; do
-      pkg=$(jq -r .android "$a/screens/shots.json")
+      # Every app's id is the flake's bundlePrefix and its name: the
+      # package whose id ends in .<app>.
+      pkg=$(jq -r --arg a "$a" '.packages | keys[] | select(endswith("." + $a))' <<< "$index" | head -1)
       name=$(jq -r --arg p "$pkg" '.packages[$p] // [] | max_by(.versionCode) | .apkName // empty' <<< "$index")
       if [ -z "$name" ]; then echo "::warning::F-Droid offers no $pkg; $a's Android shots are kept"; continue; fi
       mkdir -p "$dir/apk-$a"
