@@ -219,18 +219,21 @@ interface PickerActions {
  * beside and under it are their own targets.
  */
 @Composable
-fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions, onDone: (() -> Unit)? = null) {
+fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions, onDone: (() -> Unit)? = null, grabber: Boolean = false) {
     // Laid out as the iPhone's (Sheets.swift, `DevicesSheet`): its grabber, the title in the middle
     // and Done at its end, and the devices together in one rounded group, the cursor's tinted.
     // Scrolled, for a house of speakers taller than the screen; a sheet's place is not kept.
     Column(Modifier.fillMaxWidth().verticalScroll(rememberTransientScrollState()).padding(bottom = Space.l)) {
-        Box(
-            Modifier.padding(top = Space.s)
-                .align(Alignment.CenterHorizontally)
-                .size(36.dp, 5.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-        )
+        // Its own grabber only where nothing else draws one: the glass sheet the device chip grows
+        // into, not a bottom sheet, which has its own.
+        if (grabber)
+            Box(
+                Modifier.padding(top = Space.s)
+                    .align(Alignment.CenterHorizontally)
+                    .size(36.dp, 5.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
         Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Space.s)) {
             Text(
                 "Playing On",

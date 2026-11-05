@@ -511,7 +511,7 @@ private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modif
         held = menu?.held,
         collapsed = { DeviceFace(on, controls) },
     ) {
-        if (menu != null) DevicesSheet(menu.rows, menu.cursor, menu.actions, onDone = menu.close)
+        if (menu != null) DevicesSheet(menu.rows, menu.cursor, menu.actions, onDone = menu.close, grabber = true)
     }
 }
 
