@@ -363,10 +363,7 @@ impl Store {
     }
 
     fn find(&self, table: &str) -> Result<usize, String> {
-        self.schema
-            .table(table)
-            .map(|(i, _)| i)
-            .ok_or_else(|| format!("no table {table}"))
+        self.schema.table(table).map(|(i, _)| i).ok_or_else(|| format!("no table {table}"))
     }
 
     /// A table's rows in key order; none for a table the schema lacks.
@@ -525,10 +522,7 @@ impl Store {
         for r in &tab.refs {
             let Some(k) = p.named(tab, r.column)? else { continue };
             if !self.tables[self.find(&r.table)?].rows.contains_key(&k) {
-                return Err(format!(
-                    "{}.{}: no {} has this key",
-                    tab.name, tab.columns[r.column].name, r.table
-                ));
+                return Err(format!("{}.{}: no {} has this key", tab.name, tab.columns[r.column].name, r.table));
             }
         }
         Ok(())
