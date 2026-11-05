@@ -10,7 +10,7 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
            transactions.rs; plaid.rs, the bank import; receipts.rs and
            stores.rs, the stores' receipts; migrations.rs. The demo's
-           household is outside the app, in ../seed/money
+           household is beside the app, in seed/
 server/    money-server: the hub, sign-in, the browser client, and the
            bank importer (src/importer.rs, Plaid over src/plaid.rs);
            nix/module.nix is services.money

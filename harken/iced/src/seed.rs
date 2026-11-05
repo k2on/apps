@@ -1,5 +1,5 @@
 //! What an empty demo library starts with: the demo's library as
-//! `harken-seed` (`seed/harken`, outside the app) makes it — the classical
+//! `harken-seed` (`harken/seed`, beside the app, not in it) makes it — the classical
 //! catalogue and the shows, as the records of a peer alone — opened here as
 //! this window's replica.
 //!

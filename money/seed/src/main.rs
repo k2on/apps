@@ -3,7 +3,7 @@
 //! it boots on, so a phone signed in as `alex` under dev auth opens on a
 //! household three months deep: what the app screenshots run
 //! (.github/screens/apps.md). Refuses a directory that already has
-//! anything in it, as `harken-seed` does (`seed/README.md`).
+//! anything in it, as `harken-seed` does (`docs/seed.md`).
 //!
 //! ```text
 //! money-seed /tmp/money && MONEY_DEV_AUTH=1 MONEY_DATA=/tmp/money money-server 0.0.0.0:8788

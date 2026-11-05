@@ -70,7 +70,7 @@ All of it is in `<app>/screens/`:
   starts the app's server with dev auth and something in it, writes its pid
   to `<dir>/pid` and its log to `<dir>/server.log`, and returns. Each
   seeds a fresh data directory first with the app's seed, which lives
-  outside the app (`seed/README.md`): `nix build .#<app>-seed`, then
+  beside the app, not in it (`docs/seed.md`): `nix build .#<app>-seed`, then
   `<app>-seed <dir>/data`, then the server from `nix build .#<app>-server`
   on it. money's writes the demo household as the log the server boots on
   (`money-seed`); harken's writes the demo catalogue as a media root of

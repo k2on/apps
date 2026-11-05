@@ -54,7 +54,7 @@ on:
       - ".github/screens/**"
       - "*/screens/**"
       # What the servers are seeded with.
-      - "seed/**"
+      - "*/seed/**"
       - ".github/workflows/app-screens.yaml"
   workflow_dispatch:
 

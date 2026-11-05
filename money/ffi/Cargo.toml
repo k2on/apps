@@ -15,8 +15,8 @@ ark = { path = "../../rust/ark" }
 ark-ffi = { path = "../../rust/ark-ffi" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-domain = { path = "../domain", features = ["ffi"] }
-# The demo's household (`seed/money`), which `money_demo` opens on.
-money-seed = { path = "../../seed/money", default-features = false }
+# The demo's household (`money/seed`), which `money_demo` opens on.
+money-seed = { path = "../seed", default-features = false }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tract-onnx = { version = "0.22", optional = true }

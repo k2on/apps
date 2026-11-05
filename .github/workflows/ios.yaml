@@ -56,7 +56,7 @@ on:
       - "money/ffi/**"
       - "money/domain/**"
       # The demo's household, which money's library links for its demo.
-      - "seed/money/**"
+      - "money/seed/**"
       # The crates the phones link, not the whole workspace: arkui, arkdb
       # and the desktop apps are none of an iPhone's.
       - "rust/ark/**"

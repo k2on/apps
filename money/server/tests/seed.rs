@@ -1,5 +1,5 @@
 //! The demo's household seeded into a data directory (`money-seed`, in
-//! `seed/money`), the server started on it, and a phone signed in as the
+//! `money/seed`), the server started on it, and a phone signed in as the
 //! household's owner: what the app screenshots sign in to
 //! (.github/screens/apps.md). The phone gets every account the demo window
 //! has.

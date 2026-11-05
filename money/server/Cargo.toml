@@ -37,4 +37,4 @@ axum = "0.7"
 tempfile = "3"
 # The demo's household, seeded into a data directory as money-seed does it
 # (tests/seed.rs).
-money-seed = { path = "../../seed/money", default-features = false }
+money-seed = { path = "../seed", default-features = false }

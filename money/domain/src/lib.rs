@@ -10,7 +10,7 @@
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
-//! `money/ffi`). The demo's household is outside the app, in `seed/money`.
+//! `money/ffi`). The demo's household is beside the app, not in it: `money/seed`.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the

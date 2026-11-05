@@ -43,7 +43,6 @@ on:
     paths:
       - "harken/**"
       - "money/**"
-      - "seed/**"
       - "revelation/**"
       - "kotlin/**"
       - "rust/**"

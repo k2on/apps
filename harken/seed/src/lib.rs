@@ -2,7 +2,7 @@
 //! (github.com/k2on/classical), as `catalogue.json` beside this crate holds
 //! it — the copy `nix run .#update-catalogue` writes from the flake's
 //! `classical` input, and `checks.catalogue` holds to it — and the shows in
-//! `shows.json` beside it. It lives outside the app (`seed/README.md`): the
+//! `shows.json` beside it. It lives beside the app, not in it (`docs/seed.md`): the
 //! demo window (`harken/iced`'s `demo` feature) opens on [`seeded_disk`],
 //! and `harken-seed` (beside this file, [`media`]) writes the same albums
 //! as a folder of tagged files a server's scanner reads. The real client is

@@ -4,7 +4,7 @@
 //! `DATA` its data directory: its own scanner reads the files, so a phone
 //! signed in under dev auth opens on the demo's albums. What the app
 //! screenshots run (.github/screens/apps.md). Refuses a directory that
-//! already has anything in it, as `money-seed` does (`seed/README.md`).
+//! already has anything in it, as `money-seed` does (`docs/seed.md`).
 //!
 //! ```text
 //! harken-seed /tmp/harken && HARKEN_DEV_AUTH=1 HARKEN_DATA=/tmp/harken HARKEN_MEDIA=/tmp/harken/media harken-server 0.0.0.0:8787

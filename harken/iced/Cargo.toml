@@ -16,8 +16,8 @@ demo = ["dep:harken-seed"]
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
-# The demo's library (`seed/harken`), with the `demo` feature only.
-harken-seed = { path = "../../seed/harken", default-features = false, optional = true }
+# The demo's library (`harken/seed`), with the `demo` feature only.
+harken-seed = { path = "../seed", default-features = false, optional = true }
 # The one reconciler, the phones' and the speakers', over this window's player.
 harken-player = { path = "../player" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }

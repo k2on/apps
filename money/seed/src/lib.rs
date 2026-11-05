@@ -1,14 +1,14 @@
 //! The demo's household: three months of a family's money, up to today —
 //! what the demo window (`money/iced`), the phones' demo and previews
 //! (`money/ffi`, `money_demo`) and a seeded server (`money-seed`, beside
-//! this file) open on. It lives outside the app (`seed/README.md`), so the
+//! this file) open on. It lives beside the app, not in it (`docs/seed.md`), so the
 //! client and the server carry none of it unless they ask for it.
 //!
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
 //! the bank feeds through Plaid ([`Bank`]) — applied once each over one
 //! store and kept as the snapshot a peer alone opens on, which is what
-//! harken's demo does with its library (`seed/harken`). The dates are
+//! harken's demo does with its library (`harken/seed`). The dates are
 //! today's, so the month on screen is this one; the amounts are drawn from
 //! a fixed sequence, so every load is the same household.
 //!

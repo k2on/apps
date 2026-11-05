@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # harken's server for its screenshots (.github/screens/apps.md): the demo's
 # catalogue written as a media root of tagged files in a fresh data
-# directory (harken-seed, seed/harken), then harken-server on it with dev
+# directory (harken-seed, harken/seed), then harken-server on it with dev
 # auth, its own scanner reading them. Run from the repository's root;
 # leaves the server running.
 #

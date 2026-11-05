@@ -16,8 +16,8 @@ demo = []
 [dependencies]
 ark = { path = "../../rust/ark" }
 money-domain = { path = "../domain" }
-# The demo's household (`seed/money`), and the bank its "Sync" asks.
-money-seed = { path = "../../seed/money", default-features = false }
+# The demo's household (`money/seed`), and the bank its "Sync" asks.
+money-seed = { path = "../seed", default-features = false }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
