@@ -8,6 +8,17 @@
 import Foundation
 
 public enum Pictures {
+    /// What a face says without a picture: the first letters of the name's
+    /// first and last words, upper case — `Ada Lovelace` is `AL`, `Ada` is
+    /// `A`, `?` is nothing.
+    public static func initials(_ name: String) -> String {
+        func first(_ w: Substring) -> Character? { w.first { $0.isLetter || $0.isNumber } }
+        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { first($0) != nil }
+        guard let a = words.first.flatMap(first) else { return "" }
+        guard words.count > 1, let z = words.last.flatMap(first) else { return String(a).uppercased() }
+        return (String(a) + String(z)).uppercased()
+    }
+
     /// `user`'s picture on `server`, versioned by the login's `picture`; empty for none.
     public static func url(server: String, user: String, picture: String) -> String {
         if picture.isEmpty || server.isEmpty { return "" }

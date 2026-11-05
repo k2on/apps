@@ -45,6 +45,7 @@ import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
+import dev.arkui.Face
 import dev.arkui.TabTitle
 import dev.arkui.destinationKeepsAPlace
 import dev.arkui.quiet
@@ -112,7 +113,8 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
-            TabTitle("Home") { IconButton(onClick = act::settings) { Avatar(data.who, 32.dp, "Settings") } }
+            // The face where money's is: in the bar above the title, opening Settings.
+            TabTitle("Home", bar = { IconButton(onClick = act::settings) { Face(data.who.name, data.who.picture) } })
         }
         if (data.offline != null) item { Offline(data.offline) }
         when {

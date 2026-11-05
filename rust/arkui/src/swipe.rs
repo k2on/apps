@@ -28,6 +28,7 @@ use iced::time::{Duration, Instant};
 use iced::widget::{container, stack};
 use iced::{Alignment, Background, Element, Length, Padding};
 
+use crate::motion::{Slide, Spring};
 use crate::{glyphs, icon, theme};
 
 /// How far sideways, in pixels of the fingers' travel, a pull goes before
@@ -42,8 +43,12 @@ pub const LET_GO: Duration = Duration::from_millis(150);
 /// than the last one coasting.
 pub const QUIET: Duration = Duration::from_millis(300);
 
-/// How long the page takes to spring back.
-pub const BACK: Duration = Duration::from_millis(220);
+/// What the pull springs back on: critically damped and quick, from where
+/// it was drawn when the fingers lifted.
+pub const BACK: Spring = Spring {
+    damping: 1.0,
+    response: 0.22,
+};
 
 /// The furthest the pull is drawn, however far the fingers go: the rubber
 /// band's length, which the arrow slides in by half of.
@@ -58,9 +63,9 @@ enum State {
     Idle,
     /// The fingers are down: `x` is how far they have gone.
     Pulling { x: f32 },
-    /// Let go at `x`, springing back since `at`; what still arrives is the
-    /// gesture coasting.
-    Settling { x: f32, at: Instant },
+    /// Let go at `x`, springing back from where that was drawn; what still
+    /// arrives is the gesture coasting.
+    Settling { x: f32, back: Slide },
 }
 
 /// One gesture, from the first sideways motion to the page settling.
@@ -126,10 +131,13 @@ impl Swipe {
         match self.state {
             Pulling { x } if let_go => {
                 self.lifted = false;
-                self.state = Settling { x, at: now };
+                self.state = Settling {
+                    x,
+                    back: Slide::new(band(x), 0.0, now, BACK.or_instant()),
+                };
                 (self.armed_at(x)).then_some(Self::way(x))
             }
-            Settling { at, .. } if now.duration_since(at) > BACK && self.last.is_some_and(|t| now.duration_since(t) > QUIET) => {
+            Settling { back, .. } if !back.moving(now) && self.last.is_some_and(|t| now.duration_since(t) > QUIET) => {
                 self.state = Idle;
                 None
             }
@@ -175,11 +183,7 @@ impl Swipe {
             Idle => 0.0,
             Pulling { x } if x.abs() < 2.0 * self.y || !self.open(x) => 0.0,
             Pulling { x } => band(x),
-            Settling { x, at } => {
-                let t = (now.duration_since(at).as_secs_f32() / BACK.as_secs_f32()).min(1.0);
-                // Out of the way fast and then easing in, as a spring lets go.
-                band(x) * (1.0 - t).powi(3)
-            }
+            Settling { back, .. } => back.at(now),
         }
     }
 

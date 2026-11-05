@@ -505,40 +505,20 @@ struct Fetching: View {
     }
 }
 
-/// The account at the top right of every tab, as the browser has it: who,
-/// as their picture, whether the link is up, Settings, signing out. Nobody
-/// goes offline by hand: the phone does by itself when the server cannot be
-/// reached, and says so.
-struct AccountMenu: View {
+/// The account at the top left of every tab, as money has it: who is
+/// listening, as their face, opening Settings — who they are, whether the
+/// link is up, and the way out. Nobody goes offline by hand: the phone does
+/// by itself when the server cannot be reached, and says so.
+struct AccountButton: View {
     @EnvironmentObject private var model: Model
-    @Environment(\.open) private var open
 
     var body: some View {
-        Menu {
-            if let l = model.login {
-                Section(Logins.name(l) + (l.email.isEmpty ? "" : " · " + l.email)) {
-                    Text(linkWords)
-                }
-            }
-            Button { open(.settings) } label: { Label("Settings", systemImage: "gearshape") }
-            Divider()
-            Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
-        } label: {
-            Group {
-                if let l = model.login {
-                    Avatar(name: Logins.name(l), picture: Pictures.url(server: model.server, user: l.user, picture: l.picture), side: 32)
-                } else {
-                    Image(systemName: "person.crop.circle")
-                }
-            }
-            .accessibilityLabel("Account")
+        let who = model.login.map(Logins.name) ?? "?"
+        NavigationLink(value: Route.settings) {
+            Face(name: who, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "")
         }
-    }
-
-    private var linkWords: String {
-        guard let st = model.snapshot.status else { return "Opening…" }
-        if st.linked { return "Connected to \(Probe.display(model.server))" }
-        return "Can't reach \(Probe.display(model.server)) right now"
+        .accessibilityLabel("Signed in as \(who)")
+        .accessibilityHint("Account and settings")
     }
 }
 

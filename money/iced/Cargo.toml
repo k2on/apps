@@ -30,6 +30,9 @@ arkui = { path = "../../rust/arkui" }
 # the keys by.
 # `fira-sans` is the typeface, as harken's.
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
+# (.github/screens/apps.md): this same application, run headless.
+arkui-shots = { path = "../../rust/arkui-shots" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach, as harken's page.

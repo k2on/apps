@@ -3,29 +3,27 @@
 //! about a thing on it — a queue. A dialog takes the middle for something
 //! done; this takes the side for something looked down and rearranged.
 //!
-//! **It moves as shadcn/ui's sheet does**, without the blur: it slides in
-//! from beyond the window's edge over [`TIMING`]'s 500 ms and back out over
-//! its 300 ms, along Tailwind's `ease-in-out`, as the page dims and clears
-//! as a dialog's does ([`crate::dialog::DIMMING`]). Its width is theirs: three
+//! **It slides in from beyond the window's edge on a spring** ([`SPRING`]),
+//! and back out the way it came, as the page dims and clears with it as a
+//! dialog's does ([`crate::dialog::dimmed`]). Closed as it slides in, it
+//! slows, stops and goes back from where it was, not from all the way in
+//! ([`crate::motion`]); where the system asks for less motion it only
+//! fades, where it stands. Its width is shadcn/ui's sheet's: three
 //! quarters of the window, and never more than [`MAX_WIDTH`]. An app holds
 //! a [`Shown`] for it as for a dialog ([`crate::dialog`]). As a dialog is,
 //! it is opaque to the pointer: a click anywhere on it is its own, and only
 //! one on the dimmed page beside it closes it.
-use iced::time::{Duration, Instant};
+use iced::time::Instant;
 use iced::widget::{column, container, opaque, row, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Vector};
 
-use crate::motion::{self, Shown, Timing, EASE_IN_OUT};
+use crate::motion::{self, Shown, Spring};
 use crate::theme::of;
 
-/// How long it takes to slide in and out, and its curve: shadcn/ui's
-/// `data-[state=open]:duration-500`, `data-[state=closed]:duration-300`,
-/// on `ease-in-out`.
-pub const TIMING: Timing = Timing {
-    opening: Duration::from_millis(500),
-    closing: Duration::from_millis(300),
-    ease: EASE_IN_OUT,
-};
+/// What it slides on: critically damped, as a thing opened by a click and
+/// not flung is — Apple's drawer has a little bounce, for one dragged —
+/// and a little slower than a dialog, for the further it travels.
+pub const SPRING: Spring = Spring { damping: 1.0, response: 0.4 };
 
 /// The widest it gets: `sm:max-w-sm`, 24 rem.
 pub const MAX_WIDTH: f32 = 384.0;
@@ -42,10 +40,10 @@ pub const HEADER_ALONE: f32 = 24.0;
 
 /// A sheet coming into view at `now`.
 pub fn shown(now: Instant) -> Shown {
-    Shown::new(TIMING, now)
+    Shown::new(SPRING, now)
 }
 
-/// How far in it is at `now`, 0 to 1, along its curve.
+/// How far in it is at `now`, 0 to 1, on its spring.
 pub fn open(shown: &Shown, now: Instant) -> f32 {
     shown.at(now)
 }
@@ -104,8 +102,13 @@ pub fn view<'a, M: 'a>(
     // page, whose click closes. Inside the slide, so "over it" is where it
     // is drawn: half in, a click where it will be but is not yet closes it.
     let panel = opaque(panel);
+    // With less motion it stays where it ends and only fades, under a veil
+    // of the ground thinning as it opens.
     let drawn: Element<'a, M> = if open < 1.0 {
-        motion::transformed(panel, Vector::new(width * (1.0 - open), 0.0), 1.0, 0.0, 0.0)
+        match motion::reduced() {
+            true => motion::transformed(panel, Vector::ZERO, 1.0, 1.0 - open, 0.0),
+            false => motion::transformed(panel, Vector::new(width * (1.0 - open), 0.0), 1.0, 0.0, 0.0),
+        }
     } else {
         panel
     };
@@ -158,18 +161,22 @@ mod tests {
         assert_eq!(width(1600.0), MAX_WIDTH);
     }
 
-    /// In over half a second, out over less than a third; half way through
-    /// sliding in it is some 78% of the way, `ease-in-out` landing softly.
-    /// Falsified by the dialog's timing: at 300 ms it was all the way in.
+    /// It slides in a little slower than a dialog opens, and is in; closed
+    /// as it slides in, it turns back from where it was and is gone.
+    /// Falsified by the dialog's spring: at 120 ms it was as far in as a
+    /// dialog is open.
     #[test]
-    fn it_slides_in_slower_than_it_slides_out() {
+    fn it_slides_in_and_turns_back_from_where_it_is() {
+        let ms = std::time::Duration::from_millis;
         let at = Instant::now();
         let mut s = shown(at);
-        assert!((open(&s, at + TIMING.opening / 2) - 0.776).abs() < 0.01);
-        assert!(open(&s, at + Duration::from_millis(300)) < 1.0);
-        assert_eq!(open(&s, at + TIMING.opening), 1.0);
-        let out = at + TIMING.opening;
-        s.hide(out);
-        assert!(s.gone(out + TIMING.closing));
+        let dialog = crate::dialog::shown(at);
+        assert!(open(&s, at + ms(120)) < crate::dialog::open(&dialog, at + ms(120)));
+        assert_eq!(open(&s, at + ms(1000)), 1.0);
+        let part = open(&s, at + ms(100));
+        s.hide(at + ms(100));
+        assert!((open(&s, at + ms(100)) - part).abs() < 1e-3, "no jump");
+        assert!(!s.gone(at + ms(150)));
+        assert!(s.gone(at + ms(1500)));
     }
 }

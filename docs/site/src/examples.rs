@@ -301,8 +301,8 @@ pub fn notes(component: &str) -> &'static [&'static str] {
         ],
         "picker" => &["Off a menu, a picker is that menu's submenu, pinned beside its entry (layer::pinned); on its own it is centred over a dimmed page (layer::dimmed, layer::centred)."],
         "dialog" => &[
-            "A dialog fades in and grows from 95% over 200 ms as the page dims over 150 ms, and goes back the same way; a click on the dimmed page, its ×, or <Esc> closes it.",
-            "A sheet slides in from beyond the window's edge over 500 ms and out over 300 ms, on ease-in-out.",
+            "A dialog fades in and grows from 95% on a spring as the page dims a little ahead of it, and goes back the same way, from wherever it got to; a click on the dimmed page, its ×, or <Esc> closes it.",
+            "A sheet slides in from beyond the window's edge on a spring and back out the way it came; closed as it slides in, it turns back from where it is.",
         ],
         "command" => &["Ctrl+K opens it from anywhere; ↑ and ↓ walk what it found, ⏎ chooses, <Esc> or a click on the dimmed page closes it."],
         "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way over reorder::SLIDING."],

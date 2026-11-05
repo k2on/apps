@@ -76,7 +76,11 @@ fn mute_button<'a>(level: Level, muted: bool, lit: bool) -> Element<'a, Message>
         true => icon::line(glyph, true),
         false => icon::plain(glyph, !muted),
     };
-    button(drawn).style(button::text).padding(2).on_press(Message::Mute(level)).into()
+    button(drawn)
+        .style(style::quiet)
+        .padding(arkui::button::ICON_PADDING)
+        .on_press(Message::Mute(level))
+        .into()
 }
 
 /// A volume slider, 0 to 100, sending as it is dragged and once more when
@@ -146,14 +150,11 @@ impl App {
                 "sermon" => "Follow sermons",
                 _ => "Follow a podcast",
             };
-            let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
-                .style(style::quiet)
-                .padding(6)
-                .on_press(Message::Adding(false));
+            let close = arkui::button::icon(glyphs::CLOSE, Message::Adding(false));
             let height = (self.window.height - 2.0 * BAR_HEIGHT).max(240.0);
             layers = layers
                 .push(arkui::dialog::backdrop(Message::Adding(false), Message::Swallow, dim))
-                .push(arkui::dialog::view(title.into(), close.into(), self.view_adding(a), 560.0, height, open));
+                .push(arkui::dialog::view(title.into(), close, self.view_adding(a), 560.0, height, open));
         }
 
         if let Some(m) = &self.ctx.menu {
@@ -191,7 +192,7 @@ impl App {
         // out once closed. While a row of it is held, one layer over all
         // of it follows the pointer and hears it let go, wherever that is.
         if let Some(sheet) = self.queue_sheet.filter(|s| !s.gone(now)) {
-            let dim = sheet.at_pace(arkui::dialog::DIMMING, now);
+            let dim = arkui::dialog::dimmed(&sheet, now);
             layers = layers
                 .push(arkui::dialog::backdrop(Message::CloseQueue, Message::Swallow, dim))
                 .push(self.view_queue(self.queue_panel, arkui::sheet::open(&sheet, now)));
@@ -241,6 +242,13 @@ impl App {
                     messages,
                     open,
                 ));
+        }
+        // What the keys can do next, over everything, above the play bar.
+        if let Some(prefix) = self.which.showing() {
+            let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS], prefix);
+            if !entries.is_empty() {
+                layers = layers.push(arkui::which::view(prefix, &entries, crate::BAR_HEIGHT + 32.0));
+            }
         }
 
         // The window's root: the pointer heard over every layer, in the
@@ -373,12 +381,12 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
-            Source::Podcasts | Source::Sermons if !(self.help || self.debug) => self.view_shows(),
-            Source::Show(id, title) if !(self.help || self.debug) => self.view_show(id, title),
-            Source::Transcript if !(self.help || self.debug) => self.view_transcript(),
+            Source::Podcasts | Source::Sermons if !self.debug => self.view_shows(),
+            Source::Show(id, title) if !self.debug => self.view_show(id, title),
+            Source::Transcript if !self.debug => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
-            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
+            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.debug => {
                 padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
             Source::Album(id, name) => self.view_album(id, name),
@@ -423,7 +431,7 @@ impl App {
             library = library.push(text(said.clone()).size(12).style(style::faint(0.55)));
         }
         let page = column![
-            container(text("Settings").size(28).font(hero::BOLD)).padding(Padding {
+            container(arkui::line::title("Settings")).padding(Padding {
                 top: PAGE_PADDING,
                 bottom: 18.0,
                 ..Padding::ZERO
@@ -442,7 +450,7 @@ impl App {
         let l = self.layout();
         let title = if self.shows_kind() == "sermon" { "Sermons" } else { "Podcasts" };
         let add = self.ringed(&l, Mark::Add, icon::tinted(glyphs::PLUS, 16.0, |p| p.background.base.text).into(), false);
-        let bar = row![text(title).size(28).font(hero::BOLD), add].spacing(10).align_y(Alignment::Center);
+        let bar = row![arkui::line::title(title), add].spacing(10).align_y(Alignment::Center);
         let mut page = column![bar].spacing(18);
         for (k, s) in self.unread_feeds() {
             page = page.push(self.view_unread(&l, k, s));
@@ -527,12 +535,8 @@ impl App {
             .spacing(2)
             .width(Length::Fill);
             let action: Element<'_, Message> = match followed {
-                // On the cursor's fill, in the colour paired with it.
                 true => {
-                    let tick = match on {
-                        true => icon::tinted(glyphs::TICK, 13.0, |p| p.primary.base.text),
-                        false => icon::tinted(glyphs::TICK, 13.0, |p| p.background.base.text),
-                    };
+                    let tick = icon::tinted(glyphs::TICK, 13.0, |p| p.background.base.text);
                     row![tick, text("Following").size(12).style(tone(false))]
                         .spacing(5)
                         .align_y(Alignment::Center)
@@ -584,26 +588,13 @@ impl App {
         row![words, unfollow].spacing(12).align_y(Alignment::Center).into()
     }
 
-    /// A button that does what `mark`'s cell does, ringed under the cursor:
-    /// in the accent, as Play is, or plain. The button is pressed itself —
-    /// it takes the click, so a press around it would never hear one.
+    /// A button that does what `mark`'s cell does: in the accent, as Play
+    /// is, or plain, with no ring and no fill. The keys do not walk onto a
+    /// button (`Mark::reachable`); Tab and a click do.
     fn ringed<'a>(&self, l: &Layout, mark: Mark, body: Element<'a, Message>, accent: bool) -> Element<'a, Message> {
-        let on = self.on(l, mark);
-        let look = if accent { style::action } else { button::text };
-        let cell = l.cell(mark);
-        let go = cell.and_then(|c| l.message(c)).cloned();
-        let ring = container(button(body).style(look).padding([5, 12]).on_press_maybe(go))
-            .padding(2)
-            .style(move |t| container::Style {
-                border: iced::border::rounded(8.0)
-                    .width(if on { 2.0 } else { 0.0 })
-                    .color(arkui::theme::of(t).background.base.text),
-                ..container::Style::default()
-            });
-        match cell {
-            Some(cell) => mouse_area(ring).on_enter(Message::HoverAt(cell)).into(),
-            None => ring.into(),
-        }
+        let look = if accent { style::action } else { style::quiet };
+        let go = l.cell(mark).and_then(|c| l.message(c)).cloned();
+        button(body).style(look).padding([5, 0]).on_press_maybe(go).into()
     }
 
     /// How far everybody has got in an episode, the signed-in person first
@@ -678,32 +669,24 @@ impl App {
         l.cell(mark).is_some_and(|c| Some(c) == self.page_cursor())
     }
 
-    /// Something a click opens, drawn as `body`: the pointer over it is the
-    /// cursor on it, and a click (or `<Enter>` on it) does what its cell
-    /// does. Not on the page — nobody to open — and it is only `body`.
+    /// Something a click opens, drawn as `body`: a click (or `<Enter>` on
+    /// it) does what its cell does, and, where the keys reach it (an item,
+    /// `Mark::reachable`), the pointer over it is the cursor on it. Not on
+    /// the page — nobody to open — and it is only `body`.
     fn opens<'a>(&self, l: &Layout, mark: Mark, body: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
         match l.cell(mark).zip(l.cell(mark).and_then(|c| l.message(c)).cloned()) {
-            Some((cell, go)) => mouse_area(body).on_enter(Message::HoverAt(cell)).on_press(go).into(),
+            Some((cell, go)) if mark.reachable() => mouse_area(body).on_enter(Message::HoverAt(cell)).on_press(go).into(),
+            Some((_, go)) => mouse_area(body).on_press(go).interaction(iced::mouse::Interaction::Pointer).into(),
             None => body.into(),
         }
     }
 
-    /// A name a click opens, in `size` and `tone` — and, under the cursor,
-    /// filled as the cursor's row is, so it is seen wherever it is.
+    /// A name a click opens, in `size` and `tone`: underlined while it is
+    /// pointed at, its colour the same whatever the pointer does.
     fn name<'a>(&self, l: &Layout, mark: Mark, words: String, size: f32, tone: fn(&iced::Theme) -> text::Style) -> Element<'a, Message> {
-        let on = self.on(l, mark);
-        let body = container(text(words).size(size).wrapping(text::Wrapping::Word).style(move |t| match on {
-            true => text::Style {
-                color: Some(arkui::theme::of(t).primary.base.text),
-            },
-            false => tone(t),
-        }))
-        .padding([0, 2])
-        .style(move |t| match on {
-            true => style::row(t, true, true, false),
-            false => container::Style::default(),
-        });
-        self.opens(l, mark, body)
+        let body = text(words).size(size).wrapping(text::Wrapping::Word).style(tone);
+        let underlined = arkui::button::underlined(body, move |t| tone(t).color.unwrap_or(arkui::theme::of(t).background.base.text));
+        self.opens(l, mark, container(underlined).padding([0, 2]))
     }
 
     /// Names side by side, each its own link, comma between: who played it.
@@ -744,7 +727,7 @@ impl App {
     ) -> Element<'a, Message> {
         let mut words = column![].spacing(4).width(Length::Fill);
         if let Some(line) = over.filter(|o| !o.is_empty()) {
-            words = words.push(self.name(l, Mark::Over, line.to_uppercase(), 11.0, |t| style::faint(0.6)(t)));
+            words = words.push(self.name(l, Mark::Over, line, 11.0, |t| style::faint(0.6)(t)));
         }
         words = words.push(
             text(drawable(title).into_owned())
@@ -801,7 +784,7 @@ impl App {
     /// A Play, in the accent, that does what `mark`'s cell does — ringed
     /// under the cursor, as the button is already the accent.
     fn play_button<'a>(&self, l: &Layout, mark: Mark) -> Element<'a, Message> {
-        let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.text), text("Play").size(13),]
+        let play = row![icon::tinted(glyphs::PLAY, 12.0, |p| p.primary.base.color), text("Play").size(13),]
             .spacing(6)
             .align_y(Alignment::Center);
         self.ringed(l, mark, play.into(), true)
@@ -817,7 +800,7 @@ impl App {
         // filled behind it, so the colour paired with a fill would be dark
         // on dark.
         let mut words = column![
-            text(label.to_uppercase()).size(10).style(style::faint(0.5)),
+            text(label.to_string()).size(10).style(style::faint(0.5)),
             text(drawable(&title).into_owned())
                 .size(17)
                 .wrapping(text::Wrapping::Word)
@@ -877,7 +860,7 @@ impl App {
             let mut line = Row::new().spacing(0).align_y(Alignment::Center).push(match here {
                 true => Element::from(
                     button(playing(!sounding, on_cursor))
-                        .style(button::text)
+                        .style(style::quiet)
                         .padding([0, 8])
                         .on_press(Message::PlayPause),
                 ),
@@ -912,7 +895,7 @@ impl App {
                 .push(table::cell(self.length_of(item), TIME, on_cursor, false, true))
                 .push(
                     button(icon::more(on_cursor))
-                        .style(button::text)
+                        .style(style::quiet)
                         .padding([0, 6])
                         .on_press(Message::RowMenu(item.id, crate::Anchor::Dots)),
                 );
@@ -927,7 +910,7 @@ impl App {
             let d = &details[start];
             if headings && !d.work.is_empty() {
                 let ms: i64 = rows[start..end].iter().map(|i| i.duration_ms).sum();
-                let composer = self.name(l, Mark::Composer(start), d.composer.to_uppercase(), 10.0, |t| style::faint(0.5)(t));
+                let composer = self.name(l, Mark::Composer(start), d.composer.clone(), 10.0, |t| style::faint(0.5)(t));
                 let work = self.opens(
                     l,
                     Mark::Work(start),
@@ -976,7 +959,7 @@ impl App {
         if !label.is_empty() {
             foot = foot.push(
                 column![
-                    text("RECORD LABEL").size(10).style(style::faint(0.5)),
+                    text("Record label").size(10).style(style::faint(0.5)),
                     text(label.to_string()).size(13).style(style::accent)
                 ]
                 .spacing(2)
@@ -1067,7 +1050,7 @@ impl App {
         let l = self.layout();
         let rows = self.peer.rows();
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
-        let mut small = format!("PLAYLIST  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "track"));
+        let mut small = format!("Playlist  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "track"));
         if ms > 0 {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
         }
@@ -1085,7 +1068,7 @@ impl App {
         let show = self.peer.shows().iter().find(|s| s.id == id);
         let rows = self.peer.rows();
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
-        let kind = if id.starts_with("sermon/") { "SERMONS" } else { "PODCAST" };
+        let kind = if id.starts_with("sermon/") { "Sermons" } else { "Podcast" };
         let mut small = format!("{kind}  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "episode"));
         if ms > 0 {
             small.push_str(&format!("  \u{b7}  {}", spell(ms)));
@@ -1156,7 +1139,7 @@ impl App {
                 .filter(|s| !s.is_empty())
                 .collect();
             if !over.is_empty() {
-                words = words.push(text(over.join("  \u{b7}  ").to_uppercase()).size(11).style(tone(true)));
+                words = words.push(text(over.join("  \u{b7}  ")).size(11).style(tone(true)));
             }
             words = words.push(
                 text(drawable(&item.title).into_owned())
@@ -1202,31 +1185,10 @@ impl App {
                 true => (glyphs::PAUSE, Message::PlayPause),
                 false => (glyphs::PLAY, Message::PlayItem(item.id)),
             };
-            let pill = row![
-                match on {
-                    true => icon::tinted(glyph, 11.0, |p| p.primary.base.color),
-                    false => icon::tinted(glyph, 11.0, |p| p.primary.base.text),
-                },
-                text(left).size(12)
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center);
-            let pill = button(pill)
-                .padding([4, 12])
-                .style(move |t, s| match on {
-                    // On the accent's fill, the colours swapped round.
-                    true => button::Style {
-                        background: Some(iced::Background::Color(arkui::theme::of(t).primary.base.text)),
-                        text_color: arkui::theme::of(t).primary.base.color,
-                        border: iced::border::rounded(14.0),
-                        ..button::Style::default()
-                    },
-                    false => button::Style {
-                        border: iced::border::rounded(14.0),
-                        ..style::action(t, s)
-                    },
-                })
-                .on_press(press);
+            let pill = row![icon::tinted(glyph, 11.0, |p| p.primary.base.color), text(left).size(12)]
+                .spacing(6)
+                .align_y(Alignment::Center);
+            let pill = button(pill).padding([4, 0]).style(style::action).on_press(press);
             let mut foot = row![pill].spacing(12).align_y(Alignment::Center);
             // Where everybody else is in it, quietly.
             let others: Vec<String> = p
@@ -1238,7 +1200,7 @@ impl App {
             foot = foot.push(text(others.join("  \u{b7}  ")).size(12).style(tone(true)).width(Length::Fill));
             foot = foot.push(
                 button(icon::more(on))
-                    .style(button::text)
+                    .style(style::quiet)
                     .padding([0, 6])
                     .on_press(Message::RowMenu(item.id, crate::Anchor::Dots)),
             );
@@ -1335,7 +1297,7 @@ impl App {
         let said = self.cue_now();
         let focused = self.has_keys(Pane::Tracks);
         let cursor = self.page_cursor();
-        let mut head = column![text("TRANSCRIPT").size(11).style(style::faint(0.6))]
+        let mut head = column![text("Transcript").size(11).style(style::faint(0.6))]
             .spacing(4)
             .width(Length::Fill);
         let track = self.now().map(|n| n.track().clone());
@@ -1359,7 +1321,7 @@ impl App {
             under = under.push(linked(name.into(), show.map(|s| Source::Show(s.id.clone(), s.title.clone()))));
         }
         if l.cell(Mark::Follow).is_some() {
-            let follow = row![icon::tinted(glyphs::PLAYING, 12.0, |p| p.primary.base.text), text("Follow").size(13)]
+            let follow = row![icon::tinted(glyphs::PLAYING, 12.0, |p| p.primary.base.color), text("Follow").size(13)]
                 .spacing(6)
                 .align_y(Alignment::Center);
             under = under.push(self.ringed(&l, Mark::Follow, follow.into(), true));
@@ -1383,7 +1345,7 @@ impl App {
             // Whoever says it, over the first of their lines in a row.
             let before = i.checked_sub(1).map(|b| cues[b].speaker.as_str());
             if !c.speaker.is_empty() && before != Some(c.speaker.as_str()) {
-                let who = text(c.speaker.to_uppercase()).size(11).style(style::faint(0.55));
+                let who = text(c.speaker.clone()).size(11).style(style::faint(0.55));
                 // A voice told apart is named by a click on its name.
                 let who: Element<'_, Message> = match c.voice.is_empty() {
                     true => who.into(),
@@ -1404,7 +1366,6 @@ impl App {
             let ink = move |t: &iced::Theme| {
                 let palette = arkui::theme::of(t);
                 match (on, now, gone) {
-                    (true, ..) => palette.primary.base.text,
                     (_, true, _) => palette.primary.base.color,
                     (_, _, true) => palette.background.base.text.scale_alpha(0.4),
                     _ => palette.background.base.text.scale_alpha(0.85),
@@ -1549,7 +1510,7 @@ impl App {
                 let art_path = art.or(person.as_ref().map(|p| p.art.as_str())).unwrap_or_default();
                 let side = self.cover_side();
                 let picture = self.picture(name, art_path, side, side / 2.0);
-                page = page.push(self.view_cover(&l, name, picture, None, name, "", "", kind.to_uppercase()));
+                page = page.push(self.view_cover(&l, name, picture, None, name, "", "", kind.to_string()));
                 None
             }
         };
@@ -1650,9 +1611,9 @@ impl App {
         let work = p.works().iter().find(|w| w.id == id);
         let composer = work.map(|w| w.composer.clone()).unwrap_or_default();
         let mut head = column![].spacing(4).width(Length::Fill);
-        // Whose it is, in small capitals, the way back to them.
+        // Whose it is, in a quieter line, the way back to them.
         if !composer.is_empty() {
-            let crumb = format!("{}  \u{203A}", composer.to_uppercase());
+            let crumb = format!("{}  \u{203A}", composer);
             head = head.push(self.name(&l, Mark::Over, crumb, 12.0, |t| style::faint(0.6)(t)));
         }
         head = head.push(
@@ -1830,7 +1791,7 @@ impl App {
             let mut line = Row::new().spacing(0).align_y(Alignment::Center).push(match here {
                 true => Element::from(
                     button(playing(!sounding, on_cursor))
-                        .style(button::text)
+                        .style(style::quiet)
                         .padding([0, 8])
                         .on_press(Message::PlayPause),
                 ),
@@ -1870,7 +1831,7 @@ impl App {
                 // know a right click opens one.
                 .push(
                     button(icon::more(on_cursor))
-                        .style(button::text)
+                        .style(style::quiet)
                         .padding([0, 6])
                         .on_press(Message::RowMenu(item.id, crate::Anchor::Dots)),
                 );
@@ -1925,15 +1886,12 @@ impl App {
                     // page's name is (`docs/plan-db.md` D4).
                     // Cut rather than run on past the page, and the count
                     // after it keeps its room: the title gives way.
-                    Line::new(
-                        match (&p.source, &p.search) {
-                            (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
-                            _ => p.source.title().to_string(),
-                        },
-                        22.0,
-                        Cut::Middle,
-                        |theme| arkui::theme::of(theme).background.base.text,
-                    )
+                    // The page's title, as money's month is: one look for both.
+                    arkui::line::title(match (&p.source, &p.search) {
+                        (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
+                        _ => p.source.title().to_string(),
+                    })
+                    .cut(Cut::Middle)
                     .gives_way(),
                     text(format!("{} {}", p.rows().len(), plural(p.rows().len() as i64, "track")))
                         .size(12)
@@ -1942,11 +1900,6 @@ impl App {
                 .spacing(12)
                 .align_y(Alignment::Center),
             );
-        }
-        if self.help {
-            // The status line stays: which pane has the cursor is exactly what
-            // somebody reading the keymap is trying to work out.
-            return main.push(view_help()).push(self.view_status()).into();
         }
         if self.debug {
             return main.push(self.view_debug()).push(self.view_status()).into();
@@ -2002,16 +1955,16 @@ impl App {
     /// see as they type: the last thing worth saying, and what is half-typed
     /// — a count, a `g`, a search — and nothing at all when there is neither.
     /// Whether the status line has anything to say: a note, keys half
-    /// typed, or the debug view or the keymap, which keep it whole. When it
+    /// typed, or the debug view, which keeps it whole. When it
     /// has not, a page leaves it no room at all — not even the gap above it.
     fn says_status(&self) -> bool {
         let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
-        self.debug || self.help || !self.note.is_empty() || typing
+        self.debug || !self.note.is_empty() || typing
     }
 
     fn view_status(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        let whole = self.debug || self.help;
+        let whole = self.debug;
         if !self.says_status() {
             return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
         }
@@ -2290,7 +2243,7 @@ impl App {
                 .spacing(5)
                 .align_y(Alignment::Center),
             )
-            .style(button::text)
+            .style(style::quiet)
             .on_press(Message::OpenDevices)
             .into(),
         )
@@ -2300,7 +2253,7 @@ impl App {
     fn view_queue_button(&self) -> Element<'_, Message> {
         let open = self.queue_panel.is_some();
         button(icon::line(glyphs::PLAYLIST, open))
-            .style(button::text)
+            .style(style::quiet)
             .padding(2)
             .on_press(Message::OpenQueue)
             .into()
@@ -2454,12 +2407,12 @@ impl App {
             false => (glyphs::PREVIOUS, glyphs::NEXT),
         };
         let transport = row![
-            button(icon::plain(back, true)).style(button::text).padding(6).on_press(self.back()),
+            arkui::button::icon(back, self.back()),
             button(toggle)
-                .style(button::text)
-                .padding(6)
+                .style(style::quiet)
+                .padding(arkui::button::ICON_PADDING)
                 .on_press_maybe(workable.then_some(Message::PlayPause)),
-            button(icon::plain(forward, true)).style(button::text).padding(6).on_press(self.forward()),
+            arkui::button::icon(forward, self.forward()),
         ]
         .spacing(2)
         .align_y(Alignment::Center);
@@ -2528,7 +2481,12 @@ impl App {
                 true => icon::accent(glyphs::TRANSCRIPT, false),
                 false => icon::line(glyphs::TRANSCRIPT, false),
             };
-            line = line.push(button(glyph).style(button::text).padding(2).on_press(Message::Select(Source::Transcript)));
+            line = line.push(
+                button(glyph)
+                    .style(style::quiet)
+                    .padding(arkui::button::ICON_PADDING)
+                    .on_press(Message::Select(Source::Transcript)),
+            );
         }
         line = line.push(self.view_queue_button());
         if let Some(output) = self.view_output() {
@@ -2595,7 +2553,7 @@ impl App {
                     true => (glyphs::PLUS, Message::Join(device.id.clone())),
                     false => (glyphs::MINUS, Message::Unjoin(device.id.clone())),
                 };
-                controls = controls.push(button(icon::line(glyph, on_cursor)).style(button::text).padding(2).on_press(message));
+                controls = controls.push(arkui::button::icon(glyph, message));
             }
             if let Some(volume) = device.volume {
                 let level = device.level();
@@ -2708,57 +2666,14 @@ fn with_header<'a>(header: Element<'a, Message>, body: Element<'a, Message>) -> 
     column![header, body].spacing(0).width(Length::Fill).into()
 }
 
-/// The keymap: one that has to be read in the source is one nobody finds.
-fn view_help() -> Element<'static, Message> {
-    const KEYS: &[(&str, &str)] = &[
-        ("j  k", "down, up"),
-        ("h  l", "left, right \u{2014} out of a list, the next pane; in a menu, a submenu"),
-        ("{n}j", "a count: 5j is five down"),
-        ("gg  G", "first, last. 7G is the seventh"),
-        ("^d  ^u", "a page down, a page up"),
-        ("<Tab>", "swap between the sidebar and the page"),
-        ("<Enter>  o", "in the sidebar, step into it; on a card, open it; in the table, play"),
-        ("<Space>", "play or pause"),
-        ("m", "this track's menu"),
-        ("a", "which playlists this track is on \u{2014} and make one"),
-        ("d", "which device is making the sound, and move it; each one's volume"),
-        ("q", "the queue: <Enter> plays a row, x takes it out, J and K move it down and up"),
-        (
-            "t",
-            "the transcript of the episode playing: <Enter> plays from a line; f follows the line being said again",
-        ),
-        (
-            "+  -",
-            "the volume of what is playing \u{2014} the group's, when it is one; in the picker, the row's",
-        ),
-        ("M", "mute it, or unmute it"),
-        ("J", "in the picker: join this speaker to what is playing, or take it out"),
-        ("D", "every number the session holds, and where your changes stand"),
-        ("/", "search this pane; <Enter> accepts, <Esc> drops it"),
-        ("n  N", "the next match, the one before"),
-        ("{  }", "the previous track, the next one; an episode back 15s, on 30s"),
-        ("?", "this"),
-    ];
-    let rows = KEYS.iter().fold(column![].spacing(6), |col, (keys, what)| {
-        col.push(row![text(*keys).size(13).width(Length::Fixed(110.0)), text(*what).size(13).style(style::dim)].spacing(12))
-    });
-    container(column![text("keys").size(16), rows].spacing(12))
-        .padding(12)
-        .height(Length::Fill)
-        .into()
-}
-
 /// How far in an episode is, as a bar across its row: the accent over a
-/// faint track — on the cursor's accent fill, the colour paired with it.
-fn progress<'a>(share: f32, on: bool) -> Element<'a, Message> {
+/// faint track, the same on the cursor's row as off it.
+fn progress<'a>(share: f32, _on: bool) -> Element<'a, Message> {
     let done = (share.clamp(0.0, 1.0) * 1000.0).round() as u16;
     let bar = move |filled: bool| {
         container(Space::new()).height(Length::Fixed(4.0)).style(move |t: &iced::Theme| {
             let palette = arkui::theme::of(t);
-            let ink = match on {
-                true => palette.primary.base.text,
-                false => palette.primary.base.color,
-            };
+            let ink = palette.primary.base.color;
             container::Style {
                 background: Some(iced::Background::Color(match filled {
                     true => ink,

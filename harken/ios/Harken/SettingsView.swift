@@ -19,7 +19,7 @@ struct SettingsView: View {
             Section("Account") {
                 HStack(spacing: Space.l) {
                     let name = model.login.map(Logins.name) ?? ""
-                    Avatar(name: name, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "", side: 48)
+                    Face(name: name, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "", side: 48)
                     VStack(alignment: .leading) {
                         Text(name).font(.headline)
                         Text(model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "").foregroundStyle(.quiet)

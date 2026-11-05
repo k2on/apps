@@ -372,7 +372,7 @@ use arkui::vim::{Action, Motion};
 fn drawn(app: &App) -> Vec<String> {
     app.shown()
         .iter()
-        .flat_map(|s| std::iter::once(s.group.name.to_uppercase()).chain(s.rows.iter().map(|l| l.name.clone())))
+        .flat_map(|s| std::iter::once(s.group.name.clone()).chain(s.rows.iter().map(|l| l.name.clone())))
         .collect()
 }
 
@@ -725,6 +725,38 @@ fn the_keys_cross_into_the_sidebar_and_back() {
         iced::keyboard::Modifiers::default(),
     ));
     assert_eq!(app.pane, Pane::Page);
+}
+
+/// On the budget, `c` waits for the rest of `cc` or `cg`, and after the
+/// which-key delay the panel lists both from money's own table; `?` shows
+/// every key; `<Esc>` closes it. Falsified by leaving the budget's
+/// sequences out of `KEYS`: after `c` the panel listed nothing.
+#[test]
+fn a_prefix_shows_what_can_follow_it() {
+    let mut app = app();
+    let key = |app: &mut App, c: &str| {
+        let _ = app.update(Message::Key(
+            iced::keyboard::Key::Character(c.into()),
+            iced::keyboard::Modifiers::default(),
+        ));
+    };
+    key(&mut app, "c");
+    assert_eq!(app.which.showing(), None, "not before the delay");
+    let due = app.which.waiting().expect("a timer for the panel");
+    let _ = app.update(Message::WhichDue(due));
+    assert_eq!(app.which.showing(), Some("c"));
+    let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], "c");
+    let keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(keys, ["c", "g"], "cc and cg");
+    let top = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], "");
+    assert!(top.contains(&("c".to_string(), "+create".to_string())), "{top:?}");
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::default(),
+    ));
+    assert_eq!(app.which.showing(), None);
+    key(&mut app, "?");
+    assert_eq!(app.which.showing(), Some(""), "every key");
 }
 
 /// `^O` goes back where the window was, and `^I` forward again.

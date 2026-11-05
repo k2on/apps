@@ -45,6 +45,11 @@ pub(crate) fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a
     text(s.into()).size(size).font(arkui::hero::BOLD)
 }
 
+/// A page's title, as harken draws its own ([`arkui::line::title`]).
+pub(crate) fn page_title<'a>(s: impl Into<String>) -> Element<'a, Message> {
+    arkui::line::title(s).into()
+}
+
 pub(crate) fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).style(style::dim)
 }
@@ -71,12 +76,14 @@ pub(crate) fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
         .into()
 }
 
+/// Words in the accent that do something, underlined when pointed at.
 pub(crate) fn link<'a>(label: impl Into<String>, msg: Message) -> Element<'a, Message> {
-    button(text(label.into()).size(12)).on_press(msg).padding(0).style(look::link).into()
+    arkui::button::link(label, 12.0, msg)
 }
 
+/// The icon button both windows draw (`arkui::button::icon`).
 fn glyph_button<'a>(shape: &'static [u8], msg: Message) -> Element<'a, Message> {
-    button(icon::plain(shape, false)).on_press(msg).padding(4).style(style::quiet).into()
+    arkui::button::icon(shape, msg)
 }
 
 /// What an account is, drawn beside it in the sidebar.
@@ -90,16 +97,15 @@ fn glyph(a: &AccountLine) -> &'static [u8] {
     }
 }
 
-/// An amount as the sidebar shows one: red below nothing, and in the lit
-/// entry's own colour on it.
+/// An amount as the sidebar shows one: red below nothing, the same on the
+/// cursor's entry as off it.
 fn balance<'a>(cents: i64, lit: bool) -> Element<'a, Message> {
     text(money(cents))
         .size(12)
         .style(move |theme| text::Style {
-            color: Some(match (lit, cents < 0) {
-                (true, _) => style::entry_text(theme, true),
-                (false, true) => arkui::theme::of(theme).danger.base.color,
-                (false, false) => style::entry_text(theme, false).scale_alpha(0.75),
+            color: Some(match cents < 0 {
+                true => arkui::theme::of(theme).danger.base.color,
+                false => style::entry_text(theme, lit).scale_alpha(0.75),
             }),
         })
         .into()
@@ -115,6 +121,22 @@ impl App {
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
+        // What the last thing done came to, under the page — or what is
+        // half-typed: a count, a `c`, a `/search`. In the page's flow, as
+        // harken's status line is, not laid over it: over it, it was drawn
+        // across whatever the page had at its foot, an inspector's last
+        // section among them. Only while there is something to say, so a
+        // page with nothing to say has all the height.
+        let pending = self.keys.pending();
+        let note = if pending.is_empty() { self.note.clone() } else { pending };
+        let page: Element<'_, Message> = match note.is_empty() {
+            true => page,
+            false => column![
+                page,
+                container(dim(note, 11)).width(Length::Fill).padding([6, 14]).align_x(Alignment::End)
+            ]
+            .into(),
+        };
         // The sidebar is a surface, a step off the page's ground, with a
         // hairline where it meets the page, as harken's is.
         let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
@@ -133,29 +155,22 @@ impl App {
                     .on_scroll(|_| Message::Swallow),
             );
         }
-        // What the last thing done came to, in the page's corner — or what
-        // is half-typed: a count, a `c`, a `/search`.
-        let pending = self.keys.pending();
-        let note = if pending.is_empty() { self.note.clone() } else { pending };
-        if !note.is_empty() {
-            layers = layers.push(
-                container(dim(note, 11))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .padding([8, 14])
-                    .align_x(Alignment::End)
-                    .align_y(Alignment::End),
-            );
-        }
         // The account at the top right, over the page, as harken's: its menu
         // opens Settings and signs out.
         if let Some(account) = self.account() {
             layers = layers.push(
-                container(arkui::account::button(&account, None, Message::AccountMenu))
+                container(arkui::account::button(&account, self.account_picture(), Message::AccountMenu))
                     .width(Length::Fill)
                     .padding(PAD)
                     .align_x(Alignment::End),
             );
+        }
+        // What the keys can do next, at the bottom right, over the page.
+        if let Some(prefix) = self.which.showing() {
+            let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
+            if !entries.is_empty() {
+                layers = layers.push(arkui::which::view(prefix, &entries, 36.0));
+            }
         }
         if let Some(m) = &self.modal {
             layers = layers
@@ -278,21 +293,15 @@ impl App {
     }
 
     /// A count in a bubble: what needs looking at.
-    fn badge<'a>(&self, n: usize, lit: bool) -> Element<'a, Message> {
+    fn badge<'a>(&self, n: usize, _lit: bool) -> Element<'a, Message> {
         container(text(n.to_string()).size(10).style(move |theme| text::Style {
-            color: Some(match lit {
-                true => arkui::theme::of(theme).primary.base.color,
-                false => arkui::theme::of(theme).primary.base.text,
-            }),
+            color: Some(arkui::theme::of(theme).primary.base.text),
         }))
         .padding([1, 6])
         .style(move |theme| {
             let p = arkui::theme::of(theme);
             container::Style {
-                background: Some(iced::Background::Color(match lit {
-                    true => p.primary.base.text,
-                    false => p.primary.base.color,
-                })),
+                background: Some(iced::Background::Color(p.primary.base.color)),
                 border: iced::Border {
                     radius: 8.0.into(),
                     ..iced::Border::default()
@@ -310,7 +319,7 @@ impl App {
         let this = month_of(&self.today);
         let mut month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            bold(month_name(&self.peer.month), 22),
+            page_title(month_name(&self.peer.month)),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -373,11 +382,11 @@ impl App {
         let heading = |label: &str, width: f32| right(text(label.to_string()).size(11).style(style::faint(0.55)).into(), width);
         let header = container(
             row![
-                text("CATEGORY").size(11).style(style::faint(0.55)).width(Length::Fill),
-                heading("ASSIGNED", MONEY_COL),
-                heading("ACTIVITY", MONEY_COL),
+                text("Category").size(11).style(style::faint(0.55)).width(Length::Fill),
+                heading("Assigned", MONEY_COL),
+                heading("Activity", MONEY_COL),
                 Space::new().width(Length::Fixed(GOAL_COL)),
-                heading("AVAILABLE", PILL_COL),
+                heading("Available", PILL_COL),
             ]
             .align_y(Alignment::Center),
         )
@@ -918,9 +927,9 @@ impl App {
         // An account's name is renamed where it stands, as a category's is,
         // and so is a saved filter's.
         let title: Element<'_, Message> = match (ledger, account) {
-            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
-            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), bold(title, 22).into()),
-            _ => bold(title, 22).into(),
+            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), page_title(title)),
+            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), page_title(title)),
+            _ => page_title(title),
         };
         // What the conditions come to, beside the title: the bar under it is
         // as wide as its conditions, and the receipt's panel takes the rest.
@@ -975,15 +984,15 @@ impl App {
         let w = |n: f32| Length::Fixed(n);
         let mut head = row![].align_y(Alignment::Center);
         if all {
-            head = head.push(table::heading("ACCOUNT", w(130.0)));
+            head = head.push(table::heading("Account", w(130.0)));
         }
         head = head
-            .push(table::heading("DATE", w(96.0)))
-            .push(table::heading("PAYEE", Length::FillPortion(3)))
-            .push(table::heading("CATEGORY", Length::FillPortion(3)))
-            .push(table::heading("MEMO", Length::FillPortion(2)))
-            .push(table::heading("OUTFLOW", w(100.0)))
-            .push(table::heading("INFLOW", w(100.0)))
+            .push(table::heading("Date", w(96.0)))
+            .push(table::heading("Payee", Length::FillPortion(3)))
+            .push(table::heading("Category", Length::FillPortion(3)))
+            .push(table::heading("Memo", Length::FillPortion(2)))
+            .push(table::heading("Outflow", w(100.0)))
+            .push(table::heading("Inflow", w(100.0)))
             .push(table::heading("", w(116.0)));
 
         let mut body: Column<'_, Message> = Column::new();
@@ -1099,11 +1108,10 @@ impl App {
             Cleared::Cleared => (glyphs::TICKED, Some(false)),
             Cleared::Reconciled => (glyphs::TICK, None),
         };
-        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match (lit, t.cleared) {
-            (true, _) => p.primary.base.text,
-            (false, Cleared::Uncleared) => p.background.base.text.scale_alpha(0.35),
-            (false, Cleared::Cleared) => p.success.base.color,
-            (false, Cleared::Reconciled) => p.primary.base.color,
+        let mut cleared = button(icon::tinted(mark, icon::SIZE, move |p| match t.cleared {
+            Cleared::Uncleared => p.background.base.text.scale_alpha(0.35),
+            Cleared::Cleared => p.success.base.color,
+            Cleared::Reconciled => p.primary.base.color,
         }))
         .padding(2)
         .style(style::quiet);
@@ -1115,10 +1123,9 @@ impl App {
         if !t.receipt.is_empty() || t.photos > 0 {
             let read = !t.receipt.is_empty();
             end = end.push(
-                button(icon::tinted(glyphs::RECEIPT, icon::SIZE, move |p| match (lit, read) {
-                    (true, _) => p.primary.base.text,
-                    (false, true) => p.background.base.text.scale_alpha(0.7),
-                    (false, false) => p.background.base.text.scale_alpha(0.35),
+                button(icon::tinted(glyphs::RECEIPT, icon::SIZE, move |p| match read {
+                    true => p.background.base.text.scale_alpha(0.7),
+                    false => p.background.base.text.scale_alpha(0.35),
                 }))
                 .on_press(Message::EditTxn(t.id))
                 .padding(2)
@@ -1132,13 +1139,7 @@ impl App {
         mouse_area(
             table::row(line, on_cursor, focused, odd)
                 .center_y(Length::Fixed(TXN_ROW))
-                .style(move |theme| {
-                    let mut s = style::row(theme, on_cursor, focused, odd);
-                    if !t.approved && !on_cursor {
-                        s.background = Some(iced::Background::Color(arkui::theme::of(theme).primary.base.color.scale_alpha(0.08)));
-                    }
-                    s
-                }),
+                .style(move |theme| style::row(theme, on_cursor, focused, odd)),
         )
         .on_press(Message::TxnClick(t.id))
         .into()
@@ -1375,7 +1376,7 @@ impl App {
         }
         let month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            bold(format!("Spending in {}", month_name(&self.peer.month)), 22),
+            page_title(format!("Spending in {}", month_name(&self.peer.month))),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -1553,7 +1554,7 @@ impl App {
         c = c.push(bold(title, 16));
         if let (Choosing::Form, Some(f)) = (choosing, &self.form) {
             if f.editing.is_none() {
-                list = list.push(container(text("TRANSFER TO").size(10).style(style::faint(0.5))).padding([6, 10]));
+                list = list.push(container(text("Transfer to").size(10).style(style::faint(0.5))).padding([6, 10]));
                 for a in self.peer.accounts.rows.iter().filter(|a| !a.closed && Some(a.id) != f.account) {
                     list = list.push(option(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)));
                 }
@@ -1563,10 +1564,10 @@ impl App {
             Choosing::Move { .. } => Choice::Category(None),
             _ => Choice::Category(Some(ready_to_assign())),
         };
-        list = list.push(container(text("INFLOW").size(10).style(style::faint(0.5))).padding([6, 10]));
+        list = list.push(container(text("Inflow").size(10).style(style::faint(0.5))).padding([6, 10]));
         list = list.push(option("Ready to Assign".into(), Some(self.peer.summary().ready_to_assign), rta));
         for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
-            list = list.push(container(text(g.name.to_uppercase()).size(10).style(style::faint(0.5))).padding([6, 10]));
+            list = list.push(container(text(g.name.clone()).size(10).style(style::faint(0.5))).padding([6, 10]));
             for l in self
                 .peer
                 .lines
