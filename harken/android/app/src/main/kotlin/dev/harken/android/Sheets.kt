@@ -66,6 +66,8 @@ import dev.arkui.rememberTransientListState
 import dev.arkui.rememberTransientScrollState
 import kotlinx.coroutines.delay
 import uniffi.harken_domain.Playlist
+import dev.arkui.Feedback
+import dev.arkui.SensoryFeedback
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -143,6 +145,8 @@ fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggl
         item { SheetRow(Glyphs.Plus, "New Playlist", onNew, emphasis = true) }
         items(playlists, key = { it.id.hex }) { p ->
             val ticked = on?.contains(p.id) == true
+            // A tick as the row is ticked or unticked: the iPhone's selection feedback.
+            SensoryFeedback(Feedback.Selection, ticked)
             SheetRow(
                 if (ticked) Glyphs.Ticked else Glyphs.Untick,
                 p.name,
@@ -405,6 +409,8 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
 // followed, the tick.
 @Composable
 private fun FoundShow(s: Directory.Found, following: Boolean, onFollow: () -> Unit, modifier: Modifier = Modifier) {
+    // A success once the show is followed: when the library says so, not on the tap.
+    SensoryFeedback(Feedback.Success, following)
     Row(modifier.fillMaxWidth().padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
         Cover(s.title, s.art, 56.dp, Modifier.size(56.dp), corner = 6.dp)
         Spacer(Modifier.width(Space.m))

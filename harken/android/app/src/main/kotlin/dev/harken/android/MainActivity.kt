@@ -18,6 +18,7 @@ import dev.harken.android.onboarding.ArkApp
 import dev.harken.android.onboarding.Permission
 import dev.harken.android.onboarding.holdSplash
 import dev.arkui.Strict
+import dev.arkui.keepMotion
 
 /** Why harken asks for notifications, in the onboarding's words. */
 const val WHY_NOTIFY = "So what's playing, and its controls, can be in a notification and on the lock screen."
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
         // there, as in a test. A release says it once in the log and keeps working.
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) Strict.on = true
         enableEdgeToEdge()
+        // Compose on arkui's duration scale: "Remove animations" is the app's to interpret
+        // (`dev.arkui.ReducedMotion`), not a jump to every animation's end.
+        keepMotion()
         setContent {
             val identity =
                 AppIdentity(

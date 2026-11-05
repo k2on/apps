@@ -70,6 +70,8 @@ import dev.arkui.UnderStatusBar
 import dev.arkui.quiet
 import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
+import dev.arkui.pressable
+import dev.arkui.Press
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -698,7 +700,7 @@ fun EpisodeRow(
     val dated = facts(show, Episodes.dated(detail?.publishedMs ?: 0, now))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Column(Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight)) {
         Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs, top = Space.m), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f).padding(top = Space.xs)) {
                 if (dated.isNotEmpty()) Text(dated, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1, overflow = TextOverflow.Ellipsis)

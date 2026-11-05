@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arkui.ServerScreen
 import dev.arkui.SignInScreen
 import dev.arkui.holdSplashUntil
+import dev.arkui.keepMotion
 import dev.arkui.server.Probe
 
 class MainActivity : ComponentActivity() {
@@ -52,6 +53,9 @@ class MainActivity : ComponentActivity() {
             start.starter.code(it)
         }
         addOnNewIntentListener { i -> codeOf(i)?.let { start.starter.code(it) } }
+        // Compose on arkui's duration scale: "Remove animations" is the app's to interpret
+        // (`dev.arkui.ReducedMotion`), not a jump to every animation's end.
+        keepMotion()
         setContent {
             MoneyTheme {
                 Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {

@@ -11,7 +11,6 @@
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,6 +50,7 @@ import dev.arkui.TabTitle
 import dev.arkui.destinationKeepsAPlace
 import dev.arkui.quiet
 import dev.arkui.rememberDestinationListState
+import dev.arkui.pressable
 
 /**
  * What was played last, and the page it was started from, so Home can offer it back. `live` when it
@@ -190,7 +190,7 @@ private fun LastCard(last: LastPlayed, from: String, onResume: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page).clickable(onClick = onResume),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page).pressable(onClick = onResume),
     ) {
         Row(Modifier.padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
             Cover(last.track.album.ifEmpty { last.track.title }, last.track.art, 64.dp, Modifier.size(64.dp))

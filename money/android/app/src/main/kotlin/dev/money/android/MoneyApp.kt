@@ -19,9 +19,8 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -69,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -79,6 +79,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
 import dev.arkui.LargeTitles
+import dev.arkui.SensoryFeedback
+import dev.arkui.Springs
+import dev.arkui.reducedMotion
 import uniffi.money_domain.TxnLine
 
 /** The four tabs. */
@@ -112,6 +115,10 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var form by remember { mutableStateOf<TxnForm?>(null) }
     LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
+    // What the hand feels of a change the book has taken, on the frame it shows: the iPhone's
+    // `.sensoryFeedback` on the same events (`Book.felt`).
+    val felt by book.felt.collectAsStateWithLifecycle()
+    SensoryFeedback(felt.kind, felt.count)
     // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here.
     val context = LocalContext.current
     LaunchedEffect(book) {
@@ -138,6 +145,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val tab = Tab.entries.firstOrNull { it.route == route }
+    val reduced = reducedMotion()
 
     CompositionLocalProvider(LocalShell provides shell) {
         Scaffold(
@@ -170,10 +178,10 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 nav,
                 startDestination = Tab.Budget.route,
                 modifier = Modifier.padding(bottom = pad.calculateBottomPadding()),
-                enterTransition = { enter() },
-                exitTransition = { exit() },
-                popEnterTransition = { popEnter() },
-                popExitTransition = { popExit() },
+                enterTransition = { enter(reduced) },
+                exitTransition = { exit(reduced) },
+                popEnterTransition = { popEnter(reduced) },
+                popExitTransition = { popExit(reduced) },
             ) {
                 composable(Tab.Budget.route) { BudgetScreen(ledger) }
                 composable(Tab.Accounts.route) { AccountsScreen(ledger) }
@@ -207,24 +215,37 @@ private fun isTab(e: NavBackStackEntry): Boolean = Tab.entries.any { it.route ==
 
 // Between tabs, Material's fade through: the old page fades out quickly, the new one fades in
 // and grows the last few percent. Into a page and back out, the shared X axis: a short slide
-// with a fade, which the back gesture drives in reverse.
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.enter(): EnterTransition =
-    if (isTab(initialState) && isTab(targetState)) {
-        fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
-            scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.92f)
-    } else {
-        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } + fadeIn(tween(300))
+// with a fade, which the back gesture drives in reverse, along the same path it came in by.
+//
+// On arkui's springs rather than tweens (`Springs.kt`), critically damped — a tap moved the page,
+// nothing threw it — so a page started from wherever it is, as a navigation interrupted part-way
+// is, carries on from there instead of restarting a fixed curve. With motion reduced
+// (`reducedMotion`) nothing slides or grows: every change of page is a quick cross-fade.
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.enter(reduced: Boolean): EnterTransition =
+    when {
+        reduced -> fadeIn(Springs.fade())
+        isTab(initialState) && isTab(targetState) ->
+            fadeIn(Springs.size()) + scaleIn(Springs.size(), initialScale = 0.92f)
+        else -> slideInHorizontally(slide()) { it / 5 } + fadeIn(Springs.size())
     }
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.exit(): ExitTransition =
-    if (isTab(initialState) && isTab(targetState)) fadeOut(tween(90))
-    else slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 5 } + fadeOut(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.exit(reduced: Boolean): ExitTransition =
+    when {
+        reduced -> fadeOut(Springs.fade())
+        isTab(initialState) && isTab(targetState) -> fadeOut(Springs.fade())
+        else -> slideOutHorizontally(slide()) { -it / 5 } + fadeOut(Springs.size())
+    }
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(): EnterTransition =
-    slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 5 } + fadeIn(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(reduced: Boolean): EnterTransition =
+    if (reduced) fadeIn(Springs.fade())
+    else slideInHorizontally(slide()) { -it / 5 } + fadeIn(Springs.size())
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(): ExitTransition =
-    slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } + fadeOut(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(reduced: Boolean): ExitTransition =
+    if (reduced) fadeOut(Springs.fade())
+    else slideOutHorizontally(slide()) { it / 5 } + fadeOut(Springs.size())
+
+/** Where a page is, in pixels, on arkui's spring for a move. */
+private fun slide() = spring(Springs.MOVE, Springs.STIFFNESS, IntOffset.VisibilityThreshold)
 
 /** A new transaction: today, in `account` or the first open budget account, money going out. */
 fun newForm(l: Ledger, account: Id?): TxnForm =

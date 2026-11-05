@@ -6,7 +6,6 @@
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,6 +55,7 @@ import dev.arkui.rememberDestinationGridState
 import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
 import dev.arkui.rememberHero
+import dev.arkui.pressable
 
 /** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
 enum class LibraryTab(val title: String, val kind: String? = null) {
@@ -196,7 +196,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         }
         items(shows, key = { it.id }) { s ->
             val hero = rememberHero(Space.corner)
-            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {
+            Column(Modifier.pressable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {
                 Cover(s.title, s.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(s.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -253,7 +253,7 @@ private fun Albums(albums: List<Album>, act: Do) {
     ) {
         items(albums, key = { it.id }) { a ->
             val hero = rememberHero(Space.corner)
-            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.id)) })) {
+            Column(Modifier.pressable(onClick = hero.lifting { act.open(Page.ForAlbum(a.id)) })) {
                 Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
