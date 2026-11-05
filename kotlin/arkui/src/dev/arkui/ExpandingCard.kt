@@ -219,6 +219,11 @@ public data class ExpandingCardSpec(
     public val wide: Float = 0.25f,
     /** How dark what is under the card gets, expanded. */
     public val dim: Float = 0.4f,
+    /**
+     * The bar on glass (Glass.kt), as the iPhone's mini player is: a capsule, its ends half its
+     * height, in glass's fill, rather than a card of [corner] in the scheme's high container.
+     */
+    public val glass: Boolean = false,
     /** The collapsed face is gone by this much of the way up. */
     public val collapsedOut: Float = 0.2f,
     /** The expanded face starts to come in this far up. */
@@ -237,7 +242,7 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
     val barH = with(d) { spec.bar.sumOf { it.roundToPx() }.toFloat() }
     val thumb = with(d) { spec.thumb.roundToPx().toFloat() }
     val thumbInset = with(d) { spec.thumbInset.roundToPx().toFloat() }
-    val corner = with(d) { spec.corner.toPx() }
+    val corner = if (spec.glass) barH / 2f else with(d) { spec.corner.toPx() }
     val shadow = with(d) { spec.shadow.toPx() }
     val lift = with(d) { spec.lift.toPx() }
     val artSmall = with(d) { spec.thumbCorner.toPx() }
@@ -336,7 +341,7 @@ public fun ExpandingCard(
     }
 
     val scrim = MaterialTheme.colorScheme.scrim
-    val card = MaterialTheme.colorScheme.surfaceContainerHigh
+    val card = if (spec.glass) Glass.fill() else MaterialTheme.colorScheme.surfaceContainerHigh
     val ground = MaterialTheme.colorScheme.background
     // Where the expanded face leaves room for the piece: read as the card is placed, just after the
     // face.
