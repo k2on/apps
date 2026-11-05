@@ -1,12 +1,22 @@
-//! Motion that runs a while and stops: something shown and hidden with a
-//! move each way ([`Shown`]), the curves it moves along ([`Ease`]), and a
-//! widget that draws what it holds moved, scaled and veiled
-//! ([`transformed`]).
+//! Motion that runs a while and stops: a value on a spring ([`Slide`]),
+//! something shown and hidden on one ([`Shown`]), the spring itself
+//! ([`Spring`]), whether to move at all ([`reduced`]), and a widget that
+//! draws what it holds moved, scaled and veiled ([`transformed`]).
 //!
-//! **Nothing ticks at rest.** A [`Shown`] is a moment and a direction; how
-//! far along it is, is worked out from the time whenever it is drawn. So an
-//! app keeps a frame clock running while [`Shown::moving`] says so, draws
-//! each frame from [`Shown::at`], and drops what was hidden once
+//! **A move is a spring, not a curve over a time.** A curve has a length:
+//! sent back half way, it either finishes first or starts again from
+//! somewhere and jumps, and either way its speed breaks. A spring has only
+//! somewhere to be and how fast it is going, so sent somewhere else on its
+//! way it turns from where it is drawn at the speed it was drawn at — a
+//! sheet closed as it slides in slows, stops and goes back, and a row let
+//! go mid-drag carries on at the pointer's speed. It is set as Apple sets
+//! one ([`Spring`]): how much it is damped, and how quickly it gets there.
+//!
+//! **Nothing ticks at rest.** A [`Slide`] is where it set off from, how
+//! fast, toward where and when; where it is, is worked out from the time
+//! whenever it is drawn — a spring has a closed form, so no step is kept.
+//! So an app keeps a frame clock running while [`Shown::moving`] says so,
+//! draws each frame from [`Shown::at`], and drops what was hidden once
 //! [`Shown::gone`].
 //!
 //! **A fade is a veil.** iced draws each widget's colours as they are and
@@ -14,190 +24,145 @@
 //! whole. What it can do is lay over it the colour of what is behind it,
 //! less and less: over a page dimmed to its own ground, which is where a
 //! dialog or a sheet is, that looks the same as fading it.
+//!
+//! **Less motion is a fade.** Where the system asks for less motion
+//! ([`reduced`]), what slides or grows only fades, quickly, and a row out
+//! of the way of a drag is there at once: the change is still seen, but
+//! nothing travels across the screen.
+use std::sync::OnceLock;
+
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::advanced::{mouse, overlay, renderer, Clipboard, Shell};
 use iced::time::{Duration, Instant};
 use iced::{Border, Color, Element, Event, Length, Rectangle, Size, Transformation, Vector};
 
-/// A cubic Bézier curve from (0, 0) to (1, 1) through two control points, as
-/// CSS's `cubic-bezier(x1, y1, x2, y2)`: how far along a move is (y) at how
-/// far through its time (x).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Ease(pub f32, pub f32, pub f32, pub f32);
-
-/// CSS's `ease`: what Tailwind's `animate-in` and `animate-out` move along
-/// unless told otherwise, so what shadcn/ui's dialog does.
-pub const EASE: Ease = Ease(0.25, 0.1, 0.25, 1.0);
-
-/// Tailwind's `ease-in-out`: shadcn/ui's sheet.
-pub const EASE_IN_OUT: Ease = Ease(0.4, 0.0, 0.2, 1.0);
-
-impl Ease {
-    /// How far along at `t` of the way through, both 0 to 1.
-    pub fn at(self, t: f32) -> f32 {
-        let t = t.clamp(0.0, 1.0);
-        if t == 0.0 || t == 1.0 {
-            return t;
-        }
-        let Ease(x1, y1, x2, y2) = self;
-        // One coordinate of the curve at parameter `s`, from its two
-        // control points' own.
-        let curve = |a: f32, b: f32, s: f32| {
-            let r = 1.0 - s;
-            3.0 * r * r * s * a + 3.0 * r * s * s * b + s * s * s
-        };
-        // The parameter where the curve is `t` across: it only ever goes
-        // right, so halving the interval finds it.
-        let (mut lo, mut hi) = (0.0f32, 1.0f32);
-        for _ in 0..32 {
-            let mid = (lo + hi) / 2.0;
-            if curve(x1, x2, mid) < t {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        curve(y1, y2, (lo + hi) / 2.0)
-    }
-}
-
-/// How long showing takes, how long hiding does, and the curve both go
-/// along.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Timing {
-    pub opening: Duration,
-    pub closing: Duration,
-    pub ease: Ease,
-}
-
-/// Something shown, or being hidden, and from when: how far shown it is at
-/// a moment, 0 (not at all) to 1 (all the way).
+/// A spring as Apple's interface designers set one: how much it is damped
+/// and how quickly it responds, rather than a mass, a stiffness and a
+/// damping that each change both.
 ///
-/// Hidden part of the way through showing, it goes back from where it had
-/// got to, not from all the way; and so does a show part of the way through
-/// hiding.
+/// `damping` is the ratio to just enough to come to rest without going
+/// past: 1 settles as fast as it can and never overshoots, below it the
+/// value swings past and back. `response` is roughly how long it takes to
+/// get there, in seconds — the period it would swing at undamped. It is
+/// not a duration: a spring has none, and settles when it settles. Zero is
+/// no spring at all: there at once.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Shown {
-    timing: Timing,
-    shown: bool,
-    since: Instant,
-    from: f32,
+pub struct Spring {
+    pub damping: f32,
+    pub response: f32,
 }
 
-impl Shown {
-    /// Coming into view, from nothing, at `now`.
-    pub fn new(timing: Timing, now: Instant) -> Self {
-        Shown {
-            timing,
-            shown: true,
-            since: now,
-            from: 0.0,
+/// What most moves go on: critically damped, so it lands without a bounce,
+/// in about a third of a second — Apple's for moving a thing from one
+/// place to another.
+pub const SMOOTH: Spring = Spring {
+    damping: 1.0,
+    response: 0.35,
+};
+
+/// No spring: there at once.
+pub const INSTANT: Spring = Spring { damping: 1.0, response: 0.0 };
+
+/// What a move is, where the system asks for less motion: a fade quick
+/// enough to read as a cut softened, not as travel ([`reduced`]).
+pub const FADE: Spring = Spring {
+    damping: 1.0,
+    response: 0.15,
+};
+
+impl Spring {
+    /// How far from where it is going it is, and how fast it is going, `t`
+    /// seconds after it set off `x` from there at `v`: the spring's closed
+    /// form, critically damped, under- or over-.
+    pub fn state(self, x: f32, v: f32, t: f32) -> (f32, f32) {
+        if self.response <= 0.0 {
+            return (0.0, 0.0);
         }
-    }
-
-    /// Whether it is showing, or on its way out.
-    pub fn is_shown(&self) -> bool {
-        self.shown
-    }
-
-    /// How far through its time it is at `now`, by `timing` rather than
-    /// its own: what goes with it at another pace, as a dialog's dimming
-    /// does with the dialog.
-    pub fn through(&self, timing: Timing, now: Instant) -> f32 {
-        let elapsed = now.saturating_duration_since(self.since).as_secs_f32();
-        let of = |d: Duration| d.as_secs_f32().max(f32::EPSILON);
-        if self.shown {
-            (self.from + elapsed / of(timing.opening)).min(1.0)
+        let (x, v, t) = (x as f64, v as f64, t.max(0.0) as f64);
+        let w = std::f64::consts::TAU / self.response as f64;
+        let z = self.damping.max(0.0) as f64;
+        let (x, v) = if (z - 1.0).abs() < 1e-4 {
+            let e = (-w * t).exp();
+            let b = v + w * x;
+            ((x + b * t) * e, (v - w * t * b) * e)
+        } else if z < 1.0 {
+            let wd = w * (1.0 - z * z).sqrt();
+            let e = (-z * w * t).exp();
+            let b = (v + z * w * x) / wd;
+            let (sin, cos) = (wd * t).sin_cos();
+            let at = x * cos + b * sin;
+            (e * at, e * (-z * w * at + wd * (b * cos - x * sin)))
         } else {
-            (self.from - elapsed / of(timing.closing)).max(0.0)
+            let s = w * (z * z - 1.0).sqrt();
+            let (r1, r2) = (-z * w + s, -z * w - s);
+            let c2 = (v - r1 * x) / (r2 - r1);
+            let c1 = x - c2;
+            let (e1, e2) = ((r1 * t).exp(), (r2 * t).exp());
+            (c1 * e1 + c2 * e2, c1 * r1 * e1 + c2 * r2 * e2)
+        };
+        (x as f32, v as f32)
+    }
+
+    /// This spring, or [`INSTANT`] where the system asks for less motion: for
+    /// what travels and has no fade to become.
+    pub fn or_instant(self) -> Spring {
+        match reduced() {
+            true => INSTANT,
+            false => self,
         }
-    }
-
-    /// How far shown it is at `now`: through its time, along its curve.
-    pub fn at(&self, now: Instant) -> f32 {
-        self.timing.ease.at(self.through(self.timing, now))
-    }
-
-    /// How far shown, at `timing`'s pace and along its curve.
-    pub fn at_pace(&self, timing: Timing, now: Instant) -> f32 {
-        timing.ease.at(self.through(timing, now))
-    }
-
-    /// On its way out, from wherever it is at `now`.
-    pub fn hide(&mut self, now: Instant) {
-        if self.shown {
-            self.from = self.through(self.timing, now);
-            self.shown = false;
-            self.since = now;
-        }
-    }
-
-    /// Back into view, from wherever it is at `now`.
-    pub fn show(&mut self, now: Instant) {
-        if !self.shown {
-            self.from = self.through(self.timing, now);
-            self.shown = true;
-            self.since = now;
-        }
-    }
-
-    /// Whether it is still moving at `now`: a frame to draw yet. True for
-    /// [`LAST_FRAME`] past its end too, so the frame drawn at the end, not
-    /// the one just before it, is the last: an app runs its frame clock by
-    /// this, and a clock stopped a tick early leaves the move a frame short
-    /// of done on the screen until something else happens.
-    pub fn moving(&self, now: Instant) -> bool {
-        let t = self.through(self.timing, now.checked_sub(LAST_FRAME).unwrap_or(now));
-        if self.shown {
-            t < 1.0
-        } else {
-            t > 0.0
-        }
-    }
-
-    /// Whether it has been hidden all the way: what to stop drawing.
-    pub fn gone(&self, now: Instant) -> bool {
-        !self.shown && self.through(self.timing, now) <= 0.0
     }
 }
 
-/// How long past its end a move still counts as moving: a few frames, so
-/// that one is drawn at its end ([`Shown::moving`]).
-pub const LAST_FRAME: Duration = Duration::from_millis(50);
-
-/// A move from one place to another over a time, along a curve: where a
-/// row is on its way out of the way of one being dragged.
+/// A value on a spring: where it set off from and how fast, where it is
+/// going, and when. Sent somewhere else on its way ([`Slide::toward`]), it
+/// sets off again from where it is and as fast as it is going, so nothing
+/// jumps and nothing stops dead.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Slide {
-    from: f32,
+    /// How far from `to` it set off, and how fast.
+    off: f32,
+    speed: f32,
     to: f32,
     since: Instant,
-    taking: Duration,
-    ease: Ease,
+    spring: Spring,
+    /// How near its end, and how slow, is at rest.
+    rest: f32,
 }
+
+/// How near its end a slide in pixels is at rest: a tenth of a pixel.
+pub const REST: f32 = 0.1;
 
 impl Slide {
     /// At `at`, not moving.
     pub fn still(at: f32, now: Instant) -> Self {
+        Slide::new(at, at, now, INSTANT)
+    }
+
+    /// From `from` to `to`, from a standstill at `now`, on `spring`.
+    pub fn new(from: f32, to: f32, now: Instant, spring: Spring) -> Self {
         Slide {
-            from: at,
-            to: at,
+            off: from - to,
+            speed: 0.0,
+            to,
             since: now,
-            taking: Duration::ZERO,
-            ease: EASE,
+            spring,
+            rest: REST,
         }
     }
 
-    /// From `from` to `to`, starting `now`, taking `taking` along `ease`.
-    pub fn new(from: f32, to: f32, now: Instant, taking: Duration, ease: Ease) -> Self {
-        Slide {
-            from,
-            to,
-            since: now,
-            taking,
-            ease,
-        }
+    /// Setting off at `speed` a second rather than from a standstill: what a
+    /// drag let go hands on, so the slide carries on as the pointer went.
+    pub fn moving_at(mut self, speed: f32) -> Self {
+        self.speed = speed;
+        self
+    }
+
+    /// At rest within `rest` of its end rather than [`REST`]: for a value
+    /// that is not in pixels.
+    pub fn resting_within(mut self, rest: f32) -> Self {
+        self.rest = rest;
+        self
     }
 
     /// Where it is going.
@@ -205,27 +170,192 @@ impl Slide {
         self.to
     }
 
-    /// Where it is at `now`.
+    /// How far from its end, and how fast, at `now`.
+    fn state(&self, now: Instant) -> (f32, f32) {
+        self.spring
+            .state(self.off, self.speed, now.saturating_duration_since(self.since).as_secs_f32())
+    }
+
+    /// Whether it is at rest at `now`: near enough its end, and slow enough
+    /// to stay there, that it is drawn at its end.
+    fn at_rest(&self, now: Instant) -> bool {
+        let (x, v) = self.state(now);
+        x.abs() <= self.rest && v.abs() <= self.rest * 10.0
+    }
+
+    /// Where it is at `now`: exactly its end once at rest.
     pub fn at(&self, now: Instant) -> f32 {
-        if self.taking.is_zero() {
-            return self.to;
+        match self.at_rest(now) {
+            true => self.to,
+            false => self.to + self.state(now).0,
         }
-        let t = now.saturating_duration_since(self.since).as_secs_f32() / self.taking.as_secs_f32();
-        self.from + (self.to - self.from) * self.ease.at(t)
     }
 
-    /// Off to `to` from wherever it is at `now`, unless it is already going
-    /// there.
-    pub fn toward(&mut self, to: f32, now: Instant, taking: Duration, ease: Ease) {
+    /// How fast it is going at `now`, a second.
+    pub fn speed(&self, now: Instant) -> f32 {
+        match self.at_rest(now) {
+            true => 0.0,
+            false => self.state(now).1,
+        }
+    }
+
+    /// Off to `to` on `spring` from wherever it is at `now`, as fast as it
+    /// is going there, unless it is already going there.
+    pub fn toward(&mut self, to: f32, now: Instant, spring: Spring) {
         if self.to != to {
-            *self = Slide::new(self.at(now), to, now, taking, ease);
+            let (at, speed) = (self.at(now), self.speed(now));
+            *self = Slide::new(at, to, now, spring).moving_at(speed).resting_within(self.rest);
         }
     }
 
-    /// Whether it is still on its way at `now`, and for [`LAST_FRAME`] after.
+    /// Whether it is still on its way at `now`, and for [`LAST_FRAME`] after
+    /// it came to rest, so the frame drawn at rest, not the one just before
+    /// it, is the last: an app runs its frame clock by this, and a clock
+    /// stopped a tick early leaves the move a frame short of done on the
+    /// screen until something else happens.
     pub fn moving(&self, now: Instant) -> bool {
-        self.from != self.to && now.saturating_duration_since(self.since) < self.taking + LAST_FRAME
+        !self.at_rest(now.checked_sub(LAST_FRAME).unwrap_or(now))
     }
+}
+
+/// Something shown, or being hidden: how far shown it is at a moment, 0
+/// (not at all) to 1 (all the way), on a spring.
+///
+/// Hidden part of the way through showing, it turns back from where it had
+/// got to and as fast as it was going, not from all the way; and so does a
+/// show part of the way through hiding.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shown {
+    slide: Slide,
+}
+
+/// How near shown or hidden is all the way: a thousandth, under half a
+/// pixel of a sheet's slide.
+const SHOWN_REST: f32 = 1e-3;
+
+impl Shown {
+    /// Coming into view, from nothing, at `now`, on `spring` — or a quick
+    /// fade ([`FADE`]) where the system asks for less motion.
+    pub fn new(spring: Spring, now: Instant) -> Self {
+        let spring = match reduced() {
+            true => FADE,
+            false => spring,
+        };
+        Shown {
+            slide: Slide::new(0.0, 1.0, now, spring).resting_within(SHOWN_REST),
+        }
+    }
+
+    /// Whether it is showing, or on its way out.
+    pub fn is_shown(&self) -> bool {
+        self.slide.target() == 1.0
+    }
+
+    /// How far shown it is at `now`, 0 to 1: a spring that swings a little
+    /// past either end is drawn at that end.
+    pub fn at(&self, now: Instant) -> f32 {
+        self.slide.at(now).clamp(0.0, 1.0)
+    }
+
+    /// On its way out, from wherever it is at `now`.
+    pub fn hide(&mut self, now: Instant) {
+        let spring = self.slide.spring;
+        self.slide.toward(0.0, now, spring);
+    }
+
+    /// Back into view, from wherever it is at `now`.
+    pub fn show(&mut self, now: Instant) {
+        let spring = self.slide.spring;
+        self.slide.toward(1.0, now, spring);
+    }
+
+    /// Whether it is still moving at `now`: a frame to draw yet
+    /// ([`Slide::moving`]).
+    pub fn moving(&self, now: Instant) -> bool {
+        self.slide.moving(now)
+    }
+
+    /// Whether it has been hidden all the way: what to stop drawing.
+    pub fn gone(&self, now: Instant) -> bool {
+        !self.is_shown() && self.slide.at(now) <= 0.0
+    }
+}
+
+/// How long past coming to rest a move still counts as moving: a few
+/// frames, so that one is drawn at rest ([`Slide::moving`]).
+pub const LAST_FRAME: Duration = Duration::from_millis(50);
+
+/// Animate whatever the system says. While true, the system's asking for
+/// less motion is not listened to, and everything moves as it would
+/// without it; `ARK_REDUCE_MOTION` still is ([`reduced`]).
+///
+/// **On for now, on purpose.** The desktop these windows are made on asks
+/// for less motion, and its owner still wants to see the springs while they
+/// are being worked on. Once that is done this goes, or becomes false, and
+/// the system is listened to.
+pub const ALWAYS_ANIMATE: bool = true;
+
+/// Whether to keep motion down: what slides or grows fades instead, and a
+/// row out of the way is there at once.
+///
+/// Asked once, the first time anything wants it, and kept — an app asks
+/// at startup, so the system is not asked from inside a frame. In order:
+/// `ARK_REDUCE_MOTION` (`1` less motion, `0` all of it), then, unless
+/// [`ALWAYS_ANIMATE`], the system — GNOME's `enable-animations` on Linux,
+/// Accessibility's Reduce motion on macOS — and otherwise all of it. A
+/// system that cannot be asked (no `gsettings`, a browser) is all of it.
+pub fn reduced() -> bool {
+    static REDUCED: OnceLock<bool> = OnceLock::new();
+    *REDUCED.get_or_init(|| decide(std::env::var("ARK_REDUCE_MOTION").ok().as_deref(), ALWAYS_ANIMATE, system_reduced))
+}
+
+/// [`reduced`], from what `ARK_REDUCE_MOTION` says, whether to listen to
+/// the system, and the system — asked only if it is listened to.
+fn decide(env: Option<&str>, always: bool, system: impl FnOnce() -> Option<bool>) -> bool {
+    match env.map(str::trim) {
+        Some("1" | "true" | "yes") => return true,
+        Some("0" | "false" | "no") => return false,
+        _ => {}
+    }
+    !always && system().unwrap_or(false)
+}
+
+/// What a command prints, trimmed, if it ran and said it went well.
+#[cfg(all(not(target_arch = "wasm32"), any(target_os = "linux", target_os = "macos")))]
+fn ask(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Whether the system asks for less motion: GNOME's animations turned off.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
+fn system_reduced() -> Option<bool> {
+    match ask("gsettings", &["get", "org.gnome.desktop.interface", "enable-animations"])?.as_str() {
+        "false" => Some(true),
+        "true" => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether the system asks for less motion: Accessibility's Reduce motion.
+#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+fn system_reduced() -> Option<bool> {
+    match ask("defaults", &["read", "com.apple.universalaccess", "reduceMotion"])?.as_str() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// Nowhere else is asked.
+#[cfg(any(target_arch = "wasm32", not(any(target_os = "linux", target_os = "macos"))))]
+fn system_reduced() -> Option<bool> {
+    None
 }
 
 /// `content` drawn moved by `by`, scaled by `scale` about its middle, and
@@ -379,58 +509,103 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Transformed<'_, M> {
 mod tests {
     use super::*;
 
-    const T: Timing = Timing {
-        opening: Duration::from_millis(200),
-        closing: Duration::from_millis(100),
-        ease: EASE,
-    };
-
-    /// CSS's `ease` starts slow, passes the middle early and settles: at a
-    /// quarter of the time it is some 40% along, at half some 80%. Falsified
-    /// by a linear curve, or one solved for y where x was meant: at a
-    /// quarter it was a quarter, or past 60%.
-    #[test]
-    fn ease_is_css_ease() {
-        assert_eq!(EASE.at(0.0), 0.0);
-        assert_eq!(EASE.at(1.0), 1.0);
-        assert!((EASE.at(0.25) - 0.409).abs() < 0.01, "{}", EASE.at(0.25));
-        assert!((EASE.at(0.5) - 0.802).abs() < 0.01, "{}", EASE.at(0.5));
-        // Tailwind's ease-in-out is not symmetrical: it lands softly, some
-        // 78% of the way at half the time.
-        assert!((EASE_IN_OUT.at(0.5) - 0.776).abs() < 0.01);
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
     }
 
-    /// It shows over its opening, hides over its closing, and a hide halfway
-    /// through showing goes back from halfway, so it is gone in half the
-    /// closing. Falsified by a hide that began from all the way: it was
-    /// still there after half the closing.
+    /// Critically damped from a standstill, it never goes past its end and
+    /// is well on its way in a third of its response: some 63% by 120 ms of
+    /// 0.35 s. Falsified by a response read as a duration, or a stiffness
+    /// off by 2π: by 120 ms it was a fifth of the way, or all.
+    #[test]
+    fn a_critically_damped_spring_lands_without_a_bounce() {
+        let at = Instant::now();
+        let s = Slide::new(0.0, 100.0, at, SMOOTH);
+        assert_eq!(s.at(at), 0.0);
+        let mid = s.at(at + ms(120));
+        assert!((58.0..68.0).contains(&mid), "{mid}");
+        let mut last = 0.0;
+        for n in 0..100 {
+            let x = s.at(at + ms(n * 10));
+            assert!(x >= last && x <= 100.0, "{n}: {x} after {last}");
+            last = x;
+        }
+        assert_eq!(s.at(at + Duration::from_secs(1)), 100.0, "at rest, exactly there");
+        assert!(!s.moving(at + Duration::from_secs(1)));
+    }
+
+    /// Less damped, it swings past and comes back; more, it only creeps in.
+    /// Falsified by the underdamped form's sine and cosine swapped: it began
+    /// a long way off.
+    #[test]
+    fn a_looser_spring_swings_past() {
+        let at = Instant::now();
+        let loose = Spring { damping: 0.5, response: 0.3 };
+        let s = Slide::new(0.0, 100.0, at, loose);
+        assert!(s.at(at).abs() < 1e-3);
+        let most = (0..100).map(|n| s.at(at + ms(n * 5))).fold(0.0f32, f32::max);
+        assert!(most > 105.0, "{most}");
+        let stiff = Slide::new(0.0, 100.0, at, Spring { damping: 2.0, response: 0.3 });
+        assert!((0..100).all(|n| stiff.at(at + ms(n * 5)) <= 100.0));
+        assert!(stiff.at(at + ms(120)) < s.at(at + ms(120)));
+    }
+
+    /// Sent back on its way, it turns from where it is drawn and as fast as
+    /// it was going: no jump, and no speed thrown away — a moment later it
+    /// is still going the old way, slowing. Falsified by a re-target that
+    /// set off from a standstill: a moment later it had already turned.
+    #[test]
+    fn a_slide_turned_on_its_way_keeps_its_place_and_its_speed() {
+        let at = Instant::now();
+        let mut s = Slide::new(0.0, 100.0, at, SMOOTH);
+        let half = at + ms(60);
+        let (there, speed) = (s.at(half), s.speed(half));
+        assert!(speed > 0.0);
+        s.toward(0.0, half, SMOOTH);
+        assert!((s.at(half) - there).abs() < 1e-3, "no jump");
+        assert!((s.speed(half) - speed).abs() < 1e-2 * speed, "no break in its speed");
+        assert!(s.at(half + ms(10)) > there, "still going the old way, a moment on");
+        assert_eq!(s.at(half + Duration::from_secs(2)), 0.0);
+        assert!(!s.moving(half + Duration::from_secs(2)));
+    }
+
+    /// It shows, comes to rest, and hides; hidden part of the way through
+    /// showing it turns back from there, so it is gone sooner than one
+    /// hidden from all the way. Falsified by a hide that began from all the
+    /// way: it took as long to go as the other.
     #[test]
     fn a_hide_part_way_goes_back_from_where_it_got_to() {
         let at = Instant::now();
-        let mut s = Shown::new(T, at);
+        let s = Shown::new(SMOOTH, at);
         assert_eq!(s.at(at), 0.0);
-        assert!(s.moving(at + T.opening / 2));
-        assert_eq!(s.at(at + T.opening), 1.0);
-        assert!(s.moving(at + T.opening), "a frame drawn at its end");
-        assert!(!s.moving(at + T.opening + LAST_FRAME));
-        s.hide(at + T.opening / 2);
-        assert!(!s.is_shown());
-        assert!(!s.gone(at + T.opening / 2 + T.closing / 4));
-        assert!(s.gone(at + T.opening / 2 + T.closing / 2));
+        assert!(s.moving(at + ms(100)));
+        let open = at + Duration::from_secs(1);
+        assert_eq!(s.at(open), 1.0);
+        assert!(!s.moving(open + LAST_FRAME));
+        let mut whole = s;
+        whole.hide(open);
+        let mut part = Shown::new(SMOOTH, open);
+        part.hide(open + ms(60));
+        assert!(!part.is_shown());
+        assert!(part.at(open + ms(60)) < 1.0, "from where it got to");
+        let ends = |s: &Shown, from: Instant| (0..400u64).find(|&n| s.gone(from + ms(n * 5))).expect("gone");
+        assert!(ends(&part, open + ms(60)) < ends(&whole, open), "sooner gone from part of the way");
+        assert!(!part.gone(open + ms(80)));
+        assert!(part.gone(open + Duration::from_secs(2)));
+        assert!(!part.moving(open + Duration::from_secs(2)));
     }
 
-    /// A slide sent somewhere else on its way starts from where it is, so
-    /// nothing jumps. Falsified by one that restarted from where it began.
+    /// `ARK_REDUCE_MOTION` says first; then the system, only when listened
+    /// to — and not asked at all while [`ALWAYS_ANIMATE`] holds. Falsified
+    /// by the override turned on its head: the system's "less" was obeyed.
     #[test]
-    fn a_slide_turned_on_its_way_starts_from_where_it_is() {
-        let at = Instant::now();
-        let d = Duration::from_millis(100);
-        let mut s = Slide::new(0.0, 10.0, at, d, EASE_IN_OUT);
-        let half = at + d / 2;
-        let there = s.at(half);
-        s.toward(-10.0, half, d, EASE_IN_OUT);
-        assert!((s.at(half) - there).abs() < 1e-4);
-        assert_eq!(s.at(half + d), -10.0);
-        assert!(!s.moving(half + d + LAST_FRAME));
+    fn who_says_how_much_to_move() {
+        let unasked = || -> Option<bool> { panic!("the system was asked") };
+        assert!(decide(Some("1"), true, unasked));
+        assert!(!decide(Some("0"), false, || Some(true)));
+        assert!(!decide(None, true, unasked), "always animating, the system is not asked");
+        assert!(decide(None, false, || Some(true)));
+        assert!(!decide(None, false, || None), "a system that cannot be asked moves");
+        assert!(!decide(Some("maybe"), false, || Some(false)));
     }
 }

@@ -192,7 +192,7 @@ impl App {
         // out once closed. While a row of it is held, one layer over all
         // of it follows the pointer and hears it let go, wherever that is.
         if let Some(sheet) = self.queue_sheet.filter(|s| !s.gone(now)) {
-            let dim = sheet.at_pace(arkui::dialog::DIMMING, now);
+            let dim = arkui::dialog::dimmed(&sheet, now);
             layers = layers
                 .push(arkui::dialog::backdrop(Message::CloseQueue, Message::Swallow, dim))
                 .push(self.view_queue(self.queue_panel, arkui::sheet::open(&sheet, now)));

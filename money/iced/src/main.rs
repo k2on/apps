@@ -2437,6 +2437,8 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::MONEY);
+    // Whether to move, asked of the system now rather than in a frame.
+    arkui::motion::reduced();
     let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
