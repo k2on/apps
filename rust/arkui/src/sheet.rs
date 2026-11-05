@@ -15,7 +15,7 @@
 //! one on the dimmed page beside it closes it.
 use iced::time::Instant;
 use iced::widget::{column, container, opaque, row, text, Space};
-use iced::{Alignment, Background, Border, Element, Length, Vector};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Vector};
 
 use crate::motion::{self, Shown, Spring};
 use crate::theme::of;
@@ -29,7 +29,11 @@ pub const SPRING: Spring = Spring { damping: 1.0, response: 0.4 };
 pub const MAX_WIDTH: f32 = 384.0;
 
 /// Its padding, and the room between its header and its body: `p-4`,
-/// `gap-4`.
+/// `gap-4`. The padding is on the top and the sides only: the body runs
+/// down to the window's foot, so a list in it scrolls all the way down
+/// rather than stopping a padding short of the edge with its last row cut
+/// off there. A body that scrolls carries the padding under its last row
+/// itself, inside what scrolls, so that row can still be scrolled clear.
 pub const PADDING: f32 = 16.0;
 pub const GAP: f32 = 16.0;
 
@@ -57,7 +61,7 @@ pub fn width(window: f32) -> f32 {
 /// its title or not: what a list in it is given to scroll in.
 pub fn body_height(window: f32, described: bool) -> f32 {
     let header = if described { HEADER } else { HEADER_ALONE };
-    (window - 2.0 * PADDING - header - GAP).max(0.0)
+    (window - PADDING - header - GAP).max(0.0)
 }
 
 /// The sheet, `width` wide and the window's height at its right-hand edge:
@@ -81,7 +85,10 @@ pub fn view<'a, M: 'a>(
     let panel = container(column![head, body].spacing(GAP))
         .width(Length::Fixed(width))
         .height(Length::Fill)
-        .padding(PADDING)
+        .padding(Padding {
+            bottom: 0.0,
+            ..Padding::new(PADDING)
+        })
         .style(|theme| {
             let palette = of(theme);
             container::Style {

@@ -1904,6 +1904,13 @@ impl App {
         if self.debug {
             return main.push(self.view_debug()).push(self.view_status()).into();
         }
+        // Down to the play bar, with the gutter under the last row inside
+        // what scrolls, as `scrolled` has it: scrolled to the end, the last
+        // row stands clear of the bar rather than against it.
+        let rows = container(rows).padding(Padding {
+            bottom: GUTTER,
+            ..Padding::ZERO
+        });
         main.push(head)
             .push(rule::horizontal(1))
             .push(
@@ -2186,8 +2193,9 @@ impl App {
         let table = rows.into_iter().fold(column![].spacing(4), |col, (k, v)| {
             col.push(row![text(k).size(13).style(style::dim).width(Length::Fixed(260.0)), text(v).size(13)].spacing(12))
         });
-        container(scrollable(column![text("the session, in numbers").size(16), table].spacing(12)).style(style::bars))
-            .padding(12)
+        // The padding inside what scrolls, so its last line scrolls clear.
+        scrollable(column![text("the session, in numbers").size(16), table].spacing(12).padding(12))
+            .style(style::bars)
             .height(Length::Fill)
             .into()
     }
@@ -2300,6 +2308,12 @@ impl App {
             self.queue_settle.as_ref().map(|s| &s.settle),
             now,
         );
+        // Down to the window's foot, the sheet's padding under the last
+        // row inside what scrolls (`arkui::sheet::PADDING`).
+        let list = container(list).padding(Padding {
+            bottom: arkui::sheet::PADDING,
+            ..Padding::ZERO
+        });
         body = body.push(scrollable(list).id(QUEUE).style(style::bars).height(Length::Fill));
         let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
             .style(style::quiet)

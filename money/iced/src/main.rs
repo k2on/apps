@@ -1838,7 +1838,7 @@ impl App {
 
     /// How tall the register's list is on screen.
     fn register_view(&self) -> f32 {
-        (self.window.height - view::PAD * 2.0 - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+        (self.window.height - view::PAD - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
     }
 
     /// Scroll the register just far enough that row `i` is in sight.
@@ -1850,11 +1850,16 @@ impl App {
             0.0
         };
         let top = above + i as f32 * view::TXN_ROW;
+        // The last row is followed by the page's padding, inside what
+        // scrolls (`view::page_pad`): scrolled to it, the list goes to its
+        // end, so the row stands clear of the window's foot.
+        let last = i + 1 >= self.peer.register.rows.len();
+        let foot = if last { view::PAD } else { 0.0 };
         let seen = self.register_view();
         let y = if top < self.register_scroll {
             top
-        } else if top + view::TXN_ROW > self.register_scroll + seen {
-            top + view::TXN_ROW - seen
+        } else if top + view::TXN_ROW + foot > self.register_scroll + seen {
+            top + view::TXN_ROW + foot - seen
         } else {
             return Task::none();
         };

@@ -34,6 +34,18 @@ const SIDEBAR_SCROLL: &str = "sidebar";
 type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 pub const PAD: f32 = 18.0;
+
+/// A page's padding around a list that scrolls: on the top and the sides,
+/// and none under it, so the list runs down to the window's foot. With
+/// `PAD` under it too the list stopped short of the edge with its last
+/// visible row cut off mid-line over an empty strip; the padding under the
+/// last row is inside what scrolls instead, so that row scrolls clear.
+fn page_pad() -> Padding {
+    Padding {
+        bottom: 0.0,
+        ..Padding::new(PAD)
+    }
+}
 const MONEY_COL: f32 = 120.0;
 /// The goal's column, and the pill's.
 const GOAL_COL: f32 = 110.0;
@@ -463,15 +475,18 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(body)
-                    .id(look::BUDGET)
-                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars)
+                scrollable(container(body).padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::BUDGET)
+                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars)
             ],
         ]
         .spacing(12)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
 
         row![page, self.view_inspector()].into()
@@ -1021,15 +1036,18 @@ impl App {
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body)
-                    .id(look::REGISTER)
-                    .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars),
+                scrollable(body.padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::REGISTER)
+                .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars),
             ],
         ]
         .spacing(LEDGER_GAP)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
         // The selected transaction's receipt beside it, as the inspector is
         // beside the budget.
@@ -1391,11 +1409,13 @@ impl App {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
             tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
         }
-        column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
+        // All of it scrolls, its padding inside: a month of many categories
+        // is taller than the window, and was cut off at the foot.
+        let page = column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
             .spacing(16)
             .padding(PAD)
-            .width(Length::Fill)
-            .into()
+            .width(Length::Fill);
+        scrollable(page).height(Length::Fill).style(style::bars).into()
     }
 
     fn tile<'a>(&self, label: &str, cents: i64, tone: Tone) -> Element<'a, Message> {
