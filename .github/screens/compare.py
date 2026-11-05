@@ -5,7 +5,7 @@
 <main apps dir> is the `screens` branch's apps/ and <PR dir> the PR's
 images, both laid out <app>/<phone>/<theme>/<id>.png. A shot differs when
 more than a thousandth of its pixels are more than a few percent off
-(ImageMagick's `compare`, which must be on the PATH): enough that the
+(ImageMagick's `compare`, 6 or 7, which must be on the PATH: the flake's): enough that the
 clock or a cursor's blink is not a change and a moved label is. Prints the
 comment's Markdown: each shot that differs or is new, main's beside the
 PR's, and how many are the same. Images are linked at <main ref> (the
@@ -44,8 +44,11 @@ def differs(a, b):
         ["compare", "-metric", "AE", "-fuzz", "4%", a, b, "null:"],
         capture_output=True, text=True,
     )
+    # How many pixels are off: ImageMagick 7 says it in brackets, after the
+    # same scaled by its quantum ("6.5535e+06 (100)"); 6 said it alone.
+    said = r.stderr.split()
     try:
-        off = float(r.stderr.split()[0])
+        off = float(said[1].strip("()")) if len(said) > 1 and said[1].startswith("(") else float(said[0])
     except (IndexError, ValueError):
         return True  # not comparable: a different size, or unreadable
     size = subprocess.run(["identify", "-format", "%w %h", b], capture_output=True, text=True).stdout.split()
