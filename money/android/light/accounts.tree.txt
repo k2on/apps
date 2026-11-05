@@ -1,0 +1,43 @@
+    #content
+                    'Net worth' [text]
+                    '-$227,116.43' 'Net worth, -$227,116.43' [text]
+                    'In the budget' [text]
+                    '$21,033.57' [text]
+                    'Tracking' [text]
+                    '-$248,150.00' [text]
+                  'Budget accounts' [text]
+                  [button] pressable
+                    '$14,236.90' [text]
+                    'Checking' [text]
+                    'Checking' [text]
+                  [button] pressable
+                    '$6,900.00' [text]
+                    'Savings' [text]
+                    'Savings' [text]
+                  [button] pressable
+                    '$74.16' [text]
+                    'Cash' [text]
+                    'Cash' [text]
+                  [button] pressable
+                    '-$177.49' [text]
+                    'Chase Sapphire' [text]
+                    'Credit card · chase ••4417 · 3 to review' [text]
+                  'Tracking' [text]
+                  [button] pressable
+                    '-$312,450.00' [text]
+                    'Mortgage' [text]
+                    'Loan' [text]
+                  [button] pressable
+                    'A' 'Signed in as Alex' [text]
+                    [button]
+                  'Accounts' [text]
+                [button] pressable
+                  'Add a transaction'
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
