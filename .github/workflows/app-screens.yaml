@@ -204,11 +204,20 @@ jobs:
           arch: x86_64
           profile: pixel_7
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          script: RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
       - name: The servers' logs
         if: always()
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
+
+      # The screen after each step of each shot: what to read when a shot
+      # is not what its steps say.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-steps
+          path: ${{ runner.temp }}/steps
+          if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()

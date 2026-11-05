@@ -151,12 +151,21 @@ for theme in light dark; do
     id=$(jq -r .id <<< "$shot")
     echo "$app android $theme $id"
     open_app
+    # What the screen was after each step, for the run's results (not the
+    # shots): where a shot went other than it was written to.
+    steps="${RESULTS:-$out/../steps}/$app/$theme/$id"
+    mkdir -p "$steps"
+    n=0
     while read -r s; do
+      [ -n "$s" ] || continue
+      n=$((n + 1))
       # A step that fails fails the capture (as the iPhone's test does):
       # under `set -e`, a failure inside `a && b` would be passed over.
-      if [ -n "$s" ]; then step "$s" || { echo "::error::$app android $theme $id: step $s failed"; exit 1; }; fi
+      step "$s" || { echo "::error::$app android $theme $id: step $s failed"; dump | python3 -I "$here/ui.py" --tree > "$steps/$n-failed.txt" || true; exit 1; }
+      { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done < <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
+    { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
     adb exec-out screencap -p > "$out/$theme/$id.png"
     dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
   done 3< <(jq -c '.shots[]' "$shots")
