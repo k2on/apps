@@ -171,6 +171,12 @@ jobs:
         app: ${{ fromJSON(needs.which.outputs.android-json) }}
     name: android (${{ matrix.app }})
     runs-on: ubuntu-latest
+    # One of each app's at a time on a branch: a newer commit's (or the
+    # same commit's again, from another event: on main both a script
+    # change and build) takes over from the one going.
+    concurrency:
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      cancel-in-progress: true
     timeout-minutes: 90
     env:
       APPS: ${{ matrix.app }}
@@ -284,6 +290,12 @@ jobs:
         app: ${{ fromJSON(needs.which.outputs.ios-json) }}
     name: ios (${{ matrix.app }})
     runs-on: macos-15
+    # As Android's: one of each app's at a time on a branch. On main a push
+    # that moves the scripts and starts ios would otherwise take the
+    # iPhone's shots twice, a macOS runner each.
+    concurrency:
+      group: app-screens-ios-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      cancel-in-progress: true
     timeout-minutes: 120
     # It builds the commit's code, one step of it outside nix's sandbox
     # (flake.nix, `iosSimulator`): it can read and nothing more, and only
