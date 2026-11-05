@@ -14,7 +14,7 @@
 # "role" ("tab", "button", "field", "text") to prefer when several say
 # it, "where": "bottom" for the lowest of them on the screen, and "unless":
 # "<label>" to skip the step when that is on the screen already (what it
-# opens is open); {"await": "<label>"} waits for that label to be there; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# opens is open); {"await": "<label>"} waits for that label to be there (`a|b`, either); {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 set -euo pipefail
@@ -60,9 +60,14 @@ step() {
   done=$(jq -r '.unless // ""' <<< "$s")
   if [ -n "$done" ] && says "$done"; then return 0; fi
   if jq -e 'has("await")' <<< "$s" > /dev/null; then
-    local label i
+    local label i one
     label=$(jq -r '.await' <<< "$s")
-    for i in $(seq 1 20); do says "$label" && return 0; sleep 1; done
+    # `a|b`: either will do.
+    for i in $(seq 1 20); do
+      IFS='|' read -ra each <<< "$label"
+      for one in "${each[@]}"; do says "$one" && return 0; done
+      sleep 1
+    done
     echo "::error::$app: '$label' never came"; return 1
   elif jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
   elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
