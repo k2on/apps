@@ -1665,7 +1665,9 @@ impl App {
         let now = iced::time::Instant::now();
         match drag.drop(&self.sizes(), now) {
             outline::Dropped::Click(grab) => {
-                let double = self.last_click.is_some_and(|(g, at)| g == grab && now.duration_since(at) < DOUBLE_CLICK);
+                let double = self
+                    .last_click
+                    .is_some_and(|(g, at)| g == grab && now.duration_since(at) < arkui::button::DOUBLE_CLICK);
                 self.last_click = (!double).then_some((grab, now));
                 if let Grab::Row(n) = grab {
                     self.anchor = None;
@@ -2420,7 +2422,7 @@ impl App {
             || self.settle.is_some_and(|s| s.moving(now))
             || self.compact.moving(now)
         {
-            subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
+            subs.push(arkui::motion::Clock::Frames.ticks().map(|()| Message::Frame));
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.
@@ -2588,9 +2590,6 @@ fn money_keys() -> vim::Keys {
     keys.set_bindings(&MONEY_KEYS);
     keys
 }
-
-/// How soon a second click is a double click: AppKit's default.
-const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How wide the category dropdown is.
 pub const DROP_WIDTH: f32 = 340.0;

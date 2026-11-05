@@ -251,10 +251,16 @@ pub fn hairline(theme: &Theme) -> rule::Style {
 pub fn page(theme: &Theme) -> container::Style {
     let palette = of(theme);
     container::Style {
-        background: Some(Background::Color(palette.background.base.color)),
+        background: Some(Background::Color(page_color(theme))),
         text_color: Some(palette.background.base.text),
         ..container::Style::default()
     }
+}
+
+/// The colour of a [`page`]'s ground: what a scroll edge over the page
+/// lays down ([`crate::edge`]).
+pub fn page_color(theme: &Theme) -> Color {
+    of(theme).background.base.color
 }
 
 /// How far a [`surface`] steps from the page toward the text colour.

@@ -32,6 +32,13 @@ use crate::{art, glyphs, icon, panel};
 /// holding it is given this height, and the menu hangs from its bottom.
 pub const HEIGHT: f32 = 28.0;
 
+/// The band at the window's top the face floats in, when it stands
+/// `padding` down: what a page scrolling under it goes soft beneath
+/// ([`crate::edge`]) and where its small header comes ([`crate::compact`]).
+pub fn band(padding: f32) -> f32 {
+    padding + HEIGHT
+}
+
 /// Who is signed in, as the app knows them: the name they gave, and the id
 /// the server knows them by — either may be empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

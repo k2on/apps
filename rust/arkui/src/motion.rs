@@ -37,6 +37,8 @@ use iced::advanced::{mouse, overlay, renderer, Clipboard, Shell};
 use iced::time::{Duration, Instant};
 use iced::{Border, Color, Element, Event, Length, Rectangle, Size, Transformation, Vector};
 
+use crate::motion_tokens as tokens;
+
 /// A spring as Apple's interface designers set one: how much it is damped
 /// and how quickly it responds, rather than a mass, a stiffness and a
 /// damping that each change both.
@@ -53,22 +55,57 @@ pub struct Spring {
     pub response: f32,
 }
 
-/// What most moves go on: critically damped, so it lands without a bounce,
-/// in about a third of a second — Apple's for moving a thing from one
-/// place to another.
+/// What most moves go on: a page, a dialog, a sheet, a row out of a
+/// drag's way, the small header. Critically damped ([`tokens::MOVE`]), so
+/// it lands without a bounce, at the one response every toolkit here moves
+/// at ([`tokens::RESPONSE`], the phones' 700 stiffness: about 0.24 s) —
+/// written once, in `arkui/theme.toml`'s `[motion]`.
 pub const SMOOTH: Spring = Spring {
-    damping: 1.0,
-    response: 0.35,
+    damping: tokens::MOVE,
+    response: tokens::RESPONSE,
 };
+
+/// What a thing thrown settles on: the same response, a little under
+/// critically damped ([`tokens::MOMENTUM`]), so one let go at speed swings
+/// a hair past and comes back as a thing thrown does. Only ever chosen by
+/// [`released`], never for a move a tap or the app made.
+pub const THROWN: Spring = Spring {
+    damping: tokens::MOMENTUM,
+    response: tokens::RESPONSE,
+};
+
+/// How large a thing is and how much of it shows — a scale, a dim, a
+/// veil: never past its size ([`tokens::SIZE`]).
+pub const SIZE: Spring = Spring {
+    damping: tokens::SIZE,
+    response: tokens::RESPONSE,
+};
+
+/// What a release settles on, set off at `speed` (pixels a second): one
+/// at least a flick's speed ([`tokens::FLICK`]) was thrown, and spends
+/// its momentum ([`THROWN`]); slower, it was put down ([`SMOOTH`]). The
+/// phones' `Springs.settle` and `Springs.released`.
+pub fn released(speed: f32) -> Spring {
+    match speed.abs() >= tokens::FLICK {
+        true => THROWN,
+        false => SMOOTH,
+    }
+}
+
+/// The longest a settle may run, whatever a release handed it
+/// ([`tokens::CAP_MS`]): a critically damped one is at rest first, so this
+/// bounds only a release the tuning did not see.
+pub const CAP: Duration = Duration::from_millis(tokens::CAP_MS);
 
 /// No spring: there at once.
 pub const INSTANT: Spring = Spring { damping: 1.0, response: 0.0 };
 
-/// What a move is, where the system asks for less motion: a fade quick
-/// enough to read as a cut softened, not as travel ([`reduced`]).
+/// A fade, a hover, and what a move is where the system asks for less
+/// motion: quick enough to read as a cut softened, not as travel
+/// ([`reduced`], [`tokens::FADE_RESPONSE`], about 150 ms to rest).
 pub const FADE: Spring = Spring {
-    damping: 1.0,
-    response: 0.15,
+    damping: tokens::SIZE,
+    response: tokens::FADE_RESPONSE,
 };
 
 impl Spring {
@@ -130,8 +167,8 @@ pub struct Slide {
     rest: f32,
 }
 
-/// How near its end a slide in pixels is at rest: a tenth of a pixel.
-pub const REST: f32 = 0.1;
+/// How near its end a slide in pixels is at rest ([`tokens::REST_PX`]).
+pub const REST: f32 = tokens::REST_PX;
 
 impl Slide {
     /// At `at`, not moving.
@@ -229,9 +266,9 @@ pub struct Shown {
     slide: Slide,
 }
 
-/// How near shown or hidden is all the way: a thousandth, under half a
-/// pixel of a sheet's slide.
-const SHOWN_REST: f32 = 1e-3;
+/// How near shown or hidden is all the way ([`tokens::REST`]): well under
+/// a pixel of a sheet's slide.
+const SHOWN_REST: f32 = tokens::REST;
 
 impl Shown {
     /// Coming into view, from nothing, at `now`, on `spring` — or a quick
@@ -263,6 +300,14 @@ impl Shown {
         self.slide.toward(0.0, now, spring);
     }
 
+    /// Where it is going, at once: what a key opened or closed is there or
+    /// gone on the frame the key went down (docs/motion.md, the frequency
+    /// rule). Its spring is kept, for a later show or hide by the pointer.
+    pub fn snap(&mut self, now: Instant) {
+        let to = self.slide.target();
+        self.slide = Slide::new(to, to, now, self.slide.spring).resting_within(self.slide.rest);
+    }
+
     /// Back into view, from wherever it is at `now`.
     pub fn show(&mut self, now: Instant) {
         let spring = self.slide.spring;
@@ -278,6 +323,29 @@ impl Shown {
     /// Whether it has been hidden all the way: what to stop drawing.
     pub fn gone(&self, now: Instant) -> bool {
         !self.is_shown() && self.slide.at(now) <= 0.0
+    }
+}
+
+/// What wakes a window that has something to draw by itself: the
+/// display's frames while something moves ([`Clock::Frames`]) — never a
+/// wall-clock timer, which drifts against a 60 Hz display and caps a 120
+/// Hz one — or, for what only needs a nudge now and then (a scrubber, a
+/// dwell), a timer at that period. A window at rest has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clock {
+    /// Every frame the compositor draws (`iced::window::frames`).
+    Frames,
+    /// A timer, this often.
+    Every(Duration),
+}
+
+impl Clock {
+    /// Its ticks, as a subscription saying nothing but that it ticked.
+    pub fn ticks(self) -> iced::Subscription<()> {
+        match self {
+            Clock::Frames => iced::window::frames().map(|_| ()),
+            Clock::Every(every) => iced::time::every(every).map(|_| ()),
+        }
     }
 }
 
@@ -514,15 +582,15 @@ mod tests {
     }
 
     /// Critically damped from a standstill, it never goes past its end and
-    /// is well on its way in a third of its response: some 63% by 120 ms of
-    /// 0.35 s. Falsified by a response read as a duration, or a stiffness
-    /// off by 2π: by 120 ms it was a fifth of the way, or all.
+    /// is well on its way in a third of its response: some 62% by 80 ms of
+    /// the shared 0.24 s. Falsified by a response read as a duration, or a
+    /// stiffness off by 2π: by 80 ms it was a fifth of the way, or all.
     #[test]
     fn a_critically_damped_spring_lands_without_a_bounce() {
         let at = Instant::now();
         let s = Slide::new(0.0, 100.0, at, SMOOTH);
         assert_eq!(s.at(at), 0.0);
-        let mid = s.at(at + ms(120));
+        let mid = s.at(at + ms(80));
         assert!((58.0..68.0).contains(&mid), "{mid}");
         let mut last = 0.0;
         for n in 0..100 {

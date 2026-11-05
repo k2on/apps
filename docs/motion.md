@@ -94,13 +94,13 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 
 | Concept | Compose (`dev.arkui`) | SwiftUI (`ArkUI`, `ArkUICore`) | iced (`arkui::motion` and friends) |
 |---|---|---|---|
-| Stiffness / response | `Springs.STIFFNESS` 700 (unit mass) | `Springs.stiffness` 700, `Springs.response` = 2π/√700 ≈ 0.2375 s | per module: `SMOOTH` 0.35 s, `dialog::SPRING` 0.3, `sheet::SPRING` 0.4, `reorder::SLIDING` 0.3, `swipe::BACK` 0.22 |
-| A move, nothing threw it | `Springs.MOVE` 1.0, `Springs.move()` | `Springs.move` (damping 1) | `SMOOTH` (damping 1.0) |
-| A move a flick threw | `Springs.MOMENTUM` 0.8, chosen by `Springs.settle(velocity, density, reduced)` | `Springs.momentum` 0.8, chosen by `Springs.released(velocity:from:to:)` | `reorder::SETTLING` 0.85 |
-| What counts as a flick | `Springs.FLICK` 500 dp/s, `Springs.isFlick` | `Springs.thrown` 500 pt/s | `reorder` hands on speed unless held still for 60 ms |
-| A size, clip or dim | `Springs.SIZE` 1.0, `Springs.size()` | `Springs.size` | — (scale and veil ride a `Shown`) |
-| Something going, quickly | `Springs.fade()`, `FADE_STIFFNESS` 2500 (≈150 ms) | `Springs.fade` (≈150 ms) | `FADE` (response 0.15 s) |
-| The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | — (closed form; `LAST_FRAME` 50 ms past rest) |
+| Stiffness / response | `Springs.STIFFNESS` 700 (unit mass) | `Springs.stiffness` 700, `Springs.response` = 2π/√700 ≈ 0.2375 s | `motion_tokens::RESPONSE` (the same 2π/√700); `motion::SMOOTH` rides it, and `dialog::SPRING`, `sheet::SPRING`, `reorder::SLIDING`, `swipe::BACK` and `compact::SPRING` are `SMOOTH` |
+| A move, nothing threw it | `Springs.MOVE` 1.0, `Springs.move()` | `Springs.move` (damping 1) | `motion::SMOOTH` (damping `MOVE`) |
+| A move a flick threw | `Springs.MOMENTUM` 0.8, chosen by `Springs.settle(velocity, density, reduced)` | `Springs.momentum` 0.8, chosen by `Springs.released(velocity:from:to:)` | `motion::THROWN` (damping `MOMENTUM`), chosen by `motion::released(speed)` (`reorder::settling`) |
+| What counts as a flick | `Springs.FLICK` 500 dp/s, `Springs.isFlick` | `Springs.thrown` 500 pt/s | `motion_tokens::FLICK` 500 px/s (`motion::released`); `reorder` hands on speed unless held still for 60 ms |
+| A size, clip or dim | `Springs.SIZE` 1.0, `Springs.size()` | `Springs.size` | `motion::SIZE` (damping `SIZE`) |
+| Something going, quickly | `Springs.fade()`, `FADE_STIFFNESS` 2500 (≈150 ms) | `Springs.fade` (≈150 ms) | `motion::FADE` (`FADE_RESPONSE`, ≈150 ms) |
+| The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | `motion::CAP` (`CAP_MS`) on `reorder`'s settle; closed form otherwise, `LAST_FRAME` 50 ms past rest |
 | Where a flick lands | `Springs.project`, `Springs.nearest`, `DECELERATION` 0.998, `SNAPPY` 0.99 | `Momentum.project`, `Momentum.target`, `Momentum.normal`/`snappy` | — |
 | Velocity as the spring wants it | `Animatable.animateTo(…, initialVelocity)` in px/s | `Momentum.relative(_:from:to:)` (share of the gap per second) | `Slide::moving_at(speed)` in px/s |
 | A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12 | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `swipe::band(x)`, `STRETCH` 180 px |
@@ -113,10 +113,10 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 Two things follow from the table. The Swift spring and the Compose spring
 are the same spring — SwiftUI's `response` is the period `2π/√(k/m)` of
 Compose's stiffness — so a value tuned on one is the value on the other.
-And iced's springs are set per module, by response, rather than from one
-stiffness; that is a known gap, to be closed by giving iced one response
-that matches the phones' and naming the rest against it. Until then a new
-iced motion uses `SMOOTH` or `FADE` rather than adding another number.
+And iced's springs are the same spring too: `motion::SMOOTH`, `THROWN`,
+`SIZE` and `FADE` are built on `motion_tokens` (`RESPONSE` is the period
+of the phones' 700 stiffness), and every module's spring is one of them,
+so a new iced motion uses those rather than adding another number.
 
 ### Translating the Web's Curves
 
@@ -402,8 +402,15 @@ floating, it goes soft under it rather than meeting a 1 px line:
 `edge::FADE` (28 px), and at rest — scrolled not at all — there is nothing,
 so an unscrolled page looks exactly as it would without it. SwiftUI's
 `Surfaces.swift` does the same with the system's scroll edge, and gives a
-hard edge with its line under Reduce Transparency. (The compact header on
-scroll is being built separately; this section does not cover it.)
+hard edge with its line under Reduce Transparency.
+
+**The header goes small into the band.** Once a page's own header has
+scrolled up out of sight, `arkui::compact` brings a small one — the same
+art at 28 px, the name on one line — into the band beside the face,
+rising 4 px and unveiling on `SMOOTH`, the art and the name as one; it
+goes back the same way when the header returns, turning mid-way. Pressed,
+it scrolls the page to its top. A scroll the keys made, or reduced motion,
+puts it there or takes it away at once.
 
 **Materials follow the person's settings.** Reduce Transparency makes glass
 the solid container; Increase Contrast gives it a defined edge and stronger
@@ -521,9 +528,11 @@ seen on one.
   no state is stepped. The app runs a frame clock only while something
   says it is `moving(now)` (which holds `LAST_FRAME` past rest, so the
   frame at rest is the last one drawn), and none at all otherwise.
-- The frame clock should be the display's: `iced::window::frames()` ticks
-  with the compositor, where `iced::time::every(16 ms)` is a wall-clock
-  timer that drifts against a 60 Hz display and caps a 120 Hz one.
+- The frame clock is the display's: `motion::Clock::Frames`
+  (`iced::window::frames()`) ticks with the compositor, where a 16 ms
+  `iced::time::every` is a wall-clock timer that drifts against a 60 Hz
+  display and caps a 120 Hz one. `Clock::Every` is for a nudge now and
+  then (a scrubber, a dwell), never for motion.
 - `motion::transformed` lays its content out where it would be, unmoved,
   and only draws it moved, so nothing around it relays out; and it maps the
   pointer back through the move, so what it holds answers where it is drawn.
