@@ -142,7 +142,7 @@ struct AskRow: View {
     @ViewBuilder private var mark: some View {
         switch ask.state {
         case .asked: ProgressView()
-        case .waiting: Image(systemName: "safari.fill").foregroundStyle(.blue)
+        case .waiting: Image(systemName: "safari.fill").foregroundStyle(Color.accentText)
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.positive)
         case .failed, .expired: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.caution)
         }
@@ -156,12 +156,7 @@ struct BankRow: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Image(systemName: "building.columns.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 32, height: 32)
-                .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .accessibilityHidden(true)
+            AccountMark(kind: "checking")
             VStack(alignment: .leading, spacing: 2) {
                 Text(Banks.title(bank)).lineLimit(1)
                 BankHealthText(bank: bank).font(.caption).lineLimit(1)
@@ -170,7 +165,7 @@ struct BankRow: View {
             if bank.waiting > 0 {
                 Text("\(bank.waiting)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.onCaution)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Color.caution, in: Capsule())

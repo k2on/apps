@@ -30,10 +30,7 @@ struct AccountsView: View {
                             CentsText(rows.filter { !$0.closed && $0.onBudget }.reduce(0) { $0 + $1.balance })
                         }
                     } icon: {
-                        Image(systemName: "tray.full.fill")
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.gray.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        AccountMark.Tile(symbol: "tray.full.fill", color: .quiet)
                     }
                 }
             }
@@ -106,7 +103,7 @@ struct AccountRow: View {
             if account.unapproved > 0 {
                 Text("\(account.unapproved)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.onAccent)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Color.accent, in: Capsule())

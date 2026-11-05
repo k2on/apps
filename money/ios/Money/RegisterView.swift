@@ -45,7 +45,7 @@ struct RegisterView: View {
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 if !t.approved {
                                     Button { model.approve([t.id]) } label: { Label("Approve", systemImage: "checkmark") }
-                                        .tint(.green)
+                                        .tint(Color.accent)
                                 }
                                 if t.cleared != .reconciled {
                                     Button {
@@ -54,7 +54,7 @@ struct RegisterView: View {
                                     } label: {
                                         Label(t.cleared == .uncleared ? "Clear" : "Unclear", systemImage: t.cleared == .uncleared ? "c.circle.fill" : "c.circle")
                                     }
-                                    .tint(.blue)
+                                    .tint(Color.chart[1])
                                 }
                             }
                             .swipeActions(edge: .trailing) {

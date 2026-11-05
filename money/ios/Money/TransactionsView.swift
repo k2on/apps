@@ -10,7 +10,7 @@ import ArkUI
 import SwiftUI
 
 struct TransactionsView: View {
-    enum Showing: String, CaseIterable { case review = "Review", all = "All" }
+    enum Showing: String, CaseIterable { case review = "To Review", all = "All" }
 
     @EnvironmentObject private var model: Model
     @Environment(\.present) private var present
@@ -25,7 +25,7 @@ struct TransactionsView: View {
             Section {
                 Picker("Showing", selection: $showing) {
                     ForEach(Showing.allCases, id: \.self) { s in
-                        Text(s == .review && !model.snapshot.inbox.isEmpty ? "Review (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
+                        Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -75,14 +75,14 @@ struct TransactionsView: View {
                                 model.approve([t.id])
                                 approved += 1
                             } label: { Label("Approve", systemImage: "checkmark") }
-                                .tint(.green)
+                                .tint(Color.accent)
                         }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button { present(.categorize([t.id], approve: true)) } label: { Label("Categorize", systemImage: "folder") }
-                            .tint(.orange)
+                            .tint(Color.caution)
                         Button { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
-                            .tint(.gray)
+                            .tint(Color.quiet)
                     }
                     .contextMenu {
                         Button { present(.categorize([t.id], approve: true)) } label: { Label("Categorize and Approve…", systemImage: "folder") }
