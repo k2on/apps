@@ -96,3 +96,29 @@ fn a_featured_play_is_a_key_away() {
     let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Enter), Modifiers::empty()));
     assert!(!app.queue.is_empty(), "<Enter> on the Play queues it");
 }
+
+/// A prefix half typed opens the which-key panel once its delay goes by,
+/// listing what follows it; finishing it closes the panel, and `zz` leaves
+/// the cursor on its row. `?` opens the panel for every key, and `<Esc>`
+/// closes it. Falsified by `?` still toggling the old keymap page: nothing
+/// was showing.
+#[test]
+fn a_prefix_shows_what_can_follow_it() {
+    let mut app = album("The Four Seasons");
+    press(&mut app, "j");
+    press(&mut app, "z");
+    assert_eq!(app.which.showing(), None, "not before the delay");
+    let key = app.which.waiting().expect("a timer for the panel");
+    let _ = app.update(Message::WhichDue(key));
+    assert_eq!(app.which.showing(), Some("z"));
+    let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS], "z");
+    assert!(entries.iter().any(|(k, what)| k == "z" && what.contains("middle")), "{entries:?}");
+    press(&mut app, "z");
+    assert_eq!(app.which.showing(), None, "zz done: gone");
+    assert_eq!(app.at(Pane::Tracks), 1, "the cursor stays on its row");
+
+    press(&mut app, "?");
+    assert_eq!(app.which.showing(), Some(""), "every key");
+    let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Escape), Modifiers::empty()));
+    assert_eq!(app.which.showing(), None);
+}

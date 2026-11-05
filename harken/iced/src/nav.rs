@@ -390,7 +390,7 @@ impl App {
             },
             marks: vec![],
         };
-        let detailed = !(self.help || self.debug);
+        let detailed = !self.debug;
         match &p.source {
             Source::Album(id, _) if detailed => {
                 let album = p.albums().iter().find(|a| a.id == *id);

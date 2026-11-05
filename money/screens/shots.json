@@ -81,6 +81,23 @@
             "click": "Reflect"
           }
         ]
+      },
+      {
+        "id": "keys",
+        "steps": [
+          {
+            "click": "Budget"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "z"
+          },
+          {
+            "wait": 1
+          }
+        ]
       }
     ]
   }

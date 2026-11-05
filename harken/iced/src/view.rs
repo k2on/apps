@@ -243,6 +243,13 @@ impl App {
                     open,
                 ));
         }
+        // What the keys can do next, over everything, above the play bar.
+        if let Some(prefix) = self.which.showing() {
+            let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS], prefix);
+            if !entries.is_empty() {
+                layers = layers.push(arkui::which::view(prefix, &entries, crate::BAR_HEIGHT + 32.0));
+            }
+        }
 
         // The window's root: the pointer heard over every layer, in the
         // window's own coordinates, and arkui's own needs of the platform.
@@ -374,12 +381,12 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
-            Source::Podcasts | Source::Sermons if !(self.help || self.debug) => self.view_shows(),
-            Source::Show(id, title) if !(self.help || self.debug) => self.view_show(id, title),
-            Source::Transcript if !(self.help || self.debug) => self.view_transcript(),
+            Source::Podcasts | Source::Sermons if !self.debug => self.view_shows(),
+            Source::Show(id, title) if !self.debug => self.view_show(id, title),
+            Source::Transcript if !self.debug => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
-            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.help || self.debug => {
+            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.debug => {
                 padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
             Source::Album(id, name) => self.view_album(id, name),
@@ -1897,11 +1904,6 @@ impl App {
                 .align_y(Alignment::Center),
             );
         }
-        if self.help {
-            // The status line stays: which pane has the cursor is exactly what
-            // somebody reading the keymap is trying to work out.
-            return main.push(view_help()).push(self.view_status()).into();
-        }
         if self.debug {
             return main.push(self.view_debug()).push(self.view_status()).into();
         }
@@ -1956,16 +1958,16 @@ impl App {
     /// see as they type: the last thing worth saying, and what is half-typed
     /// — a count, a `g`, a search — and nothing at all when there is neither.
     /// Whether the status line has anything to say: a note, keys half
-    /// typed, or the debug view or the keymap, which keep it whole. When it
+    /// typed, or the debug view, which keeps it whole. When it
     /// has not, a page leaves it no room at all — not even the gap above it.
     fn says_status(&self) -> bool {
         let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
-        self.debug || self.help || !self.note.is_empty() || typing
+        self.debug || !self.note.is_empty() || typing
     }
 
     fn view_status(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        let whole = self.debug || self.help;
+        let whole = self.debug;
         if !self.says_status() {
             return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
         }
@@ -2665,46 +2667,6 @@ fn bar_surface(line: Element<'_, Message>) -> Element<'_, Message> {
 
 fn with_header<'a>(header: Element<'a, Message>, body: Element<'a, Message>) -> Element<'a, Message> {
     column![header, body].spacing(0).width(Length::Fill).into()
-}
-
-/// The keymap: one that has to be read in the source is one nobody finds.
-fn view_help() -> Element<'static, Message> {
-    const KEYS: &[(&str, &str)] = &[
-        ("j  k", "down, up"),
-        ("h  l", "left, right \u{2014} out of a list, the next pane; in a menu, a submenu"),
-        ("{n}j", "a count: 5j is five down"),
-        ("gg  G", "first, last. 7G is the seventh"),
-        ("^d  ^u", "a page down, a page up"),
-        ("<Tab>", "swap between the sidebar and the page"),
-        ("<Enter>  o", "in the sidebar, step into it; on a card, open it; in the table, play"),
-        ("<Space>", "play or pause"),
-        ("m", "this track's menu"),
-        ("a", "which playlists this track is on \u{2014} and make one"),
-        ("d", "which device is making the sound, and move it; each one's volume"),
-        ("q", "the queue: <Enter> plays a row, x takes it out, J and K move it down and up"),
-        (
-            "t",
-            "the transcript of the episode playing: <Enter> plays from a line; f follows the line being said again",
-        ),
-        (
-            "+  -",
-            "the volume of what is playing \u{2014} the group's, when it is one; in the picker, the row's",
-        ),
-        ("M", "mute it, or unmute it"),
-        ("J", "in the picker: join this speaker to what is playing, or take it out"),
-        ("D", "every number the session holds, and where your changes stand"),
-        ("/", "search this pane; <Enter> accepts, <Esc> drops it"),
-        ("n  N", "the next match, the one before"),
-        ("{  }", "the previous track, the next one; an episode back 15s, on 30s"),
-        ("?", "this"),
-    ];
-    let rows = KEYS.iter().fold(column![].spacing(6), |col, (keys, what)| {
-        col.push(row![text(*keys).size(13).width(Length::Fixed(110.0)), text(*what).size(13).style(style::dim)].spacing(12))
-    });
-    container(column![text("keys").size(16), rows].spacing(12))
-        .padding(12)
-        .height(Length::Fill)
-        .into()
 }
 
 /// How far in an episode is, as a bar across its row: the accent over a

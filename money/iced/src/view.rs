@@ -158,6 +158,13 @@ impl App {
                     .align_x(Alignment::End),
             );
         }
+        // What the keys can do next, at the bottom right, over the page.
+        if let Some(prefix) = self.which.showing() {
+            let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
+            if !entries.is_empty() {
+                layers = layers.push(arkui::which::view(prefix, &entries, 36.0));
+            }
+        }
         if let Some(m) = &self.modal {
             layers = layers
                 .push(layer::dimmed(Message::CloseModal, Message::Swallow))

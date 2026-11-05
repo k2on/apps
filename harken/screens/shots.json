@@ -139,6 +139,23 @@
             "await": "Für Elise"
           }
         ]
+      },
+      {
+        "id": "keys",
+        "steps": [
+          {
+            "click": "Songs"
+          },
+          {
+            "key": "l"
+          },
+          {
+            "key": "z"
+          },
+          {
+            "wait": 1
+          }
+        ]
       }
     ]
   }
