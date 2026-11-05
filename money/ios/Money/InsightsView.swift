@@ -12,7 +12,6 @@ import SwiftUI
 
 struct InsightsView: View {
     @EnvironmentObject private var model: Model
-    @Environment(\.reducesMotion) private var still
     @State private var picked: Int64? = nil
 
     var body: some View {
@@ -21,10 +20,12 @@ struct InsightsView: View {
         let total = spending.reduce(0) { $0 + $1.spent }
         List {
             Section {
+                // A step changes the month at once; only its figures roll, as its
+                // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                 Pager(model.monthName,
-                      home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move.reduced(still)) { model.showThisMonth() } },
-                      back: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(-1) } },
-                      forward: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(1) } })
+                      home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
+                      back: { model.stepMonth(-1) },
+                      forward: { model.stepMonth(1) })
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
             }
@@ -41,7 +42,7 @@ struct InsightsView: View {
                             Text(g.group)
                             Spacer()
                             Text(share(g.spent, total)).foregroundStyle(.quiet).monospacedDigit()
-                            CentsText(g.spent).frame(minWidth: 90, alignment: .trailing)
+                            CentsText(g.spent).rolls(on: model.snapshot.month).frame(minWidth: 90, alignment: .trailing)
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -49,10 +50,10 @@ struct InsightsView: View {
             }
             if let m = s.summary {
                 Section("The Month") {
-                    LabeledContent("Income") { CentsText(m.income).foregroundStyle(Color.positive) }
-                    LabeledContent("Spent") { CentsText(-total) }
+                    LabeledContent("Income") { CentsText(m.income).foregroundStyle(Color.positive).rolls(on: model.snapshot.month) }
+                    LabeledContent("Spent") { CentsText(-total).rolls(on: model.snapshot.month) }
                     LabeledContent("Left Over") {
-                        CentsText(m.income - total).foregroundStyle(m.income - total < 0 ? Color.error : Color.ink)
+                        CentsText(m.income - total).foregroundStyle(m.income - total < 0 ? Color.error : Color.ink).rolls(on: model.snapshot.month)
                     }
                     .fontWeight(.semibold)
                     // Paying a card is not spending (what it bought was), so
@@ -61,7 +62,7 @@ struct InsightsView: View {
                     if s.lines.contains(where: Cards.isPayment) {
                         let short = Cards.uncovered(s.lines)
                         LabeledContent("Card Debt Not Covered") {
-                            CentsText(short).foregroundStyle(short > 0 ? Color.caution : Color.positive)
+                            CentsText(short).foregroundStyle(short > 0 ? Color.caution : Color.positive).rolls(on: model.snapshot.month)
                         }
                     }
                 }

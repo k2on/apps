@@ -316,6 +316,10 @@ pub enum Message {
     RegisterScrolled(f32),
     /// The budget scrolled; and a page opened scrolled to where it was left.
     PageScrolled(f32),
+    /// Reflect or Settings was scrolled to this far down.
+    TopScrolled(f32),
+    /// The small header pressed: Reflect or Settings back to its top.
+    PageTop,
     ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
     /// scrolled, its keys, closed.
@@ -444,6 +448,12 @@ pub struct App {
     pub which: arkui::which::Which,
     /// The note, said for a moment over the page's foot (`arkui::toast`).
     pub toast: arkui::toast::Toast,
+    /// How far down Reflect or Settings is scrolled, as it last said.
+    pub top_y: f32,
+    /// Their small header, in the band once the page's title has scrolled
+    /// away (`arkui::compact`), and the page it is for.
+    pub compact: arkui::compact::Compact,
+    pub compact_for: Option<Page>,
 }
 
 impl App {
@@ -496,6 +506,9 @@ impl App {
             pictures: arkui::images::Images::new("money/pictures"),
             which: arkui::which::Which::new(),
             toast: arkui::toast::Toast::new(),
+            top_y: 0.0,
+            compact: arkui::compact::Compact::new(iced::time::Instant::now()),
+            compact_for: None,
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -684,6 +697,16 @@ impl App {
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
         self.toast.heard(&self.note);
+        // The small header: for a new page, hidden at once; otherwise in or
+        // out as the page is scrolled past its title or back.
+        let now = iced::time::Instant::now();
+        if self.compact_for != Some(self.page) {
+            self.compact_for = Some(self.page);
+            self.compact.reset(now);
+            self.top_y = 0.0;
+        }
+        let after = self.compact_title().map(|_| view::TITLED);
+        self.compact.heard(self.top_y, after, false, now);
         // A page just opened is drawn before this comes back, so the scroll
         // lands on its list rather than the one it replaced.
         match self.scroll_due.take() {
@@ -748,6 +771,11 @@ impl App {
                 self.scroll_due = Some(self.history.arrive(&self.place()));
             }
             Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::TopScrolled(y) => self.top_y = y,
+            Message::PageTop => {
+                self.top_y = 0.0;
+                return iced::widget::operation::scroll_to(look::PAGE_TOP, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 });
+            }
             Message::ScrollPage(y) => {
                 let id = match self.page {
                     Page::Ledger(_) => {
@@ -1637,7 +1665,9 @@ impl App {
         let now = iced::time::Instant::now();
         match drag.drop(&self.sizes(), now) {
             outline::Dropped::Click(grab) => {
-                let double = self.last_click.is_some_and(|(g, at)| g == grab && now.duration_since(at) < DOUBLE_CLICK);
+                let double = self
+                    .last_click
+                    .is_some_and(|(g, at)| g == grab && now.duration_since(at) < arkui::button::DOUBLE_CLICK);
                 self.last_click = (!double).then_some((grab, now));
                 if let Grab::Row(n) = grab {
                     self.anchor = None;
@@ -2387,8 +2417,12 @@ impl App {
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));
         }
-        if self.history.active() || self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
-            subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
+        if self.history.active()
+            || self.drag.as_ref().is_some_and(|d| d.moving(now))
+            || self.settle.is_some_and(|s| s.moving(now))
+            || self.compact.moving(now)
+        {
+            subs.push(arkui::motion::Clock::Frames.ticks().map(|()| Message::Frame));
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.
@@ -2556,9 +2590,6 @@ fn money_keys() -> vim::Keys {
     keys.set_bindings(&MONEY_KEYS);
     keys
 }
-
-/// How soon a second click is a double click: AppKit's default.
-const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How wide the category dropdown is.
 pub const DROP_WIDTH: f32 = 340.0;

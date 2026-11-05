@@ -28,16 +28,27 @@ struct MiniPlayer: View {
         GeometryReader { geo in
             HStack(spacing: Space.m) {
                 if let now = s.now {
-                    CoverView(seed: now.seed, url: now.art, side: compact ? 28 : 36, corner: 6)
-                        .frame(width: compact ? 28 : 36, height: compact ? 28 : 36)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        if !compact {
-                            Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.accentText : .quiet).lineLimit(1)
+                    // The cover and the words open the player, and give under
+                    // the finger as it lands (`.press`); the buttons beside
+                    // them are their own, so a tap on one does not open it.
+                    Button(action: open) {
+                        HStack(spacing: Space.m) {
+                            CoverView(seed: now.seed, url: now.art, side: compact ? 28 : 36, corner: 6)
+                                .frame(width: compact ? 28 : 36, height: compact ? 28 : 36)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                if !compact {
+                                    Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.accentText : .quiet).lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .offset(x: swipe)
                         }
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .offset(x: swipe)
+                    .buttonStyle(.press)
+                    .accessibilityHint("Opens the player")
                     Button { model.toggle() } label: {
                         Image(systemName: s.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace)).frame(width: 32, height: 32)
                     }
@@ -61,24 +72,24 @@ struct MiniPlayer: View {
             .frame(maxHeight: .infinity)
             .overlay(alignment: .bottom) { if s.now != nil && !compact { Hairline().padding(.horizontal, Space.l) } }
             .contentShape(Rectangle())
-            .onTapGesture { if s.now != nil { open() } }
-            // A sideways drag skips: far enough, or fast enough (where it
-            // would come to rest, `predictedEndTranslation`); then it springs
+            // A sideways drag skips: where it would come to rest, projected
+            // snappily (`Momentum.snappy`, as a reorder's drop is) since it
+            // decides an act rather than a place, past a share of the width,
+            // or let go as fast as a throw (`Springs.flick`); then it springs
             // back, starting at the finger's speed, with the momentum's
             // overshoot only when it was flicked.
             .gesture(DragGesture(minimumDistance: 12).onChanged { v in
                 if abs(v.translation.width) > abs(v.translation.height) { swipe = v.translation.width }
             }.onEnded { v in
                 let wide = Springs.wide * geo.size.width
-                let fast = v.predictedEndTranslation.width - v.translation.width
-                if swipe < -wide || fast < -Springs.flick * 0.25 { model.next() }
-                else if swipe > wide || fast > Springs.flick * 0.25 { model.previous() }
+                let rest = swipe + CGFloat(Momentum.project(Double(v.velocity.width), rate: Momentum.snappy))
+                if rest < -wide || v.velocity.width < -Springs.flick { model.next() }
+                else if rest > wide || v.velocity.width > Springs.flick { model.previous() }
                 let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.width), from: Double(swipe), to: 0)
                 withAnimation(back) { swipe = 0 }
             })
         }
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Open the player") { open() }
     }
 }
 
@@ -111,8 +122,6 @@ struct FullPlayer: View {
     @Environment(\.open) private var open
     @Environment(\.colorScheme) private var scheme
     @Namespace private var glass
-    /// How far down a drag must be going to close the player: where it would come to rest.
-    static let closes: CGFloat = 120
 
     var body: some View {
         let s = model.player
@@ -152,7 +161,7 @@ struct FullPlayer: View {
                     // three share it and the cover is a third of it.
                     .layoutPriority(1)
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
-                    .motionScale(s.playing ? 1 : 0.9)
+                    .motionScale(s.playing ? 1 : MotionTokens.pausedScale)
                     .motion(Springs.move, value: s.playing)
             }
             Spacer(minLength: 0)
@@ -227,20 +236,54 @@ struct FullPlayer: View {
                     .ignoresSafeArea()
             }
         }
-        // Pulled down, it closes: judged by where the pull would come to
-        // rest (`Momentum`), so a short flick closes it as a long drag does,
-        // and a drag that is going back up does not.
-        .gesture(DragGesture(minimumDistance: 40).onEnded { v in
-            let down = v.translation.height
-            let rest = down + CGFloat(Momentum.project(Double(v.velocity.height)))
-            if rest > Self.closes && v.velocity.height >= 0 && abs(v.translation.width) < down { close() }
-        })
+        .modifier(PullToClose(close: close))
     }
 
     /// The library's row for what plays, for its menu.
     private var track: LibraryEntry? {
         guard let id = model.player.now?.id else { return nil }
         return model.tracks.first { $0.id.hex == id }
+    }
+}
+
+/// The full player pulled down to close it. It follows the finger one to
+/// one — down as far as it is pulled, up rubber-banded (`Momentum.band`),
+/// there being nothing above it — and let go it closes, judged by where the
+/// pull would come to rest (`Momentum`), so a short flick closes it as a
+/// long drag does, and a drag that is going back up does not. Otherwise it
+/// springs back from where it was let go at the finger's speed
+/// (`Springs.released`); a pull caught again on its way back takes over at
+/// once. Its own view, so the pull's every frame redraws the offset and not
+/// the player.
+private struct PullToClose: ViewModifier {
+    let close: () -> Void
+    @Environment(\.reducesMotion) private var still
+    /// How far the player is drawn down by the finger.
+    @State private var pull: CGFloat = 0
+    /// How tall the player is: the room a pull up is rubber-banded in.
+    @State private var tall: CGFloat = 800
+    /// How far down a drag must be going to close the player: where it would come to rest.
+    static let closes: CGFloat = 120
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: pull)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+            .gesture(DragGesture(minimumDistance: 12).onChanged { v in
+                let y = v.translation.height
+                // Vertical once it is under way, so a sideways drag is not a pull.
+                guard pull != 0 || abs(y) > abs(v.translation.width) else { return }
+                pull = y >= 0 ? y : CGFloat(Momentum.band(Double(y), limit: Double(tall)))
+            }.onEnded { v in
+                let down = v.translation.height
+                let rest = down + CGFloat(Momentum.project(Double(v.velocity.height)))
+                if rest > Self.closes && v.velocity.height >= 0 && abs(v.translation.width) < down {
+                    close()
+                } else {
+                    let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.height), from: Double(pull), to: 0)
+                    withAnimation(back) { pull = 0 }
+                }
+            })
     }
 }
 
@@ -403,9 +446,10 @@ struct QueueSheet: View {
                     }
                     Reorderable(Self.keyed(s.upNext), key: \.key, onMove: { model.moveUpNext(from: $0, to: $1) }) { row, handle in
                         HStack(spacing: Space.s) {
-                            QueueRow(p: row.p, current: false)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.jump(row.p.index) }
+                            Button { model.jump(row.p.index) } label: {
+                                QueueRow(p: row.p, current: false).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.pressRow)
                             handle
                         }
                         .padding(.leading, Space.l)
@@ -455,6 +499,7 @@ struct QueueSheet: View {
 /// held asks who its voice is, where voices were told apart.
 struct TranscriptSheet: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     /// The list keeps the line playing in its middle.
     @State private var following = true
     /// A finger is on the list, or it is still coasting from one.
@@ -515,14 +560,14 @@ struct TranscriptSheet: View {
                             .onChange(of: at) { before, now in
                                 if !following && !handled && TranscriptEntry.caughtUp(from: before, to: now, showing: showing) { following = true }
                                 guard following, let i = now else { return }
-                                withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) }
+                                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(i, anchor: .center) }
                             }
                             .onAppear { if let i = at { proxy.scrollTo(i, anchor: .center) } }
                             .overlay(alignment: .bottom) {
                                 if !following {
                                     Button {
                                         following = true
-                                        if let i = at { withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) } }
+                                        if let i = at { withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(i, anchor: .center) } }
                                     } label: {
                                         Label("Follow Along", systemImage: "waveform")
                                     }

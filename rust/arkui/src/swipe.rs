@@ -43,12 +43,9 @@ pub const LET_GO: Duration = Duration::from_millis(150);
 /// than the last one coasting.
 pub const QUIET: Duration = Duration::from_millis(300);
 
-/// What the pull springs back on: critically damped and quick, from where
-/// it was drawn when the fingers lifted.
-pub const BACK: Spring = Spring {
-    damping: 1.0,
-    response: 0.22,
-};
+/// What the pull springs back on: the shared move ([`crate::motion::SMOOTH`]),
+/// critically damped, from where it was drawn when the fingers lifted.
+pub const BACK: Spring = crate::motion::SMOOTH;
 
 /// The furthest the pull is drawn, however far the fingers go: the rubber
 /// band's length, which the arrow slides in by half of.

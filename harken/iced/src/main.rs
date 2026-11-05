@@ -381,6 +381,8 @@ pub enum Message {
     Swallow,
     /// The page was scrolled to this far down (absolute, in pixels).
     PageScrolled(f32),
+    /// The small header pressed: the page back to its top.
+    PageTop,
     /// Put the page's scroll where it was left, or at the top: sent once the
     /// page it is for has been drawn, so it lands on that page's list.
     ScrollPage(f32),
@@ -835,6 +837,12 @@ pub struct App {
     pub note: String,
     /// The note, said for a moment over the page (`arkui::toast`).
     pub toast: arkui::toast::Toast,
+    /// How far down the page is scrolled, as it last said.
+    pub page_y: f32,
+    /// The page's small header, in the band once its own has scrolled away
+    /// (`arkui::compact`), and the page it is for.
+    pub compact: arkui::compact::Compact,
+    pub compact_for: Option<Source>,
 }
 
 impl App {
@@ -897,6 +905,9 @@ impl App {
             refused: Vec::new(),
             note: String::new(),
             toast: arkui::toast::Toast::new(),
+            page_y: 0.0,
+            compact: arkui::compact::Compact::new(iced::time::Instant::now()),
+            compact_for: None,
         }
     }
 
@@ -1381,7 +1392,15 @@ impl App {
                     None => Task::none(),
                 },
                 'd' => self.update(Message::OpenDevices),
-                'q' => self.update(Message::OpenQueue),
+                // From the keys the queue is there, or gone, at once
+                // (docs/motion.md, the frequency rule); its button slides it.
+                'q' => {
+                    let task = self.update(Message::OpenQueue);
+                    if let Some(sheet) = self.queue_sheet.as_mut() {
+                        sheet.snap(iced::time::Instant::now());
+                    }
+                    task
+                }
                 't' => self.update(Message::Select(Source::Transcript)),
                 'f' if self.peer.source == Source::Transcript => self.update(Message::Follow(true)),
                 '}' => self.update(self.forward()),
@@ -1731,7 +1750,8 @@ impl App {
     /// The command box closed: it fades out as it came.
     fn close_command(&mut self) {
         if let Some(mut c) = self.command.take() {
-            c.shown.hide(iced::time::Instant::now());
+            // At once, as it opened (`Command::close`): it is the keys'.
+            c.close(iced::time::Instant::now());
             self.command_leaving = Some(c);
         }
     }
@@ -2625,7 +2645,24 @@ impl App {
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
         self.toast.heard(&self.note);
+        self.hear_compact();
         Task::batch([task, reacted, self.want_covers_if_moved(), self.want_picture()])
+    }
+
+    /// The small header, after every message: for a new page, hidden at
+    /// once, as the page's own header is in view at its top; otherwise in
+    /// or out as the page is scrolled past its header or back. A scroll
+    /// the keys made (the pointer standing still since, `keyed`) puts it
+    /// there or takes it away at once, without the spring.
+    fn hear_compact(&mut self) {
+        let now = iced::time::Instant::now();
+        if self.compact_for.as_ref() != Some(&self.peer.source) {
+            self.compact_for = Some(self.peer.source.clone());
+            self.compact.reset(now);
+            self.page_y = 0.0;
+        }
+        let after = self.compact_of().map(|s| s.after);
+        self.compact.heard(self.page_y, after, self.keyed.is_some(), now);
     }
 
     /// Ask for covers when the lists have been rebuilt since the last ask.
@@ -3217,7 +3254,13 @@ impl App {
                 }
             }
             Message::PageScrolled(y) => {
+                self.page_y = y;
                 self.history.scrolled(&self.peer.source.place(), y);
+            }
+            Message::PageTop => {
+                self.page_y = 0.0;
+                self.history.scrolled(&self.peer.source.place(), 0.0);
+                return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 });
             }
             Message::ScrollPage(y) => {
                 return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y });
@@ -3342,24 +3385,26 @@ impl App {
     /// scrubber and the media session's position, and `D` counts how long ago
     /// the room spoke (250 ms). `None` is a window at rest, which runs no
     /// timer at all.
-    pub fn clock(&self) -> Option<Duration> {
+    pub fn clock(&self) -> Option<arkui::motion::Clock> {
+        use arkui::motion::Clock;
         // A volume the throttle holds is sent by the clock, the last value
         // of a drag that stopped moving without being let go.
         // A swipe under way draws a frame at a time: the page follows the
         // fingers, and springs back.
         if self.history.active() {
-            return Some(Duration::from_millis(16));
+            return Some(Clock::Frames);
         }
         // …and so does a dialog or a sheet coming or going, and a row of
         // the queue sliding out of the way of one dragged, or settling.
-        if self.moving(iced::time::Instant::now()) {
-            return Some(Duration::from_millis(16));
+        if self.moving(iced::time::Instant::now()) || self.compact.moving(iced::time::Instant::now()) {
+            return Some(Clock::Frames);
         }
+        // Not motion: a nudge now and then, on a timer at that period.
         if self.ctx.dwelling() || self.volume_held.is_some() {
-            return Some(Duration::from_millis(50));
+            return Some(Clock::Every(Duration::from_millis(50)));
         }
         let sounding = self.now().is_some_and(|n| n.playing);
-        (sounding || self.debug).then_some(Duration::from_millis(250))
+        (sounding || self.debug).then_some(Clock::Every(Duration::from_millis(250)))
     }
 
     /// Move frames, and bring the lists up to date with whatever moved —
@@ -3423,8 +3468,8 @@ impl App {
             let delay = Duration::from_millis(at.saturating_sub(client::monotonic_ms()) + 2);
             subs.push(arkui::wake::at(at, delay).map(|()| Message::Due));
         }
-        if let Some(every) = self.clock() {
-            subs.push(iced::time::every(every).map(|_| Message::Tick));
+        if let Some(clock) = self.clock() {
+            subs.push(clock.ticks().map(|()| Message::Tick));
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.

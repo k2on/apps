@@ -14,10 +14,6 @@
 package dev.money.android
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,6 +63,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import dev.arkui.pressable
+import dev.arkui.Press
+import dev.arkui.Transitions
 import dev.arkui.AmountField
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
@@ -102,7 +101,7 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
     val ok = signed != null && f.account != null && (f.payee.isNotBlank() || transfer != null)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
-        AnimatedContent(choosing, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "txn-sheet") { now ->
+        AnimatedContent(choosing, transitionSpec = { Transitions.crossFade() }, label = "txn-sheet") { now ->
             when (now) {
                 Choosing.Category ->
                     Column(Modifier.navigationBarsPadding()) {
@@ -280,6 +279,6 @@ private fun Field(label: String, value: String, icon: (@Composable () -> Unit)? 
         headlineContent = { Text(value) },
         trailingContent = icon,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClickLabel = "Choose", onClick = onClick),
+        modifier = Modifier.pressable(onClickLabel = "Choose", onClick = onClick, press = Press.Highlight),
     )
 }

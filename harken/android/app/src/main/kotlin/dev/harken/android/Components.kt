@@ -9,7 +9,6 @@
 package dev.harken.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -222,7 +221,7 @@ fun PageHeader(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
-                modifier = if (onBy != null) Modifier.clickable(onClick = onBy).padding(Space.xs) else Modifier.padding(Space.xs),
+                modifier = if (onBy != null) Modifier.pressable(onClick = onBy).padding(Space.xs) else Modifier.padding(Space.xs),
             )
         }
         Text(facts, style = quiet(MaterialTheme.typography.bodySmall), textAlign = TextAlign.Center)
@@ -359,13 +358,13 @@ fun CoverHeader(
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             if (!over.isNullOrEmpty()) {
-                Text(over, style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
+                Text(over, style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.pressable(onClick = onOver) else Modifier)
                 Spacer(Modifier.height(Space.xs))
             }
             Text(title, style = MaterialTheme.typography.headlineSmall)
             if (!by.isNullOrEmpty()) Text(by, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.xs))
             if (!small.isNullOrEmpty()) {
-                Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.clickable(onClick = onSmall) else Modifier))
+                Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.pressable(onClick = onSmall) else Modifier))
             }
             if (onPlay != null) {
                 Spacer(Modifier.height(Space.m))
@@ -394,7 +393,7 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             Text(label, style = quiet(MaterialTheme.typography.labelSmall))
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = open))
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.pressable(onClick = open))
             if (facts.isNotEmpty()) Text(facts, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(Space.s))
             PlayPill(onPlay)

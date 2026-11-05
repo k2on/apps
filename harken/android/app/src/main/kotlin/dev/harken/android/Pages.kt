@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -332,7 +331,7 @@ private fun WebLink(link: String) {
     val uri = LocalUriHandler.current
     val host = link.substringAfter("://").substringBefore('/').removePrefix("www.").ifEmpty { link }
     Row(
-        Modifier.padding(horizontal = Space.page - Space.s).clip(RoundedCornerShape(50)).clickable { runCatching { uri.openUri(link) } }.padding(horizontal = Space.s, vertical = Space.s),
+        Modifier.padding(horizontal = Space.page - Space.s).clip(RoundedCornerShape(50)).pressable(onClick = { runCatching { uri.openUri(link) } }).padding(horizontal = Space.s, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
@@ -358,7 +357,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
                     Text(
                         composer + "  ›",
                         style = quiet(MaterialTheme.typography.labelLarge),
-                        modifier = Modifier.clickable { act.open(Page.ForArtist(composer)) }.padding(vertical = Space.xs),
+                        modifier = Modifier.pressable(onClick = { act.open(Page.ForArtist(composer)) }).padding(vertical = Space.xs),
                     )
                 }
                 Text(work?.title.orEmpty(), style = MaterialTheme.typography.headlineMedium)
@@ -623,7 +622,7 @@ private fun Hosts(hosts: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
             Text("Hosted by", style = quiet(MaterialTheme.typography.labelLarge), maxLines = 1)
             for (h in hosts) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(50)).clickable { onOpen(h) }.padding(horizontal = Space.s, vertical = Space.xs),
+                    Modifier.clip(RoundedCornerShape(50)).pressable(onClick = { onOpen(h) }).padding(horizontal = Space.s, vertical = Space.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Cover(h.name, h.art, 24.dp, Modifier.size(24.dp), round = true)
@@ -642,7 +641,7 @@ private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     Box(Modifier.padding(top = Space.s)) {
         Row(
-            Modifier.clip(RoundedCornerShape(50)).clickable { if (guests.size == 1) onOpen(guests[0]) else choosing = true }.padding(vertical = Space.xs, horizontal = 2.dp),
+            Modifier.clip(RoundedCornerShape(50)).pressable(onClick = { if (guests.size == 1) onOpen(guests[0]) else choosing = true }).padding(vertical = Space.xs, horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val faces = guests.take(3)

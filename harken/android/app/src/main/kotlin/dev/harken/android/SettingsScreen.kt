@@ -6,7 +6,6 @@
 // signed in as a face, their picture round, which Home's bar opens this by.
 package dev.harken.android
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,8 +34,10 @@ import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Status
 import dev.arkui.Glyph
 import dev.arkui.PageBar
+import dev.arkui.Press
 import dev.arkui.Space
 import dev.arkui.quiet
+import dev.arkui.pressable
 import dev.arkui.rememberDestinationScrollState
 
 /** What Settings draws. */
@@ -133,7 +134,7 @@ private fun Group(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun Line(title: String, under: String, onClick: (() -> Unit)? = null, chevron: Boolean = false) {
     Row(
-        Modifier.fillMaxWidth().let { if (onClick != null) it.clickable(onClick = onClick) else it }.padding(Space.l),
+        Modifier.fillMaxWidth().let { if (onClick != null) it.pressable(onClick = onClick, press = Press.Highlight) else it }.padding(Space.l),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {

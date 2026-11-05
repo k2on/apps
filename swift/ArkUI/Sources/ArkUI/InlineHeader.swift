@@ -16,8 +16,8 @@
 // `MotionTokens.rise` and a fade, transform and opacity only — on
 // `Springs.move`, critically damped: nothing threw it, so it does not
 // overshoot. It leaves the way it came, sinking back toward the header.
-// Under Reduce Motion it only fades (`.motion`'s calm ease), with nothing
-// travelling, and the way back to the top is the same ease.
+// Under Reduce Motion it only fades (`.motion`'s `Springs.calm`), with nothing
+// travelling, and the way back to the top is the same.
 //
 // Android's twin is arkui's `PinnedBar` (kotlin/arkui).
 import SwiftUI

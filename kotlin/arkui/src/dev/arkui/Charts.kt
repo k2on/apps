@@ -10,8 +10,6 @@
 package dev.arkui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,12 +55,17 @@ public data class Part(val label: String, val value: Long, val color: Color)
 public fun chartPalette(): List<Color> =
     ChartColors.of(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f)
 
-/** Grows from 0 to 1 on a spring the first time it is composed: a chart drawing itself in. */
+/**
+ * Grows from 0 to 1 on arkui's spring for a size the first time it is composed: a chart drawing
+ * itself in, once. With motion reduced it is drawn whole from the first frame; its figures say
+ * the rest.
+ */
 @Composable
 private fun drawnIn(key: Any?): Float {
-    val a = remember(key) { Animatable(0f) }
+    val reduced = reducedMotion()
+    val a = remember(key) { Animatable(if (reduced) 1f else 0f) }
     LaunchedEffect(key) {
-        a.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessVeryLow))
+        a.animateTo(1f, Springs.size())
     }
     return a.value
 }

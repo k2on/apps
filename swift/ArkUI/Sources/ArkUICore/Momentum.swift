@@ -9,8 +9,9 @@ import Foundation
 public enum Momentum {
     /// How fast a projection slows, per millisecond: a scroll view's normal
     /// deceleration, and a snappier one for a throw that should not go far.
-    public static let normal: Double = 0.998
-    public static let snappy: Double = 0.99
+    /// arkui's motion tokens (`MotionTokens.deceleration`, `.snappy`).
+    public static let normal: Double = MotionTokens.deceleration
+    public static let snappy: Double = MotionTokens.snappy
 
     /// How much further something let go at `velocity` (points a second)
     /// travels before it stops, decelerating at `rate`: UIScrollView's
@@ -32,5 +33,15 @@ public enum Momentum {
     public static func relative(_ velocity: Double, from: Double, to: Double) -> Double {
         let gap = to - from
         return abs(gap) < 0.5 ? 0 : velocity / gap
+    }
+
+    /// How far a thing dragged `x` points past its edge is drawn past it:
+    /// Apple's rubber band, `(x · d · c) / (d + c · |x|)`, where `d` is the
+    /// room it is dragged in (`limit`) and `c` `MotionTokens.rubberBand`
+    /// (0.55). It follows the finger at first and less and less, never
+    /// reaching `d`; the sign is the drag's.
+    public static func band(_ x: Double, limit: Double, c: Double = MotionTokens.rubberBand) -> Double {
+        guard limit > 0 else { return 0 }
+        return (x * limit * c) / (limit + c * abs(x))
     }
 }

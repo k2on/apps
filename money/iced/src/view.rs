@@ -42,13 +42,54 @@ pub const PAD: f32 = 18.0;
 /// receipt beside the register, Settings and Reflect; the budget's and
 /// the register's lists start below their headings and never pass under it.
 pub(crate) fn under_face<'a>(content: impl Into<Element<'a, Message>>, ground: fn(&iced::Theme) -> iced::Color) -> Element<'a, Message> {
-    arkui::edge::faded(content, PAD + arkui::account::HEIGHT, ground)
+    arkui::edge::faded(content, arkui::account::band(PAD), ground)
 }
 
-/// The page's own ground, for [`under_face`].
-pub(crate) fn page_ground(theme: &iced::Theme) -> iced::Color {
-    arkui::theme::of(theme).background.base.color
+/// How far down Reflect or Settings is scrolled once its title, the
+/// page's first line, has gone off the top: the padding over it and its
+/// line (Reflect's is its arrows', 32 tall). Sooner, and the small title
+/// came while the large one was still there to read under the band.
+pub const TITLED: f32 = PAD + 32.0;
+
+impl App {
+    /// What the small header says on this page once its title has scrolled
+    /// away (`arkui::compact`): Reflect's and Settings' titles. The budget
+    /// and the registers keep their headings over their lists, so they
+    /// have none.
+    pub(crate) fn compact_title(&self) -> Option<String> {
+        match self.page {
+            Page::Reflect => Some(format!("Spending in {}", month_name(&self.peer.month))),
+            Page::Settings => Some("Settings".into()),
+            _ => None,
+        }
+    }
+
+    /// The small header, at the top of the page beside the face, while it
+    /// is in.
+    fn view_compact(&self) -> Option<Element<'_, Message>> {
+        let now = iced::time::Instant::now();
+        if !self.compact.showing(now) {
+            return None;
+        }
+        let title = self.compact_title()?;
+        let small = arkui::compact::view(None, &title, self.compact.at(now), Message::PageTop);
+        Some(
+            container(small)
+                .padding(Padding {
+                    top: PAD,
+                    left: SIDEBAR + 1.0 + PAD - 6.0,
+                    right: PAD + arkui::account::HEIGHT + PAD,
+                    bottom: 0.0,
+                })
+                .height(Length::Fixed(arkui::account::band(PAD)))
+                .align_y(Alignment::Center)
+                .into(),
+        )
+    }
 }
+
+/// The page's own ground, for [`under_face`] (`arkui::style::page_color`).
+pub(crate) use arkui::style::page_color as page_ground;
 
 /// A page's padding around a list that scrolls: on the top and the sides,
 /// and none under it, so the list runs down to the window's foot. With
@@ -180,6 +221,11 @@ impl App {
                     .padding(PAD)
                     .align_x(Alignment::End),
             );
+        }
+        // The page's small header, once its title has scrolled away, in the
+        // band beside the face.
+        if let Some(small) = self.view_compact() {
+            layers = layers.push(small);
         }
         // What the keys can do next, at the bottom right, over the page.
         if let Some(prefix) = self.which.showing() {
@@ -1434,7 +1480,12 @@ impl App {
             .spacing(16)
             .padding(PAD)
             .width(Length::Fill);
-        scrollable(under_face(page, page_ground)).height(Length::Fill).style(style::bars).into()
+        scrollable(under_face(page, page_ground))
+            .id(look::PAGE_TOP)
+            .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
+            .height(Length::Fill)
+            .style(style::bars)
+            .into()
     }
 
     fn tile<'a>(&self, label: &str, cents: i64, tone: Tone) -> Element<'a, Message> {

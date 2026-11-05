@@ -30,19 +30,21 @@ use crate::motion::{self, Slide, Spring};
 /// How far, in pixels, a press travels before it is a drag.
 pub const THRESHOLD: f32 = 4.0;
 
-/// What a row slides out of the way on: critically damped and quick, so
-/// the gap is open by the time the eye is on it. Sent back on its way — the
-/// pointer turned — it turns from where it is ([`crate::motion`]).
-pub const SLIDING: Spring = Spring { damping: 1.0, response: 0.3 };
+/// What a row slides out of the way on: the shared move
+/// ([`motion::SMOOTH`]), critically damped, so the gap is open by the time
+/// the eye is on it. Sent back on its way — the pointer turned — it turns
+/// from where it is ([`crate::motion`]).
+pub const SLIDING: Spring = motion::SMOOTH;
 
-/// What a row let go settles into its place on, setting off as fast as the
-/// pointer was going: a little under critically damped, so one let go at
-/// speed swings a hair past and comes back, as a thing thrown does — the
-/// only move here with momentum behind it, and so the only one to bounce.
-pub const SETTLING: Spring = Spring {
-    damping: 0.85,
-    response: 0.3,
-};
+/// What a row let go at `speed` settles into its place on, setting off as
+/// fast as the pointer was going: thrown — at least a flick's speed — a
+/// little under critically damped ([`motion::THROWN`]), so it swings a hair
+/// past and comes back, as a thing thrown does; put down, critically damped
+/// ([`motion::SMOOTH`]). The phones' `Springs.settle` and `released`, by
+/// [`motion::released`]. Either way it is at rest within [`motion::CAP`].
+pub fn settling(speed: f32) -> Spring {
+    motion::released(speed)
+}
 
 /// How long the pointer can be still before letting go and still hand on
 /// its speed: held still longer, it was put down, not thrown.
@@ -81,18 +83,29 @@ pub enum Drop {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settle {
     pub to: usize,
+    /// When it was let go: past [`motion::CAP`] it is in its place.
+    since: Instant,
     slide: Slide,
 }
 
 impl Settle {
-    /// How far the row is from its place at `now`.
-    pub fn offset(&self, now: Instant) -> f32 {
-        self.slide.at(now)
+    /// Whether the cap has gone by at `now`, however the spring stands.
+    fn capped(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.since) >= motion::CAP
     }
 
-    /// Whether it is still on its way.
+    /// How far the row is from its place at `now`.
+    pub fn offset(&self, now: Instant) -> f32 {
+        match self.capped(now) {
+            true => 0.0,
+            false => self.slide.at(now),
+        }
+    }
+
+    /// Whether it is still on its way — and for the frame after, so the
+    /// one at rest is drawn ([`motion::LAST_FRAME`]).
     pub fn moving(&self, now: Instant) -> bool {
-        self.slide.moving(now)
+        self.slide.moving(now) && !self.capped(now.checked_sub(motion::LAST_FRAME).unwrap_or(now))
     }
 }
 
@@ -220,7 +233,8 @@ impl Reorder {
             to: self.to,
             settle: Settle {
                 to: self.to,
-                slide: Slide::new(left, 0.0, now, SETTLING.or_instant()).moving_at(self.lift_speed(now)),
+                since: now,
+                slide: Slide::new(left, 0.0, now, settling(self.lift_speed(now)).or_instant()).moving_at(self.lift_speed(now)),
             },
         }
     }
@@ -321,6 +335,27 @@ mod tests {
         assert_eq!(put.slide.speed(up + ms(200)), 0.0, "held still, it was put down");
         assert!(thrown.offset(up + ms(5)) > put.offset(up + ms(205)));
         assert_eq!(thrown.offset(up + SETTLED), 0.0);
+    }
+
+    /// Let go at a flick's speed, a row settles with its momentum, a hair
+    /// past and back; slower, it was put down and lands critically damped;
+    /// and whatever it was handed, it is home by the cap. Falsified by one
+    /// damping for every release (0.85 of old) or no cap.
+    #[test]
+    fn a_flick_settles_with_momentum_and_a_put_down_without() {
+        use crate::motion_tokens as tokens;
+        assert_eq!(settling(tokens::FLICK + 300.0).damping, tokens::MOMENTUM);
+        assert_eq!(settling(-(tokens::FLICK + 300.0)).damping, tokens::MOMENTUM, "up as well as down");
+        assert_eq!(settling(tokens::FLICK - 100.0).damping, tokens::MOVE);
+        let at = Instant::now();
+        let settle = Settle {
+            to: 0,
+            since: at,
+            slide: Slide::new(-400.0, 0.0, at, settling(9000.0)).moving_at(9000.0),
+        };
+        assert!(settle.moving(at));
+        assert_eq!(settle.offset(at + motion::CAP), 0.0, "home by the cap");
+        assert!(!settle.moving(at + motion::CAP + motion::LAST_FRAME));
     }
 
     /// A press that moves less than the threshold is a click on that row,

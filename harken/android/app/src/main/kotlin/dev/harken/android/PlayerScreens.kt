@@ -37,12 +37,9 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -116,6 +113,7 @@ import dev.arkui.quiet
 import dev.arkui.rememberReorder
 import dev.arkui.rememberTransientListState
 import dev.arkui.unlessReduced
+import dev.arkui.reducedMotion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -218,7 +216,7 @@ fun MiniPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long>
         color = Glass.fill(),
         shape = CircleShape,
         shadowElevation = BAR_SHADOW,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clip(CircleShape).clickable(onClick = controls::open),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clip(CircleShape).pressable(onClick = controls::open),
     ) {
         MiniFace(state, controls, position)
     }
@@ -337,7 +335,7 @@ fun FullFace(
             // rounded, lifted, and a little smaller while paused.
             if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
             else if (now != null) {
-                val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(spring(Springs.MOVE, Springs.STIFFNESS)), label = "cover")
+                val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
                 Cover(
                     seedOf(now),
                     now.art,
@@ -362,14 +360,14 @@ fun FullFace(
                 style = MaterialTheme.typography.headlineSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = if (album == null) Modifier else Modifier.clickable { controls.goTo(album) },
+                modifier = if (album == null) Modifier else Modifier.pressable(onClick = { controls.goTo(album) }),
             )
             Text(
                 artist,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
-                modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
+                modifier = if (artist.isEmpty()) Modifier else Modifier.pressable(onClick = { controls.goTo(Page.ForArtist(artist)) }),
             )
             // The chapter it is in, for an episode that has them.
             val chapters = LocalChapters.current
@@ -432,7 +430,7 @@ fun FullFace(
 }
 
 /** How much of its place the full player's cover takes: all of it playing, less paused. */
-fun coverScale(playing: Boolean): Float = if (playing) 1f else 0.9f
+fun coverScale(playing: Boolean): Float = if (playing) 1f else Springs.PAUSED_SCALE
 
 /** The full player's cover: its corners and its shadow, here and travelling (PlayerSheet.kt). */
 val COVER_CORNER = 16.dp
@@ -449,7 +447,7 @@ private fun backdrop(): Float = Tokens.washOpacity(dark = MaterialTheme.colorSch
 @Composable
 private fun GlassButton(icon: ImageVector, description: String, onClick: () -> Unit, enabled: Boolean = true) {
     Box(
-        Modifier.glass(id = description).size(width = 60.dp, height = 44.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        Modifier.glass(id = description).size(width = 60.dp, height = 44.dp).clip(CircleShape).pressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = description, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f), modifier = Modifier.size(22.dp))
@@ -463,7 +461,7 @@ private val ChipPadding = PaddingValues(horizontal = Space.l, vertical = Space.m
 @Composable
 private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier = Modifier) {
     Row(
-        modifier.glass(id = "queue").clip(CircleShape).clickable(onClick = controls::queue).padding(ChipPadding),
+        modifier.glass(id = "queue").clip(CircleShape).pressable(onClick = controls::queue).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Glyph(Glyphs.Queue, null, size = 18.dp)
@@ -475,7 +473,7 @@ private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier
 // What is being said, a line at a time: the transcript's sheet. Its glyph alone, after the queue's.
 @Composable
 private fun TranscriptChip(controls: Controls) {
-    Box(Modifier.glass(id = "transcript").clip(CircleShape).clickable(onClick = controls::transcript).padding(ChipPadding)) {
+    Box(Modifier.glass(id = "transcript").clip(CircleShape).pressable(onClick = controls::transcript).padding(ChipPadding)) {
         Glyph(Glyphs.Transcript, "Transcript", size = 18.dp)
     }
 }
@@ -523,7 +521,7 @@ private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modif
 private fun DeviceFace(on: Where, controls: Controls) {
     val tint = if (on.here && !on.away) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Row(
-        Modifier.clip(CircleShape).clickable(onClick = controls::devices).padding(ChipPadding),
+        Modifier.clip(CircleShape).pressable(onClick = controls::devices).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyphs.device(on.kind, on.name), contentDescription = "Playing on", tint = tint, modifier = Modifier.size(18.dp))
@@ -655,9 +653,11 @@ fun TranscriptSheet(
     LaunchedEffect(dragged) { if (dragged) following = false }
     // Following, the line being said is brought to the middle: at once as the sheet opens, gliding after.
     var placed by remember { mutableStateOf(false) }
+    // With motion reduced the line is put at the middle at once: a glide is travel the eye must follow.
+    val reduced = reducedMotion()
     LaunchedEffect(at, following, lines) {
         if (!following) return@LaunchedEffect
-        list.centre(at.coerceAtLeast(0), glide = placed)
+        list.centre(at.coerceAtLeast(0), glide = placed && !reduced)
         placed = true
     }
     // Left where the hand left it, it takes up following again once the line being said reaches the middle.
@@ -720,7 +720,7 @@ fun NameVoiceCard(line: Cue, people: List<OnEpisode>, onName: (String) -> Unit, 
                     p.name,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (p.name == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Space.corner)).clickable { onName(p.name) }.padding(vertical = Space.m, horizontal = Space.s),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Space.corner)).pressable(onClick = { onName(p.name) }, press = Press.Highlight).padding(vertical = Space.m, horizontal = Space.s),
                 )
             }
             OutlinedTextField(
@@ -742,7 +742,7 @@ fun NameVoiceCard(line: Cue, people: List<OnEpisode>, onName: (String) -> Unit, 
 // Back to the line being said, while the transcript is not following it.
 @Composable
 private fun FollowAlong(shown: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    AnimatedVisibility(shown, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+    AnimatedVisibility(shown, enter = fadeIn(Springs.fade()), exit = fadeOut(Springs.fade()), modifier = modifier) {
         FilledTonalButton(onClick = onClick) {
             Glyph(Glyphs.Follow, null, size = 16.dp)
             Spacer(Modifier.width(Space.s))
@@ -765,12 +765,14 @@ private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boole
             said -> ink.copy(alpha = 0.3f)
             else -> ink.copy(alpha = 0.55f)
         },
+        // A fade, not a move: on arkui's quick spring for a colour changing in place.
+        Springs.colour(),
         label = "line",
     )
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).clickable(onClick = onClick).padding(horizontal = Space.l, vertical = Space.s)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.s)) {
         if (speaker.isNotEmpty()) {
             // A voice told apart is named by tapping its name.
-            val named = if (line.voice.isEmpty()) Modifier else Modifier.clickable(onClick = onSpeaker)
+            val named = if (line.voice.isEmpty()) Modifier else Modifier.pressable(onClick = onSpeaker)
             Text(speaker, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
         }
         Text(line.text, style = MaterialTheme.typography.titleLarge, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = colour)
@@ -793,7 +795,7 @@ private suspend fun LazyListState.centre(index: Int, glide: Boolean) {
     val info = layoutInfo
     val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
     val by = (item.offset + item.size / 2 - (info.viewportStartOffset + info.viewportEndOffset) / 2).toFloat()
-    if (glide) animateScrollBy(by, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow)) else scrollBy(by)
+    if (glide) animateScrollBy(by, Springs.move()) else scrollBy(by)
 }
 
 @Composable
