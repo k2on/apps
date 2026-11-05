@@ -3,8 +3,8 @@
 // something), and every song in the order it arrived — each opening the page
 // it stands for, zooming out of its cover (Android's `LibraryScreen.kt`) —
 // and the podcasts and the sermons, always there, so the first can be
-// followed. They are a segmented control in the glass of the navigation
-// bar's bottom; the playlists list is where a new one is made, and the
+// followed. They are a row of capsules under the large title that scrolls
+// sideways, as Android's chips are; the playlists list is where a new one is made, and the
 // domain's own checks decide whether a name will do; the + on Podcasts and
 // Sermons finds a show to follow (`FollowSheet`).
 import ArkUI
@@ -46,19 +46,17 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("Library")
-        // A bar of the page's own: what scrolls under it softens there, as
-        // under the navigation bar (`safeAreaBar`, not an inset).
-        .safeAreaBar(edge: .top, spacing: 0) {
+        // The filter row, inset under the navigation bar rather than a bar of
+        // its own (`safeAreaBar`), whose soft edge would wash out the large
+        // title over it. On the page's own colour, so a list scrolled up goes
+        // under it rather than through the capsules.
+        .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                SwiftUI.Picker("Show", selection: $tab) {
-                    // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
-                    ForEach(LibraryTab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, Space.page)
-                .padding(.vertical, Space.s)
+                // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
+                LibraryChips(tab: $tab)
                 if let host = model.unreachable { Offline(host: host) }
             }
+            .background(Color.page)
         }
         .toolbar {
             // On Podcasts and Sermons the + finds a show to follow; on the rest it makes a playlist.
@@ -72,6 +70,39 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+}
+
+/// The Library's lists as a row of capsules that scrolls sideways, the one
+/// shown filled in the accent and the rest quiet: Android's chips, in the
+/// same order and words. Each is a button named by its list, which is what
+/// the screenshot driver taps.
+private struct LibraryChips: View {
+    @Binding var tab: LibraryTab
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Space.s) {
+                ForEach(LibraryTab.allCases) { t in
+                    let on = t == tab
+                    Button { tab = t } label: {
+                        Text(t.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(on ? Color.onAccent : Color.ink)
+                            .padding(.horizontal, Space.l)
+                            .frame(minHeight: 36)
+                            .background(Capsule().fill(on ? Color.accent : Color.containerHigh))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, Space.page)
+            .padding(.vertical, Space.s)
+        }
+        .scrollClipDisabled()
+        .animation(Springs.fade, value: tab)
     }
 }
 
@@ -112,6 +143,7 @@ private struct PlaylistsList: View {
             }
         }
         .listStyle(.plain)
+        .scrollEdgeEffectStyle(.soft, for: .all)
     }
 }
 
@@ -143,6 +175,7 @@ private struct AlbumsGrid: View {
                 }
                 .padding(Space.page)
             }
+            .scrollEdgeEffectStyle(.soft, for: .all)
         }
     }
 }
@@ -199,6 +232,7 @@ private struct ShowsGrid: View {
                 .padding(Space.page)
                 .animation(Springs.move, value: unread.map { $0.url })
             }
+            .scrollEdgeEffectStyle(.soft, for: .all)
         }
     }
 }
@@ -253,6 +287,7 @@ private struct ArtistsList: View {
                 }
             }
             .listStyle(.plain)
+            .scrollEdgeEffectStyle(.soft, for: .all)
         }
     }
 
@@ -305,6 +340,7 @@ struct SongsList: View {
                          onPlay: { model.play(tracks, at: i, from: .songs) }) { RowCover(track: t) }
             }
             .listStyle(.plain)
+            .scrollEdgeEffectStyle(.soft, for: .all)
         }
     }
 }

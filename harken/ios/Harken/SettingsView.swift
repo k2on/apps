@@ -95,7 +95,7 @@ struct DiagnosticsView: View {
             Section("Listening") {
                 ForEach(Array(Self.listening(model.heard).enumerated()), id: \.offset) { Number(name: $0.element.0, value: $0.element.1) }
             }
-            Section("Changes from this phone") {
+            Section("Changes from This Phone") {
                 if changes.isEmpty { Text("None yet — what you change here is listed with where it stands").foregroundStyle(.quiet) }
                 ForEach(Array(changes.enumerated()), id: \.offset) { LabeledContent($0.element.0, value: $0.element.1) }
             }

@@ -113,7 +113,7 @@ struct TrackRow<Leading: View>: View {
 }
 
 /// An episode's row, as a podcast app has it: when it came out — and, away
-/// from its show's page, which show — in small capitals; its title, bold;
+/// from its show's page, which show — in small type; its title, bold;
 /// what it is about; who is on it besides its hosts, their faces and their
 /// names; and a play button that says how long it is, how much is left of
 /// it or that it is played — or, while its file is not on the server yet,
@@ -141,7 +141,7 @@ struct EpisodeRow: View {
         let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
         let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
         let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
-        let over = Spell.facts([show, day]).uppercased()
+        let over = Spell.facts([show, day])
         VStack(alignment: .leading, spacing: Space.xs) {
             if !over.isEmpty {
                 Text(over).font(.caption.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
@@ -398,7 +398,7 @@ struct PageHeader<Cover: View>: View {
     var body: some View {
         VStack(spacing: Space.xs) {
             cover().padding(.top, Space.s).padding(.bottom, Space.l)
-            Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
+            Text(kind).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
             Text(title).font(.title2.bold()).multilineTextAlignment(.center)
             if let by = by {
                 Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.accentText).disabled(onBy == nil)

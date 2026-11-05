@@ -39,6 +39,7 @@ private struct CataloguePage<Content: View>: View {
                 .padding(.bottom, Space.xl)
         }
         .ignoresSafeArea(.container, edges: under)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .onScrollGeometryChange(for: Bool.self) { g in
             g.contentOffset.y + g.contentInsets.top < fold
         } action: { _, now in
@@ -87,12 +88,12 @@ struct AlbumPage: View {
         let creator = album?.creator ?? tracks.first?.creator ?? ""
         // Who played it, in the gold: whoever is credited on the most of it,
         // which on a record by one orchestra is the orchestra; whose it is
-        // then goes under, in small capitals. Nobody credited, and it is
+        // then goes under, in small type. Nobody credited, and it is
         // whoever made it.
         let credited = album?.performer ?? ""
         let performer: String? = credited.isEmpty || credited == creator ? nil : credited
         let year = album?.released ?? 0
-        let small = Spell.facts([performer == nil ? nil : creator.uppercased(), year > 0 ? String(year) : nil])
+        let small = Spell.facts([performer == nil ? nil : creator, year > 0 ? String(year) : nil])
         let toCreator: (() -> Void)? = creator.isEmpty ? nil : { open(.page(.artist(creator))) }
         CataloguePage {
             RecordHeader(title: name, by: performer ?? creator, onBy: performer == nil ? toCreator : nil,
@@ -228,7 +229,7 @@ struct ArtistPage: View {
     }
 }
 
-/// A work's page, as a catalogue sets one: its composer in small capitals
+/// A work's page, as a catalogue sets one: its composer in small type
 /// over its title, the way back to them, what it is under, a hairline; then
 /// its fullest performance set apart with a Play, and every performance —
 /// cover, who played it, when, how long — the same music told apart by who
@@ -254,7 +255,7 @@ struct WorkPage: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !composer.isEmpty {
                     Button { open(.page(.artist(composer))) } label: {
-                        Text(composer.uppercased() + "  \u{203A}").font(.footnote.weight(.semibold)).foregroundStyle(.quiet)
+                        Text(composer + "  \u{203A}").font(.footnote.weight(.semibold)).foregroundStyle(.quiet)
                     }
                     .buttonStyle(.plain)
                 }
@@ -457,6 +458,7 @@ struct ShowPage: View {
             }
         }
         .listStyle(.plain)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // The show's own settings, where it is followed: Unfollow.
@@ -518,6 +520,7 @@ struct PlaylistPage: View {
             }
         }
         .listStyle(.plain)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

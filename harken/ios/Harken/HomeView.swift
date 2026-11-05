@@ -36,6 +36,9 @@ struct HomeView: View {
             }
             .padding(.bottom, Space.xl)
         }
+        // On the scroll view itself, so the fade under the tab bar and the
+        // mini player is this one's, not only an environment value above it.
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationTitle("Home")
         .animation(Springs.fade, value: s.loaded)
     }

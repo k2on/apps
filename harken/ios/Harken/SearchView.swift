@@ -26,6 +26,7 @@ struct SearchView: View {
             }
         }
         .listStyle(.plain)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .navigationTitle("Search")
         .searchable(text: needle, prompt: "Songs, albums, artists")
         .onSubmit(of: .search) { model.searched(model.needle) }

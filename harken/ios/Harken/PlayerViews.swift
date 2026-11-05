@@ -580,7 +580,7 @@ private struct TranscriptLine: View {
         let ink: Color = when == .saying ? .ink : when == .coming ? .quiet : .disabled
         VStack(alignment: .leading, spacing: Space.xs) {
             if named {
-                Text(cue.speaker.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.accentText)
+                Text(cue.speaker).font(.caption.weight(.semibold)).foregroundStyle(Color.accentText)
                     .opacity(when == .said ? 0.6 : 1)
             }
             Text(cue.text).font(.title3.weight(.semibold)).foregroundStyle(ink)
