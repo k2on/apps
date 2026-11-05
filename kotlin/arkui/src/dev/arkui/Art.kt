@@ -21,11 +21,13 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
@@ -147,7 +149,9 @@ public fun Cover(
     corner: Dp = Space.corner
 ) {
     val shape = if (round) CircleShape else RoundedCornerShape(corner)
-    Box(modifier.clip(shape)) {
+    // On the page's own colour: the derived square fades to a third, and a cover lifted on a
+    // shadow (the player's) would show the shadow through it, a dark band inside its edge.
+    Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surface)) {
         Square(seed, Modifier.fillMaxSize())
         val covers = LocalCoverLoader.current
         val url = remember(covers, art) { covers?.urlOf(art) }
