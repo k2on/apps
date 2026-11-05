@@ -40,7 +40,7 @@
           "where": "bottom"
         },
         {
-          "wait": 3
+          "await": "Pause"
         },
         {
           "tap": "Für Elise",
