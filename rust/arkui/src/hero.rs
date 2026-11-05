@@ -186,11 +186,8 @@ pub fn grid<'a, M: 'a>(entries: Vec<Element<'a, M>>, columns: usize) -> Element<
 /// One entry over its hairline, with `picture` (a cover, a face) at its
 /// left when it has one.
 pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
-    let title = text(e.title.clone()).size(14).style(move |t| text::Style {
-        color: Some(match on_cursor {
-            true => theme::of(t).primary.base.color,
-            false => theme::of(t).background.base.text,
-        }),
+    let title = text(e.title.clone()).size(14).style(|t| text::Style {
+        color: Some(theme::of(t).background.base.text),
     });
     let mut words = column![].spacing(2).width(Length::Fill);
     if !e.over.is_empty() {
@@ -212,12 +209,14 @@ pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, o
     .align_y(Alignment::Center);
     mouse_area(
         column![
-            container(body).padding(Padding {
-                top: 10.0,
-                right: 4.0,
-                bottom: 10.0,
-                left: 0.0
-            }),
+            container(body)
+                .padding(Padding {
+                    top: 10.0,
+                    right: 4.0,
+                    bottom: 10.0,
+                    left: 0.0
+                })
+                .style(move |t| style::row(t, on_cursor, true, false)),
             rule::horizontal(1).style(style::hairline)
         ]
         .width(Length::Fill),
@@ -232,12 +231,7 @@ pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, o
 /// the cursor, filled as the cursor's row is. Opening it is the caller's.
 pub fn more<'a, M: 'a>(label: &str, lit: bool) -> Element<'a, M> {
     let line = row![
-        text(label.to_string()).size(14).style(move |t| match lit {
-            true => text::Style {
-                color: Some(theme::of(t).primary.base.text),
-            },
-            false => style::accent(t),
-        }),
+        text(label.to_string()).size(14).style(style::accent),
         Space::new().width(Length::Fill),
         text("\u{203A}").size(18).style(style::faint(0.45)),
     ]

@@ -3,8 +3,8 @@
 //!
 //! Lifted from harken's, where the rules were paid for. **One highlight, not
 //! two**: the sidebar's cursor *is* what the page is showing, so the row
-//! under it is marked whether or not the sidebar has the keyboard, and lit
-//! (the accent, [`style::entry`]) only while it has. A heading is drawn when
+//! under it is marked whether or not the sidebar has the keyboard: the
+//! focus's rounded ground ([`style::entry`]), fainter while it has not. A heading is drawn when
 //! the group changes rather than stored as a row, so the cursor's row `n`
 //! and the reader's are the same and the keyboard walks a plain column
 //! ([`crate::vim::Grid::column`]).
@@ -43,16 +43,13 @@ pub fn lit(i: usize, cursor: usize, focused: bool) -> bool {
 }
 
 /// A tally on a row's right: how many are in the place.
-pub fn count<'a, M: 'a>(n: i64, lit: bool) -> Element<'a, M> {
+pub fn count<'a, M: 'a>(n: i64, _lit: bool) -> Element<'a, M> {
     text(n.to_string())
         .size(10)
         .style(move |t| {
             let p = theme::of(t);
             text::Style {
-                color: Some(match lit {
-                    true => p.primary.base.text.scale_alpha(0.7),
-                    false => p.background.base.text.scale_alpha(0.5),
-                }),
+                color: Some(p.background.base.text.scale_alpha(0.5)),
             }
         })
         .into()

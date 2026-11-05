@@ -15,7 +15,6 @@
 use iced::widget::{button, container, rule, scrollable, slider, text};
 use iced::{Background, Border, Color, Theme};
 
-use crate::panel::ENTRY_RADIUS;
 use crate::theme::of;
 
 /// Secondary text: a clock, a count, a hint.
@@ -79,46 +78,80 @@ pub fn seek(theme: &Theme, status: slider::Status) -> slider::Style {
 
 /// A button somebody is meant to press: signing in, going offline.
 ///
-/// Filled with the accent, and its text is the one colour that accent was
-/// paired with — the same rule the cursor's row follows.
+/// Words in the accent, with no fill and no border: a button reads as part
+/// of the page's text, and the accent alone says it is the one to press.
+/// Pointing at it changes nothing about its colour; what a pointer does to
+/// a control is [`crate::button`]'s underline or [`quiet`]'s faint tint.
 pub fn action(theme: &Theme, status: button::Status) -> button::Style {
     let palette = of(theme);
-    let (background, text_color) = match status {
-        button::Status::Active => (palette.primary.base.color, palette.primary.base.text),
-        button::Status::Hovered => (palette.primary.strong.color, palette.primary.strong.text),
-        button::Status::Pressed => (palette.primary.weak.color, palette.primary.weak.text),
-        button::Status::Disabled => (palette.background.weak.color, palette.background.base.text.scale_alpha(0.4)),
+    let text_color = match status {
+        button::Status::Disabled => palette.background.base.text.scale_alpha(0.4),
+        _ => palette.primary.base.color,
     };
     button::Style {
-        background: Some(Background::Color(background)),
+        background: None,
+        text_color,
+        border: Border::default(),
+        ..button::Style::default()
+    }
+}
+
+/// A button that reads as a label until it is pointed at: an icon, a word,
+/// the account at the end of a top bar. No border, and pointed at, only the
+/// faintest tint behind it ([`HOVER_ALPHA`]); its text keeps its colour.
+pub fn quiet(theme: &Theme, status: button::Status) -> button::Style {
+    let palette = of(theme);
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => Some(Background::Color(palette.background.base.text.scale_alpha(HOVER_ALPHA))),
+        button::Status::Active | button::Status::Disabled => None,
+    };
+    let text_color = match status {
+        button::Status::Disabled => palette.background.base.text.scale_alpha(0.4),
+        _ => palette.background.base.text,
+    };
+    button::Style {
+        background,
         text_color,
         border: Border {
-            radius: 6.0.into(),
+            radius: FOCUS_RADIUS.into(),
             ..Border::default()
         },
         ..button::Style::default()
     }
 }
 
-/// A button that reads as a label until it is pointed at: the account at
-/// the end of a top bar. Not [`action`]: it is not something somebody is
-/// being asked to press, and an accent there would compete with the one on
-/// the row that is playing.
-pub fn quiet(theme: &Theme, status: button::Status) -> button::Style {
+/// A button that is only what it holds: no fill, no border, its text in the
+/// page's colour whatever the pointer does. A link's or a name's, whose
+/// pointer is the underline [`crate::button::underlined`] draws.
+pub fn bare(theme: &Theme, status: button::Status) -> button::Style {
     let palette = of(theme);
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => Some(Background::Color(palette.background.strong.color)),
-        button::Status::Active | button::Status::Disabled => None,
-    };
     button::Style {
-        background,
-        text_color: palette.background.base.text,
-        border: Border {
-            radius: ENTRY_RADIUS.into(),
-            ..Border::default()
+        background: None,
+        text_color: match status {
+            button::Status::Disabled => palette.background.base.text.scale_alpha(0.4),
+            _ => palette.background.base.text,
         },
+        border: Border::default(),
         ..button::Style::default()
     }
+}
+
+/// How much of the text colour a control pointed at is tinted with: enough
+/// to say "this one", not so much that the pointer passing over a page
+/// lights it up as it goes.
+pub const HOVER_ALPHA: f32 = 0.05;
+
+/// How round the focus's ground is ([`focus`]).
+pub const FOCUS_RADIUS: f32 = 6.0;
+
+/// The ground behind what has the focus: the cursor's row, entry or cell.
+/// A low wash of the text colour, rounded, rather than the accent: the
+/// focus is where the keys are, not something to press, and an accent
+/// stripe drowns the row it is on. A pane without the keyboard keeps a
+/// fainter one, the way a native list dims its selection when you click
+/// away, so the row the page is about is still seen.
+pub fn focus(theme: &Theme, focused: bool) -> Color {
+    of(theme).background.base.text.scale_alpha(if focused { 0.08 } else { 0.05 })
 }
 
 /// The scrollbars. **A scrollbar is not a thing to accent.**
@@ -265,84 +298,40 @@ fn mix(from: Color, to: Color, by: f32) -> Color {
     }
 }
 
-/// What a row of a list or a table is painted.
-///
-/// Three states, and they are deliberately not three shades of one idea: the
-/// cursor is the accent when its pane has the keyboard and a plain strong grey
-/// when it does not — the way a native list dims its selection when you click
-/// away — and everything else is the zebra, the page's own background
-/// alternating with the faintest step up from it.
-pub fn row(theme: &Theme, on_cursor: bool, focused: bool, odd: bool) -> container::Style {
-    let palette = of(theme);
-    let background = if on_cursor {
-        Some(match focused {
-            true => palette.primary.base.color,
-            false => palette.background.strong.color,
-        })
-    } else if odd {
-        // A wash of the text colour rather than `background.weak`: from a
-        // base this dark iced's generated step goes a long way, which reads as
-        // a striped table rather than a list you can follow across. Alpha, so
-        // the same number is a lift on a dark theme and a shade on a light one.
-        Some(palette.background.base.text.scale_alpha(0.045))
-    } else {
-        None
-    };
+/// What a row of a list or a table is painted: nothing, but under the
+/// cursor, the [`focus`]'s rounded ground. No zebra and no accent fill: a
+/// list reads as its text, and the one row with a ground is the one the
+/// keys are on. `odd` is kept for the callers that still say it.
+pub fn row(theme: &Theme, on_cursor: bool, focused: bool, _odd: bool) -> container::Style {
     container::Style {
-        background: background.map(Background::Color),
-        ..container::Style::default()
-    }
-}
-
-/// What one entry inside a panel is painted: a rounded rectangle floating
-/// inside the panel's padding, rather than a stripe painted onto its edge.
-///
-/// `focused` is `false` on a panel whose keyboard has gone somewhere else — a
-/// menu with its submenu up, or a submenu opened by pointing that the keys
-/// have not followed into. It dims to `background.strong` rather than going
-/// out, the same rule [`row`] has and for the same reason: the entry is still
-/// the one the panel is about.
-pub fn entry(theme: &Theme, on_cursor: bool, focused: bool) -> container::Style {
-    let palette = of(theme);
-    container::Style {
-        background: on_cursor.then_some(Background::Color(match focused {
-            true => palette.primary.base.color,
-            false => palette.background.strong.color,
-        })),
+        background: on_cursor.then(|| Background::Color(focus(theme, focused))),
         border: Border {
-            radius: ENTRY_RADIUS.into(),
+            radius: FOCUS_RADIUS.into(),
             ..Border::default()
         },
         ..container::Style::default()
     }
 }
 
-/// The one colour text on such an entry is legible in: the colour the accent
-/// was paired with when it is lit, the page's text when it is not.
-pub fn entry_text(theme: &Theme, lit: bool) -> Color {
-    let palette = of(theme);
-    match lit {
-        true => palette.primary.base.text,
-        false => palette.background.base.text,
-    }
+/// What one entry inside a panel or a sidebar is painted: the [`focus`]'s
+/// rounded ground under the cursor, fainter while its pane does not have
+/// the keyboard (a menu with its submenu up), the same rule as [`row`].
+pub fn entry(theme: &Theme, on_cursor: bool, focused: bool) -> container::Style {
+    row(theme, on_cursor, focused, false)
 }
 
-/// Text on a row that may be under the cursor.
-///
-/// On the cursor the row is filled with the accent, so there is exactly one
-/// colour text on it can be — the one that accent was paired with — and a
-/// dimmed column gets the same hue at lower alpha, never a grey that was
-/// chosen against the window instead. Off it, `accent` is the accent colour
-/// (the one playing, a ticked name) and `dim` is the text at 0.6.
-pub fn on_row(theme: &Theme, on_cursor: bool, accent: bool, dim: bool) -> Color {
+/// The colour of text on such an entry: the page's text, lit or not, since
+/// the focus's ground is a wash the text reads on either way.
+pub fn entry_text(theme: &Theme, _lit: bool) -> Color {
+    of(theme).background.base.text
+}
+
+/// Text on a row that may be under the cursor: the same whether it is or
+/// not, the cursor being a wash under it ([`row`]). `accent` is the accent
+/// colour (the one playing, a ticked name) and `dim` is the text at 0.6.
+pub fn on_row(theme: &Theme, _on_cursor: bool, accent: bool, dim: bool) -> Color {
     let palette = of(theme);
-    if on_cursor {
-        let text = palette.primary.base.text;
-        match dim {
-            true => text.scale_alpha(0.75),
-            false => text,
-        }
-    } else if accent {
+    if accent {
         palette.primary.base.color
     } else if dim {
         palette.background.base.text.scale_alpha(0.6)

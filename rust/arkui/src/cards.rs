@@ -142,32 +142,40 @@ pub fn view<'a, M: Clone + 'a>(
     .into()
 }
 
+/// How far the focus's ground reaches past a card's picture on each side.
+const PLATE: f32 = 6.0;
+
 /// One card `side` wide ([`Shelf::side`]): the picture, the name, and what
-/// is under it.
+/// is under it. Under the cursor it stands on the focus's rounded ground
+/// ([`style::row`]), its words the colour they always are. The ground is
+/// inside the card's width, so the picture is a little narrower than the
+/// card and the grid's geometry is the same with or without it.
 pub fn view_card<'a, M: Clone + 'a>(side: f32, card: &Card<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
-    let corner = if card.round { side / 2.0 } else { 6.0 };
+    let inner = (side - 2.0 * PLATE).max(1.0);
+    let corner = if card.round { inner / 2.0 } else { 6.0 };
     mouse_area(
-        column![
-            art::picture(&card.seed, card.picture.as_ref(), side, corner),
-            // Bounded, and allowed to wrap. Unbounded with `Wrapping::None` the
-            // layout node is as wide as the text, so a long title ran straight
-            // through the card beside it.
-            text(crate::fit::drawable(&card.title).into_owned())
-                .size(13)
-                .width(Length::Fixed(side))
-                .style(move |theme| text::Style {
-                    color: Some(match on_cursor {
-                        true => crate::theme::of(theme).primary.base.color,
-                        false => crate::theme::of(theme).background.base.text,
+        container(
+            column![
+                art::picture(&card.seed, card.picture.as_ref(), inner, corner),
+                // Bounded, and allowed to wrap. Unbounded with `Wrapping::None`
+                // the layout node is as wide as the text, so a long title ran
+                // straight through the card beside it.
+                text(crate::fit::drawable(&card.title).into_owned())
+                    .size(13)
+                    .width(Length::Fixed(inner))
+                    .style(|theme| text::Style {
+                        color: Some(crate::theme::of(theme).background.base.text),
                     }),
-                }),
-            text(crate::fit::drawable(&card.under).into_owned())
-                .size(12)
-                .width(Length::Fixed(side))
-                .style(style::faint(0.5)),
-        ]
-        .spacing(4)
-        .width(Length::Fixed(side)),
+                text(crate::fit::drawable(&card.under).into_owned())
+                    .size(12)
+                    .width(Length::Fixed(inner))
+                    .style(style::faint(0.5)),
+            ]
+            .spacing(4),
+        )
+        .padding(PLATE)
+        .width(Length::Fixed(side))
+        .style(move |t| style::row(t, on_cursor, true, false)),
     )
     .on_enter(hover)
     .on_press(card.open.clone())

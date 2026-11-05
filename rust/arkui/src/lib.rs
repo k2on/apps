@@ -21,6 +21,7 @@
 
 pub mod account;
 pub mod art;
+pub mod button;
 pub mod cards;
 mod clipboard;
 pub mod command;
