@@ -36,14 +36,16 @@
       "id": "player",
       "steps": [
         {
-          "tap": "Für Elise"
+          "tap": "Für Elise",
+          "where": "bottom"
         },
         {
           "wait": 3
         },
         {
           "tap": "Für Elise",
-          "where": "bottom"
+          "where": "bottom",
+          "unless": "Close the player"
         },
         {
           "wait": 3
