@@ -5,28 +5,25 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Module, Peer};
+use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
-use arkdb::demo::{arrival, room, CreatePlaylist, Point};
+use arkdb::demo::{Arrival, CreatePlaylist, Point};
 
 fn hub() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
-    c.live = Some(ark_peer::Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        ..ark_peer::Live::new(Module::of(&room()))
-    });
+    let c = Config {
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
+    };
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
-    c.live = Some(ark_peer::Live {
-        device: Some(b"d0".to_vec()),
-        ..ark_peer::Live::new(Module::of(&room()))
-    });
-    let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()), false);
+    let c = Config {
+        device: Some(Arrival { name: "d0".into() }.to_bytes()),
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
+    };
+    let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()));
     p.linked = true;
     p
 }
@@ -52,7 +49,8 @@ fn carry(hub: &mut Peer, d: &mut Peer, c: u64) {
 /// the server's live space. Falsified by the live machine opening under the
 /// log's origin, which the disk keeps: the reloaded page's `local`s started
 /// again at 1, below what the page before it had pushed, and every call was
-/// refused as overtaken — harken's presses and hand-offs after a reload.
+/// taken for one judged already — harken's presses and hand-offs after a
+/// reload.
 #[test]
 fn a_reloaded_page_is_heard_in_the_live_space() {
     let mut hub = hub();
@@ -61,7 +59,7 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
     d.connected();
     carry(&mut hub, &mut d, c);
     for i in 0..5 {
-        d.author(Space::Volatile, "room.point", Point { x: i }.to_bytes(), i).unwrap();
+        d.mutate_at("room.point", Point { x: i }.to_bytes(), i).unwrap();
         carry(&mut hub, &mut d, c);
     }
     // The page reloads: its connection goes, it opens again from its disk.
@@ -72,7 +70,7 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
     d.connected();
     carry(&mut hub, &mut d, c);
     let before = hub.machine(Space::Volatile).unwrap().log().head();
-    d.author(Space::Volatile, "room.point", Point { x: 99 }.to_bytes(), 20).unwrap();
+    d.mutate_at("room.point", Point { x: 99 }.to_bytes(), 20).unwrap();
     carry(&mut hub, &mut d, c);
     let after = hub.machine(Space::Volatile).unwrap().log().head();
     assert_ne!(before, after, "the reloaded page's call never reached the server's live space");
@@ -87,13 +85,8 @@ fn a_reloaded_page_is_heard_in_the_live_space() {
 fn the_servers_spaces_name_their_entries_apart() {
     let mut hub = hub();
     // The log's first entry is the server's own, as harken's library is.
-    hub.author(
-        Space::Durable,
-        "demo.create_playlist",
-        CreatePlaylist { name: "mix".into() }.to_bytes(),
-        0,
-    )
-    .unwrap();
+    hub.mutate_at("demo.create_playlist", CreatePlaylist { name: "mix".into() }.to_bytes(), 0)
+        .unwrap();
     let mut d = device();
     let c = hub.accept(d.me().clone());
     d.connected();

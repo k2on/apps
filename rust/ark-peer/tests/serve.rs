@@ -12,17 +12,17 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_peer::link::{socket, wait, Dial, Event};
-use ark_peer::{dev, now_ms, Disk, Files, Handle, Live, Memory, Module, Peer, Server};
+use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Memory, Peer, Server};
 
 mod support;
 
 use support::{config, device, linked, named, until};
 
 fn create(c: &mut Peer, name: &str) {
-    let _ = c.author(Space::Durable, "demo.create_playlist", named(name), now_ms());
+    let _ = c.mutate_at("demo.create_playlist", named(name), now_ms());
     c.pump();
 }
 
@@ -81,7 +81,7 @@ fn a_linked_round_trip_waits_on_nothing() {
     let direct: Vec<Duration> = (0..100)
         .map(|i| {
             let t = std::time::Instant::now();
-            let _ = d.author(Space::Durable, "demo.create_playlist", named(&format!("D{i}")), now_ms());
+            let _ = d.mutate_at("demo.create_playlist", named(&format!("D{i}")), now_ms());
             loop {
                 for f in d.take_frames() {
                     wire.send(f);
@@ -162,13 +162,13 @@ fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     for name in ["a", "b"] {
-        hub.author(Space::Durable, "demo.create_playlist", named(name), 1).unwrap();
+        hub.mutate_at("demo.create_playlist", named(name), 1).unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
     let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
-    hub.author(Space::Durable, "demo.create_playlist", named("c"), 1).unwrap();
+    hub.mutate_at("demo.create_playlist", named("c"), 1).unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
 }
 
@@ -190,7 +190,7 @@ impl Disk for Flaky {
     }
 }
 
-fn push(who: &Who, local: i64, name: &str) -> Vec<u8> {
+fn push(who: &Ctx, local: i64, name: &str) -> Vec<u8> {
     support::push(who, local, "demo.create_playlist", named(name))
 }
 
@@ -215,7 +215,7 @@ fn nothing_is_delivered_before_it_is_written() {
             [
                 Frame::Page { .. },
                 Frame::Verdict {
-                    verdict: Verdict::Ok { seq: 1 },
+                    verdict: Verdict::At { seq: 1, .. },
                     ..
                 }
             ]
@@ -255,7 +255,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
         out.iter().any(|(_, b)| matches!(
             Frame::dec(b),
             Ok(Frame::Verdict {
-                verdict: Verdict::Ok { seq: 1 },
+                verdict: Verdict::At { seq: 1, .. },
                 ..
             })
         )),
@@ -289,44 +289,50 @@ fn a_web_build_is_its_own_validator() {
 
 /// The live space across a restart: what the hub held when it closed is
 /// what it opens with, and `on_restore` is authored over it — the room
-/// keeps who was here and lets every pointer go. Falsified by `Peer::serve`
+/// keeps who was here and lets every pointer go — and its journal, so each
+/// origin is judged on from where it was. Falsified by `Peer::serve`
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
-    use arkdb::demo::{arrival, room};
-    let r = room();
-    let mut config = config();
-    config.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        on_restore: Some("room.on_restore".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(8),
-        ..Live::new(Module::of(&r))
-    });
+    let config = Config {
+        live_keep: Some(8),
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..config()
+    };
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();
     let c = hub.accept(alice.clone());
+    let device = Frame::Call {
+        id: 0,
+        name: ark::frames::DEVICE.into(),
+        input: arkdb::demo::Arrival { name: "phone".into() }.to_bytes(),
+    };
     let hello = Frame::Hello {
         space: Space::Volatile,
         cursor: 0,
-        hash: None,
-        device: Some(b"phone".to_vec()),
-        schema: Default::default(),
-        version: String::new(),
+        hash: Default::default(),
+        fill: None,
+        most: ark::peer::PART as u64,
     };
+    hub.frame(c, device.enc(), 1);
     hub.frame(c, hello.enc(), 1);
-    hub.author(Space::Volatile, "room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2)
-        .unwrap();
+    hub.mutate_at("room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2).unwrap();
     let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 1],
         "here, and a pointer"
     );
+    let journal = |h: &Peer| match &h.live.as_ref().unwrap().role {
+        ark::peer::Role::Authority { journal } => journal.last.clone(),
+        ark::peer::Role::Replica => unreachable!(),
+    };
+    let judged = journal(&hub);
+    assert!(!judged.is_empty());
     hub.close();
     let disk = hub.log.disk.take().unwrap();
     let hub = Peer::serve(config, disk, 3);
+    assert!(judged.iter().all(|(o, l)| journal(&hub).get(o) == Some(l)), "the journal kept");
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 0],
@@ -348,7 +354,7 @@ async fn a_frame_past_16_mib_is_taken() {
     let name = big.clone();
     running
         .hub
-        .with(move |p| p.author(Space::Durable, "demo.create_playlist", named(&name), 1))
+        .with(move |p| p.mutate_at("demo.create_playlist", named(&name), 1))
         .unwrap()
         .unwrap();
     tokio::task::spawn_blocking(move || {

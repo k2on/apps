@@ -1,27 +1,30 @@
 //! §1.6 The log, chained: each entry an intent, logged with the facts it
-//! had, the state hash after it and the hash of the chain to it.
+//! had and the hash of the chain to it.
 //!
 //! ```text
-//! Entry  { id, actor, session, origin, local, roles, func, input, now }
-//! Logged { seq, entry, facts, state, hash }
-//! hash = sha256(prev.hash ‖ enc([seq, entry, facts, state]))
+//! Ctx    { id, actor, session, origin, local, roles, func, input, now, cause }
+//! Logged { seq, entry, facts, hash }
+//! hash = sha256(prev.hash ‖ enc([seq, entry, facts]))
 //! ```
 //!
 //! **The log is a table.** Its entries are the rows of the store's `_log`
 //! table ([`crate::store::LOG`]), keyed by sequence, each row a
-//! [`Logged`]'s encoding; the chain is that table's invariant, judged at
-//! every write to it ([`Logged::links`]), and its first row is the one the
-//! log stands on (the horizon, or a snapshot's head), not checked. What a
+//! [`Logged`]'s encoding; each follows the one before, and on an
+//! authority, which makes the chain, links onto it ([`Logged::links`]) —
+//! a replica holds the hashes it was sent, its feed's (§1.8) — and its
+//! first row is the one the log stands on (the horizon, or a fill's head),
+//! not checked. What a
 //! peer makes durable is the store's rows whole, the log's table's among
 //! them, and the rows appended to the log's table since ([`Record`]): an
 //! entry's facts are in its row, so the rows they write to the schema's
 //! tables are not journaled beside it but written again as a peer opens
-//! ([`Durable`]): one format, each fact on disk once.
+//! from its records: one format, each fact on disk once.
 //!
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
 //! paged from there by an authority that has that hash at that sequence
-//! and is sent a snapshot by one that does not.
+//! (keyed by the scope it is fed by, if one) and is filled by one that
+//! does not.
 //!
 //! **Deterministic ids.** An entry's id is `sha256(len(origin) ‖ origin ‖
 //! local)[..16]`, the length and `local` eight bytes big-endian: `origin` is sixteen bytes a replica draws once,
@@ -34,17 +37,15 @@
 //! replica's pushes; `actor`, `session` and `roles` are what the authority
 //! stamps from the connection it judged the entry on.
 //!
-//! **Snapshots and the horizon.** A [`Snapshot`] is `(seq, hash, state,
-//! rows in key order)`, what an authority sends; a log stands on it as a
-//! first row of its table with no entry ([`Snapshot::base`]). The horizon
+//! **The horizon.** A log stands on a first row of its table with no entry
+//! ([`Logged::base`]): where it began, a fill's head, or the horizon, which
 //! is a delete of the rows below it.
 
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
-use crate::hash::{sha256, EntryHash, StateHash};
+use crate::hash::{sha256, EntryHash};
 use crate::store::Change;
-use crate::Refusal;
 
 /// A position in the log. The first entry is 1; 0 is the empty chain.
 pub type Seq = i64;
@@ -115,18 +116,6 @@ impl std::fmt::Debug for Span {
     }
 }
 
-impl Span {
-    /// A span of its own inside this one's trace, named by `bytes` (a run
-    /// of a job, a call through the bridge).
-    pub fn child(&self, bytes: impl AsRef<[u8]>) -> Span {
-        Span {
-            trace: self.trace,
-            id: first16(sha256(&[&self.id, bytes.as_ref()])),
-            began: self.began,
-        }
-    }
-}
-
 impl EntryId {
     /// The id of the `local`-th intent from `origin` (an [`Origin`]; any
     /// bytes name an id outside the log, as a query's context does).
@@ -141,12 +130,16 @@ impl EntryId {
     }
 }
 
-/// An intent, as recorded. `actor` and `roles` are what the authority
-/// judged it under: it stamps them before sequencing (§1.7), and a replay
-/// anywhere reads what the log says. The default is no intent, what the
-/// first row of a log standing on a snapshot carries.
+/// An entry: an intent, as recorded, and all a function knows of the one
+/// it runs for — all frozen in it, so every run of it, anywhere, is the
+/// same. `actor` and `roles` are what the authority judged it under: it
+/// stamps them before sequencing (§1.7), and a replay anywhere reads what
+/// the log says. The default is no intent, what the first row of a log
+/// standing on a snapshot carries. With no intent in it, who someone is
+/// ([`Ctx::who`]): who a peer authors as, who a connection was verified to
+/// be; at a `now`, a query's or a view's context.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
+pub struct Ctx {
     pub id: EntryId,
     pub actor: String,
     pub session: String,
@@ -161,11 +154,43 @@ pub struct Entry {
     /// The span it was authored under: a tap, a job's run, the entry whose
     /// change woke what authored it. None begins a trace of its own.
     pub cause: Option<Span>,
+    /// How many row ids a run of it has drawn ([`Ctx::new_id`]): no part of
+    /// the entry.
+    #[serde(skip)]
+    pub draws: Draws,
 }
 
-impl Default for Entry {
-    fn default() -> Entry {
-        Entry {
+/// A count a run moves through a shared reference: a `Cell`'s, but one a
+/// context held across threads (who a connection is) may carry. Not what
+/// an entry is: any two are equal.
+#[derive(Debug, Default)]
+pub struct Draws(std::sync::atomic::AtomicI64);
+
+impl Draws {
+    pub fn get(&self) -> i64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    pub fn set(&self, n: i64) {
+        self.0.store(n, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Clone for Draws {
+    fn clone(&self) -> Draws {
+        Draws(self.get().into())
+    }
+}
+
+impl PartialEq for Draws {
+    fn eq(&self, _: &Draws) -> bool {
+        true
+    }
+}
+impl Eq for Draws {}
+
+impl Default for Ctx {
+    fn default() -> Ctx {
+        Ctx {
             id: EntryId::default(),
             actor: String::new(),
             session: String::new(),
@@ -176,27 +201,59 @@ impl Default for Entry {
             input: ().to_bytes(),
             now: 0,
             cause: None,
+            draws: Draws::default(),
         }
     }
 }
 
-impl Entry {
+impl Ctx {
     /// The `local`-th intent from `origin`, as `who` makes it: calling
     /// `func` on `input` (an input is its encoding; no bytes are `()`'s) at
     /// `now`.
-    pub fn new(who: &crate::peer::Who, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Entry {
-        Entry {
+    pub fn new(who: &Ctx, origin: Origin, local: i64, func: impl Into<String>, input: Vec<u8>, now: i64) -> Ctx {
+        Ctx {
             id: EntryId::of(origin, local),
-            actor: who.actor.clone(),
-            session: who.session.clone(),
             origin,
             local,
-            roles: who.roles.clone(),
             func: func.into(),
             input: if input.is_empty() { ().to_bytes() } else { input },
             now,
             cause: None,
+            ..who.clone()
         }
+    }
+
+    /// Who someone is, in no entry.
+    pub fn who(actor: impl Into<String>, session: impl Into<String>, roles: Vec<String>) -> Ctx {
+        Ctx {
+            actor: actor.into(),
+            session: session.into(),
+            roles,
+            ..Ctx::default()
+        }
+    }
+
+    /// The next row id this run draws: the entry's `n`-th, from 0 (§1.6).
+    /// With `now`, a function's only non-determinism, frozen in the entry.
+    pub fn new_id<R>(&self) -> crate::row::Id<R> {
+        let n = self.draws.get();
+        self.draws.set(n + 1);
+        crate::row::Id::new(self.id.draw(n))
+    }
+
+    /// Who the intent is from.
+    pub fn user(&self) -> &str {
+        &self.actor
+    }
+
+    /// The device the intent came from: its session.
+    pub fn device(&self) -> &str {
+        &self.session
+    }
+
+    /// Whether the intent was judged under `role`.
+    pub fn has_role(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r == role)
     }
 
     /// Whether the id is the one `(origin, local)` names: an id is never
@@ -219,69 +276,69 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Logged {
     pub seq: Seq,
-    pub entry: Entry,
+    pub entry: Ctx,
     pub facts: Vec<Change>,
-    pub state: StateHash,
     pub hash: EntryHash,
 }
 
 impl Logged {
     /// The hash of the chain to an entry, from the one before it.
-    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Entry, facts: &[Change], state: &StateHash) -> EntryHash {
-        let b = crate::format::encode(&(seq, entry, facts, state)).expect("an entry serializes");
+    pub fn chain(prev: &EntryHash, seq: Seq, entry: &Ctx, facts: &[Change]) -> EntryHash {
+        let b = crate::format::encode(&(seq, entry, facts)).expect("an entry serializes");
         EntryHash(sha256(&[&prev.0, &b]))
     }
 
-    /// An intent not yet sequenced, as a peer pages it (§1.11): at
-    /// sequence 0, with no facts and zero hashes.
-    pub fn intent(entry: Entry) -> Logged {
-        let (state, hash) = Default::default();
+    /// An intent not yet sequenced: at sequence 0 and a zero hash, with
+    /// what its run changed as its facts — a peer's own pending, or, with
+    /// none, as a peer pages it (§1.11).
+    pub fn intent(entry: Ctx, facts: Vec<Change>) -> Logged {
         Logged {
-            seq: 0,
-            entry,
+            facts,
+            ..Logged::base(0, EntryHash::default()).with(entry)
+        }
+    }
+
+    /// The row a log stands on at `(seq, hash)`: no entry, no facts.
+    pub fn base(seq: Seq, hash: EntryHash) -> Logged {
+        Logged {
+            seq,
+            entry: Ctx::default(),
             facts: vec![],
-            state,
             hash,
         }
     }
 
+    fn with(self, entry: Ctx) -> Logged {
+        Logged { entry, ..self }
+    }
+
+    /// About how many bytes it is in a frame: what a page is cut by.
+    pub fn weight(&self) -> usize {
+        let e = &self.entry;
+        let rows = |c: &Change| match c {
+            Change::Add { row, .. } | Change::Remove { row, .. } => row.len(),
+            Change::Edit { old, new, .. } => old.len() + new.len(),
+        };
+        let facts: usize = self.facts.iter().map(|c| c.table().len() + rows(c)).sum();
+        96 + e.func.len() + e.actor.len() + e.session.len() + e.input.len() + facts
+    }
+
     /// Whether this links onto `prev`.
     pub fn links(&self, prev: &EntryHash) -> bool {
-        self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts, &self.state)
-    }
-}
-
-/// The state at a sequence: the chain's hash and the state hash there, and
-/// the durable rows, table by table in schema order, each in key order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub seq: Seq,
-    pub hash: EntryHash,
-    pub state: StateHash,
-    #[serde(with = "crate::format::raw_tables")]
-    pub rows: Vec<(String, Vec<Vec<u8>>)>,
-}
-
-impl Snapshot {
-    /// The first row of a log standing on this snapshot: its sequence,
-    /// state and hash, and no entry.
-    pub fn base(&self) -> Logged {
-        let mut l = Logged::intent(Entry::default());
-        (l.seq, l.state, l.hash) = (self.seq, self.state, self.hash);
-        l
-    }
-
-    /// The store's rows as a log standing on this snapshot holds them: the
-    /// snapshot's, then the log's table with its first row.
-    pub fn kv_rows(&self) -> Rows {
-        let mut rows = self.rows.clone();
-        rows.push((crate::store::LOG.into(), vec![self.base().to_bytes()]));
-        rows
+        self.hash == Logged::chain(prev, self.seq, &self.entry, &self.facts)
     }
 }
 
 /// A store's rows, by table.
 pub type Rows = Vec<(String, Vec<Vec<u8>>)>;
+
+/// A store's rows and a log standing on `(seq, hash)` beside them: what a
+/// store made durable whole at that head holds, every entry before it
+/// folded in.
+pub fn standing(mut rows: Rows, seq: Seq, hash: EntryHash) -> Rows {
+    rows.push((crate::store::LOG.into(), vec![Logged::base(seq, hash).to_bytes()]));
+    rows
+}
 
 /// Where a fill stands: at `table`'s first row whose key is `key` or past
 /// it, every row before it sent.
@@ -292,53 +349,26 @@ pub struct Cursor {
     pub key: Vec<u8>,
 }
 
-/// Every row of `table` whose key is `from` or past it and before `to`
-/// (none: to the table's end), as the authority held them.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Range {
-    pub table: String,
-    #[serde(with = "crate::format::raw")]
-    pub from: Vec<u8>,
-    pub to: Option<Vec<u8>>,
-    #[serde(with = "crate::format::raw_list")]
-    pub rows: Vec<Vec<u8>>,
-}
-
-/// A part of a fill (§1.7): ranges of the authority's rows as they stood at
-/// `(seq, hash)`, with the state there, each range's rows replacing what a
-/// replica held in it; the first part of a fill begins it from nothing,
-/// and the last says no `next`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Part {
-    pub seq: Seq,
-    pub hash: EntryHash,
-    pub state: StateHash,
-    pub first: bool,
-    pub ranges: Vec<Range>,
-    pub next: Option<Cursor>,
-}
-
-impl Part {
-    /// Where it begins: its first range's start.
-    pub fn from(&self) -> Option<Cursor> {
-        self.ranges.first().map(|r| Cursor {
-            table: r.table.clone(),
-            key: r.from.clone(),
-        })
-    }
-}
-
-/// What a peer makes durable, one record per `Persist` (§1.7): a logged
+/// What a peer makes durable, one record per `Send(To::Disk)` (§1.7): a logged
 /// entry, appended, as its row of the log's table — its facts are in it —
 /// or the store's rows whole, which every entry before them is folded
-/// into; or a part of a fill, appended, its rows written again as a peer
-/// opens beside the entries, by its sequence.
+/// into. A peer opens from its records in order (`Input::Open`): the
+/// store's rows as last written whole, the rows appended to the log's
+/// table since, whose facts write the rest again, and what a device's
+/// driver keeps of it beside them (`Pending`, never a `Send(To::Disk)`): its own
+/// intents still pending, each with its preview's changes as its facts,
+/// the head of the log those were made at (none: they are run again), and
+/// the last `local` it drew.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
     Rows(#[serde(with = "crate::format::raw_tables")] Rows),
-    Part(Part),
+    Pending {
+        pending: Vec<Logged>,
+        at: Option<(Seq, EntryHash)>,
+        local: i64,
+    },
 }
 
 impl Record {
@@ -358,24 +388,7 @@ impl Record {
         b.first() == Some(&1)
     }
 
-    pub fn dec(b: &[u8]) -> Result<Record, Refusal> {
+    pub fn dec(b: &[u8]) -> Result<Record, String> {
         Record::from_bytes(b)
     }
-}
-
-/// What a peer is opened from: its store's rows as they were last written
-/// whole — the log's table's among them — and the rows appended to the
-/// log's table since, in order, whose facts write the rest again; its own
-/// intents still pending; and the last `local` it drew. A replica filling
-/// has the parts of the fill appended since too, each after the entries at
-/// or below its sequence.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Durable {
-    #[serde(with = "crate::format::raw_tables")]
-    pub rows: Rows,
-    pub logged: Vec<Logged>,
-    pub pending: Vec<Entry>,
-    pub local: i64,
-    #[serde(default)]
-    pub parts: Vec<Part>,
 }

@@ -342,7 +342,7 @@ fn on_a_server_sync_is_an_ask() {
         });
         assert!(held, "{}", app.note);
     };
-    settle(&mut app, &|a| a.peer.client.status().link == "online");
+    settle(&mut app, &|a| a.peer.client.link_state() == "online");
 
     let _ = app.update(Message::AddAccount);
     let _ = app.update(Message::AccountName("Checking".into()));
@@ -1290,7 +1290,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
         });
         assert!(held, "{}", app.note);
     };
-    settle(&mut app, &mut importer, &|a| a.peer.client.status().link == "online");
+    settle(&mut app, &mut importer, &|a| a.peer.client.link_state() == "online");
     let open = OpenAccount {
         name: "Checking".into(),
         kind: "checking".into(),

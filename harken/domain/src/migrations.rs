@@ -1,24 +1,14 @@
-//! The steps that read the rows of a schema before this one
-//! ([`ark::migrate`]), oldest first. Each pins the schema it reads, as the
-//! server last stood on it (`migrations/<name>.json`, a copy of
-//! `tests/schema.json` then), and is a function over every row as JSON.
+//! What moved data from a schema before this one: each a transform of a
+//! server's export (`arkdb export`, `ark::dynamic::Tables`), its rows as
+//! JSON, under the schema it read (`migrations/<name>.json`, a copy of
+//! `tests/schema.json` then), for `arkdb import` under this one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ark::migrate::{Migration, Tables};
-use ark::Refusal;
+use ark::dynamic::Tables;
 use serde_json::{Map, Value as Json};
 
 use crate::keys;
-
-/// Every step, oldest first.
-pub fn all() -> Vec<Migration> {
-    vec![Migration::new(
-        "albums by folder",
-        include_str!("../migrations/albums-by-folder.json"),
-        albums_by_folder,
-    )]
-}
 
 /// An album was its name, so two recordings of one title were one album;
 /// it is now its folder and its name ([`keys::album_id`]), and a song names
@@ -29,7 +19,7 @@ pub fn all() -> Vec<Migration> {
 /// none until their files offer one; a picture of no folder's (one taken
 /// out of a file, `.art/…`) is each one's. An album no song was on goes,
 /// as the albums page never listed it.
-fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
+pub fn albums_by_folder(t: &mut Tables) -> Result<(), String> {
     let file_of: BTreeMap<String, String> = t
         .get("media")
         .into_iter()
@@ -48,7 +38,7 @@ fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
             Some(Json::String(name)) => {
                 let file = file_of
                     .get(&song["media_id"].to_string())
-                    .ok_or(Refusal::new("a song without its media"))?;
+                    .ok_or(String::from("a song without its media"))?;
                 let folder = keys::folder_of(file);
                 folders.entry(name.clone()).or_default().insert(folder.to_string());
                 Json::String(keys::album_id(folder, &name))
@@ -60,7 +50,7 @@ fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
     let from = |art: &str, folder: &str| art.starts_with(&format!("{folder}/")) || art.contains(&format!("/{folder}/"));
     let mut albums = vec![];
     for (name, folders) in folders {
-        let row = by_name.get(&name).ok_or(Refusal(format!("a song on {name}, an album with no row")))?;
+        let row = by_name.get(&name).ok_or(format!("a song on {name}, an album with no row"))?;
         let art = row["art"].as_str().unwrap_or_default();
         let taken_from = folders.iter().any(|f| from(art, f));
         for folder in &folders {

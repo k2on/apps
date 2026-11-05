@@ -51,7 +51,7 @@ fn row_of(t: &Table, v: serde_json::Value) -> Vec<u8> {
 }
 
 fn whys(s: &mut Store, c: Change) -> String {
-    s.apply(&c).expect_err("refused").0
+    s.apply(&c).expect_err("refused")
 }
 
 /// Each constraint refuses by what it is, and a refused write leaves the
@@ -148,20 +148,13 @@ fn every_change_inverts_and_the_hash_is_the_rows() {
             done.push(c);
         }
         if k % 97 == 0 {
-            let fresh = Store::from_rows(schema.clone(), ark::schema::Space::Durable, &s.snapshot_rows())
-                .unwrap()
-                .0;
+            let fresh = Store::from_rows(schema.clone(), ark::schema::Space::Durable, &s.snapshot_rows()).unwrap();
             assert_eq!(fresh.state_hash(), s.state_hash(), "at write {k}");
             assert_eq!(fresh, s);
         }
     }
     assert!(done.len() > 1000 && done.iter().any(|c| matches!(c, Change::Edit { .. })));
     let full = s.state_hash();
-    assert_eq!(
-        s.hash_beside([&s.undo_of(done.iter().rev())]),
-        empty.state_hash(),
-        "the digests' arithmetic undoes it too"
-    );
     for c in done.iter().rev() {
         s.apply(&c.inverse()).unwrap();
     }
@@ -246,8 +239,8 @@ fn a_row_still_named_is_not_removed() {
     let pin = row_of(&s.schema().tables[2].clone(), serde_json::json!({"n": 1, "of": hex(&id(2))}));
     s.put("pin", pin).unwrap();
     let before = s.clone();
-    assert!(s.delete("playlist", &key(pid(1))).unwrap_err().0.contains("named by item.playlist_id"));
-    assert!(s.delete("playlist", &key(pid(2))).unwrap_err().0.contains("named by pin.of"));
+    assert!(s.delete("playlist", &key(pid(1))).unwrap_err().contains("named by item.playlist_id"));
+    assert!(s.delete("playlist", &key(pid(2))).unwrap_err().contains("named by pin.of"));
     assert_eq!(s, before, "refused, nothing moved");
     s.delete("pin", &key(1i64)).unwrap();
     s.delete("playlist", &key(pid(2))).unwrap();
@@ -285,79 +278,94 @@ fn compat_is_a_prefix_extension() {
     )
     .is_err());
     let row = item_row(&id(1), "t1", 4);
-    let (full, other) = new.tables[1].fit(&row).unwrap();
-    assert!(other);
+    let full = new.tables[1].fit(&row).unwrap();
+    assert_ne!(full, row);
     assert_eq!(
         ark::dynamic::row(&new.tables[1], &full).unwrap(),
         serde_json::json!({"playlist_id": hex(&id(1)), "track_id": "t1", "pos": 4, "note": null, "plays": 0})
     );
-    assert_eq!(old.tables[1].fit(&full).unwrap(), (row.clone(), true));
-    assert_eq!(old.tables[1].fit(&row).unwrap(), (row, false));
+    assert_eq!(old.tables[1].fit(&full).unwrap(), row);
+    assert_eq!(old.tables[1].fit(&row).unwrap(), row);
 }
 
-/// The log is a table whose invariant is the chain (§1.6): a row is added
-/// only at an end it links onto, removed only at an end, never edited; a
-/// write to it through `apply`, the door a function's facts take, is
-/// refused; and it is in neither the state hash nor a snapshot sent.
-/// Falsified by `apply_kv` taking a `Remove` of any row of the log: the
-/// middle entry came out.
+/// The log's invariant is the sequence, and an authority's also the chain
+/// (§1.6): rows are read into it only when each follows the one before,
+/// and it is a chain only when each links onto the one before; it is cut
+/// at the horizon; a write to it through `apply`, the door a function's
+/// facts take, is refused; and it is in neither the state hash nor a fill
+/// sent. Falsified by `chained` not checking links: the forged entry was
+/// taken for the chain.
 #[test]
 fn the_log_is_a_table_whose_rows_are_a_chain() {
     use ark::format::Encode;
-    use ark::hash::{EntryHash, StateHash};
-    use ark::log::{Entry, Logged};
+    use ark::hash::EntryHash;
+    use ark::log::{Ctx, Logged};
     use ark::store::LOG;
     let mut s = Store::new(demo::shared(), ark::schema::Space::Durable);
     let (hash, rows) = (s.state_hash(), s.snapshot_rows());
     let mut chain = vec![];
     let mut prev = EntryHash::default();
     for seq in 0..4 {
-        let entry = Entry {
+        let entry = Ctx {
             local: seq,
-            ..Entry::default()
+            ..Ctx::default()
         };
-        let state = StateHash([seq as u8; 32]);
-        let hash = Logged::chain(&prev, seq, &entry, &[], &state);
+        let hash = Logged::chain(&prev, seq, &entry, &[]);
         prev = hash;
         chain.push(Logged {
             seq,
             entry,
             facts: vec![],
-            state,
             hash,
         });
     }
-    let row = |l: &Logged| l.to_bytes();
-    let add = |l: &Logged| Change::Add {
-        table: LOG.into(),
-        row: row(l),
-    };
-    let remove = |l: &Logged| Change::Remove {
-        table: LOG.into(),
-        row: row(l),
-    };
-    s.start_log([row(&chain[1])]).unwrap();
-    s.apply_kv(&add(&chain[2])).unwrap();
-    s.apply_kv(&add(&chain[0])).expect("added at the front, linking");
-    assert!(s.apply_kv(&add(&chain[2])).is_err(), "not at an end");
+    let rows_of = |ls: &[Logged]| ls.iter().map(Encode::to_bytes).collect::<Vec<_>>();
     let mut gap = chain[3].clone();
     gap.seq = 4;
-    assert!(s.apply_kv(&add(&gap)).is_err(), "a gap");
+    assert!(s.start_log(rows_of(&[chain[1].clone(), gap])).is_err(), "a gap");
     let mut other = chain[3].clone();
-    other.state = StateHash([9; 32]);
-    assert!(s.apply_kv(&add(&other)).is_err(), "it does not link");
-    s.apply_kv(&add(&chain[3])).unwrap();
-    assert!(s.apply_kv(&remove(&chain[1])).is_err(), "the middle stays");
-    let edit = Change::Edit {
+    other.hash = EntryHash([9; 32]);
+    s.start_log(rows_of(&[chain[1].clone(), chain[2].clone(), other])).unwrap();
+    assert!(!s.log().chained(), "it does not link");
+    s.start_log(rows_of(&chain[1..])).unwrap();
+    assert!(s.log().chained());
+    assert_eq!(s.log().entries(), chain[2..].to_vec());
+    let add = Change::Add {
         table: LOG.into(),
-        old: row(&chain[3]),
-        new: row(&chain[3]),
+        row: chain[3].to_bytes(),
     };
-    assert!(s.apply_kv(&edit).is_err(), "never edited");
-    assert!(s.apply(&add(&chain[3])).is_err(), "not a table a fact names");
-    assert_eq!(s.log().entries(), chain[1..].to_vec());
-    s.apply_kv(&remove(&chain[0])).expect("the horizon moves");
-    s.apply_kv(&remove(&chain[3])).expect("the head comes off");
-    assert_eq!((s.log().base(), s.log().head()), (chain[1].clone(), (2, chain[2].hash)));
+    assert!(s.apply(&add).is_err(), "not a table a fact names");
+    s.log_horizon(2);
+    assert_eq!(
+        (s.log().base(), s.log().head()),
+        (chain[2].clone(), (3, chain[3].hash)),
+        "the horizon moves"
+    );
     assert_eq!((s.state_hash(), s.snapshot_rows()), (hash, rows), "not in the hash or a snapshot sent");
+}
+
+/// A store's human form is its whole state (`ark::dynamic`): its tables
+/// read back are the same store, and a transform of them — a column
+/// renamed — is imported under a schema that has it, every row judged.
+/// Falsified by `store` not judging what it imports: the item naming no
+/// playlist was taken.
+#[test]
+fn a_store_is_exported_transformed_and_imported() {
+    use ark::dynamic::{store, tables};
+    use ark::schema::Space;
+    let mut s = Store::new(demo::shared(), Space::Durable);
+    s.put("playlist", playlist_row(&id(1), "Road", "u")).unwrap();
+    s.put("item", item_row(&id(1), "t1", 1)).unwrap();
+    let mut t = tables(&s).unwrap();
+    assert_eq!(store(demo::shared(), Space::Durable, &t).unwrap(), s, "read back, the same store");
+    let mut renamed = (*demo::shared()).clone();
+    renamed.tables[0].columns[1].name = "title".into();
+    for p in t.get_mut("playlist").unwrap() {
+        let name = p.remove("name").unwrap();
+        p.insert("title".into(), name);
+    }
+    let moved = store(Arc::new(renamed), Space::Durable, &t).unwrap();
+    assert_eq!(moved.rows("playlist").count(), 1);
+    t.get_mut("playlist").unwrap().clear();
+    assert!(store(demo::shared(), Space::Durable, &t).is_err(), "an item naming no playlist");
 }

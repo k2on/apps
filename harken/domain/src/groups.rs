@@ -9,8 +9,8 @@ use crate::listening::*;
 use crate::schema::*;
 use crate::types::*;
 
-fn refuse(why: &str) -> Result<(), Refusal> {
-    Err(Refusal::new(why))
+fn refuse(why: &str) -> Result<(), String> {
+    Err(why.into())
 }
 
 /// Whether `present` is in the group `leader` leads: the leader, or
@@ -68,7 +68,7 @@ pub fn scaled(level: i64, from: i64, to: i64) -> i64 {
 }
 
 /// Every device of the account's for which `f` says a new entry, written.
-fn each(db: &mut Db<Harken, Volatile>, user: &str, devices: Vec<ListeningDevice>, f: impl Fn(&Present) -> Option<Present>) -> Result<(), Refusal> {
+fn each(db: &mut Db<Harken, Volatile>, user: &str, devices: Vec<ListeningDevice>, f: impl Fn(&Present) -> Option<Present>) -> Result<(), String> {
     for e in devices {
         if let Some(p) = f(&e.present) {
             put_present(db, user, &e.device, p)?;
@@ -79,7 +79,7 @@ fn each(db: &mut Db<Harken, Volatile>, user: &str, devices: Vec<ListeningDevice>
 
 /// The group `leader` leads at the level `to`: every member with a volume
 /// moved in proportion and unmuted.
-pub fn group_at(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, to: i64) -> Result<(), Refusal> {
+pub fn group_at(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, to: i64) -> Result<(), String> {
     let from = group_level(db, user, leader);
     let members = voiced(db, user, leader);
     each(db, user, members, |p| {
@@ -92,13 +92,13 @@ pub fn group_at(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, to: i64
 }
 
 /// The group `leader` leads, every member with a volume muted or not.
-pub fn group_muted(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, muted: bool) -> Result<(), Refusal> {
+pub fn group_muted(db: &mut Db<Harken, Volatile>, user: &str, leader: &str, muted: bool) -> Result<(), String> {
     let members = voiced(db, user, leader);
     each(db, user, members, |p| Some(Present { muted, ..p.clone() }))
 }
 
 /// `id` follows nobody, and nobody follows it.
-pub fn dissolved(db: &mut Db<Harken, Volatile>, user: &str, id: &str) -> Result<(), Refusal> {
+pub fn dissolved(db: &mut Db<Harken, Volatile>, user: &str, id: &str) -> Result<(), String> {
     let members = devices_of(db, user);
     each(db, user, members, |p| {
         (p.id == id || p.follows.as_deref() == Some(id)).then(|| Present { follows: None, ..p.clone() })
@@ -106,7 +106,7 @@ pub fn dissolved(db: &mut Db<Harken, Volatile>, user: &str, id: &str) -> Result<
 }
 
 /// `id` follows `leader`; whoever followed `id` follows nobody.
-pub fn followed(db: &mut Db<Harken, Volatile>, user: &str, id: &str, leader: &str) -> Result<(), Refusal> {
+pub fn followed(db: &mut Db<Harken, Volatile>, user: &str, id: &str, leader: &str) -> Result<(), String> {
     let all = devices_of(db, user);
     each(db, user, all, |p| {
         if p.id == id {
@@ -124,7 +124,7 @@ pub fn followed(db: &mut Db<Harken, Volatile>, user: &str, id: &str, leader: &st
 
 /// The sound handed to `to`: if it was following a leader, it leads that
 /// group now, as Sonos makes a member the coordinator when it is picked.
-pub fn led_by(db: &mut Db<Harken, Volatile>, user: &str, to: &str) -> Result<(), Refusal> {
+pub fn led_by(db: &mut Db<Harken, Volatile>, user: &str, to: &str) -> Result<(), String> {
     let was = entry(db, user, to).and_then(|e| e.present.follows);
     let all = devices_of(db, user);
     each(db, user, all, |p| {
@@ -144,7 +144,7 @@ pub fn led_by(db: &mut Db<Harken, Volatile>, user: &str, to: &str) -> Result<(),
 /// The leader `caller`'s word on who follows it: each member that is here
 /// and of its family follows it; whoever followed it and is not named, or
 /// followed a device that is a member now, follows nobody.
-pub fn regrouped(db: &mut Db<Harken, Volatile>, user: &str, caller: &str, members: &[String]) -> Result<(), Refusal> {
+pub fn regrouped(db: &mut Db<Harken, Volatile>, user: &str, caller: &str, members: &[String]) -> Result<(), String> {
     let family = entry(db, user, caller).and_then(|e| e.present.family);
     let all = devices_of(db, user);
     each(db, user, all, |p| {
@@ -170,13 +170,13 @@ pub fn group_has_volume(db: &Db<Harken, Volatile>, user: &str) -> bool {
 }
 
 /// The output's id: the leader the group transitions move.
-pub fn leader(db: &Db<Harken, Volatile>, user: &str) -> Result<String, Refusal> {
-    output_id(&session_of(db, user)).ok_or_else(|| Refusal::new("unwrapped none"))
+pub fn leader(db: &Db<Harken, Volatile>, user: &str) -> Result<String, String> {
+    output_id(&session_of(db, user)).ok_or_else(|| String::from("unwrapped none"))
 }
 
 /// A speaker joins the output's group; whatever followed it follows nobody.
-#[live("listening.join")]
-pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
+#[mutator("listening.join")]
+pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), String> {
     let Some(leader) = output_id(&session_of(db, ctx.user())) else {
         return refuse("nothing is playing to join");
     };
@@ -187,8 +187,8 @@ pub fn join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(
 }
 
 /// …and leaves whatever group it is in.
-#[live("listening.unjoin")]
-pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), Refusal> {
+#[mutator("listening.unjoin")]
+pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result<(), String> {
     if !entry(db, ctx.user(), &input.device).is_some_and(|e| e.present.follows.is_some()) {
         return refuse("that device is not in a group");
     }
@@ -197,8 +197,8 @@ pub fn unjoin(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Member) -> Result
 }
 
 /// A leader's word on who follows it, changed outside harken.
-#[live("listening.report_group")]
-pub fn report_group(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportGroup) -> Result<(), Refusal> {
+#[mutator("listening.report_group")]
+pub fn report_group(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportGroup) -> Result<(), String> {
     if !entry(db, ctx.user(), ctx.device()).is_some_and(|e| e.present.family.is_some()) {
         return refuse("not here, or not a speaker that groups");
     }
@@ -206,7 +206,7 @@ pub fn report_group(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportGroup
 }
 
 /// The guard of every group transition.
-fn grouped(ctx: &Ctx, db: &Db<Harken, Volatile>) -> Result<(), Refusal> {
+fn grouped(ctx: &Ctx, db: &Db<Harken, Volatile>) -> Result<(), String> {
     if !group_has_volume(db, ctx.user()) {
         return refuse("nothing playing has a volume");
     }
@@ -214,23 +214,23 @@ fn grouped(ctx: &Ctx, db: &Db<Harken, Volatile>) -> Result<(), Refusal> {
 }
 
 /// The output's group at a level, every member in proportion, unmuted.
-#[live("listening.set_group_volume")]
-pub fn set_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupVolume) -> Result<(), Refusal> {
+#[mutator("listening.set_group_volume")]
+pub fn set_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupVolume) -> Result<(), String> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     group_at(db, ctx.user(), &leader, input.level)
 }
 
-#[live("listening.nudge_group_volume")]
-pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupNudge) -> Result<(), Refusal> {
+#[mutator("listening.nudge_group_volume")]
+pub fn nudge_group_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupNudge) -> Result<(), String> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     let to = (group_level(db, ctx.user(), &leader) + input.delta).clamp(0, 100);
     group_at(db, ctx.user(), &leader, to)
 }
 
-#[live("listening.set_group_mute")]
-pub fn set_group_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupMute) -> Result<(), Refusal> {
+#[mutator("listening.set_group_mute")]
+pub fn set_group_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: GroupMute) -> Result<(), String> {
     grouped(ctx, db)?;
     let leader = leader(db, ctx.user())?;
     group_muted(db, ctx.user(), &leader, input.muted)

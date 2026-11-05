@@ -59,7 +59,7 @@ use library::Scanner;
 /// The phone's URL scheme: a login may always send its code back there.
 pub const PHONE_SCHEME: &str = "harken://";
 
-pub use ark_peer::{Keepalive, Retention, SignIn};
+pub use ark_peer::SignIn;
 
 /// The chapterers tried when the server is told none.
 pub const DEFAULT_CHAPTERS: &str = "outline,tiling";
@@ -384,17 +384,16 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let auth = Arc::new(auth);
 
-    let mut hub = hub_config(&hosted, config.retain.entries);
+    let mut hub = hub_config(&hosted, config.retain);
     if config.scoped {
-        hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
+        hub.feed = Arc::new(|_| Some("session.feed".into()));
     }
     let mut server = ark_peer::Server::new(hub).auth(auth.clone());
-    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
-    if config.keepalive != Keepalive::default() {
+    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive);
+    if config.keepalive != ark_peer::settings::KEEPALIVE {
         eprintln!(
-            "harken-server: the sync socket pings every {}ms and gives up after {} unanswered",
-            config.keepalive.every.as_millis(),
-            config.keepalive.missed
+            "harken-server: the sync socket pings every {}ms and gives up after 3 unanswered",
+            config.keepalive.as_millis()
         );
     }
     // One root for every kind rather than one per kind, because `file` is
@@ -581,39 +580,18 @@ mod tests {
         );
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);
         assert_eq!(c.picture_hosts, ["photos.example", "photos.example:8443"]);
-        assert_eq!(c.keepalive, Keepalive::default());
+        assert_eq!(c.keepalive, ark_peer::settings::KEEPALIVE);
         assert_eq!(c.public_url(), "https://harken.example.com");
     }
 
-    /// The keepalive a test shortens, and nothing a typo could make of it;
-    /// a count of unanswered pings other than the hub's three refuses to
-    /// start rather than being ignored. Falsified by reading
-    /// `HARKEN_KEEPALIVE_MISSED` without holding it to 3: a count of 2 started.
+    /// The keepalive a test shortens, and nothing a typo could make of it.
+    /// Falsified by ignoring `HARKEN_KEEPALIVE_MS`: the interval was 20 s.
     #[test]
     fn the_keepalive_is_the_hubs_unless_told() {
         let dev = ("HARKEN_DEV_AUTH", "1");
-        let c = Config::from_vars(
-            "x:1",
-            vars(&[
-                dev,
-                ("HARKEN_KEEPALIVE_MS", "250"),
-                ("HARKEN_KEEPALIVE_MISSED", "3"),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(
-            c.keepalive,
-            Keepalive {
-                every: std::time::Duration::from_millis(250),
-                missed: 3
-            }
-        );
-        for bad in [
-            ("HARKEN_KEEPALIVE_MS", "0"),
-            ("HARKEN_KEEPALIVE_MS", "1s"),
-            ("HARKEN_KEEPALIVE_MISSED", "-1"),
-            ("HARKEN_KEEPALIVE_MISSED", "2"),
-        ] {
+        let c = Config::from_vars("x:1", vars(&[dev, ("HARKEN_KEEPALIVE_MS", "250")])).unwrap();
+        assert_eq!(c.keepalive, std::time::Duration::from_millis(250));
+        for bad in [("HARKEN_KEEPALIVE_MS", "0"), ("HARKEN_KEEPALIVE_MS", "1s")] {
             assert!(
                 Config::from_vars("x:1", vars(&[dev, bad])).is_err(),
                 "{bad:?}"
@@ -652,46 +630,18 @@ mod tests {
         assert!(Config::from_vars("x:1", vars(&[dev, ("HARKEN_ROLES", "=alice")])).is_err());
     }
 
-    /// The two retention constants are the defaults unless told, and
-    /// nothing a typo could make of them. Falsified by ignoring
-    /// `HARKEN_RETAIN_ENTRIES`: the count is 10,000.
+    /// The entries the log keeps are 10,000 unless told, and nothing a typo
+    /// could make of them. Falsified by ignoring `HARKEN_RETAIN_ENTRIES`:
+    /// the count is 10,000.
     #[test]
     fn retention_is_the_engines_unless_told() {
         let dev = ("HARKEN_DEV_AUTH", "1");
         let c = Config::from_vars("x:1", vars(&[dev])).unwrap();
-        assert_eq!(
-            c.retain,
-            Retention {
-                entries: 10_000,
-                days: 30
-            }
-        );
-        let c = Config::from_vars(
-            "x:1",
-            vars(&[
-                dev,
-                ("HARKEN_RETAIN_DAYS", "0"),
-                ("HARKEN_RETAIN_ENTRIES", " 50 "),
-            ]),
-        )
-        .unwrap();
-        assert_eq!(
-            c.retain,
-            Retention {
-                entries: 50,
-                days: 0
-            }
-        );
-        for bad in [
-            ("HARKEN_RETAIN_DAYS", "-1"),
-            ("HARKEN_RETAIN_DAYS", "30d"),
-            ("HARKEN_RETAIN_ENTRIES", "1e4"),
-        ] {
-            assert!(
-                Config::from_vars("x:1", vars(&[dev, bad])).is_err(),
-                "{bad:?}"
-            );
-        }
+        assert_eq!(c.retain, 10_000);
+        let c = Config::from_vars("x:1", vars(&[dev, ("HARKEN_RETAIN_ENTRIES", " 50 ")])).unwrap();
+        assert_eq!(c.retain, 50);
+        let bad = ("HARKEN_RETAIN_ENTRIES", "1e4");
+        assert!(Config::from_vars("x:1", vars(&[dev, bad])).is_err());
     }
 
     #[test]

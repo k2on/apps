@@ -9,9 +9,9 @@
 //!
 //! Signing in is the bridge's, as harken's phones do it: the server's page
 //! (`login_url`, redirecting to `money://auth`), the code exchanged
-//! (`exchange`), the peer told (`Peer::login`) and dialled (`socket_url`,
-//! `Peer::connect`). A refusal is a value wherever the app can ask before
-//! it acts (`Peer::check`) or after (`Peer::standing`, `take_rejections`);
+//! (`exchange`), the peer told (`Peer::login`) and dialled
+//! (`Peer::connect`). A refusal is a value wherever the app can ask before
+//! it acts (`Peer::check`) or after (`Peer::outcome`, `take_refusals`);
 //! [`money_send`] is a mutation whose own refusal is one too. A [`Hall`] is
 //! a money server in the same process, over memory, that devices dial
 //! without a socket: what the apps' tests sync through.

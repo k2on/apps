@@ -83,7 +83,7 @@ pub fn is_payment(db: &Db<Money>, id: Id<Category>) -> bool {
 /// card is, while the card is on the budget; hidden once it is closed or
 /// off it. Every function that opens, renames or closes an account calls
 /// this, so no device has to guess whether another made it.
-pub fn keep(ctx: &Ctx, db: &mut Db<Money>, account: &Account) -> Result<(), Refusal> {
+pub fn keep(ctx: &Ctx, db: &mut Db<Money>, account: &Account) -> Result<(), String> {
     if account.kind != "credit" {
         return Ok(());
     }

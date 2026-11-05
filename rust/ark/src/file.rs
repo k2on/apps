@@ -85,13 +85,13 @@ pub fn named(t: &Type, v: &Json, out: &mut Vec<String>) {
     }
 }
 
-/// Whether a row of `store` names the file `hash`: who may read the store
-/// may read the file.
-pub fn held(store: &Store, hash: &str) -> bool {
+/// Whether a row of `store` that `reads` names the file `hash`: who may
+/// read the row may read the file.
+pub fn held(store: &Store, hash: &str, reads: impl Fn(&str, &[u8]) -> bool) -> bool {
     let schema = store.schema_arc().clone();
     schema.tables.iter().filter(|t| mentions(&t.row_type())).any(|t| {
         let ty = t.row_type();
-        store.rows(&t.name).any(|r| {
+        store.rows(&t.name).filter(|r| reads(&t.name, r)).any(|r| {
             let mut out = vec![];
             if let Ok(v) = crate::dynamic::row(t, r) {
                 named(&ty, &v, &mut out);

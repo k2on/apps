@@ -6,40 +6,31 @@
 //! items come before the playlists they name.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
+use ark::domain::Domain;
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::peer::{Input, Journal, Output, Peer as Machine, Role, Who};
-use ark_peer::{Instance, Memory, Module};
+use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, To};
+use ark_peer::{Instance, Memory};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
-fn module() -> Module {
-    Module::of(&arkdb::demo::demo().later("playlist"))
+fn module() -> Domain {
+    arkdb::demo::demo().later("playlist")
 }
 
-fn who(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+fn who(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
 fn server() -> Machine {
     let m = module();
-    let mut p = Machine::new(
-        m.schema.clone(),
-        m.functions.clone(),
-        Role::Authority { journal: Journal::default() },
-        who("server"),
-    );
-    p.later = m.later().to_vec();
-    p
+    Machine::new(Arc::new(m), Role::Authority { journal: Journal::default() }, who("server"))
 }
 
 fn replica() -> Machine {
     let m = module();
-    Machine::new(m.schema.clone(), m.functions.clone(), Role::Replica, who("alice"))
+    Machine::new(Arc::new(m), Role::Replica, who("alice"))
 }
 
 fn alice() -> Instance {
@@ -54,7 +45,7 @@ fn author(server: &mut Machine, func: &str, input: Vec<u8>) -> Vec<Output> {
         now: 1,
         cause: None,
     });
-    assert!(o.iter().any(|x| matches!(x, Output::Confirmed(_))), "{func} refused: {o:?}");
+    assert!(o.iter().any(|x| matches!(x, Output::Settled(_, Ok(())))), "{func} refused: {o:?}");
     o
 }
 
@@ -75,7 +66,7 @@ fn library(server: &mut Machine) {
         author(server, "demo.add_to_playlist", input.to_bytes());
     }
     let head = server.log().head().0;
-    server.step(Input::Compact(head));
+    server.compact(head);
 }
 
 fn playlists(p: &Machine) -> Vec<Playlist> {
@@ -91,7 +82,7 @@ fn items(p: &Machine) -> usize {
 fn frames(outs: &[Output]) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(b) | Output::Fanout(b) => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back | To::All, b) => Some(Frame::dec(b).unwrap()),
             _ => None,
         })
         .collect()
@@ -171,7 +162,8 @@ fn a_fill_comes_in_parts_the_later_tables_last() {
     same(&alice, &server);
 }
 
-/// A replica that asks for small parts (`Frame::Parts`) is sent them: the
+/// A replica that asks for small parts (`most`, in each `Hello`) is sent
+/// them: the
 /// demo's 40 KB playlists one a part where it would be sent several, each
 /// part's rows past the size only by its last; filled, it is the
 /// authority's store all the same. Falsified by the authority sending
@@ -188,8 +180,8 @@ fn a_replica_is_sent_parts_as_small_as_it_asks() {
         // The frames carried by hand, each part weighed on its way down.
         loop {
             if let Some(f) = wire.down.pop_front() {
-                if let Frame::Part { part, .. } = &f {
-                    let rows = part.ranges.iter().flat_map(|r| &r.rows);
+                if let Frame::Part { rows, .. } = &f {
+                    let rows = rows.iter().flat_map(|(_, rs)| rs);
                     let (sizes, last) = (rows.clone().map(Vec::len).sum::<usize>(), rows.last().map_or(0, Vec::len));
                     biggest = biggest.max(sizes - last);
                     wire.parts += 1;
@@ -266,34 +258,27 @@ fn what_is_logged_during_a_fill_is_taken() {
     assert!(playlists(&alice).iter().any(|p| p.name == "unsent"));
 }
 
-/// A replica reopened during its fill holds what it had taken and goes on
-/// from where it was: no part is sent it twice; reopened once it is done,
-/// it is done, the authority's store, and asks for nothing. Falsified by a
-/// part not made durable: the reopened replica began the fill again; and
-/// by the last part not made durable: the done replica was filling.
+/// A replica reopened during its fill made nothing durable of it: it holds
+/// what it held before (here nothing) and fills again, to the authority's
+/// store; reopened once it is done, it is done, and asks for nothing.
+/// Falsified by a part made durable as it is taken: the reopened replica
+/// held a library cut short and took it for whole; and by the last part not
+/// made durable: the done replica filled again.
 #[test]
-fn a_fill_reopened_goes_on_where_it_was() {
+fn a_fill_reopened_begins_again() {
     let mut server = server();
     library(&mut server);
     let mut alice = alice();
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, Some(2));
-    let (had, taken) = (playlists(&alice).len(), wire.parts);
+    assert!(alice.fill.is_some() && !playlists(&alice).is_empty(), "part way");
     let mut alice = Instance::new(replica(), Some(alice.into_disk()));
     let stored = alice.stored();
     alice.step(Input::Open(stored));
-    assert_eq!(playlists(&alice).len(), had, "what it had taken, held");
-    assert!(alice.fill.is_some(), "and filling");
+    assert!(playlists(&alice).is_empty() && alice.fill.is_none(), "nothing of it held");
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, None);
     same(&alice, &server);
-    let total = {
-        let (mut s, mut a) = (server_with_library(), self::alice());
-        let mut w = connect(&mut a);
-        w.run(&mut s, &mut a, None);
-        w.parts
-    };
-    assert_eq!(taken + wire.parts, total, "no part sent twice");
     let mut alice = Instance::new(replica(), Some(alice.into_disk()));
     let stored = alice.stored();
     alice.step(Input::Open(stored));
@@ -301,12 +286,6 @@ fn a_fill_reopened_goes_on_where_it_was() {
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, None);
     assert_eq!(wire.parts, 0, "nothing asked for");
-}
-
-fn server_with_library() -> Machine {
-    let mut s = server();
-    library(&mut s);
-    s
 }
 
 /// An intent made during a fill: previewed over what is held, or, naming a
@@ -339,7 +318,7 @@ fn an_intent_during_a_fill_is_the_authoritys_to_judge() {
             now: 2,
             cause: None,
         });
-        assert!(!o.iter().any(|x| matches!(x, Output::Refused { .. })), "{func}: {o:?}");
+        assert!(!o.iter().any(|x| matches!(x, Output::Settled(_, Err(_)))), "{func}: {o:?}");
         wire.up.extend(frames(&o));
     }
     wire.run(&mut server, &mut alice, None);

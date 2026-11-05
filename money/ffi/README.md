@@ -13,7 +13,7 @@ Three ways in, each an `ark_ffi::Peer`:
 
 - **`moneyOpen(dir, login)`** — the household's replica on the phone's
   disk, one directory per server, as whoever last signed in there or as
-  `login`. Then `peer.connect(socketUrl(server))`: it dials whenever
+  `login`. Then `peer.connect(server)`: it dials whenever
   signed in, and redials by itself.
 - **`moneyDemo(today)`** — the demo's household (`money/seed`, the
   demo window's to the cent) in memory, its own authority, signed in as
@@ -89,7 +89,7 @@ is money's but the scheme:
 3. `exchange(server, code)` posts it to `<server>/auth/exchange` and
    answers the `Login` (token, session, who, roles, picture).
 4. `moneyOpen(dir, login)` — or `peer.login(login)` on a replica already
-   open — and `peer.connect(socketUrl(server))`, which is `ws(s)://…/sync`
+   open — and `peer.connect(server)`, which dials `ws(s)://…/sync`
    with the token. `peer.signedIn()` is who it is once the session row has
    synced; `peer.logout()` revokes it and keeps what is pending.
 

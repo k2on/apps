@@ -1,0 +1,125 @@
+{
+  "tables": [
+    {
+      "name": "playlist",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "playlist"
+          },
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            2,
+            1
+          ],
+          "unique": true
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "sign_in",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "name",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "email",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "device",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "issued_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "expires_ms",
+          "ty": "Int",
+          "default": null
+        },
+        {
+          "name": "revoked",
+          "ty": "Bool",
+          "default": null
+        },
+        {
+          "name": "roles",
+          "ty": {
+            "List": "Text"
+          },
+          "default": null
+        },
+        {
+          "name": "picture",
+          "ty": "Text",
+          "default": ""
+        }
+      ],
+      "key": 1,
+      "indexes": [
+        {
+          "columns": [
+            1
+          ],
+          "unique": false
+        }
+      ],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "role",
+      "columns": [
+        {
+          "name": "user",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "role",
+          "ty": "Text",
+          "default": null
+        }
+      ],
+      "key": 2,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    }
+  ]
+}

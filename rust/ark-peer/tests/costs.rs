@@ -23,7 +23,7 @@ use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::Store;
 use ark_peer::link::wait;
-use ark_peer::{dev, now_ms, Config, Disk, Memory, Module, Peer, Server};
+use ark_peer::{dev, now_ms, Config, Disk, Memory, Peer, Server};
 use arkdb::demo::{demo as domain, AddToPlaylist};
 
 mod support;
@@ -118,11 +118,10 @@ fn offline(n: u64) -> usize {
     let token = "alice@perf";
     let mut c = device(token, Box::new(disk.clone()));
     for j in 0..10 {
-        c.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
+        c.mutate_at("demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
     }
     let add = |c: &mut Peer, i: u64| {
-        c.author(Space::Durable, "demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0)
-            .unwrap();
+        c.mutate_at("demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0).unwrap();
     };
     (0..n).for_each(|i| add(&mut c, i));
     let before = disk.written();
@@ -147,11 +146,11 @@ fn an_offline_intent_writes_the_same_as_pending_grows() {
 /// A hub with `c` connections fed whole, each at the head, and one of
 /// them pushing an add: what one push allocates.
 fn fanout(c: usize) -> usize {
-    let mut hub = Peer::serve(Config::new(Module::of(&domain())), Box::new(Memory::default()), 0);
+    let mut hub = Peer::serve(Config::of(Arc::new(domain())), Box::new(Memory::default()), 0);
     let author = dev("alice@dev").unwrap();
     let a = hub.accept(author.clone());
     let mut local = 0;
-    let mut push = |hub: &mut Peer, conn, who: &ark::peer::Who, func: &str, input: Vec<u8>| {
+    let mut push = |hub: &mut Peer, conn, who: &ark::peer::Ctx, func: &str, input: Vec<u8>| {
         local += 1;
         hub.frame(conn, support::push(who, local, func, input), 0)
     };
@@ -162,10 +161,9 @@ fn fanout(c: usize) -> usize {
     let hello = Frame::Hello {
         space: Space::Durable,
         cursor: head,
-        hash: Some(hash),
-        device: None,
-        schema: Default::default(),
-        version: String::new(),
+        hash,
+        fill: None,
+        most: ark::peer::PART as u64,
     }
     .enc();
     let conns: Vec<u64> = (0..c).map(|k| hub.accept(dev(&format!("u{k}@x")).unwrap())).collect();
@@ -245,7 +243,7 @@ fn a_media_row_is_held_in_bounded_bytes() {
 #[test]
 #[ignore]
 fn timings() {
-    let mut s = Server::new(Config::new(Module::of(&domain())));
+    let mut s = Server::new(Config::of(Arc::new(domain())));
     s.data = None;
     let hub = s.build().unwrap().0;
     let mut c = support::linked("alice@perf", "", hub.dialer(Arc::new(dev)));
@@ -253,8 +251,7 @@ fn timings() {
     let n = 2000;
     let t = Instant::now();
     for j in 0..n {
-        c.0.author(Space::Durable, "demo.create_playlist", named(&format!("P{j}")), now_ms())
-            .unwrap();
+        c.0.mutate_at("demo.create_playlist", named(&format!("P{j}")), now_ms()).unwrap();
         c.0.pump();
         while !c.0.log.pending.is_empty() {
             wait(&c.0, &c.1, Duration::from_millis(1));
@@ -264,19 +261,60 @@ fn timings() {
     eprintln!("b: a linked round trip, {n} playlists: {:.1} µs", us(t.elapsed() / n));
     let disk = Counting::default();
     let mut d = device("bob@perf", Box::new(disk));
-    d.author(Space::Durable, "demo.create_playlist", named("P"), 0).unwrap();
+    d.mutate_at("demo.create_playlist", named("P"), 0).unwrap();
     (0..4000).for_each(|i| {
-        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid("bob@perf", 1), i), 0)
-            .unwrap()
+        d.mutate_at("demo.add_to_playlist", add_input(&pid("bob@perf", 1), i), 0).unwrap();
     });
     let t = Instant::now();
     (0..1000).for_each(|i| {
-        d.author(Space::Durable, "demo.add_to_playlist", add_input(&pid("bob@perf", 1), 5000 + i), 0)
-            .unwrap()
+        d.mutate_at("demo.add_to_playlist", add_input(&pid("bob@perf", 1), 5000 + i), 0).unwrap();
     });
     eprintln!("c: an offline intent at 4,000 pending: {:.1} µs", us(t.elapsed() / 1000));
 }
 
 fn us(d: Duration) -> f64 {
     d.as_secs_f64() * 1e6
+}
+
+/// A device offline for long — 10 playlists and 5,000 adds made with no
+/// server — reopened from its disk, then linked to a fresh server and
+/// pumped until every intent is confirmed: the time of each step.
+#[test]
+#[ignore]
+fn offline_then_joined() {
+    let n = 5000;
+    let token = "carol@perf";
+    let t = Instant::now();
+    let mut d = device(token, Box::new(Memory::default()));
+    for j in 0..10 {
+        d.mutate_at("demo.create_playlist", named(&format!("P{j}")), 0).unwrap();
+    }
+    eprintln!("d: open: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    let t = Instant::now();
+    (0..n).for_each(|i| {
+        d.mutate_at("demo.add_to_playlist", add_input(&pid(token, i % 10 + 1), i), 0).unwrap();
+    });
+    eprintln!("e: {n} adds offline: {:.1} µs each", us(t.elapsed() / n as u32));
+    let t = Instant::now();
+    let mut d = d.reopen();
+    eprintln!("f: a reopen at {n}: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    let mut s = Server::new(Config::of(Arc::new(domain())));
+    s.data = None;
+    let hub = s.build().unwrap().0;
+    let t = Instant::now();
+    let (wake, rx) = ark_peer::link::bell();
+    d.set_waker(wake);
+    d.link.backoff = (5, 20);
+    d.set_token(Some(token.into()));
+    d.connect_with("", hub.dialer(Arc::new(dev)));
+    let mut c = (d, rx);
+    let held = ark_peer::link::until(Duration::from_secs(120), Duration::ZERO, || {
+        c.0.pump();
+        c.0.linked && c.0.log.pending.is_empty() || {
+            wait(&c.0, &c.1, Duration::from_millis(1));
+            false
+        }
+    });
+    assert!(held, "never confirmed");
+    eprintln!("g: joined, {n} confirmed: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
 }

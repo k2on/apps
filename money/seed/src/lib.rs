@@ -7,8 +7,8 @@
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
 //! the bank feeds through Plaid ([`Bank`]) — applied once each over one
-//! store and kept as the snapshot a peer alone opens on, which is what
-//! harken's demo does with its library (`harken/seed`). The dates are
+//! store and kept as the snapshot a peer with no server opens on, which is
+//! what harken's demo does with its library (`harken/seed`). The dates are
 //! today's, so the month on screen is this one; the amounts are drawn from
 //! a fixed sequence, so every load is the same household.
 //!
@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 
 use ark::format::Encode;
-use ark::log::{EntryId, Record, Snapshot};
+use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
 use ark_peer::{Config, Disk, Memory, Peer as Replica};
@@ -266,8 +266,7 @@ impl Seeder {
         let d = domain();
         let b = d.binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
         let f = d.get(b).and_then(|f| f.proc.clone()).unwrap_or_else(|| panic!("{name} writes nothing"));
-        f.apply(&mut self.store, &self.ctx, &input.to_bytes())
-            .unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
+        f(&mut self.store, &self.ctx, &input.to_bytes()).unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
     }
 
     fn ask<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
@@ -383,7 +382,7 @@ fn plaid_txn(id: &str, date: &str, payee: &str, cents: i64, pending: bool, repla
 }
 
 /// The household, three months of it up to `today`: the demo's records,
-/// its own authority's, as the demo window and the phones' demo open them.
+/// with no server, as the demo window and the phones' demo open them.
 pub fn seeded_disk(today: &str, now: i64) -> Memory {
     let mut disk = Memory::default();
     log(&mut disk, today, now).expect("memory takes it");
@@ -396,15 +395,7 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
 /// starts, so a phone signed in as [`ME`] opens on it (`money-seed`, what
 /// the app screenshots run: .github/screens/apps.md).
 pub fn log(disk: &mut dyn Disk, today: &str, now: i64) -> std::io::Result<()> {
-    let store = household(today, now);
-    let snapshot = Snapshot {
-        seq: 0,
-        hash: Default::default(),
-        state: store.state_hash(),
-        rows: store.snapshot_rows(),
-    };
-    disk.record(&Record::Rows(snapshot.kv_rows()).enc())?;
-    ark_peer::migrate::put_schema(disk, store.schema_arc())
+    ark_peer::disk::put_store(disk, &household(today, now))
 }
 
 /// The household's store, three months of it up to `today`.
@@ -739,13 +730,12 @@ fn household(today: &str, now: i64) -> Store {
     s.store
 }
 
-/// The demo's peer: the seeded household, its own authority, holding the
+/// The demo's peer: the seeded household, with no server, holding the
 /// bank importer's role so that "Sync" can run the import here as a
 /// server's importer would.
 pub fn open(disk: Memory) -> Replica {
     let mut peer = Replica::open_as(Config::of(domain()), Box::new(disk), None);
     peer.set_roles([BANK]);
-    peer.alone();
     peer
 }
 

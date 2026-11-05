@@ -73,6 +73,11 @@
       "name": "album",
       "columns": [
         {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
           "name": "name",
           "ty": "Text",
           "default": null
@@ -420,7 +425,7 @@
           "default": null
         },
         {
-          "name": "album_name",
+          "name": "album_id",
           "ty": {
             "Option": "Text"
           },

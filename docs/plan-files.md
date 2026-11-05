@@ -67,7 +67,7 @@ Absent { hash, why }                  server: not for you, or not here yet
 ```
 
 Each chunk is at most `files::CHUNK` (1 MiB, well under a socket's frame
-limit), and each is asked for by a `Want` — pull, like `Part`/`More` — so
+limit), and each is asked for by a `Want` — pull, like a fill's parts — so
 neither end holds more than a chunk of a file in its outbox.
 
 **Up** (a file this device made). `Peer::put_file(bytes, media)` writes the
@@ -95,7 +95,7 @@ wanted it, and they want it again.
 
 **Who may read.** The server answers a `Want` when the connection may read
 a row that names the hash: for a connection fed the log whole, any row of
-the store; for one fed by a scope, a row of its union (`Served.union`).
+the store; for one fed by a scope, a row its scope holds (`Peer::reads`).
 Rows are searched by their type: each table's columns that are, or hold,
 a `FileRef`. Anyone signed in may upload; an upload is checked against its
 hash, so nobody can put other bytes under a file's name.

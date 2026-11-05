@@ -3,14 +3,10 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, device: Option<Bytes>, schema, version }
+//! Hello   { space, cursor, hash, fill: Option<{ table, key }>, most }
 //! Page    { space, from, logged: [Logged] }
-//! Snapshot{ space, snapshot }
-//! Verdict { space, id, verdict: Ok { seq } | Refused { why } | Held { func: name } | Gap { last } }
-//! Telemetry { events: [Event] }
-//! Part    { space, part: { seq, hash, state, first, ranges: [{ table, from, to, rows }], next } }
-//! More    { space, from: { table, key } }
-//! Parts   { space, most }
+//! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
+//! Part    { space, seq, hash, from: Option<{ table, key }>, rows: [(table, [row])], next }
 //! Call    { id, name, input }
 //! Reply   { id, reply: Ok { output } | Refused { why } }
 //! Offer   { hash, size }
@@ -22,23 +18,25 @@
 //!
 //! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
 //! is its intents not yet sequenced, each at sequence 0 with no facts and
-//! zero hashes ([`Logged::intent`]) — a push being a page of one; a chain
-//! it made alone is pushed so too, as intents (§1.7). A `Verdict` answers one intent: sequenced at `seq`, refused,
-//! `Held` — a function the authority does not run — or `Gap`: past one of
-//! its origin's the authority has not judged, and the last it has.
+//! zero hashes ([`Logged::intent`]) — a push being a page of one; what it
+//! did with no server is pushed so too, as intents (§1.7) — and its `from`
+//! the `local` its pending intents begin after: what its origin had up to
+//! there, it no longer holds. A `Verdict` answers
+//! one intent: refused, or where its origin stands — the last `local` of
+//! it the authority judged, and its head: an intent at or below that last
+//! is in the log at or below the head; one past it was not judged (past a
+//! gap, or naming a function the authority does not run).
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
-//! `Hello` its log cannot page — the first, from its rows' start — and to
-//! each `More`, the part from where it says, of rows as they stand when
-//! the authority answers. A replica asks for each part once it holds the
-//! one before. `Parts` is how big a replica would have them: at most
-//! `most` bytes of rows each, from its next `Hello` on — one that takes a
-//! part on the thread it draws on asks for small ones, and is sent more of
-//! them. Unasked, a part is about [`crate::peer::PART`].
-//!
-//! `Telemetry` is no machine's: what a device says of itself
-//! (docs/plan-observe.md), sent to its server beside the frames, which a
-//! server collects and a machine never reads.
+//! `Hello` its log cannot page — the first, from its rows' start (no
+//! `from`) — and, after the pages, to one that says where its fill stands
+//! (`fill`): the part from there, of rows as they stand when the authority
+//! answers, each table's from where the part begins to where the next
+//! does. A replica asks for each part once it holds the one before. A
+//! `Hello` says how big a replica would have the frames it is sent — a
+//! part, `most` bytes of rows at most, or a page, `most` bytes of entries —
+//! one that takes them on the thread it draws on asks for small ones, and
+//! is sent more of them — up to [`crate::peer::PART`].
 //!
 //! `Call` and `Reply` are no machine's either: a device's call of a
 //! function its server's program registered by name (ark-peer's
@@ -46,7 +44,11 @@
 //! A call is never an entry: its input is not logged, journaled, recorded
 //! or told to any other connection, so it can carry what must stay off the
 //! log (a password for the server alone). It is answered once, while the
-//! connection that made it is up, and is not sent again.
+//! connection that made it is up, and is not sent again. What a device says
+//! of itself is shipped as one ([`EVENTS`]), which every server collects
+//! and answers nothing; and what it is, as one at each connection before
+//! its `Hello`s ([`DEVICE`]): the bytes its server authors its `on_join`
+//! from, answered nothing.
 //!
 //! `Offer`, `Want`, `Chunk`, `Have` and `Absent` are no machine's either:
 //! the bytes of the files rows name (`crate::file`, docs/plan-files.md),
@@ -58,14 +60,12 @@
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
-//! `Held` says an intent names one it does not run, and the intent stays pending on the device, pushed
-//! again on its next connection. Nothing a client sends is ever loaded.
+//! an intent naming one it does not run is not judged: it stays pending on
+//! the device, pushed again on its next connection. Nothing a client sends is ever loaded.
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
-//! `device` is what a device says it is, the bytes the authority authors
-//! its `on_join` from (the driver's to read); `schema` and `version` are the
-//! domain the peer runs, its schema's hash and its version string. A frame
+//! A frame
 //! is its bytes in the value format, serde's derived form (`crate::format`;
 //! `tests/frames.rs` holds every frame to
 //! reading back as itself).
@@ -73,49 +73,40 @@
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
-use crate::hash::{EntryHash, SchemaHash};
-use crate::log::{Cursor, Entry, EntryId, Logged, Part, Seq, Snapshot};
+use crate::hash::EntryHash;
+use crate::log::{Ctx, Cursor, EntryId, Logged, Rows, Seq};
 use crate::schema::Space;
-use crate::Refusal;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
     Hello {
         space: Space,
         cursor: Seq,
-        hash: Option<EntryHash>,
-        device: Option<Vec<u8>>,
-        schema: SchemaHash,
-        version: String,
+        hash: EntryHash,
+        /// Where its fill stands, filling: the part from there is asked.
+        fill: Option<Cursor>,
+        most: u64,
     },
     Page {
         space: Space,
         from: Seq,
         logged: Vec<Logged>,
     },
-    Snapshot {
-        space: Space,
-        snapshot: Snapshot,
-    },
     Verdict {
         space: Space,
         id: EntryId,
         verdict: Verdict,
     },
-    Telemetry {
-        events: Vec<Event>,
-    },
+    /// Rows as they stood at `(seq, hash)`, by table, from `from` (none:
+    /// the first part, from nothing) to `next` (none: the last).
     Part {
         space: Space,
-        part: Part,
-    },
-    More {
-        space: Space,
-        from: Cursor,
-    },
-    Parts {
-        space: Space,
-        most: u64,
+        seq: Seq,
+        hash: EntryHash,
+        from: Option<Cursor>,
+        #[serde(with = "crate::format::raw_tables")]
+        rows: Rows,
+        next: Option<Cursor>,
     },
     Call {
         id: u64,
@@ -149,6 +140,16 @@ pub enum Frame {
     },
 }
 
+/// The call a device ships what it said of itself by (docs/plan-observe.md):
+/// its input a page of [`Event`]s, which every server collects and answers
+/// nothing — no machine's, and no app's to register.
+pub const EVENTS: &str = "ark.events";
+
+/// The call a device says what it is by, at each connection before its
+/// `Hello`s (§1.9): its input the bytes its server's live space authors
+/// `on_join` from — the driver's to read, no machine's — answered nothing.
+pub const DEVICE: &str = "ark.device";
+
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
 /// loud (`error`, `warn`, `info`, `debug`, `trace`), what (`msg`), and its
 /// fields as text, the spans around it first.
@@ -161,25 +162,15 @@ pub struct Event {
     pub fields: Vec<(String, String)>,
 }
 
-/// An authority's answer to one intent; what its journal keeps of each it
-/// judged (never `Held` or `Gap`, which are not judgments).
+/// An authority's answer to one intent: refused, or where its origin
+/// stands — `last`, the last `local` of it judged, with the log at `seq`.
+/// One at or below `last` is in the log, at or below `seq`; one past it is
+/// not judged, and stays pending on the device (§1.7). What its journal
+/// keeps is the refusals.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
-    Ok {
-        seq: Seq,
-    },
-    Refused {
-        why: String,
-    },
-    Held {
-        func: String,
-    },
-    /// Past a `local` of its origin the authority has not judged: `last`,
-    /// the last it has. A device that no longer holds the ones between
-    /// numbers its pending intents on from there (§1.7).
-    Gap {
-        last: i64,
-    },
+    At { seq: Seq, last: i64 },
+    Refused { why: String },
 }
 
 /// A server's answer to one `Call`: what its function gave back, or why
@@ -194,16 +185,9 @@ impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
         match self {
-            Frame::Hello { space, .. }
-            | Frame::Page { space, .. }
-            | Frame::Snapshot { space, .. }
-            | Frame::Verdict { space, .. }
-            | Frame::Part { space, .. }
-            | Frame::More { space, .. }
-            | Frame::Parts { space, .. } => *space,
+            Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Verdict { space, .. } | Frame::Part { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
-            Frame::Telemetry { .. }
-            | Frame::Call { .. }
+            Frame::Call { .. }
             | Frame::Reply { .. }
             | Frame::Offer { .. }
             | Frame::Want { .. }
@@ -221,10 +205,11 @@ impl Frame {
         )
     }
 
-    /// A peer's intents, not yet sequenced, as a page.
-    pub fn push(space: Space, entries: impl IntoIterator<Item = Entry>) -> Frame {
-        let logged = entries.into_iter().map(Logged::intent).collect();
-        Frame::Page { space, from: 0, logged }
+    /// A peer's intents, not yet sequenced, as a page: its pending
+    /// beginning after `from`.
+    pub fn push(space: Space, from: i64, entries: impl IntoIterator<Item = Ctx>) -> Frame {
+        let logged = entries.into_iter().map(|e| Logged::intent(e, vec![])).collect();
+        Frame::Page { space, from, logged }
     }
 
     pub fn enc(&self) -> Vec<u8> {
@@ -232,7 +217,7 @@ impl Frame {
     }
 
     /// A frame from canonical bytes, whole, or why not.
-    pub fn dec(b: &[u8]) -> Result<Frame, Refusal> {
+    pub fn dec(b: &[u8]) -> Result<Frame, String> {
         Frame::from_bytes(b)
     }
 }

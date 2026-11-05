@@ -107,7 +107,7 @@ impl App {
             bottom: 0.0,
             left: GUTTER,
         });
-        let alone = self.peer.client.lock().is_alone();
+        let alone = self.is_alone();
         let paged: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             true => column![top, self.view_page()].spacing(10).into(),
             false => stack![self.view_page(), top].into(),
@@ -1926,7 +1926,7 @@ impl App {
     /// Exactly [`arkui::account::HEIGHT`] tall, because the menu hangs off
     /// its bottom before anything is laid out.
     fn view_top(&self) -> Element<'_, Message> {
-        let alone = self.peer.client.lock().is_alone();
+        let alone = self.is_alone();
         let left: Element<'_, Message> = match !cfg!(feature = "demo") && alone {
             // Alone: everything works here, and this is how it starts
             // syncing — a server, then its sign-in (`docs/plan-alone.md` §4).
@@ -1976,7 +1976,7 @@ impl App {
             (c.cursor(), c.pending_len())
         };
         let mut line = format!("{} songs \u{b7} cursor {cursor} \u{b7} {pending} pending", p.items().len());
-        if !cfg!(feature = "demo") && p.client.lock().is_alone() {
+        if !cfg!(feature = "demo") && self.is_alone() {
             line = format!("alone \u{b7} {line}");
         } else if !cfg!(feature = "demo") {
             // Who the replica's session row says, once it has synced.
@@ -2039,7 +2039,6 @@ impl App {
         let l = &self.listening;
         let stats = l.stats();
         let client = &self.peer.client.lock();
-        let status = client.status();
         let live = crate::client::live_status(client);
         let session = self.session.as_ref();
         let yes = |b: bool| if b { "yes" } else { "no" };
@@ -2055,10 +2054,10 @@ impl App {
             ("this device".into(), format!("{} \u{b7} {}", l.name(), l.me())),
             ("can play".into(), yes(Player::AUDIBLE).into()),
             (String::new(), String::new()),
-            ("link".into(), status.link.clone()),
+            ("link".into(), client.link_state().into()),
             (
                 "client linked \u{b7} epoch".into(),
-                format!("{} \u{b7} {}", yes(status.linked), status.epoch),
+                format!("{} \u{b7} {}", yes(client.linked), client.link.epoch),
             ),
             (
                 "live seq \u{b7} pending \u{b7} synced".into(),
@@ -2186,16 +2185,16 @@ impl App {
         rows.push((String::new(), String::new()));
         rows.push((
             "log cursor \u{b7} pending \u{b7} songs".into(),
-            format!("{} \u{b7} {} \u{b7} {}", status.cursor, status.pending, self.peer.items().len()),
+            format!("{} \u{b7} {} \u{b7} {}", client.cursor(), client.pending_len(), self.peer.items().len()),
         ));
         // What this window did, and what became of each: pending, in the log,
         // or refused and why — the sentence every replica reaches.
         for e in self.edits.iter().rev().take(12) {
-            let standing = match client.standing(&e.id) {
-                crate::client::Standing::Pending => "pending".to_string(),
-                crate::client::Standing::Confirmed => "in the log".to_string(),
-                crate::client::Standing::Rejected(why) => format!("refused: {why}"),
-                crate::client::Standing::Unknown => "unknown".to_string(),
+            let standing = match client.outcome(&e.id) {
+                Some(crate::client::Outcome::Pending) => "pending".to_string(),
+                Some(crate::client::Outcome::Ok) => "in the log".to_string(),
+                Some(crate::client::Outcome::Refused(why)) => format!("refused: {why}"),
+                None => "unknown".to_string(),
             };
             rows.push((format!("  {}", fit::tail(&e.what, 34)), standing));
         }

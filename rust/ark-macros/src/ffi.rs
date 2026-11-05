@@ -1,7 +1,7 @@
 //! The typed views of the bridge (`docs/plan-v5.md`, Landed: typed views):
 //! what `#[ark(ffi_view)]` on a view's row type adds for `ark_ffi`'s typed
 //! half — the type's **twin**, a UniFFI record (or enum) named as the type
-//! is, each field its own type's twin, with the conversions both ways
+//! is, each field its own type's twin, with the conversion to it
 //! (`ark_ffi::Twin`), and its view object `<T>View`. `#[ark(ffi)]` asks for
 //! the twin alone, for a type a row holds. What is written is in the
 //! domain's crate, whose UniFFI scaffolding (`crate::UniFfiTag`) and `uniffi`
@@ -14,17 +14,13 @@ use syn::{Data, DeriveInput, Fields, Ident, Index, Type};
 
 use crate::domain::{err, items, Item};
 
-/// `<t as Twin>::Ffi`, the type `t` crosses as; `t` to it; `t` from it.
+/// `<t as Twin>::Ffi`, the type `t` crosses as; `t` to it.
 fn ffi_ty(t: &Type) -> TokenStream {
     quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::Ffi)
 }
 
 fn to(t: &Type, e: TokenStream) -> TokenStream {
     quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::ffi(#e))
-}
-
-fn from(t: &Type, e: TokenStream) -> TokenStream {
-    quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::from_ffi(#e))
 }
 
 /// Whether a type asks for its twin (`ffi`) and, as a view's row, its view
@@ -83,12 +79,11 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
         return err(name.span(), "a twin is of a type with no parameters");
     }
     let (label, tw) = (name.to_string(), format_ident!("{}Ffi", name));
-    let (kind, decl, out, back) = match &input.data {
+    let (kind, decl, out) = match &input.data {
         Data::Struct(s) => {
             let fs = named(&s.fields, name.span())?;
             let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
             let (tys, tos) = (fs.iter().map(|(_, t, _)| ffi_ty(t)), fs.iter().map(|(f, t, _)| to(t, quote!(self.#f))));
-            let froms = fs.iter().map(|(f, t, _)| from(t, quote!(t.#f)));
             // A field added with a default (`#[serde(default)]`) has its
             // type's default in Swift's and Kotlin's constructors too, so
             // what built the record before still does.
@@ -107,36 +102,23 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
                 quote!(::uniffi::Record),
                 quote!(struct #tw { #(#defaults pub #ns: #tys,)* }),
                 quote!(#tw { #(#ns: #tos,)* }),
-                quote!(#name { #(#ns: #froms,)* }),
             )
         }
         Data::Enum(e) => {
-            let (mut decl, mut out, mut back) = (vec![], vec![], vec![]);
+            let (mut decl, mut out) = (vec![], vec![]);
             for v in &e.variants {
                 let vi = &v.ident;
                 let fs = named(&v.fields, vi.span())?;
                 let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
                 let tys = fs.iter().map(|(_, t, _)| ffi_ty(t));
                 let tos: Vec<_> = fs.iter().map(|(f, t, _)| to(t, quote!(#f))).collect();
-                let froms: Vec<_> = fs.iter().map(|(f, t, _)| from(t, quote!(#f))).collect();
                 decl.push(quote!(#vi { #(#ns: #tys),* }));
-                match fs.first() {
-                    Some((_, _, Some(_))) => {
-                        out.push(quote!(#name::#vi(value) => #tw::#vi { #(#ns: #tos),* }));
-                        back.push(quote!(#tw::#vi { value } => #name::#vi(#(#froms),*)));
-                    }
-                    _ => {
-                        out.push(quote!(#name::#vi { #(#ns),* } => #tw::#vi { #(#ns: #tos),* }));
-                        back.push(quote!(#tw::#vi { #(#ns),* } => #name::#vi { #(#ns: #froms),* }));
-                    }
-                }
+                out.push(match fs.first() {
+                    Some((_, _, Some(_))) => quote!(#name::#vi(value) => #tw::#vi { #(#ns: #tos),* }),
+                    _ => quote!(#name::#vi { #(#ns),* } => #tw::#vi { #(#ns: #tos),* }),
+                });
             }
-            (
-                quote!(::uniffi::Enum),
-                quote!(enum #tw { #(#decl,)* }),
-                quote!(match self { #(#out,)* }),
-                quote!(match t { #(#back,)* }),
-            )
+            (quote!(::uniffi::Enum), quote!(enum #tw { #(#decl,)* }), quote!(match self { #(#out,)* }))
         }
         Data::Union(_) => return err(name.span(), "a union has no twin"),
     };
@@ -150,9 +132,6 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
             type Ffi = #tw;
             fn ffi(self) -> #tw {
                 #out
-            }
-            fn from_ffi(t: #tw) -> #name {
-                #back
             }
         }
 
@@ -178,7 +157,7 @@ fn view_object(name: &Ident) -> TokenStream {
 
         #[derive(Clone, Debug, PartialEq, ::uniffi::Record)]
         pub struct #taken {
-            pub update: ::ark_ffi::Taken,
+            pub ops: ::std::vec::Vec<::ark_ffi::Op>,
             pub rows: ::std::vec::Vec<#tw>,
         }
 
@@ -199,8 +178,8 @@ fn view_object(name: &Ident) -> TokenStream {
             }
 
             pub fn take(&self) -> #taken {
-                let (update, rows) = self.0.take();
-                #taken { update, rows: rows.into_iter().map(#twin).collect() }
+                let (ops, rows) = self.0.take();
+                #taken { ops, rows: rows.into_iter().map(#twin).collect() }
             }
         }
     }

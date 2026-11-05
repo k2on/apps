@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use ark_ffi::{Login, Op, Peer, Refusal, RowId, Taken, Twin};
+use ark_ffi::{Login, Op, Peer, Refusal, RowId, Twin};
 use harken_domain::{LibraryEntryView, PlaylistView};
 use harken_ffi::harken_open;
 
@@ -24,9 +24,7 @@ fn librarian(dir: &tempfile::TempDir) -> Arc<Peer> {
         picture: String::new(),
     };
     let device = r#"{"can_play":true,"id":"","kind":"phone","name":"Pixel","user":""}"#;
-    let p = harken_open(dir.path().to_str().unwrap().into(), Some(login), device.into()).unwrap();
-    p.alone();
-    p
+    harken_open(dir.path().to_str().unwrap().into(), Some(login), device.into()).unwrap()
 }
 
 /// The playlists and a playlist's contents, read typed while the old path
@@ -41,14 +39,9 @@ fn a_views_rows_are_the_domains_own_types() {
     let lists = PlaylistView::new(p.clone(), "playlists.playlists".into(), "null".into()).unwrap();
     p.mutate("playlists.create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
     let taken = lists.take();
-    assert_eq!(
-        taken.update,
-        Taken::Patched {
-            ops: vec![Op::Insert { at: 0 }]
-        }
-    );
+    assert_eq!(taken.ops, vec![Op::Insert { at: 0 }]);
     assert_eq!(taken.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Mix"]);
-    assert_eq!(lists.take().update, Taken::Unchanged);
+    assert_eq!(lists.take().ops, vec![]);
     assert_eq!(lists.rows()[0].user_id, "u");
 
     let song = r#"{"title":"Air","artist":"Bach","album":"","duration_ms":1000,"file":"air.flac","track":1,"part":"","catalogue":"","performer":"","bpm":0,"album_art":"","artist_art":"","disc":1,"work_title":"","movement_no":0,"artist_banner":"","released":0,"folder":""}"#;
@@ -65,12 +58,7 @@ fn a_views_rows_are_the_domains_own_types() {
     assert_eq!((rows[0].title.as_str(), rows[0].playlist_pos), ("Air", Some(1)));
     assert_eq!(ark::hash::hex(&rows[0].id.0), media, "an id crosses as its sixteen bytes");
     let taken = library.take();
-    assert_eq!(
-        taken.update,
-        Taken::Patched {
-            ops: vec![Op::Update { at: 0 }]
-        }
-    );
+    assert_eq!(taken.ops, vec![Op::Update { at: 0 }]);
     assert_eq!(taken.rows[0].playlist_pos, Some(1), "the library marks what is on the playlist");
 
     let wrong = LibraryEntryView::new(p.clone(), "library.albums".into(), "null".into());
@@ -103,8 +91,8 @@ mod nested {
     }
 }
 
-/// Falsified by the enum twin's way back dropping a lone unnamed field
-/// (`unreachable!()` in its place): the round trip of `Wraps` panicked.
+/// Falsified by the enum twin dropping a lone unnamed field (its
+/// `value` left out): `Wraps` was not a record of its value.
 #[test]
 fn nested_sums_options_lists_and_ids_have_twins() {
     use nested::{Inner, InnerFfi, Outer, OuterFfi};
@@ -120,13 +108,19 @@ fn nested_sums_options_lists_and_ids_have_twins() {
         Outer::Wraps(inner.clone()),
         Outer::Nothing,
     ];
-    for o in all {
-        let t = <Outer as Twin<crate::UniFfiTag>>::ffi(o.clone());
-        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::from_ffi(t), o);
-    }
-    let w = <Outer as Twin<crate::UniFfiTag>>::ffi(Outer::Wraps(inner));
-    let OuterFfi::Wraps { value: InnerFfi { at, ids } } = w else {
-        panic!("Wraps is a record of its value: {w:?}")
+    let twin = || InnerFfi {
+        at: Some(3),
+        ids: vec![RowId([7; 16])],
     };
-    assert_eq!((at, ids), (Some(3), vec![RowId([7; 16])]));
+    let twins = [
+        OuterFfi::Has {
+            inner: twin(),
+            tags: vec![Some("a".into()), None],
+        },
+        OuterFfi::Wraps { value: twin() },
+        OuterFfi::Nothing {},
+    ];
+    for (o, t) in all.into_iter().zip(twins) {
+        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::ffi(o), t, "Wraps is a record of its value");
+    }
 }

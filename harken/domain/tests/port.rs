@@ -404,10 +404,9 @@ fn the_schema_hash_is_pinned() {
 }
 
 /// The schema reads every row the one a server last stood on wrote
-/// (`tests/schema.json`): as they are (`ark::schema::compat`), or through
-/// the domain's migrations (`src/migrations.rs`). A column appended with
-/// neither an `Option` type nor a default, and no step that reads the rows
-/// before it, is a server that does not start. `ARK_WRITE_GEN=1` writes
+/// (`tests/schema.json`), as they are: this one grows from it
+/// (`ark::schema::compat`). A column appended with neither an `Option` type
+/// nor a default is a server that does not start. `ARK_WRITE_GEN=1` writes
 /// this schema there, once it is the one the server runs.
 ///
 /// Falsified by taking `#[serde(default)]` off `person.banner`: "banner is
@@ -421,7 +420,7 @@ fn the_schema_reads_what_the_last_one_wrote() {
     }
     let was = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}; ARK_WRITE_GEN=1 writes it"));
     let was: ark::schema::Schema = serde_json::from_str(&was).unwrap();
-    let read = ark::migrate::migrate(&was, &vec![], &now, &domain().migrations);
+    let read = ark::schema::compat(&was, &now);
     assert!(read.is_ok(), "{read:?}");
 }
 
@@ -434,6 +433,10 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .values()
         .filter(|f| f.kind == ark::domain::Kind::View)
         .map(|f| f.name.as_str())
+        // A kind's due jobs became a view after these pins were taken (it
+        // was a query, never asked here): the pins are over the views
+        // there were.
+        .filter(|n| *n != "look.due")
         .collect();
     assert_eq!(views.len(), 32);
     let (mut refused, mut moved) = (0, 0);
@@ -451,14 +454,14 @@ fn run(seed: u64) -> (String, String, usize, usize) {
             ..Default::default()
         };
         let f = native.get(s.name).unwrap_or_else(|| panic!("{}", s.name)).proc.clone().unwrap();
-        match f.apply(&mut a, &ctx, &s.input) {
+        match f(&mut a, &ctx, &s.input) {
             Ok(x) => {
                 moved += !x.is_empty() as usize;
                 said.extend(format!("{} {} changes\n", s.name, x.len()).bytes());
             }
             Err(x) => {
                 refused += 1;
-                said.extend(format!("{} refused: {}\n", s.name, x.0).bytes());
+                said.extend(format!("{} refused: {}\n", s.name, x).bytes());
             }
         }
         said.extend(a.state_hash().0);
@@ -472,7 +475,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
                     let input = view_input(&a, v);
                     match native.ask(&a, &ctx, v, &input) {
                         Ok(x) => said.extend(x),
-                        Err(e) => said.extend(e.0.bytes()),
+                        Err(e) => said.extend(e.bytes()),
                     }
                 }
             }

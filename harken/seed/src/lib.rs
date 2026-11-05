@@ -30,7 +30,7 @@ use std::sync::{Arc, OnceLock};
 
 use ark::domain::Domain;
 use ark::format::Encode;
-use ark::log::{EntryId, Record, Snapshot};
+use ark::log::{EntryId, Record};
 use ark::peer::Ctx;
 use ark::store::Store;
 use ark_peer::{Disk, Memory};
@@ -117,8 +117,7 @@ impl Seeder {
             .get(name)
             .and_then(|f| f.proc.clone())
             .unwrap_or_else(|| panic!("{name} writes nothing"));
-        f.apply(&mut self.store, &self.ctx, input)
-            .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
+        f(&mut self.store, &self.ctx, input).unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
     }
 
     /// One mutation by the name the domain binds it to.
@@ -185,8 +184,8 @@ fn copy_of(c: &Catalogue, k: usize) -> Catalogue {
     c
 }
 
-/// The demo's library `copies` times over, as the records of a peer alone:
-/// a snapshot of the seeded store, and who it is. `1` is the demo. Every
+/// The demo's library `copies` times over, as the records of a peer with no
+/// server: a snapshot of the seeded store, and who it is. `1` is the demo. Every
 /// copy after the first has its own composers, albums, works, recordings and
 /// files (the names carry ` (k)`), so every list is `copies` times as long,
 /// for measuring how a list's cost grows with the library; the playlists
@@ -255,15 +254,10 @@ pub fn seeded_disk(copies: usize) -> Memory {
 
     // The store, as a peer alone keeps it: a snapshot at the start of an
     // empty chain, which its own authority stands on.
-    let snapshot = Snapshot {
-        seq: 0,
-        hash: Default::default(),
-        state: seed.store.state_hash(),
-        rows: seed.store.snapshot_rows(),
-    };
+    let rows = ark::log::standing(seed.store.snapshot_rows(), 0, Default::default());
     let mut disk = Memory::default();
-    disk.record(&Record::Rows(snapshot.kv_rows()).enc()).expect("memory takes it");
-    ark_peer::migrate::put_schema(&mut disk, seed.store.schema_arc()).expect("memory takes it");
+    disk.record(&Record::Rows(rows).enc()).expect("memory takes it");
+    ark_peer::disk::put_schema(&mut disk, seed.store.schema_arc()).expect("memory takes it");
     ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(DEMO.into()), LOCAL.into())).expect("memory takes it");
     disk
 }

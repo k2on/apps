@@ -3,15 +3,14 @@
 //! A [`Domain`] is what a crate of plain Rust registers: the schema its
 //! `#[derive(Schema)]` struct is, and per name — `playlists.add_to_playlist`
 //! — a function and its input's type description. `#[mutator(..)]`,
-//! `#[live(..)]`, `#[query(..)]`, `#[view(..)]` and `#[scope(..)]` only
-//! register a function by name ([`register!`]); what it does is the Rust.
+//! `#[view(..)]` and `#[scope(..)]` only register a function by name
+//! ([`register!`]); what it does is the Rust.
 //!
-//! - a **mutator** (and a **live transition**, over volatile tables) is
-//!   `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`: the machine runs it
-//!   as a [`Procedure`], its input read and refined first ([`Input`]);
-//! - a **query** is `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`, answered
-//!   over a store;
-//! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
+//! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>`:
+//!   the machine of the space it writes (`P`, durable unless it says
+//!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it
+//!   ([`Run`]), its input read and refined first ([`Input`]);
+//! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, String>`,
 //!   kept up to date ([`crate::plan::View`]) or answered afresh;
 //! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
 //!   rows a connection fed by it holds (§1.8).
@@ -28,51 +27,71 @@ pub mod effect;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::db::{read, write_in, Db, Tables, Volatile, Writes};
+use crate::db::{write_in, Db, Tables, Writes};
 use crate::hash::SchemaHash;
-use crate::peer::{self, Ctx, Functions, Procedure, Runs};
+use crate::peer::Ctx;
 use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
-use crate::schema::Schema;
+use crate::schema::{Schema, Space};
 use crate::store::{Change, Store};
-use crate::Refusal;
 
 /// What a function is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Mutator,
-    Live,
-    Query,
     View,
     Scope,
 }
 
+/// What the machine runs of a mutator, opaque to it: run over the store,
+/// its changes left applied, all or none — or its refusal. It reads its
+/// own writes as it makes them.
+pub type Run = Arc<dyn Fn(&mut Store, &Ctx, &[u8]) -> Result<Vec<Change>, String> + Send + Sync>;
+/// What a scope holds (§1.8): whether the union of who reads holds a row
+/// of the table named, by the row's bytes.
+pub type Holds = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, String> + Send + Sync>;
 /// A function's answer over a store, encoded.
-pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, Refusal> + Send + Sync>;
+pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 /// A view of a function, kept.
-pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, Refusal> + Send + Sync>;
+pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, String> + Send + Sync>;
 /// An input's refinements over its encoding: every field that fails, and why.
 pub type Check = Arc<dyn Fn(&[u8]) -> Result<(), Vec<(String, String)>> + Send + Sync>;
 
-/// One function of a domain, by name.
+/// One function of a domain, by name — what a generator reads (`arkdb
+/// gen`) — and what runs it.
 #[derive(Clone)]
 pub struct Function {
     pub name: String,
     pub kind: Kind,
+    /// The space a mutator writes, and its intents are on.
+    pub space: Space,
     /// What it takes, as a form reads it.
     pub input: Type,
-    /// What it answers, a query's or a view's element.
+    /// What it answers: a view's element.
     pub output: Option<Type>,
-    /// What the machine runs: a mutator's, a live transition's.
-    pub proc: Option<Arc<dyn Procedure>>,
+    /// What the machine runs: a mutator's.
+    pub proc: Option<Run>,
     /// What a scope holds (§1.8).
-    pub scope: Option<peer::Scope>,
+    pub scope: Option<Holds>,
     pub ask: Option<Ask>,
     pub watch: Option<Watch>,
     pub check: Check,
-    /// Each refined field of the input, and its refinements as a form says
-    /// them.
-    pub checks: Vec<(String, Vec<String>)>,
+}
+
+/// A function taking `I` that runs nothing yet: what each kind is made from.
+fn function<I: Input>(name: &str, kind: Kind, output: Option<Type>) -> Function {
+    Function {
+        name: name.into(),
+        kind,
+        space: Space::Durable,
+        input: I::describe(),
+        output,
+        proc: None,
+        scope: None,
+        ask: None,
+        watch: None,
+        check: check_of::<I>(),
+    }
 }
 
 impl std::fmt::Debug for Function {
@@ -82,59 +101,42 @@ impl std::fmt::Debug for Function {
 }
 
 /// A domain: its name and version, its schema, its functions by name.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Domain {
     pub name: String,
     pub version: String,
     pub schema: Arc<Schema>,
     pub fns: BTreeMap<String, Function>,
-    /// The steps that read rows of a schema before this one, oldest first
-    /// ([`crate::migrate`]).
-    pub migrations: Vec<crate::migrate::Migration>,
     /// The tables a server sends a device last when it fills it
-    /// ([`crate::peer::Peer::later`]): what it can be without for a while.
+    /// what it can be without for a while.
     pub later: Vec<String>,
 }
 
 fn check_of<I: Input>() -> Check {
-    Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e.0)])?.check().map(|_| ()))
+    Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e)])?.check().map(|_| ()))
 }
 
 /// An input from its encoding (no bytes are `()`'s), refined.
-fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
+fn input_of<I: Input>(b: &[u8]) -> Result<I, String> {
     match b.is_empty() {
         true => I::decode(&crate::format::encode(&())?)?.refine(),
         false => I::decode(b)?.refine(),
     }
 }
 
-/// A mutator's function, or a live transition's (`P` the space it writes).
-pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>;
-
-struct Mutate<S: Tables, P: Writes, I> {
-    f: WriteFn<S, P, I>,
-}
-
-impl<S: Tables, P: Writes, I: Input> Procedure for Mutate<S, P, I> {
-    fn apply(&self, store: &mut Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let input = input_of::<I>(input)?;
-        // Every run draws from the entry's first id: a run again is the
-        // same run (§1.6).
-        ctx.draws.set(0);
-        write_in::<S, P, _>(store, |db| (self.f)(ctx, db, input)).map(|(_, cs)| cs)
-    }
-}
+/// A mutator's function (`P` the space it writes).
+pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>;
 
 /// A scope's predicate on a row's encoding.
-type Holds = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+type OnRow = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, String> + Send + Sync>;
 
 /// A view's function, as a domain writes it.
-pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>;
+pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, String>;
 
 /// Which rows a connection fed by a scope holds (§1.8): per table, a
 /// predicate on its rows; a table the scope does not name holds none.
 pub struct Scope<S> {
-    tables: BTreeMap<&'static str, Holds>,
+    tables: BTreeMap<&'static str, OnRow>,
     _p: std::marker::PhantomData<fn() -> S>,
 }
 
@@ -167,16 +169,8 @@ impl Domain {
             version: version.into(),
             schema: Arc::new(S::schema()),
             fns: BTreeMap::new(),
-            migrations: vec![],
             later: vec![],
         }
-    }
-
-    /// A step that reads rows of a schema before this one, after those
-    /// already given ([`crate::migrate`]).
-    pub fn migration(mut self, m: crate::migrate::Migration) -> Domain {
-        self.migrations.push(m);
-        self
     }
 
     /// `table` sent after every other in a fill, after those already given.
@@ -192,85 +186,45 @@ impl Domain {
         self
     }
 
-    fn writer<S: Tables, P: Writes, I: Input>(self, name: &str, kind: Kind, f: WriteFn<S, P, I>) -> Domain {
-        self.add(Function {
-            name: name.into(),
-            kind,
-            input: I::describe(),
-            output: None,
-            proc: Some(Arc::new(Mutate { f })),
-            scope: None,
-            ask: None,
-            watch: None,
-            check: check_of::<I>(),
-            checks: I::checks(),
-        })
-    }
-
-    pub fn mutator<S: Tables, I: Input>(self, name: &str, f: fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>) -> Domain {
-        self.writer(name, Kind::Mutator, f)
-    }
-
-    /// A transition of live state: a mutator over volatile tables (§1.9),
-    /// which writes none other ([`crate::db`]).
-    pub fn live<S: Tables, I: Input>(self, name: &str, f: WriteFn<S, Volatile, I>) -> Domain {
-        self.writer(name, Kind::Live, f)
-    }
-
-    pub fn query<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>) -> Domain {
-        let ask: Ask = Arc::new(move |store, ctx, b| {
-            let input = input_of::<I>(b)?;
-            read::<S, _>(store, |db| f(ctx, db, input)).map(|t| t.encode())
+    /// A mutator of the space `P` its `Db` writes, which it writes alone
+    /// ([`crate::db`]): a durable one an intent on the log, a volatile one a
+    /// transition of live state (§1.9).
+    pub fn mutator<S: Tables, P: Writes, I: Input>(self, name: &str, f: WriteFn<S, P, I>) -> Domain {
+        let run: Run = Arc::new(move |store, ctx, input| {
+            let input = input_of::<I>(input)?;
+            // Every run draws from the entry's first id: a run again is the
+            // same run (§1.6).
+            ctx.draws.set(0);
+            write_in::<S, P, _>(store, |db| f(ctx, db, input)).map(|(_, cs)| cs)
         });
-        self.add(Function {
-            name: name.into(),
-            kind: Kind::Query,
-            input: I::describe(),
-            output: Some(T::describe()),
-            proc: None,
-            scope: None,
-            ask: Some(ask),
-            watch: None,
-            check: check_of::<I>(),
-            checks: I::checks(),
-        })
+        let mut f = Function {
+            proc: Some(run),
+            ..function::<I>(name, Kind::Mutator, None)
+        };
+        f.space = P::SPACE;
+        self.add(f)
     }
 
     pub fn view<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: ViewFn<S, I, T>) -> Domain {
-        let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, Refusal> {
+        let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, String> {
             let input = input_of::<I>(b)?;
             Ok(Arc::new(move |ctx: &Ctx, db: &Db<S>| f(ctx, db, input.clone())))
         };
         let ask: Ask = Arc::new(move |store, ctx, b| Ok(answer(&make(b)?, ctx, store)?.encode()));
         let watch: Watch = Arc::new(move |store, ctx, b| Ok(Box::new(View::new(make(b)?, ctx.clone(), store)?) as Box<dyn Maintained>));
         self.add(Function {
-            name: name.into(),
-            kind: Kind::View,
-            input: I::describe(),
-            output: Some(T::describe()),
-            proc: None,
-            scope: None,
             ask: Some(ask),
             watch: Some(watch),
-            check: check_of::<I>(),
-            checks: I::checks(),
+            ..function::<I>(name, Kind::View, Some(T::describe()))
         })
     }
 
     pub fn scope<S: Tables>(self, name: &str, scope: Scope<S>) -> Domain {
         let tables = scope.tables;
-        let holds: peer::Scope = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
+        let holds: Holds = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
         self.add(Function {
-            name: name.into(),
-            kind: Kind::Scope,
-            input: Type::Unit,
-            output: None,
-            proc: None,
             scope: Some(holds),
-            ask: None,
-            watch: None,
-            check: check_of::<()>(),
-            checks: vec![],
+            ..function::<()>(name, Kind::Scope, None)
         })
     }
 
@@ -287,112 +241,64 @@ impl Domain {
     /// The function a name means: itself, or the first whose last part it
     /// is.
     pub fn binding(&self, name: &str) -> Option<&str> {
-        self.fns
-            .keys()
-            .map(String::as_str)
-            .find(|n| *n == name || n.rsplit('.').next() == Some(name))
+        match self.fns.get_key_value(name) {
+            Some((n, _)) => Some(n),
+            None => self.fns.keys().map(String::as_str).find(|n| n.rsplit('.').next() == Some(name)),
+        }
     }
 
     pub fn schema_hash(&self) -> SchemaHash {
         self.schema.hash()
     }
 
-    /// The functions the machine runs, by name.
-    pub fn functions(&self) -> Functions {
-        let mut c = Functions::default();
-        for f in self.fns.values() {
-            let run = f.proc.clone().map(Runs::Procedure).or(f.scope.clone().map(Runs::Scope));
-            run.into_iter().for_each(|r| c.put(f.name.clone(), r));
-        }
-        c
+    /// `name` run by `run` over the store as it is, in place of what it
+    /// ran, or a mutator of no typed input: what an authority's own raw
+    /// write, or a test, registers without a `Db`.
+    pub fn run(mut self, name: &str, run: Run) -> Domain {
+        let f = self.fns.entry(name.into()).or_insert_with(|| function::<()>(name, Kind::Mutator, None));
+        f.proc = Some(run);
+        self
     }
 
-    /// A query's or a view's answer over a store, as `ctx` reads it.
-    pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
-        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
-        let ask = f.ask.as_ref().ok_or_else(|| Refusal(format!("{name} answers nothing")))?;
+    /// A view's answer over a store, as `ctx` reads it.
+    pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
+        let f = self.get(name).ok_or_else(|| format!("no function {name}"))?;
+        let ask = f.ask.as_ref().ok_or_else(|| format!("{name} answers nothing"))?;
         ask(store, ctx, input)
     }
 
-    fn func(&self, name: &str) -> Result<&Function, Refusal> {
-        self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))
+    fn func(&self, name: &str) -> Result<&Function, String> {
+        self.get(name).ok_or_else(|| format!("no function {name}"))
     }
 
     /// A function's input from its JSON text (none is `()`'s), in the value
     /// format: what a host that speaks JSON calls it with.
-    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, Refusal> {
+    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
         crate::json::from_text(&self.func(name)?.input, text)
     }
 
-    /// What [`Domain::ask`] answered, as JSON: a query's value, a view's
-    /// list.
-    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
-        let f = self.func(name)?;
-        let t = f.output.clone().unwrap_or(Type::Unit);
-        let t = if f.kind == Kind::View { Type::List(Box::new(t)) } else { t };
-        crate::json::to_text(&t, bytes)
+    /// What [`Domain::ask`] answered, as JSON: a view's list.
+    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        let t = self.func(name)?.output.clone().unwrap_or(Type::Unit);
+        crate::json::to_text(&Type::List(Box::new(t)), bytes)
     }
 
     /// One element of a view of a function, as JSON.
-    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
+    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
         crate::json::to_text(self.func(name)?.output.as_ref().unwrap_or(&Type::Unit), bytes)
     }
 
     /// A row of a table of the schema, as JSON.
-    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, Refusal> {
-        let (_, t) = self.schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?;
+    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
+        let (_, t) = self.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
         crate::json::to_text(&t.row_type(), bytes)
     }
 
     /// A view of a function, kept over `store`.
-    pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, Refusal> {
-        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
-        let w = f.watch.as_ref().ok_or_else(|| Refusal(format!("{name} is not a view")))?;
+    pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, String> {
+        let f = self.get(name).ok_or_else(|| format!("no function {name}"))?;
+        let w = f.watch.as_ref().ok_or_else(|| format!("{name} is not a view"))?;
         w(store, ctx, input)
-    }
-}
-
-/// A domain described (§1.16), what a generator reads: its schema, and per
-/// function its name, its kind, and the descriptions of its input, of what
-/// it answers and of its input's refinements — what a form is drawn from.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Catalog {
-    pub schema: Schema,
-    pub functions: Vec<Described>,
-}
-
-/// One function, described.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Described {
-    pub name: String,
-    pub kind: Kind,
-    pub input: Type,
-    pub output: Option<Type>,
-    pub checks: Vec<(String, Vec<String>)>,
-}
-
-impl Catalog {
-    /// A domain's, as it registers its functions.
-    pub fn of(d: &Domain) -> Catalog {
-        let functions = d
-            .fns
-            .values()
-            .map(|f| Described {
-                name: f.name.clone(),
-                kind: f.kind,
-                input: f.input.clone(),
-                output: f.output.clone(),
-                checks: f.checks.clone(),
-            })
-            .collect();
-        Catalog {
-            schema: (*d.schema).clone(),
-            functions,
-        }
-    }
-
-    pub fn get(&self, name: &str) -> Option<&Described> {
-        self.functions.iter().find(|f| f.name == name)
     }
 }
 

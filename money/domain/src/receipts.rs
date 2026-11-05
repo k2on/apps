@@ -222,7 +222,7 @@ fn payer(db: &Db<Money>, r: &Receipt) -> Option<Txn> {
 
 /// A transaction that just arrived, as what pays for a receipt waiting for
 /// one; its split written when it does.
-pub fn pay_waiting(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
+pub fn pay_waiting(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), String> {
     let Some(t) = db.txn.get(id) else { return Ok(()) };
     let mut charges: Vec<Charge> = db
         .charge
@@ -303,7 +303,7 @@ fn confirmed(t: &Txn) -> bool {
 /// one transaction somebody just said the receipt paid (`pay`,
 /// `pay_charge`, a receipt typed for it), which is split whether approved
 /// or not: saying so is asking for it.
-pub fn split_by(db: &mut Db<Money>, receipt_id: &str, chosen: Option<Id<Txn>>) -> Result<(), Refusal> {
+pub fn split_by(db: &mut Db<Money>, receipt_id: &str, chosen: Option<Id<Txn>>) -> Result<(), String> {
     let Some(r) = db.receipt.get(receipt_id.to_string()) else {
         return Ok(());
     };
@@ -323,7 +323,7 @@ pub fn split_by(db: &mut Db<Money>, receipt_id: &str, chosen: Option<Id<Txn>>) -
 
 /// One transaction split by a receipt's items: its own amount shared over
 /// them.
-fn split_txn(db: &mut Db<Money>, r: &Receipt, t: Txn) -> Result<(), Refusal> {
+fn split_txn(db: &mut Db<Money>, r: &Receipt, t: Txn) -> Result<(), String> {
     let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
     if !on_budget || t.transfer_id.is_some() {
         return Ok(());
@@ -372,7 +372,7 @@ fn split_txn(db: &mut Db<Money>, r: &Receipt, t: Txn) -> Result<(), Refusal> {
 
 /// A transaction split again by the receipt it paid for, when it paid for
 /// one.
-pub fn resplit_txn(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
+pub fn resplit_txn(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), String> {
     if let Some(r) = db.receipt.by(Receipt::TXN_ID).from(Some(id)).first() {
         return split_by(db, &r.id, None);
     }
@@ -389,14 +389,14 @@ pub fn resplit_txn(db: &mut Db<Money>, id: Id<Txn>) -> Result<(), Refusal> {
 /// with what somebody filed kept, and each paid for by the transaction
 /// that did, once there is one.
 #[mutator("receipts.add_receipts")]
-pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Result<(), Refusal> {
+pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Result<(), String> {
     crate::budget::ensure_setup(ctx, db)?;
     for got in &input.receipts {
         if !is_day(&got.date) {
-            return Err(Refusal::new(format!("{}: {} is not a day", got.order_id, got.date)));
+            return Err(format!("{}: {} is not a day", got.order_id, got.date));
         }
         if got.order_id.trim().is_empty() {
-            return Err(Refusal::new("a receipt needs the store's id for it"));
+            return Err("a receipt needs the store's id for it".into());
         }
         let id = format!("{}:{}", input.store, got.order_id.trim());
         let had = db.receipt.get(id.clone());
@@ -465,17 +465,17 @@ pub fn add_receipts(ctx: &Ctx, db: &mut Db<Money>, input: ReceiptImport) -> Resu
 /// the same key as one of them filed with it; and the transactions their
 /// receipts paid for split again.
 #[mutator("receipts.file_items")]
-pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(), Refusal> {
+pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(), String> {
     if let Some(c) = input.category_id {
         match db.category.get(c) {
-            None => return Err(Refusal::new("no such category")),
-            Some(g) if g.parent_id.is_none() => return Err(Refusal::new(format!("{} is a group: file it under a category in it", g.name))),
+            None => return Err("no such category".into()),
+            Some(g) if g.parent_id.is_none() => return Err(format!("{} is a group: file it under a category in it", g.name)),
             Some(_) => {}
         }
     }
     let mut receipts: Vec<String> = vec![];
     for r in &input.items {
-        let item = db.item.get((r.receipt_id.clone(), r.line)).ok_or_else(|| Refusal::new("no such item"))?;
+        let item = db.item.get((r.receipt_id.clone(), r.line)).ok_or_else(|| String::from("no such item"))?;
         let mut same: Vec<Item> = match input.category_id {
             Some(_) => db
                 .item
@@ -510,15 +510,15 @@ pub fn file_items(_: &Ctx, db: &mut Db<Money>, input: ClassifyItems) -> Result<(
 /// A receipt said to be paid by a transaction, or by none; split by it
 /// when one.
 #[mutator("receipts.pay")]
-pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), Refusal> {
-    let r = db.receipt.get(input.receipt_id.clone()).ok_or_else(|| Refusal::new("no such receipt"))?;
+pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), String> {
+    let r = db.receipt.get(input.receipt_id.clone()).ok_or_else(|| String::from("no such receipt"))?;
     if let Some(t) = input.txn_id {
-        let t = db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
+        let t = db.txn.get(t).ok_or_else(|| String::from("no such transaction"))?;
         if t.transfer_id.is_some() {
-            return Err(Refusal::new("a transfer pays for no receipt"));
+            return Err("a transfer pays for no receipt".into());
         }
         if let Some(other) = db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).all().into_iter().find(|o| o.id != r.id) {
-            return Err(Refusal::new(format!("that transaction paid for {} already", other.id)));
+            return Err(format!("that transaction paid for {} already", other.id));
         }
     }
     db.receipt.update(Receipt {
@@ -533,12 +533,12 @@ pub fn pay(_: &Ctx, db: &mut Db<Money>, input: MatchReceipt) -> Result<(), Refus
 /// transactions split again. A charge said again changes nothing; one
 /// somebody paid by hand stays so.
 #[mutator("receipts.add_charges")]
-pub fn add_charges(ctx: &Ctx, db: &mut Db<Money>, input: ChargeImport) -> Result<(), Refusal> {
+pub fn add_charges(ctx: &Ctx, db: &mut Db<Money>, input: ChargeImport) -> Result<(), String> {
     let mut seen: BTreeMap<String, i64> = BTreeMap::new();
     let mut touched: Vec<String> = vec![];
     for c in &input.charges {
         if !is_day(&c.date) {
-            return Err(Refusal::new(format!("{}: {} is not a day", c.order_id, c.date)));
+            return Err(format!("{}: {} is not a day", c.order_id, c.date));
         }
         if c.order_id.trim().is_empty() {
             continue;
@@ -589,15 +589,15 @@ pub fn add_charges(ctx: &Ctx, db: &mut Db<Money>, input: ChargeImport) -> Result
 /// A charge said to be paid by a transaction, or by none; its receipt's
 /// transactions split again.
 #[mutator("receipts.pay_charge")]
-pub fn pay_charge(_: &Ctx, db: &mut Db<Money>, input: PayCharge) -> Result<(), Refusal> {
-    let c = db.charge.get(input.charge_id.clone()).ok_or_else(|| Refusal::new("no such charge"))?;
+pub fn pay_charge(_: &Ctx, db: &mut Db<Money>, input: PayCharge) -> Result<(), String> {
+    let c = db.charge.get(input.charge_id.clone()).ok_or_else(|| String::from("no such charge"))?;
     if let Some(t) = input.txn_id {
-        let t = db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
+        let t = db.txn.get(t).ok_or_else(|| String::from("no such transaction"))?;
         if t.transfer_id.is_some() {
-            return Err(Refusal::new("a transfer pays for no receipt"));
+            return Err("a transfer pays for no receipt".into());
         }
         if db.receipt.by(Receipt::TXN_ID).from(Some(t.id)).any() || db.charge.by(Charge::TXN_ID).from(Some(t.id)).all().iter().any(|o| o.id != c.id) {
-            return Err(Refusal::new("that transaction paid for another receipt already"));
+            return Err("that transaction paid for another receipt already".into());
         }
     }
     db.charge.update(Charge {
@@ -611,7 +611,7 @@ pub fn pay_charge(_: &Ctx, db: &mut Db<Money>, input: PayCharge) -> Result<(), R
 
 /// A receipt's charges, by day.
 #[view("receipts.charges")]
-pub fn charges(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ChargeLine>, Refusal> {
+pub fn charges(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ChargeLine>, String> {
     let id = input.receipt_id;
     Ok(scan::<Money, Charge>()
         .filter(move |c| c.receipt_id == id)
@@ -636,7 +636,7 @@ pub fn charges(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ChargeL
 /// week before to three after, paying for nothing else; the nearest in
 /// amount, then in days, first, and at most twenty.
 #[view("receipts.candidates")]
-pub fn candidates(_: &Ctx, _: &Db<Money>, input: PaidFor) -> Result<Plan<CandidateLine>, Refusal> {
+pub fn candidates(_: &Ctx, _: &Db<Money>, input: PaidFor) -> Result<Plan<CandidateLine>, String> {
     Ok(scan::<Money, Txn>()
         .map_with(move |db, t| {
             let (date, amount, paying) = match &input.charge_id {
@@ -670,7 +670,7 @@ pub fn candidates(_: &Ctx, _: &Db<Money>, input: PaidFor) -> Result<Plan<Candida
 /// Every receipt, the newest first, with how many of its items are filed
 /// and what paid for it.
 #[view("receipts.receipts")]
-pub fn receipts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<ReceiptLine>, Refusal> {
+pub fn receipts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<ReceiptLine>, String> {
     Ok(receipt_lines(scan::<Money, Receipt>()))
 }
 
@@ -701,7 +701,7 @@ fn receipt_lines(rows: Plan<Receipt>) -> Plan<ReceiptLine> {
 /// "Groceries › Eggs" is Costco's, Target's and Amazon's eggs — or (none)
 /// every item not filed yet; the newest first.
 #[view("receipts.items")]
-pub fn items(_: &Ctx, _: &Db<Money>, input: ItemsIn) -> Result<Plan<ItemLine>, Refusal> {
+pub fn items(_: &Ctx, _: &Db<Money>, input: ItemsIn) -> Result<Plan<ItemLine>, String> {
     let under = input.category_id;
     Ok(scan::<Money, Item>()
         .filter_with(move |db, i| match (under, i.category_id) {
@@ -738,7 +738,7 @@ pub fn item_line(db: &Db<Money>, i: &Item) -> ItemLine {
 
 /// One receipt's items, in order.
 #[view("receipts.receipt_items")]
-pub fn receipt_items(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ItemLine>, Refusal> {
+pub fn receipt_items(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<ItemLine>, String> {
     let id = input.receipt_id;
     Ok(scan::<Money, Item>()
         .filter(move |i| i.receipt_id == id)
@@ -778,12 +778,12 @@ mod tests {
 /// the receipt it wrote (`paper:<photo>`), paid by the transaction it was
 /// taken for or, like any receipt, the one that did.
 #[mutator("receipts.add_photo")]
-pub fn add_photo(ctx: &Ctx, db: &mut Db<Money>, input: AddPhoto) -> Result<(), Refusal> {
+pub fn add_photo(ctx: &Ctx, db: &mut Db<Money>, input: AddPhoto) -> Result<(), String> {
     if !ark::file::is_hash(&input.file.hash) || input.file.size <= 0 {
-        return Err(Refusal::new("not a photo's file"));
+        return Err("not a photo's file".into());
     }
     if let Some(t) = input.txn_id {
-        db.txn.get(t).ok_or_else(|| Refusal::new("no such transaction"))?;
+        db.txn.get(t).ok_or_else(|| String::from("no such transaction"))?;
     }
     db.photo.insert(Photo {
         id: ctx.new_id(),
@@ -797,7 +797,7 @@ pub fn add_photo(ctx: &Ctx, db: &mut Db<Money>, input: AddPhoto) -> Result<(), R
 
 /// Every receipt photo, the newest first, and where reading it stands.
 #[view("receipts.photos")]
-pub fn photos(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<PhotoLine>, Refusal> {
+pub fn photos(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<PhotoLine>, String> {
     Ok(scan::<Money, Photo>()
         .map(|p| {
             let (receipt_id, state, why) = match &p.state {
@@ -838,17 +838,17 @@ pub fn receipt_of(db: &Db<Money>, txn: Id<Txn>) -> Option<String> {
 /// right — its items replaced, each filed as it was when it is the same
 /// thing — and paid by the transaction it is for when one is said.
 #[mutator("receipts.write_receipt")]
-pub fn write_receipt(ctx: &Ctx, db: &mut Db<Money>, input: WriteReceipt) -> Result<(), Refusal> {
+pub fn write_receipt(ctx: &Ctx, db: &mut Db<Money>, input: WriteReceipt) -> Result<(), String> {
     let (store, order_id) = match input.receipt_id.trim() {
         "" => (crate::stores::PAPER.to_string(), ctx.new_id::<Receipt>().hex()),
         id => {
-            db.receipt.get(id.to_string()).ok_or_else(|| Refusal::new("no such receipt"))?;
-            let (s, o) = id.split_once(':').ok_or_else(|| Refusal::new("no such receipt"))?;
+            db.receipt.get(id.to_string()).ok_or_else(|| String::from("no such receipt"))?;
+            let (s, o) = id.split_once(':').ok_or_else(|| String::from("no such receipt"))?;
             (s.to_string(), o.to_string())
         }
     };
     if input.items.iter().any(|i| i.name.trim().is_empty()) {
-        return Err(Refusal::new("every item needs a name"));
+        return Err("every item needs a name".into());
     }
     let total = input.total.unwrap_or_else(|| input.items.iter().map(|i| i.amount).sum());
     let receipt_id = format!("{store}:{order_id}");
@@ -876,7 +876,7 @@ pub fn write_receipt(ctx: &Ctx, db: &mut Db<Money>, input: WriteReceipt) -> Resu
 /// The receipts that paid for a transaction (whole or by a charge), and
 /// those of the photos taken for it.
 #[view("receipts.for_txn")]
-pub fn for_txn(_: &Ctx, _: &Db<Money>, input: OneTxn) -> Result<Plan<ReceiptLine>, Refusal> {
+pub fn for_txn(_: &Ctx, _: &Db<Money>, input: OneTxn) -> Result<Plan<ReceiptLine>, String> {
     let t = input.id;
     let mine = scan::<Money, Receipt>().filter_with(move |db, r| {
         r.txn_id == Some(t)

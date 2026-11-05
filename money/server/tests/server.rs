@@ -50,11 +50,7 @@ fn one_household_signs_in_and_shares_one_budget() {
     let txns: Vec<Txn> = hub_rows(&server, "txn");
     assert!(txns.iter().all(|t| t.user_id == "alice"), "entered by alice");
 
-    let mut mallory = open(ark::peer::Who {
-        actor: "mallory".into(),
-        session: "nope".into(),
-        roles: vec![],
-    });
+    let mut mallory = open(ark::peer::Ctx::who("mallory", "nope", vec![]));
     mallory.connect(&url, "forged");
     mallory.mutate("accounts.open_account", &open_account("Mine now"));
     pump_until(&mut [&mut mallory], 10, |ps| ps[0].closed());

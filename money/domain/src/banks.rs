@@ -39,7 +39,7 @@ use ark::prelude::*;
 use crate::schema::*;
 use crate::types::*;
 
-fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result<(), Refusal> {
+fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result<(), String> {
     // After every ask before it, even within one millisecond: newest first
     // is the order a person's asks are read in.
     let last = db.bank_ask.scan().iter().map(|a| a.asked_ms).max().unwrap_or(0);
@@ -55,19 +55,19 @@ fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result
     })
 }
 
-fn bank_of(db: &Db<Money>, name: &str) -> Result<Bank, Refusal> {
-    db.bank.get(name).ok_or_else(|| Refusal::new("no bank of that name is connected"))
+fn bank_of(db: &Db<Money>, name: &str) -> Result<Bank, String> {
+    db.bank.get(name).ok_or_else(|| String::from("no bank of that name is connected"))
 }
 
 /// Ask the server to connect a bank: anybody in the household may.
 #[mutator("banks.connect")]
-pub fn connect(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), Refusal> {
+pub fn connect(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), String> {
     ask(ctx, db, "connect", &None)
 }
 
 /// Ask the server for a page to log in to a connected bank again.
 #[mutator("banks.reconnect")]
-pub fn reconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), Refusal> {
+pub fn reconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), String> {
     let bank = bank_of(db, &input.bank)?;
     ask(ctx, db, "reconnect", &Some(bank))
 }
@@ -77,7 +77,7 @@ pub fn reconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), R
 /// that was not shared before is opened here at the next import, as an
 /// account of its kind with its whole history (`banks.open`).
 #[mutator("banks.add_accounts")]
-pub fn add_accounts(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), Refusal> {
+pub fn add_accounts(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), String> {
     let bank = bank_of(db, &input.bank)?;
     ask(ctx, db, "add_accounts", &Some(bank))
 }
@@ -85,7 +85,7 @@ pub fn add_accounts(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<()
 /// Ask the server to disconnect a bank: Plaid forgets the login and the
 /// bank stops importing. Its accounts here, and what is in them, stay.
 #[mutator("banks.disconnect")]
-pub fn disconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), Refusal> {
+pub fn disconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), String> {
     let bank = bank_of(db, &input.bank)?;
     ask(ctx, db, "disconnect", &Some(bank))
 }
@@ -95,11 +95,11 @@ pub fn disconnect(ctx: &Ctx, db: &mut Db<Money>, input: BankName) -> Result<(), 
 /// clears what its last failure said; a disconnection done forgets the
 /// bank and what it knew of its accounts.
 #[mutator("banks.answer")]
-pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), Refusal> {
+pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), String> {
     if !ctx.has_role(crate::BANK) {
-        return Err(Refusal::new("only the bank importer answers"));
+        return Err("only the bank importer answers".into());
     }
-    let asked = db.bank_ask.get(input.id).ok_or_else(|| Refusal::new("no such ask"))?;
+    let asked = db.bank_ask.get(input.id).ok_or_else(|| String::from("no such ask"))?;
     if input.state == AskState::Done {
         match asked.what.as_str() {
             "connect" if !input.bank.trim().is_empty() && db.bank.get(&input.bank).is_none() => db.bank.insert(Bank {
@@ -156,7 +156,7 @@ pub fn answer(ctx: &Ctx, db: &mut Db<Money>, input: Answer) -> Result<(), Refusa
 
 /// A bank gone: its row and its accounts' links. The accounts it fed stay,
 /// kept by hand from now on.
-pub(crate) fn forget(db: &mut Db<Money>, bank: &str) -> Result<(), Refusal> {
+pub(crate) fn forget(db: &mut Db<Money>, bank: &str) -> Result<(), String> {
     for l in db.linked.scan().into_iter().filter(|l| l.bank == bank) {
         db.linked.remove(&l)?;
     }
@@ -169,9 +169,9 @@ pub(crate) fn forget(db: &mut Db<Money>, bank: &str) -> Result<(), Refusal> {
 /// The importer could not import a bank: what Plaid said, for the
 /// household to see beside the bank (a login run out wants a reconnect).
 #[mutator("banks.failed")]
-pub fn failed(ctx: &Ctx, db: &mut Db<Money>, input: BankFailed) -> Result<(), Refusal> {
+pub fn failed(ctx: &Ctx, db: &mut Db<Money>, input: BankFailed) -> Result<(), String> {
     if !ctx.has_role(crate::BANK) {
-        return Err(Refusal::new("only the bank importer says what a bank said"));
+        return Err("only the bank importer says what a bank said".into());
     }
     let previous = db.bank.get(&input.bank);
     let institution = match (input.institution.trim(), &previous) {
@@ -192,7 +192,7 @@ pub fn failed(ctx: &Ctx, db: &mut Db<Money>, input: BankFailed) -> Result<(), Re
 /// The reader's own asks about bank connections, newest first: where the
 /// page they asked for is, and what came of it.
 #[view("banks.asks")]
-pub fn asks(ctx: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<AskLine>, Refusal> {
+pub fn asks(ctx: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<AskLine>, String> {
     let me = ctx.user().to_string();
     Ok(scan::<Money, BankAsk>()
         .filter(move |a| a.user_id == me)

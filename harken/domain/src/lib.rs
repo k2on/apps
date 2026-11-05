@@ -47,7 +47,7 @@ pub use types::*;
 /// guarded by it ([`library::is_library`]).
 pub const LIBRARY: &str = "library";
 
-/// This domain's version, which a `Hello` carries beside its schema's hash.
+/// This domain's version: what a build says it runs, beside its schema's hash.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Every function, registered by its name.
@@ -76,7 +76,6 @@ pub fn domain() -> Domain {
         shows::show_people, shows::appearances, shows::set_transcript, shows::transcript, shows::name_voice, feed)
     .with(ark_auth::register::<Harken>)
     .with(<Look as ark::effect::Effect>::register::<Harken>)
-    .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
     // Nearly every row is a transcript's line: a device filling is sent
     // the library first, and the lines after.
     .later("cue")

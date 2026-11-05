@@ -692,6 +692,12 @@ rec {
             packageId = "sha2";
             usesDefaultFeatures = false;
           }
+          {
+            name = "tracing";
+            packageId = "tracing";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
         ];
 
       };

@@ -63,14 +63,7 @@ fn a_login_from_the_routes_is_who_the_socket_says_you_are() {
     );
 
     // A token nobody issued is turned away, and keeps what it authored.
-    let mut mallory = open(
-        ark::peer::Who {
-            actor: "mallory".into(),
-            session: "nope".into(),
-            roles: vec![],
-        },
-        None,
-    );
+    let mut mallory = open(ark::peer::Ctx::who("mallory", "nope", vec![]), None);
     mallory.connect(&url, "forged");
     mallory.mutate("playlists.create_playlist", &named("Mine now"));
     pump_until(&mut [&mut mallory], 10, |ps| ps[0].closed());
@@ -258,25 +251,24 @@ fn a_clients_raw_write_is_refused() {
         new: hijacked.to_bytes(),
     };
     // The authority's raw write before S3a, a function of no input.
-    struct Raw(Change);
-    impl ark::peer::Procedure for Raw {
-        fn apply(
-            &self,
-            store: &mut ark::store::Store,
-            _: &ark::peer::Ctx,
-            _: &[u8],
-        ) -> Result<Vec<Change>, ark::Refusal> {
-            store.apply(&self.0)?;
-            Ok(vec![self.0.clone()])
-        }
-    }
-    let (h, raw) = ("raw write".to_string(), std::sync::Arc::new(Raw(edit)));
+    let raw: ark::domain::Run = std::sync::Arc::new(move |store, _, _| {
+        store.apply(&edit)?;
+        Ok(vec![edit.clone()])
+    });
+    let h = "raw write".to_string();
     let mut bob = signed_in(&server, "bob");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].cursor() == head(&server));
-    bob.client.log.functions.insert(h.clone(), raw);
-    let _ = bob
-        .client
-        .author(ark::schema::Space::Durable, &h, vec![], ark_peer::now_ms());
+    let d = bob.client.log.machine.domain.as_ref().clone();
+    bob.client.log.machine.domain = std::sync::Arc::new(d.run(&h, raw));
+    // A function the domain has not: past `mutate`, to the machine itself.
+    let (input, now, cause) = (vec![], ark_peer::now_ms(), None);
+    let raw = ark::peer::Input::Mutate {
+        func: h.clone(),
+        input,
+        now,
+        cause,
+    };
+    bob.client.step(ark::schema::Space::Durable, raw);
     for _ in 0..100 {
         bob.pump();
         std::thread::sleep(std::time::Duration::from_millis(10));

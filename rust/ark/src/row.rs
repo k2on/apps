@@ -28,10 +28,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
 use crate::hash::{EntryHash, StateHash};
-use crate::log::{Entry, EntryId, Logged, Origin, Span, TraceId};
+use crate::log::{Ctx, EntryId, Logged, Origin, Span, TraceId};
 use crate::schema::{Column, Table};
 use crate::store::Change;
-use crate::Refusal;
 
 /// A value a domain stores, takes or answers: its bytes in the value
 /// format ([`crate::format`]), read back from them alone.
@@ -39,7 +38,7 @@ pub trait Value: Serialize + DeserializeOwned + Clone + fmt::Debug + PartialEq +
     fn encode(&self) -> Vec<u8> {
         self.to_bytes()
     }
-    fn decode(b: &[u8]) -> Result<Self, Refusal> {
+    fn decode(b: &[u8]) -> Result<Self, String> {
         Self::from_bytes(b)
     }
 }
@@ -167,7 +166,7 @@ macro_rules! fields {
     ($($f:ident: $t:expr),*) => { vec![$((stringify!($f).to_string(), $t)),*] };
 }
 
-impl Describe for Entry {
+impl Describe for Ctx {
     fn describe() -> Type {
         use Type::{Bytes as B, Int, Text};
         let (id, origin, roles) = (EntryId::describe(), Origin::describe(), Vec::<String>::describe());
@@ -196,11 +195,8 @@ impl Describe for Change {
 
 impl Describe for Logged {
     fn describe() -> Type {
-        let (entry, facts, b) = (Entry::describe(), Vec::<Change>::describe(), Type::Bytes);
-        Type::Record(
-            "Logged".into(),
-            fields! { seq: Type::Int, entry: entry, facts: facts, state: b.clone(), hash: b },
-        )
+        let (entry, facts, b) = (Ctx::describe(), Vec::<Change>::describe(), Type::Bytes);
+        Type::Record("Logged".into(), fields! { seq: Type::Int, entry: entry, facts: facts, hash: b })
     }
 }
 
@@ -405,14 +401,9 @@ pub fn column_or_default<T: Describe + Default + Serialize>(name: &str) -> Colum
 pub trait Input: Value + Describe {
     fn check(self) -> Result<Self, Vec<(String, String)>>;
 
-    /// Each refined field's refinements, as a form says them beside it.
-    fn checks() -> Vec<(String, Vec<String>)> {
-        vec![]
-    }
-
     /// [`Input::check`], the first failure its refusal.
-    fn refine(self) -> Result<Self, Refusal> {
-        self.check().map_err(|mut fs| Refusal(fs.remove(0).1))
+    fn refine(self) -> Result<Self, String> {
+        self.check().map_err(|mut fs| fs.remove(0).1)
     }
 }
 

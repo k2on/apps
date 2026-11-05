@@ -1385,21 +1385,6 @@ public struct PhotoClaim: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
 }
 
-/// The record `PhotoDue`.
-public struct PhotoDue: Equatable {
-    public var rows: [Photo]
-    public var nextMs: Int64?
-
-    public init(rows: [Photo], nextMs: Int64? = nil) { self.rows = rows; self.nextMs = nextMs; }
-
-    public init(json j: Any?) {
-        let o = j as! [String: Any]
-        self.init(rows: J.list(o["rows"]) { v0 in Photo(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
-    }
-
-    public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
-}
-
 /// The record `PhotoFinish`.
 public struct PhotoFinish: Equatable {
     public var id: Id
@@ -2228,8 +2213,8 @@ public struct Money {
     /// `photo.claim`: its intent's id.
     @discardableResult public func claim(_ input: PhotoClaim) throws -> String { try peer.mutate(name: "photo.claim", input: input.json) }
 
-    /// `photo.due`.
-    public func due() throws -> PhotoDue { PhotoDue(json: J.parse(try peer.query(name: "photo.due", input: "null"))) }
+    /// `photo.due`, kept.
+    public func due() throws -> LiveView<Photo> { LiveView(try peer.view(name: "photo.due", input: "null")) { j in Photo(json: j) } }
 
     /// `photo.finish`: its intent's id.
     @discardableResult public func finish(_ input: PhotoFinish) throws -> String { try peer.mutate(name: "photo.finish", input: input.json) }
@@ -2282,9 +2267,6 @@ public struct Money {
     /// `role.revoke`: its intent's id.
     @discardableResult public func roleRevoke(_ input: Grant) throws -> String { try peer.mutate(name: "role.revoke", input: input.json) }
 
-    /// `session.current`.
-    public func current() throws -> SignIn? { J.opt(J.parse(try peer.query(name: "session.current", input: "null"))) { v0 in SignIn(json: v0) } }
-
     /// `session.mine`, kept.
     public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
 
@@ -2336,23 +2318,23 @@ public struct Money {
     /// `transactions.splits`, kept.
     public func splits(_ input: OneTxn) throws -> LiveView<SplitLine> { LiveView(try peer.view(name: "transactions.splits", input: input.json)) { j in SplitLine(json: j) } }
 
-    private func typed(_ v: AccountLineView) -> LiveView<AccountLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: AccountLineView) -> LiveView<AccountLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: AskLineView) -> LiveView<AskLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: AskLineView) -> LiveView<AskLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: BankLineView) -> LiveView<BankLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: BankLineView) -> LiveView<BankLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: BudgetLineView) -> LiveView<BudgetLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: BudgetLineView) -> LiveView<BudgetLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: GroupLineView) -> LiveView<GroupLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: GroupLineView) -> LiveView<GroupLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: LinkedLineView) -> LiveView<LinkedLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: PayeeLineView) -> LiveView<PayeeLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: SpendingLineView) -> LiveView<SpendingLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: SpendingLineView) -> LiveView<SpendingLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: SummaryView) -> LiveView<Summary> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: SummaryView) -> LiveView<Summary> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: TxnLineView) -> LiveView<TxnLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: TxnLineView) -> LiveView<TxnLine> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 }

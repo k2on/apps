@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::hash::hex;
 use ark::log::Logged;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::store::{Change, Store};
 use ark_peer::{Config, Files, Peer};
 use arkdb::sim::{Net, Op};
@@ -117,7 +117,7 @@ impl Log {
         let mut p = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
         let state = std::mem::replace(
             &mut p.log.store,
-            Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
+            Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
         );
         Some(Log {
             base: state.log().base_seq(),
@@ -455,7 +455,7 @@ pub struct PeerProc {
     pub name: String,
     pub dir: PathBuf,
     pub user: Option<String>,
-    /// Started `--alone`: its own authority, dialling nothing. Cleared, the
+    /// Started `--alone`: no server, dialling nothing, its intents pending. Cleared, the
     /// next start is `--server` over the same directory — the join.
     pub alone: bool,
     pub proxy: Proxy,
@@ -903,12 +903,8 @@ impl Seeder {
         let i = match self.users.get(user) {
             Some(i) => *i,
             None => {
-                let who = Who {
-                    actor: user.into(),
-                    session: format!("seeded-{user}"),
-                    roles: vec!["library".into()],
-                };
-                let i = self.net.add(who, Config::new(hosted().module.clone()));
+                let who = Ctx::who(user, format!("seeded-{user}"), vec!["library".into()]);
+                let i = self.net.add(who, Config::of(hosted().domain.clone()));
                 *self.users.entry(user.into()).or_insert(i)
             }
         };
@@ -1102,7 +1098,7 @@ impl Fleet {
             let log = self.server.log_on_disk().unwrap_or_else(|| Log {
                 base: 0,
                 entries: vec![],
-                state: Store::new(hosted().module.schema.clone(), ark::schema::Space::Durable),
+                state: Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
             });
             let head = log.head_seq();
             let hash = log.hash();

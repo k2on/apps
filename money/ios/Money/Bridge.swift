@@ -99,9 +99,6 @@ final class Held<E> {
         case .patched(let changes):
             rows.splice(changes)
             return true
-        case .reset(let all):
-            rows = all
-            return true
         }
     }
 }
@@ -194,7 +191,7 @@ final class Bridge {
                 let dir = Bridge.directory(root, server)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 peer = try moneyOpen(dir: dir.path, login: login)
-                peer.connect(url: socketUrl(server: server))
+                peer.connect(server: server)
             case let .demo(today):
                 peer = try moneyDemo(today: today)
                 bank = DemoBank()
@@ -266,8 +263,8 @@ final class Bridge {
             deniedSaid = true
             main { self.denied(d) }
         }
-        if let last = m.peer.takeRejections().last {
-            let w = last.why
+        if let last = m.peer.takeRefusals().last {
+            let w = last.refused ?? ""
             main { self.notice("Not saved: \(w)") }
         }
         show()

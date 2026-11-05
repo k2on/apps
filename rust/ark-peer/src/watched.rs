@@ -3,21 +3,22 @@
 //!
 //! A [`Watched`] is a view of a function by name and input's bytes, opened
 //! for whoever is signed in, and its rows decoded by the reader it was given.
-//! [`Watched::settle`] takes what the view did and splices it into the rows;
-//! the rows are read whole when the view was made again (a reset), when it
-//! was opened for another login (it is opened again for this one), or when
-//! a query that refused at open answers now — a page that is not yours is
-//! no rows rather than an error, and is asked again when anything moved.
+//! [`Watched::settle`] takes what the view did and splices it into the rows.
+//! What a view does is always its patches: one made again (it could not be
+//! kept up, it was opened for another login, or a query that refused at
+//! open answers now) says its rows as they were removed and as they are
+//! inserted ([`again`]) — a page that is not yours is no rows rather than
+//! an error, and is asked again when anything moved.
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 
-use crate::{Patch, Peer, Update};
+use crate::{Patch, Peer};
 
 /// One view and the rows a UI holds of it.
 pub struct Watched<T> {
     name: String,
     input: Vec<u8>,
-    who: Who,
+    who: Ctx,
     /// The view, or — while its query refuses — none, which is no rows.
     view: Option<usize>,
     read: fn(&[u8]) -> T,
@@ -72,48 +73,44 @@ impl<T> Watched<T> {
         self.view
     }
 
-    /// What the view did since the last settle, spliced into the rows, or
-    /// the rows read whole (`Reset`). `moved` is whether anything moved:
-    /// what a refused query is asked again on.
-    pub fn settle(&mut self, peer: &mut Peer, moved: bool) -> Update {
-        let update = self.take(peer, moved);
-        self.apply(peer, &update);
-        update
+    /// What the view did since the last settle, spliced into the rows.
+    /// `moved` is whether anything moved: what a refused query is asked
+    /// again on.
+    pub fn settle(&mut self, peer: &mut Peer, moved: bool) -> Vec<Patch> {
+        let patches = self.take(peer, moved);
+        splice(&mut self.rows, &patches, self.read);
+        patches
     }
 
     /// What the view did since the last settle, the rows not yet told: a
-    /// view opened for another login, or refused, opened again (`Reset`).
-    pub fn take(&mut self, peer: &mut Peer, moved: bool) -> Update {
+    /// view opened for another login, or refused, opened again.
+    pub fn take(&mut self, peer: &mut Peer, moved: bool) -> Vec<Patch> {
         match self.view {
             Some(v) if self.who == *peer.me() => peer.update(v),
-            None if !moved && self.who == *peer.me() => Update::Unchanged,
+            None if !moved && self.who == *peer.me() => vec![],
             was => {
                 if let Some(v) = was {
                     peer.unwatch(v);
                 }
                 self.who = peer.me().clone();
                 self.view = peer.view(&self.name, &self.input).ok();
-                match (was, self.view) {
-                    (None, None) => Update::Unchanged,
-                    _ => Update::Reset,
-                }
+                again(self.rows.len(), self.view.and_then(|v| peer.rows(v)).unwrap_or_default())
             }
         }
     }
 
-    /// What [`Watched::take`] said, onto the rows.
-    pub fn apply(&mut self, peer: &Peer, update: &Update) {
-        match update {
-            Update::Unchanged => {}
-            Update::Patched(ps) => splice(&mut self.rows, ps, self.read),
-            Update::Reset => self.fill(peer),
-        }
-    }
-
     fn fill(&mut self, peer: &Peer) {
-        let rows = self.view.map(|v| peer.rows(v)).unwrap_or_default();
+        let rows = self.view.and_then(|v| peer.rows(v)).unwrap_or_default();
         self.rows = rows.iter().map(|b| (self.read)(b)).collect();
     }
+}
+
+/// What takes a list of `old` rows to `rows`: each removed, from the back,
+/// and each of `rows` inserted — a view made again, as its patches.
+pub fn again(old: usize, rows: Vec<Vec<u8>>) -> Vec<Patch> {
+    let gone = (0..old).rev().map(|at| Patch::Remove { at });
+    gone.chain(rows.into_iter().enumerate().map(|(at, node)| Patch::Insert { at, node }))
+        .collect()
 }
 
 /// The patches, in order, onto the decoded list: `ark::plan::splice` with

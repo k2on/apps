@@ -4,16 +4,26 @@
 //! the log not a table, every write journaled, or a peer's own state in
 //! blobs of its own — is refused.
 
-use ark::log::{Entry, Logged, Record};
-use ark_peer::disk::Stored;
+use ark::log::{Ctx, Logged, Record};
 use ark_peer::{Disk, Files, Memory};
 
 /// The `k`-th entry of the log (the disk does not link them: opening is
 /// the peer's).
 fn row(k: i64) -> Logged {
-    let mut l = Logged::intent(Entry::default());
+    let mut l = Logged::intent(Ctx::default(), vec![]);
     l.seq = k;
     l
+}
+
+/// The entries a disk's records hold.
+fn logged(records: Vec<Record>) -> Vec<Logged> {
+    records
+        .into_iter()
+        .filter_map(|r| match r {
+            Record::Logged(l) => Some(l),
+            _ => None,
+        })
+        .collect()
 }
 
 fn persist(d: &mut dyn Disk, ks: std::ops::Range<i64>) {
@@ -33,16 +43,16 @@ fn a_torn_tail_is_cut() {
     let mut f = Files::new(dir.path()).unwrap();
     persist(&mut f, 1..3);
     let two: Vec<Logged> = (1..3).map(row).collect();
-    assert_eq!(f.load().unwrap().logged, two);
+    assert_eq!(logged(f.load().unwrap()), two);
     let path = dir.path().join("log");
     let mut bytes = std::fs::read(&path).unwrap();
     bytes.extend_from_slice(&[0, 0, 0, 200, 1, 2, 3]);
     std::fs::write(&path, &bytes).unwrap();
     let mut f = Files::new(dir.path()).unwrap();
-    assert_eq!(f.load().unwrap().logged, two, "the torn record is not read");
+    assert_eq!(logged(f.load().unwrap()), two, "the torn record is not read");
     persist(&mut f, 3..4);
     assert_eq!(
-        Files::new(dir.path()).unwrap().load().unwrap().logged,
+        logged(Files::new(dir.path()).unwrap().load().unwrap()),
         (1..4).map(row).collect::<Vec<_>>(),
         "and what follows it is read"
     );
@@ -62,51 +72,11 @@ fn the_rows_fold_every_write_before() {
         let rows = vec![("t".to_string(), vec![br#"{"k":1}"#.to_vec()])];
         d.record(&Record::Rows(rows.clone()).enc()).unwrap();
         persist(d, 3..5);
-        let want = Stored {
-            rows: Some(rows),
-            logged: (3..5).map(row).collect(),
-            parts: vec![],
-        };
+        let mut want = vec![Record::Rows(rows)];
+        want.extend((3..5).map(row).map(Record::Logged));
         assert_eq!(d.load().unwrap(), want);
         d.put("blob", b"\x00\x01").unwrap();
         assert_eq!(d.get("blob").unwrap().as_deref(), Some(&b"\x00\x01"[..]));
         assert_eq!(d.get("nothing").unwrap(), None);
     }
-}
-
-/// A directory holding a log of the format before the log was a table
-/// (`snapshot`, `chain`) does not open as an empty one. Falsified by
-/// `load` reading only `kv` and `writes`: it opened empty.
-#[test]
-fn the_format_before_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("chain"), [0, 0, 0, 1, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("before the log was a table"), "{err}");
-}
-
-/// A directory of the format that journaled every write — each entry's
-/// facts, the rows they wrote and its row of the log's table, in `writes`
-/// — is refused with a message, never read as one with no entries since
-/// its rows. Falsified by `load` not looking for `writes`: it opened on
-/// `kv` alone and lost the entry.
-#[test]
-fn the_format_that_journaled_every_write_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("kv"), Record::Rows(vec![]).enc()).unwrap();
-    std::fs::write(dir.path().join("writes"), [0, 0, 0, 2, 0, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("journaled every write"), "{err}");
-}
-
-/// A directory that kept a peer's own state in blobs of its own (here a
-/// device's `pending` journal) is refused, not opened as one with nothing
-/// pending. Falsified by `load` not looking for them: it opened, and the
-/// pending intents were lost.
-#[test]
-fn the_format_of_side_blobs_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("pending"), [0, 0, 0, 1, 0]).unwrap();
-    let err = Files::new(dir.path()).unwrap().load().unwrap_err();
-    assert!(err.to_string().contains("in blobs (pending)"), "{err}");
 }

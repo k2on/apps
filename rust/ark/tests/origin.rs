@@ -12,7 +12,7 @@ mod support {
 
 use ark::frames::{Frame, Verdict};
 use ark::log::{EntryId, Origin};
-use ark::peer::{Peer, Role, Who};
+use ark::peer::{Ctx, Peer, Role};
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
 
@@ -22,14 +22,14 @@ use support::wire::*;
 /// playlist by the row id its create drew — stamped as alice's; a push
 /// again is acknowledged where it was; bob pushing from alice's origin is
 /// refused. Falsified by the authority deriving ids from the session again
-/// (`Entry::id_checks` over `(session, local)`): both were refused as ids
+/// (`Ctx::id_checks` over `(session, local)`): both were refused as ids
 /// not their own; and by not binding an origin to an actor: bob's push was
 /// sequenced at 3.
 #[test]
 fn ids_are_the_origins_whoever_signs_in() {
-    let nobody = Who::default();
+    let nobody = Ctx::default();
     let origin = Origin::named(b"a device's sixteen bytes");
-    let mut device = Peer::new(demo::shared(), demo::cas(), Role::Replica, nobody);
+    let mut device = Peer::new(demo::cas(), Role::Replica, nobody);
     device.origin = origin;
     let pid = EntryId::of(origin, 1).draw(0);
     let mut pushes = sends(&device.step(mutate(CREATE, create_input("Road"), 1)));
@@ -40,7 +40,7 @@ fn ids_are_the_origins_whoever_signs_in() {
         back.extend(sends(&server.step(up(&who("alice"), f))));
     }
     assert!(
-        matches!(verdicts(&back)[..], [Some(Verdict::Ok { seq: 1 }), Some(Verdict::Ok { seq: 2 })]),
+        matches!(verdicts(&back)[..], [Some(Verdict::At { seq: 1, .. }), Some(Verdict::At { seq: 2, .. })]),
         "{back:?}"
     );
     let e = &server.log().entries()[0].entry;
@@ -56,7 +56,7 @@ fn ids_are_the_origins_whoever_signs_in() {
         "the add named the playlist by its drawn id"
     );
     let again = sends(&server.step(up(&who("alice"), &pushes[1])));
-    assert!(matches!(verdicts(&again)[..], [Some(Verdict::Ok { seq: 2 })]), "{again:?}");
+    assert!(matches!(verdicts(&again)[..], [Some(Verdict::At { seq: 2, .. })]), "{again:?}");
     let mut third = pushes[1].clone();
     if let Frame::Page { logged, .. } = &mut third {
         logged[0].entry.local = 3;

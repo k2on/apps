@@ -5,7 +5,7 @@ use ark::schema::Space;
 use ark_auth::{Account, Login};
 
 use super::{signed_in, signed_out, song};
-use crate::client::Standing;
+use crate::client::Outcome;
 use crate::places::Pane;
 use crate::{App, Message};
 
@@ -45,7 +45,7 @@ fn signing_in_moves_the_same_replica_on() {
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
     assert_eq!(app.peer.items().len(), 1, "what was done signed out is on screen");
-    assert_eq!(app.peer.client.lock().standing(&id), Standing::Pending);
+    assert_eq!(app.peer.client.lock().outcome(&id), Some(Outcome::Pending));
     let pending = |app: &App| {
         app.peer
             .client
@@ -66,7 +66,7 @@ fn signing_in_moves_the_same_replica_on() {
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
     let now = app.peer.client.lock().log.pending[0].entry.id;
     assert_eq!(now, id, "its id kept");
-    assert_eq!(app.peer.client.lock().standing(&id), Standing::Pending);
+    assert_eq!(app.peer.client.lock().outcome(&id), Some(Outcome::Pending));
     assert!(app.note.contains("1 change from before"), "{}", app.note);
 
     // Signing out revokes the session through the domain, keeps the
@@ -103,7 +103,7 @@ fn a_refusal_names_what_was_refused() {
     let _ = app.update(Message::PickerActivate);
     let edit = app.edits.last().cloned().expect("the toggle was authored");
     assert_eq!(edit.what, "put Air on Favorites");
-    assert_eq!(app.peer.client.lock().standing(&edit.id), Standing::Pending);
+    assert_eq!(app.peer.client.lock().outcome(&edit.id), Some(Outcome::Pending));
 
     let reject = Frame::Verdict {
         space: Space::Durable,
@@ -119,7 +119,7 @@ fn a_refusal_names_what_was_refused() {
         app.refused.last(),
         Some(&("put Air on Favorites".to_string(), "not your playlist".to_string()))
     );
-    assert!(matches!(app.peer.client.lock().standing(&edit.id), Standing::Rejected(why) if why == "not your playlist"));
+    assert!(matches!(app.peer.client.lock().outcome(&edit.id), Some(Outcome::Refused(why)) if why == "not your playlist"));
     assert!(!app.peer.items()[0].on_playlist(), "the rebase took the optimistic row back");
 }
 

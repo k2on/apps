@@ -8,12 +8,12 @@
 use std::sync::{Arc, Mutex};
 
 use ark::effect::Job;
-use ark::log::{Entry, Span};
+use ark::log::Span;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[effect(lease_ms = 150, retry_ms = 150, owner = owner)]
 pub struct Fetch {
     #[ark(key)]
@@ -32,7 +32,7 @@ pub struct Ask {
     pub id: String,
 }
 
-fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), String> {
     let state = Job::Pending { due_ms: ctx.now };
     db.fetch.insert(Fetch {
         id: i.id,
@@ -58,7 +58,7 @@ impl Net {
             devices: vec![],
         };
         for i in 0..n {
-            let mut d = Peer::open(config(), dev(&format!("user{i}@device{i}")).unwrap(), Box::new(Memory::default()), false);
+            let mut d = Peer::open(config(), dev(&format!("user{i}@device{i}")).unwrap(), Box::new(Memory::default()));
             let c = net.hub.accept(d.me().clone());
             d.connected();
             net.devices.push((d, c));
@@ -88,8 +88,8 @@ impl Net {
     }
 
     /// The server's logged entries naming `func`, in order.
-    fn logged(&self, func: &str) -> Vec<Entry> {
-        let f = self.hub.binding(func).unwrap_or_else(|| func.to_string());
+    fn logged(&self, func: &str) -> Vec<Ctx> {
+        let f = self.hub.function(func).map_or_else(|_| func.to_string(), |f| f.name.clone());
         self.hub
             .log
             .log()
@@ -147,7 +147,7 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     net.d(1).end();
     let a = net.logged("fetch.ask").pop().unwrap();
     for _ in 0..3 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     let claim = net.logged("fetch.claim").pop().expect("claimed");
@@ -172,9 +172,9 @@ fn an_answer_after_the_trace_is_over_begins_its_own() {
     let tap = net.d(0).begin("tap");
     asks(&mut net, 0, "a");
     net.d(0).end();
-    let f = net.d(1).binding("fetch.ask").unwrap();
+    let f = net.d(1).function("fetch.ask").unwrap().name.clone();
     let late = tap.began + ark_peer::TRACE_MS + 1;
-    net.d(1).author(Space::Durable, &f, Ask { id: "late".into() }.to_bytes(), late).unwrap();
+    net.d(1).mutate_at(&f, Ask { id: "late".into() }.to_bytes(), late).unwrap();
     net.carry();
     let b = net.logged("fetch.ask").pop().unwrap();
     assert_eq!(b.cause, None, "late, it is a trace of its own");
@@ -197,7 +197,7 @@ fn a_jobs_own_words_are_collected_in_its_trace() {
     asks(&mut net, 1, "words");
     net.d(1).end();
     for _ in 0..3 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     let me = net.devices[0].0.label();

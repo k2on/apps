@@ -59,7 +59,7 @@ impl Memory {
 
     pub fn sign_ins(&self) -> Vec<SignIn> {
         let s = self.0.lock().unwrap();
-        ark::db::read::<App, _>(&s, |db| Ok::<_, Refusal>(db.sign_in.scan())).unwrap()
+        ark::db::read::<App, _>(&s, |db| Ok::<_, String>(db.sign_in.scan())).unwrap()
     }
 }
 
@@ -69,10 +69,10 @@ impl Hub for Memory {
     }
 
     fn write(&self, c: Change) -> Result<(), String> {
-        self.0.lock().unwrap().apply(&c).map_err(|r| r.0)
+        self.0.lock().unwrap().apply(&c)
     }
 
-    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String> {
+    fn mutate(&self, func: &str, input: Vec<u8>) -> Result<(), String> {
         self.1.lock().unwrap().push((func.into(), input));
         Ok(())
     }

@@ -13,12 +13,12 @@
 use std::sync::{Arc, OnceLock};
 
 use ark::domain::Domain;
-use ark::peer::Who;
-pub use ark_peer::driven::Driven;
+use ark::peer::Ctx;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]
 pub use ark_peer::nobody;
-pub use ark_peer::{monotonic_ms, now_ms, Peer as Replica, Standing, Update};
+pub use ark_peer::Handle;
+pub use ark_peer::{monotonic_ms, now_ms, Outcome, Peer as Replica};
 use ark_peer::{Config, Disk, Memory};
 
 /// The milliseconds between two ephemeral calls the relay sends — a
@@ -43,19 +43,19 @@ pub fn config(device: Vec<u8>) -> Config {
 
 /// The peer `disk` holds ([`Replica::open_as`]), saying `device` in its
 /// volatile `Hello`.
-pub fn open(disk: Box<dyn Disk>, login: Option<(Who, String)>, device: Vec<u8>) -> Replica {
+pub fn open(disk: Box<dyn Disk>, login: Option<(Ctx, String)>, device: Vec<u8>) -> Replica {
     Replica::open_as(config(device), disk, login)
 }
 
 /// A peer in memory, as `me`, its token `token` when there is one.
 #[cfg_attr(all(feature = "demo", not(test)), allow(dead_code))]
-pub fn memory(me: Who, token: Option<&str>) -> Replica {
+pub fn memory(me: Ctx, token: Option<&str>) -> Replica {
     memory_as(me, token, crate::listening::device())
 }
 
 /// [`memory`], saying `device` in its volatile `Hello`.
 #[cfg_attr(all(feature = "demo", not(test)), allow(dead_code))]
-pub fn memory_as(me: Who, token: Option<&str>, device: Vec<u8>) -> Replica {
+pub fn memory_as(me: Ctx, token: Option<&str>, device: Vec<u8>) -> Replica {
     let mut disk = Memory::default();
     let (actor, session) = (Some(me.actor.clone()), me.session.clone());
     let _ = ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (actor, session));

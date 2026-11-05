@@ -54,7 +54,7 @@ pub use types::*;
 /// [`plaid::import`] asks for it.
 pub const BANK: &str = "bank";
 
-/// This domain's version, which a `Hello` carries beside its schema's hash.
+/// This domain's version: what a build says it runs, beside its schema's hash.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Every function, registered by its name.
@@ -78,7 +78,6 @@ pub fn domain() -> Domain {
         banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
     .with(ark_auth::register::<Money>)
     .with(<Photo as ark::effect::Effect>::register::<Money>)
-    .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
 }
 
 /// What a connection fed by scope holds (§1.8): the budget whole — it is

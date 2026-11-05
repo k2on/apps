@@ -12,9 +12,11 @@ public struct Id: Hashable {
     public static let none = Id(String(repeating: "0", count: 32))
 }
 
-/// A view's rows read as `T`, and what it did since last taken: each row its
-/// JSON read by `read` over a `ViewHandle`, or — a typed view — rows UniFFI
-/// hands over as they are (`typed`).
+/// A view's rows read as `T`, and what it did since last taken (its `Op`s
+/// and the rows that came with them): each row its JSON read by `read` over
+/// a `ViewHandle`, or — a typed view — rows UniFFI hands over as they are
+/// (`typed`). A view made again says so as its changes: its rows removed
+/// and inserted.
 public final class LiveView<T> {
     let rowsOf: () -> [T]
     let takeOf: () -> Update<T>
@@ -23,38 +25,30 @@ public final class LiveView<T> {
 
     public convenience init(_ handle: ViewHandle, _ read: @escaping (Any?) -> T) {
         self.init(rows: { handle.rows().map { read(J.parse($0)) } }, take: {
-            switch handle.take() {
-            case .unchanged: return .unchanged
-            case let .reset(rows): return .reset(rows.map { read(J.parse($0)) })
-            case let .patched(patches):
-                return .patched(patches.map { p -> Change<T> in
-                    switch p {
-                    case let .insert(at, row): return .insert(at: Int(at), row: read(J.parse(row)))
-                    case let .remove(at): return .remove(at: Int(at))
-                    case let .update(at, row): return .update(at: Int(at), row: read(J.parse(row)))
-                    }
-                })
-            }
+            let t = handle.take()
+            return LiveView.taken(t.ops, t.rows.map { read(J.parse($0)) })
         })
     }
 
     /// A domain's typed view object (`<T>View`): its rows, and what it did
     /// with the rows that came with it.
-    public static func typed(rows: @escaping () -> [T], take: @escaping () -> (Taken, [T])) -> LiveView<T> {
+    public static func typed(rows: @escaping () -> [T], take: @escaping () -> ([Op], [T])) -> LiveView<T> {
         LiveView(rows: rows, take: {
-            let (t, came) = take()
-            switch t {
-            case .unchanged: return .unchanged
-            case .reset: return .reset(came)
-            case let .patched(ops):
-                var r = came.makeIterator()
-                return .patched(ops.map { o -> Change<T> in
-                    switch o {
-                    case let .insert(at): return .insert(at: Int(at), row: r.next()!)
-                    case let .remove(at): return .remove(at: Int(at))
-                    case let .update(at): return .update(at: Int(at), row: r.next()!)
-                    }
-                })
+            let (ops, came) = take()
+            return taken(ops, came)
+        })
+    }
+
+    /// What a view did, `came` the rows that came with it: each insert's
+    /// and update's.
+    static func taken(_ ops: [Op], _ came: [T]) -> Update<T> {
+        if ops.isEmpty { return .unchanged }
+        var r = came.makeIterator()
+        return .patched(ops.map { o -> Change<T> in
+            switch o {
+            case let .insert(at): return .insert(at: Int(at), row: r.next()!)
+            case let .remove(at): return .remove(at: Int(at))
+            case let .update(at): return .update(at: Int(at), row: r.next()!)
             }
         })
     }
@@ -67,7 +61,6 @@ public final class LiveView<T> {
 public enum Update<T> {
     case unchanged
     case patched([Change<T>])
-    case reset([T])
 }
 
 public enum Change<T> {

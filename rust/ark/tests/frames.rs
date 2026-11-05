@@ -5,13 +5,13 @@ mod demo;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Reply, Verdict};
-use ark::hash::{EntryHash, SchemaHash, StateHash};
-use ark::log::{Cursor, Entry, EntryId, Logged, Origin, Record, Snapshot, Span, TraceId};
+use ark::hash::EntryHash;
+use ark::log::{Ctx, Cursor, EntryId, Logged, Origin, Record, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
 
 fn every_frame() -> Vec<Frame> {
-    let entry = Entry {
+    let entry = Ctx {
         id: EntryId::of(Origin::named("s"), 1),
         actor: "a\0b".into(),
         session: "s".into(),
@@ -26,6 +26,7 @@ fn every_frame() -> Vec<Frame> {
             id: [2; 16],
             began: -9,
         }),
+        ..Ctx::default()
     };
     let facts = vec![
         Change::Add {
@@ -46,39 +47,33 @@ fn every_frame() -> Vec<Frame> {
         seq: 3,
         entry: entry.clone(),
         facts: facts.clone(),
-        state: StateHash([7; 32]),
         hash: EntryHash([0; 32]),
-    };
-    let snapshot = Snapshot {
-        seq: 9,
-        hash: EntryHash([1; 32]),
-        state: StateHash([0; 32]),
-        rows: vec![("item".into(), vec![br#"{"k":0}"#.to_vec(), b"{}".to_vec()]), ("p".into(), vec![])],
     };
     let id = entry.id;
     vec![
         Frame::Hello {
             space: Space::Durable,
             cursor: 0,
-            hash: None,
-            device: None,
-            schema: SchemaHash([0; 32]),
-            version: String::new(),
+            hash: EntryHash([0; 32]),
+            fill: None,
+            most: ark::peer::PART as u64,
         },
         Frame::Hello {
             space: Space::Volatile,
             cursor: 4,
-            hash: Some(EntryHash([0xFF; 32])),
-            device: Some(b"phone\0".to_vec()),
-            schema: SchemaHash([2; 32]),
-            version: "1.2".into(),
+            hash: EntryHash([0xFF; 32]),
+            fill: Some(Cursor {
+                table: "item".into(),
+                key: vec![0, 1],
+            }),
+            most: 16 << 10,
         },
-        Frame::push(Space::Volatile, [entry.clone()]),
-        Frame::push(Space::Durable, [entry.clone(), entry]),
+        Frame::push(Space::Volatile, 0, [entry.clone()]),
+        Frame::push(Space::Durable, 0, [entry.clone(), entry]),
         Frame::Verdict {
             space: Space::Durable,
             id,
-            verdict: Verdict::Ok { seq: 3 },
+            verdict: Verdict::At { seq: 3, last: 2 },
         },
         Frame::Verdict {
             space: Space::Volatile,
@@ -90,7 +85,7 @@ fn every_frame() -> Vec<Frame> {
         Frame::Verdict {
             space: Space::Durable,
             id,
-            verdict: Verdict::Held { func: "demo.gone".into() },
+            verdict: Verdict::At { seq: 2, last: 1 },
         },
         Frame::Page {
             space: Space::Durable,
@@ -102,20 +97,16 @@ fn every_frame() -> Vec<Frame> {
             from: 0,
             logged: vec![],
         },
-        Frame::Snapshot {
+        Frame::Part {
             space: Space::Durable,
-            snapshot,
-        },
-        Frame::More {
-            space: Space::Durable,
-            from: Cursor {
+            seq: 3,
+            hash: EntryHash([1; 32]),
+            from: Some(Cursor {
                 table: "item".into(),
                 key: vec![0, 1],
-            },
-        },
-        Frame::Parts {
-            space: Space::Durable,
-            most: 16 << 10,
+            }),
+            rows: vec![("item".into(), vec![br#"{"k":0}"#.to_vec()]), ("p".into(), vec![])],
+            next: None,
         },
         Frame::Call {
             id: 7,
@@ -187,6 +178,6 @@ fn a_push_is_a_page_of_intents() {
     assert_eq!(*from, 0);
     assert!(logged
         .iter()
-        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone())));
+        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone(), vec![])));
     assert_eq!(logged.len(), 2);
 }

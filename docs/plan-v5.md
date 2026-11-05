@@ -1857,7 +1857,7 @@ a budget of 3,000; 28 tests, each falsified once. Held to the `hash/`
 vectors re-derived (`spec5/vectors/hash/`), `three-peers` steps 1–4,
 `fleet-seed-7` through the ported scheduler plus 40 other seeds, and
 alone/join adopt-or-refuse. Decisions it took, now part of the design:
-`Input::Frame { from: Option<Who>, bytes }` (an authority judges by the
+`Input::Frame { from: Option<Ctx>, bytes }` (an authority judges by the
 connection's verified identity); `Output::Fanout` beside `Send`;
 lifecycle inputs `Connected`, `Alone`, `Join`, `Compact(seq)`; a `Join`
 frame carrying a chain; confirmation through `Batch` only, `Ack` carries

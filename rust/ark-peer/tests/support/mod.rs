@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::log::{Entry, Origin};
-use ark::peer::Who;
+use ark::log::Origin;
+use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_peer::link::{bell, wait, Dial, Pumped};
 use ark_peer::{dev, Config, Disk, Memory, Peer};
@@ -27,9 +27,9 @@ pub fn named(name: &str) -> Vec<u8> {
 
 /// `who`'s `local`-th intent calling `func` on `input`, its origin named
 /// by its session, pushed: the frame's bytes.
-pub fn push(who: &Who, local: i64, func: &str, input: Vec<u8>) -> Vec<u8> {
-    let entry = Entry::new(who, Origin::named(&who.session), local, func, input, local);
-    Frame::push(Space::Durable, [entry]).enc()
+pub fn push(who: &Ctx, local: i64, func: &str, input: Vec<u8>) -> Vec<u8> {
+    let entry = Ctx::new(who, Origin::named(&who.session), local, func, input, local);
+    Frame::push(Space::Durable, 0, [entry]).enc()
 }
 
 /// A device of `token`'s login (or one of nobody's when it proves none)
@@ -38,7 +38,7 @@ pub fn device(token: &str, mut disk: Box<dyn Disk>) -> Peer {
     let who = dev(token).unwrap_or(dev("x@y").unwrap());
     let origin = Origin::named(&who.session);
     ark_peer::local::preset(&mut *disk, |r| r.origin = origin).unwrap();
-    Peer::open(config(), who, disk, false)
+    Peer::open(config(), who, disk)
 }
 
 /// `token`'s device, dialling `url` through `dial`, and its bell.

@@ -2,22 +2,21 @@
 //!
 //! ```text
 //! arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]   a domain's typed Kotlin or Swift, to stdout
-//! arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]] the fuzzer
+//! arkdb fuzz [SESSIONS] [FIRST SEED]                the fuzzer
 //! arkdb tail [--from DIR] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 //! arkdb trace ID [--from DIR]                       what a tap or an entry caused, everywhere
 //! arkdb peer P [--from DIR]                         one peer's events
-//! arkdb origins [--from DIR]                        where a server has each device's intents
-//! arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]
-//!                                                   a server's rows, a JSON object a line
+//! arkdb export [--from DIR]                         a server's rows, as JSON
+//! arkdb import FILE SCHEMA [--to DIR]                an export's rows, into an empty data directory
 //! ```
 
 const USAGE: &str = "arkdb gen kotlin|swift DOMAIN [NAME [PACKAGE]]
-arkdb fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]
+arkdb fuzz [SESSIONS] [FIRST SEED]
 arkdb tail [--from DIR|FILE|-] [-n N] [--follow] [--peer P] [--refused] [--grep S]
 arkdb trace ID [--from DIR|FILE|-]
 arkdb peer P [--from DIR|FILE|-]
-arkdb origins [--from DIR]
-arkdb rows TABLE [COLUMN=VALUE]... [--sort [-]COLUMN] [-n N] [--from DIR]";
+arkdb export [--from DIR]
+arkdb import FILE SCHEMA [--to DIR]";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -30,11 +29,11 @@ fn main() {
             Ok(s) => print!("{s}"),
             Err(e) => fail(e),
         },
-        Some((cmd, rest)) if cmd == "rows" => match arkdb::rows::main(rest) {
+        Some((cmd, rest)) if cmd == "export" => match arkdb::port::export(rest) {
             Ok(s) => print!("{s}"),
             Err(e) => fail(e),
         },
-        Some((cmd, rest)) if cmd == "origins" => match arkdb::origins::main(rest) {
+        Some((cmd, rest)) if cmd == "import" => match arkdb::port::import(rest) {
             Ok(s) => print!("{s}"),
             Err(e) => fail(e),
         },

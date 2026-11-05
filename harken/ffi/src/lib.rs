@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_ffi::{Login, Peer, Refusal};
 use ark_peer::{now_ms, Config, Handle, Memory};
 use harken_domain::host::{self, Listening};
@@ -77,13 +77,9 @@ pub fn harken_media_url(server: String, file: String) -> String {
 /// are pumped by hand ([`Hall::carry`]), so a test says when what was said
 /// has been answered.
 /// Who a hall's token, `user/session`, is.
-fn token(t: &str) -> Option<Who> {
+fn token(t: &str) -> Option<Ctx> {
     let (actor, session) = t.split_once('/')?;
-    Some(Who {
-        actor: actor.into(),
-        session: session.into(),
-        roles: vec![],
-    })
+    Some(Ctx::who(actor, session, vec![]))
 }
 
 #[derive(uniffi::Object)]

@@ -180,7 +180,7 @@ fn a_sign_in_goes_by_itself_once_a_load() {
 /// in to or out of.
 ///
 /// Falsified by dropping the demo's arm from `App::account`: the demo's
-/// replica is its own authority, so it reads `Alone — …`.
+/// replica has no server, so it reads `Alone — …`.
 #[test]
 #[cfg(feature = "demo")]
 fn the_demo_is_alone() {

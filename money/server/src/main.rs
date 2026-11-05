@@ -44,9 +44,8 @@ async fn main() -> Result<()> {
     }
     let config = Config::from_env(&listen)?;
     let events = config.data.join("events");
-    match ark_peer::observe::Files::new(&events) {
-        Ok(f) => drop(ark_peer::observe::install(ark_peer::observe::Sink::Files(std::sync::Mutex::new(f)))),
-        Err(e) => eprintln!("money-server: no events kept: {}: {e}", events.display()),
+    if let Err(e) = ark_peer::observe::install(ark_peer::observe::Sink::Files(events.clone())) {
+        eprintln!("money-server: no events kept: {}: {e}", events.display());
     }
     let server = start(config).await?;
     run(&server).await?;

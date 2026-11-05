@@ -8,11 +8,10 @@ use std::sync::Arc;
 
 use ark::domain::Domain;
 
-/// The domain assembled, and the same as a peer's per-space module.
+/// The domain assembled.
 #[derive(Clone)]
 pub struct Hosted {
     pub domain: Arc<Domain>,
-    pub module: ark_peer::Module,
 }
 
 impl Hosted {
@@ -22,10 +21,7 @@ impl Hosted {
     }
 
     pub fn of(domain: Arc<Domain>) -> Hosted {
-        Hosted {
-            module: ark_peer::Module::of(&domain),
-            domain,
-        }
+        Hosted { domain }
     }
 
     /// A registered function's name, `library.add_song`, as an entry

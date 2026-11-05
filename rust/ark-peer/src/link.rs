@@ -17,7 +17,7 @@
 //!
 //! A wire is made by a [`Dial`]: [`socket`] is a WebSocket (`ws://…/sync`)
 //! on a thread of its own natively and the page's own in a browser; the
-//! server's in-process transport (`serve::Handle::dialer`) is another.
+//! server's in-process transport (`handle::Handle::dialer`) is another.
 //! Each rings the peer's [`Wake`] whenever it has something to say, and
 //! [`Peer::pump`] takes it in.
 
@@ -204,7 +204,7 @@ impl Peer {
     /// the relay's next send while it holds a call, and now when what the
     /// connection said is not all taken in.
     pub fn deadline(&self) -> Option<u64> {
-        let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
+        let every = self.config.every_ms;
         let relay = (!self.relay.is_empty()).then(|| {
             let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
             crate::monotonic_ms() + wait as u64
@@ -255,7 +255,6 @@ impl Peer {
     pub fn pump(&mut self) -> Pumped {
         let now = crate::monotonic_ms();
         let mut p = Pumped::default();
-        let arrived = self.files.arrived;
         self.dial_if_due(now);
         let l = &mut self.link;
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
@@ -316,7 +315,7 @@ impl Peer {
         self.tick(crate::now_ms());
         self.jobs(crate::now_ms());
         self.flush();
-        p.shown |= !self.told.updates.is_empty() || self.files.arrived != arrived;
+        p.shown |= !self.told.updates.is_empty() || std::mem::take(&mut self.files.arrived);
         p
     }
 

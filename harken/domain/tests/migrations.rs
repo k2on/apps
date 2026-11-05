@@ -1,5 +1,6 @@
-//! The steps that read the rows of a schema before this one
-//! (`src/migrations.rs`), run over rows as a server kept them.
+//! The transforms that moved data from a schema before this one
+//! (`src/migrations.rs`), run over rows as a server kept them: exported,
+//! transformed, imported.
 
 use std::sync::Arc;
 
@@ -78,8 +79,9 @@ fn albums_of_one_name_in_two_folders_are_two() {
             ),
         ],
     );
-    let new = ark::migrate::migrate(&was, &old, &d.schema, &d.migrations).unwrap().expect("migrated");
-    let (store, _) = Store::from_rows(Arc::clone(&d.schema), Space::Durable, &new).unwrap();
+    let mut tables = ark::dynamic::tables(&Store::from_rows(Arc::new(was), Space::Durable, &old).unwrap()).unwrap();
+    harken_domain::migrations::albums_by_folder(&mut tables).unwrap();
+    let store = ark::dynamic::store(Arc::clone(&d.schema), Space::Durable, &tables).unwrap();
     let (albums, songs) = ark::db::read::<harken_domain::Harken, _>(&store, |db| (db.album.scan(), db.song.scan()));
     let ids: Vec<(&str, &str, &str, i64)> = albums
         .iter()

@@ -895,7 +895,7 @@ impl App {
         }
     }
 
-    /// The demo: a seeded replica that is its own authority, and nothing to
+    /// The demo: a seeded replica with no server, and nothing to
     /// sign in to. In memory on both targets, as it always was — a demo that
     /// reloads to its seed is a demo that cannot be broken.
     #[cfg(feature = "demo")]
@@ -932,9 +932,13 @@ impl App {
     /// the saved one will not open, or before a page knows its server.
     #[cfg(not(feature = "demo"))]
     fn alone_in_memory() -> Replica {
-        let mut r = crate::client::memory(client::nobody(), None);
-        r.alone();
-        r
+        crate::client::memory(client::nobody(), None)
+    }
+
+    /// Whether this window has no server: what it does is pending on its
+    /// replica, kept here until "connect" names one.
+    pub fn is_alone(&self) -> bool {
+        self.server.is_empty()
     }
 
     /// "Connect": the replica this window has been using alone joins the
@@ -2134,7 +2138,7 @@ impl App {
         if cfg!(feature = "demo") {
             return Some(Account::alone("A demo \u{2014} what you do stays on this device"));
         }
-        if self.peer.client.lock().is_alone() {
+        if self.is_alone() {
             return Some(Account::alone("Alone \u{2014} what you do is kept on this device"));
         }
         let login = self.login.as_ref()?;
@@ -3375,7 +3379,7 @@ impl App {
             }
             turned_away = self.sign_in_unasked();
         }
-        for (id, reason) in self.peer.client.lock().take_rejections() {
+        for (id, reason) in self.peer.client.lock().take_refusals(ark::schema::Space::Durable) {
             let what = self
                 .edits
                 .iter()
@@ -3482,7 +3486,7 @@ pub fn main() -> iced::Result {
     panic_to_console();
     arkui::theme::install(palette::HARKEN);
     // What this device does goes to its server (docs/plan-observe.md).
-    ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
+    let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
     let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)

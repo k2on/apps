@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use ark::prelude::*;
-use ark_peer::{Live, Module};
+use ark_peer::Config;
 
 // * The demo
 
@@ -74,7 +74,7 @@ pub struct Items {
 /// A playlist, unless the person has one of that name; its id the entry's
 /// first draw.
 #[mutator("demo.create_playlist")]
-pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), Refusal> {
+pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), String> {
     let user = ctx.user().to_string();
     if !db.playlist.by(Playlist::USER_ID_NAME).from((user.clone(), input.name.clone())).any() {
         db.playlist.insert(Playlist {
@@ -88,9 +88,9 @@ pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> R
 
 /// A track at one past the playlist's last place, unless it is on it.
 #[mutator("demo.add_to_playlist")]
-pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
+pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), String> {
     if !db.playlist.has(input.playlist_id) {
-        return Err(Refusal::new("playlist_id: no such playlist"));
+        return Err("playlist_id: no such playlist".into());
     }
     if db.item.has((input.playlist_id, input.track_id.clone())) {
         return Ok(());
@@ -104,19 +104,19 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
 }
 
 #[mutator("demo.rename_playlist")]
-pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), Refusal> {
-    let p = db.playlist.get(input.playlist_id).ok_or_else(|| Refusal::new("no such playlist"))?;
+pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), String> {
+    let p = db.playlist.get(input.playlist_id).ok_or_else(|| String::from("no such playlist"))?;
     db.playlist.update(Playlist { name: input.name, ..p })
 }
 
 #[mutator("demo.remove_from_playlist")]
-pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), Refusal> {
+pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), String> {
     db.item.delete((input.playlist_id, input.track_id))
 }
 
 /// A playlist's items, in order.
 #[view("demo.items")]
-pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, String> {
     Ok(scan::<Demo, Item>().filter(move |i| i.playlist_id == input.playlist_id).sort(|i| i.pos))
 }
 
@@ -159,10 +159,10 @@ pub struct Room {
     pub pointer: Pointer,
 }
 
-/// A device as `on_join` and `on_leave` are told of it.
+/// A device as its `Hello` says it, and `on_join` and `on_leave` are told
+/// of it, as its login: its session is the login's, whatever it says.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Arrival {
-    pub session: String,
     pub name: String,
 }
 
@@ -176,33 +176,33 @@ pub struct Rename {
     pub name: String,
 }
 
-#[live("room.on_join")]
-pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
-    db.here.delete(&a.session)?;
+#[mutator("room.on_join")]
+pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), String> {
+    db.here.delete(ctx.device())?;
     db.here.insert(Here {
-        session: a.session,
+        session: ctx.device().into(),
         name: a.name,
         since: ctx.now,
     })
 }
 
-#[live("room.on_leave")]
-pub fn on_leave(_: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
-    db.pointer.delete(&a.session)?;
-    db.here.delete(&a.session)
+#[mutator("room.on_leave")]
+pub fn on_leave(ctx: &Ctx, db: &mut Db<Room, Volatile>, _: Arrival) -> Result<(), String> {
+    db.pointer.delete(ctx.device())?;
+    db.here.delete(ctx.device())
 }
 
 /// After a restart: who was here is kept, every pointer let go.
-#[live("room.on_restore")]
-pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), Refusal> {
+#[mutator("room.on_restore")]
+pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), String> {
     for p in db.pointer.scan() {
         db.pointer.remove(&p)?;
     }
     Ok(())
 }
 
-#[live("room.point")]
-pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(), Refusal> {
+#[mutator("room.point")]
+pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(), String> {
     db.pointer.delete(ctx.device())?;
     db.pointer.insert(Pointer {
         session: ctx.device().into(),
@@ -210,14 +210,14 @@ pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(),
     })
 }
 
-#[live("room.rename")]
-pub fn rename(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Rename) -> Result<(), Refusal> {
-    let one = db.here.get(ctx.device()).ok_or_else(|| Refusal::new("not here"))?;
+#[mutator("room.rename")]
+pub fn rename(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Rename) -> Result<(), String> {
+    let one = db.here.get(ctx.device()).ok_or_else(|| String::from("not here"))?;
     db.here.update(Here { name: input.name, ..one })
 }
 
 #[view("room.present")]
-pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, Refusal> {
+pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, String> {
     Ok(scan::<Room, Here>().filter(|h| h.since >= 0))
 }
 
@@ -227,27 +227,24 @@ pub fn room() -> Domain {
 }
 
 /// The room as a client of it is configured: the device it says it is,
-/// its name; `point` relayed every `every_ms`.
-pub fn live(name: &str, every_ms: i64) -> Live {
-    Live {
-        device: Some(name.as_bytes().to_vec()),
+/// `config` with the room as its live space: a device's, named `name`,
+/// relaying its pointer at most every `every_ms`.
+pub fn device(config: Config, name: &str, every_ms: i64) -> Config {
+    Config {
+        device: Some(Arrival { name: name.into() }.to_bytes()),
         ephemeral: BTreeSet::from(["room.point".to_string()]),
         every_ms,
-        ..Live::new(Module::of(&room()))
+        ..hub(config)
     }
 }
 
-/// What a device's `Hello` says, made the input of `on_join`: its session
-/// is the login's, whatever it says; its name is what it says.
-pub fn arrival(who: &ark::peer::Who, said: &[u8]) -> Option<Vec<u8>> {
-    let name = String::from_utf8(said.to_vec()).ok()?;
-    Some(
-        Arrival {
-            session: who.session.clone(),
-            name,
-        }
-        .to_bytes(),
-    )
+/// `config` with the room as its live space: a server's, authoring its
+/// `on_join`, `on_leave` and `on_restore`.
+pub fn hub(config: Config) -> Config {
+    Config {
+        live: Some(std::sync::Arc::new(room())),
+        ..config
+    }
 }
 
 /// A domain of this crate's by its name: what a trace is replayed with.

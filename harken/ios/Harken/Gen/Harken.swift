@@ -990,21 +990,6 @@ public struct LookClaim: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"by\":" + J.q(by)]) }
 }
 
-/// The record `LookDue`.
-public struct LookDue: Equatable {
-    public var rows: [Look]
-    public var nextMs: Int64?
-
-    public init(rows: [Look], nextMs: Int64? = nil) { self.rows = rows; self.nextMs = nextMs; }
-
-    public init(json j: Any?) {
-        let o = j as! [String: Any]
-        self.init(rows: J.list(o["rows"]) { v0 in Look(json: v0) }, nextMs: J.opt(o["next_ms"]) { v0 in J.int(v0) })
-    }
-
-    public var json: String { J.obj(["\"rows\":" + J.wlist(rows) { v0 in v0.json }, "\"next_ms\":" + J.wopt(nextMs) { v0 in String(v0) }]) }
-}
-
 /// The record `LookFinish`.
 public struct LookFinish: Equatable {
     public var id: Id
@@ -2372,49 +2357,49 @@ public struct Harken {
     public func works(_ input: Works) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.works", input: input.json)) { j in WorkSummary(json: j) } }
 
     /// `listening.advance`, on the live space.
-    public func advance(_ input: Advance) throws { try peer.call(name: "listening.advance", input: input.json) }
+    public func advance(_ input: Advance) throws { _ = try peer.mutate(name: "listening.advance", input: input.json) }
 
     /// `listening.clear_upcoming`, on the live space.
-    public func clearUpcoming() throws { try peer.call(name: "listening.clear_upcoming", input: "null") }
+    public func clearUpcoming() throws { _ = try peer.mutate(name: "listening.clear_upcoming", input: "null") }
 
     /// `listening.enqueue`, on the live space.
-    public func enqueue(_ input: Enqueue) throws { try peer.call(name: "listening.enqueue", input: input.json) }
+    public func enqueue(_ input: Enqueue) throws { _ = try peer.mutate(name: "listening.enqueue", input: input.json) }
 
     /// `listening.equip`, on the live space.
-    public func equip(_ input: Equip) throws { try peer.call(name: "listening.equip", input: input.json) }
+    public func equip(_ input: Equip) throws { _ = try peer.mutate(name: "listening.equip", input: input.json) }
 
     /// `listening.join`, on the live space.
-    public func join(_ input: Member) throws { try peer.call(name: "listening.join", input: input.json) }
+    public func join(_ input: Member) throws { _ = try peer.mutate(name: "listening.join", input: input.json) }
 
     /// `listening.jump`, on the live space.
-    public func jump(_ input: Jump) throws { try peer.call(name: "listening.jump", input: input.json) }
+    public func jump(_ input: Jump) throws { _ = try peer.mutate(name: "listening.jump", input: input.json) }
 
     /// `listening.last_played`, kept.
     public func lastPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.last_played", input: "null")) { j in Play(json: j) } }
 
     /// `listening.move`, on the live space.
-    public func move(_ input: Move) throws { try peer.call(name: "listening.move", input: input.json) }
+    public func move(_ input: Move) throws { _ = try peer.mutate(name: "listening.move", input: input.json) }
 
     /// `listening.nudge_group_volume`, on the live space.
-    public func nudgeGroupVolume(_ input: GroupNudge) throws { try peer.call(name: "listening.nudge_group_volume", input: input.json) }
+    public func nudgeGroupVolume(_ input: GroupNudge) throws { _ = try peer.mutate(name: "listening.nudge_group_volume", input: input.json) }
 
     /// `listening.nudge_volume`, on the live space.
-    public func nudgeVolume(_ input: NudgeVolume) throws { try peer.call(name: "listening.nudge_volume", input: input.json) }
+    public func nudgeVolume(_ input: NudgeVolume) throws { _ = try peer.mutate(name: "listening.nudge_volume", input: input.json) }
 
     /// `listening.on_join`, on the live space.
-    public func onJoin(_ input: Device) throws { try peer.call(name: "listening.on_join", input: input.json) }
+    public func onJoin(_ input: Device) throws { _ = try peer.mutate(name: "listening.on_join", input: input.json) }
 
     /// `listening.on_leave`, on the live space.
-    public func onLeave(_ input: Device) throws { try peer.call(name: "listening.on_leave", input: input.json) }
+    public func onLeave(_ input: Device) throws { _ = try peer.mutate(name: "listening.on_leave", input: input.json) }
 
     /// `listening.on_restore`, on the live space.
-    public func onRestore() throws { try peer.call(name: "listening.on_restore", input: "null") }
+    public func onRestore() throws { _ = try peer.mutate(name: "listening.on_restore", input: "null") }
 
     /// `listening.pause`, on the live space.
-    public func pause() throws { try peer.call(name: "listening.pause", input: "null") }
+    public func pause() throws { _ = try peer.mutate(name: "listening.pause", input: "null") }
 
     /// `listening.play`, on the live space.
-    public func play() throws { try peer.call(name: "listening.play", input: "null") }
+    public func play() throws { _ = try peer.mutate(name: "listening.play", input: "null") }
 
     /// `listening.recently_played`, kept.
     public func recentlyPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.recently_played", input: "null")) { j in Play(json: j) } }
@@ -2423,58 +2408,58 @@ public struct Harken {
     @discardableResult public func recordPlay(_ input: RecordPlay) throws -> String { try peer.mutate(name: "listening.record_play", input: input.json) }
 
     /// `listening.release`, on the live space.
-    public func release() throws { try peer.call(name: "listening.release", input: "null") }
+    public func release() throws { _ = try peer.mutate(name: "listening.release", input: "null") }
 
     /// `listening.remove`, on the live space.
-    public func remove(_ input: Remove) throws { try peer.call(name: "listening.remove", input: input.json) }
+    public func remove(_ input: Remove) throws { _ = try peer.mutate(name: "listening.remove", input: input.json) }
 
     /// `listening.report_group`, on the live space.
-    public func reportGroup(_ input: ReportGroup) throws { try peer.call(name: "listening.report_group", input: input.json) }
+    public func reportGroup(_ input: ReportGroup) throws { _ = try peer.mutate(name: "listening.report_group", input: input.json) }
 
     /// `listening.report_position`, on the live space.
-    public func reportPosition(_ input: Report) throws { try peer.call(name: "listening.report_position", input: input.json) }
+    public func reportPosition(_ input: Report) throws { _ = try peer.mutate(name: "listening.report_position", input: input.json) }
 
     /// `listening.report_volume`, on the live space.
-    public func reportVolume(_ input: ReportVolume) throws { try peer.call(name: "listening.report_volume", input: input.json) }
+    public func reportVolume(_ input: ReportVolume) throws { _ = try peer.mutate(name: "listening.report_volume", input: input.json) }
 
     /// `listening.scrub`, on the live space.
-    public func scrub(_ input: Scrub) throws { try peer.call(name: "listening.scrub", input: input.json) }
+    public func scrub(_ input: Scrub) throws { _ = try peer.mutate(name: "listening.scrub", input: input.json) }
 
     /// `listening.seek`, on the live space.
-    public func seek(_ input: Seek) throws { try peer.call(name: "listening.seek", input: input.json) }
+    public func seek(_ input: Seek) throws { _ = try peer.mutate(name: "listening.seek", input: input.json) }
 
     /// `listening.set_group_mute`, on the live space.
-    public func setGroupMute(_ input: GroupMute) throws { try peer.call(name: "listening.set_group_mute", input: input.json) }
+    public func setGroupMute(_ input: GroupMute) throws { _ = try peer.mutate(name: "listening.set_group_mute", input: input.json) }
 
     /// `listening.set_group_volume`, on the live space.
-    public func setGroupVolume(_ input: GroupVolume) throws { try peer.call(name: "listening.set_group_volume", input: input.json) }
+    public func setGroupVolume(_ input: GroupVolume) throws { _ = try peer.mutate(name: "listening.set_group_volume", input: input.json) }
 
     /// `listening.set_mute`, on the live space.
-    public func setMute(_ input: SetMute) throws { try peer.call(name: "listening.set_mute", input: input.json) }
+    public func setMute(_ input: SetMute) throws { _ = try peer.mutate(name: "listening.set_mute", input: input.json) }
 
     /// `listening.set_volume`, on the live space.
-    public func setVolume(_ input: SetVolume) throws { try peer.call(name: "listening.set_volume", input: input.json) }
+    public func setVolume(_ input: SetVolume) throws { _ = try peer.mutate(name: "listening.set_volume", input: input.json) }
 
     /// `listening.skip`, on the live space.
-    public func skip(_ input: Skip) throws { try peer.call(name: "listening.skip", input: input.json) }
+    public func skip(_ input: Skip) throws { _ = try peer.mutate(name: "listening.skip", input: input.json) }
 
     /// `listening.stalled`, on the live space.
-    public func stalled(_ input: At) throws { try peer.call(name: "listening.stalled", input: input.json) }
+    public func stalled(_ input: At) throws { _ = try peer.mutate(name: "listening.stalled", input: input.json) }
 
     /// `listening.start`, on the live space.
-    public func start(_ input: Start) throws { try peer.call(name: "listening.start", input: input.json) }
+    public func start(_ input: Start) throws { _ = try peer.mutate(name: "listening.start", input: input.json) }
 
     /// `listening.started`, on the live space.
-    public func started(_ input: At) throws { try peer.call(name: "listening.started", input: input.json) }
+    public func started(_ input: At) throws { _ = try peer.mutate(name: "listening.started", input: input.json) }
 
     /// `listening.stop`, on the live space.
-    public func stop() throws { try peer.call(name: "listening.stop", input: "null") }
+    public func stop() throws { _ = try peer.mutate(name: "listening.stop", input: "null") }
 
     /// `listening.transfer`, on the live space.
-    public func transfer(_ input: Transfer) throws { try peer.call(name: "listening.transfer", input: input.json) }
+    public func transfer(_ input: Transfer) throws { _ = try peer.mutate(name: "listening.transfer", input: input.json) }
 
     /// `listening.unjoin`, on the live space.
-    public func unjoin(_ input: Member) throws { try peer.call(name: "listening.unjoin", input: input.json) }
+    public func unjoin(_ input: Member) throws { _ = try peer.mutate(name: "listening.unjoin", input: input.json) }
 
     /// `look.cancel`: its intent's id.
     @discardableResult public func cancel(_ input: LookCancel) throws -> String { try peer.mutate(name: "look.cancel", input: input.json) }
@@ -2482,8 +2467,8 @@ public struct Harken {
     /// `look.claim`: its intent's id.
     @discardableResult public func claim(_ input: LookClaim) throws -> String { try peer.mutate(name: "look.claim", input: input.json) }
 
-    /// `look.due`.
-    public func due() throws -> LookDue { LookDue(json: J.parse(try peer.query(name: "look.due", input: "null"))) }
+    /// `look.due`, kept.
+    public func due() throws -> LiveView<Look> { LiveView(try peer.view(name: "look.due", input: "null")) { j in Look(json: j) } }
 
     /// `look.finish`: its intent's id.
     @discardableResult public func finish(_ input: LookFinish) throws -> String { try peer.mutate(name: "look.finish", input: input.json) }
@@ -2518,18 +2503,15 @@ public struct Harken {
     /// `role.revoke`: its intent's id.
     @discardableResult public func roleRevoke(_ input: Grant) throws -> String { try peer.mutate(name: "role.revoke", input: input.json) }
 
-    /// `session.current`.
-    public func current() throws -> SignIn? { J.opt(J.parse(try peer.query(name: "session.current", input: "null"))) { v0 in SignIn(json: v0) } }
-
     /// `session.mine`, kept.
     public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
 
-    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
-    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.update, t.rows) }) }
+    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
 
     /// The live table `listening`, as this device holds it.
     public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }

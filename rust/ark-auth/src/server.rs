@@ -26,12 +26,12 @@ use ark::db::read;
 use ark::format::Encode;
 use ark::hash::{hex, unhex};
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::{Change, Store};
 
 use crate::oidc::{Challenge, Provider};
-use crate::rows::{current, live, AuthTables, Role, SignIn};
+use crate::rows::{current, live, AuthTables, Role, SignIn, Signed};
 use crate::{Account, Login};
 
 #[cfg(feature = "server")]
@@ -74,16 +74,16 @@ pub trait Hub: Send + Sync {
     fn write(&self, c: Change) -> Result<(), String>;
     /// The domain's function `func` run on `input`, as an entry the
     /// authority authors.
-    fn author(&self, func: &str, input: Vec<u8>) -> Result<(), String>;
+    fn mutate(&self, func: &str, input: Vec<u8>) -> Result<(), String>;
 }
 
 /// The hub's watch over who is signed in: given what an entry changed — or
 /// `None`, the clock's tick — and the sessions connected, the sessions
 /// whose connections to close.
-pub type Watch = Box<dyn FnMut(&Store, Option<&[Change]>, &[Who], i64) -> Vec<String> + Send>;
+pub type Watch = Box<dyn FnMut(&Store, Option<&[Change]>, &[Ctx], i64) -> Vec<String> + Send>;
 
 /// Who signs in, as a token proves it.
-pub type Authenticate = Arc<dyn Fn(&str) -> Option<Who> + Send + Sync>;
+pub type Authenticate = Arc<dyn Fn(&str) -> Option<Ctx> + Send + Sync>;
 
 /// A login started and not finished: what the provider's answer has to
 /// match, where the code goes, and what is signing in.
@@ -110,29 +110,14 @@ const CODE_TTL_MS: i64 = 60 * 1000;
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
 const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
 
-/// The schema's reads, its type erased: a session live at `ctx.now` with
-/// its granted roles, a sign-in by id, and a person's sign-ins.
-struct Reads {
-    current: fn(&Store, &Ctx) -> Option<SignIn>,
-    get: fn(&Store, &str) -> Option<SignIn>,
-    of: fn(&Store, &str) -> Vec<SignIn>,
+/// A sign-in by id, over a store holding the two tables.
+fn get(store: &Store, id: &str) -> Option<SignIn> {
+    read::<Signed, _>(store, |db| db.sign_in.get(id.to_string()))
 }
 
-fn reads<S: AuthTables>() -> Reads {
-    Reads {
-        current: |store, ctx| read::<S, _>(store, |db| current::<S>(ctx, db, ())).ok().flatten(),
-        get: |store, id| {
-            read::<S, _>(store, |db| Ok::<_, ark::Refusal>(S::sign_in(db).get(id.to_string())))
-                .ok()
-                .flatten()
-        },
-        of: |store, user| {
-            read::<S, _>(store, |db| {
-                Ok::<_, ark::Refusal>(S::sign_in(db).by(SignIn::USER).from(user.to_string()).all())
-            })
-            .unwrap_or_default()
-        },
-    }
+/// A person's sign-ins, over a store holding the two tables.
+fn of(store: &Store, user: &str) -> Vec<SignIn> {
+    read::<Signed, _>(store, |db| db.sign_in.by(SignIn::USER).from(user.to_string()).all())
 }
 
 /// Everything the routes share. `Arc` it; the same one is what the hub is
@@ -152,7 +137,6 @@ pub struct Auth {
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
     hub: OnceLock<Box<dyn Hub>>,
-    reads: Reads,
     /// `docs/plan-auth.md` The roles the configuration grants, by account
     /// id ([`Auth::with_roles`]), merged at every judging.
     roles: BTreeMap<String, BTreeSet<String>>,
@@ -178,7 +162,6 @@ impl Auth {
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
             hub: OnceLock::new(),
-            reads: reads::<S>(),
             roles: BTreeMap::new(),
             welcome: None,
             pictures: Mutex::new(HashMap::new()),
@@ -304,12 +287,13 @@ impl Auth {
     /// Who session `id` proves over `store` at `now`: its row live, its
     /// person holding the roles it was opened with, those the role table
     /// grants and those the configuration does.
-    pub fn judge(&self, store: &Store, id: &str, now: i64) -> Option<Who> {
-        let s = (self.reads.current)(store, &at(id, now))?;
-        Some(Who {
+    pub fn judge(&self, store: &Store, id: &str, now: i64) -> Option<Ctx> {
+        let s = current(&at(id, now), store)?;
+        Some(Ctx {
             roles: self.merged(&s.user, &s.roles),
             actor: s.user,
             session: id.into(),
+            ..Ctx::default()
         })
     }
 
@@ -329,8 +313,7 @@ impl Auth {
     /// live or gone, and every session of a person whose roles changed, to
     /// be judged again. A connection no row names is not a sign-in's (one
     /// the server's process connected itself) and is left be.
-    pub fn watcher(self: &Arc<Self>) -> Watch {
-        let auth = self.clone();
+    pub fn watcher(&self) -> Watch {
         Box::new(move |store, changes, open, now| {
             let (mut ids, mut users) = (BTreeSet::new(), BTreeSet::new());
             for c in changes.unwrap_or_default() {
@@ -344,7 +327,7 @@ impl Auth {
                 }
             }
             let ended = open.iter().filter(|w| {
-                let row = || (auth.reads.get)(store, &w.session);
+                let row = || get(store, &w.session);
                 users.contains(&w.actor)
                     || match changes {
                         None => row().is_some_and(|s| !live(&s, now)),
@@ -374,7 +357,7 @@ impl Auth {
     pub fn issue(&self, account: &Account, device: &str) -> Result<Login, String> {
         let first = match &self.welcome {
             Some(_) => {
-                let (user, of) = (account.id.clone(), self.reads.of);
+                let user = account.id.clone();
                 self.ask(move |store| of(store, &user).is_empty()).unwrap_or(false)
             }
             None => false,
@@ -387,7 +370,7 @@ impl Auth {
                 name: account.name.clone(),
             };
             // A welcome refused is not a sign-in refused: the person is in.
-            if let Err(e) = hub.author(func, input.to_bytes()) {
+            if let Err(e) = hub.mutate(func, input.to_bytes()) {
                 eprintln!("ark-auth: {func} for {}: {e}", account.id);
             }
         }
@@ -423,7 +406,7 @@ impl Auth {
     /// earlier start with a day or more left, minted again — a restart
     /// writes no entry — or a new one.
     pub fn own(&self, account: &Account, device: &str) -> Result<Login, String> {
-        let (user, of, now) = (account.id.clone(), self.reads.of, now_ms());
+        let (user, now) = (account.id.clone(), now_ms());
         let day = 24 * 60 * 60 * 1000;
         let earlier = self.ask(move |store| of(store, &user)).unwrap_or_default();
         match earlier.into_iter().rfind(|s| s.device == device && live(s, now + day)) {
@@ -483,7 +466,7 @@ impl Auth {
     /// and those it was told to trust as much ([`Auth::trust_picture_host`]).
     /// Blocking.
     pub fn picture(&self, user: &str) -> Result<Option<Picture>, String> {
-        let (u, of) = (user.to_string(), self.reads.of);
+        let u = user.to_string();
         let rows = self.ask(move |store| of(store, &u)).unwrap_or_default();
         let newest = rows.into_iter().filter(|s| !s.picture.is_empty()).max_by_key(|s| s.issued_ms);
         let Some(url) = newest.map(|s| s.picture) else { return Ok(None) };

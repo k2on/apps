@@ -1,8 +1,7 @@
 //! §1.2 A schema grows under a log: an authority reopened under a
 //! prefix-extension of the schema its records were written under keeps its
 //! head, its chain and its rows, the rows widened and the store's digests
-//! this schema's; a replica of the older schema takes what the wider one
-//! logs on faith, as it says (it is behind).
+//! this schema's.
 
 #[path = "demo.rs"]
 mod demo;
@@ -13,12 +12,11 @@ mod support {
 use std::sync::Arc;
 
 use ark::frames::Frame;
-use ark::log::{Durable, EntryId, Origin};
-use ark::peer::{Ctx, Input, Journal, Peer, Procedure, Role};
+use ark::log::{EntryId, Origin, Record};
+use ark::peer::{Ctx, Input, Journal, Peer, Role};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::store::{Change, Store};
-use ark::Refusal;
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
 
@@ -37,32 +35,27 @@ fn wider() -> Arc<Schema> {
 }
 
 /// Tags a row in the appended table: what only the wider schema can log.
-struct TagIt;
-
-impl Procedure for TagIt {
-    fn apply(&self, store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
-        let c = Change::Add {
-            table: "tag".into(),
-            row: input.to_vec(),
-        };
-        store.apply(&c)?;
-        Ok(vec![c])
-    }
+fn tag_it(store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, String> {
+    let c = Change::Add {
+        table: "tag".into(),
+        row: input.to_vec(),
+    };
+    store.apply(&c)?;
+    Ok(vec![c])
 }
 
 const TAG: &str = "grow.tag";
 
-fn durable(p: &Peer) -> Durable {
-    Durable {
-        rows: p.confirmed_rows(),
-        ..Durable::default()
-    }
+fn durable(p: &Peer) -> Vec<Record> {
+    vec![Record::Rows(p.confirmed_rows())]
 }
 
-fn wide_authority(d: Durable) -> Peer {
-    let mut cas = demo::cas();
-    cas.insert(TAG, Arc::new(TagIt));
-    let mut p = Peer::new(wider(), cas, Role::Authority { journal: Journal::default() }, who("server"));
+fn wide_authority(d: Vec<Record>) -> Peer {
+    let cas = ark::Domain {
+        schema: wider(),
+        ..demo::demo().run(TAG, Arc::new(tag_it))
+    };
+    let mut p = Peer::new(Arc::new(cas), Role::Authority { journal: Journal::default() }, who("server"));
     p.step(Input::Open(d));
     p
 }
@@ -70,11 +63,9 @@ fn wide_authority(d: Durable) -> Peer {
 /// An authority reopened under an appended column and an appended table
 /// keeps its head, its chain entry for entry and its rows, the playlist
 /// row widened with `None`; its store hashes as the wider schema's from
-/// those rows; what it logs next carries that hash; a `Hello` below the
-/// entries logged under the old schema is answered with the snapshot at
-/// the head; reopened again, and after compacting, it is the same. Alice,
-/// on the old schema, takes the entry touching the table she lacks as it
-/// says and stays at the head. Falsified by `open` deriving each entry's
+/// those rows; a `Hello` from the start is paged every entry, the old
+/// schema's among them; reopened again, and after compacting, it is the
+/// same. Falsified by `open` deriving each entry's
 /// state again (cutting the chain where it differs): the head was 0.
 #[test]
 fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
@@ -91,7 +82,6 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
     assert_eq!(server.log().head().0, 2);
     let mut wide = wide_authority(durable(&server));
     assert_eq!(wide.log(), server.log(), "head and chain kept");
-    assert_eq!(wide.foreign, Some(2));
     let rows = |p: &Peer, t: &str| p.store.rows(t).map(<[u8]>::to_vec).collect::<Vec<_>>();
     let widened: Vec<Vec<u8>> = rows(&server, "playlist")
         .into_iter()
@@ -103,9 +93,7 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         .collect();
     assert_eq!(rows(&wide, "playlist"), widened, "a row widened with None");
     assert_eq!(rows(&wide, "item"), rows(&server, "item"));
-    let fresh = Store::from_rows(wider(), ark::schema::Space::Durable, &wide.store.snapshot_rows())
-        .unwrap()
-        .0;
+    let fresh = Store::from_rows(wider(), ark::schema::Space::Durable, &wide.store.snapshot_rows()).unwrap();
     assert_eq!(wide.store.state_hash(), fresh.state_hash(), "the digests are the wider schema's");
     assert_ne!(wide.store.state_hash(), server.store.state_hash());
 
@@ -115,78 +103,30 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         now: 3,
         cause: None,
     });
-    let fan = fanouts(&o);
-    assert_eq!(logged(&fan[0]).state, wide.store.state_hash(), "a new entry carries the wider hash");
+    assert_eq!(fanouts(&o).len(), 1, "logged");
     let s = sends(&wide.step(up(
         &who("bob"),
         &Frame::Hello {
             space: ark::schema::Space::Durable,
             cursor: 0,
-            hash: None,
-            device: None,
-            schema: Default::default(),
-            version: String::new(),
+            hash: Default::default(),
+            fill: None,
+            most: ark::peer::PART as u64,
         },
     )));
-    assert!(
-        matches!(&s[..], [Frame::Part { part, .. }] if part.first && part.seq == 3 && part.state == wide.store.state_hash() && part.next.is_none()),
-        "{s:?}"
-    );
-
-    alice.step(down(&fan[0]));
-    assert!(alice.faith && alice.diverged.is_empty(), "alice is behind, on faith");
-    assert_eq!(alice.log(), wide.log());
-    assert_eq!(rows(&alice, "playlist"), rows(&server, "playlist"), "she holds the prefix");
+    assert!(matches!(&s[..], [Frame::Page { from: 0, logged, .. }] if logged.len() == 3), "{s:?}");
 
     let again = wide_authority(durable(&wide));
     assert_eq!((again.log(), &again.store), (wide.log(), &wide.store));
-    wide.step(Input::Compact(3));
+    wide.compact(3);
     let compacted = wide_authority(durable(&wide));
     assert_eq!(compacted.log().head(), wide.log().head());
-    assert_eq!((compacted.store.clone(), compacted.foreign), (wide.store.clone(), None));
+    assert_eq!(compacted.store, wide.store);
 }
 
-/// A replica of the old schema beside an authority whose schema only
-/// appended a table: an entry's facts read the same under both, its state
-/// does not. Alice diverges there, starts again, diverges there again, and
-/// then asks for the snapshot (cursor -1), which names the table she lacks:
-/// she takes it as it says and is at the head, her intent confirmed.
-/// Falsified by `diverge` asking from 0 every time: she never left the
-/// divergence (a bounded loop of Hellos, never a snapshot).
-#[test]
-fn a_replica_behind_an_appended_table_asks_for_the_snapshot() {
-    let mut s = demo::schema();
-    s.tables.push(Table::new("tag").col("name", Type::Text));
-    let mut server = Peer::new(Arc::new(s), demo::cas(), Role::Authority { journal: Journal::default() }, who("server"));
-    let mut alice = replica("alice", demo::cas());
-    let mut up_frames = sends(&alice.step(mutate(CREATE, create_input("Road"), 1)));
-    for _ in 0..8 {
-        let mut back = vec![];
-        for f in up_frames.drain(..) {
-            let o = server.step(up(&who("alice"), &f));
-            back.extend(fanouts(&o));
-            back.extend(sends(&o));
-        }
-        if back.is_empty() {
-            break;
-        }
-        for f in back {
-            up_frames.extend(sends(&alice.step(down(&f))));
-        }
-    }
-    assert!(up_frames.is_empty(), "settled: {up_frames:?}");
-    assert_eq!(alice.diverged, vec![1, 1]);
-    assert!(alice.faith && alice.pending.is_empty());
-    assert_eq!(alice.log().head(), server.log().head());
-    assert_eq!(alice.store.rows("playlist").count(), 1);
-}
-
-/// A log reopened under the schema it was written under is wholly its
-/// own: nothing foreign, nothing on faith, each entry's state its rows'
-/// with the facts after it undone (§1.3's arithmetic); and reopened from
-/// its entries appended, the same. Falsified by `foreign` comparing each
-/// entry's state with the head's digests, never undoing: entry 1 was
-/// foreign.
+/// A log reopened under the schema it was written under is its own, from
+/// its rows whole or from its entries appended: the same log and the same
+/// state. Falsified by `open` not applying the appended entries' facts.
 #[test]
 fn a_log_reopened_under_its_own_schema_is_its_own() {
     let mut server = authority(demo::cas());
@@ -201,98 +141,12 @@ fn a_log_reopened_under_its_own_schema_is_its_own() {
     }
     let mut whole = authority(demo::cas());
     whole.step(Input::Open(durable(&server)));
-    let base = Durable {
-        rows: authority(demo::cas()).confirmed_rows(),
-        logged: server.log().entries(),
-        ..Durable::default()
-    };
+    let mut base = durable(&authority(demo::cas()));
+    base.extend(server.log().entries().into_iter().map(Record::Logged));
     let mut appended = authority(demo::cas());
     appended.step(Input::Open(base));
     for p in [&whole, &appended] {
         assert_eq!(p.log(), server.log());
-        assert_eq!((p.foreign, p.faith), (None, false));
         assert_eq!(p.store.state_hash(), server.store.state_hash());
     }
-}
-
-/// Frames carried between a replica and an authority until neither has
-/// more, from the replica's Hello: how many rounds it took, at most `n`.
-fn settle(server: &mut Peer, name: &str, replica: &mut Peer, n: usize) -> usize {
-    let mut up_frames = sends(&replica.step(Input::Connected));
-    for round in 0..n {
-        let mut back = vec![];
-        for f in up_frames.drain(..) {
-            let o = server.step(up(&who(name), &f));
-            back.extend(fanouts(&o));
-            back.extend(sends(&o));
-        }
-        if back.is_empty() {
-            return round;
-        }
-        for f in back {
-            up_frames.extend(sends(&replica.step(down(&f))));
-        }
-    }
-    n
-}
-
-/// An app a schema behind its server, whose log is compacted so it is
-/// filled rather than paged: the fill names a table the app lacks, its
-/// state is not one the app can make, and it is taken on faith, the rows
-/// it knows kept. Falsified by the fill's last part checking the state
-/// alone: the app filled, diverged and filled again for ever, showing
-/// nothing (a phone on the old money, against the new server).
-#[test]
-fn an_older_app_filled_by_a_newer_server_keeps_what_it_knows() {
-    let mut server = Peer::new(appended(), server_cas(), Role::Authority { journal: Journal::default() }, who("server"));
-    let mut bob = Peer::new(appended(), server_cas(), Role::Replica, who("bob"));
-    let tag = ark::dynamic::row_bytes(&appended().tables[2], &serde_json::json!({"name": "loud"})).unwrap();
-    for (i, (f, input)) in [(CREATE, create_input("Road")), (TAG, tag)].into_iter().enumerate() {
-        let o = bob.step(mutate(f, input, i as i64 + 1));
-        deliver_up(&mut server, &who("bob"), &o);
-    }
-    let head = server.log().head().0;
-    server.step(Input::Compact(head));
-    let mut alice = replica("alice", demo::cas());
-    let rounds = settle(&mut server, "alice", &mut alice, 12);
-    assert!(rounds < 12, "settled");
-    assert!(alice.faith, "on faith");
-    assert_eq!(alice.log().head(), server.log().head());
-    assert_eq!(alice.store.rows("playlist").count(), 1, "what it knows kept");
-}
-
-/// An app a schema ahead of its server, filled by it: every row is one it
-/// knows, so nothing says the schemas differ but the state, which the app
-/// cannot make; filled to the same head twice and still another state, it
-/// takes the server's on faith. Falsified by the same, for an app that
-/// updated before its server: it filled for ever.
-#[test]
-fn a_newer_app_filled_by_an_older_server_keeps_its_rows() {
-    let mut server = authority(demo::cas());
-    let mut bob = replica("bob", demo::cas());
-    let o = bob.step(mutate(CREATE, create_input("Road"), 1));
-    deliver_up(&mut server, &who("bob"), &o);
-    let head = server.log().head().0;
-    server.step(Input::Compact(head));
-    let mut carol = Peer::new(appended(), demo::cas(), Role::Replica, who("carol"));
-    let rounds = settle(&mut server, "carol", &mut carol, 12);
-    assert!(rounds < 12, "settled");
-    assert!(carol.faith, "on faith");
-    assert_eq!(carol.log().head(), server.log().head());
-    assert_eq!(carol.store.rows("playlist").count(), 1, "its rows kept");
-}
-
-/// The demo's functions and the wider schema's tag.
-fn server_cas() -> ark::peer::Functions {
-    let mut cas = demo::cas();
-    cas.insert(TAG, Arc::new(TagIt));
-    cas
-}
-
-/// The demo's schema with a table appended and nothing else: as money's
-/// receipt photos grew it.
-fn appended() -> Arc<Schema> {
-    let mut s = demo::schema();
-    s.tables.push(Table::new("tag").col("name", Type::Text));
-    Arc::new(s)
 }

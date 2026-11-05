@@ -18,8 +18,10 @@ fn out(r: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
 /// `#[ark(index(a, b))]`, `#[ark(unique(a, b))]` (each `as NAME`
 /// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct. A
 /// column appended with `#[serde(default)]` takes its type's default in a
-/// row written before it.
-#[proc_macro_derive(Row, attributes(ark))]
+/// row written before it. A row whose `state` field is an
+/// `ark::effect::Job<T>` is a job (`ark::effect::Effect`), `#[effect(lease_ms
+/// = .., retry_ms = .., role = "..", owner = field)]` optionally.
+#[proc_macro_derive(Row, attributes(ark, effect))]
 pub fn row(input: TokenStream) -> TokenStream {
     out(domain::row(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
@@ -40,14 +42,6 @@ pub fn describe(input: TokenStream) -> TokenStream {
     out(domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
 
-/// `#[derive(Effect)]`: a row whose `state` field is an `ark::effect::Job<T>`
-/// as a job (`ark::effect::Effect`), `#[effect(lease_ms = .., retry_ms = ..,
-/// role = "..", owner = field)]` optionally.
-#[proc_macro_derive(Effect, attributes(effect))]
-pub fn effect(input: TokenStream) -> TokenStream {
-    out(domain::effect(syn::parse_macro_input!(input as syn::DeriveInput)))
-}
-
 /// `#[derive(Schema)]`: a struct of tables, each field a row type, as the
 /// schema and its handles (`ark::db::Tables`).
 #[proc_macro_derive(Schema)]
@@ -55,27 +49,16 @@ pub fn schema(input: TokenStream) -> TokenStream {
     out(domain::schema(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
 
-/// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S>, I) -> Result<(),
-/// Refusal>` by name.
+/// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S, P>, I) ->
+/// Result<(), String>` by name, on the space `P` it writes (`Db<S>` the
+/// log's, `Db<S, Volatile>` the live space's).
 #[proc_macro_attribute]
 pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("mutator", attr.into(), item.into()))
 }
 
-/// `#[live("name")]`: a mutator over volatile tables.
-#[proc_macro_attribute]
-pub fn live(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("live", attr.into(), item.into()))
-}
-
-/// `#[query("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<T, Refusal>`.
-#[proc_macro_attribute]
-pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("query", attr.into(), item.into()))
-}
-
 /// `#[view("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
-/// Refusal>`, a query kept up to date.
+/// String>`, a query kept up to date.
 #[proc_macro_attribute]
 pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("view", attr.into(), item.into()))

@@ -1,9 +1,8 @@
-//! A gap in a device's pushes is answered (§1.7): `Gap { last }`, where its
-//! origin stands at the authority. A device that holds the ones between
-//! waits for them; one that no longer does numbers its pending intents on
-//! from `last` and pushes them again, rather than pushing past the gap
-//! forever with nothing ever said — what a phone whose intents before 18
-//! were nowhere did, its photo and its edits behind them for a day.
+//! A gap in a device's pushes (§1.7): a push says where its device's
+//! pending intents begin (its page's `from`), and what its origin had up to
+//! there is passed — the device no longer holds it — so a phone whose
+//! intents before 18 were nowhere is not stuck behind them, as one was, its
+//! photo and its edits behind them for a day.
 
 #[path = "demo.rs"]
 mod demo;
@@ -21,11 +20,11 @@ fn pid() -> [u8; 16] {
 }
 
 /// Alice's device lost what it had pending past its first, but kept its
-/// count: its next intent is 18 while the authority has judged 1. The push
-/// is answered with the gap, and the device's intents go on from 2 — run
-/// again, pushed again, sequenced. Falsified by `verdict_on` answering a
-/// gap with nothing (the first assertion: no verdict at all), or by
-/// `close_gap` keeping the numbers (pushed at 18 again, a gap again).
+/// count: its next intent is 18 while the authority has judged 1. Its push
+/// says its pending begin after 17; the authority passes 2 to 17, judges 18
+/// and sequences it, its number and the ids it drew as they were. Falsified
+/// by `verdict_on` not passing a push's `from` (18 answered as a gap, not
+/// judged), or by the device's push saying it begins after 0.
 #[test]
 fn a_device_past_a_gap_goes_on_from_where_the_authority_stands() {
     let (mut server, mut alice) = (authority(demo::cas()), replica("alice", demo::cas()));
@@ -34,18 +33,16 @@ fn a_device_past_a_gap_goes_on_from_where_the_authority_stands() {
     assert!(alice.pending.is_empty());
     alice.local = 17;
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
+    let id = alice.pending[0].entry.id;
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Gap { last: 1 })]) && f.is_empty(), "{s:?}");
-    let o = alice.step(down(&s[0]));
-    assert_eq!(
-        (alice.pending[0].entry.local, alice.local),
-        (2, 2),
-        "numbered on from the authority's last"
-    );
-    let (s, f) = deliver_up(&mut server, &who("alice"), &o);
-    assert!(matches!(verdicts(&s)[..], [Some(Verdict::Ok { seq: 2 })]), "{s:?}");
+    assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 2, last: 18 })]), "{s:?}");
     alice.step(down(&f[0]));
     alice.step(down(&s[0]));
+    assert_eq!(
+        (server.log().head().0, server.log().at(2).unwrap().entry.id),
+        (2, id),
+        "sequenced as it was numbered"
+    );
     assert!(alice.pending.is_empty() && alice.store == server.store);
     assert_eq!(pos_of(&alice.store, &pid(), "t1"), Some(1));
 }

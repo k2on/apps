@@ -41,7 +41,7 @@ fn bench_queries() {
     ];
     for (name, input) in &reads {
         let started = Instant::now();
-        let b = client.binding(name).unwrap();
+        let b = client.function(name).unwrap().name.clone();
         let v = crate::client::domain()
             .ask(&client.log.store, &client.ctx(), &b, input)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -142,7 +142,7 @@ fn views_at(copies: usize) {
         let started = Instant::now();
         let v = client.view(name, input).unwrap_or_else(|e| panic!("{name}: {e}"));
         let took = started.elapsed();
-        eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).len());
+        eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).unwrap_or_default().len());
     }
     let (mut toggle, mut describe) = (vec![], vec![]);
     for round in 0..ROUNDS * 2 {
@@ -379,15 +379,14 @@ fn bench_fill_driven() {
 
 fn fill(driven: bool) {
     use ark::frames::Frame;
-    use ark::peer::{Input, Output, Role};
+    use ark::peer::{Input, Output, Role, To};
     let Some(dir) = std::env::var_os("HARKEN_BENCH_LOG") else {
         return eprintln!("HARKEN_BENCH_LOG names no log");
     };
-    let m = ark_peer::Module::of(crate::client::domain());
+    let m = crate::client::domain();
     let mut server = ark_peer::Instance::open_under(m.schema.clone(), Box::new(ark_peer::Files::new(&dir).unwrap()));
     server.machine.role = Role::Authority { journal: Default::default() };
-    server.machine.functions = m.functions.clone();
-    server.machine.later = m.later().to_vec();
+    server.machine.domain = m.clone();
     let me = super::who("max");
     let peer = match driven {
         true => crate::peer::Peer::open(crate::client::memory(me.clone(), Some("dev"))),
@@ -397,14 +396,14 @@ fn fill(driven: bool) {
     let made: std::sync::Arc<std::sync::Mutex<Vec<super::Queues>>> = Default::default();
     app.peer.client.lock().connect_with("ws://queues", super::Queues::dialer(made.clone()));
     let _ = app.update(crate::Message::Due);
-    // Driven, the dial is the driver's, made on its thread.
+    // On its thread, the dial is the driver's, made on its thread.
     let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || !made.lock().unwrap().is_empty());
     let q = made.lock().unwrap()[0].clone();
     q.push(ark_peer::Event::Open);
     let (mut worst, mut total, mut wakes) = (Duration::ZERO, Duration::ZERO, 0);
     let t0 = Instant::now();
     for _ in 0..10_000 {
-        // Driven, the window wakes once its driver took in what came.
+        // On its thread, the window wakes once its driver took in what came.
         if driven {
             let head = server.log().head();
             let done = || {
@@ -428,14 +427,14 @@ fn fill(driven: bool) {
         }
         for b in sent {
             let Ok(f) = Frame::dec(&b) else { continue };
-            if f.space() != ark::schema::Space::Durable || matches!(f, Frame::Telemetry { .. }) {
+            if f.space() != ark::schema::Space::Durable || matches!(&f, Frame::Call { name, .. } if name == ark::frames::EVENTS) {
                 continue;
             }
             for o in server.machine.step(Input::Frame {
                 from: Some(me.clone()),
                 bytes: b,
             }) {
-                if let Output::Send(b) | Output::Fanout(b) = o {
+                if let Output::Send(To::Back | To::All, b) = o {
                     q.push(ark_peer::Event::Frame(b));
                 }
             }
@@ -467,7 +466,7 @@ fn bench_fold() {
     let mut replica = crate::client::open(Box::new(ark_peer::Files::new(&tmp).unwrap()), None, crate::listening::device());
     let head = replica.log.log().head().0;
     let t = Instant::now();
-    let _ = replica.log.step(ark::peer::Input::Compact(head));
+    let _ = replica.log.machine.compact(head);
     eprintln!("a fold at {head}: {:.1?}", t.elapsed());
     let t = Instant::now();
     let rows = replica.log.confirmed_rows();

@@ -25,8 +25,8 @@ fn config() -> Config {
 #[test]
 fn a_call_is_answered_to_its_caller_alone_and_logged_nowhere() {
     let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
-    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
-    let other = Peer::open(config(), dev("bob@phone").unwrap(), Box::new(Memory::default()), false);
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
+    let other = Peer::open(config(), dev("bob@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
     let seen = hub.accept(other.me().clone());
     d.connected();
@@ -61,7 +61,7 @@ fn a_call_is_answered_to_its_caller_alone_and_logged_nowhere() {
 #[test]
 fn a_function_the_server_has_not_is_none() {
     let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
-    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
     d.connected();
     d.take_frames();
@@ -77,7 +77,7 @@ fn a_function_the_server_has_not_is_none() {
 /// connection dropped is answered so, never sent again.
 #[test]
 fn a_call_is_never_kept_to_send_later() {
-    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     assert!(d.request("echo", vec![]).is_err(), "not linked");
     d.connected();
     d.take_frames();
@@ -144,7 +144,7 @@ fn a_call_goes_out_as_it_is_made() {
     });
     server.calls.insert("mark".into(), mark);
     let hub = Handle::spawn(Peer::serve(server, Box::new(Memory::default()), 0));
-    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()), false);
+    let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     d.set_token(Some("alice@phone".into()));
     d.connect_with("", hub.dialer(Arc::new(dev)));
     let up = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(5), || {

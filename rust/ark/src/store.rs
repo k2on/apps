@@ -28,23 +28,22 @@
 //! keyed by sequence, each row a [`Logged`]'s encoding. It is not the
 //! schema's — not in its hash or the state hash, not in a snapshot sent,
 //! not a table a function names, not in a store's equality — and its
-//! invariant is the chain: a row is added at either end only when it
-//! links onto its neighbour, removed only at either end, never edited
-//! ([`Store::apply_kv`]). The store's rows with the log's are what a peer
-//! makes durable ([`Store::kv_rows`]).
+//! invariant is the sequence: a row is added at the head only when it
+//! follows it, removed only at either end, never edited. On an authority
+//! it is also the chain ([`Log::chained`]); a replica holds the hashes it
+//! was sent. The store's rows with the log's are what a peer makes durable
+//! ([`Store::kv_rows`]).
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::format::{put_key, Encode};
+use crate::format::Encode;
 use crate::hash::{add256, sha256, sub256, EntryHash, SchemaHash, StateHash};
 use crate::log::{Logged, Rows as KvRows, Seq};
 use crate::schema::{Parsed, Schema, Space, Table};
-use crate::Refusal;
 
 /// The log's table (§1.6).
 pub const LOG: &str = "_log";
@@ -77,6 +76,20 @@ impl Change {
     pub fn table(&self) -> &str {
         match self {
             Change::Add { table, .. } | Change::Remove { table, .. } | Change::Edit { table, .. } => table,
+        }
+    }
+
+    /// The same change, each row as `f` makes it.
+    pub fn map(&self, mut f: impl FnMut(&[u8]) -> Vec<u8>) -> Change {
+        let table = self.table().to_string();
+        match self {
+            Change::Add { row, .. } => Change::Add { table, row: f(row) },
+            Change::Remove { row, .. } => Change::Remove { table, row: f(row) },
+            Change::Edit { old, new, .. } => Change::Edit {
+                table,
+                old: f(old),
+                new: f(new),
+            },
         }
     }
 
@@ -167,8 +180,8 @@ pub struct Store {
     shash: SchemaHash,
     tables: Vec<Rows>,
     space: Space,
-    /// The log's table: sequence's bytes to the row.
-    log: BTreeMap<Vec<u8>, LogRow>,
+    /// The log: the row it stands on, then its entries, in order.
+    log: Vec<Logged>,
 }
 
 impl PartialEq for Store {
@@ -178,109 +191,56 @@ impl PartialEq for Store {
 }
 impl Eq for Store {}
 
-/// Per table, the leaves undoing some changes adds to its digest and
-/// takes from it ([`Store::undo_of`]).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Undo(Vec<(usize, [u8; 32], [u8; 32])>);
-
-impl Undo {
-    /// Digests, in schema order, with the changes undone.
-    pub fn apply(&self, digests: &mut [[u8; 32]]) {
-        for (t, plus, minus) in &self.0 {
-            add256(&mut digests[*t], plus);
-            sub256(&mut digests[*t], minus);
-        }
-    }
-}
-
-/// The log as its table holds it, read (§1.6). Every peer's log stands on
-/// a first row; the entries are the rows after it.
-#[derive(Clone, Copy)]
-pub struct Log<'a>(&'a BTreeMap<Vec<u8>, LogRow>);
-
-/// A row of the log's table, and its sequence, state and hash, taken from
-/// the entry it was read or written as.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LogRow {
-    bytes: Vec<u8>,
-    ends: (Seq, StateHash, EntryHash),
-}
-
-impl LogRow {
-    fn of(l: &Logged, bytes: Vec<u8>) -> LogRow {
-        LogRow {
-            ends: (l.seq, l.state, l.hash),
-            bytes,
-        }
-    }
-}
-
-impl PartialEq for Log<'_> {
-    fn eq(&self, other: &Log) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl std::fmt::Debug for Log<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_list().entries(self.0.values().map(read)).finish()
-    }
-}
-
-fn read(b: &LogRow) -> Logged {
-    Logged::from_bytes(&b.bytes).expect("a row of the log reads")
-}
-
-/// A sequence's key in the log's table.
-fn seq_key(seq: Seq) -> Vec<u8> {
-    let mut k = vec![];
-    put_key(&seq, &mut k);
-    k
-}
+/// The log, read (§1.6): the row it stands on, then its entries, one per
+/// sequence.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Log<'a>(&'a [Logged]);
 
 impl<'a> Log<'a> {
     /// The row the log stands on.
     pub fn base(&self) -> Logged {
-        read(self.0.values().next().expect("a log stands on a row"))
+        self.0[0].clone()
     }
 
     pub fn base_seq(&self) -> Seq {
-        self.0.values().next().expect("a log stands on a row").ends.0
-    }
-
-    fn last(&self) -> (Seq, StateHash, EntryHash) {
-        self.0.values().next_back().expect("a log stands on a row").ends
+        self.0[0].seq
     }
 
     /// The last sequence and the chain's hash there.
     pub fn head(&self) -> (Seq, EntryHash) {
-        let (n, _, h) = self.last();
-        (n, h)
+        let l = self.0.last().expect("a log stands on a row");
+        (l.seq, l.hash)
     }
 
-    pub fn head_state(&self) -> StateHash {
-        self.last().1
+    fn index(&self, seq: Seq) -> Option<usize> {
+        usize::try_from(seq - self.base_seq()).ok().filter(|i| *i < self.0.len())
     }
 
     /// The entry at `seq`, above the row the log stands on.
     pub fn at(&self, seq: Seq) -> Option<Logged> {
-        (seq > self.base_seq()).then(|| self.0.get(&seq_key(seq)).map(read)).flatten()
+        self.index(seq).filter(|i| *i > 0).map(|i| self.0[i].clone())
     }
 
-    /// Whether this log has `hash` at `seq`: one history up to there.
-    pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        self.0.get(&seq_key(seq)).is_some_and(|b| b.ends.2 == *hash)
+    /// The chain's hash at `seq`, the row the log stands on or above it.
+    pub fn hash_at(&self, seq: Seq) -> Option<EntryHash> {
+        self.index(seq).map(|i| self.0[i].hash)
+    }
+
+    /// Whether each entry links onto the row before it: the chain, as an
+    /// authority holds it (a replica holds the hashes it was sent).
+    pub fn chained(&self) -> bool {
+        self.0.windows(2).all(|w| w[1].links(&w[0].hash))
     }
 
     /// The entries after `seq`, in order.
     pub fn after(&self, seq: Seq) -> impl Iterator<Item = Logged> + 'a {
-        let from = seq_key(seq.max(self.base_seq()));
-        self.0.range((Bound::Excluded(from), Bound::Unbounded)).map(|(_, b)| read(b))
+        let from = self.index(seq.max(self.base_seq())).map_or(self.0.len(), |i| i + 1);
+        self.0[from..].iter().cloned()
     }
 
     /// Every entry above the row the log stands on.
     pub fn entries(&self) -> Vec<Logged> {
-        self.after(Seq::MIN).collect()
+        self.0[1..].to_vec()
     }
 }
 
@@ -326,7 +286,7 @@ impl Store {
             schema,
             tables,
             space,
-            log: BTreeMap::new(),
+            log: vec![],
         }
     }
 
@@ -335,80 +295,59 @@ impl Store {
         Log(&self.log)
     }
 
-    /// One write to the store, the log's table's included: a row of the
-    /// schema's judged as [`Store::apply`] judges it, a row of the log's by
-    /// the chain — added at either end only when it links onto the row
-    /// beside it (any row starts an empty table), removed only at either
-    /// end, never edited.
-    pub fn apply_kv(&mut self, c: &Change) -> Result<(), Refusal> {
-        let row = match c {
-            _ if c.table() != LOG => return self.apply(c),
-            Change::Edit { .. } => return Err(Refusal::new("the log is not edited")),
-            Change::Add { row, .. } | Change::Remove { row, .. } => row,
-        };
-        let l = Logged::from_bytes(row)?;
-        let key = seq_key(l.seq);
-        let (first, last) = (self.log.first_key_value(), self.log.last_key_value());
-        let ok = match c {
-            Change::Add { .. } => match (first, last) {
-                (Some((_, f)), Some((_, b))) => {
-                    let (n, _, h) = b.ends;
-                    l.seq == n + 1 && l.links(&h) || read(f).seq == l.seq + 1 && read(f).links(&l.hash)
-                }
-                _ => true,
-            },
-            _ => self.log.get(&key).map(|r| &r.bytes) == Some(row) && (first.map(|f| f.0) == Some(&key) || last.map(|b| b.0) == Some(&key)),
-        };
-        if !ok {
-            return Err(Refusal(format!("{LOG}: entry {} is not an end of the chain", l.seq)));
-        }
-        match c {
-            Change::Add { .. } => {
-                self.log.insert(key, LogRow::of(&l, row.clone()));
-            }
-            _ => {
-                self.log.remove(&key);
-            }
-        }
-        Ok(())
-    }
-
-    /// The log's table emptied and these rows, in order, written to it.
-    pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), Refusal> {
+    /// The log emptied and these rows, in order, written to it: each after
+    /// the first the sequence after the one before it (§1.6).
+    pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), String> {
         self.log.clear();
-        rows.into_iter()
-            .try_for_each(|row| self.apply_kv(&Change::Add { table: LOG.into(), row }))
-    }
-
-    /// A logged entry appended as its row of the log's table, as a peer
-    /// opens its log (§1.6): the entry must link onto the head, and
-    /// `facts` — its own, as this store's schema reads them — apply, all or
-    /// none.
-    pub fn append(&mut self, l: &Logged, facts: &[Change]) -> Result<(), Refusal> {
-        let (n, h) = self.log().head();
-        if l.seq != n + 1 || !l.links(&h) {
-            return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
+        for row in rows {
+            let l = Logged::from_bytes(&row)?;
+            if let Some(b) = self.log.last().filter(|b| l.seq != b.seq + 1) {
+                return Err(format!("{LOG}: entry {} does not follow {}", l.seq, b.seq));
+            }
+            self.log.push(l);
         }
-        self.apply_all(facts)?;
-        self.log_push(l, l.to_bytes());
         Ok(())
     }
 
-    /// An entry added at the head of the log as its row, `row`, by a peer
-    /// that chained it onto the head, or checked that it links there.
-    pub(crate) fn log_push(&mut self, l: &Logged, row: Vec<u8>) {
-        self.log.insert(seq_key(l.seq), LogRow::of(l, row));
+    /// A logged entry appended, as a peer opens its log (§1.6): the entry
+    /// must follow the head, and its facts apply ([`Store::apply_facts`]).
+    pub fn append(&mut self, l: &Logged) -> Result<(), String> {
+        if l.seq != self.log().head().0 + 1 {
+            return Err(format!("{LOG}: entry {} does not follow the head", l.seq));
+        }
+        self.apply_facts(&l.facts)?;
+        self.log_push(l);
+        Ok(())
     }
 
-    /// The log's rows above `seq` deleted, newest first.
-    pub fn log_truncate(&mut self, seq: Seq) {
-        self.log.split_off(&seq_key(seq + 1));
+    /// Facts as some schema this one grows from or into wrote them, applied,
+    /// all or none (§1.2): as they are, or else each row read under this
+    /// one ([`Table::fit`]) and the changes to a table it lacks dropped.
+    /// What was applied.
+    pub fn apply_facts(&mut self, facts: &[Change]) -> Result<Vec<Change>, String> {
+        if self.apply_all(facts).is_ok() {
+            return Ok(facts.to_vec());
+        }
+        let fit = |c: &Change| {
+            let (_, t) = self.schema.table(c.table())?;
+            Some(c.map(|r| t.fit(r).unwrap_or_else(|_| r.to_vec())))
+        };
+        let fitted: Vec<Change> = facts.iter().filter_map(fit).collect();
+        self.apply_all(&fitted).map(|_| fitted)
+    }
+
+    /// An entry added at the head of the log by a peer that chained it
+    /// onto the head, or checked that it links there.
+    pub(crate) fn log_push(&mut self, l: &Logged) {
+        self.log.push(l.clone());
     }
 
     /// The horizon: the log's rows below `seq` deleted, so that it stands
     /// on the row there.
     pub fn log_horizon(&mut self, seq: Seq) {
-        self.log = self.log.split_off(&seq_key(seq));
+        if let Some(i) = self.log().index(seq) {
+            self.log.drain(..i);
+        }
     }
 
     pub fn space(&self) -> Space {
@@ -423,11 +362,8 @@ impl Store {
         self.shash
     }
 
-    fn find(&self, table: &str) -> Result<usize, Refusal> {
-        self.schema
-            .table(table)
-            .map(|(i, _)| i)
-            .ok_or_else(|| Refusal(format!("no table {table}")))
+    fn find(&self, table: &str) -> Result<usize, String> {
+        self.schema.table(table).map(|(i, _)| i).ok_or_else(|| format!("no table {table}"))
     }
 
     /// A table's rows in key order; none for a table the schema lacks.
@@ -436,6 +372,11 @@ impl Store {
             .ok()
             .into_iter()
             .flat_map(move |t| self.tables[t].rows.values().map(|r| &r[..]))
+    }
+
+    /// How many rows its tables hold, the log's not among them.
+    pub fn held(&self) -> usize {
+        self.tables.iter().map(|t| t.rows.len()).sum()
     }
 
     /// `sha256(table ‖ row)`, read as a 256-bit integer.
@@ -462,64 +403,21 @@ impl Store {
         self.hash_of(self.tables.iter().map(|r| r.digest))
     }
 
-    /// What undoing `changes` does to the tables' digests, summed per
-    /// table: worked out once for changes [`Store::hash_beside`] is asked
-    /// past many times.
-    pub fn undo_of<'a>(&self, changes: impl IntoIterator<Item = &'a Change>) -> Undo {
-        let mut u: Vec<(usize, [u8; 32], [u8; 32])> = vec![];
-        for c in changes {
-            let Ok(t) = self.find(c.table()) else { continue };
-            let i = u.iter().position(|x| x.0 == t).unwrap_or_else(|| {
-                u.push((t, [0; 32], [0; 32]));
-                u.len() - 1
-            });
-            let (_, plus, minus) = &mut u[i];
-            match c {
-                Change::Add { table, row } => add256(minus, &Store::leaf(table, row)),
-                Change::Remove { table, row } => add256(plus, &Store::leaf(table, row)),
-                Change::Edit { table, old, new } => {
-                    add256(minus, &Store::leaf(table, new));
-                    add256(plus, &Store::leaf(table, old));
-                }
-            }
-        }
-        Undo(u)
-    }
-
-    /// The state hash the store would have with `undone` undone, by the
-    /// digests' arithmetic alone: what a replica checks a confirmed state
-    /// by while its pending changes stay applied.
-    pub fn hash_beside<'a>(&self, undone: impl IntoIterator<Item = &'a Undo>) -> StateHash {
-        let mut ds = self.digests();
-        undone.into_iter().for_each(|u| u.apply(&mut ds));
-        self.hash_with(&ds)
-    }
-
-    /// The tables' digests, in schema order.
-    pub fn digests(&self) -> Vec<[u8; 32]> {
-        self.tables.iter().map(|r| r.digest).collect()
-    }
-
-    /// The state hash these digests, in schema order, give.
-    pub fn hash_with(&self, digests: &[[u8; 32]]) -> StateHash {
-        self.hash_of(digests.iter().copied())
-    }
-
     /// A row's key, and its entry in each of its table's indexes: what a
     /// read through the key or an index covers of it (§1.10).
-    pub fn paths_of(&self, table: &str, row: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), Refusal> {
+    pub fn paths_of(&self, table: &str, row: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>), String> {
         let p = self.schema.tables[self.find(table)?].parse(row)?;
         Ok((p.key, p.entries))
     }
 
     /// A row's key.
-    pub fn key_of(&self, table: &str, row: &[u8]) -> Result<Vec<u8>, Refusal> {
+    pub fn key_of(&self, table: &str, row: &[u8]) -> Result<Vec<u8>, String> {
         Ok(self.schema.tables[self.find(table)?].parse(row)?.key)
     }
 
     /// Applies one change, judging it: the row before must be what the
     /// change says, the row after canonical and within every constraint.
-    pub fn apply(&mut self, c: &Change) -> Result<(), Refusal> {
+    pub fn apply(&mut self, c: &Change) -> Result<(), String> {
         let schema = self.schema.clone();
         let t = self.find(c.table())?;
         let tab = &schema.tables[t];
@@ -532,7 +430,7 @@ impl Store {
         // An old row must be the one held, which is canonical: checked below.
         let parsed_old = old.map(|r| tab.parse_held(r)).transpose()?;
         let key = match (&parsed_new, &parsed_old) {
-            (Some(n), Some(o)) if n.key != o.key => return Err(Refusal(format!("{}: an edit keeps its key", tab.name))),
+            (Some(n), Some(o)) if n.key != o.key => return Err(format!("{}: an edit keeps its key", tab.name)),
             (Some(n), _) => &n.key,
             (None, Some(o)) => &o.key,
             _ => unreachable!(),
@@ -540,9 +438,9 @@ impl Store {
         match (self.tables[t].rows.get(key), old) {
             (Some(have), Some(o)) if have == o => {}
             (None, None) => {}
-            (Some(_), None) => return Err(Refusal(format!("{}: a row with this key exists", tab.name))),
-            (None, Some(_)) => return Err(Refusal(format!("{}: no row has this key", tab.name))),
-            (Some(_), Some(_)) => return Err(Refusal(format!("{}: the row is not the one the change replaces", tab.name))),
+            (Some(_), None) => return Err(format!("{}: a row with this key exists", tab.name)),
+            (None, Some(_)) => return Err(format!("{}: no row has this key", tab.name)),
+            (Some(_), Some(_)) => return Err(format!("{}: the row is not the one the change replaces", tab.name)),
         }
         match &parsed_new {
             Some(n) => self.judge(tab, n)?,
@@ -559,7 +457,7 @@ impl Store {
     }
 
     /// Applies changes in order, all or none.
-    pub fn apply_all(&mut self, cs: &[Change]) -> Result<(), Refusal> {
+    pub fn apply_all(&mut self, cs: &[Change]) -> Result<(), String> {
         for (i, c) in cs.iter().enumerate() {
             if let Err(e) = self.apply(c) {
                 self.undo(&cs[..i]).expect("an inverse applies");
@@ -571,7 +469,7 @@ impl Store {
 
     /// Changes made, undone: each one's inverse applied, newest first, up
     /// to the first that does not apply; the inverses, as applied.
-    pub fn undo<'c, I>(&mut self, cs: I) -> Result<Vec<Change>, Refusal>
+    pub fn undo<'c, I>(&mut self, cs: I) -> Result<Vec<Change>, String>
     where
         I: IntoIterator<Item = &'c Change>,
         I::IntoIter: DoubleEndedIterator,
@@ -580,7 +478,7 @@ impl Store {
     }
 
     /// Puts a row, adding it or replacing the one under its key.
-    pub fn put(&mut self, table: &str, row: Vec<u8>) -> Result<Change, Refusal> {
+    pub fn put(&mut self, table: &str, row: Vec<u8>) -> Result<Change, String> {
         let t = self.find(table)?;
         let key = self.schema.tables[t].parse(&row)?.key;
         let c = match self.tables[t].rows.get(&key) {
@@ -595,19 +493,19 @@ impl Store {
     }
 
     /// Deletes the row under `key`.
-    pub fn delete(&mut self, table: &str, key: &[u8]) -> Result<Change, Refusal> {
+    pub fn delete(&mut self, table: &str, key: &[u8]) -> Result<Change, String> {
         let t = self.find(table)?;
         let row = self.tables[t]
             .rows
             .get(key)
             .cloned()
-            .ok_or_else(|| Refusal(format!("{table}: no row has this key")))?;
+            .ok_or_else(|| format!("{table}: no row has this key"))?;
         let c = Change::Remove { table: table.into(), row };
         self.apply(&c).map(|_| c)
     }
 
     // The constraints on a row about to be written under its key.
-    fn judge(&self, tab: &Table, p: &Parsed) -> Result<(), Refusal> {
+    fn judge(&self, tab: &Table, p: &Parsed) -> Result<(), String> {
         let t = self.find(&tab.name)?;
         for (i, (ix, e)) in tab.indexes.iter().zip(&p.entries).enumerate() {
             let cols = &e[..e.len() - p.key.len()];
@@ -618,16 +516,13 @@ impl Store {
                     .any(|(_, k)| *k != p.key);
             if clash {
                 let names: Vec<&str> = ix.columns.iter().map(|c| &tab.columns[*c].name[..]).collect();
-                return Err(Refusal(format!("{}: another row has this ({})", tab.name, names.join(", "))));
+                return Err(format!("{}: another row has this ({})", tab.name, names.join(", ")));
             }
         }
         for r in &tab.refs {
             let Some(k) = p.named(tab, r.column)? else { continue };
             if !self.tables[self.find(&r.table)?].rows.contains_key(&k) {
-                return Err(Refusal(format!(
-                    "{}.{}: no {} has this key",
-                    tab.name, tab.columns[r.column].name, r.table
-                )));
+                return Err(format!("{}.{}: no {} has this key", tab.name, tab.columns[r.column].name, r.table));
             }
         }
         Ok(())
@@ -636,7 +531,7 @@ impl Store {
     // No row names this one, about to be removed, by a reference: through an
     // index the referring column leads, or the key when it leads it, or
     // else by reading the referring table.
-    fn unnamed(&self, tab: &Table, key: &[u8]) -> Result<(), Refusal> {
+    fn unnamed(&self, tab: &Table, key: &[u8]) -> Result<(), String> {
         for (rt, rows) in self.schema.tables.iter().zip(&self.tables) {
             for r in rt.refs.iter().filter(|r| r.table == tab.name) {
                 let opt = rt.columns[r.column].ty.is_option();
@@ -653,7 +548,7 @@ impl Store {
                 };
                 if hit {
                     let c = &rt.columns[r.column].name;
-                    return Err(Refusal(format!("{}: named by {}.{c}", tab.name, rt.name)));
+                    return Err(format!("{}: named by {}.{c}", tab.name, rt.name));
                 }
             }
         }
@@ -695,60 +590,36 @@ impl Store {
     /// last: what a peer makes durable whole.
     pub fn kv_rows(&self) -> KvRows {
         let mut rows = self.snapshot_rows();
-        rows.push((LOG.into(), self.log.values().map(|r| r.bytes.clone()).collect()));
+        rows.push((LOG.into(), self.log.iter().map(Encode::to_bytes).collect()));
         rows
     }
 
-    /// A store of `space` holding exactly these rows, as some schema of this
-    /// one wrote them (§1.2): each read as it is, and only when it is not
-    /// this schema's completed or cut to its prefix ([`Table::fit`]); a
-    /// table this schema lacks dropped; constraints judged once all are in,
-    /// so the order tables come in does not matter. And whether any was
-    /// another schema's (a table of this space missing counts). Each row is
-    /// parsed once, unless it is fitted.
-    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<(Store, bool), Refusal> {
-        Store::of_rows(schema, space, rows, true)
-    }
-
-    /// [`Store::from_rows`], its constraints judged or not: a replica's
-    /// filling holds rows whose neighbours are not all there yet.
-    pub(crate) fn of_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)], judged: bool) -> Result<(Store, bool), Refusal> {
+    /// A store of `space` holding exactly these rows, as some schema this
+    /// one grows from or into wrote them ([`Table::fit`]), each parsed once
+    /// unless fitted; constraints judged once all are in, so the order
+    /// tables come in does not matter.
+    pub fn from_rows(schema: Arc<Schema>, space: Space, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, String> {
         let mut s = Store::new(schema.clone(), space);
-        let mut other = schema.tables.iter().filter(|t| t.space == space).count() != rows.len();
         let mut parsed: Vec<Vec<Parsed>> = schema.tables.iter().map(|_| vec![]).collect();
         for (table, rs) in rows {
-            let t = match s.find(table) {
-                Err(_) => {
-                    other = true;
-                    continue;
-                }
-                t => t?,
-            };
-            let tab = &schema.tables[t];
+            // A table this schema lacks is a newer one's: none of its.
+            let Ok(t) = s.find(table) else { continue };
             for row in rs {
-                let (row, p) = match tab.parse(row) {
-                    Ok(p) => (Cow::Borrowed(&row[..]), p),
-                    Err(e) => {
-                        let (r, o) = tab.fit(row).map_err(|_| e)?;
-                        other |= o;
-                        let p = tab.parse(&r)?;
-                        (Cow::Owned(r), p)
-                    }
-                };
+                let (row, p) = schema.tables[t].parse_fit(row)?;
                 if s.tables[t].rows.contains_key(&p.key) {
-                    return Err(Refusal(format!("{table}: two rows have one key")));
+                    return Err(format!("{table}: two rows have one key"));
                 }
                 let key = p.key.clone();
                 s.write(t, &key, None, Some((&row, &p)));
                 parsed[t].push(p);
             }
         }
-        for (t, tab) in schema.tables.iter().enumerate().filter(|_| judged) {
+        for (t, tab) in schema.tables.iter().enumerate() {
             for p in &parsed[t] {
                 s.judge(tab, p)?;
             }
         }
-        Ok((s, other))
+        Ok(s)
     }
 
     /// Every row of `table` in key order from `from` on, each with its key.
@@ -761,71 +632,41 @@ impl Store {
         })
     }
 
-    /// The rows of `table` from `from` to `to` (none: its end) replaced by
-    /// `rows`, as some schema of this one wrote them, judging nothing: how a
-    /// replica filling holds a range it was sent, whose neighbours it may
-    /// not hold yet. What moved, as changes; and whether a row was another
-    /// schema's. A table this schema lacks is none of its.
-    pub(crate) fn replace(&mut self, table: &str, from: &[u8], to: Option<&[u8]>, rows: &[Vec<u8>]) -> Result<(Vec<Change>, bool), Refusal> {
-        let Ok(t) = self.find(table) else {
-            return Ok((vec![], true));
-        };
-        let schema = self.schema.clone();
-        let tab = &schema.tables[t];
-        let mut other = false;
-        let mut sent = BTreeMap::new();
-        for row in rows {
-            let (row, p) = match tab.parse(row) {
-                Ok(p) => (row.clone(), p),
-                Err(e) => {
-                    let (r, o) = tab.fit(row).map_err(|_| e)?;
-                    other |= o;
-                    let p = tab.parse(&r)?;
-                    (r, p)
-                }
-            };
-            sent.insert(p.key.clone(), (row, p));
-        }
-        let hi = to.map_or(Bound::Unbounded, Bound::Excluded);
-        let held: Vec<Vec<u8>> = self.tables[t]
-            .rows
-            .range::<[u8], _>((Bound::Included(from), hi))
-            .map(|(k, _)| k.clone())
-            .filter(|k| !sent.contains_key(k))
-            .collect();
-        let mut out = vec![];
-        for k in held {
-            out.extend(self.force(t, &k, None)?);
-        }
-        for (k, row) in sent {
-            out.extend(self.force(t, &k, Some(row))?);
-        }
-        Ok((out, other))
+    /// `rows` of `table` put, each under its key, judging nothing: how a
+    /// replica filling holds the rows it was sent, whose neighbours it may
+    /// not hold yet. What moved, as changes.
+    pub(crate) fn put_rows(&mut self, table: &str, rows: &[Vec<u8>]) -> Result<Vec<Change>, String> {
+        rows.iter().filter_map(|r| self.force_row(table, r, false).transpose()).collect()
     }
 
     /// Changes applied as they are, judging nothing but each row's bytes:
     /// an `Add` or an `Edit` puts its row, a `Remove` takes its key's away,
     /// whatever was held — how a replica filling takes an entry's facts
     /// over rows it may not all hold yet. What moved, as changes.
-    pub(crate) fn force_all(&mut self, cs: &[Change]) -> Result<Vec<Change>, Refusal> {
-        let mut out = vec![];
-        for c in cs {
-            let Ok(t) = self.find(c.table()) else { continue };
-            let tab = &self.schema.tables[t];
+    pub(crate) fn force_all(&mut self, cs: &[Change]) -> Result<Vec<Change>, String> {
+        let force = |c: &Change| {
             let (row, gone) = match c {
                 Change::Add { row, .. } | Change::Edit { new: row, .. } => (row, false),
                 Change::Remove { row, .. } => (row, true),
             };
-            let p = tab.parse(row)?;
-            let key = p.key.clone();
-            out.extend(self.force(t, &key, (!gone).then(|| (row.clone(), p)))?);
-        }
-        Ok(out)
+            self.force_row(c.table(), row, gone).transpose()
+        };
+        cs.iter().filter_map(force).collect()
+    }
+
+    // A row as some schema of this one wrote it ([`Table::fit`]) written
+    // under its key — or, `gone`, its key's row taken away — judging
+    // nothing; a table this schema lacks is none of its.
+    fn force_row(&mut self, table: &str, row: &[u8], gone: bool) -> Result<Option<Change>, String> {
+        let Ok(t) = self.find(table) else { return Ok(None) };
+        let (row, p) = self.schema.tables[t].parse_fit(row)?;
+        let key = p.key.clone();
+        self.force(t, &key, (!gone).then_some((row, p)))
     }
 
     // A key's row written as `row`, parsed already (none: gone), judging
     // nothing; the change, when one was made.
-    fn force(&mut self, t: usize, key: &[u8], new: Option<(Vec<u8>, Parsed)>) -> Result<Option<Change>, Refusal> {
+    fn force(&mut self, t: usize, key: &[u8], new: Option<(Vec<u8>, Parsed)>) -> Result<Option<Change>, String> {
         let schema = self.schema.clone();
         let tab = &schema.tables[t];
         let old = self.tables[t].rows.get(key).cloned();

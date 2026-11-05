@@ -204,11 +204,6 @@ private class Held<T>(private val view: View<T>) : AutoCloseable {
                 rows.splice(u.changes)
                 true
             }
-            is Update.Reset -> {
-                rows.clear()
-                rows.addAll(u.rows)
-                true
-            }
         }
 
     override fun close() = view.close()
@@ -358,7 +353,7 @@ private constructor(
         for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
         for ((h, _) in items.values) h.settle()
         for ((h, _) in registers.values) h.settle()
-        for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
+        for (r in peer.takeRefusals()) say("The server didn't take a change: ${r.refused}")
         awaiting?.let { w ->
             when (val f = follow(asks?.rows.orEmpty(), w.after)) {
                 is Follow.Open -> {
@@ -387,7 +382,7 @@ private constructor(
                 banks = banks?.rows?.toList().orEmpty(),
                 linked = linked?.rows?.toList().orEmpty(),
                 asks = asks?.rows?.toList().orEmpty(),
-                link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
+                link = Link(s.linked, s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
                 demo = demo,
                 server = server,

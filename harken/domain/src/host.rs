@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 
-use ark::peer::Who;
 use ark::plan::rows;
 use ark::row::Value;
 use ark::store::Read;
@@ -20,15 +19,6 @@ pub const UNSAID_VOLUME: i64 = 100;
 /// before one is put right (`report_position`): 600 ms, the grain of the
 /// coarsest output (a speaker read through Home Assistant).
 pub const SYNC_MS: i64 = 600;
-
-/// What a server authors `on_join` and `on_leave` with: what the device
-/// said it is, its user and its id the verified login's — a device is a
-/// session. What a device says that does not read as a device is no device.
-pub fn arrive(who: &Who, said: &[u8]) -> Option<Vec<u8>> {
-    let d = Device::decode(said).ok()?;
-    let (user, id) = (who.actor.clone(), who.session.clone());
-    Some(Device { user, id, ..d }.encode())
-}
 
 /// `keys::work_key`: a work's key, from its composer, catalogue number and
 /// title, trimmed as `add_song` trims them.
@@ -121,7 +111,7 @@ impl Active {
 
 impl LibraryEntry {
     /// The rows of a query's answer, a list of entries.
-    pub fn list(bytes: &[u8]) -> Result<Vec<LibraryEntry>, ark::Refusal> {
+    pub fn list(bytes: &[u8]) -> Result<Vec<LibraryEntry>, String> {
         Vec::<LibraryEntry>::decode(bytes)
     }
 

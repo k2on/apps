@@ -5,31 +5,30 @@
 
 use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
-use ark::peer::{Functions, Input, Journal, Output, Peer, Role, Who};
+use std::sync::Arc;
+
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
 use ark::store::Change;
+use ark::Domain;
 
-pub fn who(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+pub fn who(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
-pub fn replica(name: &str, cas: Functions) -> Peer {
-    Peer::new(super::super::demo::shared(), cas, Role::Replica, who(name))
+pub fn replica(name: &str, cas: Arc<Domain>) -> Peer {
+    Peer::new(cas, Role::Replica, who(name))
 }
 
-pub fn authority(cas: Functions) -> Peer {
+pub fn authority(cas: Arc<Domain>) -> Peer {
     let role = Role::Authority { journal: Journal::default() };
-    Peer::new(super::super::demo::shared(), cas, role, who("server"))
+    Peer::new(cas, role, who("server"))
 }
 
 fn frames(outs: &[Output], fanout: bool) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(b) if !fanout => Some(Frame::dec(b).unwrap()),
-            Output::Fanout(b) if fanout => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back, b) if !fanout => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::All, b) if fanout => Some(Frame::dec(b).unwrap()),
             _ => None,
         })
         .collect()
@@ -67,7 +66,7 @@ pub fn down(f: &Frame) -> Input {
 }
 
 /// A frame from a connection verified as `w`, to an authority.
-pub fn up(w: &Who, f: &Frame) -> Input {
+pub fn up(w: &Ctx, f: &Frame) -> Input {
     Input::Frame {
         from: Some(w.clone()),
         bytes: f.enc(),
@@ -93,7 +92,7 @@ pub fn logged(f: &Frame) -> Logged {
 
 /// Every frame a step sent upstream delivered to the authority as `w`; what
 /// the authority says back, sends then fanouts.
-pub fn deliver_up(server: &mut Peer, w: &Who, outs: &[Output]) -> (Vec<Frame>, Vec<Frame>) {
+pub fn deliver_up(server: &mut Peer, w: &Ctx, outs: &[Output]) -> (Vec<Frame>, Vec<Frame>) {
     let (mut s, mut f) = (vec![], vec![]);
     for frame in sends(outs) {
         let o = server.step(up(w, &frame));

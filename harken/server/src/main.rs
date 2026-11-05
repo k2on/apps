@@ -22,7 +22,7 @@ Everything else is the environment:
   HARKEN_DATA  HARKEN_PUBLIC_URL  HARKEN_REDIRECTS  HARKEN_PICTURE_HOSTS  HARKEN_MEDIA  HARKEN_CATALOGUE
   HARKEN_WEB  HARKEN_WEB_MODULE
   HARKEN_HA_URL + HARKEN_HA_TOKEN_FILE + HARKEN_HA_PLAYERS  HARKEN_HA_MEDIA
-  HARKEN_KEEPALIVE_MS  HARKEN_KEEPALIVE_MISSED  HARKEN_ROLES";
+  HARKEN_KEEPALIVE_MS  HARKEN_ROLES";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -42,11 +42,8 @@ async fn main() -> Result<()> {
     // The system's events, this server's and every device's, in the data
     // directory: what `arkdb` reads (docs/plan-observe.md).
     let events = config.data.join("events");
-    match ark_peer::observe::Files::new(&events) {
-        Ok(f) => drop(ark_peer::observe::install(ark_peer::observe::Sink::Files(
-            std::sync::Mutex::new(f),
-        ))),
-        Err(e) => eprintln!("harken-server: no events kept: {}: {e}", events.display()),
+    if let Err(e) = ark_peer::observe::install(ark_peer::observe::Sink::Files(events.clone())) {
+        eprintln!("harken-server: no events kept: {}: {e}", events.display());
     }
     eprintln!("harken-server: events in {}", events.display());
     let server = start(config).await?;

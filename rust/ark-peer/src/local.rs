@@ -1,97 +1,99 @@
-//! What a peer keeps beside its log, as rows (§1.3, §1.7, §1.9): the
-//! schema [`Local`], on a local instance under the `local.` names of the
-//! peer's disk ([`Shared`]): a server's journal — each origin's last
-//! `local` and actor (`origin`), the intents it refused (`verdict`) — and
-//! its volatile space as it
-//! last closed (`volatile`); a device's replica (`replica`: its origin,
-//! the last `local` drawn, who last signed in, its fork) and its pending intents (`pending`). And an app's logins
-//! ([`Logins`]), a local instance of `ark-auth`'s schema.
+//! What a peer keeps beside its log, each a record under the `local.`
+//! names of the peer's disk (`Shared`): a device's replica ([`Replica`],
+//! `local.replica`: its origin, the last `local` drawn, who last signed
+//! in, how many times it opened) and its pending intents, records appended
+//! ([`Kept`], `local.pending`); a server's journal and its volatile space
+//! as it last closed, each one record (`local.journal`, `local.volatile`,
+//! `crate::hub`). And an app's logins ([`Logins`]), an instance of
+//! `ark-auth`'s schema of its own.
 
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use ark::db::{Db, Durable as Run};
+use ark::db::Durable as Run;
+use ark::format::Encode;
 use ark::hash::EntryHash;
-use ark::log::{Entry, EntryId, Origin, Seq};
-use ark::prelude::{Deserialize, Row, Schema, Serialize};
-use ark::row::Bytes;
+use ark::log::Logged;
+use ark::log::{Origin, Seq};
+use ark::prelude::{Deserialize, Serialize};
 use ark_auth::remember::Remembered;
 
 use crate::{Disk, Instance};
 
-/// A server's: an origin's last `local` judged, and the actor it is bound
-/// to.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "origin")]
-pub struct Last {
-    #[ark(key)]
-    pub origin: Origin,
-    pub actor: String,
-    pub last: i64,
-}
-
-/// A server's: an intent it refused, and why.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "verdict")]
-pub struct Refused {
-    #[ark(key)]
-    pub entry: EntryId,
-    pub why: String,
-}
-
-/// A server's: a row of its volatile space (its log's row among them) as
-/// it stood when the server last closed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "volatile")]
-pub struct LiveRow {
-    #[ark(key)]
-    pub table: String,
-    #[ark(key)]
-    pub row: Bytes,
-}
-
-/// A device's, one row: its origin and the last `local` drawn from it,
-/// who last signed in on it, and its fork while alone.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "replica")]
+/// A device's, one record: its origin and the last `local` drawn from it
+/// (as it was signed in: [`Kept`] has it since), who last signed in on it,
+/// and how many times it has opened — what its live machine's origin is
+/// drawn from at each.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Replica {
-    /// Always 0: a disk is one replica.
-    #[ark(key)]
-    pub n: i64,
     /// Drawn at the first open; the default until then.
     pub origin: Origin,
     pub local: i64,
     pub actor: Option<String>,
     pub session: String,
-    pub fork: Option<(Seq, EntryHash)>,
+    pub opens: u64,
 }
 
-/// A device's: one of its own intents not yet confirmed, by its `local`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(table = "pending")]
-pub struct Intent {
-    #[ark(key)]
+/// The blob a device's replica is kept in, under [`LOCAL`].
+pub const REPLICA: &str = "replica";
+
+impl Replica {
+    /// What `disk` (the peer's, under [`LOCAL`]) holds; none, or one that
+    /// does not read, the default.
+    pub fn read(disk: &mut dyn Disk) -> Replica {
+        disk.get(REPLICA)
+            .ok()
+            .flatten()
+            .and_then(|b| Replica::from_bytes(&b).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// The blob a device's pending intents are kept in, under [`LOCAL`].
+pub const PENDING: &str = "pending";
+
+/// One record of a device's pending intents (§1.7), length-framed in
+/// [`PENDING`]: so many taken off the front (confirmed or refused), these
+/// put on the back, each with its preview's changes — or, `whole`, these
+/// all of them, the blob written afresh; with the last `local` drawn and
+/// the head of the log the changes stand on. A mutate appends one put, so
+/// what it writes is the same however many are pending; an open puts the
+/// changes back rather than running the intents again.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Kept {
+    pub whole: bool,
+    pub gone: u64,
+    pub put: Vec<Logged>,
     pub local: i64,
-    pub entry: Entry,
+    pub at: Option<(Seq, EntryHash)>,
 }
 
-/// What a peer keeps beside its log.
-#[derive(Schema)]
-pub struct Local {
-    pub origin: Last,
-    pub verdict: Refused,
-    pub volatile: LiveRow,
-    pub replica: Replica,
-    pub pending: Intent,
+impl Kept {
+    /// The pending intents the records in `blob` keep, read up to the first
+    /// that does not read; the last of them, and how many there are.
+    pub fn read(blob: &[u8]) -> (Vec<Logged>, Kept, usize) {
+        let (mut pending, mut last) = (std::collections::VecDeque::new(), Kept::default());
+        let records = crate::disk::framed::<Kept>(blob).0;
+        let n = records.len();
+        for k in records {
+            if k.whole {
+                pending.clear();
+            }
+            pending.drain(..(k.gone as usize).min(pending.len()));
+            pending.extend(k.put.iter().cloned());
+            last = Kept { put: vec![], ..k };
+        }
+        (pending.into(), last, n)
+    }
 }
 
-/// The names a peer's local instance journals under on its disk.
+/// The names a peer keeps its records beside its log under, on its disk.
 pub const LOCAL: &str = "local.";
 
 /// One disk's blobs shared, each holder under a prefix of their names: how
-/// a peer's local instance keeps its journal on the disk its log is on.
+/// a peer keeps its records beside its log on the disk its log is on.
 #[derive(Clone)]
-pub struct Shared {
+pub(crate) struct Shared {
     disk: Arc<Mutex<Box<dyn Disk>>>,
     prefix: String,
 }
@@ -132,57 +134,21 @@ impl Disk for Shared {
     }
 }
 
-/// A peer's disk, shared with its local instance.
-pub(crate) fn beside(disk: Box<dyn Disk>) -> (Box<dyn Disk>, Instance) {
+/// A peer's disk, and the same disk under [`LOCAL`]: what it keeps beside
+/// its log.
+pub(crate) fn beside(disk: Box<dyn Disk>) -> (Box<dyn Disk>, Box<dyn Disk>) {
     let shared = Shared::new(disk);
-    let local = Instance::open::<Local>(Box::new(shared.under(LOCAL)));
+    let local = Box::new(shared.under(LOCAL));
     (Box::new(shared), local)
 }
 
-/// A device's replica row, as its disk holds it.
-pub fn replica(db: &Db<Local>) -> Option<Replica> {
-    db.replica.get(0)
-}
-
-/// A device's replica row on `disk` said beforehand, as `f` changes it —
-/// what a simulator seeds, or a demo: the rest of what the disk's local
-/// instance holds is kept.
+/// A device's replica on `disk` said beforehand, as `f` changes it — what
+/// a simulator seeds, or a demo.
 pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<()> {
-    edit(disk, |db| {
-        let mut r = replica(db).unwrap_or_default();
-        f(&mut r);
-        db.replica.put(r)
-    })
-}
-
-/// A server's journal on `disk` told each origin's last `local` and actor
-/// in `last`, where it is past what the journal says: what a log about to
-/// lose its entries keeps of them, as a horizon moving does.
-pub fn passed(disk: &mut dyn Disk, last: impl IntoIterator<Item = (Origin, String, i64)>) -> io::Result<()> {
-    edit(disk, |db| {
-        for (origin, actor, local) in last {
-            if db.origin.get(&origin).is_none_or(|l| l.last < local) {
-                db.origin.put(Last { origin, actor, last: local })?;
-            }
-        }
-        Ok(())
-    })
-}
-
-/// The local instance on `disk`, as `f` changes it.
-fn edit(disk: &mut dyn Disk, f: impl for<'t> FnOnce(&mut Db<'t, Local>) -> Result<(), ark::prelude::Refusal>) -> io::Result<()> {
-    let names = [format!("{LOCAL}kv"), format!("{LOCAL}log")];
-    let mut held = crate::Memory::default();
-    for n in &names {
-        disk.get(n)?.map_or(Ok(()), |b| held.put(n, &b))?;
-    }
-    let mut local = Instance::open::<Local>(Box::new(Shared::new(Box::new(held)).under(LOCAL)));
-    local.write::<Local, Run, _>(f).map_err(|r| io::Error::other(r.0))?;
-    let mut held = local.into_disk();
-    for n in ["kv", "log"] {
-        held.get(n)?.map_or(Ok(()), |b| disk.put(&format!("{LOCAL}{n}"), &b))?;
-    }
-    Ok(())
+    let name = format!("{LOCAL}{REPLICA}");
+    let mut r = disk.get(&name)?.and_then(|b| Replica::from_bytes(&b).ok()).unwrap_or_default();
+    f(&mut r);
+    disk.put(&name, &r.to_bytes())
 }
 
 /// Where one app's logins are remembered, one per server: `ark-auth`'s

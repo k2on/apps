@@ -362,10 +362,8 @@ class Screens {
                 epoch = 3u,
                 cursor = 1287,
                 pending = 2u,
-                joining = false,
                 user = "ana",
                 session = "s-7f3a",
-                alone = false,
                 failure = null,
                 denied = null,
             )

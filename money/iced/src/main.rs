@@ -604,7 +604,7 @@ impl App {
     /// signed in again (once).
     pub fn wake(&mut self) -> Task<Message> {
         let p = self.peer.client.pump();
-        for (_, why) in self.peer.client.take_rejections() {
+        for (_, why) in self.peer.client.take_refusals(ark::schema::Space::Durable) {
             self.note = format!("the server refused a change: {why}");
         }
         self.peer.refresh();
@@ -635,7 +635,7 @@ impl App {
                 false
             }
         };
-        for (_, why) in self.peer.client.take_rejections() {
+        for (_, why) in self.peer.client.take_refusals(ark::schema::Space::Durable) {
             self.note = format!("could not {what}: {why}");
         }
         self.peer.refresh();

@@ -57,7 +57,7 @@ use crate::domain::{
 };
 use anyhow::{Context, Result};
 use ark::format::Encode;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
@@ -228,16 +228,12 @@ impl Scanner {
         roles.push(crate::domain::LIBRARY.to_string());
         roles.sort();
         roles.dedup();
-        let who = Who {
-            actor: login.user.id.clone(),
-            session: login.session.clone(),
-            roles,
-        };
+        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
         let config = Config::of(hosted.domain.clone());
-        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk), false);
+        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk));
         // Each start is a login of its own: what the replica kept pending
         // is authored again under it, from its session's first `local`,
         // or the hub would hold the first entry for the ones before it.
@@ -475,7 +471,7 @@ impl Prints {
             }
             Ok(())
         });
-        if let Some(e) = kept.err().map(|r| r.0).or(self.local.failure.clone()) {
+        if let Some(e) = kept.err().or(self.local.failure.clone()) {
             eprintln!("harken-server: library: cannot keep the prints: {e}");
         }
     }
@@ -693,7 +689,7 @@ impl Scan {
 /// out loud.
 fn pump(peer: &mut ark_peer::Peer) {
     peer.pump();
-    for (_, why) in peer.take_rejections() {
+    for (_, why) in peer.take_refusals(ark::schema::Space::Durable) {
         eprintln!("harken-server: library: an entry was refused: {why}");
     }
 }
@@ -956,7 +952,7 @@ fn author_one(peer: &mut ark_peer::Peer, name: &str, what: &str, input: Vec<u8>)
     if !would_change(peer, name, &input) {
         return false;
     }
-    match peer.mutate_bytes(name, input) {
+    match peer.mutate(name, input) {
         Ok(_) => true,
         Err(why) => {
             eprintln!("harken-server: library: {what} ({name}) was refused: {why}");
@@ -979,7 +975,7 @@ fn author(peer: &mut ark_peer::Peer, plan: &crate::sync::Plan) -> (usize, bool) 
             Would::Refuse if call.if_there => continue,
             Would::Change | Would::Refuse => {}
         }
-        match peer.mutate_bytes(call.name, call.input.clone()) {
+        match peer.mutate(call.name, call.input.clone()) {
             Ok(_) => authored += 1,
             Err(why) => eprintln!(
                 "harken-server: {}: {} ({}) was refused: {why}",
@@ -1047,13 +1043,14 @@ fn would(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> Would {
     let me = &peer.log.me;
     let ctx = Ctx {
         id: peer.log.next_id(),
-        ..Ctx::new(me, ark_peer::now_ms())
+        now: ark_peer::now_ms(),
+        ..me.clone()
     };
     let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
         return Would::Change;
     };
     let mut store = peer.log.store.clone();
-    match f.apply(&mut store, &ctx, input) {
+    match f(&mut store, &ctx, input) {
         Ok(changes) if changes.is_empty() => Would::Nothing,
         Ok(_) => Would::Change,
         Err(_) => Would::Refuse,
@@ -1213,7 +1210,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         scan.prints.set(print);
         return Offered::Read;
     }
-    match peer.mutate_bytes(ADD_SONG, call) {
+    match peer.mutate(ADD_SONG, call) {
         Ok(_) => {
             scan.prints.set(print);
             Offered::Authored
@@ -1301,7 +1298,7 @@ fn offer_episode(
         if !would_change(peer, name, &input) {
             continue;
         }
-        match peer.mutate_bytes(name, input) {
+        match peer.mutate(name, input) {
             Ok(_) => authored = true,
             Err(why) => {
                 eprintln!(

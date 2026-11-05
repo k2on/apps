@@ -61,10 +61,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark_auth::Login;
-use ark_peer::{Handle, Memory, Peer, Standing};
+use ark_peer::{Handle, Memory, Peer};
 use money_domain::plaid::import_of;
 use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
 
@@ -174,16 +174,12 @@ impl Importer {
         roles.push(money_domain::BANK.to_string());
         roles.sort();
         roles.dedup();
-        let who = Who {
-            actor: login.user.id.clone(),
-            session: login.session.clone(),
-            roles,
-        };
+        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
         // In memory: what it holds is the hub's, filled at every start, and
         // an import it had not seen confirmed is pulled again from the
         // cursor kept, rather than pushed again from a disk.
         let config = ark_peer::Config::of(money_domain::shared());
-        let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()), false);
+        let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()));
         peer.sign_in(who.clone());
         let token = login.token.clone();
         let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
@@ -336,14 +332,14 @@ impl Job {
         if let Some(why) = p.denied {
             self.say(format!("the hub turned the importer's sign-in away: {why}"));
         }
-        for (_, why) in self.peer.take_rejections() {
+        for (_, why) in self.peer.take_refusals(ark::schema::Space::Durable) {
             self.say(format!("refused: {why}"));
         }
     }
 
     /// A read of what the importer holds.
     fn read<T>(&self, f: impl FnOnce(&ark::db::Db<money_domain::Money>) -> T) -> Option<T> {
-        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, ark::Refusal>(f(db))).ok()
+        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, String>(f(db))).ok()
     }
 
     /// The day of the first transaction any bank brought; none before one
@@ -934,25 +930,22 @@ impl Job {
     /// A mutation authored, and waited for until the hub confirms it — on
     /// its disk — or refuses it.
     fn author(&mut self, name: &str, input: &impl Encode) -> Result<()> {
-        let id = self
-            .peer
-            .mutate_bytes(name, input.to_bytes())
-            .map_err(|why| anyhow!("refused here: {why}"))?;
+        let id = self.peer.mutate(name, input.to_bytes()).map_err(|why| anyhow!("refused here: {why}"))?;
         let mut why = None;
         let held = ark_peer::link::until(CONFIRM, Duration::from_millis(0), || {
             ark_peer::link::wait(&self.peer, &self.rx, Duration::from_millis(50));
             let p = self.peer.pump();
-            for (r, w) in self.peer.take_rejections() {
+            for (r, w) in self.peer.take_refusals(ark::schema::Space::Durable) {
                 if r == id {
                     why = Some(w);
                 }
             }
             drop(p);
-            !matches!(self.peer.standing(&id), Standing::Pending)
+            !matches!(self.peer.outcome(&id), Some(ark_peer::Outcome::Pending))
         });
-        match (held, self.peer.standing(&id), why) {
-            (_, Standing::Confirmed, _) => Ok(()),
-            (_, Standing::Rejected(w), _) | (_, _, Some(w)) => bail!("the hub refused it: {w}"),
+        match (held, self.peer.outcome(&id), why) {
+            (_, Some(ark_peer::Outcome::Ok), _) => Ok(()),
+            (_, Some(ark_peer::Outcome::Refused(w)), _) | (_, _, Some(w)) => bail!("the hub refused it: {w}"),
             (false, ..) => bail!("the hub did not confirm it within {}s", CONFIRM.as_secs()),
             (true, s, None) => bail!("it stands {s:?}"),
         }

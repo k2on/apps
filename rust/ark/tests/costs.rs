@@ -1,6 +1,6 @@
 //! What the machine's paths cost, held as bounds rather than printed: the
-//! allocations a `Batch` of a page takes to decode and a step of a peer
-//! alone takes as its log grows, and what one change against each of
+//! allocations a `Batch` of a page takes to decode and an authority's step
+//! of its own takes as its log grows, and what one change against each of
 //! three maintained views reads and allocates as its store grows — the
 //! counts sixteen times apart the same. Over the demo of `tests/demo.rs`,
 //! driven through [`Peer::step`] with frames as bytes. Allocations are
@@ -22,8 +22,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ark::frames::Frame;
-use ark::log::{Entry, EntryId, Logged, Origin, Seq};
-use ark::peer::{Ctx, Input, Output, Peer, Role, Who, PAGE};
+use ark::log::{EntryId, Logged, Origin, Seq};
+use ark::peer::{Ctx, Output, Peer, Role};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::{Change, Store};
@@ -66,12 +66,8 @@ fn allocs<T>(f: impl FnOnce() -> T) -> (T, usize) {
 
 // The demo, driven ---------------------------------------------------------------------
 
-fn who(actor: &str, session: &str) -> Who {
-    Who {
-        actor: actor.into(),
-        session: session.into(),
-        roles: vec![],
-    }
+fn who(actor: &str, session: &str) -> Ctx {
+    Ctx::who(actor, session, vec![])
 }
 
 /// A log an authority sequenced from one author: `playlists` playlists,
@@ -82,8 +78,8 @@ fn log(playlists: u64, n: u64) -> Peer {
     let mut local = 0;
     let mut push = |a: &mut Peer, name: &str, input: Vec<u8>| {
         local += 1;
-        let entry = Entry::new(&me, Origin::named(&me.session), local, name.to_string(), input, local);
-        a.step(up(&me, &Frame::push(Space::Durable, [entry])));
+        let entry = Ctx::new(&me, Origin::named(&me.session), local, name.to_string(), input, local);
+        a.step(up(&me, &Frame::push(Space::Durable, 0, [entry])));
     };
     for j in 0..playlists {
         push(&mut a, CREATE, create_input(&format!("P{j}")));
@@ -96,6 +92,10 @@ fn log(playlists: u64, n: u64) -> Peer {
     a
 }
 
+/// Entries a page of the log carries here: about what one of `PART` bytes
+/// carries of the demo's.
+const PAGE: usize = 256;
+
 /// A page of the log as the `Batch` a replica is sent.
 fn page(a: &Peer) -> Frame {
     let logged: Vec<Logged> = a.log().entries();
@@ -107,11 +107,11 @@ fn page(a: &Peer) -> Frame {
     }
 }
 
-/// A peer alone holding `n` adds over `playlists` playlists, and the
-/// input of its next add.
-fn alone(playlists: u64, n: u64) -> (Peer, impl FnMut(&mut Peer) -> Vec<Output>) {
-    let mut p = Peer::new(shared(), cas(), Role::Replica, who("me", "me-local"));
-    p.step(Input::Alone);
+/// An authority holding `n` adds of its own over `playlists` playlists,
+/// and the input of its next add.
+fn own(playlists: u64, n: u64) -> (Peer, impl FnMut(&mut Peer) -> Vec<Output>) {
+    let role = Role::Authority { journal: Default::default() };
+    let mut p = Peer::new(cas(), role, who("me", "me-local"));
     for j in 0..playlists {
         p.step(support::wire::mutate(CREATE, create_input(&format!("P{j}")), 0));
     }
@@ -141,25 +141,25 @@ fn a_page_decodes_in_bounded_allocations() {
     assert!(dec <= 12 * PAGE, "a page decoded in {dec} allocations");
     assert!(enc <= 32, "a page encoded in {enc} allocations");
     let Frame::Page { logged, .. } = &f else { unreachable!() };
-    let push = Frame::push(Space::Durable, [logged[0].entry.clone()]).enc();
+    let push = Frame::push(Space::Durable, 0, [logged[0].entry.clone()]).enc();
     let (_, one) = allocs(|| Frame::dec(&push).unwrap());
     assert!(one <= 16, "a push decoded in {one} allocations");
 }
 
-/// A peer alone's step of an add allocates no more over a log of 8,000
+/// An authority's step of an add of its own allocates no more over a log of 8,000
 /// than over one of 500 (at most 128 either way; 115 and 116 measured): nothing it does per
 /// step walks the log or the store. Falsified by `Peer::step` cloning its
 /// log's entries first: 5,734 allocations at 500, 88,239 at 8,000.
 #[test]
-fn a_step_alone_allocates_the_same_as_the_log_grows() {
+fn an_own_step_allocates_the_same_as_the_log_grows() {
     let per = |n: u64| {
-        let (mut p, mut add) = alone(10, n);
+        let (mut p, mut add) = own(10, n);
         let (o, a) = allocs(|| add(&mut p));
-        assert!(matches!(o.last(), Some(Output::Confirmed(_))), "{o:?}");
+        assert!(matches!(o.last(), Some(Output::Settled(_, Ok(())))), "{o:?}");
         a
     };
     let (small, big) = (per(500), per(8000));
-    assert!(big <= small + 4 && big <= 128, "a step alone: {small} allocations at 500, {big} at 8,000");
+    assert!(big <= small + 4 && big <= 128, "an own step: {small} allocations at 500, {big} at 8,000");
 }
 
 // Three maintained views over the library's schema -----------------------------------
@@ -196,7 +196,7 @@ fn store_of(rows: &[Change]) -> Store {
         let Change::Add { table, row } = c else { panic!("a store is rows") };
         by.iter_mut().find(|(t, _)| t == table).unwrap().1.push(row.clone());
     }
-    Store::from_rows(schema.into(), Space::Durable, &by).unwrap().0
+    Store::from_rows(schema.into(), Space::Durable, &by).unwrap()
 }
 
 type Made<T> = ark::plan::Make<Lib, T>;
@@ -334,15 +334,18 @@ fn a_view_push_costs_the_same_as_its_store_grows() {
     }
 }
 
-/// The numbers Part 3 reads: a peer alone's add over a log of 8,000, a
+/// The numbers Part 3 reads: an authority's own add over a log of 8,000, a
 /// page of 256 decoded, and a push against each view at 16,000 rows.
 #[test]
 #[ignore]
 fn timings() {
-    let (mut p, mut add) = alone(800, 8000);
+    let (mut p, mut add) = own(800, 8000);
     let t = Instant::now();
     (0..1000).for_each(|_| drop(add(&mut p)));
-    eprintln!("a: a peer alone's add, log of 8,000, playlists of 10: {:.2} µs", us(t.elapsed() / 1000));
+    eprintln!(
+        "a: an authority's own add, log of 8,000, playlists of 10: {:.2} µs",
+        us(t.elapsed() / 1000)
+    );
     let bytes = page(&log(10, PAGE as u64)).enc();
     let t = Instant::now();
     (0..50).for_each(|_| drop(Frame::dec(&bytes).unwrap()));

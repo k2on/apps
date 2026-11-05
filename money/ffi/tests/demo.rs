@@ -1,7 +1,7 @@
 //! The demo through the bridge: the seeded household read typed, as the
 //! apps' previews and screenshots draw it, and its bank's syncs.
 
-use ark_ffi::{Peer, Taken};
+use ark_ffi::Peer;
 use money_domain::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
 use money_ffi::{money_add_months, money_demo, money_month_name, DemoBank};
 use money_seed as seed;
@@ -20,7 +20,7 @@ fn demo() -> Arc<Peer> {
 fn the_demo_is_the_seeded_household() {
     let p = demo();
     let st = p.status();
-    assert!(st.alone, "{st:?}");
+    assert_eq!(st.link, "alone", "{st:?}");
     assert_eq!(st.user, seed::ME);
 
     let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap().rows();
@@ -43,9 +43,12 @@ fn the_demo_is_the_seeded_household() {
     let bank = DemoBank::new();
     let first = bank.sync(p.clone(), Some(TODAY.into())).unwrap();
     assert_eq!(first.note, "Chase: 2 new from the bank \u{2014} one still pending");
-    assert_eq!(p.standing(first.intent), ark_ffi::Standing::Confirmed);
+    assert!(
+        p.outcome(first.intent).is_some_and(|o| o.pending && o.refused.is_none()),
+        "no server: kept here"
+    );
     let t = inbox.take();
-    assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
+    assert!(!t.ops.is_empty(), "{t:?}");
     assert_eq!(inbox.rows().len(), waiting + 2);
     let second = bank.sync(p.clone(), Some(TODAY.into())).unwrap();
     assert_eq!(second.note, "Chase: 2 from the bank, 1 pending one posted");

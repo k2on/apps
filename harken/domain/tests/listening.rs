@@ -18,14 +18,13 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live, Module};
+use ark_peer::Config;
 use arkdb::sim::{Net, Op};
 use common::domain;
 use harken_domain::host::Listening;
@@ -71,7 +70,7 @@ impl House {
             .get(&format!("listening.{name}"))
             .and_then(|f| f.proc.clone())
             .ok_or(format!("no function {name}"))?;
-        f.apply(&mut self.store, &ctx, &input.to_bytes()).map_err(|r| r.0)?;
+        f(&mut self.store, &ctx, &input.to_bytes())?;
         Ok(())
     }
 
@@ -90,7 +89,7 @@ impl House {
             .get(&format!("listening.{name}"))
             .and_then(|f| f.proc.clone())
             .ok_or(format!("no function {name}"))?;
-        f.apply(&mut self.store, &ctx, input).map(|_| ()).map_err(|r| r.0)
+        f(&mut self.store, &ctx, input).map(|_| ())
     }
 
     /// A device of `user` connects, saying what it is: `on_join`.
@@ -102,7 +101,7 @@ impl House {
             name: device.into(),
             user: user.into(),
         };
-        self.author("authority", "authority", "on_join", &d).unwrap();
+        self.author(user, device, "on_join", &d).unwrap();
         self.devices.insert(device.into(), d);
     }
 
@@ -129,7 +128,7 @@ impl House {
     /// Its connection goes: `on_leave`. Not a decision about the music.
     fn leave(&mut self, device: &str) {
         let d = self.devices.remove(device).expect("standing");
-        self.author("authority", "authority", "on_leave", &d).unwrap();
+        self.author(&d.user.clone(), device, "on_leave", &d).unwrap();
     }
 
     /// Call as `device`: nothing, or the refusal.
@@ -818,7 +817,7 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
             .map(|t| (t.to_string(), h.store.rows(t).map(|r| r.to_vec()).collect()))
             .collect();
         let mut back = House::new();
-        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap().0;
+        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap();
         back.now = later;
         back.author("authority", "authority", "on_restore", &()).unwrap();
         back
@@ -1249,8 +1248,8 @@ fn a_report_of_a_volume_is_heard_in_order() {
 /// How often a device relays its scrubber.
 const RELAY_MS: i64 = 250;
 
-fn module() -> Module {
-    Module::of(domain())
+fn module() -> std::sync::Arc<ark::domain::Domain> {
+    std::sync::Arc::new(domain().clone())
 }
 
 /// The house over the wire: the hub, the session in its volatile machine,
@@ -1263,16 +1262,11 @@ struct Wire {
 
 impl Wire {
     fn new() -> Wire {
-        let mut hub = Config::new(module());
-        let get = |n: &str| Some(format!("listening.{n}"));
-        hub.live = Some(Live {
-            on_join: get("on_join"),
-            on_leave: get("on_leave"),
-            on_restore: get("on_restore"),
-            arrive: Arc::new(harken_domain::host::arrive),
-            keep: Some(64),
-            ..Live::new(module())
-        });
+        let hub = Config {
+            live: Some(module()),
+            live_keep: Some(64),
+            ..Config::of(module())
+        };
         Wire {
             net: Net::of(hub, vec![], 1),
             devices: BTreeMap::new(),
@@ -1289,22 +1283,15 @@ impl Wire {
             name: id.into(),
             user: "alice".into(),
         };
-        let live = Live {
-            device: Some(said.to_bytes()),
-            ephemeral: ["listening.scrub".to_string()].into(),
-            every_ms: RELAY_MS,
-            ..Live::new(module())
-        };
-        let who = Who {
-            actor: "alice".into(),
-            session: id.into(),
-            roles: vec![],
-        };
+        let who = Ctx::who("alice", id, vec![]);
         let i = self.net.add(
             who,
             Config {
-                live: Some(live),
-                ..Config::new(module())
+                live: Some(module()),
+                device: Some(said.to_bytes()),
+                ephemeral: ["listening.scrub".to_string()].into(),
+                every_ms: RELAY_MS,
+                ..Config::of(module())
             },
         );
         self.net.deliver();

@@ -9,9 +9,10 @@
 //! own type's twin ([`Twin`]), named in Kotlin and Swift as the type is. A
 //! scalar, `String`, `Option` and `Vec` are their own twins; an id is a
 //! [`RowId`] (its hex, the apps' `Id`). A view of rows of `T` is an object
-//! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as a
-//! [`Taken`] whose inserted and updated rows come beside it, in order.
-//! Mutations, queries and the live space stay called by name with JSON.
+//! of `T`'s own (`<T>View`, over [`Typed`]): its rows, and what it did as
+//! its changes ([`Op`]) whose inserted and updated rows come beside them, in
+//! order — as a view read as JSON's do ([`crate::ViewTaken`]).
+//! Mutations (of either space) and queries stay called by name with JSON.
 
 use std::sync::Arc;
 
@@ -20,12 +21,12 @@ use ark::row::Describe;
 
 use crate::{Peer, Refusal, ViewHandle};
 
-/// A type and the record or enum it crosses the bridge as. `UT` is the
+/// A type and the record or enum it crosses the bridge as, one way: a
+/// view's rows go out, nothing comes back typed. `UT` is the
 /// crate whose UniFFI scaffolding the twin is in (UniFFI's tag).
 pub trait Twin<UT>: Sized {
     type Ffi;
     fn ffi(self) -> Self::Ffi;
-    fn from_ffi(f: Self::Ffi) -> Self;
 }
 
 macro_rules! itself {
@@ -34,9 +35,6 @@ macro_rules! itself {
             type Ffi = $t;
             fn ffi(self) -> $t {
                 self
-            }
-            fn from_ffi(f: $t) -> $t {
-                f
             }
         }
     )*};
@@ -48,18 +46,12 @@ impl<UT, T: Twin<UT>> Twin<UT> for Option<T> {
     fn ffi(self) -> Self::Ffi {
         self.map(T::ffi)
     }
-    fn from_ffi(f: Self::Ffi) -> Self {
-        f.map(T::from_ffi)
-    }
 }
 
 impl<UT, T: Twin<UT>> Twin<UT> for Vec<T> {
     type Ffi = Vec<T::Ffi>;
     fn ffi(self) -> Self::Ffi {
         self.into_iter().map(T::ffi).collect()
-    }
-    fn from_ffi(f: Self::Ffi) -> Self {
-        f.into_iter().map(T::from_ffi).collect()
     }
 }
 
@@ -81,9 +73,6 @@ impl<UT, R> Twin<UT> for ark::row::Id<R> {
     fn ffi(self) -> RowId {
         RowId(self.0)
     }
-    fn from_ffi(f: RowId) -> Self {
-        ark::row::Id::new(f.0)
-    }
 }
 
 /// One change to a typed view's rows; an insert's and an update's row is
@@ -93,16 +82,6 @@ pub enum Op {
     Insert { at: u64 },
     Remove { at: u64 },
     Update { at: u64 },
-}
-
-/// What a typed view did since it was last taken: its rows taken with it
-/// are, for `Patched`, each insert's and update's in order, and for
-/// `Reset`, all of them.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Taken {
-    Unchanged,
-    Patched { ops: Vec<Op> },
-    Reset,
 }
 
 /// A view of rows of `T`, read as `T`: what a domain's `<T>View` object is.
@@ -120,9 +99,9 @@ impl<T: Encode> Typed<T> {
         self.handle.rows_bytes().iter().map(|b| decode(b)).collect()
     }
 
-    pub fn take(&self) -> (Taken, Vec<T>) {
-        let (taken, rows) = self.handle.take_bytes();
-        (taken, rows.iter().map(|b| decode(b)).collect())
+    pub fn take(&self) -> (Vec<Op>, Vec<T>) {
+        let (ops, rows) = self.handle.take_bytes();
+        (ops, rows.iter().map(|b| decode(b)).collect())
     }
 }
 
@@ -132,7 +111,7 @@ impl Peer {
     pub fn view_typed<T: Describe>(&self, name: &str, input: &str) -> Result<Typed<T>, Refusal> {
         let args = {
             let s = self.shared.lock();
-            let f = s.peer.binding(name).and_then(|b| s.peer.domain().get(&b).map(|f| f.output.clone()));
+            let f = s.peer.function(name).ok().map(|f| f.output.clone());
             if f.as_ref().is_some_and(|o| *o != Some(T::describe())) {
                 return Err(format!("{name}'s rows are not {}", std::any::type_name::<T>()).into());
             }

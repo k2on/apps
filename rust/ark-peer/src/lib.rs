@@ -1,16 +1,17 @@
 //! The ArkDB v5 peer: a driver of the one machine (§1.7), twice — the
-//! log's and, when the module has live state, the volatile space's (§1.9)
+//! log's and, when the domain has live state, the volatile space's (§1.9)
 //! — over one disk. A device and a server are the same [`Peer`] in two
 //! roles:
 //!
-//! - **a device** ([`Peer::open`]) is a replica, or an authority alone
-//!   since its fork; it **dials** a server ([`Peer::connect`]: the link,
-//!   `link`), keeps its pending intents on its disk, relays its ephemeral
-//!   calls, and keeps the maintained views a UI draws (§1.10);
+//! - **a device** ([`Peer::open`]) is a replica; it **dials** a server
+//!   ([`Peer::connect`]: the link, `link`) when it has one, keeps its
+//!   pending intents on its disk — with no server, or none reached, they
+//!   are simply pending — relays its ephemeral calls, and keeps the
+//!   maintained views a UI draws (§1.10);
 //! - **a server** ([`Peer::serve`]) is the authority of each space; it
 //!   **listens** (`hub`: the connections, each with its identity and its
-//!   feed, routed; the journal beside the log), natively on a thread of its
-//!   own (`handle`) and, with the `server` feature, on a socket (`serve`:
+//!   feed, routed; the journal beside the log), on a thread of its own
+//!   (`handle`, a device's too) and, with the `server` feature, on a socket (`serve`:
 //!   the sync socket, the web build's routes and
 //!   sign-in — axum and tokio, which a phone or a browser never links).
 //!
@@ -26,7 +27,7 @@
 //! rows as its own type, patched as the view moves (`watched`).
 //!
 //! **The relay** of ephemeral calls is the driver's policy, as §1.9 says:
-//! a call to a function the module names ephemeral goes to the volatile
+//! a call to a function the config names ephemeral goes to the volatile
 //! machine at most once every `every_ms`, coalesced to the newest call per
 //! function; the rest go at once.
 //!
@@ -45,15 +46,14 @@
 //! every token by the row it names and closes what is revoked or expired,
 //! as `ark_auth::server::Auth` says (`serve`).
 //!
-//! **A peer is three instances** (`instance`: a machine and what keeps
-//! it) wired together: the log's, the live space's, and the local one
-//! beside them on the same disk, whose rows (`local`) are what a peer keeps
-//! beside its log — a server's journal and volatile space, a device's
-//! replica and pending intents.
+//! **A peer is two instances** (`instance`: a machine and what keeps
+//! it) wired together, the log's and the live space's, and records beside
+//! them on the same disk (`local`): a server's journal and volatile space,
+//! a device's replica and pending intents.
 //!
-//! **Handlers and reconcilers** (`jobs`) act on the world outside: a
-//! handler claims, runs and finishes the jobs of a kind (`ark::effect`) on
-//! the peer that registered it; a reconciler is told a view's rows.
+//! **Handlers** (`jobs`) act on the world outside: a handler claims, runs
+//! and finishes the jobs of a kind (`ark::effect`) on the peer that
+//! registered it.
 //!
 //! Every input either machine of a device is given is recorded, when asked
 //! (`record`), as an [`Act`]: a device is a pure function of these, which
@@ -61,20 +61,17 @@
 
 pub mod app;
 pub mod disk;
-pub mod driven;
 pub mod files;
+pub mod handle;
 mod hub;
 pub mod instance;
 mod jobs;
 pub mod link;
 pub mod local;
-pub mod migrate;
 pub mod observe;
 pub mod signed;
 pub mod watched;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod handle;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod serve;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -87,122 +84,59 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::hash::EntryHash;
-use ark::log::{Durable, Entry, EntryId, Origin, Record, Seq, Span};
-use ark::peer::{Ctx, Feed, Functions, Input, Journal, Output, Peer as Machine, Role, Told, Who};
+use ark::log::{EntryId, Logged, Origin, Record, Span};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told};
 use ark::plan::Maintained;
-use ark::schema::{Schema, Space};
+use ark::schema::Space;
 use ark::store::Change;
-use ark::{Domain, Refusal};
+use ark::Domain;
 
-pub use app::{nobody, Standing, Status, Update};
+pub use app::{nobody, Arg, Outcome};
 pub use ark::file::FileRef;
+pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};
-pub use files::{Dir, Store};
 #[cfg(not(target_arch = "wasm32"))]
-pub use handle::{dev, Authenticate, Handle};
+pub use handle::Authenticate;
+pub use handle::{dev, Handle};
 pub use hub::{Called, ConnId, Deliver};
-pub use instance::{Fold, Instance};
+pub use instance::Instance;
 pub use link::{Event, Pumped, Wake};
-pub use local::{Local, Logins, Shared};
+pub use local::Logins;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
-pub use settings::{Keepalive, Retention, Serve, SignIn};
+pub use settings::{Serve, SignIn};
 pub use watched::Watched;
-
-/// One space's module: its schema, the functions a peer runs by name, and
-/// the domain its views are made by.
-#[derive(Clone)]
-pub struct Module {
-    pub schema: Arc<Schema>,
-    pub functions: Functions,
-    pub domain: Option<Arc<Domain>>,
-}
-
-impl Module {
-    /// The steps that read rows of a schema before this one
-    /// ([`ark::migrate`]): its domain's.
-    pub fn migrations(&self) -> &[ark::migrate::Migration] {
-        self.domain.as_ref().map_or(&[], |d| &d.migrations)
-    }
-
-    /// The tables a fill sends last ([`ark::peer::Peer::later`]): its
-    /// domain's.
-    pub fn later(&self) -> &[String] {
-        self.domain.as_ref().map_or(&[], |d| &d.later)
-    }
-
-    /// A domain as a peer holds it (§1.16).
-    pub fn of(d: &Domain) -> Module {
-        Module {
-            schema: d.schema.clone(),
-            functions: d.functions(),
-            domain: Some(Arc::new(d.clone())),
-        }
-    }
-}
-
-/// What `on_join` and `on_leave` are authored with: from who a connection
-/// is and what its device said, the function's input, or none.
-pub type Arrive = Arc<dyn Fn(&Who, &[u8]) -> Option<Vec<u8>> + Send + Sync>;
-
-/// The live space: its module; as a device, what its `Hello` says it is
-/// and the functions relayed as ephemeral, and how often; as a server, the
-/// functions it authors as devices come and go and the input it authors
-/// them with, and the entries kept above the horizon.
-#[derive(Clone)]
-pub struct Live {
-    pub module: Module,
-    pub device: Option<Vec<u8>>,
-    pub ephemeral: BTreeSet<String>,
-    pub every_ms: i64,
-    pub on_join: Option<String>,
-    pub on_leave: Option<String>,
-    pub on_restore: Option<String>,
-    pub arrive: Arrive,
-    pub keep: Option<usize>,
-    /// Where a device's live machine draws its origin from, once per open
-    /// ([`draw_origin`]; a simulator's is seeded).
-    pub origin: Draw,
-}
-
-/// Where an origin is drawn from.
-pub type Draw = Arc<dyn Fn() -> Origin + Send + Sync>;
 
 /// How long a trace an answer joins lasts, from its beginning: what one
 /// hand caused is over by then ([`Peer::cause`]).
 pub const TRACE_MS: i64 = 30_000;
 
-impl Live {
-    pub fn new(module: Module) -> Live {
-        Live {
-            module,
-            device: None,
-            ephemeral: BTreeSet::new(),
-            every_ms: 0,
-            on_join: None,
-            on_leave: None,
-            on_restore: None,
-            arrive: Arc::new(|_, _| None),
-            keep: None,
-            origin: Arc::new(draw_origin),
-        }
-    }
-}
-
-/// What a peer is made of: the log's module and the live one; the domain
-/// its functions are called by name in, when there is one (`app`); and, as
-/// a server, how each connection is fed (§1.8) and the entries kept above
-/// the horizon (all of them when none); and the functions of its own a
-/// device may call over its link (`calls`).
+/// What a peer is made of: the log's domain and the live space's, each its
+/// schema and its functions by name (§1.16, §1.9); as a server, how each
+/// connection is fed (§1.8), the entries each space keeps above its horizon
+/// (all of them when none), and the functions of its own a device may call
+/// over its link (`calls`); as a device, what it says it is at each
+/// connection (a call before its `Hello`s, `ark::frames::DEVICE`)
+/// and the live functions it relays as ephemeral, and how often.
+///
+/// A server authors the live domain's `on_join` (a function whose name's
+/// last part is that) when a session's first connection says what its
+/// device is — on what it said, as the connection's login — its
+/// `on_leave` when the last closes, and its `on_restore` over what a
+/// restart kept.
 #[derive(Clone)]
 pub struct Config {
-    pub log: Module,
-    pub live: Option<Live>,
-    pub domain: Option<Arc<Domain>>,
-    pub feed: Arc<dyn Fn(&Who) -> Feed + Send + Sync>,
+    pub log: Arc<Domain>,
+    pub live: Option<Arc<Domain>>,
+    /// The scope each connection is fed by (§1.8), by who it is; none,
+    /// the log whole.
+    pub feed: Scoping,
     pub keep: Option<usize>,
+    pub live_keep: Option<usize>,
+    pub device: Option<Vec<u8>>,
+    pub ephemeral: BTreeSet<String>,
+    pub every_ms: i64,
     /// A server's functions a device calls by name over its link, outside
     /// both machines ([`Frame::Call`](ark::frames::Frame)): never logged,
     /// journaled, recorded or told to another connection.
@@ -212,82 +146,52 @@ pub struct Config {
 /// One of a server's [`Config::calls`]: given the caller, verified as its
 /// connection is, and the call's input; what it gives back, or why not. It
 /// runs on a thread of its own ([`Handle`]), so it may take its time.
-pub type Call = Arc<dyn Fn(&Who, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
+pub type Call = Arc<dyn Fn(&Ctx, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl Config {
-    pub fn new(log: Module) -> Config {
+    /// A peer of `log`, with no live space.
+    pub fn of(log: Arc<Domain>) -> Config {
         Config {
             log,
             live: None,
-            domain: None,
-            feed: Arc::new(|_| Feed::Whole),
+            feed: Arc::new(|_| None),
             keep: None,
+            live_keep: None,
+            device: None,
+            ephemeral: BTreeSet::new(),
+            every_ms: 0,
             calls: BTreeMap::new(),
         }
     }
 
-    /// The domain `space`'s views are made by.
+    /// The domain of `space`.
     fn domain_of(&self, space: Space) -> Option<Arc<Domain>> {
         match space {
-            Space::Durable => self.log.domain.clone(),
-            Space::Volatile => self.live.as_ref()?.module.domain.clone(),
+            Space::Durable => Some(self.log.clone()),
+            Space::Volatile => self.live.clone(),
         }
     }
 
-    /// A domain's: its module for the log, its functions by name.
-    pub fn of(domain: Arc<Domain>) -> Config {
-        Config {
-            domain: Some(domain.clone()),
-            ..Config::new(Module::of(&domain))
-        }
+    /// The live domain's function whose name's last part is `last`: what a
+    /// server authors as devices come and go, and after a restart.
+    pub(crate) fn hook(&self, last: &str) -> Option<String> {
+        self.live.as_ref()?.binding(last).map(String::from)
     }
 }
+
+/// Why an authority's disk is not opened under its schema.
+pub const ANOTHER: &str =
+    "the rows on disk are of a schema this one does not grow from: a schema only grows (append a table, or a column that is an Option or defaulted)";
 
 /// A patch of a view's rows, each its bytes.
 pub type Patch = ark::plan::Patch<Vec<u8>>;
 
-/// One input to one machine; or both machines opened afresh as a login,
-/// as at [`Peer::open`] — the log's alone from its fork when it was
-/// alone; or a sign-in: the log's machine authoring as the login from its first
-/// `local`, the live one afresh. Each names the log's origin and the live
-/// machine's, which is drawn at every open.
-#[derive(Clone, Debug)]
-pub enum Act {
-    Open(Who, Origin, Option<(Seq, EntryHash)>, Option<Origin>),
-    SignIn(Who, Origin, Option<Origin>),
-    Step(Space, Input),
-}
-
-/// Where a machine stands after a step: its head, its state, its pending
-/// intents — what a trace holds a replay to.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct At {
-    pub head: (Seq, EntryHash),
-    pub state: ark::hash::StateHash,
-    pub pending: Vec<EntryId>,
-}
-
-impl At {
-    pub fn of(p: &Machine) -> At {
-        At {
-            head: p.log().head(),
-            state: p.store.state_hash(),
-            pending: p.pending.iter().map(|x| x.entry.id).collect(),
-        }
-    }
-}
-
-/// One recorded act, what it said, and where its machine stood after.
-pub type Recorded = (Act, Vec<Output>, Option<At>);
-
-/// Three instances wired: the log's machine on the disk, the live one, and
-/// the local instance beside them on the same disk; and what wires them.
+/// Two instances wired, the log's machine on the disk and the live one,
+/// the records beside them on the same disk, and what wires them.
 pub struct Peer {
     pub config: Config,
     pub log: Instance,
     pub live: Option<Instance>,
-    /// Every input given, when recording.
-    pub record: Option<Vec<Recorded>>,
     /// Whether a connection to its server is up.
     pub linked: bool,
     /// The link: the server, the login's token, the connection and when it
@@ -302,25 +206,36 @@ pub struct Peer {
     relayed: Option<i64>,
     /// The span it authors under: the one opened ([`Peer::begin`],
     /// [`Peer::under`]), or else, in each space, the span of the entry whose
-    /// change it was last told, so that what it does in answer (a
-    /// reconciler, a view's reader) is a child of what it answered. A server
+    /// change it was last told, so that what it does in answer (a job, a
+    /// view's reader) is a child of what it answered. A server
     /// authors under the opened one only.
     span: Option<Span>,
     woke: [Option<Span>; 2],
     /// What became of its own intents, and what its views did.
     told: app::Told,
-    /// What it keeps beside its log, on the same disk.
-    pub local: Instance,
-    /// The `local` and the pending intents (each its `local` and id) its
-    /// local instance holds.
-    saved: (i64, Vec<(i64, EntryId)>),
+    /// What it keeps beside its log, on the same disk, and its last
+    /// refusal, while it lasts.
+    pub local: Box<dyn Disk>,
+    local_failure: Option<String>,
+    /// What it keeps of the log's pending intents, as last written.
+    saved: Saved,
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
     /// The files rows name, and where each transfer is (`files`).
     pub(crate) files: files::Files,
-    /// The reconcilers, by their view.
-    reconcilers: BTreeMap<usize, jobs::Reconciler>,
+}
+
+/// What a device last wrote of its pending intents ([`local::Kept`]): its
+/// last `local`, how many times they had been run again, the `local` of
+/// the last and how many, and how many records the blob holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Saved {
+    local: i64,
+    reruns: u64,
+    back: Option<i64>,
+    len: usize,
+    records: usize,
 }
 
 /// A view a peer keeps (§1.10): what it is made of — its space, the
@@ -334,37 +249,35 @@ struct Kept {
     view: Option<Box<dyn Maintained>>,
 }
 
-/// The role of a device alone since `fork`.
-pub fn alone_at(fork: Option<(Seq, EntryHash)>) -> Role {
-    Role::Authority {
-        journal: Journal { fork, ..Journal::default() },
-    }
-}
-
-fn machine(m: &Module, role: Role, me: &Who, origin: Option<Origin>, space: Space) -> Instance {
-    let mut p = Machine::new(m.schema.clone(), m.functions.clone(), role, me.clone()).in_space(space);
-    p.later = m.later().to_vec();
+fn machine(d: &Arc<Domain>, role: Role, me: &Ctx, origin: Option<Origin>, space: Space) -> Instance {
+    let mut p = Machine::new(d.clone(), role, me.clone()).in_space(space);
     if let Some(o) = origin {
         p.origin = o;
     }
     Instance::new(p, None)
 }
 
-/// A device's live machine as `me`, from an origin drawn for it. The live
-/// space keeps nothing across an open, so its `local`s start again at 1;
-/// under the log's origin, which the disk keeps, a reloaded page's calls
-/// were refused as overtaken by what the page before it had said, for as
-/// long as the server ran.
-fn live_of(config: &Config, me: &Who) -> Option<Instance> {
-    let l = config.live.as_ref()?;
-    let mut p = machine(&l.module, Role::Replica, me, Some((l.origin)()), Space::Volatile);
-    (p.device, p.fold) = (l.device.clone(), Some(Fold::REPLICA));
+/// A device's live machine as `me`, its origin its log's `origin` at its
+/// `opens`th open. The live space keeps nothing across an open, so its
+/// `local`s start again at 1; under one origin for every open, a reloaded
+/// page's calls were taken for ones the server had judged already, for as
+/// long as it ran.
+fn live_of(config: &Config, me: &Ctx, origin: Origin, opens: u64) -> Option<Instance> {
+    let live = config.live.as_ref()?;
+    let mut p = machine(live, Role::Replica, me, Some(live_origin(origin, opens)), Space::Volatile);
+    p.fold = Some(Fold::REPLICA);
     Some(p)
+}
+
+/// The live machine's origin at the `opens`th open of a peer whose log's
+/// is `origin`.
+pub(crate) fn live_origin(origin: Origin, opens: u64) -> Origin {
+    Origin::named([&origin.0[..], b"live", &opens.to_be_bytes()].concat())
 }
 
 /// Sixteen bytes no other replica draws: the process's hasher keys (which
 /// the platform seeds), the clock and the process, through sha256.
-pub fn draw_origin() -> Origin {
+pub(crate) fn draw_origin() -> Origin {
     use std::hash::{BuildHasher, Hasher};
     let nanos = (now_ms() as u128) << 20 | monotonic_ms() as u128;
     let mut b = nanos.to_be_bytes().to_vec();
@@ -402,21 +315,16 @@ pub fn monotonic_ms() -> u64 {
 
 /// Who a login is, as a server verifies it: the account, the session, the
 /// roles it holds.
-pub fn who(l: &ark_auth::Login) -> Who {
-    Who {
-        actor: l.user.id.clone(),
-        session: l.session.clone(),
-        roles: l.user.roles.clone(),
-    }
+pub fn who(l: &ark_auth::Login) -> Ctx {
+    Ctx::who(l.user.id.clone(), l.session.clone(), l.user.roles.clone())
 }
 
 impl Peer {
-    fn with(config: Config, log: Instance, live: Option<Instance>, local: Instance) -> Peer {
+    fn with(config: Config, log: Instance, live: Option<Instance>, local: Box<dyn Disk>) -> Peer {
         Peer {
             config,
             log,
             live,
-            record: None,
             linked: false,
             link: link::Link::default(),
             hub: hub::Hub::default(),
@@ -428,74 +336,65 @@ impl Peer {
             woke: [None, None],
             told: app::Told::default(),
             local,
-            saved: (0, vec![]),
+            local_failure: None,
+            saved: Saved::default(),
             runners: vec![],
             missed: None,
-            reconcilers: BTreeMap::new(),
             files: files::Files::default(),
         }
     }
 
     /// A device opened as `me` from what `disk` holds.
-    pub fn open(config: Config, me: Who, disk: Box<dyn Disk>, record: bool) -> Peer {
+    pub fn open(config: Config, me: Ctx, disk: Box<dyn Disk>) -> Peer {
         let files = disk.files();
         let (disk, local) = local::beside(disk);
-        let mut p = Peer::opened(config, me, disk, local, record.then(Vec::new), link::Link::default());
+        let mut p = Peer::opened(config, me, disk, local, link::Link::default());
         p.keep_files(files);
         p
     }
 
-    pub(crate) fn opened(
-        config: Config,
-        me: Who,
-        disk: Box<dyn Disk>,
-        mut local: Instance,
-        mut record: Option<Vec<Recorded>>,
-        link: link::Link,
-    ) -> Peer {
-        let (r, intents) = local.read::<Local, _>(|db| (local::replica(db).unwrap_or_default(), db.pending.scan()));
+    pub(crate) fn opened(config: Config, me: Ctx, disk: Box<dyn Disk>, mut local: Box<dyn Disk>, link: link::Link) -> Peer {
+        let r = local::Replica::read(&mut *local);
+        // Pending intents are read only beside the replica they were drawn
+        // from: a disk whose replica does not read (none yet, or an older
+        // build's) starts afresh.
+        let blob = local.get(local::PENDING).ok().flatten().filter(|_| r.origin != Origin::default());
+        let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
         let origin = match r.origin {
             o if o != Origin::default() => o,
-            _ => {
-                let origin = draw_origin();
-                let _ = local.write::<Local, ark::db::Durable, _>(|db| db.replica.put(local::Replica { origin, ..r.clone() }));
-                origin
-            }
+            _ => draw_origin(),
         };
-        let pending: Vec<Entry> = intents.into_iter().map(|i| i.entry).collect();
-        let live = live_of(&config, &me);
-        if let Some(rec) = &mut record {
-            rec.push((Act::Open(me.clone(), origin, r.fork, live.as_ref().map(|l| l.origin)), vec![], None));
-        }
-        let role = if r.fork.is_some() { alone_at(r.fork) } else { Role::Replica };
-        let mut log = machine(&config.log, role, &me, Some(origin), Space::Durable);
+        let opens = r.opens + 1;
+        let _ = local.put(local::REPLICA, &local::Replica { origin, opens, ..r.clone() }.to_bytes());
+        let live = live_of(&config, &me, origin, opens);
+        let mut log = machine(&config.log, Role::Replica, &me, Some(origin), Space::Durable);
         let mut disk = disk;
-        // Rows of a schema this one does not grow from: an authority's
-        // migrated, a replica's sent again from empty (`migrate`).
-        let read = match r.fork {
-            Some(_) => migrate::migrate(&mut *disk, &config.log.schema, config.log.migrations()).map(|_| true),
-            None => migrate::kept(&mut *disk, &config.log.schema),
+        // Rows of a schema this one does not grow from (a build older than
+        // a schema that only grows) are sent again from empty (`disk::own`).
+        let schema = &config.log.schema;
+        let empty = |disk: &mut dyn Disk| disk.record(&Record::Rows(log.confirmed_rows()).to_bytes());
+        let read = match disk::own(&mut *disk, schema) {
+            Ok(false) => empty(&mut *disk).and_then(|_| disk::put_schema(&mut *disk, schema)),
+            Ok(true) => disk::put_schema(&mut *disk, schema),
+            Err(e) => Err(e),
         };
-        match read {
-            Ok(true) => {}
-            Ok(false) => {
-                let empty = Record::Rows(log.confirmed_rows()).to_bytes();
-                if let Err(e) = disk.record(&empty) {
-                    log.failure = Some(e.to_string());
-                }
-            }
-            Err(e) => log.failure = Some(e.to_string()),
+        if let Err(e) = read {
+            log.failure = Some(e.to_string());
         }
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
-        (p.record, p.link) = (record, link);
-        p.saved = (r.local, pending.iter().map(|e| (e.local, e.id)).collect());
-        let durable = Durable {
-            pending,
-            local: r.local,
-            ..p.log.stored()
+        p.link = link;
+        let local = r.local.max(kept.local);
+        p.saved = Saved {
+            local,
+            back: pending.last().map(|p| p.entry.local),
+            len: pending.len(),
+            records,
+            ..Saved::default()
         };
-        p.step(Space::Durable, Input::Open(durable));
+        let mut stored = p.log.stored();
+        stored.push(Record::Pending { pending, at: kept.at, local });
+        p.step(Space::Durable, Input::Open(stored));
         p
     }
 
@@ -505,9 +404,8 @@ impl Peer {
         let me = self.log.me.clone();
         let mut link = self.link;
         link.wire = None;
-        let local = Instance::open::<Local>(self.local.into_disk());
         let files = self.files.store;
-        let mut p = Peer::opened(self.config, me, self.log.into_disk(), local, self.record, link);
+        let mut p = Peer::opened(self.config, me, self.log.into_disk(), self.local, link);
         p.keep_files(files);
         p
     }
@@ -520,9 +418,9 @@ impl Peer {
     }
 
     /// What keeps a disk from being written, while it lasts: the log's, or
-    /// its local instance's.
+    /// its records' beside it.
     pub fn failure(&self) -> Option<&str> {
-        self.log.failure.as_deref().or(self.local.failure.as_deref())
+        self.log.failure.as_deref().or(self.local_failure.as_deref())
     }
 
     fn instance(&mut self, space: Space) -> Option<&mut Instance> {
@@ -542,22 +440,18 @@ impl Peer {
     /// server), to every connection it fans out to, or to a session's; a
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
-        let rec = self.record.is_some().then(|| input.clone());
-        let seen = tracing::event_enabled!(target: "ark", tracing::Level::WARN).then(|| input.clone());
+        let label = self.label();
         let Some(m) = self.instance(space) else { return vec![] };
-        let out = m.step(input);
-        if let Some(i) = &seen {
-            observe::step(&self.label(), space, from, i, &out);
-        }
+        let space_name = ["durable", "volatile"][space as usize];
+        let out = tracing::debug_span!(target: "ark", "step", peer = %label, space = space_name, conn = from).in_scope(|| m.step(input));
         for o in &out {
             match o {
-                Output::Send(b) => match from {
+                Output::Send(To::Back, b) => match from {
                     Some(c) => self.hub.held.push((c, b.clone())),
                     None if self.linked => self.frames.push(b.clone()),
                     None => {}
                 },
-                Output::Fanout(b) => self.hub.fanout(space, b),
-                Output::To { session, bytes } => self.hub.to(session, bytes),
+                Output::Send(To::All, b) => self.fanout(space, b),
                 Output::Changes(told) => {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {
                         self.woke[space as usize] = Some(by);
@@ -573,17 +467,10 @@ impl Peer {
                         }
                     }
                 }
-                Output::Refused { id, why } if !self.hub.serving => self.told.refused(space, *id, why),
-                Output::Confirmed(id) if !self.hub.serving => self.told.confirmed(space, *id),
+                Output::Settled(id, Err(why)) if !self.hub.serving => self.told.refused(space, *id, why),
+                Output::Settled(id, Ok(())) if !self.hub.serving => self.told.confirmed(space, *id),
                 _ => {}
             }
-        }
-        if let Some(i) = rec {
-            let at = At::of(self.machine(space).expect("a machine that spoke"));
-            self.record
-                .as_mut()
-                .expect("recording")
-                .push((Act::Step(space, i), out.clone(), Some(at)));
         }
         match (self.hub.serving, space) {
             (true, Space::Durable) => self.kept(),
@@ -593,54 +480,70 @@ impl Peer {
         out
     }
 
-    /// Its replica row, changed by `f`, kept.
+    /// Its replica, changed by `f`, kept.
     pub(crate) fn replica(&mut self, f: impl FnOnce(&mut local::Replica)) {
-        self.keep(|db| {
-            let mut r = local::replica(db).unwrap_or_default();
-            f(&mut r);
-            db.replica.put(r)
-        });
+        let mut r = local::Replica::read(&mut *self.local);
+        f(&mut r);
+        self.put_beside(local::REPLICA, &r.to_bytes());
     }
 
-    /// `f` written to its local instance; a refusal kept as its failure.
-    pub(crate) fn keep(&mut self, f: impl for<'t> FnOnce(&mut ark::db::Db<'t, Local>) -> Result<(), Refusal>) {
-        if let Err(e) = self.local.write::<Local, ark::db::Durable, _>(f) {
-            self.local.failure = Some(e.0);
+    /// A record kept beside its log, on its disk; a failure kept as its
+    /// failure.
+    pub(crate) fn put_beside(&mut self, name: &str, bytes: &[u8]) {
+        if let Err(e) = self.local.put(name, bytes) {
+            self.local_failure = Some(e.to_string());
         }
     }
 
-    /// A device's pending intents and its last `local` kept as they change, as the change to what is kept: the intents
-    /// confirmed or refused off the front deleted, those new at the back
-    /// put — so a mutate writes its one row — or, when the intents are
-    /// others (authored again from a new origin), all of them.
+    /// A device's pending intents, their changes and its last `local` kept
+    /// as they change, one record appended ([`local::Kept`]): the intents
+    /// confirmed or refused off the front, those new at the back — so a
+    /// mutate writes its one, whatever is pending — or, when they were run
+    /// again (a rebase, a renumbering, an open), or the records outnumber
+    /// them, all of them, written afresh; and the head they stand on.
     fn keep_pending(&mut self) {
-        let ids: Vec<(i64, EntryId)> = self.log.pending.iter().map(|p| (p.entry.local, p.entry.id)).collect();
-        if (self.log.local, &ids) == (self.saved.0, &self.saved.1) {
+        let (m, s) = (&self.log, &mut self.saved);
+        let back = m.pending.back().map(|p| p.entry.local);
+        if (m.local, m.reruns, back, m.pending.len()) == (s.local, s.reruns, s.back, s.len) {
             return;
         }
-        let was = std::mem::take(&mut self.saved.1);
-        let gone = (0..=was.len()).find(|d| ids.starts_with(&was[*d..]));
-        let (gone, kept) = gone.map_or((was.len(), 0), |d| (d, was.len() - d));
-        let local = self.log.local;
-        let fresh: Vec<Entry> = self.log.pending[kept..].iter().map(|p| p.entry.clone()).collect();
-        self.keep(|db| {
-            for (l, _) in &was[..gone] {
-                db.pending.delete(*l)?;
-            }
-            for entry in fresh {
-                db.pending.put(local::Intent { local: entry.local, entry })?;
-            }
-            let mut r = local::replica(db).unwrap_or_default();
-            r.local = local;
-            db.replica.put(r)
-        });
-        self.saved = (local, ids);
+        let whole = m.reruns != s.reruns || s.records > m.pending.len() + 64;
+        let new = match whole {
+            true => m.pending.len(),
+            false => m.pending.iter().rev().take_while(|p| s.back.is_none_or(|b| p.entry.local > b)).count(),
+        };
+        let kept = local::Kept {
+            whole,
+            gone: if whole { 0 } else { (s.len + new - m.pending.len()) as u64 },
+            put: m.pending.iter().skip(m.pending.len() - new).cloned().collect(),
+            local: m.local,
+            at: Some(m.log().head()),
+        };
+        *s = Saved {
+            local: m.local,
+            reruns: m.reruns,
+            back,
+            len: m.pending.len(),
+            records: if whole { 1 } else { s.records + 1 },
+        };
+        let bytes = disk::frame(&kept.to_bytes());
+        let wrote = match whole {
+            true => self.local.put(local::PENDING, &bytes),
+            false => self.local.append(local::PENDING, &bytes),
+        };
+        if let Err(e) = wrote {
+            self.local_failure = Some(format!("the pending intents cannot be written: {e}"));
+        }
     }
 
     /// Every view of `space` told a settle's changes. One that cannot be
     /// kept up, or could not be made, is made again over the store as it
-    /// is, under its number: its rows are read afresh ([`Update::Reset`]).
+    /// is, under its number: its rows as they were removed, and as they are
+    /// inserted ([`watched::again`]).
     fn changed(&mut self, space: Space, cs: &[Change]) {
+        if !self.views.iter().flatten().any(|w| w.space == space) {
+            return;
+        }
         let store = match space {
             Space::Durable => &self.log.store,
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
@@ -653,33 +556,23 @@ impl Peer {
             let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
             let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
-                Some(Ok(patches)) => {
-                    if let (false, Some(f), Some(v)) = (patches.is_empty(), self.reconcilers.get_mut(&i), &w.view) {
-                        f(&v.rows());
-                    }
-                    self.told.patched(i, patches)
-                }
-                was => {
+                Some(Ok(patches)) => self.told.patched(i, patches),
+                _ => {
+                    let old = w.view.as_ref().map_or(0, |v| v.rows().len());
                     w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
-                    if was.is_some() || w.view.is_some() {
-                        if let (Some(f), Some(v)) = (self.reconcilers.get_mut(&i), &w.view) {
-                            f(&v.rows());
-                        }
-                        self.told.reset(i);
-                    }
+                    let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
+                    self.told.patched(i, watched::again(old, rows));
                 }
             }
         }
     }
 
-    /// An intent of this peer's own on `space`'s machine — a device's on the
-    /// log, a live call (an ephemeral one through the relay), or a server's
-    /// own entry (the server half of a mutator, a raw write, a device's
-    /// arrival) — and the verdict it was given here and now: a preview's
-    /// refusal, or the authority's.
-    pub fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
-        let ephemeral = self.config.live.as_ref().is_some_and(|l| l.ephemeral.contains(func));
-        if space == Space::Volatile && ephemeral {
+    /// An intent of this peer's own of the function `func` on `space`'s
+    /// machine ([`Peer::mutate`]; a server's of a device's arrival), an
+    /// ephemeral one through the relay, and the verdict it was given here
+    /// and now: a preview's refusal, or the authority's.
+    pub(crate) fn author(&mut self, space: Space, func: &str, input: Vec<u8>, now: i64) -> Result<(), String> {
+        if space == Space::Volatile && self.config.ephemeral.contains(func) {
             let cause = self.cause(space, now);
             self.relay.insert(func.into(), (input, now, cause));
             self.tick(now);
@@ -714,7 +607,7 @@ impl Peer {
 
     /// An intent of its own just authored on the log: pending, or — an
     /// authority's, decided as it was made — at the head.
-    pub fn authored(&self, id: &EntryId) -> Option<Entry> {
+    pub fn authored(&self, id: &EntryId) -> Option<Ctx> {
         let pending = self.log.pending.iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
         let head = self.log.log().head().0;
         pending.or_else(|| {
@@ -752,10 +645,11 @@ impl Peer {
         format!("{}/{}", self.log.me.session, ark::hash::hex(&self.log.origin.0[..4]))
     }
 
-    /// Facts the authority writes itself, raw: an entry naming no function
-    /// (`Input::Write`), judged by the store as any write is.
+    /// Facts the authority writes itself, raw: an entry naming no function,
+    /// its input their encoding, judged by the store as any write is.
     pub fn write(&mut self, facts: Vec<Change>, now: i64) -> Result<(), String> {
-        self.verdict(Space::Durable, Input::Write { facts, now })
+        let (func, input, cause) = (String::new(), ark::format::encode(&facts).expect("changes encode"), None);
+        self.verdict(Space::Durable, Input::Mutate { func, input, now, cause })
     }
 
     /// One input of this peer's own, routed, and the verdict it was given
@@ -766,8 +660,7 @@ impl Peer {
         }
         let said = self.route(space, None, input);
         let verdict = said.into_iter().find_map(|o| match o {
-            Output::Refused { why, .. } => Some(Err(why)),
-            Output::Confirmed(_) => Some(Ok(())),
+            Output::Settled(_, r) => Some(r),
             _ => None,
         });
         verdict.unwrap_or(if self.hub.serving { Err("no verdict".into()) } else { Ok(()) })
@@ -775,8 +668,7 @@ impl Peer {
 
     /// The clock: the relay goes when its interval has passed.
     pub fn tick(&mut self, now: i64) {
-        let every = self.config.live.as_ref().map_or(0, |l| l.every_ms);
-        if self.relay.is_empty() || self.relayed.is_some_and(|t| now - t < every) {
+        if self.relay.is_empty() || self.relayed.is_some_and(|t| now - t < self.config.every_ms) {
             return;
         }
         self.relayed = Some(now);
@@ -793,9 +685,13 @@ impl Peer {
         self.frames.clear();
         // Where this device's own intents stand, beside where the server
         // has them (`arkdb origins`): a first pending past the server's
-        // last + 1 is a gap, answered and closed (`Verdict::Gap`).
-        let first = self.log.pending.first().map(|p| p.entry.local);
+        // last + 1 is a gap, which its pushes say and the server passes.
+        let first = self.log.pending.front().map(|p| p.entry.local);
         tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
+        // What it is, before its `Hello`s, to a call nobody answers.
+        if let Some(input) = self.config.live.as_ref().and(self.config.device.clone()) {
+            self.call(0, ark::frames::DEVICE, input);
+        }
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
         self.files_connected();
@@ -816,14 +712,7 @@ impl Peer {
             return Err("not connected to the server".into());
         }
         let id = self.told.asked();
-        self.frames.push(
-            Frame::Call {
-                id,
-                name: name.into(),
-                input,
-            }
-            .enc(),
-        );
+        self.call(id, name, input);
         // Out now, as a change is: nobody pumps for an answer not yet asked.
         self.flush();
         Ok(id)
@@ -840,41 +729,11 @@ impl Peer {
         self.step(space, Input::Frame { from: None, bytes });
     }
 
-    /// Alone, its fork kept on its disk so that a reopen is alone still.
-    pub fn alone(&mut self) {
-        self.step(Space::Durable, Input::Alone);
-        if let Role::Authority {
-            journal: Journal { fork: Some(f), .. },
-        } = &self.log.role
-        {
-            let f = *f;
-            self.replica(|r| r.fork = Some(f));
-        }
-    }
-
-    /// Joined again: the chain made alone is pending intents (§1.7), kept
-    /// so before the log forgets it at the fork.
-    pub fn join(&mut self) {
-        if let Role::Authority {
-            journal: Journal { fork: Some((at, _)), .. },
-        } = &self.log.role
-        {
-            let chain: Vec<Entry> = self.log.log().after(*at).map(|l| l.entry).collect();
-            self.keep(|db| {
-                chain
-                    .into_iter()
-                    .try_for_each(|entry| db.pending.put(local::Intent { local: entry.local, entry }))
-            });
-        }
-        self.step(Space::Durable, Input::Join);
-        self.replica(|r| r.fork = None);
-    }
-
     /// Another login: every pending intent the signer's, its id kept — or,
     /// for another actor than the one this device authored as, authored
     /// again from a new origin's first `local` — and the live machine
     /// started over.
-    pub fn sign_in(&mut self, who: Who) {
+    pub fn sign_in(&mut self, who: Ctx) {
         let was = &self.log.me;
         let other = !was.actor.is_empty() && was.actor != who.actor;
         if other {
@@ -884,7 +743,7 @@ impl Peer {
             self.replica(|r| r.origin = o);
         }
         let origin = self.log.origin;
-        let mut pending: Vec<Entry> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
+        let mut pending: Vec<Ctx> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
         for (n, e) in pending.iter_mut().enumerate() {
             if other {
                 (e.origin, e.local) = (origin, n as i64 + 1);
@@ -893,41 +752,36 @@ impl Peer {
             (e.actor, e.session, e.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
         }
         self.log.me = who.clone();
-        if let Some(mut p) = live_of(&self.config, &who) {
+        let opens = local::Replica::read(&mut *self.local).opens;
+        if let Some(mut p) = live_of(&self.config, &who, self.log.origin, opens) {
             // The live origin goes on counting, unless the actor is new.
             if let Some(x) = self.live.as_ref().filter(|_| !other) {
                 (p.origin, p.local) = (x.origin, x.local);
             }
             self.live = Some(p);
         }
-        if let Some(r) = &mut self.record {
-            r.push((Act::SignIn(who.clone(), origin, self.live.as_ref().map(|l| l.origin)), vec![], None));
-        }
-        let durable = Durable {
-            rows: self.log.confirmed_rows(),
-            logged: vec![],
-            parts: vec![],
-            local: if other { pending.len() as i64 } else { self.log.local },
-            pending,
-        };
-        self.step(Space::Durable, Input::Open(durable));
+        let local = if other { pending.len() as i64 } else { self.log.local };
+        let pending = pending.into_iter().map(|e| Logged::intent(e, vec![])).collect();
+        let records = vec![Record::Rows(self.log.confirmed_rows()), Record::Pending { pending, at: None, local }];
+        self.step(Space::Durable, Input::Open(records));
         if self.linked {
             self.connected();
         }
     }
 
-    /// A view's answer as it stands.
-    pub fn values(&self, view: usize) -> Option<Vec<Vec<u8>>> {
+    /// A view's rows as they stand, each its bytes; none while it cannot be
+    /// made.
+    pub fn rows(&self, view: usize) -> Option<Vec<Vec<u8>>> {
         self.views.get(view)?.as_ref()?.view.as_ref().map(|v| v.rows())
     }
 
     /// A maintained view of the domain's function `name` on `input` over
     /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
-    /// comes as its [`Update`]s, under its number for as long as it is
-    /// held.
-    pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
-        let d = self.config.domain_of(space).ok_or_else(|| Refusal::new("no domain here"))?;
-        let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
+    /// comes as its patches ([`Peer::update`]), under its number for as
+    /// long as it is held.
+    pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, String> {
+        let d = self.config.domain_of(space).ok_or_else(|| String::from("no domain here"))?;
+        let store = &self.machine(space).ok_or_else(|| String::from("no machine of that space"))?.store;
         let view = Some(d.watch(store, &ctx, name, input)?);
         let (name, input) = (name.into(), input.to_vec());
         self.views.push(Some(Kept {
@@ -949,17 +803,35 @@ impl Peer {
         self.told.updates.remove(&view);
     }
 
-    /// The frames for its server, taken: a driver carrying them itself.
     /// What this peer said of itself since, out of the outbox and to its
-    /// server ([`Frame::Telemetry`](ark::frames::Frame)), a page at a time.
-    pub fn ship(&mut self) {
+    /// server as a call nobody answers ([`ark::frames::EVENTS`]), a page at
+    /// a time.
+    pub(crate) fn ship(&mut self) {
         let events = observe::take(&self.label(), 256);
         if !events.is_empty() {
-            self.frames.push(ark::frames::Frame::Telemetry { events }.enc());
+            self.call(0, ark::frames::EVENTS, events.to_bytes());
         }
     }
 
+    /// A call for its server (`id` 0: one nobody answers).
+    fn call(&mut self, id: u64, name: &str, input: Vec<u8>) {
+        self.frames.push(
+            Frame::Call {
+                id,
+                name: name.into(),
+                input,
+            }
+            .enc(),
+        );
+    }
+
+    /// The frames for its server, taken — what it said of itself among
+    /// them while linked, as a link sends them — by a driver carrying them
+    /// itself.
     pub fn take_frames(&mut self) -> Vec<Vec<u8>> {
+        if self.linked {
+            self.ship();
+        }
         std::mem::take(&mut self.frames)
     }
 }

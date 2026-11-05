@@ -215,18 +215,18 @@ impl Filter {
 
     /// What is wrong with it as conditions to keep, if anything: an
     /// account or a category that is not here, or a day that is not one.
-    pub fn check(&self, db: &Db<Money>) -> Result<(), Refusal> {
+    pub fn check(&self, db: &Db<Money>) -> Result<(), String> {
         if self.accounts.iter().any(|a| !db.account.has(*a)) {
-            return Err(Refusal::new("no such account"));
+            return Err("no such account".into());
         }
         if self.categories.iter().flatten().any(|c| !db.category.has(*c)) {
-            return Err(Refusal::new("no such category"));
+            return Err("no such category".into());
         }
         if [&self.from, &self.through].into_iter().flatten().any(|d| !is_day(d)) {
-            return Err(Refusal::new("a day, as 2026-10-26"));
+            return Err("a day, as 2026-10-26".into());
         }
         if self.text.chars().count() > 120 {
-            return Err(Refusal::new("the text is at most 120 characters"));
+            return Err("the text is at most 120 characters".into());
         }
         Ok(())
     }
@@ -251,12 +251,12 @@ pub fn needs_category(db: &Db<Money>, t: &Txn, on_budget: bool) -> bool {
 }
 
 /// A saved filter, or no such filter.
-pub fn saved_of(db: &Db<Money>, id: Id<SavedFilter>) -> Result<SavedFilter, Refusal> {
-    db.saved_filter.get(id).ok_or_else(|| Refusal::new("no such filter"))
+pub fn saved_of(db: &Db<Money>, id: Id<SavedFilter>) -> Result<SavedFilter, String> {
+    db.saved_filter.get(id).ok_or_else(|| String::from("no such filter"))
 }
 
 /// A name no other saved filter has, any case.
-fn unique(db: &Db<Money>, name: &str, besides: Option<Id<SavedFilter>>) -> Result<String, Refusal> {
+fn unique(db: &Db<Money>, name: &str, besides: Option<Id<SavedFilter>>) -> Result<String, String> {
     let name = name.trim().to_string();
     let taken = db
         .saved_filter
@@ -264,7 +264,7 @@ fn unique(db: &Db<Money>, name: &str, besides: Option<Id<SavedFilter>>) -> Resul
         .into_iter()
         .any(|f| Some(f.id) != besides && f.name.eq_ignore_ascii_case(&name));
     match taken {
-        true => Err(Refusal::new(format!("a filter is already called {name}"))),
+        true => Err(format!("a filter is already called {name}")),
         false => Ok(name),
     }
 }
@@ -285,7 +285,7 @@ pub fn used_by(db: &Db<Money>, id: Id<SavedFilter>) -> Vec<String> {
 
 /// A filter kept under a name, after every other.
 #[mutator("filters.save_filter")]
-pub fn save_filter(ctx: &Ctx, db: &mut Db<Money>, input: SaveFilter) -> Result<(), Refusal> {
+pub fn save_filter(ctx: &Ctx, db: &mut Db<Money>, input: SaveFilter) -> Result<(), String> {
     let filter = input.filter.tidy();
     filter.check(db)?;
     let name = unique(db, &input.name, None)?;
@@ -301,7 +301,7 @@ pub fn save_filter(ctx: &Ctx, db: &mut Db<Money>, input: SaveFilter) -> Result<(
 }
 
 #[mutator("filters.rename_filter")]
-pub fn rename_filter(_: &Ctx, db: &mut Db<Money>, input: RenameFilter) -> Result<(), Refusal> {
+pub fn rename_filter(_: &Ctx, db: &mut Db<Money>, input: RenameFilter) -> Result<(), String> {
     let f = saved_of(db, input.id)?;
     let name = unique(db, &input.name, Some(f.id))?;
     db.saved_filter.update(SavedFilter { name, ..f })
@@ -309,7 +309,7 @@ pub fn rename_filter(_: &Ctx, db: &mut Db<Money>, input: RenameFilter) -> Result
 
 /// A saved filter's conditions, changed.
 #[mutator("filters.change_filter")]
-pub fn change_filter(_: &Ctx, db: &mut Db<Money>, input: ChangeFilter) -> Result<(), Refusal> {
+pub fn change_filter(_: &Ctx, db: &mut Db<Money>, input: ChangeFilter) -> Result<(), String> {
     let f = saved_of(db, input.id)?;
     let filter = input.filter.tidy();
     filter.check(db)?;
@@ -318,18 +318,18 @@ pub fn change_filter(_: &Ctx, db: &mut Db<Money>, input: ChangeFilter) -> Result
 
 /// A saved filter gone — unless a formula sums it.
 #[mutator("filters.delete_filter")]
-pub fn delete_filter(_: &Ctx, db: &mut Db<Money>, input: FilterId) -> Result<(), Refusal> {
+pub fn delete_filter(_: &Ctx, db: &mut Db<Money>, input: FilterId) -> Result<(), String> {
     let f = saved_of(db, input.id)?;
     let using = used_by(db, f.id);
     if !using.is_empty() {
-        return Err(Refusal::new(format!("{} is summed by the formula of {}", f.name, using.join(", "))));
+        return Err(format!("{} is summed by the formula of {}", f.name, using.join(", ")));
     }
     db.saved_filter.remove(&f)
 }
 
 /// A saved filter put in front of another, or after every other.
 #[mutator("filters.move_filter")]
-pub fn move_filter(_: &Ctx, db: &mut Db<Money>, input: MoveFilter) -> Result<(), Refusal> {
+pub fn move_filter(_: &Ctx, db: &mut Db<Money>, input: MoveFilter) -> Result<(), String> {
     let moved = saved_of(db, input.id)?;
     if input.before == Some(moved.id) {
         return Ok(());
@@ -346,7 +346,7 @@ pub fn move_filter(_: &Ctx, db: &mut Db<Money>, input: MoveFilter) -> Result<(),
         Some(b) => order
             .iter()
             .position(|f| f.id == b)
-            .ok_or_else(|| Refusal::new("no such filter to go before"))?,
+            .ok_or_else(|| String::from("no such filter to go before"))?,
         None => order.len(),
     };
     order.insert(at, moved);
@@ -377,7 +377,7 @@ pub fn filter_line(db: &Db<Money>, f: &SavedFilter) -> FilterLine {
 
 /// Every saved filter, in order, with what each adds up to.
 #[view("filters.saved")]
-pub fn saved(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<FilterLine>, Refusal> {
+pub fn saved(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<FilterLine>, String> {
     Ok(scan::<Money, SavedFilter>().map_with(filter_line).sort(|l| (l.pos, l.id)))
 }
 
@@ -398,7 +398,7 @@ pub fn conditions(db: &Db<Money>, input: &Filtered) -> Option<Filter> {
 /// first. A saved filter's is read from it, so the register follows a
 /// change to it.
 #[view("transactions.filtered")]
-pub fn filtered(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<TxnLine>, Refusal> {
+pub fn filtered(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<TxnLine>, String> {
     let f = conditions(db, &input);
     Ok(scan::<Money, Txn>()
         .filter_with(move |db, t| f.as_ref().is_some_and(|f| f.matches(db, t)))
@@ -409,7 +409,7 @@ pub fn filtered(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<TxnLine
 /// What the register for a filter adds up to: one row, none when it
 /// matches nothing.
 #[view("transactions.filtered_total")]
-pub fn filtered_total(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<FilterTotal>, Refusal> {
+pub fn filtered_total(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<FilterTotal>, String> {
     let f = conditions(db, &input);
     Ok(scan::<Money, Txn>()
         .filter_with(move |db, t| f.as_ref().is_some_and(|f| f.matches(db, t)))

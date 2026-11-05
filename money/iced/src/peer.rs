@@ -9,7 +9,7 @@
 //! to another month or filter.
 
 use ark::format::Encode;
-use ark_peer::{Update, Watched};
+use ark_peer::Watched;
 use money_domain::*;
 
 use crate::client::Replica;
@@ -197,7 +197,7 @@ impl Peer {
         self.seen = state;
         let c = &mut self.client;
         let mut any = false;
-        let mut note = |u: Update| any |= u != Update::Unchanged;
+        let mut note = |u: Vec<ark_peer::Patch>| any |= !u.is_empty();
         note(self.accounts.settle(c, moved));
         note(self.groups.settle(c, moved));
         note(self.lines.settle(c, moved));

@@ -1,4 +1,4 @@
-//! A peer driven on its own thread (`ark_peer::driven`): what its server
+//! A peer on its own thread (`ark_peer::handle`): what its server
 //! sends is taken in with nobody pumping it, the app told; what the app
 //! has it do through the lock is sent; and a peer held twice on one thread
 //! is said, not waited on for ever.
@@ -8,27 +8,25 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark::schema::Space;
-use ark_peer::driven::Driven;
 use ark_peer::link::bell;
-use ark_peer::{dev, Memory, Peer};
+use ark_peer::{dev, Handle, Memory, Peer};
 use support::{config, named};
 
-fn hub() -> ark_peer::Handle {
-    ark_peer::Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
+fn hub() -> Handle {
+    Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
 }
 
 /// `token`'s device, linked to `hub`, driven.
-fn driven(token: &str, hub: &ark_peer::Handle) -> Driven {
-    let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()), false);
+fn driven(token: &str, hub: &Handle) -> Handle {
+    let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()));
     p.set_token(Some(token.into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
-    Driven::new(p)
+    Handle::spawn(p)
 }
 
 /// Waits up to two seconds for `f` to hold of the driven peer, reading it
 /// through the lock as an app does.
-fn until(d: &Driven, what: &str, f: impl Fn(&Peer) -> bool) {
+fn until(d: &Handle, what: &str, f: impl Fn(&Peer) -> bool) {
     let held = ark_peer::link::until(Duration::from_secs(2), Duration::from_millis(5), || f(&d.lock()));
     assert!(held, "never: {what}");
 }
@@ -46,10 +44,10 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
     until(&alice, "alice linked", |p| p.linked);
     until(&bob, "bob linked", |p| p.linked);
     let _ = rang.try_iter().count();
-    bob.lock().author(Space::Durable, "demo.create_playlist", named("Road"), 1).unwrap();
+    bob.lock().mutate_at("demo.create_playlist", named("Road"), 1).unwrap();
     until(&alice, "alice has bob's playlist", |p| p.log.log().head().0 >= 1);
     assert!(rang.try_iter().count() > 0, "and her app was told");
-    alice.lock().author(Space::Durable, "demo.create_playlist", named("Hymns"), 2).unwrap();
+    alice.lock().mutate_at("demo.create_playlist", named("Hymns"), 2).unwrap();
     until(&alice, "hers confirmed", |p| p.log.pending.is_empty() && p.log.log().head().0 >= 2);
     let at = hub.with(|p| p.log.log().head().0).unwrap();
     assert_eq!(at, 2, "the server has both");
@@ -61,8 +59,8 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "held already on this thread")]
 fn a_peer_held_twice_on_one_thread_is_said() {
-    let p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()), false);
-    let d = Driven::new(p);
+    let p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));
+    let d = Handle::spawn(p);
     let _held = d.lock();
     let _again = d.lock();
 }
@@ -78,17 +76,17 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
     hub.with(|p| {
         for i in 0..80 {
             let name = format!("{i:02}{}", "x".repeat(40_000));
-            p.author(Space::Durable, "demo.create_playlist", named(&name), 1).unwrap();
+            p.mutate_at("demo.create_playlist", named(&name), 1).unwrap();
         }
         let head = p.log.machine.log().head().0;
-        p.log.machine.step(ark::peer::Input::Compact(head));
+        p.log.machine.compact(head);
     })
     .unwrap();
-    let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()), false);
+    let mut p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));
     p.log.machine.part = Some(16 << 10);
     p.set_token(Some("alice@laptop".into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
-    let alice = Driven::new(p);
+    let alice = Handle::spawn(p);
     let (told, rang) = bell();
     alice.set_waker(told);
     until(&alice, "alice filled", |p| {

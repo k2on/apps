@@ -27,7 +27,7 @@ pub fn for_budget(a: &Account, b: &Account) -> bool {
 
 /// A transfer's other half let go: kept as a transaction of its own when
 /// the bank told of it, else gone. `t` itself is the caller's to write.
-pub fn unlink(db: &mut Db<Money>, t: &Txn) -> Result<(), Refusal> {
+pub fn unlink(db: &mut Db<Money>, t: &Txn) -> Result<(), String> {
     let Some(pair) = t.transfer_id.and_then(|p| db.txn.get(p)) else {
         return Ok(());
     };
@@ -62,7 +62,7 @@ fn opposite(db: &Db<Money>, account: Option<Id<Account>>, not: Id<Txn>, date: &s
 /// as a transfer to it, its own payee kept for when it is let go), and
 /// only a side the budget pays from or into an account off it keeps its
 /// category.
-fn join(db: &mut Db<Money>, a: Txn, b: Txn) -> Result<(), Refusal> {
+fn join(db: &mut Db<Money>, a: Txn, b: Txn) -> Result<(), String> {
     let (aa, ba) = (
         crate::accounts::account_of(db, a.account_id)?,
         crate::accounts::account_of(db, b.account_id)?,
@@ -87,7 +87,7 @@ fn join(db: &mut Db<Money>, a: Txn, b: Txn) -> Result<(), Refusal> {
 /// same money into another, both from the banks, within a few days of each
 /// other, neither looked at yet. Both stay waiting to be looked at, now as
 /// one transfer. Whether it joined.
-pub fn join_imported(db: &mut Db<Money>, t: &Txn) -> Result<bool, Refusal> {
+pub fn join_imported(db: &mut Db<Money>, t: &Txn) -> Result<bool, String> {
     let Some(here) = db.account.get(t.account_id).filter(|a| a.on_budget) else {
         return Ok(false);
     };
@@ -110,10 +110,10 @@ pub fn join_imported(db: &mut Db<Money>, t: &Txn) -> Result<bool, Refusal> {
 /// transfer (if any) let go, the edit applied, and then paired with the
 /// matching transaction in `to` — the nearest in date for the opposite
 /// amount — or given its other half there.
-pub fn make(ctx: &Ctx, db: &mut Db<Money>, t: Txn, account: &Account, to: Id<Account>, input: &EditTransaction) -> Result<(), Refusal> {
+pub fn make(ctx: &Ctx, db: &mut Db<Money>, t: Txn, account: &Account, to: Id<Account>, input: &EditTransaction) -> Result<(), String> {
     let other = open_account(db, to)?;
     if other.id == account.id {
-        return Err(Refusal::new("a transfer is between two accounts"));
+        return Err("a transfer is between two accounts".into());
     }
     unlink(db, &t)?;
     let here = Txn {

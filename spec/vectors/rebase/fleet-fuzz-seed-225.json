@@ -1,7 +1,7 @@
 {
   "found": "a volatile push overtaken by a later one was never answered",
-  "hash": "e418e2c4bb426d7b2a320bde1aa75f864a9eac227c725fbe85e08b409115975f",
-  "head": 5,
+  "hash": "bdf155f51e6b9453f286c711e32aa49fb801e2bc3618efc6f07f2ec08b71cf18",
+  "head": 4,
   "seed": 225,
   "state": "2d29ac228171f2484f73eed5e9b53527f9448dc90b6b018437e6e56704c89d6d"
 }

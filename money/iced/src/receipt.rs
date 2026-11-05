@@ -203,7 +203,7 @@ impl App {
             return;
         }
         let f = f.clone();
-        if let Some(bytes) = self.peer.client.open_file(&f) {
+        if let Ok(Some(bytes)) = self.peer.client.file(&f) {
             self.photo = Some((f.hash, image::Handle::from_bytes(bytes)));
         }
     }

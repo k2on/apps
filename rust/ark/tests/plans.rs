@@ -111,8 +111,8 @@ trait Check {
 impl<T: Clone + PartialEq + Send + std::fmt::Debug + 'static> Check for (View<V, T>, Make<V, T>) {
     fn push(&mut self, changes: &[ark::store::Change], store: &Store) -> Result<(), String> {
         let before = self.0.rows();
-        let patches = self.0.push(changes, store).map_err(|e| e.0)?;
-        let fresh = ark::plan::answer(&self.1, &ctx(), store).map_err(|e| e.0)?;
+        let patches = self.0.push(changes, store)?;
+        let fresh = ark::plan::answer(&self.1, &ctx(), store)?;
         let rows = self.0.rows();
         if rows != fresh {
             return Err(format!("the view is not a fresh run:\n{rows:?}\n{fresh:?}"));
@@ -311,7 +311,7 @@ fn a_view_built_from_a_read_is_built_again_when_it_moves() {
             .playlist
             .get(one(1))
             .filter(|p| p.user_id == ctx.user())
-            .ok_or_else(|| Refusal::new("not yours"))?;
+            .ok_or_else(|| String::from("not yours"))?;
         Ok(scan::<V, Item>().filter(move |i| i.playlist_id == p.id))
     });
     let put = |store: &mut Store, user: &str| {

@@ -20,7 +20,6 @@
 
 use std::sync::Arc;
 
-use ark::peer::Functions;
 use ark::prelude::*;
 use ark::schema::Schema;
 use ark::store::Read;
@@ -87,7 +86,7 @@ pub struct Items {
 /// A playlist, unless the person has one of that name; its id the entry's
 /// first draw.
 #[mutator("demo.create_playlist")]
-pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), Refusal> {
+pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), String> {
     let user = ctx.user().to_string();
     if !db.playlist.by(Playlist::USER_ID_NAME).from((user.clone(), input.name.clone())).any() {
         db.playlist.insert(Playlist {
@@ -101,9 +100,9 @@ pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> R
 
 /// A track at one past the playlist's last place, unless it is on it.
 #[mutator("demo.add_to_playlist")]
-pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
+pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), String> {
     if !db.playlist.has(input.playlist_id) {
-        return Err(Refusal::new("playlist_id: no such playlist"));
+        return Err("playlist_id: no such playlist".into());
     }
     if db.item.has((input.playlist_id, input.track_id.clone())) {
         return Ok(());
@@ -117,19 +116,19 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
 }
 
 #[mutator("demo.rename_playlist")]
-pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), Refusal> {
-    let p = db.playlist.get(input.playlist_id).ok_or_else(|| Refusal::new("no such playlist"))?;
+pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), String> {
+    let p = db.playlist.get(input.playlist_id).ok_or_else(|| String::from("no such playlist"))?;
     db.playlist.update(Playlist { name: input.name, ..p })
 }
 
 #[mutator("demo.remove_from_playlist")]
-pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), Refusal> {
+pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), String> {
     db.item.delete((input.playlist_id, input.track_id))
 }
 
 /// A playlist's items, in order.
 #[view("demo.items")]
-pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, String> {
     Ok(scan::<Demo, Item>().filter(move |i| i.playlist_id == input.playlist_id).sort(|i| i.pos))
 }
 
@@ -230,21 +229,19 @@ pub fn h(name: &str) -> String {
 }
 
 /// Every demo function, as a peer that authors all of them holds them.
-pub fn cas() -> Functions {
-    demo().functions()
+pub fn cas() -> Arc<Domain> {
+    Arc::new(demo())
 }
 
 /// Dave's build: `add_to_playlist`'s name, running a body stepping by two.
-pub fn daves_cas() -> Functions {
-    let mut c = cas();
-    let dave = Domain::new::<Demo>("demo", "1").mutator(ADD, daves_add).functions();
-    c.insert(ADD, dave.get(ADD).unwrap().clone());
-    c
+pub fn daves_cas() -> Arc<Domain> {
+    let dave = Domain::new::<Demo>("demo", "1").mutator(ADD, daves_add);
+    Arc::new(demo().run(ADD, dave.fns[ADD].proc.clone().unwrap()))
 }
 
-fn daves_add(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
+fn daves_add(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), String> {
     if !db.playlist.has(input.playlist_id) {
-        return Err(Refusal::new("playlist_id: no such playlist"));
+        return Err("playlist_id: no such playlist".into());
     }
     if db.item.has((input.playlist_id, input.track_id.clone())) {
         return Ok(());
@@ -258,11 +255,14 @@ fn daves_add(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Ref
 }
 
 /// Only these demo functions: a peer built without the rest.
-pub fn only(names: &[&str]) -> Functions {
-    let all = cas();
-    let mut f = Functions::default();
-    for n in names {
-        f.insert(*n, all.get(n).unwrap().clone());
-    }
-    f
+pub fn only(names: &[&str]) -> Arc<Domain> {
+    let mut d = demo();
+    d.fns.retain(|n, _| names.contains(&n.as_str()));
+    Arc::new(d)
+}
+
+/// `name`'s function, as `cas` runs it, given `peer` too.
+pub fn give(peer: &mut ark::peer::Peer, name: &str) {
+    let f = demo().fns[name].clone();
+    Arc::make_mut(&mut peer.domain).fns.insert(name.into(), f);
 }

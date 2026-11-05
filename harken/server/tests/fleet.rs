@@ -1392,10 +1392,7 @@ fn fuzz(seed: u64, steps: usize) {
 /// the horizon assertion names 0.
 #[test]
 fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
-    let f = Fleet::with_env(
-        "retention",
-        vec![("HARKEN_RETAIN_ENTRIES", "50"), ("HARKEN_RETAIN_DAYS", "0")],
-    );
+    let f = Fleet::with_env("retention", vec![("HARKEN_RETAIN_ENTRIES", "50")]);
     let mut a = f.peer("a", Some("alice"));
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("alice"));
@@ -1502,12 +1499,12 @@ fn joined(_p: &mut PeerProc, _n: i64) {}
 /// dialled at all; then the same directory is started with `--server` —
 /// the join — and a second device of the same person joins too. The
 /// server ends with exactly those sixty-one entries, in the order they
-/// were sequenced alone, all of them the person's, and every hash is the
+/// were authored alone, all of them the person's, and every hash is the
 /// server's.
 ///
-/// Falsified on v5 by the peer opening an alone directory with `--server`
-/// and not joining (the `join` at open skipped): it stays alone at 61 and
-/// the server ends empty.
+/// Falsified by the peer opening its directory with `--server` and not
+/// pushing what it has pending (the push on `Connected` skipped): the
+/// server ends empty.
 #[test]
 fn alone_then_a_fresh_server() {
     let f = Fleet::new("alone-fresh");
@@ -1519,7 +1516,7 @@ fn alone_then_a_fresh_server() {
         add(&mut p, list, m);
     }
     let st = p.status();
-    assert_eq!((st.cursor, st.pending, st.link.as_str()), (61, 0, "alone"));
+    assert_eq!((st.cursor, st.pending, st.link.as_str()), (0, 61, "alone"));
     p.quit();
     joining(&f, &p);
     p.alone = false;
@@ -1540,7 +1537,7 @@ fn alone_then_a_fresh_server() {
         fns[..50].iter().all(|f| f == "add_song")
             && fns[50] == "create_playlist"
             && fns[51..].iter().all(|f| f == "add_to_playlist"),
-        "in the order they were sequenced alone: {fns:?}"
+        "in the order they were authored alone: {fns:?}"
     );
     assert!(done
         .entries
@@ -1555,8 +1552,8 @@ fn alone_then_a_fresh_server() {
 /// authors thirty of its own; told to `join` as alice, its local history
 /// lands after everything theirs, once, and all three converge.
 ///
-/// Falsified on v5 by `join` answering before the peer joined (the
-/// `client.join()` skipped): it answers with nothing pending.
+/// Falsified by `join` dialling nothing (the server not set): it answered
+/// and nothing converged.
 #[test]
 fn alone_beside_two_server_users_lands_after_theirs() {
     let f = Fleet::new("alone-beside");
@@ -1599,12 +1596,11 @@ fn alone_beside_two_server_users_lands_after_theirs() {
 /// **16. Leave, more, and back — twice.** Alice's two devices share a
 /// playlist; one `leave`s, puts three things on it alone, while the other
 /// puts three on it online; the first `join`s again, and its three sit
-/// after the other's — authored first, sequenced last, the rebase over a
-/// fork. Then away and back once more.
+/// after the other's — authored first, sequenced last, rebased over what
+/// it missed. Then away and back once more.
 ///
-/// Falsified on v5 by `leave` going alone without the client's `alone`
-/// (only the link dropped): its three were pending, not sequenced, and the
-/// status said `offline`, not `alone`.
+/// Falsified by `leave` only dropping the link (the server kept): the
+/// status said `signed out`, not `alone`.
 #[test]
 fn leave_more_intents_and_join_again() {
     let f = Fleet::new("alone-leave");
@@ -1658,12 +1654,11 @@ fn leave_more_intents_and_join_again() {
 /// and killed a tenth, a half, nine tenths and ninety-nine hundredths of
 /// that time later — each a directory of its own — and started again with
 /// `--server`. Whatever the kill cut, the restart finishes the join: the
-/// client keeps the chain as pending intents until the server answers each,
-/// and one killed before it wrote that reopens alone and joins at open. Every intent is on the server once.
+/// client keeps its intents pending until the server answers each. Every
+/// intent is on the server once.
 ///
-/// Falsified on v5 by the peer opening an alone directory with `--server`
-/// and not joining: the ones killed before the join was written stay
-/// alone at 400 and nothing converges.
+/// Falsified by the peer opening its directory with `--server` and not
+/// pushing what it has pending: nothing converges.
 #[test]
 fn a_join_killed_with_kill9_finishes_on_restart() {
     let f = Fleet::new("alone-kill-join");
@@ -1696,7 +1691,7 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
         println!(
             "fleet: killed at {:.0}% of a join: its own state {} B",
             frac * 100.0,
-            ["local.kv", "local.log"]
+            ["local.kv", "local.log", "local.pending"]
                 .iter()
                 .map(|n| std::fs::metadata(replica.join(n)).map_or(0, |m| m.len()))
                 .sum::<u64>(),
@@ -1713,15 +1708,14 @@ fn a_join_killed_with_kill9_finishes_on_restart() {
 
 /// **18. A peer alone killed mid-append.** Three hundred songs are said to
 /// a peer alone without waiting, and it is killed a hundred and twenty
-/// milliseconds in. Started again alone, it is whole: nothing is pending,
-/// its confirmed store is its view, and every song in its library is an
-/// entry of its local history — the last whole one is where it stops. Then
-/// it joins, and the server has what it kept, every intent it answered
-/// before the kill among them.
+/// milliseconds in. Started again alone, it is whole: nothing is
+/// confirmed, and every song in its library is an intent pending — the
+/// last whole record is where it stops. Then it joins, and the server has
+/// what it kept, every intent it answered before the kill among them.
 ///
-/// Falsified on v5 by the peer alone keeping its replica in memory rather
-/// than on disk: it came back at 0, short of what it had answered. A torn
-/// last record is `ark-client`'s storage tests' to hold; no kill here was
+/// Falsified by the peer keeping its pending intents in memory rather than
+/// on disk: it came back with none, short of what it had answered. A torn
+/// last record is `ark-peer`'s storage tests' to hold; no kill here was
 /// seen to land inside one.
 #[test]
 fn a_peer_alone_killed_mid_append_reopens_whole() {
@@ -1744,13 +1738,16 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
         .count() as i64;
     p.kill9();
     p.start();
-    let (cursor, hash, view) = p.hash();
-    assert_eq!(hash, view, "the confirmed store is the view");
-    assert_eq!(p.status().pending, 0);
+    let (cursor, _, _) = p.hash();
+    assert_eq!(cursor, 0, "nothing confirmed");
     let kept = media(&mut p).len() as i64;
-    assert_eq!(kept, cursor, "every song an entry, and every entry a song");
-    assert!(cursor >= answered, "{cursor} kept, {answered} answered");
-    println!("fleet: killed mid-append: {answered} answered, {cursor} kept of 300");
+    assert_eq!(
+        kept,
+        p.status().pending,
+        "every song pending, and every pending a song"
+    );
+    assert!(kept >= answered, "{kept} kept, {answered} answered");
+    println!("fleet: killed mid-append: {answered} answered, {kept} kept of 300");
     joining(&f, &p);
     let url = p.proxy.url();
     p.ask(
@@ -1759,7 +1756,7 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
     );
     assert!(p.settle(PATIENCE));
     let log = f.server.log_on_disk().expect("a log");
-    assert_eq!(log.work(), cursor, "the server has what it kept");
+    assert_eq!(log.work(), kept, "the server has what it kept");
     for l in log.entries.iter().filter(|l| !is_sign_in(l) && !is_look(l)) {
         p.owe(l.entry.id.0, "add_song, kept past the kill");
     }

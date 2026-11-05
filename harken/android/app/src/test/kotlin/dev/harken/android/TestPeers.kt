@@ -23,12 +23,9 @@ fun declared(name: String = "Phone", canPlay: Boolean = true, kind: String = "ph
 /** A disk of its own. */
 fun scratch(): String = Files.createTempDirectory("harken").toFile().path
 
-/** A peer alone — its own authority — signed in as `user` holding `roles`: the library's role by default. */
-fun alone(user: String = "library", roles: List<String> = listOf("library")): Harken {
-    val p = harkenOpen(scratch(), testLogin(user, "s-$user", roles), declared().json())
-    p.alone()
-    return Harken(p)
-}
+/** A peer alone — no server, what it does pending — signed in as `user` holding `roles`: the library's role by default. */
+fun alone(user: String = "library", roles: List<String> = listOf("library")): Harken =
+    Harken(harkenOpen(scratch(), testLogin(user, "s-$user", roles), declared().json()))
 
 /** A device of alice's in `hall`, its login's session — its id in the listening session — `session`. */
 fun Hall.device(session: String, canPlay: Boolean = true, kind: String = "phone"): Harken =

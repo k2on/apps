@@ -1,8 +1,7 @@
-//! money's peer through the bridge: opened alone on a disk, the budget set
+//! money's peer through the bridge: opened on a disk with no server, the budget set
 //! up and an account opened by name, seen in a typed view, and a refusal
 //! said as a value.
 
-use ark_ffi::Taken;
 use money_domain::AccountLineView;
 use money_ffi::{money_domain, money_open, money_send, Sent};
 
@@ -13,7 +12,6 @@ use money_ffi::{money_domain, money_open, money_send, Sent};
 fn money_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let p = money_open(dir.path().to_str().unwrap().into(), None).unwrap();
-    p.alone();
     p.mutate("setup".into(), "null".into()).unwrap();
     let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap();
     assert!(accounts.rows().is_empty());
@@ -21,9 +19,10 @@ fn money_opens_and_is_called_by_name() {
     let Sent::Intent { id } = money_send(p.clone(), "open_account".into(), open.into()) else {
         panic!("opened")
     };
-    assert_eq!(p.standing(id), ark_ffi::Standing::Confirmed, "alone, its own authority");
+    let o = p.outcome(id).unwrap();
+    assert!(o.pending && o.refused.is_none(), "no server: pending, kept here");
     let t = accounts.take();
-    assert!(matches!(t.update, Taken::Patched { .. }), "{t:?}");
+    assert!(!t.ops.is_empty(), "{t:?}");
     assert_eq!(t.rows.len(), 1);
     assert_eq!((t.rows[0].name.as_str(), t.rows[0].balance), ("Checking", 120_000));
 

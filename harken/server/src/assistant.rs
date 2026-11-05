@@ -2957,7 +2957,7 @@ pub mod ha {
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
-    use ark::peer::{Input, Output, Peer, Role, Who};
+    use ark::peer::{Ctx, Input, Output, Peer, Role, To};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
     use ark_peer::Handle;
@@ -3114,6 +3114,13 @@ pub mod ha {
         speaker(&k.0, &k.1)
     }
 
+    /// A step of `k`'s speaker, inside its span: what the machine says in it
+    /// is the speaker's among the events.
+    fn stepped<T>(k: &(String, String), step: impl FnOnce() -> T) -> T {
+        tracing::debug_span!(target: "ark", "step", peer = %label(k), space = "volatile")
+            .in_scope(step)
+    }
+
     /// `user`'s session with each of `entities`' ids ([`speaker`]) read as
     /// the entity, which is how the bridge names a speaker.
     pub fn as_entities(mut s: Listening, user: &str, entities: &[String]) -> Listening {
@@ -3248,30 +3255,18 @@ pub mod ha {
         /// The speaker `entity`, called `name`, standing in `user`'s session.
         fn stand(&mut self, user: &str, entity: &str, name: &str) {
             let k = (user.to_string(), entity.to_string());
-            let who = Who {
-                actor: user.into(),
-                session: speaker(user, entity),
-                roles: vec![],
-            };
-            let module = &self.hosted.module;
+            let who = Ctx::who(user, speaker(user, entity), vec![]);
+            let domain = &self.hosted.domain;
             let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                let mut p = Peer::new(
-                    module.schema.clone(),
-                    module.functions.clone(),
-                    Role::Replica,
-                    who.clone(),
-                )
-                .in_space(Space::Volatile);
-                let said = Device {
-                    can_play: true,
-                    id: entity.into(),
-                    kind: Kind::Speaker.name().into(),
-                    name: name.into(),
-                    user: user.into(),
-                };
-                p.device = Some(said.to_bytes());
-                p
+                Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile)
             });
+            let said = Device {
+                can_play: true,
+                id: entity.into(),
+                kind: Kind::Speaker.name().into(),
+                name: name.into(),
+                user: user.into(),
+            };
             let (to, wake, key) = (self.frames.0.clone(), self.waker.clone(), k.clone());
             let c = self.hub.connect(
                 who,
@@ -3280,7 +3275,13 @@ pub mod ha {
                     to.send((key.clone(), b)).is_ok()
                 }),
             );
-            let out = peer.step(Input::Connected);
+            // What it is, before its `Hello`s, as a device's driver says it.
+            let (id, name, input) = (0, ark::frames::DEVICE.into(), said.to_bytes());
+            let mut out = vec![Output::Send(
+                To::Back,
+                ark::frames::Frame::Call { id, name, input }.enc(),
+            )];
+            out.extend(peer.step(Input::Connected));
             self.standing.insert(k, c);
             self.send(c, out);
         }
@@ -3298,8 +3299,8 @@ pub mod ha {
         fn send(&self, c: ConnId, out: Vec<Output>) {
             for o in out {
                 match o {
-                    Output::Send(b) => self.hub.frame(c, b),
-                    Output::Refused { why, .. } => {
+                    Output::Send(To::Back, b) => self.hub.frame(c, b),
+                    Output::Settled(_, Err(why)) => {
                         eprintln!("harken-server: house: a speaker's transition was refused: {why}")
                     }
                     _ => {}
@@ -3317,9 +3318,7 @@ pub mod ha {
                     continue;
                 };
                 let input = Input::Frame { from: None, bytes };
-                let seen = input.clone();
-                let out = peer.step(input);
-                ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
+                let out = stepped(&k, || peer.step(input));
                 for o in &out {
                     if let Output::Changes(told) = o {
                         if let Some(by) = told.iter().rev().find_map(|t| t.by) {
@@ -3378,12 +3377,10 @@ pub mod ha {
                 now,
                 cause,
             };
-            let seen = input.clone();
             let Some(peer) = self.machines.get_mut(&k) else {
                 return;
             };
-            let out = peer.step(input);
-            ark_peer::observe::step(&label(&k), Space::Volatile, None, &seen, &out);
+            let out = stepped(&k, || peer.step(input));
             self.send(c, out);
         }
 
@@ -3413,7 +3410,6 @@ pub mod ha {
                     config,
                     who.clone(),
                     Box::new(ark_peer::Memory::default()),
-                    false,
                 );
                 p.sign_in(who.clone());
                 let token = login.token.clone();
@@ -3425,7 +3421,7 @@ pub mod ha {
                 self.recorders.insert(user.to_string(), p);
             }
             if let Some(p) = self.recorders.get_mut(user) {
-                if let Err(why) = p.mutate_bytes(name, input) {
+                if let Err(why) = p.mutate(name, input) {
                     eprintln!("harken-server: house: {user}'s {name} was refused: {why}");
                 }
                 p.pump();
@@ -3437,7 +3433,7 @@ pub mod ha {
         fn pump_records(&mut self) {
             for (user, p) in self.recorders.iter_mut() {
                 p.pump();
-                for (_, why) in p.take_rejections() {
+                for (_, why) in p.take_refusals(ark::schema::Space::Durable) {
                     eprintln!("harken-server: house: {user}'s entry was refused: {why}");
                 }
             }

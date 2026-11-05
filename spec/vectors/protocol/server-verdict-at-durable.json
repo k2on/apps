@@ -1,0 +1,5 @@
+{
+  "bytes": "020010851234151743d65409f72ea19e17578f000202",
+  "frame": {"Verdict":{"id":"851234151743d65409f72ea19e17578f","space":"durable","verdict":{"At":{"last":1,"seq":1}}}},
+  "name": "server-verdict-at-durable"
+}

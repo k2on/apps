@@ -51,7 +51,7 @@ struct Calls<'a> {
 impl Calls<'_> {
     fn call(&mut self, transition: &str, input: Vec<u8>) -> Result<(), String> {
         self.stats.calls += 1;
-        let out = self.peer.call(&format!("listening.{transition}"), input);
+        let out = self.peer.mutate(&format!("listening.{transition}"), input).map(|_| ());
         if let Err(why) = &out {
             self.stats.refused += 1;
             self.stats.last_refusal = Some(format!("{transition}: {why}"));
@@ -124,7 +124,7 @@ impl Player {
     /// Whether the device is part of the session now: linked, as itself,
     /// and standing in it.
     pub fn joined(&self, p: &Peer, s: &Listening) -> bool {
-        p.status().linked && p.me().session == self.me && s.device(&self.me).is_some()
+        p.linked && p.me().session == self.me && s.device(&self.me).is_some()
     }
 
     /// Make the player agree with the session, and say what happened to it;
@@ -134,7 +134,7 @@ impl Player {
         let v = View {
             me: &self.me,
             joined: self.joined(p, &s),
-            epoch: p.status().epoch as i64,
+            epoch: p.link.epoch as i64,
             listening: &s,
             now: now_ms(),
         };
@@ -151,7 +151,7 @@ impl Player {
 
     /// What the server refused of this device's calls since the last ask.
     pub fn refusals(&mut self, p: &mut Peer) -> Vec<String> {
-        let out = p.take_live_refusals();
+        let out: Vec<String> = p.take_refusals(ark::schema::Space::Volatile).into_iter().map(|(_, why)| why).collect();
         if let Some(last) = out.last() {
             self.stats.refused += out.len() as u64;
             self.stats.last_refusal = Some(last.clone());
@@ -201,7 +201,6 @@ impl Player {
     pub fn view(&self, p: &Peer, sound: Option<&dyn Sound>) -> Value {
         let s = Player::listening(p);
         let joined = self.joined(p, &s);
-        let st = p.status();
         let active = match (joined, sound) {
             (true, _) => s.session.clone(),
             (false, Some(sound)) => self.own(sound),
@@ -211,8 +210,8 @@ impl Player {
         json!({
             "me": self.me,
             "joined": joined,
-            "linked": st.linked,
-            "epoch": st.epoch,
+            "linked": p.linked,
+            "epoch": p.link.epoch,
             "listening": listening,
             "active": active,
             "stats": self.stats,

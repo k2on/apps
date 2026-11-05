@@ -34,19 +34,18 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.1 | `format.rs` | the value format, postcard, that rows, inputs, entries, frames, snapshots, journal records and the hashed bytes are written in, one encoding per value; a key is the same value memcomparable (prefix-free, ordered as the values are); JSON is the human form (hashes and ids hex; a row inside a frame its hex) |
 | 1.1 | `json.rs` | a value without a Rust type: JSON under a `Type`, written as the Rust type it describes would be (`Typed`) and read back from those bytes (`Seed`) |
 | 1.1 | `hash.rs` | the hash spaces, each its own type: `StateHash`, `EntryHash`, `SchemaHash` |
-| 1.2 | `schema.rs` | tables, columns, keys, indexes, references, spaces; append-only growth (`compat`); a row as another schema of its table wrote it read under this one, completed or cut to its prefix (`Table::fit`) |
-| 1.2 | `migrate.rs` | rows of a schema the domain's does not grow from read through its migrations: steps, each naming the schema it reads, over every row as JSON, written under the next step's schema or the domain's |
-| 1.3 | `store.rs` | one ordered map per table, rows by key and index entries; every write judged (the row's one encoding, unique indexes, references at both ends) and a `Change` that inverts exactly; the state hash, `sha256(schema_hash ‖ per-table sums of sha256(table ‖ row))` over one space, kept per write; the log as the `_log` table, its invariant the chain |
-| 1.6 | `log.rs` | `Entry`, `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; a fill's `Part` and `Cursor`; what a peer makes durable (`Record`, `Durable`) |
-| 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority (alone is an authority with a fork): sequencing, dedupe, judging, the rebase, compaction (in either role, up to the head: a replica's pending intents are rebased by their own changes, so it folds as an authority does), going alone and joining (the chain made alone pushed as intents), a held intent, opening a log (each entry read once; a grown schema keeps it); a fill (a replica the log cannot page sent the rows in parts, each asked for with `More` once the one before is held, as they stand when it is sent; a domain's `later` tables last; an entry logged meanwhile put as it is, the state checked once the last part is in; a fill made durable part by part, reopened where it was); partial sync (`Feed`, `scoped`); the volatile space (its authority keeping the verdicts of each origin's last 64 `local`s, a push below them overtaken) |
+| 1.2 | `schema.rs` | tables, columns, keys, indexes, references, spaces; append-only growth (`compat`); a row as another schema of its table wrote it read under this one, completed or cut to its prefix (`Table::fit`), wherever a store takes rows or facts from elsewhere (`Store::apply_facts`) |
+| 1.3 | `store.rs` | one ordered map per table, rows by key and index entries; every write judged (the row's one encoding, unique indexes, references at both ends) and a `Change` that inverts exactly; the state hash, `sha256(schema_hash ‖ per-table sums of sha256(table ‖ row))` over one space, kept per write; the log as the `_log` table, its invariant the sequence (an authority's also the chain, `Log::chained`) |
+| 1.6 | `log.rs` | an entry (`Ctx`: an intent as recorded, all a function knows of it, and, with no intent in it, who someone is), `Logged`, the chain `sha256(prev ‖ enc(seq, entry, facts, state))`; ids from `(origin, local)`, row ids the entry's draws; `Snapshot`; a fill's `Cursor`; what a peer makes durable and opens from (`Record`), a device's pending intents beside it (`Record::Pending`) |
+| 1.7–1.9 | `peer.rs` | the one sans-io machine, replica or authority: sequencing, dedupe, judging, the rebase, compaction (in either role, up to the head: a replica's pending intents are rebased by their own changes, so it folds as an authority does), every push answered by where its origin stands (`At { seq, last }`) or refused, a push saying where its device's pending intents begin (its page's `from`) and what its origin had before them passed, so an intent keeps its number, opening a log (each entry read once; a grown schema keeps it) and the pending intents beside it (their changes put back, not run again, where they were made); a device with no server a replica not connected, its intents pending; a fill (a replica the log cannot page sent the rows in parts — begun again, from nothing, where facts do not apply — each asked for by a `Hello` saying where the fill stands once the one before is held, as they stand when it is sent, put as they are; a domain's `later` tables last; an entry logged meanwhile put as it is, the state checked once the last part is in; a fill made durable part by part, reopened where it was); partial sync (`Peer::feed`: a connection fed by a scope is sent every entry through it, `Peer::fed`, and its union as a fill of one part, its chain the log's keyed by who it is and its scope, nothing of it kept; a replica takes the chain it is sent, an authority checks its own as it opens); an authority's own facts (an intent naming no function); compaction by the machine's own rule (`Fold`); the volatile space, under the same rules (an authority restarted from nothing fills its replicas and passes what their pushes say they no longer hold) |
 | 1.10 | `plan.rs` | maintained views: `scan`, `filter`, `map`, `sort`, `take`, `group`, `join` over typed rows, each kept from deltas, a closure's reads recorded and re-run only for what a change hits; the answer a fresh run's, the patches splicing |
-| 1.16 | `dynamic.rs` | a row without a Rust type as JSON under the schema, its bytes and its key's; a table browsed (`Browse`: equal columns, a key range, a sort by a column, the first `n`) as a plan of the same operators, kept by patches |
-| 1.11 | `frames.rs` | the frames — `Hello`, `Page` (a peer's intents, or an authority's chain), `Snapshot` (a scoped or volatile resync), `Verdict`, `Part` and `More` (a fill), `Parts` (how big a replica would have a fill's parts), `Call` and `Reply` (a server's own function a device calls, outside both machines), and `Offer`, `Want`, `Chunk`, `Have`, `Absent` (the bytes of the files rows name, beside the log) — in the value format; no frame carries code |
+| 1.16 | `dynamic.rs` | a store's human form: a row as JSON under the schema and back, and a store whole as its tables of rows (an export), made a store again with every row judged (an import) |
+| 1.11 | `frames.rs` | the frames — `Hello`, `Page` (a peer's intents, or an authority's chain), `Verdict`, `Part` (a fill's: the rows of each table from where it begins to where the next does; a `Hello` says where the replica's log and fill stand, and how big a part, or a page, it would have), `Call` and `Reply` (a server's own function a device calls, outside both machines; what a device is and what it said of itself ride calls nobody answers, `ark.device` and `ark.events`), and `Offer`, `Want`, `Chunk`, `Have`, `Absent` (the bytes of the files rows name, beside the log) — in the value format; no frame carries code |
 | 1.16 | `row.rs` | `Row`, `Input` and its refinements (the form's words), `Describe` and `Type`, `Id`, typed indexes |
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
-| 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators, live transitions, queries, views, scopes |
+| 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators (of the space each writes), queries, views, scopes |
 | — | `file.rs` | `FileRef`, how a row names a file: the hex sha256 of its bytes, their size and media type, an ordinary record column; the files a value names (`named`), and whether a store holds a row naming one (`held`, who may read a file) |
-| — | `lib.rs` | `Refusal` and the prelude a domain uses; the derives and attributes are `rust/ark-macros` |
+| — | `lib.rs` | the prelude a domain uses (a refusal is its words, a `String`); the derives and attributes are `rust/ark-macros` |
 
 The drivers are the reference reading, not the specification:
 `rust/ark-peer` (the one peer, dialling or listening: storage, the link,
@@ -71,21 +70,26 @@ writer's own runner must fail.
 
 What a peer keeps on disk is a contract too: a new build opens the
 directory an old one wrote. `disk.rs` (`rust/ark-peer/src/`) is its
-format — `kv`, `log`, `local.kv`, `local.log` per peer, under a
-server's `log/`; a server's `session.key` beside it (`ark-auth`). The
+format — `kv`, `log`, `local.kv`, `local.log` per peer (and a
+device's pending intents, `local.pending`), under a
+server's `log/` (its journal and its volatile space as it last closed
+beside them, `local.journal` and `local.volatile`); a server's `session.key` beside it (`ark-auth`). The
 fixture `rust/ark-peer/tests/data/server/` is a server's directory with a
 device's replica in it, written once by an older build and opened by
 `rust/ark-peer/tests/old_data.rs`, which reads back its rows, its chain
-and its sign-in. **A change to the on-disk format comes with a migration
-that opens the fixtures as they are, or with a new fixture beside them
-and a note here of what moved and what reads the old one**; a fixture is
-never written over.
+and its sign-in. A change to the on-disk format writes the fixture again,
+with a note in `old_data.rs` of what moved: logs are started afresh, by
+decision, rather than migrated. Only a server's rows must cross a build: a
+device's directory may break, as it refills from its server. A server's
+directory written by main before the restructure (which this build does
+not read) crosses by `tools/from-main/migrate.sh`: its rows exported by
+that build, imported by this one, and checked row for row.
 
 Every disk keeps the schema its rows were written under beside them,
-`schema.json` (`rust/ark-peer/src/migrate.rs`). Opened under a schema
-that does not grow from it, an authority's rows are migrated by its
-domain's steps (`migrate.rs` above) and written as a snapshot one past
-its head, what it stood on kept as `kv.<hash>` and `log.<hash>`; with no
-step that reads them it does not open. A replica's start empty, its
-pending intents and origin kept, and are sent again. The fixture's
-replica predates `schema.json`, so it now opens empty, its origin kept.
+`schema.json` (`rust/ark-peer/src/disk.rs`). A schema only grows (a table
+appended, or a column that is an `Option` or defaulted), so a peer reads
+the rows and facts of any build before or after its own; an authority
+whose disk's schema its own does not grow from does not open, and a
+replica's starts empty, its pending intents and origin kept. Data moves
+within a schema by `arkdb export`, a transform of the rows as JSON, and
+`arkdb import` into an empty directory.

@@ -1,19 +1,17 @@
-//! Handlers and reconcilers (`ark_peer::jobs`), over a server and devices
-//! whose frames are carried by hand: a claim and a cancel decided by the
-//! order the server takes them in; a handler run once across a restart; a
-//! handler run only where it is registered; a reconciler told every
-//! change.
+//! Handlers (`ark_peer::jobs`), over a server and devices whose frames are
+//! carried by hand: a claim and a cancel decided by the order the server
+//! takes them in; a handler run once across a restart; a handler run only
+//! where it is registered.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ark::effect::{Cancel, Job};
 use ark::prelude::*;
-use ark::schema::Space;
 use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
 
 /// Something to fetch for its owner: the job, its outcome the body.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row, Effect)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[effect(lease_ms = 150, retry_ms = 150, owner = owner)]
 pub struct Fetch {
     #[ark(key)]
@@ -34,7 +32,7 @@ pub struct Ask {
     pub url: String,
 }
 
-fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), String> {
     let state = Job::Pending { due_ms: ctx.now };
     db.fetch.insert(Fetch {
         id: i.id,
@@ -44,7 +42,7 @@ fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
     })
 }
 
-fn all(_: &Ctx, _: &Db<Jobs>, _: ()) -> Result<Plan<Jobs, Fetch>, Refusal> {
+fn all(_: &Ctx, _: &Db<Jobs>, _: ()) -> Result<Plan<Jobs, Fetch>, String> {
     Ok(scan::<Jobs, Fetch>())
 }
 
@@ -67,7 +65,7 @@ impl Net {
         };
         for i in 0..n {
             let who = dev(&format!("user{i}@device{i}")).unwrap();
-            net.join(Peer::open(config(), who, Box::new(Memory::default()), false));
+            net.join(Peer::open(config(), who, Box::new(Memory::default())));
         }
         net
     }
@@ -148,12 +146,12 @@ fn a_claim_and_a_cancel_race_in_the_servers_order() {
         let n = Arc::new(AtomicUsize::new(0));
         net.d(0).handle::<Fetch>(counting(&n));
         asked(&mut net, 1);
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.d(1).mutate("fetch.cancel", &Cancel::<Fetch> { id: "a".into() }).unwrap();
         let order = if claim_first { [0, 1] } else { [1, 0] };
         order.into_iter().for_each(|i| net.carry_from(i));
         net.carry();
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
         match claim_first {
             true => assert_eq!(net.state(), Job::Done("body of u".into())),
@@ -175,7 +173,7 @@ fn a_handler_runs_once_across_a_restart() {
     net.d(0)
         .handle::<Fetch>(|_: &mut Peer, _: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
     asked(&mut net, 0);
-    net.d(0).jobs(now_ms());
+    net.d(0).pump();
     net.carry();
     assert!(matches!(net.state(), Job::Claimed { .. }), "claimed, confirmed");
     let (d, _) = net.devices.remove(0);
@@ -183,13 +181,13 @@ fn a_handler_runs_once_across_a_restart() {
     d.handle::<Fetch>(counting(&n));
     let i = net.join(d);
     for _ in 0..2 {
-        net.d(i).jobs(now_ms());
+        net.d(i).pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 0, "the lease holds");
     std::thread::sleep(std::time::Duration::from_millis(160));
     for _ in 0..3 {
-        net.d(i).jobs(now_ms());
+        net.d(i).pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 1, "run once the lease ran out");
@@ -209,38 +207,14 @@ fn a_handler_runs_only_where_it_is_registered() {
     asked(&mut net, 0);
     for _ in 0..3 {
         net.d(1).pump();
-        net.d(1).jobs(now_ms() + 10_000);
-        net.hub.jobs(now_ms() + 10_000);
+        net.hub.pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 0);
     assert!(matches!(net.state(), Job::Pending { .. }));
     for _ in 0..2 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     assert_eq!((n.load(Ordering::Relaxed), net.state()), (1, Job::Done("body of u".into())));
-}
-
-/// A reconciler is told the view's rows at the start and on each change:
-/// the ask, the claim, the finish, each as the server confirmed it.
-/// Falsified by telling it only at the start: it saw no rows, once.
-#[test]
-fn a_reconciler_is_told_every_change() {
-    let mut net = Net::new(2);
-    let seen: Arc<Mutex<Vec<Vec<Job<String>>>>> = Arc::default();
-    let s = seen.clone();
-    let tell = move |rows: Vec<Fetch>| s.lock().unwrap().push(rows.into_iter().map(|f| f.state).collect());
-    net.d(1).reconcile::<Fetch>(Space::Durable, "fetch.all", &().to_bytes(), tell).unwrap();
-    net.d(0).handle::<Fetch>(|_: &mut Peer, f: &Fetch| Ok(f.url.clone()));
-    asked(&mut net, 0);
-    for _ in 0..2 {
-        net.d(0).jobs(now_ms());
-        net.carry();
-    }
-    let seen = seen.lock().unwrap();
-    assert_eq!(seen.first(), Some(&vec![]));
-    assert!(matches!(seen[1][..], [Job::Pending { .. }]), "{seen:?}");
-    assert!(matches!(seen[2][..], [Job::Claimed { .. }]), "{seen:?}");
-    assert_eq!(seen.last(), Some(&vec![Job::Done("u".into())]));
 }

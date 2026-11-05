@@ -253,7 +253,6 @@ fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
     });
     let p = &read[0];
     assert_eq!(p.state, "sure", "{p:?}");
-    assert!(alice.client.files_unsent().is_empty(), "sent");
     pump_until(&mut [&mut alice], 10, |ps| {
         let rs: Vec<ReceiptLine> = ps[0].query("receipts.receipts", &()).unwrap();
         rs.iter().any(|r| r.id == p.receipt_id)
@@ -269,7 +268,7 @@ fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
         let ps: Vec<PhotoLine> = ps[0].query("receipts.photos", &()).unwrap();
         !ps.is_empty()
     });
-    assert_eq!(bob.client.open_file(&file), None, "fetched when opened");
-    pump_until(&mut [&mut bob], 10, |ps| ps[0].client.file(&file).is_some());
-    assert_eq!(bob.client.file(&file).unwrap(), jpeg);
+    assert_eq!(bob.client.file(&file), Ok(None), "fetched when opened");
+    pump_until(&mut [&mut bob], 10, |ps| ps[0].client.file(&file).is_ok_and(|f| f.is_some()));
+    assert_eq!(bob.client.file(&file).unwrap().unwrap(), jpeg);
 }

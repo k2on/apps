@@ -11,11 +11,10 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark::schema::Space;
-use ark_peer::{Config, Disk, Live, Memory, Module, Peer};
-use arkdb::demo::{arrival, live, room};
+use ark_peer::{Config, Disk, Memory, Peer};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
 use arkdb::sim::{who, Net, Op};
 
@@ -60,19 +59,11 @@ fn a_reopened_client_keeps_its_pending_intents() {
 /// the actor was: the id was another.
 #[test]
 fn a_sign_in_authors_what_was_pending_as_the_login() {
-    let anon = Who {
-        actor: "".into(),
-        session: "anon".into(),
-        roles: vec![],
-    };
+    let anon = Ctx::who("", "anon", vec![]);
     let mut n = Net::of(demo(), vec![(anon, demo()), (who(1), demo())], 5);
     n.run(&Op::Partition(0));
     n.run(&create("Road"));
-    let alice = Who {
-        actor: "alice".into(),
-        session: "alice-session".into(),
-        roles: vec!["listener".into()],
-    };
+    let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
     n.run(&Op::SignIn(0, alice.clone()));
     n.settle().unwrap();
     n.converged().unwrap();
@@ -118,7 +109,7 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
     }
     n.settle().unwrap();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&0].values(0).unwrap().len(), 3);
+    assert_eq!(n.clients[&0].rows(0).unwrap().len(), 3);
 }
 
 /// The room: two devices arrive and are here, by `on_join` the hub authored;
@@ -128,24 +119,16 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 /// moves.
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
-    let r = room();
-    let mut hub = demo();
-    hub.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: std::sync::Arc::new(arrival),
-        keep: Some(8),
-        ..Live::new(Module::of(&r))
-    });
-    let config = |name: &str| Config {
-        live: Some(live(name, 100)),
-        ..demo()
+    let hub = Config {
+        live_keep: Some(8),
+        ..arkdb::demo::hub(demo())
     };
+    let config = |name: &str| arkdb::demo::device(demo(), name, 100);
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
     let ctx = Ctx::default();
     n.watch(1, Space::Volatile, "room.present", vec![], ctx).unwrap();
-    assert_eq!(n.clients[&1].values(0).unwrap().len(), 2, "both here");
+    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 2, "both here");
     n.run(&Op::Call(0, "room.rename".into(), Rename { name: "kitchen".into() }.to_bytes()));
     for x in [1, 2, 3] {
         n.run(&Op::Call(0, "room.point".into(), Point { x }.to_bytes()));
@@ -168,7 +151,7 @@ fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     n.run(&Op::Partition(0));
     n.deliver();
     n.views_hold().unwrap();
-    assert_eq!(n.clients[&1].values(0).unwrap().len(), 1, "the phone has gone");
+    assert_eq!(n.clients[&1].rows(0).unwrap().len(), 1, "the phone has gone");
     assert!(n.refused.is_empty(), "{:?}", n.refused);
 }
 
@@ -199,12 +182,12 @@ impl Disk for Tally {
 #[test]
 fn a_mutate_writes_one_pending_record() {
     let written = Arc::new(AtomicUsize::new(0));
-    let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())), false);
+    let mut c = Peer::open(demo(), who(0), Box::new(Tally(Memory::default(), written.clone())));
     let create = "demo.create_playlist";
     let mut last = 0;
     for i in 0..=8000 {
         let before = written.load(Ordering::Relaxed);
-        let _ = c.author(Space::Durable, create, named(&format!("List {i}")), i);
+        let _ = c.mutate_at(create, named(&format!("List {i}")), i);
         last = written.load(Ordering::Relaxed) - before;
     }
     assert_eq!(c.log.pending.len(), 8001);
@@ -213,11 +196,11 @@ fn a_mutate_writes_one_pending_record() {
     let mut c = c.reopen();
     assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     let before = written.load(Ordering::Relaxed);
-    let _ = c.author(Space::Durable, create, named("One more"), 9000);
+    let _ = c.mutate_at(create, named("One more"), 9000);
     assert!(written.load(Ordering::Relaxed) - before < 512);
     let mut c = c.reopen();
     assert_eq!(c.log.pending.len(), 8002);
     assert_eq!(c.log.pending[8001].entry.local, 8002);
-    let _ = c.author(Space::Durable, create, named("And one"), 9001);
-    assert_eq!(c.log.pending.last().unwrap().entry.local, 8003, "the session's local read back");
+    let _ = c.mutate_at(create, named("And one"), 9001);
+    assert_eq!(c.log.pending.back().unwrap().entry.local, 8003, "the session's local read back");
 }

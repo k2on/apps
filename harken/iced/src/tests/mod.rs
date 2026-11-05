@@ -24,17 +24,13 @@ mod keys;
 mod views;
 
 use crate::domain::AddSong;
-use ark::peer::Who;
+use ark::peer::Ctx;
 
 use crate::client::Replica;
 use crate::listening::{Device, Kind};
 
-fn who(me: &str) -> Who {
-    Who {
-        actor: me.into(),
-        session: format!("{me}-device"),
-        roles: vec![],
-    }
+fn who(me: &str) -> Ctx {
+    Ctx::who(me, format!("{me}-device"), vec![])
 }
 
 /// A replica's lists, its device holding the `library` role
@@ -53,11 +49,9 @@ pub fn hand(p: crate::peer::Peer) -> crate::peer::Peer {
     p
 }
 
-/// A replica in memory, its own authority, as `me`.
+/// A replica in memory with no server, as `me`: what it does is pending.
 pub fn alone(me: &str) -> crate::peer::Peer {
-    let mut client = crate::client::memory(who(me), None);
-    client.alone();
-    lists(client)
+    lists(crate::client::memory(who(me), None))
 }
 
 /// A replica in memory, signed in as `me` with a token, reaching no server

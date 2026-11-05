@@ -128,7 +128,9 @@ fn the_importer_walks_one_bank_through_three_phases() {
 /// A restart asks from the cursor the last run kept and answers no ask it
 /// answered before; a run said again from an older cursor — the import
 /// in, the cursor never kept — changes nothing. Falsified by loading no
-/// store at start: the restart had no bank to import.
+/// store at start: the restart had no bank to import. (It once read the
+/// budget after the third run, which was the second open's, not the
+/// sync's, as often as the two opens were answered by a run each.)
 #[test]
 fn a_restart_resumes_from_the_cursor_and_a_run_said_twice_changes_nothing() {
     let rt = runtime();
@@ -148,7 +150,16 @@ fn a_restart_resumes_from_the_cursor_and_a_run_said_twice_changes_nothing() {
     mock.phase(2);
     alice.mutate("banks.sync", &());
     pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
-    runs(&server, 3);
+    // The run that answers the sync, with phase two: the two opens may
+    // have been answered by one run or by two, so the third is not
+    // always it.
+    let phase2 = Outcome::Imported { upserts: 2, removed: 1 };
+    let i = server.importer.as_ref().unwrap();
+    assert!(
+        eventually(20, || i.runs().iter().any(|r| r.banks.get("chase") == Some(&phase2))),
+        "{:#?}",
+        i.runs()
+    );
     let after2 = txns(&server);
     rt.block_on(server.stop());
 

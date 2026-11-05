@@ -7,22 +7,18 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_ffi::{Login, Peer, Refusal};
 use ark_peer::{now_ms, Handle, Memory};
 
 /// Who a hall's token, `user/session` or `user/session/role,role`, is.
-fn token(t: &str) -> Option<Who> {
+fn token(t: &str) -> Option<Ctx> {
     let mut parts = t.splitn(3, '/');
     let (actor, session) = (parts.next()?, parts.next()?);
     let roles = parts
         .next()
         .map_or(vec![], |r| r.split(',').filter(|r| !r.is_empty()).map(String::from).collect());
-    Some(Who {
-        actor: actor.into(),
-        session: session.into(),
-        roles,
-    })
+    Some(Ctx::who(actor, session, roles))
 }
 
 #[derive(uniffi::Object)]

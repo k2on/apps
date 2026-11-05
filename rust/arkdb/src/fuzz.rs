@@ -8,7 +8,7 @@
 //! to four clients — one fed by the scope `demo.top_two`, some holding the
 //! admin role, sometimes the live room — and a script of authoring,
 //! partitions and heals, the server restarted, a client reopened, a
-//! sign-in, going alone and joining, waits and deliveries; sometimes the
+//! sign-in, a while offline, waits and deliveries; sometimes the
 //! hub keeps only a few entries above its horizon. After every op every
 //! view kept is its patches and a fresh evaluation; once settled,
 //! [`check`]: every whole client converged, the partial one exactly its
@@ -19,11 +19,11 @@
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::peer::{Ctx, Feed, Who};
+use ark::peer::Ctx;
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
-use ark_peer::{Config, Live, Module, Peer};
+use ark_peer::{Config, Peer};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 pub use crate::sim::Rng;
@@ -31,7 +31,7 @@ use crate::sim::{Net, Op};
 
 /// The demo, and what a script can do with it.
 pub struct Gen {
-    pub module: Module,
+    pub functions: ark::Domain,
     pub scope: String,
 }
 
@@ -41,7 +41,7 @@ const TRACKS: [&str; 6] = ["t1", "t2", "t3", "t4", "t5", ""];
 impl Gen {
     pub fn new() -> Gen {
         Gen {
-            module: Module::of(&crate::demo::demo()),
+            functions: crate::demo::demo(),
             scope: "demo.top_two".into(),
         }
     }
@@ -120,59 +120,42 @@ pub struct Found {
     pub ops: usize,
 }
 
-fn login(i: i64, n: u64, admin: bool) -> Who {
+fn login(i: i64, n: u64, admin: bool) -> Ctx {
     let roles = if admin { vec!["admin".to_string()] } else { vec![] };
-    Who {
-        actor: format!("u{}", i % 2),
-        session: if i == 0 { format!("partial-{n}") } else { format!("s{i}-{n}") },
+    Ctx::who(
+        format!("u{}", i % 2),
+        if i == 0 { format!("partial-{n}") } else { format!("s{i}-{n}") },
         roles,
-    }
-}
-
-fn ctx_of(w: &Who) -> Ctx {
-    Ctx::new(w, 0)
+    )
 }
 
 /// One session from its seed: the net it left, or the first check it failed.
-pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
+pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut r = Rng(seed);
     let g = Gen::new();
-    let room = crate::demo::room();
     let live = r.one_in(2);
     let mut hub = Config::of(Arc::new(crate::demo::demo()));
     let scope = g.scope.clone();
     let scoped = scope.clone();
-    hub.feed = Arc::new(move |w: &Who| {
-        if w.session.starts_with("partial") {
-            Feed::Scoped(scoped.clone())
-        } else {
-            Feed::Whole
-        }
-    });
+    hub.feed = Arc::new(move |w: &Ctx| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
-        hub.live = Some(Live {
-            on_join: Some("room.on_join".into()),
-            on_leave: Some("room.on_leave".into()),
-            arrive: Arc::new(crate::demo::arrival),
-            keep: Some(4),
-            ..Live::new(Module::of(&room))
-        });
+        hub = Config {
+            live_keep: Some(4),
+            ..crate::demo::hub(hub)
+        };
     }
     let n = 2 + r.below(3) as i64;
     let partial = r.one_in(2);
-    let config = |i: i64| Config {
-        live: live.then(|| crate::demo::live(&format!("d{i}"), 50)),
-        ..Config::of(Arc::new(crate::demo::demo()))
+    let config = |i: i64| match live {
+        true => crate::demo::device(Config::of(Arc::new(crate::demo::demo())), &format!("d{i}"), 50),
+        false => Config::of(Arc::new(crate::demo::demo())),
     };
-    let logins: Vec<(Who, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
+    let logins: Vec<(Ctx, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
     let mut net = Net::of(hub, logins, seed);
-    if let Some(c) = net.clients.get_mut(&0).filter(|_| partial) {
-        c.log.feed = Feed::Scoped(scope.clone());
-    }
     let watch = |net: &mut Net, r: &mut Rng, i: i64| -> Result<(), String> {
         let (f, input) = g.query(r, net, i);
-        let ctx = ctx_of(&net.clients[&i].log.me);
+        let ctx = net.clients[&i].log.me.clone();
         net.watch(i, Space::Durable, &f, input, ctx).map(|_| ())
     };
     for i in 0..n {
@@ -191,31 +174,28 @@ pub fn session(seed: u64, traces: bool) -> Result<(Net, Found), String> {
             17 if r.one_in(3) => Op::Restart,
             18 if r.one_in(2) => Op::Reopen(i),
             19 if whole && r.one_in(3) => Op::SignIn(i, login(i + !partial as i64, k + 1, r.one_in(3))),
-            20 if whole && r.one_in(2) => Op::Alone(i),
-            21 => Op::Join(i),
+            20 if whole && r.one_in(2) => Op::Offline(i),
+            21 => Op::Online(i),
             22 => Op::Wait(r.below(80) as i64),
             23 if r.one_in(3) => Op::LosePending(i),
             _ => Op::Step,
         };
         net.run(&op);
         found.ops += 1;
-        if let Some(c) = net.clients.get_mut(&0).filter(|_| partial) {
-            c.log.feed = Feed::Scoped(scope.clone());
-        }
         if matches!(op, Op::Reopen(_)) {
             watch(&mut net, &mut r, i)?;
         }
         net.views_hold().map_err(|e| format!("after op {k} ({op:?}): {e}"))?;
     }
     net.settle()?;
-    check(&net, &g, partial, traces)?;
+    check(&net, &g, partial)?;
     found.entries = net.hub.log.log().head().0 as usize;
     found.refused = net.refused.len();
     Ok((net, found))
 }
 
 /// Everything a settled session must be.
-pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), String> {
+pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     net.converged()?;
     if let Some(b) = net.misread.first() {
         return Err(format!("a frame did not read back as sent: {}", ark::hash::hex(b)));
@@ -227,19 +207,15 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
     let mut s = hub.store.clone();
     s.undo(entries.iter().flat_map(|l| &l.facts))
         .map_err(|r| format!("the log's facts do not undo: {r}"))?;
-    if s.state_hash() != hub.log().base().state {
-        return Err("the store at the horizon is not the state the log stands on".into());
-    }
     for l in &entries {
-        let p = g.module.functions.get(&l.entry.func).ok_or("an entry of no function")?;
-        let ran = p
-            .apply(&mut s, &Ctx::of(&l.entry), &l.entry.input)
-            .map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
+        let p = g
+            .functions
+            .get(&l.entry.func)
+            .and_then(|f| f.proc.clone())
+            .ok_or("an entry of no function")?;
+        let ran = p(&mut s, &l.entry, &l.entry.input).map_err(|e| format!("entry {} refuses when run again: {e}", l.seq))?;
         if ran != l.facts {
             return Err(format!("entry {} runs again to other facts", l.seq));
-        }
-        if s.state_hash() != l.state {
-            return Err(format!("entry {}'s state is not its facts'", l.seq));
         }
         let w = net.logins.get(&l.entry.session).ok_or(format!("entry {} of no login", l.seq))?;
         if (&w.actor, &w.roles) != (&l.entry.actor, &l.entry.roles) {
@@ -250,53 +226,31 @@ pub fn check(net: &Net, g: &Gen, partial: bool, traces: bool) -> Result<(), Stri
         return Err("the log replayed from its facts is not the store".into());
     }
     if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.module.functions.scope(&g.scope).expect("the scope");
-        let ctx = ctx_of(&c.log.me);
+        let holds = g.functions.get(&g.scope).and_then(|f| f.scope.clone()).expect("the scope");
+        let ctx = c.log.me.clone();
         let mut rows = vec![];
         for (name, rs) in hub.store.snapshot_rows() {
             let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();
             rows.push((name, held));
         }
-        let union = Store::from_rows(schema, Space::Durable, &rows).map_err(|r| r.0)?.0;
+        let union = Store::from_rows(schema, Space::Durable, &rows)?;
         if c.log.store != union || !c.log.pending.is_empty() {
             return Err("the partial client is not exactly its union".into());
-        }
-    }
-    if traces {
-        for (i, c) in &net.clients {
-            let t = crate::trace::record(&format!("client {i}"), c);
-            crate::trace::replay(&t).map_err(|e| format!("client {i}'s trace: {e}"))?;
         }
     }
     Ok(())
 }
 
-/// `arkdb fuzz [sessions] [first seed] [traces [DIR]]`: that many sessions
-/// ([`session`]), seeds counted up from the first, each checked, every
-/// client's trace replayed when `traces` is given or, with `DIR`, written
-/// there instead as `seed-<seed>-client-<i>.json` (a trace corpus,
-/// `spec/RUNNERS.md` § trace, which the flake's `traces` check replays);
-/// each failure printed with its seed, which reproduces it. Whether any
-/// failed.
+/// `arkdb fuzz [sessions] [first seed]`: that many sessions ([`session`]),
+/// seeds counted up from the first, each checked; each failure printed
+/// with its seed, which reproduces it. Whether any failed.
 pub fn main(args: &[String]) -> bool {
     let n: u64 = args.first().and_then(|a| a.parse().ok()).unwrap_or(10_000);
     let first: u64 = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(1);
-    let traces = args.get(2).is_some_and(|a| a == "traces");
-    let out = args.get(3).filter(|_| traces);
-    if let Some(d) = out {
-        std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("{d}: {e}"));
-    }
     let (mut failed, mut entries, mut refused, mut ops) = (0, 0, 0, 0);
     for seed in first..first + n {
-        match std::panic::catch_unwind(|| session(seed, traces && out.is_none())) {
-            Ok(Ok((net, f))) => {
-                (entries, refused, ops) = (entries + f.entries, refused + f.refused, ops + f.ops);
-                for (i, c) in net.clients.iter().filter(|_| out.is_some()) {
-                    let path = format!("{}/seed-{seed}-client-{i}.json", out.expect("a directory"));
-                    let t = crate::trace::record(&format!("seed {seed} client {i}"), c);
-                    std::fs::write(&path, t).unwrap_or_else(|e| panic!("{path}: {e}"));
-                }
-            }
+        match std::panic::catch_unwind(|| session(seed)) {
+            Ok(Ok((_, f))) => (entries, refused, ops) = (entries + f.entries, refused + f.refused, ops + f.ops),
             Ok(Err(e)) => {
                 failed += 1;
                 println!("seed {seed}: {e}");

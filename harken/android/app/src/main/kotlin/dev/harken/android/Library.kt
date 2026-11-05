@@ -9,8 +9,8 @@
 // albums, the artists and the songs' details are maintained views — the
 // kernel's (§1.10), typed by the generated stubs (`gen.View`) — read once,
 // Home's three first; after every change each is asked what it did, and its
-// patches are spliced into the list the screens hold; only a `Reset` reads
-// one again. A page — an album, an artist, a playlist, a performance — is a
+// patches are spliced into the list the screens hold — a view made again
+// too, as its rows removed and inserted. A page — an album, an artist, a playlist, a performance — is a
 // view too, and so are a catalogue's lists (a person's works, a work's
 // performances, who is on one), each held while a screen shows it and
 // dropped when the last one leaves. Search is a
@@ -24,7 +24,7 @@ package dev.harken.android
 import dev.arkdb.ffi.Change
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Standing
+import dev.arkdb.ffi.Outcome
 import dev.arkdb.ffi.Status
 import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
@@ -412,11 +412,6 @@ class Library(private val session: ArkSession) {
                 held.rows.splice(u.changes, held.of)
                 true
             }
-            is Update.Reset -> {
-                held.rows.clear()
-                u.rows.mapTo(held.rows, held.of)
-                true
-            }
         }
     }
 
@@ -435,8 +430,8 @@ class Library(private val session: ArkSession) {
         val h = harken ?: return
         movedFlow.value++
         splice()
-        val rejected = h.peer.takeRejections()
-        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().why}"
+        val rejected = h.peer.takeRefusals()
+        if (rejected.isNotEmpty()) noticeFlow.value = "Not saved: ${rejected.last().refused}"
     }
 
     // Pages -------------------------------------------------------------------
@@ -628,15 +623,14 @@ class Library(private val session: ArkSession) {
     suspend fun diagnostics(): Diagnostics =
         session.run { h ->
             val mine = synchronized(changes) { changes.toList() }
-            Diagnostics(status = h.peer.status(), changes = mine.map { it.what to standing(h.peer.standing(it.id)) })
+            Diagnostics(status = h.peer.status(), changes = mine.map { it.what to standing(h.peer.outcome(it.id)) })
         }
 
-    private fun standing(st: Standing): String =
-        when (st) {
-            is Standing.Pending -> "not synced yet"
-            is Standing.Confirmed -> "saved"
-            is Standing.Unknown -> "unknown"
-            is Standing.Rejected -> "not saved: ${st.why}"
+    private fun standing(o: Outcome?): String =
+        when {
+            o == null -> "unknown"
+            o.pending -> "not synced yet"
+            else -> o.refused?.let { "not saved: $it" } ?: "saved"
         }
 
     fun signOut() = session.signOut()

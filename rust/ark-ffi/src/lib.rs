@@ -4,38 +4,38 @@
 //! The kit is domain-agnostic: an app's own Rust crate links its domain in
 //! and opens a [`Peer`] over it ([`Peer::open`]; harken's is `harken/ffi`,
 //! whose `harken_open` is the constructor its phones call). Through the
-//! bridge a [`Peer`] is called by function name with JSON — `mutate`,
-//! `query`, `view`, the live space's `call` — and says where it stands
-//! (`status`), what became of each intent (`standing`, `take_rejections`),
-//! which jobs of a kind are due for a handler written in the app (`due`),
-//! who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session rows)
-//! and whether it is alone (`alone`, `join`).
+//! bridge a [`Peer`] is called by function name with JSON — `mutate` (on
+//! the space the function writes), `query`, `view` — and says where it stands
+//! (`status`), what became of each intent (`outcome`, `take_refusals`),
+//! and who it is (`login`, `signed_in`, `logout`: `ark-auth`'s session
+//! rows). With no server (`connect` never called) it is a replica whose
+//! intents stay pending, kept on its disk until it has one.
 //! The typed Kotlin and Swift over these names is generated from the domain
 //! (`arkdb gen`), types only; a view whose row type has a twin is read
 //! typed instead, its rows UniFFI's records ([`typed`]).
 //!
 //! **It drives itself.** A peer has a thread of its own that pumps its link
 //! whenever the connection rings or a dial is due, and keeps its views up:
-//! each [`ViewHandle`] gathers its patches ([`ViewUpdate`]) until taken, and
+//! each [`ViewHandle`] gathers its patches ([`ViewTaken`]) until taken, and
 //! the app's [`Listener`] is told whenever anything moved — a frame came, a
 //! view was patched — on whatever thread moved it; the app then takes its
 //! views and asks `status` on its own. A view that could not be kept up is
-//! read again by itself and says [`ViewUpdate::Reset`] with its rows.
+//! made again by itself, and says so as its patches: its rows removed and
+//! inserted.
 
 use std::collections::BTreeMap;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::log::EntryId;
-use ark::peer::Who;
-use ark_peer::link::{bell, Dial, Wake};
-use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
+use ark::peer::Ctx;
+use ark_peer::handle::{Handle, Locked};
+use ark_peer::link::Dial;
+use ark_peer::{Config, Files, Patch, Watched};
 
 uniffi::setup_scaffolding!();
 
 pub mod typed;
-pub use typed::{Op, RowId, Taken, Twin, Typed};
+pub use typed::{Op, RowId, Twin, Typed};
 
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -56,13 +56,6 @@ impl<S: Into<String>> From<S> for Refusal {
     fn from(why: S) -> Refusal {
         Refusal::Refused { why: why.into() }
     }
-}
-
-/// A kind's jobs due now, each its row's JSON, and when the next is due.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Due {
-    pub rows: Vec<String>,
-    pub next_ms: Option<i64>,
 }
 
 /// A login as the server hands it over: the token the link proves itself
@@ -98,88 +91,62 @@ impl From<ark_auth::Login> for Login {
 }
 
 impl Login {
-    fn who(&self) -> Who {
-        Who {
-            actor: self.user.clone(),
-            session: self.session.clone(),
-            roles: self.roles.clone(),
-        }
+    fn who(&self) -> Ctx {
+        Ctx::who(self.user.clone(), self.session.clone(), self.roles.clone())
     }
 }
 
-/// One change to a view's rows, each row its JSON (§1.10).
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Patch {
-    /// `row` before the row at `at` (`at` the length appends).
-    Insert {
-        at: u64,
-        row: String,
-    },
-    Remove {
-        at: u64,
-    },
-    Update {
-        at: u64,
-        row: String,
-    },
+/// What a view did since it was last taken — its changes ([`Op`]), none
+/// when it did nothing — and the rows that came with them, each its JSON
+/// (§1.10): a typed view's `<T>Taken`, by name.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ViewTaken {
+    pub ops: Vec<Op>,
+    pub rows: Vec<String>,
 }
 
-/// The server's answer to a call ([`Peer::request`]): what its function
-/// gave back, as bytes, or why not.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Reply {
-    Ok { output: Vec<u8> },
-    Refused { why: String },
+/// What has become of the intent `id` (as [`Peer::mutate`] gave it):
+/// pending, taken by the server (neither `pending` nor `refused`), or
+/// refused and why.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Outcome {
+    pub id: String,
+    pub pending: bool,
+    pub refused: Option<String>,
 }
 
-/// What a view did since it was last taken.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ViewUpdate {
-    Unchanged,
-    Patched {
-        patches: Vec<Patch>,
-    },
-    /// It was read again: these are its rows.
-    Reset {
-        rows: Vec<String>,
-    },
-}
-
-/// What has become of an intent this device authored.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Standing {
-    Pending,
-    Confirmed,
-    Rejected { why: String },
-    Unknown,
+impl Outcome {
+    fn of(id: EntryId, o: ark_peer::Outcome) -> Outcome {
+        let (pending, refused) = match o {
+            ark_peer::Outcome::Pending => (true, None),
+            ark_peer::Outcome::Ok => (false, None),
+            ark_peer::Outcome::Refused(why) => (false, Some(why)),
+        };
+        Outcome {
+            id: ark::hash::hex(&id.0),
+            pending,
+            refused,
+        }
+    }
 }
 
 /// Where a device stands, as a status line says it.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct Status {
-    /// `alone`, `signed out`, `online`, `offline`, `connecting` or `waiting
-    /// to dial`.
+    /// `alone` (no server), `signed out`, `online`, `offline`, `connecting`
+    /// or `waiting to dial`.
     pub link: String,
     pub linked: bool,
     pub epoch: u64,
     pub cursor: i64,
     pub pending: u64,
-    pub joining: bool,
     pub user: String,
     pub session: String,
-    pub alone: bool,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
     /// Why the server last turned this login away (close 4401), until the
     /// next login: the link has stopped dialling.
     pub denied: Option<String>,
-}
-
-/// An intent the server refused: its id and why.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Rejection {
-    pub id: String,
-    pub why: String,
 }
 
 /// What the app is told when anything moved: it takes its views then.
@@ -192,69 +159,67 @@ pub trait Listener: Send + Sync {
 /// the peer as they are asked for), and what it did since taken.
 struct Kept {
     view: Watched<()>,
-    update: Update,
+    patches: Vec<Patch>,
 }
 
+/// What the bridge keeps beside the peer: its views, and what the app was
+/// last told of.
+#[derive(Default)]
 struct State {
-    peer: ark_peer::Peer,
     views: BTreeMap<u64, Kept>,
     next: u64,
-    /// Until when the driver wakes often: a live call's relay is due.
-    hurry: u64,
     /// Why the server last turned the login away.
     denied: Option<String>,
-    /// The calls' answers waiting when the app was last told.
-    replies: usize,
-    /// The files that had arrived when the app was last told.
-    files: u64,
 }
 
-impl State {
+/// The peer held, and the bridge's state beside it.
+struct Held<'a> {
+    peer: Locked<'a>,
+    state: MutexGuard<'a, State>,
+}
+
+impl Held<'_> {
     /// Every view's updates taken from the peer into what the app has not
     /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved — or a call's answer came.
+    /// Whether any moved.
     fn settle(&mut self) -> bool {
+        let (peer, s) = (&mut *self.peer, &mut *self.state);
         let mut moved = false;
-        for k in self.views.values_mut() {
-            match k.view.settle(&mut self.peer, true) {
-                Update::Unchanged => continue,
-                Update::Patched(ps) => k.update.patch(ps),
-                Update::Reset => k.update = Update::Reset,
-            }
-            moved = true;
+        for k in s.views.values_mut() {
+            let ps = k.view.settle(peer, true);
+            moved |= !ps.is_empty();
+            k.patches.extend(ps);
         }
-        let replies = self.peer.replies_waiting();
-        moved |= replies > self.replies;
-        self.replies = replies;
-        let files = self.peer.files_arrived();
-        moved |= files != self.files;
-        self.files = files;
         moved
     }
 
     /// A view's number and name, while it answers.
     fn kept(&self, id: u64) -> Option<(usize, String)> {
-        let k = self.views.get(&id)?;
+        let k = self.state.views.get(&id)?;
         Some((k.view.view()?, k.view.name().to_string()))
     }
 }
 
+/// The peer, on a thread of its own ([`Handle`]), the bridge's
+/// state, and who is told when anything moved.
 struct Shared {
+    peer: Handle,
     state: Mutex<State>,
     listener: Mutex<Option<Arc<dyn Listener>>>,
-    wake: Wake,
-    /// Pumped by whoever drives it ([`Peer::pump`]), never by its thread.
-    by_hand: std::sync::atomic::AtomicBool,
 }
 
 impl Shared {
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    fn lock(&self) -> Held<'_> {
+        let peer = self.peer.lock();
+        Held {
+            peer,
+            state: self.state.lock().unwrap_or_else(|e| e.into_inner()),
+        }
     }
 
     /// `f` on the peer, its views settled after; the listener told when
-    /// anything moved, and the driver rung to send what it said.
-    fn act<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
+    /// anything moved. Let go, the driver sends what the peer said.
+    fn act<T>(&self, f: impl FnOnce(&mut Held) -> T) -> T {
         let (out, moved) = {
             let mut s = self.lock();
             let out = f(&mut s);
@@ -263,7 +228,6 @@ impl Shared {
         if moved {
             self.tell();
         }
-        (self.wake)();
         out
     }
 
@@ -274,28 +238,14 @@ impl Shared {
         }
     }
 
-    /// How long the driver may sleep: until the next dial, a relay's
-    /// interval while one is due, a second at most.
-    fn patience(&self) -> Duration {
-        let s = self.lock();
-        let now = monotonic_ms();
-        let mut ms = 1000;
-        if let Some(d) = s.peer.deadline() {
-            ms = ms.min(d.saturating_sub(now));
-        }
-        if s.hurry > now {
-            let every = s.peer.config.live.as_ref().map_or(50, |l| l.every_ms.max(1) as u64);
-            ms = ms.min(every);
-        }
-        Duration::from_millis(ms)
-    }
-
+    /// What the driver's pumps took in — or, pumped by hand, a pump now —
+    /// settled into the views: whether anything moved, the app told so.
     fn pump(&self) -> bool {
+        let p = self.peer.pump();
         let moved = {
             let mut s = self.lock();
-            let p = s.peer.pump();
             if p.denied.is_some() {
-                s.denied = p.denied;
+                s.state.denied = p.denied;
             }
             s.settle() | p.moved
         };
@@ -306,44 +256,9 @@ impl Shared {
     }
 }
 
-/// The driver: a pump whenever the link rings or the peer's patience runs
-/// out, until the peer is gone.
-fn drive(shared: Weak<Shared>, rx: Receiver<()>) {
-    loop {
-        let wait = match shared.upgrade() {
-            Some(s) => s.patience(),
-            None => return,
-        };
-        if let Err(RecvTimeoutError::Disconnected) = rx.recv_timeout(wait) {
-            return;
-        }
-        while rx.try_recv().is_ok() {}
-        match shared.upgrade() {
-            Some(s) if !s.by_hand.load(std::sync::atomic::Ordering::Relaxed) => drop(s.pump()),
-            Some(_) => {}
-            None => return,
-        }
-    }
-}
-
 /// A value's JSON, or what went wrong reading it (which a test sees).
 fn text(json: Result<String, String>) -> String {
     json.unwrap_or_else(|why| format!("{{\"error\":{}}}", serde_json::Value::String(why)))
-}
-
-/// A view's patch, each row its JSON as `elem` writes it.
-fn patch(p: ark_peer::Patch, elem: &dyn Fn(&[u8]) -> String) -> Patch {
-    match p {
-        ark::plan::Patch::Insert { at, node } => Patch::Insert {
-            at: at as u64,
-            row: elem(&node),
-        },
-        ark::plan::Patch::Remove { at } => Patch::Remove { at: at as u64 },
-        ark::plan::Patch::Update { at, node } => Patch::Update {
-            at: at as u64,
-            row: elem(&node),
-        },
-    }
 }
 
 /// A device's peer: the app kit of `ark-peer` over a domain, on a disk.
@@ -364,31 +279,20 @@ impl Peer {
 
     /// A peer opened by its host its own way — as a login it keeps itself,
     /// its link tuned — driven from now on as [`Peer::open`]'s is.
-    pub fn of(mut peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
+    pub fn of(peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
         // What this device does goes to its server (docs/plan-observe.md).
-        ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
-        let (wake, rx) = bell();
-        peer.set_waker(wake.clone());
-        let state = State {
-            peer,
-            views: BTreeMap::new(),
-            next: 0,
-            hurry: 0,
-            denied: None,
-            replies: 0,
-            files: 0,
-        };
+        let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
         let shared = Arc::new(Shared {
-            state: Mutex::new(state),
+            peer: Handle::spawn(peer),
+            state: Mutex::default(),
             listener: Mutex::new(None),
-            wake,
-            by_hand: Default::default(),
         });
         let weak = Arc::downgrade(&shared);
-        std::thread::Builder::new()
-            .name("ark-peer".into())
-            .spawn(move || drive(weak, rx))
-            .map_err(|e| e.to_string())?;
+        shared.peer.set_waker(Arc::new(move || {
+            if let Some(s) = weak.upgrade() {
+                s.pump();
+            }
+        }));
         Ok(Arc::new(Peer { shared }))
     }
 
@@ -406,7 +310,7 @@ impl Peer {
     /// Pumped by hand from now on — [`Peer::pump`], and never by its own
     /// thread — so that a test says when what arrived is taken in.
     pub fn by_hand(&self) {
-        self.shared.by_hand.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shared.peer.by_hand();
     }
 
     /// What the connection said taken in now, and what the peer has to say
@@ -416,18 +320,12 @@ impl Peer {
     }
 
     /// A maintained view of `name` on its input's bytes.
-    pub fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
+    pub(crate) fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
         let id = self.shared.act(|s| -> Result<u64, String> {
             let view = Watched::try_open(&mut s.peer, &name, args, |_| ())?;
-            let id = s.next;
-            s.views.insert(
-                id,
-                Kept {
-                    view,
-                    update: Update::Unchanged,
-                },
-            );
-            s.next += 1;
+            let id = s.state.next;
+            s.state.views.insert(id, Kept { view, patches: vec![] });
+            s.state.next += 1;
             Ok(id)
         })?;
         Ok(Arc::new(ViewHandle {
@@ -444,9 +342,10 @@ impl Peer {
         *self.shared.listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }
 
-    /// Dial `url` (`ws://…/sync`, [`socket_url`]) whenever signed in.
-    pub fn connect(&self, url: String) {
-        self.shared.act(|s| s.peer.connect(&url));
+    /// Dial the server at `server` (`http://host:port`; its sync socket,
+    /// `ark_auth::socket_url`) whenever signed in.
+    pub fn connect(&self, server: String) {
+        self.shared.act(|s| s.peer.connect(&ark_auth::socket_url(&server)));
     }
 
     /// Offline on purpose, or back online.
@@ -461,41 +360,27 @@ impl Peer {
         self.shared.act(|s| s.peer.dial_now());
     }
 
-    /// An intent of the function `name` on its input's JSON: its id, or why
-    /// its preview — or, alone, its sequencing — refused it.
+    /// An intent of the function `name` on its input's JSON, on the space
+    /// the function writes (a live one through the relay when it is
+    /// ephemeral): its id, or why its preview — or, alone, its sequencing —
+    /// refused it.
     pub fn mutate(&self, name: String, input: String) -> Result<String, Refusal> {
         let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
         let id = self.shared.act(|s| {
             let input = s.peer.input_json(&name, &input)?;
-            // An app's mutate is somebody's doing — a tap — and the root of
-            // what it causes, unless the app opened a span around it; a
-            // job's own steps answer what made the job due instead.
+            // An app's mutate of the log is somebody's doing — a tap — and
+            // the root of what it causes; a job's own steps answer what made
+            // the job due instead, and a live call what woke it.
             let job = [".claim", ".finish", ".cancel"].iter().any(|v| name.ends_with(v));
-            if job || s.peer.open_span().is_some() {
-                return s.peer.mutate_bytes(&name, input);
+            if job || s.peer.function(&name)?.space == ark::schema::Space::Volatile {
+                return s.peer.mutate(&name, input);
             }
             s.peer.begin(&name);
-            let out = s.peer.mutate_bytes(&name, input);
+            let out = s.peer.mutate(&name, input);
             s.peer.end();
             out
         })?;
         Ok(ark::hash::hex(&id.0))
-    }
-
-    /// A call of one of the server's own functions (`ark_peer::Config::calls`)
-    /// on its input's bytes, sent now: its id, for [`Peer::take_reply`]; never
-    /// logged, and refused while not connected. The listener rings when its
-    /// answer comes.
-    pub fn request(&self, name: String, input: Vec<u8>) -> Result<u64, Refusal> {
-        Ok(self.shared.act(|s| s.peer.request(&name, input))?)
-    }
-
-    /// What the server answered the call `id`, once it has; told once.
-    pub fn take_reply(&self, id: u64) -> Option<Reply> {
-        self.shared.act(|s| s.peer.take_reply(id)).map(|r| match r {
-            Ok(output) => Reply::Ok { output },
-            Err(why) => Reply::Refused { why },
-        })
     }
 
     /// A file made on this device (docs/plan-files.md): kept in its
@@ -510,93 +395,34 @@ impl Peer {
     /// the server, and the listener rings when they arrive.
     pub fn file(&self, hash: String, size: i64, media: String) -> Option<Vec<u8>> {
         let f = ark_peer::FileRef { hash, size, media };
-        self.shared.act(|s| s.peer.open_file(&f))
-    }
-
-    /// Why the server would not give a file, when it said.
-    pub fn file_absent(&self, hash: String) -> Option<String> {
-        let f = ark_peer::FileRef { hash, ..Default::default() };
-        self.shared.lock().peer.file_absent(&f).map(String::from)
+        self.shared.act(|s| s.peer.file(&f)).ok().flatten()
     }
 
     /// The first of an input's refinements that fails, as a form says it.
     pub fn check(&self, name: String, input: String) -> Option<String> {
         let s = self.shared.lock();
-        let f = s.peer.binding(&name).and_then(|b| s.peer.domain().get(&b).cloned());
-        match f {
-            Some(f) => match s.peer.input_json(&name, &input) {
-                Ok(b) => (f.check)(&b).err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
-                Err(why) => Some(why),
-            },
-            None => Some(format!("no function {name}")),
+        let checked = s.peer.function(&name).and_then(|f| Ok((f.check)(&s.peer.input_json(&name, &input)?)));
+        match checked {
+            Ok(c) => c.err().and_then(|mut e| e.drain(..).next()).map(|(_, w)| w),
+            Err(why) => Some(why),
         }
     }
 
-    /// A query's or a view's answer on its input's JSON, as JSON, over the
-    /// optimistic state.
+    /// A view's answer on its input's JSON, as JSON, over the optimistic
+    /// state: a kind's jobs due (`<kind>.due`) among them, what a handler
+    /// written in the app asks whenever the listener rings, then answers
+    /// through `mutate` — `<kind>.claim`, and once that is taken
+    /// (`outcome`), `<kind>.finish`.
     pub fn query(&self, name: String, input: String) -> Result<String, Refusal> {
         let s = self.shared.lock();
         let answer = s.peer.ask(&name, &s.peer.input_json(&name, &input)?)?;
         Ok(s.peer.answer_json(&name, &answer)?)
     }
 
-    /// The jobs of `kind` (a table of `ark::effect` rows) a claim would take
-    /// now, each its row's JSON, and when the next falls due: what a
-    /// handler written in the app asks whenever the listener rings or its
-    /// timer for `next_ms` fires, then answers through `mutate` —
-    /// `<kind>.claim`, and once that is confirmed (`standing`),
-    /// `<kind>.finish`. A view's rows stream through `view` already.
-    pub fn due(&self, kind: String) -> Result<Due, Refusal> {
-        let answer = self.query(format!("{kind}.due"), "null".into())?;
-        let a: serde_json::Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
-        let rows = a["rows"].as_array().into_iter().flatten();
-        Ok(Due {
-            rows: rows.map(|r| r.to_string()).collect(),
-            next_ms: a["next_ms"].as_i64(),
-        })
-    }
-
     /// A maintained view of the function `name` on its input's JSON.
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
         let args = self.shared.lock().peer.input_json(&name, &input)?;
         self.view_bytes(name, args)
-    }
-
-    /// A call on the live space (§1.9) on its input's JSON: an ephemeral
-    /// one through the relay, any other at once.
-    pub fn call(&self, name: String, input: String) -> Result<(), Refusal> {
-        let _call = tracing::debug_span!(target: "ark", "ffi", call = "call", name = %name).entered();
-        Ok(self.shared.act(|s| {
-            s.hurry = monotonic_ms() + 1000;
-            let input = s.peer.input_json(&name, &input)?;
-            s.peer.call(&name, input)
-        })?)
-    }
-
-    /// A trace begun here, named `name` — what a tap, a gesture, a scan in
-    /// the app opens — and everything this peer authors under it until
-    /// [`Peer::end`]: what it caused, everywhere, is one trace. Its span, as
-    /// `trace/span` in hex.
-    pub fn begin(&self, name: String) -> String {
-        let s = self.shared.act(|s| s.peer.begin(&name));
-        format!("{}/{}", ark::hash::hex(&s.trace.0), ark::hash::hex(&s.id))
-    }
-
-    /// The span [`Peer::begin`] opened, closed.
-    pub fn end(&self) {
-        self.shared.act(|s| s.peer.end());
-    }
-
-    /// Something the app saw, said among this peer's events under the span
-    /// it authors under now: `name`, and `detail` as the app writes it.
-    pub fn event(&self, name: String, detail: String) {
-        let s = self.shared.lock();
-        let span = s
-            .peer
-            .cause(ark::schema::Space::Durable, ark_peer::now_ms())
-            .map(|s| ark::hash::hex(&s.id))
-            .unwrap_or_default();
-        tracing::info!(target: "ark", peer = %s.peer.label(), span = %span, name = %name, detail = %detail, "app");
     }
 
     /// The rows of the live space's `table` this device holds, as JSON.
@@ -608,57 +434,39 @@ impl Peer {
 
     pub fn status(&self) -> Status {
         let s = self.shared.lock();
-        let st = s.peer.status();
+        let p = &s.peer;
         Status {
-            link: st.link,
-            linked: st.linked,
-            epoch: st.epoch,
-            cursor: st.cursor,
-            pending: st.pending as u64,
-            joining: false,
-            user: st.user,
-            session: s.peer.me().session.clone(),
-            alone: st.alone,
+            link: p.link_state().into(),
+            linked: p.linked,
+            epoch: p.link.epoch,
+            cursor: p.cursor(),
+            pending: p.pending_len() as u64,
+            user: p.me().actor.clone(),
+            session: p.me().session.clone(),
             failure: s.peer.failure().map(Into::into),
-            denied: s.denied.clone(),
+            denied: s.state.denied.clone(),
         }
     }
 
-    /// Where the intent `id` (as [`Peer::mutate`] gave it) stands.
-    pub fn standing(&self, id: String) -> Standing {
-        let Some(id) = ark::hash::unhex(&id).and_then(|b| b.try_into().ok()).map(EntryId) else {
-            return Standing::Unknown;
-        };
-        match self.shared.lock().peer.standing(&id) {
-            ark_peer::Standing::Pending => Standing::Pending,
-            ark_peer::Standing::Confirmed => Standing::Confirmed,
-            ark_peer::Standing::Rejected(why) => Standing::Rejected { why },
-            ark_peer::Standing::Unknown => Standing::Unknown,
-        }
+    /// What became of the intent `id` on the log (as [`Peer::mutate`] gave
+    /// it): none for one this run did not author.
+    pub fn outcome(&self, id: String) -> Option<Outcome> {
+        let id = ark::hash::unhex(&id).and_then(|b| b.try_into().ok()).map(EntryId)?;
+        let o = self.shared.lock().peer.outcome(&id)?;
+        Some(Outcome::of(id, o))
     }
 
-    /// What the server refused of this device's intents since the last ask.
-    pub fn take_rejections(&self) -> Vec<Rejection> {
-        let mut s = self.shared.lock();
-        let r = s.peer.take_rejections();
-        r.into_iter()
-            .map(|(id, why)| Rejection {
-                id: ark::hash::hex(&id.0),
-                why,
-            })
-            .collect()
-    }
-
-    /// What the server refused of this device's live calls since the last
-    /// ask.
-    pub fn take_live_refusals(&self) -> Vec<String> {
-        self.shared.lock().peer.take_live_refusals()
+    /// What the server refused of this device's intents on the log since
+    /// the last ask.
+    pub fn take_refusals(&self) -> Vec<Outcome> {
+        let r = self.shared.lock().peer.take_refusals(ark::schema::Space::Durable);
+        r.into_iter().map(|(id, why)| Outcome::of(id, ark_peer::Outcome::Refused(why))).collect()
     }
 
     /// Somebody signed in: every pending intent theirs, dialled as them.
     pub fn login(&self, login: Login) {
         self.shared.act(|s| {
-            s.denied = None;
+            s.state.denied = None;
             s.peer.login(login.who(), login.token)
         });
     }
@@ -686,19 +494,6 @@ impl Peer {
     pub fn logout(&self) {
         self.shared.act(|s| drop(s.peer.sign_out()));
     }
-
-    /// Alone: its own authority over a local history (§1.7).
-    pub fn alone(&self) {
-        self.shared.act(|s| s.peer.alone());
-    }
-
-    /// Joined to the server at `url`: the local history handed over.
-    pub fn join(&self, url: String) {
-        self.shared.act(|s| {
-            s.peer.join();
-            s.peer.connect(&url);
-        });
-    }
 }
 
 /// A view the app holds: its rows, and what it did since last taken. Held
@@ -713,90 +508,63 @@ pub struct ViewHandle {
 impl ViewHandle {
     /// Its rows as they stand, each its JSON.
     pub fn rows(&self) -> Vec<String> {
-        let s = self.shared.lock();
-        let Some((at, name)) = s.kept(self.id) else {
-            return vec![];
-        };
-        s.peer.rows(at).iter().map(|r| text(s.peer.element_json(&name, r))).collect()
+        self.json(self.rows_bytes())
     }
 
-    /// What it did since last taken.
-    pub fn take(&self) -> ViewUpdate {
-        let mut s = self.shared.lock();
-        s.settle();
-        let Some(k) = s.views.get_mut(&self.id) else {
-            return ViewUpdate::Unchanged;
-        };
-        let (update, name) = (std::mem::replace(&mut k.update, Update::Unchanged), k.view.name().to_string());
-        let elem = |b: &[u8]| text(s.peer.element_json(&name, b));
-        match update {
-            Update::Unchanged => ViewUpdate::Unchanged,
-            Update::Patched(ps) => ViewUpdate::Patched {
-                patches: ps.into_iter().map(|p| patch(p, &elem)).collect(),
-            },
-            Update::Reset => {
-                drop(s);
-                ViewUpdate::Reset { rows: self.rows() }
-            }
-        }
+    /// What it did since last taken, and the rows that came with it.
+    pub fn take(&self) -> ViewTaken {
+        let (ops, rows) = self.take_bytes();
+        ViewTaken { ops, rows: self.json(rows) }
     }
 }
 
 impl ViewHandle {
-    /// Its rows as they stand, each its bytes.
-    pub fn rows_bytes(&self) -> Vec<Vec<u8>> {
+    /// Rows of this view, each its JSON.
+    fn json(&self, rows: Vec<Vec<u8>>) -> Vec<String> {
         let s = self.shared.lock();
-        s.kept(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
+        let Some((_, name)) = s.kept(self.id) else { return vec![] };
+        rows.iter().map(|r| text(s.peer.element_json(&name, r))).collect()
+    }
+
+    /// Its rows as they stand, each its bytes.
+    pub(crate) fn rows_bytes(&self) -> Vec<Vec<u8>> {
+        let s = self.shared.lock();
+        s.kept(self.id).and_then(|(at, _)| s.peer.rows(at)).unwrap_or_default()
     }
 
     /// What it did since last taken, and the rows that came with it, each
-    /// its bytes ([`Taken`]).
-    pub fn take_bytes(&self) -> (Taken, Vec<Vec<u8>>) {
+    /// its bytes: each insert's and update's, in order.
+    pub(crate) fn take_bytes(&self) -> (Vec<Op>, Vec<Vec<u8>>) {
         let mut s = self.shared.lock();
         s.settle();
-        let Some(k) = s.views.get_mut(&self.id) else {
-            return (Taken::Unchanged, vec![]);
+        let Some(k) = s.state.views.get_mut(&self.id) else {
+            return (vec![], vec![]);
         };
-        match std::mem::replace(&mut k.update, Update::Unchanged) {
-            Update::Unchanged => (Taken::Unchanged, vec![]),
-            Update::Patched(ps) => {
-                let (mut ops, mut rows) = (vec![], vec![]);
-                for p in ps {
-                    ops.push(match p {
-                        ark::plan::Patch::Insert { at, node } => {
-                            rows.push(node);
-                            Op::Insert { at: at as u64 }
-                        }
-                        ark::plan::Patch::Remove { at } => Op::Remove { at: at as u64 },
-                        ark::plan::Patch::Update { at, node } => {
-                            rows.push(node);
-                            Op::Update { at: at as u64 }
-                        }
-                    });
+        let (mut ops, mut rows) = (vec![], vec![]);
+        for p in std::mem::take(&mut k.patches) {
+            ops.push(match p {
+                Patch::Insert { at, node } => {
+                    rows.push(node);
+                    Op::Insert { at: at as u64 }
                 }
-                (Taken::Patched { ops }, rows)
-            }
-            Update::Reset => {
-                drop(s);
-                (Taken::Reset, self.rows_bytes())
-            }
+                Patch::Remove { at } => Op::Remove { at: at as u64 },
+                Patch::Update { at, node } => {
+                    rows.push(node);
+                    Op::Update { at: at as u64 }
+                }
+            });
         }
+        (ops, rows)
     }
 }
 
 impl Drop for ViewHandle {
     fn drop(&mut self) {
         let mut s = self.shared.lock();
-        if let Some(k) = s.views.remove(&self.id) {
+        if let Some(k) = s.state.views.remove(&self.id) {
             k.view.close(&mut s.peer);
         }
     }
-}
-
-/// The sync socket of the server at `server` (`http://host:port`).
-#[uniffi::export]
-pub fn socket_url(server: String) -> String {
-    ark_auth::socket_url(&server)
 }
 
 /// Where a sign-in starts: the server's own page, which sends its code on

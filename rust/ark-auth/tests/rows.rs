@@ -10,7 +10,7 @@ mod common;
 use std::sync::Arc;
 
 use ark::format::Encode;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::Change;
 use ark_auth::server::{dev_account, Auth, Mode};
@@ -20,12 +20,11 @@ use common::{domain, on, App, Memory};
 /// Author `name` as `ctx` over the hub's store: the refusal's text.
 fn run(hub: &Memory, ctx: &ark::peer::Ctx, name: &str, input: &impl Encode) -> Result<(), String> {
     let f = domain().get(name).and_then(|f| f.proc.clone()).unwrap();
-    f.apply(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ()).map_err(|r| r.0)
+    f(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ())
 }
 
 fn current(hub: &Memory, ctx: &ark::peer::Ctx) -> Option<SignIn> {
-    let b = domain().ask(&hub.0.lock().unwrap(), ctx, "session.current", &[]).unwrap();
-    Option::<SignIn>::from_bytes(&b).unwrap()
+    ark_auth::rows::current(ctx, &hub.0.lock().unwrap())
 }
 
 /// A row as a sign-in writes it, straight into the store.
@@ -111,7 +110,7 @@ fn only_an_admin_grants() {
         user: "bob".into(),
         role: "admin".into(),
     };
-    let roles = |h: &Memory| ark::db::read::<App, _>(&h.0.lock().unwrap(), |db| Ok::<_, ark::Refusal>(db.role.scan())).unwrap();
+    let roles = |h: &Memory| ark::db::read::<App, _>(&h.0.lock().unwrap(), |db| Ok::<_, String>(db.role.scan())).unwrap();
     assert_eq!(run(&hub, &bob, "role.grant", &grant), Err("only an admin grants roles".into()));
     assert!(roles(&hub).is_empty());
     let admin = on("root", "r1", &["admin"], 2_000);
@@ -137,7 +136,7 @@ fn nobody_else_s_sessions_are_held_or_listed() {
     signed_in(&hub, "a2", "alice", 10_000);
     signed_in(&hub, "b1", "bob", 10_000);
     let alice = on("alice", "a1", &[], 2_000);
-    let feed = domain().functions().scope("feed").cloned().unwrap();
+    let feed = domain().get("feed").and_then(|f| f.scope.clone()).unwrap();
     let held: Vec<String> = hub
         .sign_ins()
         .into_iter()
@@ -217,12 +216,8 @@ fn the_watch_names_what_to_close() {
         signed_in(&hub, id, user, expires);
     }
     // c1 is no sign-in's: a connection the server's process made itself.
-    let open: Vec<Who> = [("alice", "a1"), ("alice", "a2"), ("bob", "b1"), ("carol", "c1")]
-        .map(|(a, s)| Who {
-            actor: a.into(),
-            session: s.into(),
-            roles: vec![],
-        })
+    let open: Vec<Ctx> = [("alice", "a1"), ("alice", "a2"), ("bob", "b1"), ("carol", "c1")]
+        .map(|(a, s)| Ctx::who(a, s, vec![]))
         .into();
     let revoke = Change::Edit {
         table: SignIn::TABLE.into(),

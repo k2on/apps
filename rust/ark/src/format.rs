@@ -13,7 +13,7 @@
 //! columns is a prefix of its bytes and the store is ordered by `memcmp`.
 //!
 //! **JSON is the human form**: what a person reads and edits and the
-//! vectors are written in ([`to_json`], [`from_json`]). In it hashes and
+//! vectors are written in ([`to_json`]). In it hashes and
 //! ids are hex, and bytes that are a value of the format — a row, an input
 //! — are their hex (read as JSON under the schema by [`crate::dynamic`]).
 //!
@@ -25,28 +25,27 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as J;
 
 use crate::hash::{hex, unhex};
-use crate::Refusal;
 
-fn no(e: impl std::fmt::Display) -> Refusal {
-    Refusal(e.to_string())
+fn no(e: impl std::fmt::Display) -> String {
+    e.to_string()
 }
 
 /// A value's bytes in the format.
-pub fn encode<T: Serialize + ?Sized>(v: &T) -> Result<Vec<u8>, Refusal> {
+pub fn encode<T: Serialize + ?Sized>(v: &T) -> Result<Vec<u8>, String> {
     postcard::to_stdvec(v).map_err(no)
 }
 
 /// A value read by `seed` from bytes that are it whole: nothing after it.
-pub fn decode_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<S::Value, Refusal> {
+pub fn decode_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<S::Value, String> {
     let (v, rest) = take_seed(seed, b)?;
     match rest.is_empty() {
         true => Ok(v),
-        false => Err(Refusal::new("bytes after the value")),
+        false => Err("bytes after the value".into()),
     }
 }
 
 /// A value read by `seed` from the front of `b`, and the bytes after it.
-pub fn take_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<(S::Value, &'de [u8]), Refusal> {
+pub fn take_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<(S::Value, &'de [u8]), String> {
     let mut d = postcard::Deserializer::from_bytes(b);
     let v = seed.deserialize(&mut d).map_err(no)?;
     Ok((v, d.finalize().map_err(no)?))
@@ -58,7 +57,7 @@ pub trait Encode: Serialize + DeserializeOwned {
         encode(self).expect("a value serializes")
     }
 
-    fn from_bytes(b: &[u8]) -> Result<Self, Refusal> {
+    fn from_bytes(b: &[u8]) -> Result<Self, String> {
         decode_seed(std::marker::PhantomData::<Self>, b)
     }
 }
@@ -68,11 +67,6 @@ impl<T: Serialize + DeserializeOwned> Encode for T {}
 /// A value's human form: JSON, as `serde_json` writes it.
 pub fn to_json<T: Serialize + ?Sized>(v: &T) -> J {
     serde_json::to_value(v).expect("a value is JSON")
-}
-
-/// A value from its human form.
-pub fn from_json<T: DeserializeOwned>(v: J) -> Result<T, Refusal> {
-    serde_json::from_value(v).map_err(no)
 }
 
 /// `v`'s key bytes appended to `out`.
@@ -138,45 +132,23 @@ pub mod hex_bytes {
 // * Bytes that are a value
 
 /// Bytes that are a value of the format, written as that value: inside a
-/// JSON value their hex; inside a binary value, as bytes.
-pub mod raw {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(b: &[u8], s: S) -> Result<S::Ok, S::Error> {
-        match s.is_human_readable() {
-            true => s.serialize_str(&hex(b)),
-            false => s.serialize_bytes(b),
-        }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        bytes(d)
-    }
-}
+/// JSON value their hex; inside a binary value, as bytes — as fixed bytes
+/// are ([`hex_bytes`]).
+pub use hex_bytes as raw;
 
 /// [`raw`]'s bytes as a serde value.
-struct Raw<'a>(&'a [u8]);
+#[derive(Serialize)]
+struct Raw<'a>(#[serde(with = "raw")] &'a Vec<u8>);
 
-impl Serialize for Raw<'_> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        raw::serialize(self.0, s)
-    }
-}
-
-struct RawIn(Vec<u8>);
-
-impl<'de> Deserialize<'de> for RawIn {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<RawIn, D::Error> {
-        raw::deserialize(d).map(RawIn)
-    }
-}
+#[derive(Deserialize)]
+struct RawIn(#[serde(with = "raw")] Vec<u8>);
 
 /// A list of values' bytes.
 pub mod raw_list {
     use super::*;
 
     pub fn serialize<S: Serializer>(rows: &[Vec<u8>], s: S) -> Result<S::Ok, S::Error> {
-        s.collect_seq(rows.iter().map(|r| Raw(r)))
+        s.collect_seq(rows.iter().map(Raw))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Vec<u8>>, D::Error> {

@@ -1,5 +1,5 @@
-//! Handlers and reconcilers: native code acting on the world outside,
-//! answering with mutations (effects as rows, `ark::effect`).
+//! Handlers: native code acting on the world outside, answering with
+//! mutations (effects as rows, `ark::effect`).
 //!
 //! A **handler** ([`Peer::handle`]) is registered for a job row `R` on the
 //! one process that runs it. It keeps the rows of `R` that are not over,
@@ -10,25 +10,20 @@
 //! the row, whose key is its idempotency key, and the peer, to author
 //! what it found; its answer is the `<table>.finish`. Nothing runs during a replay or an open: rows only
 //! move what is kept, and a handler runs when its driver pumps the peer
-//! ([`Peer::jobs`]), never on a peer that did not register it. A claim
+//! ([`Peer::pump`]), never on a peer that did not register it. A claim
 //! from before a restart is another's: its row is due again only when its
 //! lease runs out. The handler is a plain function on the driver's
 //! thread: ark-peer has no executor (it is pumped, natively and in a
 //! browser), so a handler that waits blocks only its own peer's thread.
-//!
-//! A **reconciler** ([`Peer::reconcile`]) is told a view's rows, typed,
-//! every time they change, and once at the start: no claim, latest wins.
 
 use std::collections::BTreeMap;
 
 use ark::effect::{Claim, Effect, Finish};
 use ark::log::{EntryId, Span, TraceId};
 use ark::peer::Told;
-use ark::row::Value;
-use ark::schema::Space;
 use ark::store::Change;
 
-use crate::app::Standing;
+use crate::app::Outcome;
 use crate::link::Sendable;
 use crate::{monotonic_ms, now_ms, Peer};
 
@@ -103,9 +98,9 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
         }
         for (k, (e, span)) in std::mem::take(&mut self.claims) {
             // An authority's own claim is decided as it is made.
-            match if p.hub.serving { Standing::Confirmed } else { p.standing(&e) } {
-                Standing::Pending => drop(self.claims.insert(k, (e, span))),
-                Standing::Confirmed => {
+            match if p.hub.serving { Some(Outcome::Ok) } else { p.outcome(&e) } {
+                Some(Outcome::Pending) => drop(self.claims.insert(k, (e, span))),
+                Some(Outcome::Ok) => {
                     let Some((r, _, _)) = self.open.get(&k) else { continue };
                     // The run, and all it authors, under the claim.
                     let run = tracing::info_span!(target: "ark", "job", peer = %p.label(), table = R::TABLE, trace = %ark::hash::hex(&span.trace.0), span = %ark::hash::hex(&span.id));
@@ -128,9 +123,6 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
         }
     }
 }
-
-/// A view's rows, told on each change.
-pub(crate) type Reconciler = Box<dyn FnMut(&[Vec<u8>]) + Send>;
 
 impl Peer {
     /// `f` handles the jobs of `R`: each due row claimed, `f` run with this
@@ -162,7 +154,7 @@ impl Peer {
     }
 
     /// The handlers' turn: what is due claimed, what is confirmed run.
-    pub fn jobs(&mut self, now: i64) {
+    pub(crate) fn jobs(&mut self, now: i64) {
         let mut runners = std::mem::take(&mut self.runners);
         self.missed = Some(vec![]);
         for r in &mut runners {
@@ -180,22 +172,5 @@ impl Peer {
     pub(crate) fn due(&self) -> Option<u64> {
         let next = self.runners.iter().filter_map(|r| r.next()).min()?;
         Some(monotonic_ms() + (next - now_ms()).max(0) as u64)
-    }
-
-    /// `f` is told the rows of the domain's view `name` on `input` over
-    /// `space`, typed, now and on every change.
-    pub fn reconcile<T: Value>(
-        &mut self,
-        space: Space,
-        name: &str,
-        input: &[u8],
-        mut f: impl FnMut(Vec<T>) + Send + 'static,
-    ) -> Result<usize, String> {
-        let b = self.binding(name).ok_or_else(|| format!("no view {name}"))?;
-        let v = self.watch(space, &b, input, self.ctx()).map_err(|r| r.0)?;
-        let mut tell: Reconciler = Box::new(move |rows| f(rows.iter().filter_map(|b| T::decode(b).ok()).collect()));
-        tell(&self.rows(v));
-        self.reconcilers.insert(v, tell);
-        Ok(v)
     }
 }

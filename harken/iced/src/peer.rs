@@ -26,7 +26,7 @@ use crate::domain::{
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
-use crate::client::{Driven, Replica, Update};
+use crate::client::{Handle, Replica};
 use crate::places::{Place, Source};
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
@@ -49,25 +49,6 @@ const NONE: Id = [0; 16];
 /// An id as the domain's input types carry it.
 pub fn key<T>(id: Id) -> Key<T> {
     Key::new(id)
-}
-
-/// What one refresh did to one list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Moved {
-    /// This many patches, spliced.
-    Patched(usize),
-    /// Taken whole.
-    Reset,
-}
-
-impl Moved {
-    fn of(u: &Update) -> Option<Moved> {
-        match u {
-            Update::Unchanged => None,
-            Update::Patched(ps) => Some(Moved::Patched(ps.len())),
-            Update::Reset => Some(Moved::Reset),
-        }
-    }
 }
 
 /// The views the peer holds open, each with its rows
@@ -144,7 +125,7 @@ fn want<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, wanted: Option<(
 
 /// A page slot's settle, when the page has one there: its name, and what
 /// it did.
-fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Update)> {
+fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Vec<Patch>)> {
     slot.as_mut().map(|w| (w.name().to_string(), w.settle(client, moved)))
 }
 
@@ -157,7 +138,7 @@ fn rows<T>(slot: &Option<Watched<T>>) -> &[T] {
 pub struct Peer {
     /// The replica, on a thread of its own (`ark_peer::driven`): what it
     /// takes in from its server is never taken in on the window's.
-    pub client: Driven,
+    pub client: Handle,
     views: Views,
     /// The playlist the library is read against, which is what gives every
     /// row its `on_playlist`. The domain has no favorites of its own — a
@@ -181,9 +162,10 @@ pub struct Peer {
     /// while drawing rather than stored, so "line 9" means the same to the
     /// keyboard and to the eye.
     pub choices: Vec<Choice>,
-    /// What the last [`Peer::refresh`] moved, by query: the one place to
-    /// see that a change cost the lists it touched and no others.
-    pub moved: Vec<(String, Moved)>,
+    /// What the last [`Peer::refresh`] moved, by query, and by how many
+    /// patches: the one place to see that a change cost the lists it
+    /// touched and no others.
+    pub moved: Vec<(String, usize)>,
     /// Bumped whenever a list that carries covers moved: the window asks for
     /// covers when this moves, which is the *data* changing.
     pub art_gen: u64,
@@ -253,7 +235,7 @@ impl Peer {
         let seen = client.state();
         let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
         let mut peer = Peer {
-            client: Driven::new(client),
+            client: Handle::spawn(client),
             views,
             playlist,
             source: Source::Library,
@@ -501,13 +483,11 @@ impl Peer {
     }
 
     /// Hand what this peer did alone to the server at `url`
-    /// (`docs/plan-alone.md` §4), in place: the replica goes back to its
-    /// fork and its local history is pending again, and every open list is
-    /// told that as changes — none, so the library does not blink. With no
-    /// login the history stays nobody's until a sign-in makes it the
+    /// (`docs/plan-alone.md` §4), in place: its local history is pending
+    /// already, so no open list moves and the library does not blink. With
+    /// no login the history stays nobody's until a sign-in makes it the
     /// signer's.
     pub fn join(&mut self, url: &str) {
-        self.client.lock().join();
         self.client.lock().connect(url);
         self.refresh();
     }
@@ -518,8 +498,9 @@ impl Peer {
     /// Nothing is read again here: each open view has been handed the
     /// client's changes as they happened (§1.10) and answers with the
     /// patches they made. A rebase is changes too: the inverse of what it
-    /// undid, what landed, what it re-applied. A view the client dropped,
-    /// or one opened for somebody else, is read whole again.
+    /// undid, what landed, what it re-applied. A view the client made
+    /// again, or one opened for somebody else, says its rows removed and
+    /// inserted.
     pub fn refresh(&mut self) -> bool {
         let state = self.client.lock().state();
         let moved = state != self.seen;
@@ -529,12 +510,11 @@ impl Peer {
         let mut guard = self.client.lock();
         let (c, v) = (&mut *guard, &mut self.views);
         let mut changed = Vec::new();
-        let mut note = |name: &str, u: Update| match Moved::of(&u) {
-            Some(m) => {
-                changed.push((name.to_string(), m));
-                true
+        let mut note = |name: &str, u: Vec<Patch>| {
+            if !u.is_empty() {
+                changed.push((name.to_string(), u.len()));
             }
-            None => false,
+            !u.is_empty()
         };
         let lists = note("playlists", v.playlists.settle(c, moved));
         let library = note("library", v.library.settle(c, moved));
@@ -546,16 +526,9 @@ impl Peer {
         let downloads = note("downloads", v.downloads.settle(c, moved));
         let mine = note("my_progress", v.mine.settle(c, moved));
         let u = v.details.take(c, moved);
-        match &u {
-            Update::Unchanged => {}
-            Update::Patched(patches) => patch_details(&mut v.details.rows, &mut self.details, patches),
-            Update::Reset => {
-                v.details.apply(c, &u);
-                self.details = v.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
-            }
-        }
+        patch_details(&mut v.details.rows, &mut self.details, &u);
         let details = note("track_details", u);
-        let mut slot = |u: Option<(String, Update)>| u.is_some_and(|(name, u)| note(&name, u));
+        let mut slot = |u: Option<(String, Vec<Patch>)>| u.is_some_and(|(name, u)| note(&name, u));
         let shown = slot(settle(c, &mut v.shown, moved));
         let works = slot(settle(c, &mut v.works, moved));
         let recordings = slot(settle(c, &mut v.recordings, moved));
@@ -1037,7 +1010,7 @@ mod tests {
     use crate::domain::AddToPlaylist;
     use crate::tests::{alone, signed_in, song};
     use ark::frames::{Frame, Verdict};
-    use ark::peer::Who;
+    use ark::peer::Ctx;
     use ark::schema::Space;
 
     fn on(playlist: Id, media: Id) -> AddToPlaylist {
@@ -1103,9 +1076,8 @@ mod tests {
     /// playlist".
     #[test]
     fn a_window_alone_joins_a_server_in_place() {
-        use ark_peer::{Config, Module, Peer as Hub};
+        use ark_peer::{Config, Peer as Hub};
         let mut client = crate::client::memory(crate::client::nobody(), None);
-        client.alone();
         client.set_roles([crate::domain::LIBRARY]);
         let mut peer = Peer::open(client);
         peer.client.by_hand();
@@ -1117,7 +1089,7 @@ mod tests {
         let id = peer.items()[1].id;
         peer.client.lock().mutate("add_to_playlist", &on(peer.playlist, id)).unwrap();
         peer.refresh();
-        assert_eq!(peer.client.lock().status().link, "alone");
+        assert_eq!(peer.client.lock().link_state(), "alone");
         let before = peer.items().to_vec();
 
         peer.join("ws://hub/sync");
@@ -1127,14 +1099,10 @@ mod tests {
         assert_eq!(peer.client.lock().pending_len(), 5);
 
         let d = crate::client::domain();
-        let mut hub = Hub::serve(Config::new(Module::of(d)), Box::new(ark_peer::Memory::default()), 0);
+        let mut hub = Hub::serve(Config::of(d.clone()), Box::new(ark_peer::Memory::default()), 0);
         // The songs are the library's to write (`docs/plan-guards.md` D1),
         // and the server judges them under the roles of the login.
-        let alice = Who {
-            actor: "alice".into(),
-            session: "alice@desktop".into(),
-            roles: vec![crate::domain::LIBRARY.into()],
-        };
+        let alice = Ctx::who("alice", "alice@desktop", vec![crate::domain::LIBRARY.into()]);
         peer.client.lock().login(alice.clone(), "alice@desktop:library".into());
         peer.refresh();
         let c = hub.accept(alice);
@@ -1159,7 +1127,7 @@ mod tests {
         // playlist made alone keeps its id through the sign-in, and the item
         // put on it names it still.
         assert_eq!(hub.log.log().head().0, 5, "the playlist, the three songs and the add");
-        assert!(peer.client.lock().take_rejections().is_empty());
+        assert!(peer.client.lock().take_refusals(ark::schema::Space::Durable).is_empty());
         assert!(peer.items()[1].on_playlist());
     }
 

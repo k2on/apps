@@ -13,13 +13,13 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::hash::hex;
 use ark::log::{EntryId, Origin};
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::row::Id;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Live, Module};
+use ark_peer::Config;
 use serde_json::{json, Value};
 
-use crate::demo::{arrival, live, room, AddToPlaylist, CreatePlaylist, Point, Rename};
+use crate::demo::{AddToPlaylist, CreatePlaylist, Point, Rename};
 use crate::sim::{who, Net, Op};
 
 fn dir(d: &str) -> PathBuf {
@@ -108,7 +108,6 @@ pub fn fleet(seed: u64) -> Net {
 
 /// The scripted sessions whose clients are the `trace/` vectors.
 pub fn sessions() -> Vec<(&'static str, Net)> {
-    let room = room();
     let p = "peer-0-session";
     let run = |mut net: Net, ops: Vec<Op>| {
         for op in ops {
@@ -120,28 +119,13 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
     let two = |seed| Net::new(demo(), |_| demo(), 2, seed);
     let mut keep = demo();
     keep.keep = Some(1);
-    let anon = Who {
-        actor: String::new(),
-        session: "anonymous".into(),
-        roles: vec![],
+    let anon = Ctx::who(String::new(), "anonymous", vec![]);
+    let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
+    let hub = Config {
+        live_keep: Some(4),
+        ..crate::demo::hub(demo())
     };
-    let alice = Who {
-        actor: "alice".into(),
-        session: "alice-session".into(),
-        roles: vec!["listener".into()],
-    };
-    let mut hub = demo();
-    hub.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(4),
-        ..Live::new(Module::of(&room))
-    });
-    let device = |name: &str| Config {
-        live: Some(live(name, 100)),
-        ..demo()
-    };
+    let device = |name: &str| crate::demo::device(demo(), name, 100);
     let point = |i, x| Op::Call(i, "room.point".into(), Point { x }.to_bytes());
     let steps = |n: usize| vec![Op::Step; n];
     vec![
@@ -176,10 +160,10 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
             ),
         ),
         (
-            "alone-then-join",
+            "offline-then-online",
             run(
                 two(5),
-                vec![Op::Alone(0), create(0, "Road"), add(0, p, "t5"), create(1, "Bob's"), Op::Join(0)],
+                vec![Op::Offline(0), create(0, "Road"), add(0, p, "t5"), create(1, "Bob's"), Op::Online(0)],
             ),
         ),
         (
@@ -228,12 +212,12 @@ pub fn view_ctx(user: &str, session: &str) -> ark::peer::Ctx {
 
 fn row_json(s: &ark::schema::Schema, table: &str, b: &[u8]) -> Result<Value, String> {
     let t = s.table(table).ok_or(format!("no table {table}"))?.1;
-    ark::dynamic::row(t, b).map_err(|r| r.0)
+    ark::dynamic::row(t, b)
 }
 
 fn row_of(s: &ark::schema::Schema, table: &str, v: &Value) -> Result<Vec<u8>, String> {
     let t = s.table(table).ok_or(format!("no table {table}"))?.1;
-    ark::dynamic::row_bytes(t, v).map_err(|r| r.0)
+    ark::dynamic::row_bytes(t, v)
 }
 
 /// A change as the protocol's facts read: its kind, its table, its rows.
@@ -287,13 +271,12 @@ pub fn view_steps(
     batches: &[Vec<Change>],
 ) -> Result<(Value, Vec<Value>), String> {
     use ark::plan::{splice, Patch};
-    let input = d.input_json(view, &input.to_string()).map_err(|r| r.0)?;
-    let json = |b: &[u8]| -> Result<Value, String> { serde_json::from_str(&d.element_json(view, b).map_err(|r| r.0)?).map_err(|e| e.to_string()) };
+    let input = d.input_json(view, &input.to_string())?;
+    let json = |b: &[u8]| -> Result<Value, String> { serde_json::from_str(&d.element_json(view, b)?).map_err(|e| e.to_string()) };
     let list = |rows: Vec<Vec<u8>>| rows.iter().map(|r| json(r)).collect::<Result<Vec<_>, _>>();
     let holds = |store: &Store, rows: &[Value], before: &[Value], patches: &[Patch<Value>]| -> Result<(), String> {
-        let fresh: Value = serde_json::from_str(&d.answer_json(view, &d.ask(store, ctx, view, &input).map_err(|r| r.0)?).map_err(|r| r.0)?)
-            .map_err(|e| e.to_string())?;
-        let again = list(d.watch(store, ctx, view, &input).map_err(|r| r.0)?.rows())?;
+        let fresh: Value = serde_json::from_str(&d.answer_json(view, &d.ask(store, ctx, view, &input)?)?).map_err(|e| e.to_string())?;
+        let again = list(d.watch(store, ctx, view, &input)?.rows())?;
         match () {
             _ if fresh != Value::Array(rows.to_vec()) => Err("the view is not its answer afresh".into()),
             _ if again != rows => Err("the view is not a view made again".into()),
@@ -301,7 +284,7 @@ pub fn view_steps(
             _ => Ok(()),
         }
     };
-    let mut v = d.watch(&store, ctx, view, &input).map_err(|r| r.0)?;
+    let mut v = d.watch(&store, ctx, view, &input)?;
     let first = list(v.rows())?;
     holds(&store, &first, &first, &[])?;
     let (mut was, mut steps) = (first.clone(), vec![]);
@@ -382,7 +365,7 @@ pub fn run_view(text: &str) -> Result<(), String> {
             rows.iter().map(|r| row_of(&d.schema, &t.name, r)).collect::<Result<_, _>>()?,
         ));
     }
-    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by).map_err(|r| r.0)?.0;
+    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by)?;
     let batches = (v["batches"].as_array().ok_or("no batches")?.iter())
         .map(|b| {
             b.as_array()

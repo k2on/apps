@@ -20,40 +20,40 @@ use crate::schema::*;
 use crate::types::*;
 
 /// A heading somebody may change.
-fn group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
+fn group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, String> {
     match db.category.get(id) {
-        Some(g) if g.income => Err(Refusal::new("the budget's own group is not to change")),
+        Some(g) if g.income => Err("the budget's own group is not to change".into()),
         Some(g) if g.parent_id.is_none() => Ok(g),
-        Some(g) => Err(Refusal::new(format!("{} is a category, not a group", g.name))),
-        None => Err(Refusal::new("no such group")),
+        Some(g) => Err(format!("{} is a category, not a group", g.name)),
+        None => Err("no such group".into()),
     }
 }
 
 /// A group whose name and categories are people's: not the budget's own,
 /// nor the card payments' — those are the cards' (hidden or moved, yes).
-fn named_group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, Refusal> {
+fn named_group_of(db: &Db<Money>, id: Id<Group>) -> Result<Group, String> {
     match group_of(db, id)? {
-        g if g.id == card_group() => Err(Refusal::new("the card payments' group is the cards': it changes as they do")),
+        g if g.id == card_group() => Err("the card payments' group is the cards': it changes as they do".into()),
         g => Ok(g),
     }
 }
 
 /// A category people name and keep: not a card's payment category, which
 /// is named as its card is and goes when the card does.
-fn named_category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
+fn named_category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, String> {
     match category_of(db, id)? {
-        c if c.parent_id == Some(card_group()) => Err(Refusal::new("a card's payment category is the card's: rename or close the card")),
+        c if c.parent_id == Some(card_group()) => Err("a card's payment category is the card's: rename or close the card".into()),
         c => Ok(c),
     }
 }
 
 /// A category (an envelope, or a kind of one) somebody may change.
-fn category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
+fn category_of(db: &Db<Money>, id: Id<Category>) -> Result<Category, String> {
     match db.category.get(id) {
-        Some(_) if id == ready_to_assign() || is_income(db, id) => Err(Refusal::new("Ready to Assign is not to change")),
-        Some(c) if c.parent_id.is_none() => Err(Refusal::new(format!("{} is a group", c.name))),
+        Some(_) if id == ready_to_assign() || is_income(db, id) => Err("Ready to Assign is not to change".into()),
+        Some(c) if c.parent_id.is_none() => Err(format!("{} is a group", c.name)),
         Some(c) => Ok(c),
-        None => Err(Refusal::new("no such category")),
+        None => Err("no such category".into()),
     }
 }
 
@@ -64,7 +64,7 @@ fn last_pos(db: &Db<Money>) -> i64 {
 
 /// A group, after every other.
 #[mutator("categories.add_group")]
-pub fn add_group(ctx: &Ctx, db: &mut Db<Money>, input: AddGroup) -> Result<(), Refusal> {
+pub fn add_group(ctx: &Ctx, db: &mut Db<Money>, input: AddGroup) -> Result<(), String> {
     ensure_setup(ctx, db)?;
     let pos = db
         .category
@@ -87,13 +87,13 @@ pub fn add_group(ctx: &Ctx, db: &mut Db<Money>, input: AddGroup) -> Result<(), R
 }
 
 #[mutator("categories.rename_group")]
-pub fn rename_group(_: &Ctx, db: &mut Db<Money>, input: RenameGroup) -> Result<(), Refusal> {
+pub fn rename_group(_: &Ctx, db: &mut Db<Money>, input: RenameGroup) -> Result<(), String> {
     let g = named_group_of(db, input.id)?;
     db.category.update(Category { name: input.name, ..g })
 }
 
 #[mutator("categories.hide_group")]
-pub fn hide_group(_: &Ctx, db: &mut Db<Money>, input: HideGroup) -> Result<(), Refusal> {
+pub fn hide_group(_: &Ctx, db: &mut Db<Money>, input: HideGroup) -> Result<(), String> {
     let g = group_of(db, input.id)?;
     db.category.update(Category { hidden: input.hidden, ..g })
 }
@@ -101,14 +101,14 @@ pub fn hide_group(_: &Ctx, db: &mut Db<Money>, input: HideGroup) -> Result<(), R
 /// A group gone, with everything under it, each as [`delete_category`]
 /// does it.
 #[mutator("categories.delete_group")]
-pub fn delete_group(ctx: &Ctx, db: &mut Db<Money>, input: DeleteGroup) -> Result<(), Refusal> {
+pub fn delete_group(ctx: &Ctx, db: &mut Db<Money>, input: DeleteGroup) -> Result<(), String> {
     let g = named_group_of(db, input.id)?;
     delete(ctx, db, g, input.move_to)
 }
 
 /// A category, at the end of its group.
 #[mutator("categories.add_category")]
-pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result<(), Refusal> {
+pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result<(), String> {
     let g = named_group_of(db, input.group_id)?;
     let pos = last_pos(db);
     db.category.insert(Category {
@@ -125,10 +125,10 @@ pub fn add_category(ctx: &Ctx, db: &mut Db<Money>, input: AddCategory) -> Result
 /// A kind of a category, under it: "Eggs" under "Groceries", or under
 /// another kind. Its spending is the envelope's; nothing is assigned to it.
 #[mutator("categories.add_subcategory")]
-pub fn add_subcategory(ctx: &Ctx, db: &mut Db<Money>, input: AddSubcategory) -> Result<(), Refusal> {
+pub fn add_subcategory(ctx: &Ctx, db: &mut Db<Money>, input: AddSubcategory) -> Result<(), String> {
     let parent = named_category_of(db, input.parent_id)?;
     if depth(db, parent.id).unwrap_or(0) + 1 >= crate::budget::DEEPEST {
-        return Err(Refusal::new("that is as deep as categories go"));
+        return Err("that is as deep as categories go".into());
     }
     let pos = last_pos(db);
     db.category.insert(Category {
@@ -143,13 +143,13 @@ pub fn add_subcategory(ctx: &Ctx, db: &mut Db<Money>, input: AddSubcategory) -> 
 }
 
 #[mutator("categories.rename_category")]
-pub fn rename_category(_: &Ctx, db: &mut Db<Money>, input: RenameCategory) -> Result<(), Refusal> {
+pub fn rename_category(_: &Ctx, db: &mut Db<Money>, input: RenameCategory) -> Result<(), String> {
     let c = named_category_of(db, input.id)?;
     db.category.update(Category { name: input.name, ..c })
 }
 
 #[mutator("categories.hide_category")]
-pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result<(), Refusal> {
+pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result<(), String> {
     let c = category_of(db, input.id)?;
     db.category.update(Category { hidden: input.hidden, ..c })
 }
@@ -161,31 +161,31 @@ pub fn hide_category(_: &Ctx, db: &mut Db<Money>, input: HideCategory) -> Result
 /// children are numbered again in their new order, so where it lands is
 /// what the order says and not arithmetic on neighbours' numbers.
 #[mutator("categories.move_category")]
-pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result<(), Refusal> {
+pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result<(), String> {
     let c = category_of(db, input.id)?;
     let envelope = depth(db, c.id) == Some(1);
     // The cards' payment categories are put in order among themselves,
     // and nothing else is put among them.
     if envelope && (c.parent_id == Some(card_group())) != (input.group_id == card_group()) {
-        return Err(Refusal::new("a card's payment category stays with the cards"));
+        return Err("a card's payment category stays with the cards".into());
     }
     let parent = match envelope {
         true => group_of(db, input.group_id)?,
         false => {
             let p = category_of(db, input.group_id)?;
             if subtree(db, c.id).iter().any(|s| s.id == p.id) {
-                return Err(Refusal::new("a category does not go under itself"));
+                return Err("a category does not go under itself".into());
             }
             p
         }
     };
     let mut order: Vec<Category> = crate::budget::children(db, parent.id).into_iter().filter(|o| o.id != c.id).collect();
     let at = match input.before {
-        Some(b) if b == c.id => return Err(Refusal::new("a category does not go in front of itself")),
+        Some(b) if b == c.id => return Err("a category does not go in front of itself".into()),
         Some(b) => order
             .iter()
             .position(|o| o.id == b)
-            .ok_or_else(|| Refusal::new("that category is not in the group"))?,
+            .ok_or_else(|| String::from("that category is not in the group"))?,
         None => order.len(),
     };
     order.insert(
@@ -208,7 +208,7 @@ pub fn move_category(_: &Ctx, db: &mut Db<Money>, input: MoveCategory) -> Result
 /// numbered again in their new order, as [`move_category`] numbers a
 /// group's categories.
 #[mutator("categories.move_group")]
-pub fn move_group(_: &Ctx, db: &mut Db<Money>, input: MoveGroup) -> Result<(), Refusal> {
+pub fn move_group(_: &Ctx, db: &mut Db<Money>, input: MoveGroup) -> Result<(), String> {
     let g = group_of(db, input.id)?;
     let mut order: Vec<Group> = db
         .category
@@ -220,8 +220,8 @@ pub fn move_group(_: &Ctx, db: &mut Db<Money>, input: MoveGroup) -> Result<(), R
         .collect();
     order.sort_by_key(|o| (o.pos, o.id));
     let at = match input.before {
-        Some(b) if b == g.id => return Err(Refusal::new("a group does not go in front of itself")),
-        Some(b) => order.iter().position(|o| o.id == b).ok_or_else(|| Refusal::new("no such group"))?,
+        Some(b) if b == g.id => return Err("a group does not go in front of itself".into()),
+        Some(b) => order.iter().position(|o| o.id == b).ok_or_else(|| String::from("no such group"))?,
         None => order.len(),
     };
     order.insert(at, g);
@@ -237,10 +237,10 @@ pub fn move_group(_: &Ctx, db: &mut Db<Money>, input: MoveGroup) -> Result<(), R
 /// What an envelope wants each month. A kind's money is its envelope's,
 /// and so is its target.
 #[mutator("categories.set_target")]
-pub fn set_target(_: &Ctx, db: &mut Db<Money>, input: SetTarget) -> Result<(), Refusal> {
+pub fn set_target(_: &Ctx, db: &mut Db<Money>, input: SetTarget) -> Result<(), String> {
     let c = category_of(db, input.id)?;
     if depth(db, c.id) != Some(1) {
-        return Err(Refusal::new(format!("{}'s target is the category it is a kind of", c.name)));
+        return Err(format!("{}'s target is the category it is a kind of", c.name));
     }
     db.category.update(Category { target: input.target, ..c })
 }
@@ -250,23 +250,23 @@ pub fn set_target(_: &Ctx, db: &mut Db<Money>, input: SetTarget) -> Result<(), R
 /// each month gave it given to `move_to`'s envelope instead (or back to be
 /// assigned).
 #[mutator("categories.delete_category")]
-pub fn delete_category(ctx: &Ctx, db: &mut Db<Money>, input: DeleteCategory) -> Result<(), Refusal> {
+pub fn delete_category(ctx: &Ctx, db: &mut Db<Money>, input: DeleteCategory) -> Result<(), String> {
     let c = named_category_of(db, input.id)?;
     delete(ctx, db, c, input.move_to)
 }
 
-fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Category>>) -> Result<(), Refusal> {
+fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Category>>) -> Result<(), String> {
     let gone = subtree(db, c.id);
     if let Some(to) = move_to {
         if gone.iter().any(|g| g.id == to) {
-            return Err(Refusal::new(match c.parent_id {
+            return Err(String::from(match c.parent_id {
                 None => "move its money somewhere outside the group",
                 Some(_) => "move its money to another category",
             }));
         }
         match db.category.get(to) {
-            None => return Err(Refusal::new("no such category to move to")),
-            Some(t) if t.parent_id.is_none() => return Err(Refusal::new("move its money to a category, not a group")),
+            None => return Err("no such category to move to".into()),
+            Some(t) if t.parent_id.is_none() => return Err("move its money to a category, not a group".into()),
             Some(_) => {}
         }
     }
@@ -336,7 +336,7 @@ fn delete(ctx: &Ctx, db: &mut Db<Money>, c: Category, move_to: Option<Id<Categor
 /// under it, depth first: what a picker that reaches past the envelopes
 /// draws, and where a receipt's item can be filed.
 #[view("categories.tree")]
-pub fn tree(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<CategoryNode>, Refusal> {
+pub fn tree(_: &Ctx, _: &Db<Money>, _: ()) -> Result<crate::budget::Plan<CategoryNode>, String> {
     Ok(scan::<Money, Category>().map_with(node_of).sort(|n| (n.order.clone(), n.id)))
 }
 

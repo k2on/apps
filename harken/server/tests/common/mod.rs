@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_auth::{Account, Login};
-use ark_peer::{Live, Memory};
+use ark_peer::Memory;
 use harken_server::domain::host::{Kind, Listening};
 use harken_server::domain::Device;
 use harken_server::hosted::Hosted;
@@ -75,27 +75,25 @@ pub struct Peer {
 }
 
 /// A client as `who`, in memory, linked to nothing.
-pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
-    let live = device.map(|(kind, name, can_play)| Live {
-        device: Some(
-            Device {
-                can_play,
-                id: String::new(),
-                kind: kind.name().into(),
-                name: name.into(),
-                user: String::new(),
-            }
-            .to_bytes(),
-        ),
-        ephemeral: [hosted().func("listening.scrub")].into(),
-        every_ms: RELAY_MS,
-        ..Live::new(hosted().module.clone())
+pub fn open(who: Ctx, device: Option<(Kind, &str, bool)>) -> Peer {
+    let device = device.map(|(kind, name, can_play)| {
+        Device {
+            can_play,
+            id: String::new(),
+            kind: kind.name().into(),
+            name: name.into(),
+            user: String::new(),
+        }
+        .to_bytes()
     });
     let config = ark_peer::Config {
-        live,
+        live: device.is_some().then(|| hosted().domain.clone()),
+        device,
+        ephemeral: [hosted().func("listening.scrub")].into(),
+        every_ms: RELAY_MS,
         ..ark_peer::Config::of(hosted().domain.clone())
     };
-    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
+    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));
     client.link.backoff = QUICK;
     Peer {
         client,
@@ -106,12 +104,8 @@ pub fn open(who: Who, device: Option<(Kind, &str, bool)>) -> Peer {
 }
 
 /// Nobody: a client used before anybody signed in.
-pub fn nobody() -> Who {
-    Who {
-        actor: String::new(),
-        session: String::new(),
-        roles: vec![],
-    }
+pub fn nobody() -> Ctx {
+    Ctx::who(String::new(), String::new(), vec![])
 }
 
 /// `user`, signed in on this server as a device of their own: a fresh
@@ -163,18 +157,10 @@ impl Peer {
     pub fn pump(&mut self) -> ark_peer::Pumped {
         let p = self.client.pump();
         self.heard = (self.heard && !p.opened) || p.frames[1] > 0;
-        let durable = self
-            .client
-            .take_rejections()
-            .into_iter()
-            .map(|(_, why)| (Space::Durable, why));
-        self.refused.extend(durable.collect::<Vec<_>>());
-        let live = self
-            .client
-            .take_live_refusals()
-            .into_iter()
-            .map(|why| (Space::Volatile, why));
-        self.refused.extend(live);
+        for space in [Space::Durable, Space::Volatile] {
+            let told = self.client.take_refusals(space).into_iter();
+            self.refused.extend(told.map(|(_, why)| (space, why)));
+        }
         p
     }
 
@@ -217,7 +203,10 @@ impl Peer {
 
     /// A transition of the session; a refusal of its preview, said.
     pub fn call(&mut self, transition: &str, input: Vec<u8>) -> Result<(), String> {
-        let out = self.client.call(&format!("listening.{transition}"), input);
+        let out = self
+            .client
+            .mutate(&format!("listening.{transition}"), input)
+            .map(|_| ());
         if let Err(why) = &out {
             self.refused.push((Space::Volatile, why.clone()));
         }

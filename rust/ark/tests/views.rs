@@ -8,11 +8,10 @@
 mod demo;
 
 use ark::format::Encode;
-use ark::hash::hex;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Feed, Input, Journal, Output, Peer, Role, Who};
+use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
 use ark::plan::{splice, Maintained};
-use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
+use ark::prelude::{scan, Db, Desc, Id, Plan};
 use ark::store::{Change, Store};
 use ark::Domain;
 use demo::*;
@@ -28,7 +27,7 @@ fn ctx() -> Ctx {
 /// Every playlist by name, with its last three items, last first.
 type WithItems = (Id<Playlist>, String, Vec<Item>);
 
-fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, Refusal> {
+fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, String> {
     Ok(scan::<Demo, Playlist>().sort(|p| (p.name.clone(), p.id)).map_with(|db, p| {
         let mut items = db.item.by(Item::KEY).from(p.id).all();
         items.sort_by_key(|i| std::cmp::Reverse(i.pos));
@@ -38,7 +37,7 @@ fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, Ref
 }
 
 /// A playlist's first two items by place.
-fn top_two(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+fn top_two(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, String> {
     let p = input.playlist_id;
     Ok(scan::<Demo, Item>()
         .filter(move |i| i.playlist_id == p)
@@ -80,12 +79,7 @@ fn holds(d: &Domain, name: &str, input: &[u8], v: &dyn Maintained, store: &Store
 /// `top_two`, which then held one of bob's where it should hold hers.
 #[test]
 fn a_view_follows_a_replica_through_a_rebase() {
-    let mut server = Peer::new(
-        demo::shared(),
-        demo::cas(),
-        Role::Authority { journal: Journal::default() },
-        who_of("server"),
-    );
+    let mut server = Peer::new(demo::cas(), Role::Authority { journal: Journal::default() }, who_of("server"));
     let (mut alice, mut bob) = (replica_of("alice"), replica_of("bob"));
     let pid = EntryId::of(Origin::named("alice-session"), 1).draw(0);
     let d = views();
@@ -123,12 +117,15 @@ fn a_view_follows_a_replica_through_a_rebase() {
     };
     let up = |server: &mut Peer, w: &str, o: &[Output]| -> Vec<Vec<u8>> {
         let mut down = vec![];
-        for b in o.iter().filter_map(|x| if let Output::Send(b) = x { Some(b.clone()) } else { None }) {
+        for b in o
+            .iter()
+            .filter_map(|x| if let Output::Send(To::Back, b) = x { Some(b.clone()) } else { None })
+        {
             for r in server.step(Input::Frame {
                 from: Some(who_of(w)),
                 bytes: b,
             }) {
-                if let Output::Fanout(b) = r {
+                if let Output::Send(To::All, b) = r {
                     down.push(b);
                 }
             }
@@ -165,16 +162,12 @@ fn a_view_follows_a_replica_through_a_rebase() {
     assert!(alice.pending.is_empty() && alice.store == server.store);
 }
 
-fn who_of(name: &str) -> Who {
-    Who {
-        actor: name.into(),
-        session: format!("{name}-session"),
-        roles: vec![],
-    }
+fn who_of(name: &str) -> Ctx {
+    Ctx::who(name, format!("{name}-session"), vec![])
 }
 
 fn replica_of(name: &str) -> Peer {
-    Peer::new(demo::shared(), demo::cas(), Role::Replica, who_of(name))
+    Peer::new(demo::cas(), Role::Replica, who_of(name))
 }
 
 fn mutate_input(name: &str, input: Vec<u8>) -> Input {
@@ -201,13 +194,13 @@ fn union_of(store: &Store, actor: &str) -> Store {
             (t, held)
         })
         .collect();
-    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap().0
+    Store::from_rows(demo::shared(), ark::schema::Space::Durable, &rows).unwrap()
 }
 
 /// A peer's confirmed state: its store with its pending changes undone.
 fn confirmed(p: &Peer) -> Store {
     let mut s = p.store.clone();
-    for c in p.pending.iter().rev().flat_map(|x| x.changes.iter().rev()) {
+    for c in p.pending.iter().rev().flat_map(|x| x.facts.iter().rev()) {
         s.apply(&c.inverse()).unwrap();
     }
     s
@@ -243,23 +236,23 @@ struct Fleet {
     seed: u64,
 }
 
+/// Whether `server` feeds `c` the log whole: its feed names no scope.
+fn whole(server: &Peer, c: &Peer) -> bool {
+    server.feed.as_ref().is_none_or(|f| f(&c.me).is_none())
+}
+
 impl Fleet {
     fn new(seed: u64) -> Fleet {
         let cas = demo::cas();
         let h = "demo.mine";
         let auth = Role::Authority { journal: Journal::default() };
-        let mut server = Peer::new(demo::shared(), cas.clone(), auth, who_of("server"));
+        let mut server = Peer::new(cas.clone(), auth, who_of("server"));
+        // Every client but the first is fed by the scope.
+        let first = who_of("peer-0").session;
+        server.feed = Some(std::sync::Arc::new(move |w: &Ctx| (w.session != first).then(|| h.into())));
         let mut clients = vec![];
         for i in 0..3 {
-            let mut c = Peer::new(demo::shared(), cas.clone(), Role::Replica, who_of(&format!("peer-{i}")));
-            if i > 0 {
-                c.feed = Feed::Scoped(h.into());
-                server.step(Input::Feed {
-                    who: c.me.clone(),
-                    feed: c.feed.clone(),
-                });
-            }
-            clients.push(c);
+            clients.push(Peer::new(cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));
         }
         let mut f = Fleet {
             server,
@@ -275,7 +268,7 @@ impl Fleet {
 
     fn heard(&mut self, i: usize, o: Vec<Output>) {
         for x in o {
-            if let (Output::Send(b), true) = (x, self.linked[i]) {
+            if let (Output::Send(To::Back, b), true) = (x, self.linked[i]) {
                 self.up[i].push(b);
             }
         }
@@ -288,14 +281,11 @@ impl Fleet {
         });
         for x in o {
             match x {
-                Output::Send(b) => self.down[i].push(b),
-                Output::Fanout(b) => (0..3)
-                    .filter(|j| self.linked[*j] && self.clients[*j].feed == Feed::Whole)
-                    .for_each(|j| self.down[j].push(b.clone())),
-                Output::To { session, bytes } => {
-                    let j = self.clients.iter().position(|c| c.me.session == session).unwrap();
-                    if self.linked[j] {
-                        self.down[j].push(bytes);
+                Output::Send(To::Back, b) => self.down[i].push(b),
+                Output::Send(To::All, b) => {
+                    for j in (0..3).filter(|j| self.linked[*j]) {
+                        // Each through its feed.
+                        self.down[j].extend(self.server.fed(&self.clients[j].me, b.clone()));
                     }
                 }
                 _ => {}
@@ -360,7 +350,7 @@ impl Fleet {
     /// authority's state at its cursor: no row outside it, nothing in it
     /// missing.
     fn unions_hold(&self) -> Result<(), String> {
-        for c in self.clients.iter().filter(|c| c.feed != Feed::Whole) {
+        for c in self.clients.iter().filter(|c| !whole(&self.server, c)) {
             let at = c.log().head().0;
             if confirmed(c) != union_of(&state_at(&self.server, at), &c.me.actor) {
                 return Err(format!("{} at {at} does not hold its union", c.me.actor));
@@ -423,7 +413,7 @@ fn a_scoped_replica_holds_its_union() {
         f.unions_hold().unwrap();
         for c in &f.clients {
             assert!(c.pending.is_empty(), "{} settled", c.me.actor);
-            let want = if c.feed == Feed::Whole {
+            let want = if whole(&f.server, c) {
                 f.server.store.clone()
             } else {
                 union_of(&f.server.store, &c.me.actor)
@@ -431,7 +421,7 @@ fn a_scoped_replica_holds_its_union() {
             assert!(c.store == want, "{} holds what it is fed", c.me.actor);
             let (held, all) = (c.store.rows("item").count(), f.server.store.rows("item").count());
             assert!(
-                c.feed == Feed::Whole || (0 < held && held < all),
+                whole(&f.server, c) || (0 < held && held < all),
                 "{} holds some items, not all",
                 c.me.actor
             );
@@ -441,54 +431,3 @@ fn a_scoped_replica_holds_its_union() {
 }
 
 // * A table browsed
-
-/// A table browsed (`ark::dynamic::Browse`) is a plan like any other: the
-/// items of one playlist, from track `b` on, last place first, the first
-/// two, kept by patches through adds, a move, a remove and a row of another
-/// playlist — after each, its rows those a fresh browse gives, and the
-/// patches splice. Falsified by the descending sort not complementing the
-/// column's bytes: the first rows were `b`, `c` where the browse asks `d`,
-/// `c`.
-#[test]
-fn a_browse_is_kept_by_patches() {
-    let (p, q) = ([1u8; 16], [2u8; 16]);
-    let item = |pl: &[u8], t: &str, pos| Change::Add {
-        table: "item".into(),
-        row: item_row(pl, t, pos),
-    };
-    let mut store = Store::from_rows(
-        shared(),
-        ark::schema::Space::Durable,
-        &[("playlist".into(), vec![playlist_row(&p, "P", "alice"), playlist_row(&q, "Q", "bob")])],
-    )
-    .unwrap()
-    .0;
-    for c in [item(&p, "a", 1), item(&p, "b", 2), item(&p, "c", 3), item(&p, "d", 4), item(&q, "z", 9)] {
-        store.apply(&c).unwrap();
-    }
-    let b = ark::dynamic::Browse::table("item")
-        .eq("playlist_id", serde_json::json!(hex(&p)))
-        .range(Some(serde_json::json!([hex(&p), "b"])), None)
-        .sort("pos", true)
-        .take(2);
-    let mut v = ark::plan::View::new(b.make(&shared()).unwrap(), ctx(), &store).unwrap();
-    let tracks = |rows: Vec<Vec<u8>>| rows.iter().map(|r| item_of(r).1).collect::<Vec<_>>();
-    assert_eq!(tracks(v.rows()), ["d", "c"]);
-    let moved = Change::Edit {
-        table: "item".into(),
-        old: item_row(&p, "c", 3),
-        new: item_row(&p, "c", 7),
-    };
-    let gone = Change::Remove {
-        table: "item".into(),
-        row: item_row(&p, "d", 4),
-    };
-    for batch in [vec![item(&p, "e", 5)], vec![moved], vec![gone, item(&q, "y", 8)], vec![item(&p, "a0", 9)]] {
-        let was = v.rows();
-        store.apply_all(&batch).unwrap();
-        let patches = v.push(&batch, &store).unwrap();
-        assert_eq!(v.rows(), b.rows(&store).unwrap(), "a fresh browse");
-        assert_eq!(splice(&patches, &was), v.rows(), "the patches splice");
-    }
-    assert_eq!(tracks(v.rows()), ["c", "e"], "a0 is below the range");
-}

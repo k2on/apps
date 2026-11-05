@@ -7,22 +7,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_ffi::{Listener, Login, Patch, Peer, Refusal, Standing, ViewUpdate};
-use ark_peer::{dev, Config, Handle, Live, Memory, Module};
-use arkdb::demo::{arrival, demo, live, room, Playlist};
+use ark_ffi::{Listener, Login, Op, Peer, Refusal};
+use ark_peer::{dev, Config, Handle, Memory};
+use arkdb::demo::{demo, Playlist};
 
 fn config() -> Config {
     Config::of(Arc::new(demo()))
 }
 
 fn server() -> Handle {
-    let mut c = config();
-    c.live = Some(Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        ..Live::new(Module::of(&room()))
-    });
+    let c = arkdb::demo::hub(config());
     Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), 0))
 }
 
@@ -43,10 +37,7 @@ fn login(token: &str) -> Login {
 
 /// A device on a disk of its own, saying `name` in the live space.
 fn device(dir: &tempfile::TempDir, name: &str, who: Option<Login>) -> Arc<Peer> {
-    let c = Config {
-        live: Some(live(name, 10)),
-        ..config()
-    };
+    let c = arkdb::demo::device(config(), name, 10);
     Peer::open(c, dir.path().to_str().unwrap(), who).expect("opened")
 }
 
@@ -103,7 +94,9 @@ fn the_bridge_does_what_the_kit_does() {
     );
     assert_eq!(alice.check("create_playlist".into(), r#"{"name":"x"}"#.into()), None);
     assert!(alice.mutate("nothing".into(), "null".into()).is_err());
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    until("confirmed", || {
+        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
+    });
     let road = playlists(&alice)[0].id.hex();
 
     // A view and its patches; a query answering the same.
@@ -113,14 +106,11 @@ fn the_bridge_does_what_the_kit_does() {
     let before = told.0.load(Ordering::Relaxed);
     let add = format!(r#"{{"playlist_id":"{road}","track_id":"t1"}}"#);
     alice.mutate("add_to_playlist".into(), add).unwrap();
-    let ViewUpdate::Patched { patches } = items.take() else {
-        panic!("patched")
-    };
-    let [Patch::Insert { at: 0, row }] = &patches[..] else {
-        panic!("one insert: {patches:?}")
-    };
+    let taken = items.take();
+    let [row] = &taken.rows[..] else { panic!("one insert: {taken:?}") };
+    assert_eq!(taken.ops[..], [Op::Insert { at: 0 }]);
     assert!(row.contains(r#""track_id":"t1""#), "{row}");
-    assert_eq!(items.take(), ViewUpdate::Unchanged);
+    assert_eq!(items.take().ops, vec![]);
     assert!(told.0.load(Ordering::Relaxed) > before, "the listener was told");
     assert_eq!(alice.query("items".into(), args.clone()).unwrap(), format!("[{row}]"));
 
@@ -131,33 +121,37 @@ fn the_bridge_does_what_the_kit_does() {
         bob.query("items".into(), args.clone()).is_ok_and(|r| r.contains("t1"))
     });
     until("both here", || bob.live_rows("here".into()).len() == 2);
-    alice.call("point".into(), r#"{"x":3}"#.into()).unwrap();
+    alice.mutate("point".into(), r#"{"x":3}"#.into()).unwrap();
     until("bob sees the pointer", || {
         bob.live_rows("pointer".into()).iter().any(|r| r.contains(r#""x":3"#))
     });
     assert!(
-        alice.call("point".into(), r#"{"x":"three"}"#.into()).is_err(),
+        alice.mutate("point".into(), r#"{"x":"three"}"#.into()).is_err(),
         "an input not of its type refused at once"
     );
-    assert!(alice.call("rename".into(), r#"{"name":7}"#.into()).is_err(), "any other refused at once");
+    assert!(
+        alice.mutate("rename".into(), r#"{"name":7}"#.into()).is_err(),
+        "any other refused at once"
+    );
 
-    // A device alone keeps a history of its own, and hands it over joining.
+    // A device with no server keeps what it does pending, and hands it over
+    // once it has one.
     let carol = device(&dc, "tablet", None);
-    carol.connect_with("", dial());
-    carol.alone();
     carol.mutate("create_playlist".into(), r#"{"name":"Alone"}"#.into()).unwrap();
     let s = carol.status();
-    assert!(s.alone && s.cursor == 1 && s.link == "alone", "{s:?}");
-    carol.join(String::new());
+    assert!(s.cursor == 0 && s.pending == 1 && s.link == "alone", "{s:?}");
+    carol.connect_with("", dial());
     carol.login(login("carol@tablet"));
     until("carol's playlist reached bob", || playlists(&bob).iter().any(|p| p.name == "Alone"));
-    until("carol has nothing pending", || carol.status().pending == 0 && !carol.status().alone);
+    until("carol has nothing pending", || {
+        carol.status().pending == 0 && carol.status().link == "online"
+    });
 
     // Signed out: nothing dialled, the history kept.
     alice.logout();
     assert_eq!(alice.status().link, "signed out");
     assert_eq!(alice.query("items".into(), args).unwrap(), format!("[{row}]"));
-    assert!(alice.take_rejections().is_empty());
+    assert!(alice.take_refusals().is_empty());
 }
 
 /// A device opened again reads what its disk held.
@@ -202,7 +196,7 @@ pub mod jobs {
     use ark::effect::Job;
     use ark::prelude::*;
 
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row, Effect)]
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
     pub struct Fetch {
         #[ark(key)]
         pub id: String,
@@ -220,7 +214,7 @@ pub mod jobs {
         pub after_ms: i64,
     }
 
-    fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+    fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), String> {
         let state = Job::Pending {
             due_ms: ctx.now + i.after_ms,
         };
@@ -237,10 +231,10 @@ pub mod jobs {
 
     /// Every job, as a plan that reads the row `id` names, so that a write
     /// to it makes the plan again — which refuses once when asked to.
-    fn every(_: &Ctx, db: &Db<Jobs>, i: Of) -> Result<Plan<Jobs, Fetch>, Refusal> {
+    fn every(_: &Ctx, db: &Db<Jobs>, i: Of) -> Result<Plan<Jobs, Fetch>, String> {
         let _ = db.fetch.get(i.id);
         match REFUSE.swap(false, Ordering::SeqCst) {
-            true => Err(Refusal("refused once".into())),
+            true => Err("refused once".into()),
             false => Ok(scan::<Jobs, Fetch>()),
         }
     }
@@ -254,7 +248,7 @@ pub mod jobs {
 }
 
 /// A handler in the app asks which jobs of a kind are due: the rows a
-/// claim would take now, each its JSON, and when the next falls due.
+/// claim would take now, each its JSON (the view `<kind>.due`).
 /// Falsified by `<kind>.due` answering every open row: the job due in an
 /// hour was among those due now.
 #[test]
@@ -268,10 +262,9 @@ fn a_kinds_due_jobs_are_asked_by_name() {
     .unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"now","after_ms":0}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"later","after_ms":3600000}"#.into()).unwrap();
-    let due = d.due("fetch".into()).unwrap();
-    assert_eq!(due.rows.len(), 1, "{due:?}");
-    assert!(due.rows[0].contains(r#""id":"now""#), "{due:?}");
-    assert!(due.next_ms.is_some_and(|t| t > ark_peer::now_ms() + 3_000_000));
+    let due: serde_json::Value = serde_json::from_str(&d.query("fetch.due".into(), "null".into()).unwrap()).unwrap();
+    assert_eq!(due.as_array().unwrap().len(), 1, "{due}");
+    assert_eq!(due[0]["id"], "now", "{due}");
 }
 
 /// A kept view that could not be kept up is made again from its input,
@@ -284,43 +277,16 @@ fn a_view_made_again_after_a_reset_is_made_from_its_input() {
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
     d.mutate("fetch.ask".into(), r#"{"id":"b","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take(), ViewUpdate::Patched { .. }));
+    assert!(!every.take().ops.is_empty());
     jobs::REFUSE.store(true, Ordering::SeqCst);
     d.mutate("fetch.ask".into(), r#"{"id":"a","after_ms":0}"#.into()).unwrap();
     assert!(!jobs::REFUSE.load(Ordering::SeqCst), "the plan was made again, and refused");
-    let ViewUpdate::Reset { rows } = every.take() else { panic!("reset") };
-    assert_eq!(rows.len(), 2, "made again from its input: {rows:?}");
+    let (again, rows) = (every.take(), every.rows());
+    let made = [Op::Remove { at: 0 }, Op::Insert { at: 0 }, Op::Insert { at: 1 }];
+    assert_eq!(again.ops, made, "its row removed, and its rows inserted: {again:?}");
+    assert_eq!((rows.len(), again.rows), (2, rows), "made again from its input");
     d.mutate("fetch.ask".into(), r#"{"id":"c","after_ms":0}"#.into()).unwrap();
-    assert!(matches!(every.take(), ViewUpdate::Patched { .. }), "and kept up after");
-}
-
-/// A tap in the app is the root of what it causes: what is mutated between
-/// `begin` and `end` reaches the server under the span `begin` said.
-/// Falsified by `begin` opening nothing on the peer: the server's entry had
-/// no cause.
-#[test]
-fn a_tap_begun_through_the_bridge_is_the_servers_cause() {
-    let hub = server();
-    let d = tempfile::tempdir().unwrap();
-    let alice = device(&d, "phone", Some(login("alice@phone")));
-    alice.connect_with("", hub.dialer(Arc::new(dev)));
-    until("alice linked", || alice.status().linked);
-    let span = alice.begin("tap new playlist".into());
-    let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
-    alice.end();
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
-    let cause = hub
-        .with(move |p| {
-            p.log
-                .log()
-                .entries()
-                .into_iter()
-                .find(|l| ark::hash::hex(&l.entry.id.0) == made)
-                .and_then(|l| l.entry.cause)
-        })
-        .flatten()
-        .expect("the server's entry has a cause");
-    assert_eq!(format!("{}/{}", ark::hash::hex(&cause.trace.0), ark::hash::hex(&cause.id)), span);
+    assert!(!every.take().ops.is_empty(), "and kept up after");
 }
 
 /// An app's mutate with no span opened is somebody's doing too: it reaches
@@ -335,7 +301,9 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
     alice.connect_with("", hub.dialer(Arc::new(dev)));
     until("alice linked", || alice.status().linked);
     let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
-    until("confirmed", || alice.standing(made.clone()) == Standing::Confirmed);
+    until("confirmed", || {
+        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
+    });
     let entry = hub
         .with(move |p| {
             p.log

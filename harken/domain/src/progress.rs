@@ -46,9 +46,9 @@ fn name_of(ctx: &Ctx, db: &Db<Harken>, said: String, was: Option<&Progress>) -> 
     }
 }
 
-fn signed_in(ctx: &Ctx) -> Result<String, Refusal> {
+fn signed_in(ctx: &Ctx) -> Result<String, String> {
     match ctx.user() {
-        "" => Err(Refusal::new("sign in to keep your place")),
+        "" => Err("sign in to keep your place".into()),
         u => Ok(u.to_string()),
     }
 }
@@ -57,7 +57,7 @@ fn signed_in(ctx: &Ctx) -> Result<String, Refusal> {
 /// the library has not got, it writes nothing; said again where it was, it
 /// writes nothing.
 #[mutator("library.report_progress")]
-pub fn report_progress(ctx: &Ctx, db: &mut Db<Harken>, input: ReportProgress) -> Result<(), Refusal> {
+pub fn report_progress(ctx: &Ctx, db: &mut Db<Harken>, input: ReportProgress) -> Result<(), String> {
     let user = signed_in(ctx)?;
     if !db.episode.has(input.media_id) {
         return Ok(());
@@ -88,10 +88,10 @@ pub fn report_progress(ctx: &Ctx, db: &mut Db<Harken>, input: ReportProgress) ->
 /// An episode said to be played — at its end — or not played: from its
 /// start, as if never begun.
 #[mutator("library.mark_played")]
-pub fn mark_played(ctx: &Ctx, db: &mut Db<Harken>, input: MarkPlayed) -> Result<(), Refusal> {
+pub fn mark_played(ctx: &Ctx, db: &mut Db<Harken>, input: MarkPlayed) -> Result<(), String> {
     let user = signed_in(ctx)?;
     if !db.episode.has(input.media_id) {
-        return Err(Refusal::new("only an episode is played or not"));
+        return Err("only an episode is played or not".into());
     }
     if !input.finished {
         return db.progress.delete((user, input.media_id));
@@ -125,7 +125,7 @@ fn entry(p: &Progress) -> ProgressEntry {
 /// The caller's own place in every episode they have begun, the newest
 /// first.
 #[view("library.my_progress")]
-pub fn my_progress(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ProgressEntry>, Refusal> {
+pub fn my_progress(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ProgressEntry>, String> {
     let user = ctx.user().to_string();
     Ok(scan::<Harken, Progress>()
         .filter(move |p| p.user_id == user)
@@ -136,7 +136,7 @@ pub fn my_progress(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ProgressEntr
 /// How far everybody has listened to one show's episodes, the newest
 /// listening first: what its page says beside each episode.
 #[view("library.show_progress")]
-pub fn show_progress(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<ProgressEntry>, Refusal> {
+pub fn show_progress(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<ProgressEntry>, String> {
     let id = input.id;
     Ok(scan::<Harken, Progress>()
         .filter_with(move |db, p| db.episode.get(p.media_id).is_some_and(|e| e.show_id == id))

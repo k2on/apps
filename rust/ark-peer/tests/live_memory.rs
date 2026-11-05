@@ -19,33 +19,30 @@ use std::time::{Duration, Instant};
 use ark::format::Encode;
 use ark::peer::Role;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Module, Peer};
+use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
-use arkdb::demo::{arrival, room, Point};
+use arkdb::demo::{Arrival, Point};
 
 /// harken-server's live `keep`.
 const KEEP: usize = 256;
 
 fn hub() -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
-    c.live = Some(ark_peer::Live {
-        on_join: Some("room.on_join".into()),
-        on_leave: Some("room.on_leave".into()),
-        arrive: Arc::new(arrival),
-        keep: Some(KEEP),
-        ..ark_peer::Live::new(Module::of(&room()))
-    });
+    let c = Config {
+        live_keep: Some(KEEP),
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
+    };
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device(k: usize) -> Peer {
-    let mut c = Config::new(Module::of(&domain()));
-    c.live = Some(ark_peer::Live {
-        device: Some(format!("d{k}").into_bytes()),
-        ..ark_peer::Live::new(Module::of(&room()))
-    });
+    let c = Config {
+        device: Some(Arrival { name: format!("d{k}") }.to_bytes()),
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
+    };
     let who = dev(&format!("u{k}@d{k}")).unwrap();
-    let mut p = Peer::open(c, who, Box::new(Memory::default()), false);
+    let mut p = Peer::open(c, who, Box::new(Memory::default()));
     p.linked = true;
     p
 }
@@ -101,7 +98,7 @@ fn run(c: usize, n: u64) -> Held {
     for i in 0..n {
         let k = i as usize % c;
         let x = Point { x: i as i64 }.to_bytes();
-        ds[k].0.author(Space::Volatile, "room.point", x, i as i64).unwrap();
+        ds[k].0.mutate_at("room.point", x, i as i64).unwrap();
         carry(&mut hub, &mut ds);
     }
     let per_call = t.elapsed() / n as u32;
@@ -112,7 +109,7 @@ fn run(c: usize, n: u64) -> Held {
         assert!(live(d).pending.is_empty());
     }
     let verdicts = match &live(&hub).role {
-        Role::Authority { journal } => journal.verdicts.len(),
+        Role::Authority { journal } => journal.refused.len() + journal.last.len(),
         Role::Replica => unreachable!("a server's live machine is an authority"),
     };
     Held {

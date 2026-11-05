@@ -396,12 +396,11 @@
           # and reading a system's events: `tail`, `trace`, `peer`): `ark` is
           # that build, and `fuzz` its fuzzer under the name `nix run` takes.
           ark = arkdb;
-          # `nix run .#fuzz [SESSIONS] [FIRST SEED] [traces [DIR]]`: the
-          # fuzzer (rust/arkdb/src/fuzz.rs, `arkdb fuzz`), ten thousand sessions
+          # `nix run .#fuzz [SESSIONS] [FIRST SEED]`: the fuzzer
+          # (rust/arkdb/src/fuzz.rs, `arkdb fuzz`), ten thousand sessions
           # from seed 1 by default, each checked for convergence, replay
-          # from facts and every frame's bytes; `traces` replays every
-          # client's trace too and writes them under DIR. A failure prints
-          # its seed and the run exits 1.
+          # from facts and every frame's bytes. A failure prints its seed
+          # and the run exits 1.
           fuzz = pkgs.writeShellApplication {
             name = "arkdb-fuzz";
             runtimeInputs = [ ark ];
@@ -409,7 +408,7 @@
           };
           # The vectors as the writer writes them now: the kernel's tests
           # (hash/) and arkdb's
-          # (protocol/, trace/, rebase/, views/) run with ARK_WRITE_VECTORS over an
+          # (protocol/, rebase/, views/) run with ARK_WRITE_VECTORS over an
           # empty spec/vectors, which is then the output. checks.vectors
           # holds the tree's to it; `nix build .#vectors` and a copy over
           # spec/vectors is how they are written again without cargo.
@@ -429,18 +428,6 @@
             '';
             out = "cp -r spec/vectors $out";
           };
-
-          # Every client's life in every session of a fixed run of the
-          # fuzzer, as traces (spec/RUNNERS.md § trace): what checks.traces
-          # replays beside spec/vectors/trace/, and what a runtime in another
-          # language replays to be held to this one. A function of the seed
-          # and the session count, so not checked in, and moving either is a
-          # deliberate edit; a run that finds anything exits 1 and there is
-          # no corpus, since a trace is of correct behaviour.
-          # Written, not replayed: checks.traces replays them.
-          trace-corpus = pkgs.runCommand "trace-corpus" { nativeBuildInputs = [ ark ]; } ''
-            arkdb fuzz 300 2026 traces $out
-          '';
 
           # The phones (docs/plan-v5.md §1.16, N3): the Rust kernel through
           # UniFFI. `harken/ffi` is ark-ffi with harken's domain linked in, one
@@ -1096,7 +1083,7 @@
         in
         {
           packages = {
-            inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
+            inherit ark vectors fuzz harken-domain harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
             inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
@@ -1181,23 +1168,8 @@
             vectors = pkgs.runCommand "check-vectors" { } ''
               diff -r ${vectors} ${./spec/vectors} && touch $out
             '';
-            # Every trace of the corpus replays (rust/arkdb/tests/vectors.rs,
-            # `trace_corpus`; spec/vectors/trace/ and the fleets' and fuzz
-            # sessions' traces are replayed by checks.rust, once each). Its
-            # own check rather than part of checks.rust, so that the
-            # workspace's tests do not wait on a fuzz run and a trace that
-            # stops replaying is named as that.
-            traces = crateTests {
-              name = "ark-traces";
-              crates = [ { packageId = "arkdb"; member = "rust/arkdb"; } ];
-              targets = [ "vectors" ];
-              args = "trace_corpus --nocapture";
-              dirs = rustDirs ++ [ "spec/vectors" ];
-              preCheck = "export ARK_TRACE_CORPUS=${trace-corpus}";
-            };
             # The fuzzer's binary still runs and checks: a fixed seed and a
-            # few sessions, so that it cannot rot. Their traces are replayed
-            # by checks.rust (rust/arkdb/tests/fuzz.rs, seeds 1-200).
+            # few sessions, so that it cannot rot.
             fuzz-smoke = pkgs.runCommand "check-fuzz-smoke" { nativeBuildInputs = [ ark ]; } ''
               arkdb fuzz 25 1
               touch $out

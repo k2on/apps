@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use ark::format::Encode;
 use ark::log::EntryId;
-use ark::peer::Who;
+use ark::peer::Ctx;
 use ark_auth::{Account, Login};
 use ark_peer::Memory;
 use money_server::importer::Banks;
@@ -43,9 +43,9 @@ pub struct Peer {
     pub refused: Vec<String>,
 }
 
-pub fn open(who: Who) -> Peer {
+pub fn open(who: Ctx) -> Peer {
     let config = ark_peer::Config::of(money_domain::shared());
-    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
+    let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));
     client.link.backoff = (20, 200);
     Peer { client, refused: vec![] }
 }
@@ -66,7 +66,8 @@ impl Peer {
 
     pub fn pump(&mut self) -> ark_peer::Pumped {
         let p = self.client.pump();
-        self.refused.extend(self.client.take_rejections().into_iter().map(|(_, why)| why));
+        self.refused
+            .extend(self.client.take_refusals(ark::schema::Space::Durable).into_iter().map(|(_, why)| why));
         p
     }
 

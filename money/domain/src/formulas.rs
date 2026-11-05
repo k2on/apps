@@ -61,9 +61,9 @@ pub fn formula_in(db: &Db<Money>, id: Id<Category>, month: &str) -> Option<Formu
 }
 
 /// Refused, when the month follows a formula: what assigning by hand checks.
-pub fn refuse(db: &Db<Money>, id: Id<Category>, month: &str) -> Result<(), Refusal> {
+pub fn refuse(db: &Db<Money>, id: Id<Category>, month: &str) -> Result<(), String> {
     match formula_in(db, id, month) {
-        Some(_) => Err(Refusal::new(FOLLOWS)),
+        Some(_) => Err(String::from(FOLLOWS)),
         None => Ok(()),
     }
 }
@@ -288,10 +288,10 @@ pub fn assigned_of(db: &Db<Money>, month: &str, id: Id<Category>) -> i64 {
 // * Setting one
 
 /// A category that may have a formula: one money is assigned to, not a card's.
-fn formulable(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
+fn formulable(db: &Db<Money>, id: Id<Category>) -> Result<Category, String> {
     let c = budgetable(db, id)?;
     if crate::cards::is_payment(db, id) {
-        return Err(Refusal::new("a card's payment category is assigned by hand: its money is the card's"));
+        return Err("a card's payment category is assigned by hand: its money is the card's".into());
     }
     Ok(c)
 }
@@ -303,7 +303,7 @@ fn from_of(ctx: &Ctx, from: &Option<String>) -> String {
 
 /// A category's versions from a month on, removed: what a version set from
 /// that month replaces.
-fn clear_from(db: &mut Db<Money>, id: Id<Category>, from: &str) -> Result<(), Refusal> {
+fn clear_from(db: &mut Db<Money>, id: Id<Category>, from: &str) -> Result<(), String> {
     for f in db.formula.by(Formula::CATEGORY_ID_FROM).from(id).all() {
         if f.from.as_str() >= from {
             db.formula.remove(&f)?;
@@ -325,19 +325,19 @@ fn before(db: &Db<Money>, id: Id<Category>, from: &str) -> Option<Formula> {
 
 /// Terms a formula may have: one at least, each a saved filter that is
 /// here and a factor that is a ratio of something.
-fn checked(db: &Db<Money>, terms: &[Term]) -> Result<(), Refusal> {
+fn checked(db: &Db<Money>, terms: &[Term]) -> Result<(), String> {
     if terms.is_empty() {
-        return Err(Refusal::new("a formula sums at least one filter"));
+        return Err("a formula sums at least one filter".into());
     }
     if terms.len() > TERMS {
-        return Err(Refusal::new(format!("a formula has at most {TERMS} terms")));
+        return Err(format!("a formula has at most {TERMS} terms"));
     }
     for t in terms {
         if !db.saved_filter.has(t.filter_id) {
-            return Err(Refusal::new("no such filter"));
+            return Err("no such filter".into());
         }
         if t.times < 0 || t.per <= 0 {
-            return Err(Refusal::new("a factor is a share of something, never below nothing"));
+            return Err("a factor is a share of something, never below nothing".into());
         }
     }
     Ok(())
@@ -345,7 +345,7 @@ fn checked(db: &Db<Money>, terms: &[Term]) -> Result<(), Refusal> {
 
 /// A version from `from` on, in place of whatever followed from then —
 /// unless the month before already follows the same.
-fn put(ctx: &Ctx, db: &mut Db<Money>, id: Id<Category>, from: String, terms: Vec<Term>, said: String) -> Result<(), Refusal> {
+fn put(ctx: &Ctx, db: &mut Db<Money>, id: Id<Category>, from: String, terms: Vec<Term>, said: String) -> Result<(), String> {
     clear_from(db, id, &from)?;
     let f = Formula {
         from,
@@ -365,7 +365,7 @@ fn put(ctx: &Ctx, db: &mut Db<Money>, id: Id<Category>, from: String, terms: Vec
 /// A category assigned by formula from a month on (none: this month), in
 /// place of whatever it followed from then.
 #[mutator("categories.set_formula")]
-pub fn set_formula(ctx: &Ctx, db: &mut Db<Money>, input: SetFormula) -> Result<(), Refusal> {
+pub fn set_formula(ctx: &Ctx, db: &mut Db<Money>, input: SetFormula) -> Result<(), String> {
     formulable(db, input.category_id)?;
     checked(db, &input.terms)?;
     let from = from_of(ctx, &input.from);
@@ -375,7 +375,7 @@ pub fn set_formula(ctx: &Ctx, db: &mut Db<Money>, input: SetFormula) -> Result<(
 /// A category assigned by hand again from a month on (none: this month):
 /// every month before keeps what its formula gave it.
 #[mutator("categories.clear_formula")]
-pub fn clear_formula(ctx: &Ctx, db: &mut Db<Money>, input: ClearFormula) -> Result<(), Refusal> {
+pub fn clear_formula(ctx: &Ctx, db: &mut Db<Money>, input: ClearFormula) -> Result<(), String> {
     formulable(db, input.category_id)?;
     let from = from_of(ctx, &input.from);
     let later = db
@@ -387,7 +387,7 @@ pub fn clear_formula(ctx: &Ctx, db: &mut Db<Money>, input: ClearFormula) -> Resu
         .any(|f| f.from >= from);
     let followed_before = before(db, input.category_id, &from).is_some_and(|b| !b.manual);
     if !later && !followed_before {
-        return Err(Refusal::new("this category is assigned by hand already"));
+        return Err("this category is assigned by hand already".into());
     }
     clear_from(db, input.category_id, &from)?;
     if !followed_before {
@@ -411,7 +411,7 @@ pub fn clear_formula(ctx: &Ctx, db: &mut Db<Money>, input: ClearFormula) -> Resu
 /// matching acme in Checking" — said as the rule was ("10% of income
 /// matching acme in Checking").
 #[mutator("categories.set_rule")]
-pub fn set_rule(ctx: &Ctx, db: &mut Db<Money>, input: SetRule) -> Result<(), Refusal> {
+pub fn set_rule(ctx: &Ctx, db: &mut Db<Money>, input: SetRule) -> Result<(), String> {
     formulable(db, input.category_id)?;
     let mut accounts = input.accounts.clone();
     accounts.sort();
@@ -419,8 +419,8 @@ pub fn set_rule(ctx: &Ctx, db: &mut Db<Money>, input: SetRule) -> Result<(), Ref
     let mut names = Vec::new();
     for a in &accounts {
         match db.account.get(*a) {
-            None => return Err(Refusal::new("no such account")),
-            Some(a) if !a.on_budget => return Err(Refusal::new(format!("{} is not on the budget: its money is not assigned", a.name))),
+            None => return Err("no such account".into()),
+            Some(a) if !a.on_budget => return Err(format!("{} is not on the budget: its money is not assigned", a.name)),
             Some(a) => names.push(a),
         }
     }
@@ -491,7 +491,7 @@ pub fn formula_line(db: &Db<Money>, f: &Formula, month: &str) -> FormulaLine {
 
 /// Every category whose month follows a formula, and the formula.
 #[view("categories.formulas")]
-pub fn formulas(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<FormulaLine>, Refusal> {
+pub fn formulas(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<FormulaLine>, String> {
     let month = input.month;
     Ok(scan::<Money, Category>()
         .filter_with({
@@ -504,7 +504,7 @@ pub fn formulas(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<FormulaLine
 
 /// What a formula would assign in a month, before it is saved: one row.
 #[view("categories.preview_formula")]
-pub fn preview_formula(_: &Ctx, _: &Db<Money>, input: PreviewFormula) -> Result<Plan<FormulaPreview>, Refusal> {
+pub fn preview_formula(_: &Ctx, _: &Db<Money>, input: PreviewFormula) -> Result<Plan<FormulaPreview>, String> {
     let (month, terms) = (input.month, input.terms);
     Ok(scan::<Money, Category>().group(
         |_| 0i64,

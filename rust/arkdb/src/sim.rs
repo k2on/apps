@@ -8,21 +8,19 @@
 //!
 //! A script is [`Op`]s: authoring on the log or the live space, a
 //! partition and its heal, the server restarted from its disk, a client
-//! reopened from its own, a sign-in, going alone and joining, a delivery.
+//! reopened from its own, a sign-in, a while offline, a delivery.
 //! [`Net::settle`] reconnects everyone and delivers perfectly until nothing
 //! is in flight or pending. Every frame moved is checked to decode to the
 //! bytes that were sent, and every view a client keeps is mirrored by its
 //! patches ([`Net::watch`], [`Net::views_hold`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use ark::frames::Frame;
-use ark::peer::{Ctx, Who};
+use ark::peer::Ctx;
 use ark::plan::splice;
 use ark::schema::Space;
-use ark_peer::{Config, ConnId, Deliver, Memory, Peer, Update};
+use ark_peer::{Config, ConnId, Deliver, Memory, Peer};
 
 /// The whole of a seeded run's randomness — the simulator's network, the
 /// fuzzer's script, harken's port — one generator: an LCG of Knuth's MMIX
@@ -51,12 +49,8 @@ impl Rng {
 }
 
 /// Client `i`'s first login, as K1's simulator named it.
-pub fn who(i: i64) -> Who {
-    Who {
-        actor: format!("peer-{i}"),
-        session: format!("peer-{i}-session"),
-        roles: vec![],
-    }
+pub fn who(i: i64) -> Ctx {
+    Ctx::who(format!("peer-{i}"), format!("peer-{i}-session"), vec![])
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,14 +61,16 @@ pub enum Op {
     Heal(i64),
     Restart,
     Reopen(i64),
-    SignIn(i64, Who),
-    Alone(i64),
-    Join(i64),
+    SignIn(i64, Ctx),
+    /// A client offline for a while — no server reached, its intents
+    /// pending — until `Online`.
+    Offline(i64),
+    Online(i64),
     /// A device's disk loses its pending intents but keeps the last
     /// `local` it drew, as a phone's did whose intents before its 18th
     /// were nowhere: what was lost is gone, and the next one is pushed
-    /// past a gap, which the authority answers (`Verdict::Gap`) and the
-    /// device numbers on from. A device alone keeps its chain.
+    /// past a gap, which the authority answers (`Verdict::At`) and the
+    /// device numbers on from.
     LosePending(i64),
     /// The clock moves on this many milliseconds.
     Wait(i64),
@@ -98,23 +94,16 @@ pub struct Net {
     pub doubled: usize,
     /// Frames whose bytes did not decode to what was sent.
     pub misread: Vec<Vec<u8>>,
+    /// Every frame put in flight, and whether a client sent it.
+    pub wire: Vec<(bool, Vec<u8>)>,
     /// Every login each client held, by session: what its entries' roles
     /// must be.
-    pub logins: BTreeMap<String, Who>,
-    /// The clients alone.
-    pub alone: BTreeSet<i64>,
+    pub logins: BTreeMap<String, Ctx>,
+    /// The clients offline.
+    pub offline: BTreeSet<i64>,
     /// Each view kept, by client and number: what it is of, and the list
     /// its patches made.
     pub views: BTreeMap<(i64, usize), Watched>,
-}
-
-/// A live origin drawn at every open, seeded: `session`'s, counted.
-fn counted(session: &str) -> ark_peer::Draw {
-    let (session, opens) = (session.to_string(), Arc::new(AtomicU64::new(0)));
-    Arc::new(move || {
-        let n = opens.fetch_add(1, Ordering::Relaxed);
-        ark::log::Origin::named(format!("{session} live {n}"))
-    })
 }
 
 /// A view a client keeps: its space, its view's name and input, who
@@ -128,10 +117,7 @@ impl Net {
     }
 
     /// A hub and a client per login, each linked.
-    pub fn of(mut hub: Config, clients: Vec<(Who, Config)>, seed: u64) -> Net {
-        if let Some(live) = &mut hub.live {
-            live.origin = counted("authority");
-        }
+    pub fn of(hub: Config, clients: Vec<(Ctx, Config)>, seed: u64) -> Net {
         let mut net = Net {
             hub: Peer::serve(hub.clone(), Box::new(Memory::default()), 0),
             hub_config: hub,
@@ -145,8 +131,9 @@ impl Net {
             dropped: 0,
             doubled: 0,
             misread: vec![],
+            wire: vec![],
             logins: BTreeMap::new(),
-            alone: BTreeSet::new(),
+            offline: BTreeSet::new(),
             views: BTreeMap::new(),
         };
         for (w, c) in clients {
@@ -156,18 +143,14 @@ impl Net {
     }
 
     /// One more client, linked: its number.
-    pub fn add(&mut self, who: Who, mut config: Config) -> i64 {
+    pub fn add(&mut self, who: Ctx, config: Config) -> i64 {
         let i = self.clients.keys().last().map_or(0, |n| n + 1);
         self.logins.insert(who.session.clone(), who.clone());
         // The origin a device draws once, seeded: its first session's.
         let mut disk = Memory::default();
         let origin = ark::log::Origin::named(&who.session);
         let _ = ark_peer::local::preset(&mut disk, |r| r.origin = origin);
-        // And its live machine's, drawn at every open: the session's, counted.
-        if let Some(live) = &mut config.live {
-            live.origin = counted(&who.session);
-        }
-        self.clients.insert(i, Peer::open(config, who, Box::new(disk), true));
+        self.clients.insert(i, Peer::open(config, who, Box::new(disk)));
         self.heal(i);
         i
     }
@@ -187,20 +170,15 @@ impl Net {
     fn told_by_client(&mut self, i: i64) {
         let c = self.clients.get_mut(&i).unwrap();
         let frames = c.take_frames();
-        let refused = c.take_rejections().into_iter().map(|(_, why)| why).chain(c.take_live_refusals());
-        self.refused.extend(refused.map(|why| (i, why)));
+        let refused = [Space::Durable, Space::Volatile].map(|s| c.take_refusals(s)).into_iter().flatten();
+        self.refused.extend(refused.map(|(_, why)| (i, why)));
         let mine: Vec<(i64, usize)> = self.views.range((i, 0)..=(i, usize::MAX)).map(|(k, _)| *k).collect();
         for k in mine {
-            match c.update(k.1) {
-                Update::Patched(patches) => self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4)),
-                Update::Reset => {
-                    let rows = c.values(k.1).unwrap_or_default();
-                    self.views.entry(k).and_modify(|v| v.4 = rows)
-                }
-                Update::Unchanged => continue,
-            };
+            let patches = c.update(k.1);
+            self.views.entry(k).and_modify(|v| v.4 = splice(&patches, &v.4));
         }
         if self.conns.contains_key(&i) {
+            self.wire.extend(frames.iter().map(|f| (true, f.clone())));
             self.to_server.entry(i).or_default().extend(frames);
         }
     }
@@ -208,6 +186,7 @@ impl Net {
     fn told_by_server(&mut self, out: Vec<Deliver>) {
         for (c, b) in out {
             if let Some((i, _)) = self.conns.iter().find(|(_, x)| **x == c) {
+                self.wire.push((false, b.clone()));
                 self.to_client.entry(*i).or_default().push(b);
             }
         }
@@ -216,40 +195,31 @@ impl Net {
     pub fn run(&mut self, op: &Op) {
         self.now += 1;
         match op.clone() {
-            Op::Mutate(i, f, input) => {
+            Op::Mutate(i, f, input) | Op::Call(i, f, input) => {
                 let now = self.now;
-                let _ = self.client(i).author(Space::Durable, &f, input, now);
-                self.told_by_client(i);
-            }
-            Op::Call(i, f, input) => {
-                let now = self.now;
-                let _ = self.client(i).author(Space::Volatile, &f, input, now);
+                if let Err(why) = self.client(i).mutate_at(&f, input, now) {
+                    self.refused.push((i, why));
+                }
                 self.told_by_client(i);
             }
             Op::Partition(i) => self.partition(i),
             Op::Heal(i) => self.heal(i),
             Op::Restart => self.restart(),
-            Op::LosePending(i) if !self.alone.contains(&i) => {
+            Op::LosePending(i) => {
                 self.partition(i);
                 let c = self.client(i);
-                let lost = ark::log::Durable {
-                    rows: c.log.confirmed_rows(),
-                    logged: vec![],
-                    parts: vec![],
-                    local: c.log.local,
-                    pending: vec![],
-                };
+                let (pending, local) = (vec![], c.log.local);
+                let lost = vec![
+                    ark::log::Record::Rows(c.log.confirmed_rows()),
+                    ark::log::Record::Pending { pending, at: None, local },
+                ];
                 c.step(Space::Durable, ark::peer::Input::Open(lost));
                 self.heal(i);
             }
-            Op::LosePending(_) => {}
             Op::Reopen(i) => {
                 self.partition(i);
                 self.views.retain(|k, _| k.0 != i);
                 let c = self.clients.remove(&i).unwrap().reopen();
-                if !c.log.is_authority() {
-                    self.alone.remove(&i);
-                }
                 self.clients.insert(i, c);
                 self.heal(i);
             }
@@ -259,16 +229,13 @@ impl Net {
                 self.client(i).sign_in(w);
                 self.heal(i);
             }
-            Op::Alone(i) => {
+            Op::Offline(i) => {
                 self.partition(i);
-                self.client(i).alone();
-                self.alone.insert(i);
+                self.offline.insert(i);
             }
-            Op::Join(i) => {
-                if self.alone.remove(&i) {
+            Op::Online(i) => {
+                if self.offline.remove(&i) {
                     self.heal(i);
-                    self.client(i).join();
-                    self.told_by_client(i);
                 }
             }
             Op::Wait(ms) => {
@@ -295,9 +262,9 @@ impl Net {
         self.to_client.remove(&i);
     }
 
-    /// A client comes back on a fresh connection; a client alone stays so.
+    /// A client comes back on a fresh connection; a client offline stays so.
     pub fn heal(&mut self, i: i64) {
-        if self.conns.contains_key(&i) || self.alone.contains(&i) {
+        if self.conns.contains_key(&i) || self.offline.contains(&i) {
             return;
         }
         // The connection is who the client last signed in as, whatever it
@@ -380,8 +347,8 @@ impl Net {
     /// its patches.
     pub fn watch(&mut self, i: i64, space: Space, name: &str, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
         let c = self.client(i);
-        let v = c.watch(space, name, &input, ctx.clone()).map_err(|r| r.0)?;
-        let rows = c.values(v).unwrap_or_default();
+        let v = c.watch(space, name, &input, ctx.clone())?;
+        let rows = c.rows(v).unwrap_or_default();
         self.views.insert((i, v), (space, name.into(), input, ctx, rows));
         Ok(v)
     }
@@ -392,12 +359,12 @@ impl Net {
         for ((i, v), (space, f, input, ctx, mirror)) in &self.views {
             let c = &self.clients[i];
             let d = match space {
-                Space::Durable => c.config.log.domain.as_ref(),
-                Space::Volatile => c.config.live.as_ref().and_then(|l| l.module.domain.as_ref()),
+                Space::Durable => Some(&c.config.log),
+                Space::Volatile => c.config.live.as_ref(),
             };
             let store = &c.machine(*space).unwrap().store;
-            let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();
-            if c.values(*v).as_ref() != Some(&fresh) || *mirror != fresh {
+            let fresh = d.expect("a domain").watch(store, ctx, f, input)?.rows();
+            if c.rows(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
             }
         }
@@ -423,14 +390,14 @@ impl Net {
         }
     }
 
-    /// Everyone back from alone, reconnected, the relay run out, and
+    /// Everyone back online, reconnected, the relay run out, and
     /// everything delivered perfectly until nothing is in flight and nothing
     /// is pending; bounded, so a fleet that cannot converge is an error
     /// rather than a hang.
     pub fn settle(&mut self) -> Result<(), String> {
         let all: Vec<i64> = self.clients.keys().copied().collect();
         for i in &all {
-            self.run(&Op::Join(*i));
+            self.run(&Op::Online(*i));
         }
         for i in &all {
             self.partition(*i);
@@ -456,7 +423,7 @@ impl Net {
             let pairs = [(Some(&c.log), Some(&self.hub.log)), (c.live.as_ref(), self.hub.live.as_ref())];
             for (space, (p, a)) in [Space::Durable, Space::Volatile].into_iter().zip(pairs) {
                 let (Some(p), Some(a)) = (p, a) else { continue };
-                if p.feed != ark::peer::Feed::Whole {
+                if space == Space::Durable && (self.hub.config.feed)(&c.log.me).is_some() {
                     continue;
                 }
                 let from = p.log().base_seq().max(a.log().base_seq());
