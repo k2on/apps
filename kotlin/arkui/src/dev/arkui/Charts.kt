@@ -1,8 +1,8 @@
 // Charts as a phone's own apps draw them: a ring of parts with a figure in
 // its middle ([Donut]), and the same parts as bars against the largest
-// ([Bars]). Colours are the scheme's — [chartPalette] takes them from it, so
-// a chart is in the wallpaper's colours like everything around it — and
-// each draws itself in from nothing on a spring the first time it shows.
+// ([Bars]). Colours are the theme's chart palette ([chartPalette]), the same
+// on every platform — and each draws itself in from nothing on a spring the
+// first time it shows.
 //
 // A chart is one thing to TalkBack, read as a sentence the caller writes
 // (`description`): a ring of colours says nothing to somebody who cannot see
@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -48,12 +49,13 @@ import androidx.compose.foundation.background
 /** One part of a chart: what it is, how much, and its colour. */
 public data class Part(val label: String, val value: Long, val color: Color)
 
-/** Colours for a chart's parts, from the scheme, in an order that keeps neighbours apart. */
+/**
+ * Colours for a chart's parts: the theme's chart palette (arkui/theme.toml, [ChartColors]), the
+ * same the iPhone draws, for the side the page is on.
+ */
 @Composable
-public fun chartPalette(): List<Color> {
-    val c = MaterialTheme.colorScheme
-    return listOf(c.primary, c.tertiary, c.secondary, c.error, c.primaryContainer, c.tertiaryContainer, c.inversePrimary, c.outline)
-}
+public fun chartPalette(): List<Color> =
+    ChartColors.of(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f)
 
 /** Grows from 0 to 1 on a spring the first time it is composed: a chart drawing itself in. */
 @Composable
