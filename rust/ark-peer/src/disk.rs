@@ -94,9 +94,19 @@ pub fn import(disk: &mut dyn Disk, from: &Schema, schema: Arc<Schema>, tables: &
         return Err(io::Error::other("an import is into a disk that holds no rows"));
     }
     let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(io::Error::other)?;
-    let rows = ark::log::standing(store.snapshot_rows(), 0, Default::default());
+    put_store(disk, &store)
+}
+
+/// `store`'s rows the whole of a disk, and its schema beside them: a log
+/// starting afresh on rows no entry wrote (a seed, an import). The log
+/// stands on the rows' state hash, not the empty chain's start, so that a
+/// replica on the empty chain is not taken to hold them already: its
+/// Hello does not match, and it is filled.
+pub fn put_store(disk: &mut dyn Disk, store: &ark::store::Store) -> io::Result<()> {
+    let base = ark::hash::EntryHash(store.state_hash().0);
+    let rows = ark::log::standing(store.snapshot_rows(), 0, base);
     disk.record(&Record::Rows(rows).to_bytes())?;
-    put_schema(disk, &schema)
+    put_schema(disk, store.schema_arc())
 }
 
 /// Where a peer's durable records go: named blobs, and the format over them.

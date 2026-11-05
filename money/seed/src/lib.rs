@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 
 use ark::format::Encode;
-use ark::log::{EntryId, Record};
+use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
 use ark_peer::{Config, Disk, Memory, Peer as Replica};
@@ -395,10 +395,7 @@ pub fn seeded_disk(today: &str, now: i64) -> Memory {
 /// starts, so a phone signed in as [`ME`] opens on it (`money-seed`, what
 /// the app screenshots run: .github/screens/apps.md).
 pub fn log(disk: &mut dyn Disk, today: &str, now: i64) -> std::io::Result<()> {
-    let store = household(today, now);
-    let rows = ark::log::standing(store.snapshot_rows(), 0, Default::default());
-    disk.record(&Record::Rows(rows).enc())?;
-    ark_peer::disk::put_schema(disk, store.schema_arc())
+    ark_peer::disk::put_store(disk, &household(today, now))
 }
 
 /// The household's store, three months of it up to `today`.
