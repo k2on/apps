@@ -20,7 +20,6 @@
 package dev.money.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,6 +77,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.pressable
+import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.SectionHeader
 import dev.arkui.Space
@@ -324,7 +325,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
                 }
             },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = if (l.waiting || l.ignored) Modifier else Modifier.clickable(onClickLabel = "Choose the account it feeds", onClick = onLink),
+        modifier = if (l.waiting || l.ignored) Modifier else Modifier.pressable(onClickLabel = "Choose the account it feeds", onClick = onLink, press = Press.Highlight),
     )
     if (l.waiting) {
         FlowRow(

@@ -46,12 +46,10 @@ import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -103,6 +101,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import dev.arkui.pressable
 import dev.arkui.Accent
 import dev.arkui.Space
 import dev.arkui.Springs
@@ -222,7 +221,7 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                 // shutter is not a throw.
                 launch {
                     flash.snapTo(if (reduced) 0.3f else 0.9f)
-                    flash.animateTo(0f, spring(Springs.SIZE, Springs.STIFFNESS, 0.001f))
+                    flash.animateTo(0f, Springs.size())
                 }
                 val flat = withContext(Dispatchers.Default) { runCatching { flatPage(jpeg, quad, w, h, camera.turns) }.getOrNull() }
                 if (flat == null) {
@@ -312,13 +311,14 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                 .systemBarsPadding()
                 .padding(bottom = Space.xl)
                 .size(76.dp)
+                // The whole shutter gives under the finger, its ring with it.
+                .pressable(enabled = !taking, onClickLabel = "Take the picture", onClick = { take() })
                 .clip(CircleShape)
                 .border(4.dp, Color.White, CircleShape)
                 .padding(8.dp)
                 .clip(CircleShape)
                 .background(if (taking) Color.Gray else Color.White)
-                .semantics { contentDescription = "Take the picture" }
-                .clickable(enabled = !taking, onClickLabel = "Take the picture") { take() })
+                .semantics { contentDescription = "Take the picture" })
     }
 }
 

@@ -13,14 +13,7 @@ package dev.arkui
 
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -63,8 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.animation.core.VisibilityThreshold
-import androidx.compose.ui.unit.IntOffset
 
 /** The expressive shapes: corners that grow with the thing they round. */
 public val ExpressiveShapes: Shapes =
@@ -163,7 +154,7 @@ public fun Meter(
     val shown by
         animateFloatAsState(
             f,
-            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+            Springs.size(),
             label = "meter")
     Canvas(modifier.fillMaxWidth().height(height).progressSemantics(f)) {
         val r = CornerRadius(size.height / 2, size.height / 2)
@@ -242,14 +233,7 @@ public fun Stepper(
             transitionSpec = {
                 // The new title comes in from the side it was stepped toward, on arkui's
                 // critically damped springs; with motion reduced, it only cross-fades.
-                if (reduced) fadeIn(Springs.fade()) togetherWith fadeOut(Springs.fade())
-                else {
-                    val forward = targetState.second >= initialState.second
-                    val d = if (forward) 1 else -1
-                    val slide = spring(Springs.MOVE, Springs.STIFFNESS, IntOffset.VisibilityThreshold)
-                    (slideInHorizontally(slide) { w -> d * w / 3 } + fadeIn(Springs.size())) togetherWith
-                        (slideOutHorizontally(slide) { w -> -d * w / 3 } + fadeOut(Springs.fade()))
-                }
+                Transitions.stepped(forward = targetState.second >= initialState.second, reduced = reduced)
             },
             label = "stepper",
             modifier = Modifier.weight(1f, fill = false).widthIn(min = 160.dp),

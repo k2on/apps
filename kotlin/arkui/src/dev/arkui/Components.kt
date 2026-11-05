@@ -8,7 +8,6 @@
 // without a phone.
 package dev.arkui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +29,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
@@ -378,8 +376,9 @@ public fun interface RowOrigin {
 }
 
 /**
- * A row's menu: the glyph in a 48 dp target, Material's minimum, with an unbounded ripple, and the
- * role and the label a screen reader says — "More for `about`", spelt only when one asks. What
+ * A row's menu: the glyph in a 48 dp target, Material's minimum, giving under the finger as
+ * everything tappable here does ([pressable]) rather than with Material's ripple, and the role and
+ * the label a screen reader says — "More for `about`", spelt only when one asks. What
  * `IconButton` is, less what a list pays for on every row entering it: a clip layer, a colour
  * lookup, and a layout to reach the minimum it could simply be.
  *
@@ -391,12 +390,7 @@ public fun MoreButton(about: String, origin: RowOrigin?, onMore: () -> Unit) {
     val at = MoreAt()
     Box(
         Modifier.size(48.dp)
-            .clickable(
-                interactionSource = null,
-                indication = ripple(bounded = false, radius = 20.dp),
-                role = Role.Button) {
-                    at.tap(origin, onMore)
-                }
+            .pressable(role = Role.Button, onClick = { at.tap(origin, onMore) })
             .then(MoreElement(about, at)),
         contentAlignment = Alignment.Center,
     ) {

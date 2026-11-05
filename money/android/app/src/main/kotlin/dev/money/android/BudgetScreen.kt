@@ -35,10 +35,8 @@
 // `move_category` or `move_group`, in front of whatever it landed before.
 package dev.money.android
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,7 +89,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -104,6 +101,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import androidx.compose.ui.graphics.graphicsLayer
+import dev.arkui.unlessReduced
+import dev.arkui.Springs
 import dev.arkui.AmountText
 import dev.arkui.Amounts
 import dev.arkui.Landing
@@ -383,7 +383,7 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
     }
     val over = s?.overspent ?: 0L
     val fund = fundable(ledger)
-    HeroCard("Ready to Assign", ready, tone, note = readyWords(ready), modifier = modifier.animateContentSize()) {
+    HeroCard("Ready to Assign", ready, tone, note = readyWords(ready), modifier = modifier) {
         if (over > 0 || fund > 0 || (s != null && s.assigned > 0)) {
             FlowRow(Modifier.padding(top = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 if (over > 0) {
@@ -392,9 +392,9 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
                 if (fund > 0) {
                     Pill(
                         Tone.Caution,
-                        Modifier.clip(CircleShape).clickable(onClickLabel = "Assign every underfunded category its target") {
+                        Modifier.clip(CircleShape).pressable(onClickLabel = "Assign every underfunded category its target", onClick = {
                             book.autoAssign(Auto.Underfunded)
-                        }) { PillLabel(Glyphs.Auto, "$fund underfunded") }
+                        })) { PillLabel(Glyphs.Auto, "$fund underfunded") }
                 }
                 if (over == 0L && fund == 0L) {
                     Pill(Tone.Positive) { PillLabel(Glyphs.Done, "On track") }
@@ -460,12 +460,14 @@ private fun GroupHeader(
     actions: List<CustomAccessibilityAction>,
     onToggle: () -> Unit,
 ) {
-    val turn by animateFloatAsState(if (folded) -90f else 0f, label = "fold")
+    // The chevron turns a quarter as the group folds, on arkui's spring for a move and drawn, not
+    // laid out; with motion reduced it is simply turned, the rows going saying the rest.
+    val fold by animateFloatAsState(if (folded) 1f else 0f, unlessReduced(Springs.move()), label = "fold")
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.background(if (lifted) MaterialTheme.colorScheme.surfaceContainerLow else Color.Transparent)) {
         Row(
             Modifier.fillMaxWidth()
-                .clickable(role = Role.Button, onClickLabel = if (folded) "Show" else "Fold", onClick = onToggle)
+                .pressable(role = Role.Button, onClickLabel = if (folded) "Show" else "Fold", onClick = onToggle, press = Press.Highlight)
                 .padding(start = Space.xs, end = Space.l, top = Space.l, bottom = Space.s)
                 .semantics {
                     stateDescription = if (folded) "Folded" else "Open"
@@ -473,7 +475,7 @@ private fun GroupHeader(
                 },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = quiet, modifier = Modifier.size(20.dp).rotate(turn))
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = quiet, modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = -90f * fold })
             Spacer(Modifier.width(Space.xs))
             Text(
                 g.name,

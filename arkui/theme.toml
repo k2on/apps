@@ -260,3 +260,8 @@ give = 0.12
 press = 0.97
 # The least a thing scales from when it enters: never from nothing.
 enter-scale = 0.95
+# How far a page or a step slides as it comes or goes, as a share of its
+# width: enough to say which way it went, not a trip across the screen.
+shift = 0.2
+# A cover while what it plays is paused: a step back, still plainly itself.
+paused-scale = 0.9

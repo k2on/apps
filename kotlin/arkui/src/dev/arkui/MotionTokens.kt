@@ -33,4 +33,8 @@ public object MotionTokens {
     public const val PRESS: Float = 0.97f
     /** The least a thing scales from when it enters. */
     public const val ENTER_SCALE: Float = 0.95f
+    /** How far a page or a step slides as it comes or goes, as a share of its width. */
+    public const val SHIFT: Float = 0.2f
+    /** How small a cover is drawn while what it plays is paused. */
+    public const val PAUSED_SCALE: Float = 0.9f
 }

@@ -43,6 +43,8 @@ MOTION = {
     "give": "How much of the gesture brings the preview 63% of the way.",
     "press": "How small a pressed cover or chip gives.",
     "enter-scale": "The least a thing scales from when it enters.",
+    "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
+    "paused-scale": "How small a cover is drawn while what it plays is paused.",
 }
 
 # The roles of one side, in the order they are written, and each one's
