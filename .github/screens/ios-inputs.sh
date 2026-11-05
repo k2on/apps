@@ -28,13 +28,15 @@ shift 2
 
 # A path's git object in the scripts' checkout, or `none`.
 object() { git -C "$scripts" rev-parse "HEAD:$1" 2>/dev/null || echo none; }
-# A package's store path for the Mac, or `none` (and why, on stderr). The
-# checkout by its path, as `.#` is: a shallow clone's, which a `git+file:`
-# URL refuses.
+# A package's store path for the Mac, or `none` (and why, on stderr): a
+# derivation's out, or a store path's own (harken's covers are one), each
+# as a string says it. The checkout by its path, as `.#` is: a shallow
+# clone's, which a `git+file:` URL refuses.
 out() {
   local err
   err=$(mktemp)
-  nix eval --raw "$1#packages.aarch64-darwin.$2.outPath" 2> "$err" || { echo none; tail -n 3 "$err" >&2; }
+  # shellcheck disable=SC2016
+  nix eval --raw "$1#packages.aarch64-darwin.$2" --apply 'p: "${p}"' 2> "$err" || { echo none; tail -n 3 "$err" >&2; }
   rm -f "$err"
 }
 
