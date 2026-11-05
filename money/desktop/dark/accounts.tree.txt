@@ -1,0 +1,114 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"3" at 217,81 6x13
+"Settings" at 41,107 53x17
+"On Budget" at 20,138 53x13
+"Checking" at 41,165 60x17
+"$14,236.90" at 160,165 69x16
+"Savings" at 41,192 51x17
+"$6,900.00" at 168,193 61x16
+"Cash" at 41,220 32x17
+"$74.16" at 187,221 42x16
+"Chase Sapphire ••4417" at 41,248 122x17
+"-$177.49" at 175,249 54x16
+"Tracking" at 20,279 43x13
+"Mortgage" at 41,306 62x17
+"-$312,450.00" at 148,307 81x16
+"Retirement" at 41,334 73x17
+"$64,300.00" at 160,335 69x16
+"Checking" at 268,18 111x29
+"checking — on budget" at 268,49 135x16
+"$14,236.90" at 971,23 101x21
+"31 transactions" at 987,45 85x14
+"$14,396.90" at 268,76 101x21
+"Cleared Balance" at 268,98 90x14
+"+" at 383,84 13x21
+"-$160.00" at 411,76 80x21
+"Uncleared Balance" at 411,98 103x14
+"=" at 528,84 13x21
+"$14,236.90" at 555,76 101x21
+"Working Balance" at 555,98 93x14
+"+ Add Transaction" at 280,129 121x17
+"Reconcile" at 433,129 63x17
+"Rename" at 526,129 54x17
+"Checking" at 298,167 55x16
+"Payee or bank text" [field] at 369,163 160x24
+"Any category" at 545,167 80x16
+"In and out" at 651,167 61x16
+"With transfers" at 738,167 85x16
+"Needs a look" at 849,167 78x16
+"Any time" at 953,167 54x16
+"Date" at 272,247 26x14
+"Payee" at 368,247 33x14
+"Category" at 512,247 50x14
+"Memo" at 656,247 34x14
+"Outflow" at 752,247 43x14
+"Inflow" at 852,247 33x14
+"2026-11-05" at 272,282 76x17
+"Transfer : Chase Sapphire" at 368,282 131x17
+"$1,887.94" at 752,282 66x17
+"2026-11-03" at 272,316 76x17
+"State Farm" at 368,316 72x17
+"Insurance" at 512,316 64x17
+"$160.00" at 752,316 54x17
+"2026-11-02" at 272,350 76x17
+"Transfer : Savings" at 368,350 118x17
+"$250.00" at 752,350 54x17
+"2026-11-01" at 272,384 76x17
+"Greenway Property Mgmt" at 368,384 125x17
+"Rent" at 512,384 30x17
+"$1,850.00" at 752,384 66x17
+"2026-11-01" at 272,418 76x17
+"Riverside Schools" at 368,418 114x17
+"Ready to Assign" at 512,418 105x17
+"$2,240.00" at 852,418 66x17
+"2026-11-01" at 272,452 76x17
+"Acme Corp" at 368,452 71x17
+"Ready to Assign" at 512,452 105x17
+"$3,150.00" at 852,452 66x17
+"2026-10-21" at 272,486 76x17
+"Mint Mobile" at 368,486 75x17
+"Phone" at 512,486 40x17
+"$85.00" at 752,486 45x17
+"2026-10-18" at 272,520 76x17
+"Walgreens" at 368,520 69x17
+"Health" at 512,520 43x17
+"$26.14" at 752,520 45x17
+"2026-10-18" at 272,554 76x17
+"Municipal Water" at 368,554 105x17
+"Water" at 512,554 39x17
+"$43.65" at 752,554 45x17
+"2026-10-15" at 272,588 76x17
+"Acme Corp" at 368,588 71x17
+"Ready to Assign" at 512,588 105x17
+"$3,150.00" at 852,588 66x17
+"2026-10-12" at 272,622 76x17
+"City Power & Light" at 368,622 120x17
+"Electric" at 512,622 48x17
+"$100.72" at 752,622 54x17
+"2026-10-09" at 272,656 76x17
+"Jiffy Lube" at 368,656 60x17
+"Car Maintenance" at 512,656 110x17
+"$89.99" at 752,656 45x17
+"2026-10-08" at 272,690 76x17
+"Sonic Fiber" at 368,690 72x17
+"Internet" at 512,690 52x17
+"$70.00" at 752,690 45x17
+"2026-10-05" at 272,724 76x17
+"Transfer : Chase Sapphire" at 368,724 131x17
+"$1,656.43" at 752,724 66x17
+"2026-10-03" at 272,758 76x17
+"State Farm" at 368,758 72x17
+"Insurance" at 512,758 64x17
+"$160.00" at 752,758 54x17
+"2026-10-02" at 272,792 76x17
+"Transfer : Savings" at 368,792 118x17
+"$250.00" at 752,792 54x17
+"2026-10-01" at 272,826 76x17
+"Greenway Property Mgmt" at 368,826 125x17
+"Rent" at 512,826 30x17
+"$1,850.00" at 752,826 66x17
+"Receipt" at 1108,52 64x20
+"Select a transaction to see its receipt." at 1108,84 228x16
+"signed in as alex" at 1333,880 93x14
