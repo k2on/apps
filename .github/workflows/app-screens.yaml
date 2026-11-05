@@ -300,7 +300,8 @@ jobs:
 
       - name: The servers, and the driver's tools
         run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          # XcodeGen from the flake (the cache's), as every other tool here: no Homebrew.
+          bash .github/screens/tools.sh get xcodegen
           for a in $APPS; do
             if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
           done
@@ -345,6 +346,8 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      # ImageMagick from the flake's nixpkgs, as every tool these jobs use, not the image's apt.
+      - uses: DeterminateSystems/nix-installer-action@main
       - uses: actions/download-artifact@v4
         with:
           pattern: app-screens-*
@@ -387,6 +390,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+      # ImageMagick from the flake's nixpkgs, as every tool these jobs use, not the image's apt.
+      - uses: DeterminateSystems/nix-installer-action@main
       - uses: actions/download-artifact@v4
         with:
           pattern: app-screens-*
@@ -394,7 +399,7 @@ jobs:
           path: ${{ runner.temp }}/new
       - name: Compare, and keep the images on the PR's branch
         run: |
-          sudo apt-get install -y -qq imagemagick > /dev/null
+          PATH="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#imagemagick)/bin:$PATH"
           main="$RUNNER_TEMP/main"
           mkdir -p "$main"
           ref=screens
