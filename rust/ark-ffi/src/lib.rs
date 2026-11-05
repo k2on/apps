@@ -170,8 +170,6 @@ struct State {
     next: u64,
     /// Why the server last turned the login away.
     denied: Option<String>,
-    /// The files that had arrived when the app was last told.
-    files: u64,
 }
 
 /// The peer held, and the bridge's state beside it.
@@ -183,7 +181,7 @@ struct Held<'a> {
 impl Held<'_> {
     /// Every view's updates taken from the peer into what the app has not
     /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved — or a file came.
+    /// Whether any moved.
     fn settle(&mut self) -> bool {
         let (peer, s) = (&mut *self.peer, &mut *self.state);
         let mut moved = false;
@@ -192,9 +190,6 @@ impl Held<'_> {
             moved |= !ps.is_empty();
             k.patches.extend(ps);
         }
-        let files = peer.files_arrived();
-        moved |= files != s.files;
-        s.files = files;
         moved
     }
 
@@ -400,13 +395,7 @@ impl Peer {
     /// the server, and the listener rings when they arrive.
     pub fn file(&self, hash: String, size: i64, media: String) -> Option<Vec<u8>> {
         let f = ark_peer::FileRef { hash, size, media };
-        self.shared.act(|s| s.peer.open_file(&f))
-    }
-
-    /// Why the server would not give a file, when it said.
-    pub fn file_absent(&self, hash: String) -> Option<String> {
-        let f = ark_peer::FileRef { hash, ..Default::default() };
-        self.shared.lock().peer.file_absent(&f).map(String::from)
+        self.shared.act(|s| s.peer.file(&f)).ok().flatten()
     }
 
     /// The first of an input's refinements that fails, as a form says it.

@@ -40,7 +40,7 @@ pub fn receipt(photo: &Photo, r: &PaperReceipt) -> StoreReceipt {
 
 /// Reads one photo: what the importer's handler does with a job.
 pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<PhotoRead, String> {
-    let bytes = p.file(&photo.file).ok_or("the photo has not reached the server yet")?;
+    let bytes = p.file(&photo.file)?.ok_or("the photo has not reached the server yet")?;
     let readings = paper::ocr(program, data, &bytes).map_err(|e| format!("{e:#}"))?;
     let told = paper::read(&readings).told();
     let got = receipt(photo, &told);

@@ -8,7 +8,7 @@
 //! offered and sent a chunk at a time as the server wants it, from where
 //! the server's copy stops. A file a row names is read from the store
 //! ([`Peer::file`]); one not there is wanted, a chunk at a time, and the
-//! views are rung when it is whole ([`Peer::files_arrived`]).
+//! views are rung when it is whole (`crate::link::Pumped::shown`).
 //!
 //! **A server** takes what is offered into its store and checks it against
 //! its name, and gives a file to a connection that may read a row naming
@@ -126,8 +126,9 @@ pub(crate) struct Files {
     /// those of them wanted on this connection.
     wanted: BTreeSet<String>,
     asked: BTreeSet<String>,
-    /// How many files have arrived whole: what rings a device's views.
-    pub arrived: u64,
+    /// Whether a wanted file arrived whole since the last pump: what rings
+    /// a device's views.
+    pub arrived: bool,
     /// Why the server would not give one, by file, until it does.
     pub absent: BTreeMap<String, String>,
     /// A server's: the connections that wanted a file before it arrived.
@@ -143,7 +144,7 @@ impl Files {
             store,
             wanted: BTreeSet::new(),
             asked: BTreeSet::new(),
-            arrived: 0,
+            arrived: false,
             absent: BTreeMap::new(),
             waiting: BTreeMap::new(),
             let_read: BTreeMap::new(),
@@ -206,35 +207,16 @@ impl Peer {
         Ok(FileRef::of(bytes, media))
     }
 
-    /// A file's bytes, when they are here; when not, wanted from the
-    /// server, and the views rung when they arrive.
-    pub fn file(&self, f: &FileRef) -> Option<Vec<u8>> {
-        let size = whole(&*self.files.store, &f.hash)?;
-        bytes(&*self.files.store, &f.hash, 0, size as usize).ok()
-    }
-
-    /// [`Peer::file`], wanted from the server when it is not here.
-    pub fn open_file(&mut self, f: &FileRef) -> Option<Vec<u8>> {
+    /// A file's bytes when they are here; when not, wanted from the server
+    /// (the views rung when they arrive) — or why the server would not
+    /// give it, when it said.
+    pub fn file(&mut self, f: &FileRef) -> Result<Option<Vec<u8>>, String> {
         if !self.have_files(std::slice::from_ref(&f.hash)) {
             self.flush();
-            return None;
+            return self.files.absent.get(&f.hash).map_or(Ok(None), |why| Err(why.clone()));
         }
-        self.file(f)
-    }
-
-    /// Whether the server said why it would not give a file.
-    pub fn file_absent(&self, f: &FileRef) -> Option<&str> {
-        self.files.absent.get(&f.hash).map(String::as_str)
-    }
-
-    /// The files this device made that the server does not hold yet.
-    pub fn files_unsent(&self) -> Vec<String> {
-        unsent(&*self.files.store)
-    }
-
-    /// How many wanted files have arrived whole: what a UI redraws on.
-    pub fn files_arrived(&self) -> u64 {
-        self.files.arrived
+        let size = whole(&*self.files.store, &f.hash).unwrap_or(0);
+        bytes(&*self.files.store, &f.hash, 0, size as usize).map(Some).map_err(|e| e.to_string())
     }
 
     fn want(&mut self, hash: &str) {
@@ -242,7 +224,7 @@ impl Peer {
         if whole(&*self.files.store, hash).is_some() {
             if self.files.wanted.remove(hash) {
                 self.files.absent.remove(hash);
-                self.files.arrived += 1;
+                self.files.arrived = true;
             }
             return;
         }
@@ -282,7 +264,7 @@ impl Peer {
                     Ok(None) => {
                         self.files.wanted.remove(&hash);
                         self.files.absent.remove(&hash);
-                        self.files.arrived += 1;
+                        self.files.arrived = true;
                     }
                     Err(why) => drop(self.files.absent.insert(hash.clone(), why)),
                 }
