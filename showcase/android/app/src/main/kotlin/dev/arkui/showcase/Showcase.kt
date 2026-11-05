@@ -63,6 +63,9 @@ import dev.arkui.CoverCard
 import dev.arkui.Empty
 import dev.arkui.ExpandingCard
 import dev.arkui.Fetching
+import dev.arkui.Glass
+import dev.arkui.GlassContainer
+import dev.arkui.GlassMorph
 import dev.arkui.Heading
 import dev.arkui.ListRow
 import dev.arkui.LocalArkTheme
@@ -77,6 +80,7 @@ import dev.arkui.Space
 import dev.arkui.Square
 import dev.arkui.TabTitle
 import dev.arkui.VolumeSlider
+import dev.arkui.glass
 import dev.arkui.rememberExpandingCard
 import kotlinx.coroutines.delay
 
@@ -227,6 +231,44 @@ fun Showcase(shot: String, go: Int) {
                 }
             }
         }
+        // A glass button growing into its menu, held, and shrinking back into the button; the still is
+        // the menu held open. iOS's shot is the system's glass morphing between the two.
+        "glass-menu", "glass-menu-open" -> {
+            var open by remember { mutableStateOf(false) }
+            LaunchedEffect(go) {
+                if (go == 0) return@LaunchedEffect
+                delay(400L * go)
+                open = true
+                delay(1_500L * go)
+                open = false
+            }
+            GlassMenu(open, held = if (shot == "glass-menu-open") 1f else null, onDismiss = { open = false })
+        }
+        // The same button growing into a sheet resting at the foot of the screen, as iOS 26's floating
+        // sheets do, and back. iOS's shot is the system's sheet, zoomed out of its button.
+        "glass-sheet" -> {
+            var open by remember { mutableStateOf(false) }
+            LaunchedEffect(go) {
+                if (go == 0) return@LaunchedEffect
+                delay(400L * go)
+                open = true
+                delay(1_500L * go)
+                open = false
+            }
+            GlassMenu(open, held = null, onDismiss = { open = false }, sheet = true)
+        }
+        // Three capsules of glass sliding together until they are one surface, held, and parting.
+        "glass-merge" -> {
+            var together by remember { mutableStateOf(false) }
+            LaunchedEffect(go) {
+                if (go == 0) return@LaunchedEffect
+                delay(400L * go)
+                together = true
+                delay(1_500L * go)
+                together = false
+            }
+            GlassMerge(together)
+        }
         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No showcase for $shot") }
     }
 }
@@ -246,6 +288,69 @@ private fun Sheet(content: @Composable () -> Unit) {
                     Box(Modifier.width(32.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp)))
                 }
                 content()
+            }
+        }
+    }
+}
+
+// The glass shots are laid out as iOS's are (showcase/ios), number for number, so the two
+// recordings can be watched side by side: a ground a step from the page's, for the glass to stand
+// on, and the page's title.
+
+/** How near two pieces of glass come before they join: GlassEffectContainer's spacing on iOS. */
+private val glassReach = 24.dp
+
+/** What the glass button opens: the same entries on both phones. */
+private val sorts = listOf("Name", "Distance", "Most visited", "Recently visited")
+
+/**
+ * A page with a glass button at its foot that grows into a menu of [sorts] while `open`; or, with
+ * `sheet`, into a sheet of them under a heading, as wide as the screen less its margins.
+ */
+@Composable
+private fun GlassMenu(open: Boolean, held: Float?, onDismiss: () -> Unit, sheet: Boolean = false) {
+    GlassContainer(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer), spacing = glassReach) {
+        Screen {
+            Column {
+                TabTitle("Glass")
+                for (p in places.take(5)) ListRow(onClick = {}, title = p, under = "A place") { Square(p, Modifier.size(Space.thumb)) }
+            }
+        }
+        GlassMorph(
+            expanded = open,
+            onDismiss = onDismiss,
+            modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = Space.xl),
+            id = "sort",
+            menuWidth = 250.dp,
+            menuCorner = if (sheet) Glass.sheetCorner else Glass.menuCorner,
+            sheet = sheet,
+            held = held,
+            collapsed = {
+                Box(Modifier.height(44.dp).padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+                    Text("Sort", style = MaterialTheme.typography.labelLarge)
+                }
+            },
+        ) {
+            Column(Modifier.padding(vertical = if (sheet) Space.l else Space.s)) {
+                if (sheet) Text("Sort by", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 20.dp, vertical = Space.s))
+                for (s in sorts) {
+                    Text(s, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = Space.m))
+                }
+            }
+        }
+    }
+}
+
+/** Three capsules in one glass container, apart, or touching (`together`) and so one surface. */
+@Composable
+private fun GlassMerge(together: Boolean) {
+    GlassContainer(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer), spacing = glassReach) {
+        Screen { TabTitle("Glass") }
+        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(if (together) 0.dp else 40.dp)) {
+            for (l in listOf("A", "B", "C")) {
+                Box(Modifier.glass(id = l).size(width = 64.dp, height = 44.dp), contentAlignment = Alignment.Center) {
+                    Text(l, style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     }

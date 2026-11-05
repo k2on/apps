@@ -16,6 +16,8 @@ use it:
   Compose or SwiftUI version is and how to call it, and the latest capture
   from a real emulator or simulator — a screenshot, or a recording as an
   MP4 at 60 frames a second — inside a frame of that device at its own dimensions.
+  Where both phones take a shot, a third choice, **Side by side**, shows
+  each such capture from Android beside iOS's, so the two can be compared.
 
 Below 700 pixels wide the sidebar becomes a dropdown in the top bar and the
 pictures are the ones drawn at a phone's width. The theme follows the

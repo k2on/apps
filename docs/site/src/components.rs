@@ -393,6 +393,40 @@ pub const COMPONENTS: &[Component] = &[
         shots: &[recording("expanding-card", "The bar rising to the screen, and falling back.", BOTH)],
     },
     Component {
+        id: "glass",
+        name: "Glass",
+        section: Section::Motion,
+        glyph: glyphs::DROPLET,
+        summary: "Buttons and chips on glass that changes shape: pieces near each other in one space join, a piece that appears buds from its neighbour, and a button's glass grows into the menu or the sheet it opens and shrinks back. On Android it is iOS 26's Liquid Glass as it moves, and only that: the shape and the motion, on a solid fill.",
+        desktop: &[],
+        android: Some(Mobile {
+            at: &["kotlin/arkui/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"],
+            how: &[
+                "GlassContainer(modifier, spacing = Space.s) { … }: one surface for every piece of glass in it, as SwiftUI's GlassEffectContainer. Two pieces nearer than `spacing` are joined by a neck that thickens as they close; a piece appearing buds out of its nearest neighbour, and one going shrinks back into it. Best as large as the screen, since a menu opens over all of it.",
+                "Modifier.glass(shape = GlassShape.Capsule, id = null): this element on glass, a capsule or GlassShape.rounded(corner). Moved in its layout, it glides there on Springs.MOVE, its content with it. `id` is what the container knows it by, as glassEffectID.",
+                "GlassMorph(expanded, onDismiss, modifier, shape, id, menuWidth = Glass.menuWidth, menuCorner = Glass.menuCorner, sheet = false, held = null, collapsed = { button }) { menu }: a button whose glass becomes its menu, its bounds and corners on one spring, the button's face fading as the menu comes in, anchored at the button's edge. A tap outside, or back, calls onDismiss. It must be in a GlassContainer.",
+                "sheet = true opens it as iOS 26's floating sheets instead: as wide as the space less Glass.sheetMargin each side, resting on its foot that far up; give it menuCorner = Glass.sheetCorner for the iPhone's corners. Still grown out of the button, and shrunk back into it.",
+                "held = p holds a GlassMorph at p of the way, 0 to 1, whatever `expanded` says: a screenshot's frame.",
+                "The fill is the scheme's surfaceBright with a soft shadow (Glass.fill(), Glass.shadow): no blur, no refraction, no highlight yet.",
+            ],
+        }),
+        ios: Some(Mobile {
+            at: &["The system's: GlassEffectContainer, glassEffect, glassEffectID (iOS 26)"],
+            how: &[
+                "Pieces in one GlassEffectContainer(spacing:) blend as they come within its spacing: Android's GlassContainer is this.",
+                "A button and its panel given one glassEffectID in one namespace, one shown at a time and swapped inside withAnimation(Springs.move): the glass changes shape from one to the other, as GlassMorph does.",
+                "A sheet: .sheet(isPresented:) at a height short of the screen (presentationDetents) floats on glass, and zoomed out of its button (matchedTransitionSource on the button, navigationTransition(.zoom(sourceID:in:)) on the sheet) grows out of it and back, as GlassMorph(sheet = true) does.",
+                "The glass is the system's own Liquid Glass, blur and light included.",
+            ],
+        }),
+        shots: &[
+            recording("glass-menu", "A glass button growing into its menu, held, and shrinking back.", BOTH),
+            recording("glass-sheet", "The same button growing into a sheet at the foot of the screen, and back.", BOTH),
+            recording("glass-merge", "Three capsules of glass sliding together into one, and parting.", BOTH),
+            shot("glass-menu-open", "The menu, open over its page.", BOTH),
+        ],
+    },
+    Component {
         id: "pages",
         name: "Page motion",
         section: Section::Motion,
