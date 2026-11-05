@@ -223,7 +223,7 @@ struct BudgetView: View {
                 ForEach(g.lines) { l in
                     // A month its rule assigns offers neither: the domain
                     // refuses assigning it and moving money to or from it.
-                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l) }
+                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l, month: model.snapshot.month) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if Ruled.editable(l) {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
@@ -334,6 +334,8 @@ struct BudgetView: View {
 /// a category that spent more on a card than it had says so in amber.
 struct CategoryRow: View {
     let line: BudgetLine
+    /// The month its figures are of: they roll when it is stepped.
+    let month: String
 
     var body: some View {
         let tone = Tone.of(line)
@@ -346,7 +348,7 @@ struct CategoryRow: View {
                         .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
                         .lineLimit(1)
                     Spacer(minLength: Space.s)
-                    Pill(cents: line.available, tint: tone.tint).rolls(on: model.snapshot.month)
+                    Pill(cents: line.available, tint: tone.tint).rolls(on: month)
                 }
                 if card {
                     payment
