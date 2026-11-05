@@ -129,6 +129,10 @@ struct FullPlayer: View {
             if let now = s.now {
                 CoverView(seed: now.seed, url: now.art, side: 360, corner: 16)
                     .aspectRatio(1, contentMode: .fit)
+                    // The room first, as wide as the page if the height
+                    // allows, and the spacers what is left: otherwise the
+                    // three share it and the cover is a third of it.
+                    .layoutPriority(1)
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
                     .scaleEffect(s.playing ? 1 : 0.9)
                     .animation(Springs.move, value: s.playing)
