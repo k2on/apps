@@ -312,7 +312,7 @@ impl App {
     /// Songs and a playlist keep theirs over the list — or there is none.
     pub(crate) fn compact_of(&self) -> Option<Small> {
         let p = &self.peer;
-        let band = PAGE_PADDING + account::HEIGHT;
+        let band = account::band(PAGE_PADDING);
         let cover = PAGE_PADDING + self.cover_side() - band;
         let title = p.source.title().to_string();
         // A page titled in its first line: gone once that line is off the
@@ -362,7 +362,7 @@ impl App {
         let cursor = self.has_keys(Pane::Tracks).then_some(self.at(Pane::Tracks));
         // The grid starts at the window's top, under the face, as a page
         // `scrolled` does: its scroll edge is the face's band.
-        let band = PAGE_PADDING + account::HEIGHT;
+        let band = account::band(PAGE_PADDING);
         cards::view(
             SHELF,
             &cards,
@@ -718,15 +718,13 @@ impl App {
         // The page starts at the window's top, under the account's face:
         // scrolled, it goes soft under the face's band rather than being
         // drawn through it (`arkui::edge`), and at rest it is as it was.
-        let band = PAGE_PADDING + account::HEIGHT;
-        scrollable(arkui::edge::faded(page.width(Length::Fill), band, |t| {
-            arkui::theme::of(t).background.base.color
-        }))
-        .id(TRACKS)
-        .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-        .style(style::bars)
-        .height(Length::Fill)
-        .into()
+        let band = account::band(PAGE_PADDING);
+        scrollable(arkui::edge::faded(page.width(Length::Fill), band, style::page_color))
+            .id(TRACKS)
+            .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+            .style(style::bars)
+            .height(Length::Fill)
+            .into()
     }
 
     /// Where the page's cursor is, while the page has the keyboard.

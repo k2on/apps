@@ -20,10 +20,10 @@
 //! **On a spring, from the scroll.** A window hands [`Compact::heard`] how
 //! far its page is scrolled and how far down its header ends, after every
 //! update; past it, the small header comes, and back above it, goes — on
-//! a critically damped spring ([`SPRING`]), so scrolled back while it is
-//! still coming it turns where it is, as fast as it was going, rather than
-//! starting again. It is seen tens of times a day, so it is quick and
-//! slight: under a quarter of a second, a few pixels.
+//! the shared critically damped move ([`SPRING`]), so scrolled back while
+//! it is still coming it turns where it is, as fast as it was going,
+//! rather than starting again. It is seen tens of times a day, so it is
+//! quick and slight: about a quarter of a second, a few pixels.
 //!
 //! **Not for the keys, and not for less motion.** A page scrolled by the
 //! keyboard (`j`, `G`, a page down) is someone moving fast through a list
@@ -39,12 +39,10 @@ use iced::{Alignment, Element, Length, Vector};
 use crate::motion::{self, Slide, Spring};
 use crate::{fit, line, style};
 
-/// What it comes and goes on: critically damped and quick, so it is in
-/// place in under a quarter of a second and never overshoots the band.
-pub const SPRING: Spring = Spring {
-    damping: 1.0,
-    response: 0.25,
-};
+/// What it comes and goes on: the shared move ([`motion::SMOOTH`]),
+/// critically damped, so it is in place in about a quarter of a second and
+/// never overshoots the band.
+pub const SPRING: Spring = motion::SMOOTH;
 
 /// How far below its place it starts as it comes in: a few pixels.
 pub const RISE: f32 = 4.0;
@@ -55,8 +53,8 @@ pub const ART: f32 = 28.0;
 /// The name's size: a heading's, not the page's title.
 pub const SIZE: f32 = 15.0;
 
-/// How near all the way in or out is at rest: a thousandth.
-const REST: f32 = 1e-3;
+/// How near all the way in or out is at rest.
+const REST: f32 = crate::motion_tokens::REST;
 
 /// Whether the small header is up, and how far: 0 gone to 1 in place.
 #[derive(Clone, Copy, Debug)]

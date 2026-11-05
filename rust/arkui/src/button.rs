@@ -32,6 +32,10 @@ pub fn icon_maybe<'a, M: Clone + 'a>(shape: &'static [u8], press: Option<M>) -> 
         .into()
 }
 
+/// How soon a second click on the same thing is a double click: AppKit's
+/// default, for every window here.
+pub const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// A button holding `body` as it is, with no ground and no border: a card,
 /// a cover, a glyph drawn some other colour. A pointer over it changes
 /// nothing; what it holds says it can be pressed.

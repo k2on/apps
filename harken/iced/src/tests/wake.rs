@@ -130,7 +130,7 @@ fn a_dwell_runs_the_clock_until_the_submenu_opens() {
     let _ = app.update(Message::RowMenu(id, crate::Anchor::Pointer));
     let _ = app.update(Message::MenuAt(1));
     assert!(app.ctx.dwelling());
-    assert_eq!(app.clock(), Some(Duration::from_millis(50)));
+    assert_eq!(app.clock(), Some(arkui::motion::Clock::Every(Duration::from_millis(50))));
     let heard = heard_within(&app, Duration::from_millis(300));
     let ticks = names(&heard).iter().filter(|n| **n == "tick").count();
     assert!(ticks >= 4, "{ticks} ticks");

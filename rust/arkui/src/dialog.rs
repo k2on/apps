@@ -23,10 +23,10 @@ use iced::{Alignment, Background, Border, Element, Length, Vector};
 use crate::motion::{self, Shown, Spring};
 use crate::theme::of;
 
-/// What it opens and closes on: critically damped, so it lands without a
-/// bounce — it was asked for, not thrown — and quick, as a small thing
-/// near the eye is.
-pub const SPRING: Spring = Spring { damping: 1.0, response: 0.3 };
+/// What it opens and closes on: the shared move ([`motion::SMOOTH`]),
+/// critically damped, so it lands without a bounce — it was asked for, not
+/// thrown.
+pub const SPRING: Spring = motion::SMOOTH;
 
 /// How far open it is when the page under it is all the way dimmed: the
 /// dimming leads, as shadcn/ui's overlay's 150 ms does its dialog's 200.

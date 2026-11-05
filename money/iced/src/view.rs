@@ -42,7 +42,7 @@ pub const PAD: f32 = 18.0;
 /// receipt beside the register, Settings and Reflect; the budget's and
 /// the register's lists start below their headings and never pass under it.
 pub(crate) fn under_face<'a>(content: impl Into<Element<'a, Message>>, ground: fn(&iced::Theme) -> iced::Color) -> Element<'a, Message> {
-    arkui::edge::faded(content, PAD + arkui::account::HEIGHT, ground)
+    arkui::edge::faded(content, arkui::account::band(PAD), ground)
 }
 
 /// How far down Reflect or Settings is scrolled once its title, the
@@ -81,17 +81,15 @@ impl App {
                     right: PAD + arkui::account::HEIGHT + PAD,
                     bottom: 0.0,
                 })
-                .height(Length::Fixed(PAD + arkui::account::HEIGHT))
+                .height(Length::Fixed(arkui::account::band(PAD)))
                 .align_y(Alignment::Center)
                 .into(),
         )
     }
 }
 
-/// The page's own ground, for [`under_face`].
-pub(crate) fn page_ground(theme: &iced::Theme) -> iced::Color {
-    arkui::theme::of(theme).background.base.color
-}
+/// The page's own ground, for [`under_face`] (`arkui::style::page_color`).
+pub(crate) use arkui::style::page_color as page_ground;
 
 /// A page's padding around a list that scrolls: on the top and the sides,
 /// and none under it, so the list runs down to the window's foot. With

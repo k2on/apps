@@ -138,7 +138,7 @@ pub fn view<'a, M: Clone + 'a>(
     // Under something floating at the window's top, the scroll edge there
     // ([`crate::edge`]), on the page's ground.
     let page = match band {
-        Some(band) => crate::edge::faded(page, band, |t| crate::theme::of(t).background.base.color),
+        Some(band) => crate::edge::faded(page, band, style::page_color),
         None => page,
     };
     container(scrollable(page).id(scroll).on_scroll(on_scroll).style(style::bars))

@@ -20,10 +20,12 @@ use iced::{Alignment, Background, Border, Element, Length, Padding, Vector};
 use crate::motion::{self, Shown, Spring};
 use crate::theme::of;
 
-/// What it slides on: critically damped, as a thing opened by a click and
-/// not flung is — Apple's drawer has a little bounce, for one dragged —
-/// and a little slower than a dialog, for the further it travels.
-pub const SPRING: Spring = Spring { damping: 1.0, response: 0.4 };
+/// What it slides on: the shared move ([`motion::SMOOTH`]), critically
+/// damped, as a thing opened by a click and not flung is — Apple's drawer
+/// has a little bounce, for one dragged. The same response as a dialog's
+/// and the phones' sheets: a spring's speed grows with the distance, so
+/// the further travel needs no slower spring.
+pub const SPRING: Spring = motion::SMOOTH;
 
 /// The widest it gets: `sm:max-w-sm`, 24 rem.
 pub const MAX_WIDTH: f32 = 384.0;
@@ -168,17 +170,17 @@ mod tests {
         assert_eq!(width(1600.0), MAX_WIDTH);
     }
 
-    /// It slides in a little slower than a dialog opens, and is in; closed
-    /// as it slides in, it turns back from where it was and is gone.
-    /// Falsified by the dialog's spring: at 120 ms it was as far in as a
-    /// dialog is open.
+    /// It slides in on the shared move, as a dialog opens, and is in;
+    /// closed as it slides in, it turns back from where it was and is gone.
+    /// Falsified by a spring of its own: at 120 ms it was not as far in as
+    /// a dialog is open.
     #[test]
     fn it_slides_in_and_turns_back_from_where_it_is() {
         let ms = std::time::Duration::from_millis;
         let at = Instant::now();
         let mut s = shown(at);
         let dialog = crate::dialog::shown(at);
-        assert!(open(&s, at + ms(120)) < crate::dialog::open(&dialog, at + ms(120)));
+        assert_eq!(open(&s, at + ms(120)), crate::dialog::open(&dialog, at + ms(120)));
         assert_eq!(open(&s, at + ms(1000)), 1.0);
         let part = open(&s, at + ms(100));
         s.hide(at + ms(100));
