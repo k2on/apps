@@ -19,8 +19,9 @@ public enum Art {
 
 /// The colours the derived square picks from — each its gradient's first
 /// stop, as `0xRRGGBB` — for a white page and for a dark one. An app gives
-/// its own (SwiftUI's `\.squares`); until it does, ark-ui's neutral greys,
-/// Android's `ArkTheme.NeutralLight` and `NeutralDark`.
+/// its own (SwiftUI's `\.squares`); until it does, ark-ui's neutral greys.
+/// The sets themselves (`.neutral`, `.gold`, `.green`) are arkui/theme.toml's,
+/// in Tokens.swift.
 public struct Squares: Equatable, Sendable {
     public var light: [UInt32]
     public var dark: [UInt32]
@@ -29,8 +30,6 @@ public struct Squares: Equatable, Sendable {
         self.light = light
         self.dark = dark
     }
-
-    public static let neutral = Squares(light: [0xE4E4E6, 0xDDE2EA, 0xE6E1DC], dark: [0x5A5A5E, 0x4E5866, 0x605850])
 
     /// The colours for one side.
     public func of(dark: Bool) -> [UInt32] { dark ? self.dark : light }

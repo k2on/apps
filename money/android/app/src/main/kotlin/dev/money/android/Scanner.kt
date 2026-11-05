@@ -103,6 +103,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import dev.arkui.Accent
 import dev.arkui.Space
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
@@ -115,8 +116,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The overlay's blue, as Notes draws it. */
-private val Tint = Color(0xFF0A84FF)
+/** The overlay's colour: money's green as the dark side has it, bright enough to read over a camera's picture. */
+private val Tint = Accent.Green.colors(dark = true).accent
 
 /** The least sharpness (Vision.sharpness on the analysis frame) a page is taken at. */
 private const val SHARP = 60.0

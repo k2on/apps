@@ -22,7 +22,7 @@ public struct Bar: View {
 
     /// A handleless slider over `0...1`. `onValue` is said for every value the
     /// finger passes, and `onDone` when it lets go.
-    public init(value: Double, fill: Color = .accentColor, track: Color = Color.secondary.opacity(0.25), enabled: Bool = true,
+    public init(value: Double, fill: Color = Color.accent, track: Color = Color.quiet.opacity(0.25), enabled: Bool = true,
                 onValue: @escaping (Double) -> Void, onDone: @escaping () -> Void = {}) {
         self.value = value
         self.fill = fill

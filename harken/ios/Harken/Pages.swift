@@ -180,7 +180,7 @@ struct ArtistPage: View {
                 Button { openURL(web) } label: { Label(face?.site ?? "", systemImage: "safari") }
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
-                    .tint(Color.gold)
+                    .tint(Color.accent)
                     .padding(.horizontal, Space.page)
                     .padding(.top, Space.m)
                     .accessibilityLabel("Open \(face?.site ?? "their page") in the browser")
@@ -254,18 +254,18 @@ struct WorkPage: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !composer.isEmpty {
                     Button { open(.page(.artist(composer))) } label: {
-                        Text(composer.uppercased() + "  \u{203A}").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(composer.uppercased() + "  \u{203A}").font(.footnote.weight(.semibold)).foregroundStyle(.quiet)
                     }
                     .buttonStyle(.plain)
                 }
                 Text(work?.title ?? "").font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
-                if !facts.isEmpty { Text(facts).font(.subheadline).foregroundStyle(.secondary) }
+                if !facts.isEmpty { Text(facts).font(.subheadline).foregroundStyle(.quiet) }
             }
             .padding(.horizontal, Space.page)
             .padding(.vertical, Space.l)
             Divider().padding(.horizontal, Space.page)
             if read != nil && takes.isEmpty {
-                Text("No recordings of it yet.").font(.subheadline).foregroundStyle(.secondary)
+                Text("No recordings of it yet.").font(.subheadline).foregroundStyle(.quiet)
                     .padding(.horizontal, Space.page).padding(.top, Space.l)
             }
             if let first = takes.first {
@@ -405,7 +405,7 @@ struct ShowPage: View {
                     .listRowSeparator(.hidden)
             }
             if let about = show?.description, !about.isEmpty {
-                Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(6)
+                Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(6)
                     .listRowSeparator(.hidden)
             }
             // How many of its episodes are not on the server yet, and why its
@@ -417,10 +417,10 @@ struct ShowPage: View {
                         let failed = waiting.filter { $0.state == "failed" }.count
                         let going = waiting.first { $0.state == "downloading" }
                         let said = ["\(waiting.count) not on the server yet", going?.said, failed > 0 ? "\(failed) could not be downloaded" : nil]
-                        Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary)
+                        Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.quiet)
                     }
                     if let f = feed, !f.error.isEmpty {
-                        Text("Could not read its feed: \(f.error)").font(.footnote).foregroundStyle(.secondary)
+                        Text("Could not read its feed: \(f.error)").font(.footnote).foregroundStyle(.quiet)
                     }
                 }
                 .listRowSeparator(.hidden)

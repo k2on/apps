@@ -82,6 +82,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -107,6 +108,7 @@ import dev.arkui.glass
 import dev.arkui.Recompositions
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
+import dev.arkui.Tokens
 import dev.arkui.Springs
 import dev.arkui.VolumeSlider
 import dev.arkui.quiet
@@ -309,7 +311,7 @@ fun FullFace(
         // it is only ever a wash. Android blurs from 12 (API 31); before that, no wash rather than a
         // sharp cover behind the text.
         if (now != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            Cover(seedOf(now), now.art, 64.dp, Modifier.fillMaxSize().blur(80.dp).alpha(BACKDROP), corner = 0.dp)
+            Cover(seedOf(now), now.art, 64.dp, Modifier.fillMaxSize().blur(80.dp).alpha(backdrop()), corner = 0.dp)
         // Its buttons and chips on glass, in one space, so the device chip's glass can grow into the
         // picker over the whole player, as the iPhone's menus grow out of their buttons.
         GlassContainer(Modifier.fillMaxSize()) {
@@ -432,8 +434,12 @@ fun coverScale(playing: Boolean): Float = if (playing) 1f else 0.9f
 val COVER_CORNER = 16.dp
 val COVER_SHADOW = 16.dp
 
-/** How much of the cover shows through behind the full player. */
-private const val BACKDROP = 0.45f
+/**
+ * How much of the cover shows through behind the full player: the theme's wash (arkui/theme.toml),
+ * faint enough that the title, the album and the gold read over a pale cover.
+ */
+@Composable
+private fun backdrop(): Float = Tokens.washOpacity(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f)
 
 // A glyph on a glass capsule: the full player's close and its more, as the iPhone's are.
 @Composable

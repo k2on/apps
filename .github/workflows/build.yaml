@@ -164,7 +164,8 @@ jobs:
             .#checks.x86_64-linux.traces .#checks.x86_64-linux.vectors \
             .#checks.x86_64-linux.fuzz-smoke .#checks.x86_64-linux.versions \
             .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module \
-            .#checks.x86_64-linux.docs
+            .#checks.x86_64-linux.docs \
+            .#checks.x86_64-linux.theme .#checks.x86_64-linux.theme-contrast
 
   # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this

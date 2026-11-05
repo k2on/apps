@@ -18,13 +18,17 @@ use iced::{Background, Border, Color, Theme};
 use crate::panel::ENTRY_RADIUS;
 use crate::theme::of;
 
+/// How much of the text colour secondary text is: the least that still reads
+/// at 4.5:1 on either page (arkui/README.md), 0.6 being a shade under it on white.
+const DIM: f32 = 0.65;
+
 /// Secondary text: a clock, a count, a hint.
 ///
 /// In place of `text::secondary`, which reads iced's palette and so is a grey
 /// chosen against iced's background rather than the app's.
 pub fn dim(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(of(theme).background.base.text.scale_alpha(0.6)),
+        color: Some(of(theme).background.base.text.scale_alpha(DIM)),
     }
 }
 
@@ -333,7 +337,7 @@ pub fn entry_text(theme: &Theme, lit: bool) -> Color {
 /// colour text on it can be — the one that accent was paired with — and a
 /// dimmed column gets the same hue at lower alpha, never a grey that was
 /// chosen against the window instead. Off it, `accent` is the accent colour
-/// (the one playing, a ticked name) and `dim` is the text at 0.6.
+/// (the one playing, a ticked name) and `dim` is the text at [`DIM`].
 pub fn on_row(theme: &Theme, on_cursor: bool, accent: bool, dim: bool) -> Color {
     let palette = of(theme);
     if on_cursor {
@@ -345,7 +349,7 @@ pub fn on_row(theme: &Theme, on_cursor: bool, accent: bool, dim: bool) -> Color 
     } else if accent {
         palette.primary.base.color
     } else if dim {
-        palette.background.base.text.scale_alpha(0.6)
+        palette.background.base.text.scale_alpha(DIM)
     } else {
         palette.background.base.text
     }

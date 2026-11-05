@@ -150,7 +150,7 @@ struct BudgetView: View {
             HStack(spacing: Space.m) {
                 Image(systemName: "folder.fill").foregroundStyle(.tint)
                 Text(g.name).font(.headline).lineLimit(1)
-                if g.hidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary) }
+                if g.hidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.quiet) }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(g.name) group")
@@ -158,7 +158,7 @@ struct BudgetView: View {
             HStack {
                 if Cards.isPayment(l) { AccountMark(kind: "credit", side: 22) }
                 Text(l.name)
-                    .foregroundStyle(l.hidden ? Color.secondary : Color.primary)
+                    .foregroundStyle(l.hidden ? Color.quiet : Color.ink)
                     .lineLimit(1)
                 Spacer(minLength: Space.s)
                 Pill(cents: l.available, tint: Tone.of(l).tint)
@@ -224,7 +224,7 @@ struct BudgetView: View {
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if Ruled.editable(l) {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
-                                    .tint(.money)
+                                    .tint(Color.accent)
                             }
                         }
                         .swipeActions(edge: .trailing) {
@@ -260,10 +260,10 @@ struct BudgetView: View {
                         Text("\(CentsText.string(g.uncovered)) not covered")
                             .font(.subheadline.weight(.semibold))
                             .monospacedDigit()
-                            .foregroundStyle(Color.orange)
+                            .foregroundStyle(Color.caution)
                     } else {
                         CentsText(g.available).font(.subheadline.weight(.semibold))
-                            .foregroundStyle(g.available < 0 ? Color.red : Color.secondary)
+                            .foregroundStyle(g.available < 0 ? Color.error : Color.quiet)
                     }
                 }
                 .contentShape(Rectangle())
@@ -340,7 +340,7 @@ struct CategoryRow: View {
             VStack(alignment: .leading, spacing: Space.xs + 2) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(line.name)
-                        .foregroundStyle(line.hidden ? Color.secondary : Color.primary)
+                        .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
                         .lineLimit(1)
                     Spacer(minLength: Space.s)
                     Pill(cents: line.available, tint: tone.tint)
@@ -349,7 +349,7 @@ struct CategoryRow: View {
                     payment
                 } else if let f = funded(line) {
                     ProgressView(value: f)
-                        .tint(tone == .over ? Color.red : tone == .onCard || f < 1 ? Color.orange : Color.green)
+                        .tint(tone == .over ? Color.error : tone == .onCard || f < 1 ? Color.caution : Color.positive)
                         .scaleEffect(y: 0.8, anchor: .center)
                     HStack {
                         if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
@@ -358,7 +358,7 @@ struct CategoryRow: View {
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quiet)
                     .monospacedDigit()
                 } else if line.activity != 0 || line.assigned != 0 || line.ruled {
                     HStack {
@@ -368,13 +368,13 @@ struct CategoryRow: View {
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quiet)
                     .monospacedDigit()
                 }
                 if !card && line.creditOverspent > 0 {
                     Label("\(CentsText.string(line.creditOverspent)) on card", systemImage: "creditcard")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.caution)
                         .monospacedDigit()
                 }
             }
@@ -391,21 +391,21 @@ struct CategoryRow: View {
     @ViewBuilder private var payment: some View {
         if let c = Cards.covered(line) {
             ProgressView(value: c)
-                .tint(c >= 1 ? Color.green : Color.orange)
+                .tint(c >= 1 ? Color.positive : Color.caution)
                 .scaleEffect(y: 0.8, anchor: .center)
             HStack {
                 switch Cards.word(line) {
-                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.orange)
-                case .covered?: Text("Covered").foregroundStyle(Color.green)
+                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.caution)
+                case .covered?: Text("Covered").foregroundStyle(Color.positive)
                 default: EmptyView()
                 }
                 Spacer()
-                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.secondary)
+                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.quiet)
             }
             .font(.caption)
             .monospacedDigit()
         } else {
-            Text("Nothing owed").font(.caption).foregroundStyle(.secondary)
+            Text("Nothing owed").font(.caption).foregroundStyle(.quiet)
         }
     }
 

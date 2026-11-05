@@ -31,7 +31,7 @@ struct MiniPlayer: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                         if !compact {
-                            Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.gold : .secondary).lineLimit(1)
+                            Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.accentText : .quiet).lineLimit(1)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,12 +49,12 @@ struct MiniPlayer: View {
                             .accessibilityLabel("Next")
                     }
                 } else {
-                    Image(systemName: "music.note").foregroundStyle(.secondary).frame(width: 36)
-                    Text("Not Playing").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "music.note").foregroundStyle(.quiet).frame(width: 36)
+                    Text("Not Playing").font(.subheadline).foregroundStyle(.quiet).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             // The buttons in the words' colour, not the tint: as Android's bar.
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
             .padding(.horizontal, Space.m)
             .frame(maxHeight: .infinity)
             .overlay(alignment: .bottom) { if s.now != nil && !compact { Hairline().padding(.horizontal, Space.l) } }
@@ -86,8 +86,8 @@ struct Hairline: View {
             let at = s.position(Int64(t.date.timeIntervalSince1970 * 1000))
             let done = s.durationMs > 0 ? min(max(Double(at) / Double(s.durationMs), 0), 1) : 0
             GeometryReader { g in
-                Capsule().fill(.quaternary)
-                    .overlay(alignment: .leading) { Capsule().fill(Color.gold).frame(width: g.size.width * done) }
+                Capsule().fill(Color.hairline)
+                    .overlay(alignment: .leading) { Capsule().fill(Color.accent).frame(width: g.size.width * done) }
             }
             .frame(height: 2)
         }
@@ -103,6 +103,7 @@ struct FullPlayer: View {
     @EnvironmentObject private var model: Model
     @Environment(\.present) private var present
     @Environment(\.open) private var open
+    @Environment(\.colorScheme) private var scheme
     @Namespace private var glass
 
     var body: some View {
@@ -122,7 +123,7 @@ struct FullPlayer: View {
                     .accessibilityLabel("Close the player")
                 Spacer()
                 Text(s.now.map { $0.album.isEmpty ? "Now Playing" : $0.album } ?? "Now Playing")
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
                 Spacer()
                 if let t = track {
                     Menu { TrackActions(track: t, from: nil) } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
@@ -161,7 +162,7 @@ struct FullPlayer: View {
                     let show = model.shows.first { $0.title == a }
                     open(.page(show != nil && model.artist(named: a) == nil ? .show(show!.id) : .artist(a)))
                 } label: {
-                    Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.gold).lineLimit(1)
+                    Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.accentText).lineLimit(1)
                 }
                 .buttonStyle(.plain)
             }
@@ -181,7 +182,7 @@ struct FullPlayer: View {
                             Label(on.label, systemImage: symbol(forDevice: on.kind, name: on.name)).lineLimit(1)
                         }
                         .buttonStyle(.glass)
-                        .tint(on.here && !on.away ? .gold : nil)
+                        .tint(on.here && !on.away ? Color.accent : nil)
                         .glassEffectID("device", in: glass)
                     }
                     Button { present(.queue) } label: {
@@ -212,7 +213,9 @@ struct FullPlayer: View {
                 CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
                     .aspectRatio(1, contentMode: .fill)
                     .blur(radius: 80)
-                    .opacity(0.45)
+                    // The theme's wash (arkui/theme.toml): faint enough that the
+                    // title, the album and the gold read over a pale cover.
+                    .opacity(Tokens.washOpacity(dark: scheme == .dark))
                     .ignoresSafeArea()
             }
         }
@@ -244,10 +247,10 @@ struct Scrubber: View {
             VStack(spacing: 2) {
                 // The chapter it is in, for an episode that has them.
                 if let c = ChaptersEntry.at(chapters, Int64(at * total)), !c.title.isEmpty {
-                    Text(c.title).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Text(c.title).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
                 }
                 // No handle (ArkUI's `Bar`), as Android's.
-                Bar(value: at, fill: .gold, enabled: s.durationMs > 0, onValue: { v in
+                Bar(value: at, fill: Color.accent, enabled: s.durationMs > 0, onValue: { v in
                     dragging = v
                     model.scrub(Int64(v * total))
                 }, onDone: {
@@ -263,7 +266,7 @@ struct Scrubber: View {
                     Text("-" + Spell.clock(max(s.durationMs - Int64(at * total), 0)))
                 }
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             }
         }
         .task(id: s.now?.id) { if let n = s.now { model.loadChapters([Id(n.id)]) } }
@@ -282,7 +285,7 @@ struct Transport: View {
             HStack {
                 if s.alone {
                     Button { model.toggleShuffle() } label: { Image(systemName: "shuffle") }
-                        .foregroundStyle(s.shuffle ? Color.gold : .secondary)
+                        .foregroundStyle(s.shuffle ? Color.accentText : .quiet)
                         .accessibilityLabel(s.shuffle ? "Shuffle is on" : "Shuffle is off")
                 } else {
                     Color.clear.frame(width: 44)
@@ -306,7 +309,7 @@ struct Transport: View {
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .tint(.gold)
+                .tint(Color.accent)
                 .accessibilityLabel(s.playing ? "Pause" : "Play")
                 Spacer()
                 if model.jogs {
@@ -319,13 +322,13 @@ struct Transport: View {
                 Spacer()
                 if s.alone {
                     Button { model.cycleRepeat() } label: { Image(systemName: s.repeatMode == .one ? "repeat.1" : "repeat") }
-                        .foregroundStyle(s.repeatMode != .off ? Color.gold : .secondary)
+                        .foregroundStyle(s.repeatMode != .off ? Color.accentText : .quiet)
                         .accessibilityLabel(s.repeatMode == .off ? "Repeat is off" : (s.repeatMode == .all ? "Repeating the queue" : "Repeating this song"))
                 } else {
                     Color.clear.frame(width: 44)
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
         }
     }
 }
@@ -347,9 +350,9 @@ struct VolumeSlider: View {
     var body: some View {
         HStack(spacing: Space.s) {
             Button(action: onMute) { Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 28) }
-                .foregroundStyle(muted ? .secondary : .primary)
+                .foregroundStyle(muted ? Color.quiet : Color.ink)
                 .accessibilityLabel(muted ? "Unmute \(about)" : "Mute \(about)")
-            Bar(value: shown, fill: muted ? .secondary : .gold, onValue: { v in
+            Bar(value: shown, fill: muted ? Color.quiet : Color.accent, onValue: { v in
                 dragging = true
                 shown = v
                 onLevel(Int((v * 100).rounded()))
@@ -382,7 +385,7 @@ struct QueueSheet: View {
                     }
                     heading(s.shuffle ? "Up Next, Shuffled" : "Up Next").padding(.top, Space.m)
                     if s.upNext.isEmpty {
-                        Text("Nothing after this one.").foregroundStyle(.secondary).padding(.horizontal, Space.l)
+                        Text("Nothing after this one.").foregroundStyle(.quiet).padding(.horizontal, Space.l)
                     }
                     Reorderable(Self.keyed(s.upNext), key: \.key, onMove: { model.moveUpNext(from: $0, to: $1) }) { row, handle in
                         HStack(spacing: Space.s) {
@@ -510,7 +513,7 @@ struct TranscriptSheet: View {
                                         Label("Follow Along", systemImage: "waveform")
                                     }
                                     .buttonStyle(.glassProminent)
-                                    .tint(.gold)
+                                    .tint(Color.accent)
                                     .padding(.bottom, Space.l)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                                 }
@@ -572,10 +575,12 @@ private struct TranscriptLine: View {
     let when: When
 
     var body: some View {
-        let ink: HierarchicalShapeStyle = when == .saying ? .primary : when == .coming ? .secondary : .tertiary
+        // What is said now in ink, what is coming quieter, and what was said as
+        // the disabled colour: gone by, not to be read again.
+        let ink: Color = when == .saying ? .ink : when == .coming ? .quiet : .disabled
         VStack(alignment: .leading, spacing: Space.xs) {
             if named {
-                Text(cue.speaker.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.gold)
+                Text(cue.speaker.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.accentText)
                     .opacity(when == .said ? 0.6 : 1)
             }
             Text(cue.text).font(.title3.weight(.semibold)).foregroundStyle(ink)
@@ -596,11 +601,11 @@ private struct QueueRow: View {
         HStack(spacing: Space.m) {
             CoverView(seed: p.seed, url: p.art, side: 40, corner: 4).frame(width: 40, height: 40)
             VStack(alignment: .leading) {
-                Text(p.title).foregroundStyle(current ? Color.gold : .primary).lineLimit(1)
-                Text(p.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(p.title).foregroundStyle(current ? Color.accentText : .ink).lineLimit(1)
+                Text(p.artist).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer()
-            if current { Image(systemName: "waveform").foregroundStyle(Color.gold).accessibilityLabel("Playing") }
+            if current { Image(systemName: "waveform").foregroundStyle(Color.accentText).accessibilityLabel("Playing") }
         }
     }
 }

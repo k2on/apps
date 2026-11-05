@@ -100,7 +100,7 @@ struct AccountRow: View {
             AccountMark(kind: account.kind)
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name).lineLimit(1)
-                Text(Accounts.subtitle(account)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(Accounts.subtitle(account)).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             if account.unapproved > 0 {
@@ -109,11 +109,11 @@ struct AccountRow: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Color.money, in: Capsule())
+                    .background(Color.accent, in: Capsule())
                     .accessibilityLabel("\(account.unapproved) to review")
             }
             CentsText(account.balance)
-                .foregroundStyle(account.balance < 0 ? Color.red : Color.primary)
+                .foregroundStyle(account.balance < 0 ? Color.error : Color.ink)
         }
         .accessibilityElement(children: .combine)
     }

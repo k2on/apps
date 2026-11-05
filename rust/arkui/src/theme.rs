@@ -17,21 +17,17 @@
 //! The palette is installed once, at startup, with [`install`], because a style
 //! closure is `Fn(&Theme)` and has nowhere else to find it. Before anything is
 //! installed — and in every test — the answer is [`Palette::NEUTRAL`], which is
-//! the only colour this crate owns and is documented as a default rather than
-//! a brand. harken's gold stays in harken.
+//! a default rather than a brand. Every palette is arkui/theme.toml's,
+//! generated into [`crate::tokens`]: an app installs its accent's.
 use iced::theme::palette::Extended;
 use iced::{Color, Theme};
 use std::sync::OnceLock;
 
-const fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::from_rgb8(r, g, b)
-}
-
 /// An app's colours: one iced palette per theme, and the gradient pairs the
 /// derived square ([`crate::art`]) picks from.
 ///
-/// The same four things harken's generated `palette.rs` held — `LIGHT`,
-/// `DARK`, `LIGHT_ART` and `DARK_ART` — as one value an app hands over once.
+/// Generated, one per accent, from arkui/theme.toml ([`crate::tokens`]): an
+/// app hands its own over once.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub light: iced::theme::Palette,
@@ -44,38 +40,11 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// What is drawn when an app installs nothing: AppKit's neutral greys —
-    /// `controlBackgroundColor` and `labelColor`, flattened over their plane —
-    /// and its default `controlAccentColor`, the system blue. Deliberately
-    /// nobody's brand: the accent is the one slot an app is expected to fill.
-    pub const NEUTRAL: Palette = Palette {
-        light: iced::theme::Palette {
-            background: rgb(0xFF, 0xFF, 0xFF),
-            text: rgb(0x26, 0x26, 0x26),
-            primary: rgb(0x00, 0x6A, 0xDC),
-            success: rgb(0x28, 0xCD, 0x41),
-            warning: rgb(0xB2, 0x6B, 0x00),
-            danger: rgb(0xFF, 0x3B, 0x30),
-        },
-        dark: iced::theme::Palette {
-            background: rgb(0x1E, 0x1E, 0x1E),
-            text: rgb(0xDD, 0xDD, 0xDD),
-            primary: rgb(0x0A, 0x84, 0xFF),
-            success: rgb(0x32, 0xD7, 0x4B),
-            warning: rgb(0xFF, 0x9F, 0x0A),
-            danger: rgb(0xFF, 0x45, 0x3A),
-        },
-        light_art: &[
-            [rgb(0xE4, 0xE4, 0xE6), rgb(0xBC, 0xBC, 0xC0)],
-            [rgb(0xDD, 0xE2, 0xEA), rgb(0xAE, 0xB8, 0xC6)],
-            [rgb(0xE6, 0xE1, 0xDC), rgb(0xC0, 0xB6, 0xAC)],
-        ],
-        dark_art: &[
-            [rgb(0x5A, 0x5A, 0x5E), rgb(0x18, 0x18, 0x1A)],
-            [rgb(0x4E, 0x58, 0x66), rgb(0x14, 0x17, 0x1B)],
-            [rgb(0x60, 0x58, 0x50), rgb(0x1A, 0x17, 0x14)],
-        ],
-    };
+    /// What is drawn when an app installs nothing: the shared neutrals with
+    /// the system blue, arkui/theme.toml's `accent.blue`. Deliberately
+    /// nobody's brand: the accent is the one slot an app is expected to fill,
+    /// with its own from [`crate::tokens`].
+    pub const NEUTRAL: Palette = crate::tokens::BLUE;
 
     /// The iced palette for one side.
     pub fn colors(&self, dark: bool) -> iced::theme::Palette {

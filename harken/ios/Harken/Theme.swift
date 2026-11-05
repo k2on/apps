@@ -1,19 +1,13 @@
 // harken's look on the phone, over ArkUI's (swift/ArkUI: the spacing, the
-// springs, the derived square): the desktop's palette
-// (`harken/iced/src/palette.rs`) — the system's neutral greys, which on iOS
-// are the system's own colours, and the gold, one for a dark page and one
-// for a white one — and the derived square in harken's colours. Liquid Glass
+// springs, the derived square, the colours): arkui's theme
+// (arkui/theme.toml) — the neutrals every Ark app shares, as `.ink`, `.quiet`
+// and the rest, and harken's accent, the gold, which `HarkenApp` names
+// (`Accent.use(.gold)`) — and the derived square in the gold. Liquid Glass
 // brings its own materials: what is here is only what the glass is tinted
 // with.
 import ArkUI
 import SwiftUI
 import UIKit
-
-extension Color {
-    /// The gold: `controlAccentColor`'s slot. A dark page takes a bright leaf
-    /// gold; a white one cannot, because text drawn on it has to be legible.
-    static let gold = Color(light: 0x9A741A, dark: 0xE9BB45)
-}
 
 // Space, Springs, the derived square and the colour helpers are ArkUI's
 // (swift/ArkUI), any app's; what follows is harken's own.
@@ -31,13 +25,10 @@ extension Springs {
 }
 
 extension Squares {
-    /// The derived square's colours for harken — the desktop's `DARK_ART` and
-    /// `LIGHT_ART`, their first stops — set at the app's root (`\.squares`),
-    /// so the phone, the desktop and the Android app draw one album as one square.
-    static let harken = Squares(
-        light: [0xE8D19A, 0xEFDCAE, 0xE2D2AC, 0xF0DFA8, 0xE6D0A0, 0xF3E6BE],
-        dark: [0x7A5C15, 0x8A6B22, 0x6B5A2A, 0x8F7327, 0x5E4A18, 0xA08137]
-    )
+    /// The derived square's colours for harken — the gold's, the same as the
+    /// desktop's and Android's — set at the app's root (`\.squares`), so every
+    /// device draws one album as one square.
+    static let harken = AccentSet.gold.squares
 }
 
 /// The SF Symbol for a device's kind, as the picker and the device chip draw it.

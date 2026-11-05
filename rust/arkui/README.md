@@ -23,7 +23,8 @@ there.
 | module | what it is |
 |---|---|
 | `vim` | `Keys` turns presses into an `Action` (counts, `gg`/`G`/`{n}G`, `^d`/`^u`, `/` search, `n`/`N`, `<Tab>`, `<Esc>`, anything else as `Action::Key(c)`). `Grid` turns a `Motion` into a cursor. `Grid::step` returns `None` only when the cursor is already at that edge, which means "not mine". `Grid::progress` is how far down to scroll. `presses()` is the keyboard subscription, and `find` is `/` and `n`/`N` over labels. |
-| `theme` | `Palette { light, dark, light_art, dark_art }`. `install(palette)` once at startup; `of(theme)` is the app's `Extended` for whichever side iced picked. Before anything is installed it answers `Palette::NEUTRAL` (AppKit greys, system blue), which is the only colour arkui owns. |
+| `theme` | `Palette { light, dark, light_art, dark_art }`. `install(palette)` once at startup; `of(theme)` is the app's `Extended` for whichever side iced picked. Before anything is installed it answers `Palette::NEUTRAL` (the shared neutrals, system blue). |
+| `tokens` | Generated from `arkui/theme.toml` (`nix run .#update-theme`): a `Palette` per accent (`GOLD`, `GREEN`, `BLUE`) and each side's shared colours by role (`tokens::light::QUIET`). |
 | `style` | `dim`, `faint(alpha)`, `accent`, `seek`, `action`, `bars` (a scrollbar is never the accent), `page` (the root's ground), `row` (the zebra and the cursor), `entry`/`entry_text` (a lit row in a panel), `on_row` (text on a row that may be the cursor). |
 | `glyphs` | Harken's generated table of Lucide drawings, copied as it is, with `LICENSE.lucide` beside it. |
 | `icon` | `tinted(shape, size, |palette| colour)` plus `plain`, `accent`, `tick`, `line`, `faint`, `more`, `chevron`. `SIZE` is 15. The colour goes through the svg style filter. |

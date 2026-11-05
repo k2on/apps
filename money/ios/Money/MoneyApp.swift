@@ -17,6 +17,8 @@ struct MoneyApp: App {
     @State private var wasAway = false
 
     init() {
+        // money's accent, the green, before the first view draws it.
+        Accent.use(.green)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         _model = StateObject(wrappedValue: Model(shelf: DefaultsShelf(), root: support))
     }
@@ -25,7 +27,9 @@ struct MoneyApp: App {
         WindowGroup {
             Root()
                 .environmentObject(model)
-                .tint(Color.money)
+                .tint(Color.accent)
+                // The derived square in the green (ArkUI's are neutral).
+                .environment(\.squares, .green)
                 .onOpenURL { model.open(url: $0) }
         }
         .onChange(of: phase) { _, now in

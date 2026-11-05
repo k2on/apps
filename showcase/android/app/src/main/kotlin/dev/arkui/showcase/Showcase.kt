@@ -42,8 +42,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +64,8 @@ import dev.arkui.Fetching
 import dev.arkui.Heading
 import dev.arkui.ListRow
 import dev.arkui.LocalArkTheme
+import dev.arkui.Accent
+import dev.arkui.arkuiScheme
 import dev.arkui.LocalReselect
 import dev.arkui.PageBar
 import dev.arkui.Reselect
@@ -98,12 +98,12 @@ class ShowcaseActivity : ComponentActivity() {
     }
 }
 
-/** ark-ui's own look: Material's colours and ark-ui's neutral squares, nothing of any app's. */
+/** ark-ui's own look: the shared theme in nobody's accent (`Accent.Blue`), and its neutral squares. */
 @Composable
 private fun Neutral(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     CompositionLocalProvider(LocalArkTheme provides ArkTheme(if (dark) ArkTheme.NeutralDark else ArkTheme.NeutralLight)) {
-        MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+        MaterialTheme(colorScheme = arkuiScheme(Accent.Blue, dark)) {
             Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { content() }
         }
     }

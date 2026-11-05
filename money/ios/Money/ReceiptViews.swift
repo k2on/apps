@@ -98,14 +98,14 @@ struct ReceiptSection: View {
         Section {
             switch state {
             case .none:
-                Text("No receipt yet").foregroundStyle(.secondary)
+                Text("No receipt yet").foregroundStyle(.quiet)
             case let .reading(why):
                 HStack(spacing: Space.m) {
                     ProgressView()
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Reading the receipt…")
                         Text(why.isEmpty ? "Your server reads it once the photo reaches it." : "Not read yet: \(why)")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.quiet)
                     }
                 }
                 if let p = s.photos.first(where: { $0.txnId == txn && $0.receiptId.isEmpty }) {
@@ -114,7 +114,7 @@ struct ReceiptSection: View {
             case let .receipt(r, check):
                 if check {
                     Label("Check this: it doesn't add up as read", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.caution)
                 }
                 PaperReceipt(receipt: r, items: s.items[r.id] ?? [])
                     .listRowInsets(EdgeInsets(top: Space.m, leading: 0, bottom: Space.m, trailing: 0))
@@ -277,13 +277,13 @@ struct MatchReceiptList: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Receipts.heading(r))
-                        Text("\(r.date) · \(r.items) items").font(.caption).foregroundStyle(.secondary)
+                        Text("\(r.date) · \(r.items) items").font(.caption).foregroundStyle(.quiet)
                     }
                     Spacer()
                     CentsText(r.total).font(.body.weight(.medium))
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
         }
         .navigationTitle("Match a Receipt")
         .navigationBarTitleDisplayMode(.inline)
@@ -305,7 +305,7 @@ struct ReceiptPhotoView: View {
             } else {
                 VStack(spacing: Space.m) {
                     ProgressView()
-                    Text("Fetching the photo…").foregroundStyle(.secondary)
+                    Text("Fetching the photo…").foregroundStyle(.quiet)
                 }
             }
         }

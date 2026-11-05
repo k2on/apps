@@ -1045,6 +1045,12 @@
               done
             '';
           };
+          # `nix run .#update-theme`, from the repository's root: the colours
+          # every app is drawn in, written from arkui/theme.toml into the
+          # Kotlin, Swift and Rust each platform's arkui reads (arkui/README.md).
+          update-theme = pkgs.writeShellScriptBin "update-theme" ''
+            ${pkgs.python3}/bin/python3 arkui/theme.py write
+          '';
           # The catalogue as its repository builds it, and the copy the demo
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
@@ -1065,6 +1071,9 @@
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
             inherit classical update-catalogue update-cargo-nix;
+            # `nix run .#update-theme`: the theme's generated files, from
+            # arkui/theme.toml.
+            inherit update-theme;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -1116,6 +1125,27 @@
                 echo "harken/iced/src/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
+              touch $out
+            '';
+            # What is generated from arkui/theme.toml is what is committed:
+            # edit the tokens, then `nix run .#update-theme`.
+            theme = pkgs.runCommand "theme-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              python3 ${./arkui}/theme.py write generated > /dev/null
+              status=0
+              for f in $(python3 ${./arkui}/theme.py files); do
+                cmp "generated/$f" "${self}/$f" || {
+                  echo "$f is not what arkui/theme.toml makes: nix run .#update-theme" >&2
+                  status=1
+                }
+              done
+              if [ $status != 0 ]; then exit 1; fi
+              touch $out
+            '';
+            # Every text colour the tokens define is legible on every ground
+            # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
+            # a control's edge), the player's wash among them.
+            theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              python3 ${./arkui}/theme.py contrast
               touch $out
             '';
             # The fleet run mixed (docs/plan-db.md D1): every pinned

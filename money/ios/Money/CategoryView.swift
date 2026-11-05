@@ -47,7 +47,7 @@ struct CategoryView: View {
                     if let words = Ruled.words(l) {
                         Label(words, systemImage: Ruled.symbol)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quiet)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Button {
@@ -57,7 +57,7 @@ struct CategoryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(l.available < 0 ? tone.tint.color : Color.money)
+                        .tint(l.available < 0 ? tone.tint.color : Color.accent)
                         .controlSize(.large)
                         .disabled(l.available == 0)
                     }
@@ -70,9 +70,9 @@ struct CategoryView: View {
                 figure("Left Over from Last Month", l.carried)
                 if Ruled.editable(l) {
                     Button { present(.assign(l.categoryId)) } label: {
-                        LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.primary) }
+                        LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.ink) }
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.ink)
                     .accessibilityHint("Changes what this month assigns it")
                 } else {
                     LabeledContent("Assigned This Month") { MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule") }
@@ -80,7 +80,7 @@ struct CategoryView: View {
                 figure("Activity", l.activity)
                 if l.creditOverspent > 0 {
                     LabeledContent("Spent on a Card, Not Covered") {
-                        CentsText(l.creditOverspent).foregroundStyle(Color.orange)
+                        CentsText(l.creditOverspent).foregroundStyle(Color.caution)
                     }
                 }
             } footer: {
@@ -100,12 +100,12 @@ struct CategoryView: View {
                             Text("\(Int(((funded(l) ?? 0) * 100).rounded()))%").font(.caption.weight(.semibold))
                         }
                         .gaugeStyle(.accessoryCircularCapacity)
-                        .tint(tone == .short ? Color.orange : Color.green)
+                        .tint(tone == .short ? Color.caution : Color.positive)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(CentsText.string(l.target)) a month").font(.headline)
                             Text(l.assigned >= l.target ? "Funded this month" : "\(CentsText.string(Moves.toTarget(l))) more to meet it")
                                 .font(.subheadline)
-                                .foregroundStyle(l.assigned >= l.target ? Color.green : Color.secondary)
+                                .foregroundStyle(l.assigned >= l.target ? Color.positive : Color.quiet)
                         }
                     }
                     .padding(.vertical, Space.xs)
@@ -123,7 +123,7 @@ struct CategoryView: View {
                     Button { present(.target(l.categoryId)) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Label("Set a Target", systemImage: "scope")
-                            Text("How much does it need each month?").font(.footnote).foregroundStyle(.secondary)
+                            Text("How much does it need each month?").font(.footnote).foregroundStyle(.quiet)
                         }
                     }
                 }
@@ -198,7 +198,7 @@ struct CategoryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(Color.orange)
+                        .tint(Color.caution)
                         .controlSize(.large)
                         .accessibilityHint("Assigns what covers the card's debt")
                     } else {
@@ -208,7 +208,7 @@ struct CategoryView: View {
                             Label("Move Money", systemImage: "arrow.left.arrow.right").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
-                        .tint(Color.money)
+                        .tint(Color.accent)
                         .controlSize(.large)
                         .disabled(l.available <= 0)
                     }
@@ -220,7 +220,7 @@ struct CategoryView: View {
             Section {
                 LabeledContent("Owed at the Month's End") { CentsText(l.debt) }
                 LabeledContent("Not Covered") {
-                    CentsText(l.underfunded).foregroundStyle(l.underfunded > 0 ? Color.orange : Color.green)
+                    CentsText(l.underfunded).foregroundStyle(l.underfunded > 0 ? Color.caution : Color.positive)
                 }
                 if let c = Cards.covered(l) {
                     ProgressView(value: c) {
@@ -228,7 +228,7 @@ struct CategoryView: View {
                     } currentValueLabel: {
                         Text(c >= 1 ? "All of it set aside" : "\(Int((c * 100).rounded()))% set aside")
                     }
-                    .tint(c >= 1 ? Color.green : Color.orange)
+                    .tint(c >= 1 ? Color.positive : Color.caution)
                 }
             } header: {
                 Text("The Card")
@@ -240,9 +240,9 @@ struct CategoryView: View {
             Section {
                 figure("Left Over from Last Month", l.carried)
                 Button { present(.assign(l.categoryId)) } label: {
-                    LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.primary) }
+                    LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.ink) }
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(.ink)
                 .accessibilityHint("Changes what this month assigns it")
                 figure("Spending Covered, Less Payments", l.activity)
             } footer: {
@@ -276,7 +276,7 @@ struct CategoryView: View {
     }
 
     private func figure(_ label: String, _ cents: Int64) -> some View {
-        LabeledContent(label) { CentsText(cents).foregroundStyle(cents < 0 ? Color.red : Color.secondary) }
+        LabeledContent(label) { CentsText(cents).foregroundStyle(cents < 0 ? Color.error : Color.quiet) }
     }
 
     /// An Auto-Assign amount: tapped, the month assigns exactly that.
@@ -287,7 +287,7 @@ struct CategoryView: View {
         } label: {
             LabeledContent(label) { CentsText(max(cents, 0)) }
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(.ink)
         .accessibilityHint("Assigns this much this month")
     }
 }

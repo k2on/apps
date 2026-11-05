@@ -310,10 +310,11 @@ impl App {
     /// A receipt as its paper: the place and day, each item and what it
     /// cost (an item pressed is filed), and the total, monospace on white.
     fn view_paper<'a>(&'a self, r: &'a ReceiptLine, photo: Option<&'a PhotoLine>) -> Element<'a, Message> {
-        let ink = Color::from_rgb8(0x1a, 0x1a, 0x1a);
-        let faded = Color::from_rgb8(0x77, 0x77, 0x77);
-        // Each line its ink, and the paper its own: the theme's text colour is
-        // the page's, light on a dark one, which white paper would hide.
+        // Paper is white whatever the theme, so it is drawn in the light side's
+        // colours: the theme's text colour is the page's, light on a dark one,
+        // which white paper would hide.
+        let ink = arkui::tokens::light::INK;
+        let faded = arkui::tokens::light::QUIET;
         let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
@@ -330,7 +331,7 @@ impl App {
             let tint = if i.category_id.is_some() {
                 faded
             } else {
-                Color::from_rgb8(0xb2, 0x5b, 0x00)
+                arkui::tokens::light::CAUTION
             };
             let line = column![
                 row![mono(i.name.clone(), 12, ink).width(Length::Fill), mono(money(-i.amount), 12, ink)].spacing(8),
@@ -360,10 +361,10 @@ impl App {
             .padding(14)
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::WHITE)),
+                background: Some(iced::Background::Color(arkui::tokens::light::SURFACE)),
                 text_color: Some(ink),
                 border: iced::Border {
-                    color: Color::from_rgb8(0xdd, 0xdd, 0xdd),
+                    color: arkui::tokens::light::HAIRLINE,
                     width: 1.0,
                     radius: 2.0.into(),
                 },

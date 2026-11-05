@@ -22,7 +22,7 @@ struct SettingsView: View {
                     Avatar(name: name, picture: model.login?.picture ?? "", side: 48)
                     VStack(alignment: .leading) {
                         Text(name).font(.headline)
-                        Text(model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "").foregroundStyle(.secondary)
+                        Text(model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "").foregroundStyle(.quiet)
                     }
                 }
             }
@@ -38,12 +38,12 @@ struct SettingsView: View {
             }
             Section("About") {
                 LabeledContent("Harken", value: "Your music, from your own server")
-                Button { tapped() } label: { LabeledContent("Version", value: Self.version) }.foregroundStyle(.primary)
+                Button { tapped() } label: { LabeledContent("Version", value: Self.version) }.foregroundStyle(.ink)
                 if model.diagnosticsUnlocked {
                     Button { open(.diagnostics) } label: {
                         LabeledContent("Diagnostics", value: "What this phone's copy of the library is doing")
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.ink)
                 }
             }
         }
@@ -90,13 +90,13 @@ struct DiagnosticsView: View {
         Form {
             Section("Peer") {
                 if let s = status { ForEach(Self.numbers(s), id: \.0) { Number(name: $0.0, value: $0.1) } }
-                else { Text("Opening…").foregroundStyle(.secondary) }
+                else { Text("Opening…").foregroundStyle(.quiet) }
             }
             Section("Listening") {
                 ForEach(Array(Self.listening(model.heard).enumerated()), id: \.offset) { Number(name: $0.element.0, value: $0.element.1) }
             }
             Section("Changes from this phone") {
-                if changes.isEmpty { Text("None yet — what you change here is listed with where it stands").foregroundStyle(.secondary) }
+                if changes.isEmpty { Text("None yet — what you change here is listed with where it stands").foregroundStyle(.quiet) }
                 ForEach(Array(changes.enumerated()), id: \.offset) { LabeledContent($0.element.0, value: $0.element.1) }
             }
         }
@@ -156,7 +156,7 @@ private struct Number: View {
 
     var body: some View {
         HStack {
-            Text(name).foregroundStyle(.secondary)
+            Text(name).foregroundStyle(.quiet)
             Spacer()
             Text(value).font(.callout.monospaced()).multilineTextAlignment(.trailing)
         }

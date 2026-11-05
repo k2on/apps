@@ -1,11 +1,10 @@
 // The tokens every screen is laid out by: one set of spacings, the corner a
 // cover and a card have, and the little an app has to say that Material's
 // scheme has no slot for — the gradients its derived squares are drawn in
-// (`ArkTheme`). Colours are the app's: everything here asks
-// `MaterialTheme.colorScheme`, so an app's light and dark schemes are what
-// it is drawn in, and this library writes no colour of its own but the
-// neutral squares an app that names none gets — `rust/arkui`'s
-// `Palette::NEUTRAL`, the same three pairs.
+// (`ArkTheme`). Colours are the theme's (arkui/theme.toml, generated into
+// Tokens.kt): an app is drawn in `arkuiScheme(accent, dark)`, everything here
+// asks `MaterialTheme.colorScheme`, and this library writes no colour of
+// its own.
 package dev.arkui
 
 import androidx.compose.material3.MaterialTheme
@@ -52,21 +51,11 @@ public object Space {
 @Immutable
 public data class ArkTheme(public val art: List<Pair<Color, Color>> = NeutralLight) {
     public companion object {
-        /** `rust/arkui`'s neutral squares against white. */
-        public val NeutralLight: List<Pair<Color, Color>> =
-            listOf(
-                Color(0xFFE4E4E6) to Color(0xFFBCBCC0),
-                Color(0xFFDDE2EA) to Color(0xFFAEB8C6),
-                Color(0xFFE6E1DC) to Color(0xFFC0B6AC),
-            )
+        /** The neutral squares against white: arkui/theme.toml's, as `Accent.Blue` draws them. */
+        public val NeutralLight: List<Pair<Color, Color>> = Accent.Blue.art(dark = false)
 
         /** …and against a dark page. */
-        public val NeutralDark: List<Pair<Color, Color>> =
-            listOf(
-                Color(0xFF5A5A5E) to Color(0xFF18181A),
-                Color(0xFF4E5866) to Color(0xFF14171B),
-                Color(0xFF605850) to Color(0xFF1A1714),
-            )
+        public val NeutralDark: List<Pair<Color, Color>> = Accent.Blue.art(dark = true)
     }
 }
 
