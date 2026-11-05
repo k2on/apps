@@ -2234,6 +2234,7 @@ dependencies = [
  "arkui",
  "harken-domain",
  "harken-player",
+ "harken-seed",
  "iced",
  "iced_tiny_skia",
  "js-sys",
@@ -2254,6 +2255,19 @@ dependencies = [
  "harken-domain",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "harken-seed"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-peer",
+ "harken-domain",
+ "lofty",
+ "png 0.18.1",
+ "sha2",
+ "ureq",
 ]
 
 [[package]]
@@ -3519,6 +3533,7 @@ dependencies = [
  "arkdb",
  "image",
  "money-domain",
+ "money-seed",
  "serde_json",
  "tempfile",
  "tract-onnx",
@@ -3536,10 +3551,21 @@ dependencies = [
  "iced",
  "iced_test",
  "money-domain",
+ "money-seed",
  "money-server",
  "tempfile",
  "tokio",
  "web-sys",
+]
+
+[[package]]
+name = "money-seed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark",
+ "ark-peer",
+ "money-domain",
 ]
 
 [[package]]
@@ -3554,6 +3580,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "money-domain",
+ "money-seed",
  "serde",
  "serde_json",
  "tempfile",
