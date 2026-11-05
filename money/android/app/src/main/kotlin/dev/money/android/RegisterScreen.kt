@@ -56,6 +56,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
+import dev.arkui.Tokens
 import dev.arkdb.ffi.Id
 import dev.arkui.AmountField
 import dev.arkui.AmountText
@@ -67,10 +75,10 @@ import uniffi.money_domain.Cleared
 import uniffi.money_domain.TxnLine
 
 @Composable
-fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
+fun RegisterScreen(ledger: Ledger, account: Id?, onBack: () -> Unit) {
     val shell = LocalShell.current
     val book = shell.book
-    val acc = ledger.account(account)
+    val acc = account?.let { ledger.account(it) }
     DisposableEffect(account) {
         book.holdRegister(account)
         onDispose { book.releaseRegister(account) }
@@ -81,7 +89,7 @@ fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
     val rows = ledger.register(account)
 
     Page(
-        title = acc?.name ?: "Account",
+        title = if (account == null) "All Accounts" else acc?.name ?: "Account",
         onBack = onBack,
         actions = {
             if (acc != null && !acc.closed) {
@@ -105,7 +113,7 @@ fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s),
                     ) {
                         Column(Modifier.padding(Space.xl)) {
-                            Text("Working balance", style = MaterialTheme.typography.titleMedium)
+                            Text("Working Balance", style = MaterialTheme.typography.titleMedium)
                             AmountText(acc.balance, style = MaterialTheme.typography.displaySmall)
                             Spacer(Modifier.height(Space.m))
                             Row(horizontalArrangement = Arrangement.spacedBy(Space.xl)) {
@@ -125,7 +133,7 @@ fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
                     }
                 }
             }
-            days(rows, ledger.today, showAccount = false)
+            days(rows, ledger.today, showAccount = account == null)
             if (rows.isEmpty() && ledger.ready) {
                 item(key = "empty") {
                     Text(
@@ -142,7 +150,10 @@ fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
     }
 }
 
-/** `rows` under a heading per day, newest first, as a register and the inbox lay them out. */
+/**
+ * `rows` under a heading per day, newest first, each day's rows in a rounded card with hairlines
+ * between them, as a register and every account's transactions lay them out.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 fun LazyListScope.days(rows: List<TxnLine>, today: String, showAccount: Boolean, swipe: Boolean = true) {
     val byDay = rows.groupBy { it.date }.toSortedMap(compareByDescending { it })
@@ -150,79 +161,122 @@ fun LazyListScope.days(rows: List<TxnLine>, today: String, showAccount: Boolean,
         stickyHeader(key = "d$day") {
             Text(
                 Dates.heading(day, today),
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier =
                     Modifier.fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = Space.page, vertical = Space.s)
+                        .padding(start = Space.page + Space.l, end = Space.page, top = Space.m, bottom = Space.s)
                         .semantics { heading() })
         }
-        items(ts, key = { it.id.hex }) { t -> TxnRow(t, showAccount, swipe, Modifier.animateItem()) }
+        itemsIndexed(ts, key = { _, t -> t.id.hex }) { i, t ->
+            TxnRow(
+                t,
+                showAccount,
+                swipe,
+                Modifier.animateItem().padding(horizontal = Space.page).clip(inCard(i, ts.size)),
+                divided = i > 0)
+        }
     }
 }
 
-/** One transaction: cleared mark, payee, category, amount; new ones swipe to approve. */
+/** The corners of a card's `i`th row of `n`: the first rounds its top, the last its bottom. */
+fun inCard(i: Int, n: Int): Shape {
+    val r = CardCorner
+    return RoundedCornerShape(topStart = if (i == 0) r else 0.dp, topEnd = if (i == 0) r else 0.dp, bottomStart = if (i == n - 1) r else 0.dp, bottomEnd = if (i == n - 1) r else 0.dp)
+}
+
+/** What came in, in the theme's positive green: the iPhone's `.positive`. */
 @Composable
-fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Modifier = Modifier) {
+fun positiveColor(): Color = Tokens.of(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f).positive
+
+/**
+ * One transaction, as the iPhone draws it: a dot while it is new, the payee (bold while new), its
+ * category and account under it (the category in amber when it needs one), its memo, and at the end
+ * the amount (what came in in green) over its receipt and cleared marks. A tap is `onClick` (its
+ * form, unless said); a new one swipes to approve. `divided` draws the hairline over it.
+ */
+@Composable
+fun TxnRow(
+    t: TxnLine,
+    showAccount: Boolean,
+    swipe: Boolean = true,
+    modifier: Modifier = Modifier,
+    divided: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
     val shell = LocalShell.current
     val book = shell.book
     val a = LocalAmounts.current
-    val needs = t.categoryId == null && !t.transfer
-    val supporting =
-        listOfNotNull(
-                if (showAccount) t.account else null,
-                t.category.takeIf { it.isNotEmpty() },
-                t.memo.takeIf { it.isNotEmpty() },
-            )
-            .joinToString(" · ")
+    val needs = needsCategory(t)
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val row: @Composable () -> Unit = {
-        ListItem(
-            headlineContent = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!t.approved) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-                        Spacer(Modifier.size(Space.s))
+        Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+            if (divided) RowDivider(inset = Space.l + 8.dp + Space.m)
+            Row(
+                Modifier.fillMaxWidth()
+                    .clickable(onClickLabel = if (onClick == null) "Edit" else "Open", onClick = { onClick?.invoke() ?: shell.onEdit(t) })
+                    .padding(start = Space.l, end = Space.l, top = Space.m, bottom = Space.m)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription =
+                            "${t.payee.ifEmpty { "No payee" }}, ${a.signed(t.amount)}, ${t.category}" + (if (!t.approved) ", waiting for review" else "") +
+                                (if (t.receipt.isNotEmpty() || t.photos > 0) ", has a receipt" else "") +
+                                when (t.cleared) {
+                                    Cleared.RECONCILED -> ", reconciled"
+                                    Cleared.CLEARED -> ", cleared"
+                                    Cleared.UNCLEARED -> ", uncleared"
+                                }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (t.approved) Color.Transparent else MaterialTheme.colorScheme.primary))
+                Spacer(Modifier.width(Space.m))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        t.payee.ifEmpty { "No Payee" },
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (t.approved) null else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (t.transfer) {
+                            Icon(Glyphs.Transfer, contentDescription = null, tint = quiet, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(Space.xs))
+                        }
+                        Text(
+                            t.category,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (needs) MaterialTheme.colorScheme.tertiary else quiet,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false))
+                        if (showAccount) {
+                            Text(" · ${t.account}", style = MaterialTheme.typography.bodySmall, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                    Text(t.payee.ifEmpty { "No payee" }, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    if (t.receipt.isNotEmpty() || t.photos > 0) {
-                        Spacer(Modifier.size(Space.xs))
-                        Icon(
-                            Glyphs.Receipt,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp))
+                    if (t.memo.isNotEmpty()) {
+                        Text(t.memo, style = MaterialTheme.typography.bodySmall, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-            },
-            supportingContent = {
-                Text(
-                    supporting,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (needs) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            },
-            leadingContent = { ClearedMark(t) },
-            trailingContent = {
-                AmountText(
-                    t.amount,
-                    signed = true,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (t.amount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-            },
-            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier =
-                Modifier.clickable(onClickLabel = "Edit", onClick = { shell.onEdit(t) }).semantics(mergeDescendants = true) {
-                    contentDescription =
-                        "${t.payee}, ${a.signed(t.amount)}, ${t.category}" + (if (!t.approved) ", new" else "") +
-                            (if (t.receipt.isNotEmpty() || t.photos > 0) ", has a receipt" else "") +
-                            when (t.cleared) {
-                                Cleared.RECONCILED -> ", reconciled"
-                                Cleared.CLEARED -> ", cleared"
-                                Cleared.UNCLEARED -> ", uncleared"
-                            }
-                },
-        )
+                Spacer(Modifier.width(Space.s))
+                Column(horizontalAlignment = Alignment.End) {
+                    AmountText(
+                        t.amount,
+                        signed = t.amount > 0,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = if (t.amount > 0) positiveColor() else MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // A receipt paid by it, or a photo of one taken for it.
+                        if (t.receipt.isNotEmpty() || t.photos > 0) {
+                            Icon(Glyphs.Receipt, contentDescription = null, tint = quiet, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(Space.xs))
+                        }
+                        ClearedMark(t)
+                    }
+                }
+            }
+        }
     }
     if (swipe && !t.approved) {
         SwipeToAct(label = "Approve", icon = Icons.Default.Check, onAct = { book.approve(listOf(t.id)) }, modifier = modifier, row = row)
@@ -231,27 +285,33 @@ fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Mo
     }
 }
 
-/** The cleared mark: a toggle, unless the transaction is reconciled and locked. */
+/**
+ * The cleared mark, small at the end of a row as the iPhone's is: an outlined check while
+ * uncleared, a filled one once cleared — a tap toggles it — and a lock once reconciled.
+ */
 @Composable
 private fun ClearedMark(t: TxnLine) {
     val book = LocalShell.current.book
     when (t.cleared) {
         Cleared.RECONCILED ->
-            Icon(
-                Glyphs.Locked,
-                contentDescription = "Reconciled",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(12.dp).size(20.dp))
+            Icon(Glyphs.Locked, contentDescription = "Reconciled", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
         else -> {
             val on = t.cleared == Cleared.CLEARED
-            IconButton(
-                onClick = { book.setCleared(t.id, !on) },
-                modifier = Modifier.semantics { stateDescription = if (on) "Cleared" else "Uncleared" }) {
-                    Icon(
-                        if (on) Glyphs.ClearedFilled else Glyphs.Cleared,
-                        contentDescription = if (on) "Mark uncleared" else "Mark cleared",
-                        tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+            Box(
+                Modifier.size(20.dp)
+                    .clip(CircleShape)
+                    .clickable(onClickLabel = if (on) "Mark uncleared" else "Mark cleared") { book.setCleared(t.id, !on) }
+                    .semantics { stateDescription = if (on) "Cleared" else "Uncleared" },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (on) {
+                    Box(Modifier.size(18.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(12.dp))
+                    }
+                } else {
+                    Icon(Glyphs.Cleared, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
                 }
+            }
         }
     }
 }

@@ -143,10 +143,10 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         Button(onClick = { book.connect() }, enabled = ask == null || !isOpen(ask)) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                            Text("Connect a bank")
+                            Text("Connect a Bank")
                         }
                         if (ledger.banks.isNotEmpty()) {
-                            OutlinedButton(onClick = { book.sync() }, enabled = !ledger.syncing) { Text("Sync now") }
+                            OutlinedButton(onClick = { book.sync() }, enabled = !ledger.syncing) { Text("Sync Now") }
                         }
                     }
             }
@@ -333,7 +333,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
                 FilledTonalButton(onClick = { book.openLinked(l.plaidAccountId) }) {
                     Text("New ${kindName(l.opensAs).lowercase()} account")
                 }
-                OutlinedButton(onClick = onLink) { Text("Existing account") }
+                OutlinedButton(onClick = onLink) { Text("Existing Account") }
                 TextButton(onClick = { book.ignore(l.plaidAccountId, true) }) { Text("Ignore") }
             }
     }

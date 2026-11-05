@@ -78,6 +78,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
+import dev.arkui.LargeTitles
 import uniffi.money_domain.TxnLine
 
 /** The four tabs. */
@@ -94,7 +95,8 @@ class Shell(
     val snackbar: SnackbarHostState,
     val onAdd: (account: Id?) -> Unit,
     val onEdit: (TxnLine) -> Unit,
-    val onAccount: (Id) -> Unit,
+    /** An account's register, or every account's (All Accounts) for none. */
+    val onAccount: (Id?) -> Unit,
     val onSettings: () -> Unit,
     val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
@@ -126,7 +128,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
                 onEdit = { t -> form = formOf(t, book.state.value) },
-                onAccount = { id -> nav.navigate("register/${id.hex}") },
+                onAccount = { id -> nav.navigate("register/${id?.hex ?: ALL}") },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
@@ -178,7 +180,8 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
                 composable("register/{account}") { e ->
-                    val id = Id(e.arguments?.getString("account").orEmpty())
+                    val hex = e.arguments?.getString("account").orEmpty()
+                    val id = if (hex == ALL) null else Id(hex)
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
                 composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
@@ -187,6 +190,9 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }
     }
 }
+
+/** The register route's account for All Accounts: every account's transactions. */
+private const val ALL = "all"
 
 /** A tab, kept where it was; the tab showing goes back to its top. */
 private fun NavHostController.go(t: Tab) {
@@ -280,19 +286,22 @@ fun Page(
             if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
-            LargeTopAppBar(
-                title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
+            LargeTitles {
+                LargeTopAppBar(
+                    title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
                         }
-                    }
-                },
-                actions = actions,
-                scrollBehavior = bar,
-                colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
-            )
+                    },
+                    actions = actions,
+                    scrollBehavior = bar,
+                    colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
+                )
+            }
         },
         floatingActionButton = fab,
         snackbarHost = { SnackbarHost(shell.snackbar) },

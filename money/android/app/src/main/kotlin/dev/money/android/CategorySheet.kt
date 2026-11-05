@@ -242,7 +242,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         if (l.available > 0 && assignable(l)) {
             OutlinedButton(onClick = onMove, modifier = Modifier.fillMaxWidth()) {
                 Icon(Glyphs.Move, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                Text("Move money")
+                Text("Move Money")
             }
         }
         Spacer(Modifier.height(Space.xl))
