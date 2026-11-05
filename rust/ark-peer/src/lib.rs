@@ -648,16 +648,8 @@ impl Peer {
     /// Facts the authority writes itself, raw: an entry naming no function,
     /// its input their encoding, judged by the store as any write is.
     pub fn write(&mut self, facts: Vec<Change>, now: i64) -> Result<(), String> {
-        let (func, input) = (String::new(), ark::format::encode(&facts).expect("changes encode"));
-        self.verdict(
-            Space::Durable,
-            Input::Mutate {
-                func,
-                input,
-                now,
-                cause: None,
-            },
-        )
+        let (func, input, cause) = (String::new(), ark::format::encode(&facts).expect("changes encode"), None);
+        self.verdict(Space::Durable, Input::Mutate { func, input, now, cause })
     }
 
     /// One input of this peer's own, routed, and the verdict it was given
@@ -698,14 +690,7 @@ impl Peer {
         tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
         // What it is, before its `Hello`s, to a call nobody answers.
         if let Some(input) = self.config.live.as_ref().and(self.config.device.clone()) {
-            self.frames.push(
-                Frame::Call {
-                    id: 0,
-                    name: ark::frames::DEVICE.into(),
-                    input,
-                }
-                .enc(),
-            );
+            self.call(0, ark::frames::DEVICE, input);
         }
         self.step(Space::Durable, Input::Connected);
         self.step(Space::Volatile, Input::Connected);
@@ -727,14 +712,7 @@ impl Peer {
             return Err("not connected to the server".into());
         }
         let id = self.told.asked();
-        self.frames.push(
-            Frame::Call {
-                id,
-                name: name.into(),
-                input,
-            }
-            .enc(),
-        );
+        self.call(id, name, input);
         // Out now, as a change is: nobody pumps for an answer not yet asked.
         self.flush();
         Ok(id)
@@ -831,9 +809,20 @@ impl Peer {
     pub(crate) fn ship(&mut self) {
         let events = observe::take(&self.label(), 256);
         if !events.is_empty() {
-            let (id, name, input) = (0, ark::frames::EVENTS.into(), events.to_bytes());
-            self.frames.push(Frame::Call { id, name, input }.enc());
+            self.call(0, ark::frames::EVENTS, events.to_bytes());
         }
+    }
+
+    /// A call for its server (`id` 0: one nobody answers).
+    fn call(&mut self, id: u64, name: &str, input: Vec<u8>) {
+        self.frames.push(
+            Frame::Call {
+                id,
+                name: name.into(),
+                input,
+            }
+            .enc(),
+        );
     }
 
     /// The frames for its server, taken — what it said of itself among

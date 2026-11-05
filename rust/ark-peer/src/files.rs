@@ -138,23 +138,19 @@ pub(crate) struct Files {
     let_read: BTreeMap<ConnId, BTreeSet<String>>,
 }
 
-impl Files {
-    pub fn new(store: Box<dyn Disk>) -> Files {
-        Files {
-            store,
-            wanted: BTreeSet::new(),
-            asked: BTreeSet::new(),
-            arrived: false,
-            absent: BTreeMap::new(),
-            waiting: BTreeMap::new(),
-            let_read: BTreeMap::new(),
-        }
-    }
-}
-
 impl Default for Files {
     fn default() -> Files {
-        Files::new(Box::new(Memory::default()))
+        let (wanted, asked, absent, waiting, let_read) = Default::default();
+        let store = Box::new(Memory::default());
+        Files {
+            store,
+            wanted,
+            asked,
+            arrived: false,
+            absent,
+            waiting,
+            let_read,
+        }
     }
 }
 
