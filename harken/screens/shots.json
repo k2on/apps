@@ -33,6 +33,24 @@
           "role": "tab"
         }
       ]
+    },
+    {
+      "id": "player",
+      "steps": [
+        {
+          "tap": "Für Elise"
+        },
+        {
+          "wait": 3
+        },
+        {
+          "tap": "Für Elise",
+          "where": "bottom"
+        },
+        {
+          "wait": 3
+        }
+      ]
     }
   ]
 }

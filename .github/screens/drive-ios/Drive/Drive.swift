@@ -23,6 +23,7 @@ struct Shot: Decodable {
     struct Step: Decodable {
         var tap: String?
         var role: String?
+        var `where`: String?
         var type: String?
         var wait: Double?
     }
@@ -75,7 +76,7 @@ final class Drive: XCTestCase {
             sleep(2)
             for step in shot.steps {
                 if let label = step.tap {
-                    let c = control(app, label, role: step.role)
+                    let c = step.where == "bottom" ? lowest(app, label) : control(app, label, role: step.role)
                     if !c.waitForExistence(timeout: 30) {
                         try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
                         XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
@@ -131,6 +132,14 @@ final class Drive: XCTestCase {
             springboard.webViews.buttons["sign in"],
         ])
         if let send { send.tap() } else { name.typeText("\n") }
+    }
+
+    /// Of every element that says `label`, the lowest on the screen, once
+    /// one is there: a mini player saying the title a row above it says.
+    private func lowest(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        let all = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
+        _ = all.firstMatch.waitForExistence(timeout: 30)
+        return all.allElementsBoundByIndex.filter { $0.isHittable }.max { $0.frame.maxY < $1.frame.maxY } ?? all.firstMatch
     }
 
     /// What says `label`, or has it as its identifier: of the `role` asked

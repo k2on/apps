@@ -12,7 +12,7 @@
 # A step is {"tap": "<label>"} — what says it or its id, in the screen's
 # accessibility tree, as uiautomator reads it (ui.py) — with an optional
 # "role" ("tab", "button", "field", "text") to prefer when several say
-# it; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# it, and "where": "bottom" for the lowest of them on the screen; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 set -euo pipefail
@@ -32,9 +32,9 @@ dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 # Tap what says `text` (or, as `--field`, the first text field), waiting
 # up to `seconds` for it to be there; of several, the `role` one.
 tap() {
-  local text=$1 seconds=${2:-20} role=${3:-} at
+  local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} at
   for _ in $(seq 1 "$seconds"); do
-    if at=$(dump | python3 -I "$here/ui.py" "$text" $role); then
+    if at=$(dump | python3 -I "$here/ui.py" "$text" "$role" "$where"); then
       # shellcheck disable=SC2086
       adb shell input tap $at
       return 0
@@ -53,7 +53,7 @@ says() { dump | python3 -I "$here/ui.py" "$1" >/dev/null; }
 # A step of a shot, as JSON.
 step() {
   local s=$1
-  if jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")"
+  if jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
   elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
   elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
   else echo "::error::$app: no such step: $s"; return 1

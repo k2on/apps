@@ -40,6 +40,9 @@ All of it is in `<app>/screens/`:
   (`tab`, `button`, `field`, `text`) says which kind when several share a
   label (a tab and a heading both saying "Transactions"); `{"type":
   "<text>"}` types into what has focus; `{"wait": <seconds>}` waits.
+  `"where": "bottom"` on a tap takes the lowest on the screen of all that
+  match: harken's `player` shot plays a song from Home, then opens the
+  mini player, which says its title below the row it was played from.
 
   **Write steps from the accessibility tree, not by guessing.** Every shot
   is saved with the tree of the screen it was taken from, beside its
