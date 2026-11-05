@@ -100,5 +100,11 @@
         ]
       }
     ]
+  },
+  "hero": {
+    "name": "Money",
+    "line": "A household's budget, shared, on every device and offline",
+    "logo": "money/ios/Money/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    "screen": "budget"
   }
 }

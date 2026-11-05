@@ -158,5 +158,11 @@
         ]
       }
     ]
+  },
+  "hero": {
+    "name": "Harken",
+    "line": "Music, podcasts and sermons, from your own server, on every device",
+    "logo": "harken/ios/Harken/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    "screen": "home"
   }
 }

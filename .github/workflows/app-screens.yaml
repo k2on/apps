@@ -527,6 +527,20 @@ jobs:
           for a in "$branch"/apps/*/; do
             python3 -I .github/screens/manifest.py "$a" "${{ github.run_id }}" "$SHA"
           done
+      # Pillow and Inter from the flake's nixpkgs, as every tool these jobs use.
+      - uses: DeterminateSystems/nix-installer-action@main
+      # The README's heroes, from the captures just laid out: each app with a
+      # `hero` in its shots.json gets apps/<app>/hero-{light,dark}.png.
+      - name: Draw the heroes
+        run: |
+          branch="$RUNNER_TEMP/branch"
+          py=$(nix build --no-link --print-out-paths .#screens-python)
+          inter=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#inter)
+          for shots in */screens/shots.json; do
+            app=${shots%%/*}
+            [ -d "$branch/apps/$app" ] || continue
+            "$py/bin/python3" -I .github/screens/hero.py "$shots" "$branch/apps/$app" "$inter/share/fonts/truetype/Inter.ttc"
+          done
       - name: Publish
         working-directory: ${{ runner.temp }}/branch
         run: |

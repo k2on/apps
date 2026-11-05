@@ -284,6 +284,10 @@
           # CPU (tiny-skia: no window, no GPU), which the sandbox allows.
           docs = pkgs.runCommand "docs" { } "${docsCrate { }}/bin/docs $out";
 
+          # Python with Pillow, which draws the README's heroes from the
+          # published screenshots (.github/screens/hero.py).
+          screens-python = pkgs.python3.withPackages (ps: [ ps.pillow ]);
+
           # The ffmpeg the screens workflow cuts the phones' recordings with
           # (.github/screens/encode.sh), and nothing else: H.264 out through
           # x264, the native decoders and the MP4 and MOV containers, the
@@ -1110,7 +1114,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
+            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg screens-python xcodegen;
             inherit money-iced money-web money-web-server money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.

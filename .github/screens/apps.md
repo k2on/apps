@@ -152,6 +152,13 @@ which nix builds at the commit (see below).
   in part keeps what the tree had.
 - **`manifest.py`**: the docs' manifest, written for each app
   (`apps/<app>/manifest.json`).
+- **`hero.py`**: the README's picture of an app (`apps/<app>/hero-light.png`
+  and `hero-dark.png`), drawn on main's publish from the captures just laid
+  out: its logo and name, and one screen (its shots.json's `hero`) on the
+  desktop in a laptop and on each phone in a phone, the devices drawn by
+  the script from their `device.json`. A device with no capture of that
+  screen is left out. Pillow and Inter from the flake's nixpkgs
+  (`.#screens-python`, `nixpkgs#inter`).
 - **`compare.py`**: a PR's shots against main's (ImageMagick, more than a
   thousandth of the pixels more than a few percent off), as the PR's
   comment. A phone is a directory under `apps/<app>/`; the comment's
