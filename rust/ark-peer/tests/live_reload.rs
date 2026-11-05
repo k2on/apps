@@ -10,14 +10,18 @@ use arkdb::demo::demo as domain;
 use arkdb::demo::{Arrival, CreatePlaylist, Point};
 
 fn hub() -> Peer {
-    let c = arkdb::demo::hub(Config::of(Arc::new(domain())));
+    let c = Config {
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
+    };
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
 
 fn device() -> Peer {
     let c = Config {
         device: Some(Arrival { name: "d0".into() }.to_bytes()),
-        ..arkdb::demo::hub(Config::of(Arc::new(domain())))
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
     };
     let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()));
     p.linked = true;

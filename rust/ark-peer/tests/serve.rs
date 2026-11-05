@@ -296,7 +296,8 @@ fn a_web_build_is_its_own_validator() {
 fn the_live_space_is_restored_and_on_restore_authored() {
     let config = Config {
         live_keep: Some(8),
-        ..arkdb::demo::hub(config())
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..config()
     };
     let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
     let alice = dev("alice@phone").unwrap();

@@ -29,7 +29,8 @@ const KEEP: usize = 256;
 fn hub() -> Peer {
     let c = Config {
         live_keep: Some(KEEP),
-        ..arkdb::demo::hub(Config::of(Arc::new(domain())))
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
     };
     Peer::serve(c, Box::new(Memory::default()), 0)
 }
@@ -37,7 +38,8 @@ fn hub() -> Peer {
 fn device(k: usize) -> Peer {
     let c = Config {
         device: Some(Arrival { name: format!("d{k}") }.to_bytes()),
-        ..arkdb::demo::hub(Config::of(Arc::new(domain())))
+        live: Some(Arc::new(arkdb::demo::room())),
+        ..Config::of(Arc::new(domain()))
     };
     let who = dev(&format!("u{k}@d{k}")).unwrap();
     let mut p = Peer::open(c, who, Box::new(Memory::default()));
