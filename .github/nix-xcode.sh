@@ -16,6 +16,13 @@ shift 2
 flake="git+file://$src"
 added=
 status=0
+
+# Whether building <ref> would build Xcode's placeholder: Xcode not in the store.
+wants_xcode() {
+  local plan
+  plan=$(nix build --dry-run "$1" 2>&1)
+  grep -q -- '-Xcode_[^/]*\.app\.drv' <<< "$plan"
+}
 for attr in "$@"; do
   ref="$flake#packages.aarch64-darwin.$attr"
   if ! nix eval --raw "$ref.drvPath" > /dev/null 2>&1; then
@@ -23,13 +30,15 @@ for attr in "$@"; do
     status=2
     continue
   fi
-  if [ -z "$added" ] && nix build --dry-run "$ref" 2>&1 | grep -q -- '-Xcode_[^/]*\.app\.drv'; then
+  # Taken whole, then searched: `nix … | grep -q` under pipefail reads a
+  # match as a failure when grep leaves before nix has said everything.
+  if [ -z "$added" ] && wants_xcode "$ref"; then
     echo "$attr: to be built, so $xcode into the store" >&2
     start=$(date +%s)
     nix-store --add-fixed --recursive sha256 "$xcode" >&2
     echo "  added in $(( $(date +%s) - start ))s" >&2
     added=1
-    if nix build --dry-run "$ref" 2>&1 | grep -q -- '-Xcode_[^/]*\.app\.drv'; then
+    if wants_xcode "$ref"; then
       echo "::error::$xcode is not the Xcode flake.nix pins (its hash differs): pin this runner's (nix hash path), or select the one pinned" >&2
       exit 1
     fi
