@@ -58,6 +58,13 @@ when swiped toward the end, Gmail's way — the action's colour and glyph
 from under it, a tick where letting go acts, the row home after — with
 the same action on the row for TalkBack.
 
+**A page's pinned bar** (`PinnedBar.kt`): `PinnedBar`, back and a page's
+actions over its list, with a soft edge rather than a hairline once the
+list is under it; when the page's header has scrolled up out of view, a
+small copy of it (its art and its title) rises into the bar on a
+critically damped spring, and goes back down when the header returns.
+Tapped, it takes the list to its top. Under reduced motion it only fades.
+
 ## Verified
 
 The pieces harken uses are its tests' and screenshots' (`harken/android`).

@@ -31,6 +31,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.DropdownMenu
@@ -62,7 +66,7 @@ import dev.arkui.CoverCard
 import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.MoreButton
-import dev.arkui.PageBar
+import dev.arkui.PinnedBar
 import dev.arkui.Recompositions
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -131,21 +135,41 @@ private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
     }
 
 /**
+ * A page's list under its bar, pinned over it ([PinnedBar]): back, and once the header — the list's
+ * first item — has gone up under the bar, `title` beside its `art` there, which take the list back
+ * to its top. A page whose first thing is a picture under the status bar is `under` it.
+ */
+@Composable
+private fun Paged(
+    list: LazyListState,
+    title: String,
+    onBack: () -> Unit,
+    art: (@Composable (Dp) -> Unit)?,
+    under: Boolean = false,
+    actions: @Composable RowScope.() -> Unit = {},
+    content: LazyListScope.() -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = if (under) 0.dp else PinnedBar.HEIGHT), content = content)
+        PinnedBar(list, title, onBack, under = under, art = art, actions = actions)
+    }
+}
+
+/**
  * An album's page, laid out as a catalogue lays one out: the cover beside its title and who played
  * it, then its tracks under the works they are movements of, and at the foot when it came out, how
  * long it runs and who put it out. A record of no works (a pop record) is the same page with no
  * work headings, and its track numbers instead.
  */
 @Composable
-fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do) {
+fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do, list: LazyListState = rememberDestinationListState("album")) {
     Recompositions.hit("AlbumPage")
     val page = Page.ForAlbum(id)
     // Its name: its row's, or — the albums not caught up — what its tracks call it.
     val name = album?.name ?: tracks.firstNotNullOfOrNull { details[it.id]?.album } ?: ""
     val creator = album?.creator ?: tracks.firstOrNull()?.creator ?: ""
     val (by, small) = Catalogue.albumBy(album, creator)
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("album")) {
-        item { PageBar("", onBack = act::back) }
+    Paged(list, name, act::back, art = { side -> Cover(name, album?.art ?: "", side, Modifier.size(side), corner = 4.dp) }) {
         item {
             CoverHeader(
                 seed = name,
@@ -232,9 +256,11 @@ fun ArtistPage(
             first != null && first.index == 0 && first.offset + first.size > bar.getTop(density)
         }
     }
-    LazyColumn(Modifier.fillMaxSize(), state = list) {
+    // Their face in the bar once their header has gone: the portrait, or the banner cropped round.
+    val face = listOf(artist?.art, composer?.art, person?.art, banner).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
+    Paged(list, name, act::back, art = { side -> Cover(name, face, side, Modifier.size(side), round = true) }, under = banner.isNotEmpty()) {
         if (banner.isNotEmpty()) {
-            item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name, onBack = act::back) }
+            item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name) }
             if (works.isEmpty() && tracks.isNotEmpty()) {
                 item {
                     Row(Modifier.padding(start = Space.page, end = Space.page, top = Space.l), verticalAlignment = Alignment.CenterVertically) {
@@ -244,7 +270,6 @@ fun ArtistPage(
                 }
             }
         } else {
-            item { PageBar("", onBack = act::back) }
             item {
                 CoverHeader(
                     seed = name,
@@ -348,8 +373,7 @@ private fun WebLink(link: String) {
 fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, act: Do) {
     Recompositions.hit("WorkPage")
     val composer = work?.composer.orEmpty()
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("work")) {
-        item { PageBar("", onBack = act::back) }
+    Paged(rememberDestinationListState("work"), work?.title.orEmpty(), act::back, art = null) {
         item {
             Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.l)) {
                 if (composer.isNotEmpty()) {
@@ -367,7 +391,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
         item { HorizontalDivider(Modifier.padding(horizontal = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         if (recordings.isEmpty()) {
             item { Text("No recordings of it yet.", style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(Space.page)) }
-            return@LazyColumn
+            return@Paged
         }
         val first = recordings[0]
         item(key = "featured") {
@@ -419,13 +443,13 @@ fun RecordingPage(
     val composer = work?.composer.orEmpty()
     val who = take?.let(Catalogue::who).orEmpty()
     val year = take?.recorded ?: 0
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("recording")) {
-        item { PageBar("", onBack = act::back) }
+    val titled = Catalogue.recordingTitle(work, who)
+    Paged(rememberDestinationListState("recording"), titled, act::back, art = { side -> Cover(id, take?.art ?: "", side, Modifier.size(side), corner = 4.dp) }) {
         item {
             CoverHeader(
                 seed = id,
                 art = take?.art ?: "",
-                title = Catalogue.recordingTitle(work, who),
+                title = titled,
                 over = composer,
                 onOver = if (composer.isNotEmpty()) ({ act.open(Page.ForArtist(composer)) }) else null,
                 by = who,
@@ -503,8 +527,13 @@ fun ShowPage(
     // Each row's, found once rather than by every row as it scrolls in.
     val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
     val guestsBy = remember(people) { people.mapValues { OnEpisode.guests(it.value) } }
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
-        item { PageBar("", onBack = act::back) { if (feed != null) ShowMenu(title, feed, onUnfollow) } }
+    Paged(
+        rememberDestinationListState("show"),
+        title,
+        act::back,
+        art = { side -> Cover(title, show?.art ?: "", side, Modifier.size(side), corner = 4.dp) },
+        actions = { if (feed != null) ShowMenu(title, feed, onUnfollow) },
+    ) {
         item {
             PageHeader(
                 cover = { Cover(title, show?.art ?: "", Space.header, Modifier.size(Space.header)) },
@@ -755,8 +784,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
     Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("playlist")) {
-        item { PageBar("", onBack = act::back) }
+    Paged(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = 4.dp) }) {
         item {
             PageHeader(
                 cover = { Cover(name, "", Space.header, Modifier.size(Space.header)) },

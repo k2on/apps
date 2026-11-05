@@ -17,17 +17,28 @@
 import ArkUI
 import SwiftUI
 
-/// A catalogue's page: one scrolling column — with a `hero` banner, run up
-/// to the top of the screen under the status bar and the navigation bar.
-/// While the banner is under the bars, the navigation bar's background
-/// stands aside for it and the bars are light over the picture; once it has
-/// scrolled up past the status bar, the bars are the page's own again.
-private struct CataloguePage<Content: View>: View {
+/// A catalogue's page: its header, then one scrolling column — with a
+/// `hero` banner, run up to the top of the screen under the status bar and
+/// the navigation bar. While the banner is under the bars, the navigation
+/// bar's background stands aside for it and the bars are light over the
+/// picture; once it has scrolled up past the status bar, the bars are the
+/// page's own again. Once the header has gone up out of view, its `title`
+/// and its `art`, small, are in the bar (`inlineHeader`), and take the page
+/// back to its top.
+private struct CataloguePage<Art: View, Head: View, Content: View>: View {
     var hero = false
+    let title: String
+    @ViewBuilder let art: () -> Art
+    @ViewBuilder let head: () -> Head
     @ViewBuilder let content: () -> Content
 
     /// Whether the banner is still under the status bar.
     @State private var pictured = true
+    /// How tall the header is, and whether it has scrolled up out of view.
+    @State private var tall: CGFloat = .greatestFiniteMagnitude
+    @State private var gone = false
+    @State private var position = ScrollPosition(edge: .top)
+    @Environment(\.reducesMotion) private var still
 
     var body: some View {
         let under: Edge.Set = hero ? .top : []
@@ -35,9 +46,13 @@ private struct CataloguePage<Content: View>: View {
         let fold = Banner.height - Banner.statusBar
         let over = hero && pictured
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) { content() }
-                .padding(.bottom, Space.xl)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                head().onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                content()
+            }
+            .padding(.bottom, Space.xl)
         }
+        .scrollPosition($position)
         .ignoresSafeArea(.container, edges: under)
         .scrollEdges()
         .onScrollGeometryChange(for: Bool.self) { g in
@@ -45,6 +60,16 @@ private struct CataloguePage<Content: View>: View {
         } action: { _, now in
             pictured = now
         }
+        // Gone once all of it is under the bar; a banner, once it is past
+        // the status bar too, where the bar's own glass comes back.
+        .onScrollGeometryChange(for: Bool.self) { g in
+            g.contentOffset.y + g.contentInsets.top >= (hero ? fold : tall)
+        } action: { _, now in
+            gone = now
+        }
+        .inlineHeader(title, shown: gone, onTop: {
+            withAnimation(Springs.move.reduced(still)) { position.scrollTo(edge: .top) }
+        }, art: art)
         .toolbarBackgroundVisibility(over ? .hidden : .automatic, for: .navigationBar)
         .toolbarColorScheme(over ? .dark : nil, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -95,12 +120,16 @@ struct AlbumPage: View {
         let year = album?.released ?? 0
         let small = Spell.facts([performer == nil ? nil : creator, year > 0 ? String(year) : nil])
         let toCreator: (() -> Void)? = creator.isEmpty ? nil : { open(.page(.artist(creator))) }
-        CataloguePage {
+        let art = RowCover.url(model, album?.art ?? "")
+        CataloguePage(title: name) {
+            CoverView(seed: name, url: art, side: InlineHeader<EmptyView>.side, corner: 4)
+        } head: {
             RecordHeader(title: name, by: performer ?? creator, onBy: performer == nil ? toCreator : nil,
                          small: small, onSmall: performer == nil ? nil : toCreator, canPlay: !tracks.isEmpty,
                          onPlay: { model.play(tracks, at: 0, from: page) }, onShuffle: { model.shuffle(tracks, from: page) }) {
-                CoverView(seed: name, url: RowCover.url(model, album?.art ?? ""), side: Space.record)
+                CoverView(seed: name, url: art, side: Space.record)
             }
+        } content: {
             CatalogueTracks(tracks: tracks, page: page, creator: creator)
             RecordFoot(year: year, tracks: tracks, label: album?.label ?? "")
         }
@@ -163,18 +192,22 @@ struct ArtistPage: View {
         let listed = Catalogue.listed(works, all: all)
         let short = listed.count < works.count
         let by = Catalogue.initials(name)
-        CataloguePage(hero: !banner.isEmpty) {
+        CataloguePage(hero: !banner.isEmpty, title: name) {
+            // Their face: the portrait, or else the banner cropped round.
+            CoverView(seed: name, url: RowCover.url(model, portrait.isEmpty ? banner : portrait), side: InlineHeader<EmptyView>.side, round: true)
+        } head: {
             if !banner.isEmpty {
                 Banner(url: RowCover.url(model, banner), kind: kicker, name: name)
-                if let play = play {
-                    PlayShuffle(canPlay: true, onPlay: play, onShuffle: shuffle)
-                        .padding(.horizontal, Space.page)
-                        .padding(.top, Space.l)
-                }
             } else {
                 RecordHeader(over: kicker, title: name, small: life.isEmpty ? "" : counts, onPlay: play, onShuffle: shuffle) {
                     CoverView(seed: name, url: RowCover.url(model, portrait), side: Space.record, round: true)
                 }
+            }
+        } content: {
+            if !banner.isEmpty, let play = play {
+                PlayShuffle(canPlay: true, onPlay: play, onShuffle: shuffle)
+                    .padding(.horizontal, Space.page)
+                    .padding(.top, Space.l)
             }
             // Their own page on the web, where a feed gives one.
             if let web = face?.web {
@@ -251,7 +284,9 @@ struct WorkPage: View {
         let facts = work.map { Catalogue.facts($0) } ?? ""
         let read = model.recordings(of: id)
         let takes = read ?? []
-        CataloguePage {
+        CataloguePage(title: work?.title ?? "") {
+            EmptyView()
+        } head: {
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !composer.isEmpty {
                     Button { open(.page(.artist(composer))) } label: {
@@ -264,6 +299,7 @@ struct WorkPage: View {
             }
             .padding(.horizontal, Space.page)
             .padding(.vertical, Space.l)
+        } content: {
             Divider().padding(.horizontal, Space.page)
             if read != nil && takes.isEmpty {
                 Text("No recordings of it yet.").font(.subheadline).foregroundStyle(.quiet)
@@ -327,12 +363,17 @@ struct RecordingPage: View {
         let year = take?.recorded ?? 0
         let albums = model.albums(of: tracks)
         let people = Catalogue.people(composer: composer, credits: model.credits(of: id))
-        CataloguePage {
+        let title = work == nil ? who : Catalogue.title(work)
+        let art = RowCover.url(model, take?.art ?? "")
+        CataloguePage(title: title) {
+            CoverView(seed: id, url: art, side: InlineHeader<EmptyView>.side, corner: 4)
+        } head: {
             RecordHeader(over: composer, onOver: composer.isEmpty ? nil : { open(.page(.artist(composer))) },
-                         title: work == nil ? who : Catalogue.title(work), by: work == nil ? "" : who,
+                         title: title, by: work == nil ? "" : who,
                          small: year > 0 ? String(year) : "", canPlay: !tracks.isEmpty, onPlay: { model.play(tracks, at: 0, from: page) }) {
-                CoverView(seed: id, url: RowCover.url(model, take?.art ?? ""), side: Space.record)
+                CoverView(seed: id, url: art, side: Space.record)
             }
+        } content: {
             CatalogueTracks(tracks: tracks, page: page, creator: "", headings: false)
             RecordFoot(year: year, tracks: tracks, label: take?.label ?? "")
             if !albums.isEmpty {
@@ -377,6 +418,12 @@ struct ShowPage: View {
     let id: String
     @StateObject private var holding: Holding
     @EnvironmentObject private var model: Model
+    /// How tall the header is, and whether it has scrolled up out of view:
+    /// then it is small in the bar.
+    @State private var tall: CGFloat = .greatestFiniteMagnitude
+    @State private var gone = false
+    @Environment(\.reducesMotion) private var still
+    private static let head = "head"
 
     init(model: Model, id: String) {
         self.id = id
@@ -391,74 +438,89 @@ struct ShowPage: View {
         let title = show?.title ?? "Show"
         // The feed it is read from, when it is followed.
         let feed = model.subscription(of: id)
-        List {
-            PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
-                       facts: Spell.facts([Spell.count(episodes.count, "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
-                       onPlay: { model.play(episodes, at: 0, from: page) }, onShuffle: { model.shuffle(episodes, from: page) }) {
-                CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
-            }
-            .listRowSeparator(.hidden)
-            // Who hosts it, once: the newest episode's hosts, as its feed names them.
-            let hosts = PeopleEntry.hosts(episodes.first.flatMap { model.people[$0.id] } ?? [])
-            if !hosts.isEmpty {
-                PeopleLine(people: hosts, words: "Hosted by " + PeopleEntry.named(hosts), side: 26, font: .subheadline)
-                    .frame(maxWidth: .infinity)
-                    .listRowSeparator(.hidden)
-            }
-            if let about = show?.description, !about.isEmpty {
-                Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(6)
-                    .listRowSeparator(.hidden)
-            }
-            // How many of its episodes are not on the server yet, and why its
-            // feed could not be read last time: the desktop's.
-            let waiting = episodes.compactMap { model.download($0.id) }
-            if !waiting.isEmpty || feed.map({ !$0.error.isEmpty }) == true {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    if !waiting.isEmpty {
-                        let failed = waiting.filter { $0.state == "failed" }.count
-                        let going = waiting.first { $0.state == "downloading" }
-                        let said = ["\(waiting.count) not on the server yet", going?.said, failed > 0 ? "\(failed) could not be downloaded" : nil]
-                        Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.quiet)
+        ScrollViewReader { proxy in
+            List {
+                PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
+                           facts: Spell.facts([Spell.count(episodes.count, "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
+                           onPlay: { model.play(episodes, at: 0, from: page) }, onShuffle: { model.shuffle(episodes, from: page) }) {
+                    CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
+                }
+                .listRowSeparator(.hidden)
+                .id(Self.head)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                // Who hosts it, once: the newest episode's hosts, as its feed names them.
+                let hosts = PeopleEntry.hosts(episodes.first.flatMap { model.people[$0.id] } ?? [])
+                if !hosts.isEmpty {
+                    PeopleLine(people: hosts, words: "Hosted by " + PeopleEntry.named(hosts), side: 26, font: .subheadline)
+                        .frame(maxWidth: .infinity)
+                        .listRowSeparator(.hidden)
+                }
+                if let about = show?.description, !about.isEmpty {
+                    Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(6)
+                        .listRowSeparator(.hidden)
+                }
+                // How many of its episodes are not on the server yet, and why its
+                // feed could not be read last time: the desktop's.
+                let waiting = episodes.compactMap { model.download($0.id) }
+                if !waiting.isEmpty || feed.map({ !$0.error.isEmpty }) == true {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        if !waiting.isEmpty {
+                            let failed = waiting.filter { $0.state == "failed" }.count
+                            let going = waiting.first { $0.state == "downloading" }
+                            let said = ["\(waiting.count) not on the server yet", going?.said, failed > 0 ? "\(failed) could not be downloaded" : nil]
+                            Text(said.compactMap { $0 }.joined(separator: " · ")).font(.footnote).foregroundStyle(.quiet)
+                        }
+                        if let f = feed, !f.error.isEmpty {
+                            Text("Could not read its feed: \(f.error)").font(.footnote).foregroundStyle(.quiet)
+                        }
                     }
-                    if let f = feed, !f.error.isEmpty {
-                        Text("Could not read its feed: \(f.error)").font(.footnote).foregroundStyle(.quiet)
-                    }
-                }
-                .listRowSeparator(.hidden)
-            }
-            if show == nil {
-                ContentUnavailableView {
-                    Label { Text("This show is gone") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
-                } description: {
-                    Text("It was taken off this server.")
-                }
-                .listRowSeparator(.hidden)
-            } else if read != nil && episodes.isEmpty {
-                ContentUnavailableView {
-                    Label { Text("No episodes yet") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
-                } description: {
-                    Text("The server downloads a feed's newest episodes; they appear here as they arrive.")
-                }
-                .listRowSeparator(.hidden)
-            }
-            ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
-                // The signed-in person's place is the row's bar; everybody else's is said beside its play button.
-                let others = model.listened(t.id, on: id).filter { $0.userId != model.me }
-                EpisodeRow(track: t, detail: model.episode(t.id, on: id), others: ProgressEntry.said(others, me: model.me),
-                           people: PeopleEntry.guests(model.people[t.id] ?? []), from: page,
-                           onPlay: { model.play(episodes, at: i, from: page) })
-            }
-            // Older episodes, twenty at a time, while the feed has more than the library keeps.
-            if let f = feed, f.hasOlder {
-                Button("Fetch \(min(f.items - f.keep, 20)) Older Episodes") { model.fetchOlder(f, 20) }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Space.s)
                     .listRowSeparator(.hidden)
+                }
+                if show == nil {
+                    ContentUnavailableView {
+                        Label { Text("This show is gone") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
+                    } description: {
+                        Text("It was taken off this server.")
+                    }
+                    .listRowSeparator(.hidden)
+                } else if read != nil && episodes.isEmpty {
+                    ContentUnavailableView {
+                        Label { Text("No episodes yet") } icon: { Image.show(sermon: id.hasPrefix("sermon/")) }
+                    } description: {
+                        Text("The server downloads a feed's newest episodes; they appear here as they arrive.")
+                    }
+                    .listRowSeparator(.hidden)
+                }
+                ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
+                    // The signed-in person's place is the row's bar; everybody else's is said beside its play button.
+                    let others = model.listened(t.id, on: id).filter { $0.userId != model.me }
+                    EpisodeRow(track: t, detail: model.episode(t.id, on: id), others: ProgressEntry.said(others, me: model.me),
+                               people: PeopleEntry.guests(model.people[t.id] ?? []), from: page,
+                               onPlay: { model.play(episodes, at: i, from: page) })
+                }
+                // Older episodes, twenty at a time, while the feed has more than the library keeps.
+                if let f = feed, f.hasOlder {
+                    Button("Fetch \(min(f.items - f.keep, 20)) Older Episodes") { model.fetchOlder(f, 20) }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Space.s)
+                        .listRowSeparator(.hidden)
+                }
+            }
+            .listStyle(.plain)
+            .scrollEdges()
+            // Gone once all of the header is under the bar.
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentOffset.y + g.contentInsets.top >= tall
+            } action: { _, now in
+                gone = now
+            }
+            .inlineHeader(title, shown: gone, onTop: {
+                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(Self.head, anchor: .top) }
+            }) {
+                CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: InlineHeader<EmptyView>.side, corner: 4)
             }
         }
-        .listStyle(.plain)
-        .scrollEdges()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // The show's own settings, where it is followed: Unfollow.
@@ -486,6 +548,12 @@ struct PlaylistPage: View {
     let id: Id
     @StateObject private var holding: Holding
     @EnvironmentObject private var model: Model
+    /// How tall the header is, and whether it has scrolled up out of view:
+    /// then it is small in the bar.
+    @State private var tall: CGFloat = .greatestFiniteMagnitude
+    @State private var gone = false
+    @Environment(\.reducesMotion) private var still
+    private static let head = "head"
 
     init(model: Model, id: Id) {
         self.id = id
@@ -498,29 +566,44 @@ struct PlaylistPage: View {
         let tracks = read ?? []
         let playlist = model.playlist(id)
         let name = playlist?.name ?? "Playlist"
-        List {
-            PageHeader(kind: "Playlist", title: name, facts: Spell.facts([Spell.count(tracks.count, "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
-                       onPlay: { model.play(tracks, at: 0, from: page) }, onShuffle: { model.shuffle(tracks, from: page) }) {
-                CoverView(seed: name, url: "", side: Space.header).frame(width: Space.header, height: Space.header)
+        ScrollViewReader { proxy in
+            List {
+                PageHeader(kind: "Playlist", title: name, facts: Spell.facts([Spell.count(tracks.count, "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
+                           onPlay: { model.play(tracks, at: 0, from: page) }, onShuffle: { model.shuffle(tracks, from: page) }) {
+                    CoverView(seed: name, url: "", side: Space.header).frame(width: Space.header, height: Space.header)
+                }
+                .listRowSeparator(.hidden)
+                .id(Self.head)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+                if playlist == nil {
+                    ContentUnavailableView("This playlist is gone", systemImage: "music.note.list", description: Text("It was taken off this server, or it isn't yours."))
+                        .listRowSeparator(.hidden)
+                } else if read != nil && tracks.isEmpty {
+                    ContentUnavailableView("Nothing on it yet", systemImage: "music.note.list", description: Text("Put a song on it from the song's menu, anywhere in your library."))
+                        .listRowSeparator(.hidden)
+                }
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
+                    TrackRow(track: t, under: [t.creator, model.album(of: t)?.name].compactMap { $0 }.joined(separator: " · "), from: page,
+                             onPlay: { model.play(tracks, at: i, from: page) }) { RowCover(track: t) }
+                        .swipeActions {
+                            Button(role: .destructive) { model.remove(t, from: id) } label: { Label("Remove", systemImage: "minus.circle") }
+                        }
+                }
             }
-            .listRowSeparator(.hidden)
-            if playlist == nil {
-                ContentUnavailableView("This playlist is gone", systemImage: "music.note.list", description: Text("It was taken off this server, or it isn't yours."))
-                    .listRowSeparator(.hidden)
-            } else if read != nil && tracks.isEmpty {
-                ContentUnavailableView("Nothing on it yet", systemImage: "music.note.list", description: Text("Put a song on it from the song's menu, anywhere in your library."))
-                    .listRowSeparator(.hidden)
+            .listStyle(.plain)
+            .scrollEdges()
+            // Gone once all of the header is under the bar.
+            .onScrollGeometryChange(for: Bool.self) { g in
+                g.contentOffset.y + g.contentInsets.top >= tall
+            } action: { _, now in
+                gone = now
             }
-            ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
-                TrackRow(track: t, under: [t.creator, model.album(of: t)?.name].compactMap { $0 }.joined(separator: " · "), from: page,
-                         onPlay: { model.play(tracks, at: i, from: page) }) { RowCover(track: t) }
-                    .swipeActions {
-                        Button(role: .destructive) { model.remove(t, from: id) } label: { Label("Remove", systemImage: "minus.circle") }
-                    }
+            .inlineHeader(name, shown: gone, onTop: {
+                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(Self.head, anchor: .top) }
+            }) {
+                CoverView(seed: name, url: "", side: InlineHeader<EmptyView>.side, corner: 4)
             }
         }
-        .listStyle(.plain)
-        .scrollEdges()
         .navigationBarTitleDisplayMode(.inline)
     }
 }
