@@ -13,3 +13,14 @@ the three toolkits in step.
 Run the doc's Review Checklist on the diff before pushing, and say in the
 commit what was verified and what has not been seen on a device. Leave
 `ALWAYS_ANIMATE` / `alwaysAnimate` as they are unless the owner asks.
+
+Everything shared lives in arkui. Every motion value (stiffness, damping,
+fade, cap, flick speed, deceleration, press scale, entrance scale) is
+written once, in `arkui/theme.toml`'s `[motion]`, and generated into
+`MotionTokens` for Kotlin and Swift and `arkui::motion_tokens` for Rust by
+`nix run .#update-theme` (`checks.theme` fails if they drift). The
+libraries' `Springs` / `arkui::motion` are built on those tokens, and an
+app uses only the libraries' springs, transitions, press and haptics: no
+number, curve, spring or component of its own that another app could
+share. One that is missing is added to arkui (and to `theme.toml` if it is a
+value), then used from there.
