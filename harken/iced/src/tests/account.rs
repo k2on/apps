@@ -131,7 +131,7 @@ fn the_menu_signs_out() {
 /// Nobody is asked to sign in: a window with a server and no login goes, and
 /// a server turning the login away sends it again — **once a load**. A
 /// sign-in that fails, or a page that comes back without a code, says why in
-/// the status line and does not go again, or the window would go round and
+/// its note and does not go again, or the window would go round and
 /// round; a reload starts afresh (`auth::came_back` takes its mark).
 ///
 /// Falsified by `sign_in_unasked` ignoring `sign_in_tried`: after the failed

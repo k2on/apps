@@ -368,6 +368,8 @@ pub enum Message {
     Due,
     /// The which-key panel's delay went by for the prefix it was armed for.
     WhichDue(u64),
+    /// The note the toast was saying has had its time.
+    ToastDue(u64),
     /// A clock, running only while something on screen moves by itself: 50
     /// ms while a submenu's dwell counts,
     /// 250 ms while audio plays (the scrubber and the media session) —
@@ -831,6 +833,8 @@ pub struct App {
     /// Refusals, newest last, as `(what, why)`.
     pub refused: Vec<(String, String)>,
     pub note: String,
+    /// The note, said for a moment over the page (`arkui::toast`).
+    pub toast: arkui::toast::Toast,
 }
 
 impl App {
@@ -892,6 +896,7 @@ impl App {
             edits: Vec::new(),
             refused: Vec::new(),
             note: String::new(),
+            toast: arkui::toast::Toast::new(),
         }
     }
 
@@ -1106,7 +1111,7 @@ impl App {
     /// turns the login away — unless this load already has. A sign-in that
     /// came back refused or empty, or a login turned away again straight
     /// after it was made, would otherwise send the window round and round;
-    /// the reason is in the status line, and a reload starts afresh.
+    /// the reason is the note, said over the page, and a reload starts afresh.
     pub fn sign_in_unasked(&mut self) -> Task<Message> {
         match self.sign_in_tried {
             true => Task::none(),
@@ -1151,13 +1156,12 @@ impl App {
         // carries (`docs/plan-guards.md` D1).
         self.peer.client.lock().login(auth::who_of(&login), login.token.clone());
         let pending = self.peer.client.lock().pending_len();
+        // Who is signed in is the account button's to show, all the time;
+        // a note says only what is news — the changes made signed out,
+        // going up now — and the "signing in" said on the way is over.
         self.note = match pending {
-            0 => format!("signed in as {}", auth::who(&login)),
-            n => format!(
-                "signed in as {} — {n} change{} from before going up",
-                auth::who(&login),
-                if n == 1 { "" } else { "s" }
-            ),
+            0 => String::new(),
+            n => format!("{n} change{} made signed out, going up", if n == 1 { "" } else { "s" }),
         };
         self.peer.refresh();
         // A device is a login, so a new login is a new device — which is what
@@ -2617,6 +2621,10 @@ impl App {
         }
         let reacted = self.react();
         self.history.sync(&self.peer.source.place());
+        // Whatever the message came to is said for a moment over the page
+        // (`arkui::toast`), heard here once rather than wherever a note is
+        // written.
+        self.toast.heard(&self.note);
         Task::batch([task, reacted, self.want_covers_if_moved(), self.want_picture()])
     }
 
@@ -2843,8 +2851,8 @@ impl App {
             }
             Message::Key(key, mods) => {
                 self.keyed = Some(self.cursor);
-                // `None` is still typing: a count, a `g`, a search — drawn in
-                // the status line so nothing swallowed is a mystery.
+                // `None` is still typing: a count, a `g`, a search — said in
+                // the toast or the which-key panel, so nothing swallowed is a mystery.
                 let action = self.keys.press(&key, mods);
                 // The which-key panel follows what is half typed; a search
                 // is typed, not a prefix.
@@ -3230,6 +3238,7 @@ impl App {
             // What woke the window is whatever `react` finds.
             Message::Wake | Message::Due => {}
             Message::WhichDue(key) => self.which.due(key),
+            Message::ToastDue(key) => self.toast.due(key),
         }
         Task::none()
     }
@@ -3425,6 +3434,9 @@ impl App {
                     .with(key)
                     .map(|(key, ())| Message::WhichDue(key)),
             );
+        }
+        if let Some(timer) = self.toast.timer() {
+            subs.push(timer.map(Message::ToastDue));
         }
         // A transcript following the line being said stops when the wheel
         // scrolls it by hand.

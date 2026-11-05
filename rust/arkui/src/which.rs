@@ -131,7 +131,7 @@ pub fn entries(tables: &[&[Binding]], groups: &[&[Group]], prefix: &str) -> Vec<
 const KEYS_WIDTH: f32 = 56.0;
 
 /// The panel: `entries` after `prefix`, in a rounded surface at the
-/// window's bottom right, clear of a status line under it by `bottom`.
+/// window's bottom right, `bottom` clear of the foot, or of a play bar there.
 /// Small text, the keys in bold, what they do quieter beside them, two
 /// columns when there are many.
 pub fn view<'a, M: 'a>(prefix: &str, entries: &[(String, String)], bottom: f32) -> Element<'a, M> {

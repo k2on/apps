@@ -331,7 +331,7 @@ from anywhere else (GitHub Pages, a file) it opens alone. Alone is this
 device's own replica in a fixed place — `local` under
 `$XDG_DATA_HOME/harken`, in a browser in the page's memory, until it has a disk that can hold a library —
 and it is not a demo: the peer is its own authority, every change is
-sequenced as it is made and kept, and the status line says `alone`. The
+sequenced as it is made and kept, and the debug view (`D`) says `alone`. The
 line above the table has a server address and **connect**: that joins the
 server in place (`docs/plan-alone.md` §4). The chain sequenced alone is
 handed to it whole — the server adopts it by its facts and answers with the

@@ -113,10 +113,20 @@ impl Hash for Keyed {
 /// timer already running; with another key it is a new one, and the old is
 /// dropped. So a host keyed by a deadline arms exactly one timer for it.
 pub fn at(key: u64, delay: Duration) -> Subscription<()> {
-    Subscription::run_with(Due { key, delay }, |d: &Due| iced::futures::stream::once(sleep(d.delay)))
+    at_in("", key, delay)
+}
+
+/// [`at`], with its keys in a `space` of their own: a part that counts its
+/// own deadlines from one (a toast, [`crate::toast`]) cannot then land on
+/// a deadline of the app's, or of another part's, that happens to have the
+/// same number — the two would be one timer, and one of them would never
+/// fire.
+pub fn at_in(space: &'static str, key: u64, delay: Duration) -> Subscription<()> {
+    Subscription::run_with(Due { space, key, delay }, |d: &Due| iced::futures::stream::once(sleep(d.delay)))
 }
 
 struct Due {
+    space: &'static str,
     key: u64,
     delay: Duration,
 }
@@ -124,6 +134,7 @@ struct Due {
 impl Hash for Due {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "arkui::wake::at".hash(state);
+        self.space.hash(state);
         self.key.hash(state);
     }
 }
@@ -242,5 +253,10 @@ mod tests {
         };
         assert_eq!(key(at(7, Duration::from_millis(60))), key(at(7, Duration::from_millis(10))));
         assert_ne!(key(at(7, Duration::from_millis(60))), key(at(8, Duration::from_millis(60))));
+        assert_ne!(
+            key(at(7, Duration::from_millis(60))),
+            key(at_in("toast", 7, Duration::from_millis(60))),
+            "the same number in another space is another timer"
+        );
     }
 }
