@@ -1,0 +1,143 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"3" at 217,81 6x13
+"Settings" at 41,107 53x17
+"On Budget" at 20,138 53x13
+"Checking" at 41,165 60x17
+"$14,236.90" at 160,165 69x16
+"Savings" at 41,192 51x17
+"$6,900.00" at 168,193 61x16
+"Cash" at 41,220 32x17
+"$74.16" at 187,221 42x16
+"Chase Sapphire ••4417" at 41,248 122x17
+"-$177.49" at 175,249 54x16
+"Tracking" at 20,279 43x13
+"Mortgage" at 41,306 62x17
+"-$312,450.00" at 148,307 81x16
+"Retirement" at 41,334 73x17
+"$64,300.00" at 160,335 69x16
+"All Accounts" at 268,18 149x29
+"Every transaction in the household" at 268,49 210x16
+"-$227,116.43" at 953,23 119x21
+"98 transactions" at 987,45 85x14
+"+ Add Transaction" at 280,81 121x17
+"Add Account" at 433,81 82x17
+"Connect a Bank" at 545,81 103x17
+"Sync" at 678,81 31x17
+"Approve all (3)" at 739,81 96x17
+"Every account" at 298,119 86x16
+"Payee or bank text" [field] at 400,115 160x24
+"Any category" at 576,119 80x16
+"In and out" at 681,119 61x16
+"With transfers" at 768,119 85x16
+"Needs a look" at 879,119 78x16
+"Any time" at 983,119 54x16
+"Account" at 272,195 45x14
+"Date" at 402,195 26x14
+"Payee" at 498,195 33x14
+"Category" at 593,195 50x14
+"Memo" at 688,195 34x14
+"Outflow" at 752,195 43x14
+"Inflow" at 852,195 33x14
+"Chase Sapphire" at 272,230 102x17
+"2026-11-05" at 402,230 76x17
+"Thai Basil" at 498,230 63x17
+"Dining Out" at 593,230 70x17
+"$9.05" at 752,230 37x17
+"Approve" at 975,230 50x16
+"Chase Sapphire" at 272,264 102x17
+"2026-11-05" at 402,264 76x17
+"Transfer : Checking" at 498,264 82x17
+"$1,887.94" at 852,264 66x17
+"Checking" at 272,298 60x17
+"2026-11-05" at 402,298 76x17
+"Transfer : Chase Sapphire" at 498,298 81x17
+"$1,887.94" at 752,298 66x17
+"Chase Sapphire" at 272,332 102x17
+"2026-11-04" at 402,332 76x17
+"Amazon" at 498,332 53x17
+"Household" at 593,332 69x17
+"$17.98" at 752,332 45x17
+"Chase Sapphire" at 272,366 102x17
+"2026-11-04" at 402,366 76x17
+"Netflix" at 498,366 42x17
+"Subscriptions" at 593,366 83x17
+"$15.00" at 752,366 45x17
+"Approve" at 975,366 50x16
+"Checking" at 272,400 60x17
+"2026-11-03" at 402,400 76x17
+"State Farm" at 498,400 72x17
+"Insurance" at 593,400 64x17
+"$160.00" at 752,400 54x17
+"Chase Sapphire" at 272,434 102x17
+"2026-11-02" at 402,434 76x17
+"Whole Foods Market" at 498,434 79x17
+"Groceries" at 593,434 62x17
+"$135.46" at 752,434 54x17
+"Approve" at 975,434 50x16
+"Checking" at 272,468 60x17
+"2026-11-02" at 402,468 76x17
+"Transfer : Savings" at 498,468 82x17
+"$250.00" at 752,468 54x17
+"Savings" at 272,502 51x17
+"2026-11-02" at 402,502 76x17
+"Transfer : Checking" at 498,502 82x17
+"$250.00" at 852,502 54x17
+"Checking" at 272,536 60x17
+"2026-11-01" at 402,536 76x17
+"Greenway Property Mgmt" at 498,536 81x17
+"Rent" at 593,536 30x17
+"$1,850.00" at 752,536 66x17
+"Checking" at 272,570 60x17
+"2026-11-01" at 402,570 76x17
+"Riverside Schools" at 498,570 81x17
+"Ready to Assign" at 593,570 83x17
+"$2,240.00" at 852,570 66x17
+"Checking" at 272,604 60x17
+"2026-11-01" at 402,604 76x17
+"Acme Corp" at 498,604 71x17
+"Ready to Assign" at 593,604 83x17
+"$3,150.00" at 852,604 66x17
+"Chase Sapphire" at 272,638 102x17
+"2026-10-30" at 402,638 76x17
+"Trader Joe's" at 498,638 77x17
+"Groceries" at 593,638 62x17
+"$114.80" at 752,638 54x17
+"Chase Sapphire" at 272,672 102x17
+"2026-10-29" at 402,672 76x17
+"AMC Theatres" at 498,672 79x17
+"Entertainment" at 593,672 83x17
+"$26.74" at 752,672 45x17
+"Chase Sapphire" at 272,706 102x17
+"2026-10-28" at 402,706 76x17
+"Chipotle" at 498,706 54x17
+"Dining Out" at 593,706 70x17
+"$9.98" at 752,706 37x17
+"Chase Sapphire" at 272,740 102x17
+"2026-10-27" at 402,740 76x17
+"Costco" at 498,740 44x17
+"Groceries" at 593,740 62x17
+"$95.41" at 752,740 45x17
+"Chase Sapphire" at 272,774 102x17
+"2026-10-26" at 402,774 76x17
+"Chevron" at 498,774 55x17
+"Gas & Transit" at 593,774 83x17
+"$40.47" at 752,774 45x17
+"Chase Sapphire" at 272,808 102x17
+"2026-10-25" at 402,808 76x17
+"Pizzeria Delfina" at 498,808 79x17
+"Dining Out" at 593,808 70x17
+"$19.26" at 752,808 45x17
+"Chase Sapphire" at 272,842 102x17
+"2026-10-24" at 402,842 76x17
+"Home Depot" at 498,842 82x17
+"Household" at 593,842 69x17
+"$56.66" at 752,842 45x17
+"Chase Sapphire" at 272,876 102x17
+"2026-10-23" at 402,876 76x17
+"Costco" at 498,876 44x17
+"Groceries" at 593,876 62x17
+"$94.13" at 752,876 45x17
+"Receipt" at 1108,52 64x20
+"Select a transaction to see its receipt." at 1108,84 228x16

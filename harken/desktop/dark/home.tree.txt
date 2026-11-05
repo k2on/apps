@@ -1,0 +1,148 @@
+"Music" at 20,24 28x13
+"Songs" at 41,51 39x17
+"266" at 160,53 19x13
+"Albums" at 41,79 48x17
+"25" at 166,81 13x13
+"Artists" at 41,107 42x17
+"8" at 173,109 6x13
+"Shows" at 20,138 32x13
+"Podcasts" at 41,165 58x17
+"Sermons" at 41,193 57x17
+"Playlists" at 20,223 41x13
+"Favorites" at 41,250 60x17
+"Songs" at 224,16 74x29
+"266 tracks" at 310,22 64x16
+"Name" at 259,60 32x14
+"Artist" at 713,60 29x14
+"Album" at 985,60 35x14
+"Time" at 1348,60 27x14
+"I. Allegro" at 259,103 58x17
+"Antonio Vivaldi" at 702,103 98x17
+"String Concertos" at 967,103 109x17
+"3:23" at 1321,103 29x17
+"II. Larghetto e spiritoso" at 259,126 151x17
+"Antonio Vivaldi" at 702,126 98x17
+"String Concertos" at 967,126 109x17
+"3:52" at 1321,126 29x17
+"III. Allegro" at 259,149 65x17
+"Antonio Vivaldi" at 702,149 98x17
+"String Concertos" at 967,149 109x17
+"3:09" at 1321,149 29x17
+"I. Allegro – Adagio e spiccato – Allegro" at 259,172 247x17
+"Antonio Vivaldi" at 702,172 98x17
+"String Concertos" at 967,172 109x17
+"3:56" at 1321,172 29x17
+"II. Largo e spiccato" at 259,195 123x17
+"Antonio Vivaldi" at 702,195 98x17
+"String Concertos" at 967,195 109x17
+"2:14" at 1321,195 29x17
+"III. Allegro" at 259,218 65x17
+"Antonio Vivaldi" at 702,218 98x17
+"String Concertos" at 967,218 109x17
+"2:26" at 1321,218 29x17
+"I. Allegro" at 259,241 58x17
+"Antonio Vivaldi" at 702,241 98x17
+"String Concertos" at 967,241 109x17
+"3:16" at 1321,241 29x17
+"II. Largo" at 259,264 53x17
+"Antonio Vivaldi" at 702,264 98x17
+"String Concertos" at 967,264 109x17
+"3:57" at 1321,264 29x17
+"III. Allegro" at 259,287 65x17
+"Antonio Vivaldi" at 702,287 98x17
+"String Concertos" at 967,287 109x17
+"2:39" at 1321,287 29x17
+"I. Stabat mater dolorosa" at 259,309 158x17
+"Antonio Vivaldi" at 702,309 98x17
+"Stabat Mater" at 967,309 84x17
+"2:54" at 1321,309 29x17
+"II. Cujus animam gementem" at 259,332 184x17
+"Antonio Vivaldi" at 702,332 98x17
+"Stabat Mater" at 967,332 84x17
+"1:47" at 1321,332 29x17
+"III. O quam tristis" at 259,355 112x17
+"Antonio Vivaldi" at 702,355 98x17
+"Stabat Mater" at 967,355 84x17
+"1:53" at 1321,355 29x17
+"IV. Quis est homo" at 259,378 115x17
+"Antonio Vivaldi" at 702,378 98x17
+"Stabat Mater" at 967,378 84x17
+"2:50" at 1321,378 29x17
+"V. Quis non posset" at 259,401 122x17
+"Antonio Vivaldi" at 702,401 98x17
+"Stabat Mater" at 967,401 84x17
+"2:04" at 1321,401 29x17
+"VI. Pro peccatis suae gentis" at 259,424 179x17
+"Antonio Vivaldi" at 702,424 98x17
+"Stabat Mater" at 967,424 84x17
+"1:50" at 1321,424 29x17
+"VII. Eja mater, fons amoris" at 259,447 172x17
+"Antonio Vivaldi" at 702,447 98x17
+"Stabat Mater" at 967,447 84x17
+"2:43" at 1321,447 29x17
+"VIII. Fac ut ardeat" at 259,470 115x17
+"Antonio Vivaldi" at 702,470 98x17
+"Stabat Mater" at 967,470 84x17
+"1:38" at 1321,470 29x17
+"IX. Amen" at 259,493 59x17
+"Antonio Vivaldi" at 702,493 98x17
+"Stabat Mater" at 967,493 84x17
+"1:07" at 1321,493 29x17
+"Impromptu in G-flat major, D. 899" at 259,516 221x17
+"Franz Schubert" at 702,516 99x17
+"Impromptus" at 967,516 79x17
+"5:01" at 1321,516 29x17
+"I. Allegro" at 259,538 58x17
+"Antonio Vivaldi" at 702,538 98x17
+"Vivaldi: Concertos" at 967,538 118x17
+"3:19" at 1321,538 29x17
+"II. Largo" at 259,561 53x17
+"Antonio Vivaldi" at 702,561 98x17
+"Vivaldi: Concertos" at 967,561 118x17
+"4:42" at 1321,561 29x17
+"III. Allegro" at 259,584 65x17
+"Antonio Vivaldi" at 702,584 98x17
+"Vivaldi: Concertos" at 967,584 118x17
+"2:08" at 1321,584 29x17
+"Hungarian Dance No. 5" at 259,607 151x17
+"Johannes Brahms" at 702,607 113x17
+"Hungarian Dances" at 967,607 120x17
+"2:55" at 1321,607 29x17
+"Toccata and Fugue in D minor, BWV 565" at 259,630 264x17
+"Johann Sebastian Bach" at 702,630 149x17
+"Organ Works" at 967,630 85x17
+"8:34" at 1321,630 29x17
+"Magnificat" at 259,653 68x17
+"Antonio Vivaldi" at 702,653 98x17
+"Magnificat" at 967,653 68x17
+"1:05" at 1321,653 29x17
+"Et exultavit" at 259,676 74x17
+"Antonio Vivaldi" at 702,676 98x17
+"Magnificat" at 967,676 68x17
+"2:16" at 1321,676 29x17
+"Et misericordia" at 259,699 98x17
+"Antonio Vivaldi" at 702,699 98x17
+"Magnificat" at 967,699 68x17
+"2:30" at 1321,699 29x17
+"Fecit potentiam" at 259,722 102x17
+"Antonio Vivaldi" at 702,722 98x17
+"Magnificat" at 967,722 68x17
+"0:29" at 1321,722 29x17
+"Deposuit potentes" at 259,745 119x17
+"Antonio Vivaldi" at 702,745 98x17
+"Magnificat" at 967,745 68x17
+"0:55" at 1321,745 29x17
+"Esurientes" at 259,768 68x17
+"Antonio Vivaldi" at 702,768 98x17
+"Magnificat" at 967,768 68x17
+"1:40" at 1321,768 29x17
+"Suscepit Israel" at 259,790 95x17
+"Antonio Vivaldi" at 702,790 98x17
+"Magnificat" at 967,790 68x17
+"0:46" at 1321,790 29x17
+"Sicut locutus est" at 259,813 108x17
+"Antonio Vivaldi" at 702,813 98x17
+"Magnificat" at 967,813 68x17
+"2:00" at 1321,813 29x17
+"nothing playing — pick a track (the desktop build has no audio device; the browser one streams)" at 16,860 583x16
+"Desktop" at 1365,860 49x16
