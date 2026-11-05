@@ -341,12 +341,16 @@ private fun GlassMenu(open: Boolean, held: Float?, onDismiss: () -> Unit, sheet:
     }
 }
 
+// How far apart the merge's capsules start: far enough that their slide together is seen frame
+// by frame, rather than over in the spring's first few (the iPhone's is the same).
+private val MERGE_APART = 80.dp
+
 /** Three capsules in one glass container, apart, or touching (`together`) and so one surface. */
 @Composable
 private fun GlassMerge(together: Boolean) {
     GlassContainer(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainer), spacing = glassReach) {
         Screen { TabTitle("Glass") }
-        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(if (together) 0.dp else 40.dp)) {
+        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(if (together) 0.dp else MERGE_APART)) {
             for (l in listOf("A", "B", "C")) {
                 Box(Modifier.glass(id = l).size(width = 64.dp, height = 44.dp), contentAlignment = Alignment.Center) {
                     Text(l, style = MaterialTheme.typography.titleMedium)

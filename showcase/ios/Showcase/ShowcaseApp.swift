@@ -493,7 +493,10 @@ private struct GlassMergeShot: View {
             .padding(.horizontal, Space.page)
             .frame(maxWidth: .infinity, alignment: .leading)
             GlassEffectContainer(spacing: glassReach) {
-                HStack(spacing: together ? 0 : 40) {
+                // Far enough apart that their slide together is seen frame
+                // by frame, rather than over in the spring's first few
+                // (Android's is the same).
+                HStack(spacing: together ? 0 : 80) {
                     ForEach(["A", "B", "C"], id: \.self) { l in
                         Text(l)
                             .font(.headline)
