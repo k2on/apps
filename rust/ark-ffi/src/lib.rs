@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::log::EntryId;
 use ark::peer::Ctx;
-use ark_peer::driven::{Driven, Locked};
+use ark_peer::handle::{Handle, Locked};
 use ark_peer::link::Dial;
 use ark_peer::{Config, Files, Patch, Watched};
 
@@ -200,10 +200,10 @@ impl Held<'_> {
     }
 }
 
-/// The peer, driven on a thread of its own ([`Driven`]), the bridge's
+/// The peer, on a thread of its own ([`Handle`]), the bridge's
 /// state, and who is told when anything moved.
 struct Shared {
-    peer: Driven,
+    peer: Handle,
     state: Mutex<State>,
     listener: Mutex<Option<Arc<dyn Listener>>>,
 }
@@ -283,7 +283,7 @@ impl Peer {
         // What this device does goes to its server (docs/plan-observe.md).
         let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
         let shared = Arc::new(Shared {
-            peer: Driven::new(peer),
+            peer: Handle::spawn(peer),
             state: Mutex::default(),
             listener: Mutex::new(None),
         });

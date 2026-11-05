@@ -26,7 +26,7 @@ use crate::domain::{
 use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
-use crate::client::{Driven, Replica};
+use crate::client::{Handle, Replica};
 use crate::places::{Place, Source};
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
@@ -138,7 +138,7 @@ fn rows<T>(slot: &Option<Watched<T>>) -> &[T] {
 pub struct Peer {
     /// The replica, on a thread of its own (`ark_peer::driven`): what it
     /// takes in from its server is never taken in on the window's.
-    pub client: Driven,
+    pub client: Handle,
     views: Views,
     /// The playlist the library is read against, which is what gives every
     /// row its `on_playlist`. The domain has no favorites of its own — a
@@ -235,7 +235,7 @@ impl Peer {
         let seen = client.state();
         let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
         let mut peer = Peer {
-            client: Driven::new(client),
+            client: Handle::spawn(client),
             views,
             playlist,
             source: Source::Library,

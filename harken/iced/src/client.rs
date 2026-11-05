@@ -14,10 +14,10 @@ use std::sync::{Arc, OnceLock};
 
 use ark::domain::Domain;
 use ark::peer::Ctx;
-pub use ark_peer::driven::Driven;
 pub use ark_peer::link::Wake;
 #[cfg_attr(all(feature = "demo", not(test)), allow(unused_imports))]
 pub use ark_peer::nobody;
+pub use ark_peer::Handle;
 pub use ark_peer::{monotonic_ms, now_ms, Outcome, Peer as Replica};
 use ark_peer::{Config, Disk, Memory};
 

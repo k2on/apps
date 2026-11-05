@@ -10,8 +10,8 @@
 //!   maintained views a UI draws (§1.10);
 //! - **a server** ([`Peer::serve`]) is the authority of each space; it
 //!   **listens** (`hub`: the connections, each with its identity and its
-//!   feed, routed; the journal beside the log), natively on a thread of its
-//!   own (`handle`) and, with the `server` feature, on a socket (`serve`:
+//!   feed, routed; the journal beside the log), on a thread of its own
+//!   (`handle`, a device's too) and, with the `server` feature, on a socket (`serve`:
 //!   the sync socket, the web build's routes and
 //!   sign-in — axum and tokio, which a phone or a browser never links).
 //!
@@ -61,8 +61,8 @@
 
 pub mod app;
 pub mod disk;
-pub mod driven;
 pub mod files;
+pub mod handle;
 mod hub;
 pub mod instance;
 mod jobs;
@@ -72,8 +72,6 @@ pub mod observe;
 pub mod signed;
 pub mod watched;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod handle;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod serve;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -98,7 +96,8 @@ pub use ark::file::FileRef;
 pub use ark::peer::{Fold, Scoping};
 pub use disk::{Disk, Files, Memory};
 #[cfg(not(target_arch = "wasm32"))]
-pub use handle::{dev, Authenticate, Handle};
+pub use handle::Authenticate;
+pub use handle::{dev, Handle};
 pub use hub::{Called, ConnId, Deliver};
 pub use instance::Instance;
 pub use link::{Event, Pumped, Wake};

@@ -17,7 +17,7 @@
 //!
 //! A wire is made by a [`Dial`]: [`socket`] is a WebSocket (`ws://…/sync`)
 //! on a thread of its own natively and the page's own in a browser; the
-//! server's in-process transport (`serve::Handle::dialer`) is another.
+//! server's in-process transport (`handle::Handle::dialer`) is another.
 //! Each rings the peer's [`Wake`] whenever it has something to say, and
 //! [`Peer::pump`] takes it in.
 

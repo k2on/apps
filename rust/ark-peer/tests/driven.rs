@@ -1,4 +1,4 @@
-//! A peer driven on its own thread (`ark_peer::driven`): what its server
+//! A peer on its own thread (`ark_peer::handle`): what its server
 //! sends is taken in with nobody pumping it, the app told; what the app
 //! has it do through the lock is sent; and a peer held twice on one thread
 //! is said, not waited on for ever.
@@ -8,26 +8,25 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_peer::driven::Driven;
 use ark_peer::link::bell;
-use ark_peer::{dev, Memory, Peer};
+use ark_peer::{dev, Handle, Memory, Peer};
 use support::{config, named};
 
-fn hub() -> ark_peer::Handle {
-    ark_peer::Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
+fn hub() -> Handle {
+    Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
 }
 
 /// `token`'s device, linked to `hub`, driven.
-fn driven(token: &str, hub: &ark_peer::Handle) -> Driven {
+fn driven(token: &str, hub: &Handle) -> Handle {
     let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()));
     p.set_token(Some(token.into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
-    Driven::new(p)
+    Handle::spawn(p)
 }
 
 /// Waits up to two seconds for `f` to hold of the driven peer, reading it
 /// through the lock as an app does.
-fn until(d: &Driven, what: &str, f: impl Fn(&Peer) -> bool) {
+fn until(d: &Handle, what: &str, f: impl Fn(&Peer) -> bool) {
     let held = ark_peer::link::until(Duration::from_secs(2), Duration::from_millis(5), || f(&d.lock()));
     assert!(held, "never: {what}");
 }
@@ -61,7 +60,7 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
 #[should_panic(expected = "held already on this thread")]
 fn a_peer_held_twice_on_one_thread_is_said() {
     let p = Peer::open(config(), dev("alice@laptop").unwrap(), Box::new(Memory::default()));
-    let d = Driven::new(p);
+    let d = Handle::spawn(p);
     let _held = d.lock();
     let _again = d.lock();
 }
@@ -87,7 +86,7 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
     p.log.machine.part = Some(16 << 10);
     p.set_token(Some("alice@laptop".into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));
-    let alice = Driven::new(p);
+    let alice = Handle::spawn(p);
     let (told, rang) = bell();
     alice.set_waker(told);
     until(&alice, "alice filled", |p| {

@@ -396,14 +396,14 @@ fn fill(driven: bool) {
     let made: std::sync::Arc<std::sync::Mutex<Vec<super::Queues>>> = Default::default();
     app.peer.client.lock().connect_with("ws://queues", super::Queues::dialer(made.clone()));
     let _ = app.update(crate::Message::Due);
-    // Driven, the dial is the driver's, made on its thread.
+    // On its thread, the dial is the driver's, made on its thread.
     let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || !made.lock().unwrap().is_empty());
     let q = made.lock().unwrap()[0].clone();
     q.push(ark_peer::Event::Open);
     let (mut worst, mut total, mut wakes) = (Duration::ZERO, Duration::ZERO, 0);
     let t0 = Instant::now();
     for _ in 0..10_000 {
-        // Driven, the window wakes once its driver took in what came.
+        // On its thread, the window wakes once its driver took in what came.
         if driven {
             let head = server.log().head();
             let done = || {
