@@ -99,7 +99,9 @@ All of it is in `<app>/screens/`:
   exactly that (`a|b`, `"where": "bottom"`, `"optional"` and `"unless"` as
   the phones' taps have them); `{"hover": "<text>"}` moves the pointer over
   it and leaves it there, so the shot is drawn pointed at it (a shot is
-  otherwise drawn with no pointer); `{"type": "<text>"}` types into what has the
+  otherwise drawn with no pointer); `{"scroll": "<text>", "by": <pixels>}`
+  turns the wheel over it, `by` down (negative: up), for a page no key
+  scrolls; `{"type": "<text>"}` types into what has the
   keys, and a key no widget takes goes on to the app's own, the vim keys;
   `{"key": "ctrl+k"}` presses one (`Enter`, `Escape`, `Tab`, `Backspace`,
   `Space`, the arrows, or a character, after `ctrl+`, `shift+`, `alt+`,

@@ -25,6 +25,7 @@ pub mod button;
 pub mod cards;
 mod clipboard;
 pub mod command;
+pub mod compact;
 pub mod context;
 pub mod dialog;
 pub mod edge;

@@ -97,8 +97,10 @@ pub struct Card<M> {
 /// because the keyboard has to agree about where `l` lands: pass the same
 /// pane width the keyboard's grid was built from. `on_hover(i)` is
 /// sent when the pointer reaches card `i` — one highlight, however you moved
-/// it — `scroll` is the scrollable's id, for [`crate::scroll::reveal`], and
-/// `on_scroll` hears where it was scrolled to.
+/// it — `scroll` is the scrollable's id, for [`crate::scroll::reveal`],
+/// `band` is how tall the band is that floats over the grid's top, where
+/// it goes soft as it scrolls under it ([`crate::edge`]), and `on_scroll`
+/// hears where it was scrolled to.
 #[allow(clippy::too_many_arguments)]
 pub fn view<'a, M: Clone + 'a>(
     shelf: Shelf,
@@ -108,6 +110,7 @@ pub fn view<'a, M: Clone + 'a>(
     empty: &'a str,
     on_hover: impl Fn(usize) -> M,
     scroll: &'static str,
+    band: Option<f32>,
     on_scroll: impl Fn(iced::widget::scrollable::Viewport) -> M + 'a,
 ) -> Element<'a, M> {
     if cards.is_empty() {
@@ -131,15 +134,17 @@ pub fn view<'a, M: Clone + 'a>(
         right: shelf.padding + SCROLLBAR,
         ..Padding::new(shelf.padding)
     };
-    container(
-        scrollable(container(page).padding(padding))
-            .id(scroll)
-            .on_scroll(on_scroll)
-            .style(style::bars),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    let page: Element<'a, M> = container(page).padding(padding).into();
+    // Under something floating at the window's top, the scroll edge there
+    // ([`crate::edge`]), on the page's ground.
+    let page = match band {
+        Some(band) => crate::edge::faded(page, band, |t| crate::theme::of(t).background.base.color),
+        None => page,
+    };
+    container(scrollable(page).id(scroll).on_scroll(on_scroll).style(style::bars))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 /// How far the focus's ground reaches past a card's picture on each side.

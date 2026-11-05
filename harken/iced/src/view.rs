@@ -305,13 +305,75 @@ impl App {
         }
     }
 
+    /// What this page's small header says once its own has scrolled away
+    /// (`arkui::compact`): how far down the page the header ends, as the
+    /// band under the account's face sees it, the name, and the header's
+    /// picture with its corner. `None` where the header never scrolls —
+    /// Songs and a playlist keep theirs over the list — or there is none.
+    pub(crate) fn compact_of(&self) -> Option<Small> {
+        let p = &self.peer;
+        let band = PAGE_PADDING + account::HEIGHT;
+        let cover = PAGE_PADDING + self.cover_side() - band;
+        let title = p.source.title().to_string();
+        // A page titled in its first line: gone once that line is off the
+        // top, the padding over it and the title's own line.
+        let titled = (PAGE_PADDING + 32.0, title.clone(), None);
+        let half = arkui::compact::ART / 2.0;
+        let (after, title, art) = match &p.source {
+            Source::Album(id, _) => {
+                let art = p.albums().iter().find(|a| &a.id == id).map(|a| a.art.clone()).unwrap_or_default();
+                (cover, title, Some((art, 4.0)))
+            }
+            Source::Artist(name) => match self.banner_of(name) {
+                Some(b) => (hero::height(self.pane_width()) - band, title, Some((b.to_string(), half))),
+                None => {
+                    let artist = p.artists().iter().find(|a| &a.name == name).map(|a| a.art.clone());
+                    let composer = p.composers().iter().find(|c| &c.name == name).map(|c| c.art.clone());
+                    let person = p.person_named(name).map(|x| x.art.clone());
+                    let art = [artist, composer, person].into_iter().flatten().find(|a| !a.is_empty());
+                    (cover, title, Some((art.unwrap_or_default(), half)))
+                }
+            },
+            Source::Show(id, _) => {
+                let art = p.shows().iter().find(|s| &s.id == id).map(|s| s.art.clone()).unwrap_or_default();
+                (cover, title, Some((art, 4.0)))
+            }
+            Source::Work(..) | Source::Recording(..) => (cover, title, None),
+            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings => titled,
+            _ => return None,
+        };
+        Some(Small { after, title, art })
+    }
+
+    /// The small header in the band, while it is in (`arkui::compact`).
+    pub(crate) fn view_compact(&self) -> Option<Element<'_, Message>> {
+        let now = iced::time::Instant::now();
+        if !self.compact.showing(now) {
+            return None;
+        }
+        let Small { title, art, .. } = self.compact_of()?;
+        let art = art.map(|(path, corner)| self.picture(&title, &path, arkui::compact::ART, corner));
+        Some(arkui::compact::view(art, &title, self.compact.at(now), Message::PageTop))
+    }
+
     /// A grid of cards and the cursor on one of them — laid out `columns()`
     /// across, the same division the keyboard walks.
     fn view_cards(&self, cards: Vec<cards::Card<Message>>, empty: &'static str) -> Element<'_, Message> {
         let cursor = self.has_keys(Pane::Tracks).then_some(self.at(Pane::Tracks));
-        cards::view(SHELF, &cards, self.pane_width(), cursor, empty, Message::HoverAt, TRACKS, |v| {
-            Message::PageScrolled(v.absolute_offset().y)
-        })
+        // The grid starts at the window's top, under the face, as a page
+        // `scrolled` does: its scroll edge is the face's band.
+        let band = PAGE_PADDING + account::HEIGHT;
+        cards::view(
+            SHELF,
+            &cards,
+            self.pane_width(),
+            cursor,
+            empty,
+            Message::HoverAt,
+            TRACKS,
+            Some(band),
+            |v| Message::PageScrolled(v.absolute_offset().y),
+        )
     }
 
     /// The header every page that is *about* something opens with.
@@ -1950,7 +2012,9 @@ impl App {
             .spacing(12)
             .align_y(Alignment::Center)
             .into(),
-            false => text("").into(),
+            // Otherwise the page's small header, once its own has scrolled
+            // up out of sight, on the band beside the face.
+            false => self.view_compact().unwrap_or_else(|| text("").into()),
         };
         let mut bar = row![container(left).width(Length::Fill)].align_y(Alignment::Center);
         if let Some(account) = self.account() {
@@ -2642,6 +2706,15 @@ fn padded(page: Element<'_, Message>) -> Element<'_, Message> {
             left: GUTTER,
         })
         .into()
+}
+
+/// What a page's small header says (`App::compact_of`).
+pub(crate) struct Small {
+    /// How far down the page its own header ends, as the band sees it.
+    pub after: f32,
+    pub title: String,
+    /// The header's picture and its corner.
+    pub art: Option<(String, f32)>,
 }
 
 /// `body`, opening `to` when clicked, with the pointer a hand over it; just
