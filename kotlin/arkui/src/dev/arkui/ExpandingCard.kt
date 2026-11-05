@@ -16,7 +16,7 @@
 // going: the offset plus Apple's projection of the release's speed
 // (`Springs.nearest`), so a short flick up opens it and a long slow drag let
 // go below half closes it. The settle is a spring that starts at the
-// release's speed and is done within 300 ms however slowly it was let go,
+// release's speed and is done within 450 ms however slowly it was let go,
 // critically damped unless the release was a flick (`Springs.settle`). A tap
 // on the bar runs it up along the same path, from rest, critically damped;
 // and the system's back gesture previews it down a little way — no further,

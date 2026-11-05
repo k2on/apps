@@ -79,8 +79,13 @@ public object Springs {
      */
     public const val REST: Float = 0.0005f
 
-    /** The most a settle takes, however slowly it was let go: it is where it was going by then. */
-    public const val CAP_MS: Int = 300
+    /**
+     * The most a settle takes, however slowly it was let go: it is where it was going by then.
+     * Long enough that a critically damped settle at [STIFFNESS] comes to rest on its own first —
+     * from 2000 px away it is within half a pixel at about 410 ms — so the cap never cuts a
+     * visible last step; it bounds only a release the tuning did not see.
+     */
+    public const val CAP_MS: Int = 450
 
     /**
      * How fast a release has to be moving to count as a flick, and so settle on [MOMENTUM]: about
