@@ -205,6 +205,25 @@ jobs:
         continue-on-error: true
         run: bash .github/strict-ios.sh c-kernel
 
+      # Run six: a derivation's own rules apply only with nix's sandbox off
+      # (__noChroot). The money app so: with nothing in its place, and
+      # with rules of our own as near nix's sandbox as they can be written.
+      - name: D, the money app, nix's sandbox off
+        id: d3
+        continue-on-error: true
+        run: bash .github/strict-ios.sh d-app-open
+
+      - name: D, the money app, nix's sandbox off and our own tight rules in its place
+        id: d4
+        continue-on-error: true
+        run: |
+          bash .github/strict-ios.sh f-hosts-tight
+          bash .github/strict-ios.sh d-app-tight
+
+      - name: D, what the tight rules denied
+        if: always()
+        run: log show --last 90m --style compact --predicate 'eventMessage CONTAINS "deny" AND eventMessage CONTAINS "Sandbox"' 2>/dev/null | grep -i -E "xcodebuild|swift|clang|ibtool|actool|nixbld" | sed -E 's/^[^ ]+ [^ ]+ //' | sort | uniq -c | sort -rn | head -40 || true
+
       - name: D, the money app, reaching FSEvents alone
         id: d0
         continue-on-error: true
@@ -238,6 +257,8 @@ jobs:
             echo "| F, own sandbox rules applied (see its log) | ${{ steps.f.outcome }} |"
             echo "| G, who the build is (see its log) | ${{ steps.g.outcome }} |"
             echo "| C, money's kernel | ${{ steps.c.outcome }} |"
+            echo "| D, the money app, nix's sandbox off | ${{ steps.d3.outcome }} |"
+            echo "| D, the money app, off with our own tight rules | ${{ steps.d4.outcome }} |"
             echo "| D, the money app, FSEvents alone | ${{ steps.d0.outcome }} |"
             echo "| D, the money app, Xcode's services | ${{ steps.d1.outcome }} |"
             echo "| D, the money app, any service | ${{ steps.d2.outcome }} |"

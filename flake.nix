@@ -821,6 +821,7 @@
               '';
               profiles = {
                 none = "";
+                open = "";
                 xcode-services = ''
                   (allow mach-lookup
                     (global-name-prefix "com.apple.CoreSimulator")
@@ -840,6 +841,44 @@
                 # Everything, for this one build: if xcodebuild falls even so,
                 # a derivation's own rules are not applied at all.
                 everything = "(allow default)";
+                # Run six: a derivation's own rules are not applied to a
+                # sandboxed build at all (even `everything` left /etc/hosts
+                # unread). They are only for a build with __noChroot, which
+                # nix's sandbox is then off for. So: off, and in its place
+                # this, as near to nix's own as it can be written, with
+                # xcodebuild's one need besides — the store and the system
+                # read, the build's own directories written, FSEvents.
+                tight = ''
+                  (version 1)
+                  (deny default)
+                  (allow process-fork process-exec signal sysctl-read process-info*)
+                  (allow file-read-metadata)
+                  (allow file-read*
+                    (subpath "/nix/store") (subpath "/System") (subpath "/usr/lib") (subpath "/usr/share")
+                    (subpath "/bin") (subpath "/usr/bin") (subpath "/private/var/db/timezone")
+                    (subpath "/Library/Apple") (subpath "/private/var/db/dyld")
+                    (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")
+                    (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper")
+                    (literal "/private/etc/passwd") (literal "/private/etc/group"))
+                  (allow file-read* file-write*
+                    (subpath "/nix/var/nix/builds") (subpath "/private/tmp") (subpath "/private/var/folders")
+                    (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))
+                  (allow file-write* (subpath "/nix/store"))
+                  (allow ipc-posix-shm* ipc-posix-sem mach-register)
+                  (allow mach-lookup
+                    (global-name "com.apple.FSEvents")
+                    (global-name "com.apple.system.opendirectoryd.libinfo")
+                    (global-name "com.apple.system.logger")
+                    (global-name "com.apple.system.notification_center")
+                    (global-name "com.apple.logd")
+                    (global-name "com.apple.diagnosticd")
+                    (global-name "com.apple.coreservices.launchservicesd")
+                    (global-name "com.apple.lsd.mapdb")
+                    (global-name "com.apple.CoreServices.coreservicesd")
+                    (global-name "com.apple.SecurityServer")
+                    (global-name "com.apple.cfprefsd.daemon")
+                    (global-name "com.apple.cfprefsd.agent"))
+                '';
                 # Only to see whether a derivation's own rules are applied
                 # at all under the strict sandbox (F).
                 hosts = ''
@@ -897,6 +936,9 @@
                 src = only [ "money/ios" "swift/ArkUI" ];
                 nativeBuildInputs = [ xcodegen ];
                 __sandboxProfile = profiles.${profile};
+                # The two tried with nix's sandbox off (`open` for the whole
+                # build, `tight` for its own rules in nix's place).
+                __noChroot = builtins.elem profile [ "open" "tight" ];
                 buildPhase = ''
                   runHook preBuild
                   ${setup}
@@ -942,6 +984,9 @@
               g-who-all-services = whoWith "all-services";
               c-kernel = kernel;
               d-app-fsevents = appWith "fsevents";
+              d-app-open = appWith "open";
+              d-app-tight = appWith "tight";
+              f-hosts-tight = (hostsWith "tight").overrideAttrs (_: { __noChroot = true; });
               d-app-xcode-services = appWith "xcode-services";
               d-app-all-services = appWith "all-services";
             };
