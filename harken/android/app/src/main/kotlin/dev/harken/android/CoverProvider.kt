@@ -58,8 +58,8 @@ class CoverProvider : ContentProvider() {
 
 /** The URIs [CoverProvider] answers, and the pictures behind them. */
 object CarArt {
-    /** The provider's authority, as the manifest declares it. */
-    const val AUTHORITY = "dev.harken.android.art"
+    /** The provider's authority, as the manifest declares it: the app's id's (us.koon.harken). */
+    const val AUTHORITY = "us.koon.harken.art"
 
     /** What a car is given when it does not say what size it draws at. */
     const val SIZE = 320
