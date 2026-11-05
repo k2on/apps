@@ -156,14 +156,17 @@ for theme in light dark; do
     steps="${RESULTS:-$out/../steps}/$app/$theme/$id"
     mkdir -p "$steps"
     n=0
-    while read -r s; do
+    # The steps on a descriptor of their own: `adb shell` reads standard
+    # input, and on it would take every step after the first (a shot of
+    # one step never showed it; harken's player, of six, ran only one).
+    while read -r s <&4; do
       [ -n "$s" ] || continue
       n=$((n + 1))
       # A step that fails fails the capture (as the iPhone's test does):
       # under `set -e`, a failure inside `a && b` would be passed over.
       step "$s" || { echo "::error::$app android $theme $id: step $s failed"; dump | python3 -I "$here/ui.py" --tree > "$steps/$n-failed.txt" || true; exit 1; }
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
-    done < <(jq -c '.steps[]?' <<< "$shot")
+    done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
     { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
     adb exec-out screencap -p > "$out/$theme/$id.png"
