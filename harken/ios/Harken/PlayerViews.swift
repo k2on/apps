@@ -5,7 +5,8 @@
 // (`on`). The position is counted from the state's clock as it is drawn
 // (`TimelineView`), so only the hairline and the scrubber move with it.
 // Android's `PlayerScreens.kt` and `PlayerSheet.kt`: a sideways drag on the
-// bar skips — left the next track, right the one before — and a tap opens
+// bar skips — left the next track, right the one before — and the words
+// spring back from where the finger left them at its speed; a tap opens
 // it; the full player says where the sound is and opens the picker, draws
 // the volume of whatever plays, and draws shuffle and repeat only alone,
 // since the session has neither.
@@ -18,6 +19,7 @@ struct MiniPlayer: View {
     let open: () -> Void
     @EnvironmentObject private var model: Model
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @Environment(\.reducesMotion) private var still
     @State private var swipe: CGFloat = 0
 
     var body: some View {
@@ -60,7 +62,10 @@ struct MiniPlayer: View {
             .overlay(alignment: .bottom) { if s.now != nil && !compact { Hairline().padding(.horizontal, Space.l) } }
             .contentShape(Rectangle())
             .onTapGesture { if s.now != nil { open() } }
-            // A sideways drag skips: far enough, or fast enough; then it springs back.
+            // A sideways drag skips: far enough, or fast enough (where it
+            // would come to rest, `predictedEndTranslation`); then it springs
+            // back, starting at the finger's speed, with the momentum's
+            // overshoot only when it was flicked.
             .gesture(DragGesture(minimumDistance: 12).onChanged { v in
                 if abs(v.translation.width) > abs(v.translation.height) { swipe = v.translation.width }
             }.onEnded { v in
@@ -68,7 +73,8 @@ struct MiniPlayer: View {
                 let fast = v.predictedEndTranslation.width - v.translation.width
                 if swipe < -wide || fast < -Springs.flick * 0.25 { model.next() }
                 else if swipe > wide || fast > Springs.flick * 0.25 { model.previous() }
-                withAnimation(Springs.move) { swipe = 0 }
+                let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.width), from: Double(swipe), to: 0)
+                withAnimation(back) { swipe = 0 }
             })
         }
         .accessibilityElement(children: .contain)
@@ -86,7 +92,7 @@ struct Hairline: View {
             let at = s.position(Int64(t.date.timeIntervalSince1970 * 1000))
             let done = s.durationMs > 0 ? min(max(Double(at) / Double(s.durationMs), 0), 1) : 0
             GeometryReader { g in
-                Capsule().fill(Color.hairline)
+                Capsule().fill(Color.edge)
                     .overlay(alignment: .leading) { Capsule().fill(Color.accent).frame(width: g.size.width * done) }
             }
             .frame(height: 2)
@@ -105,6 +111,8 @@ struct FullPlayer: View {
     @Environment(\.open) private var open
     @Environment(\.colorScheme) private var scheme
     @Namespace private var glass
+    /// How far down a drag must be going to close the player: where it would come to rest.
+    static let closes: CGFloat = 120
 
     var body: some View {
         let s = model.player
@@ -144,8 +152,8 @@ struct FullPlayer: View {
                     // three share it and the cover is a third of it.
                     .layoutPriority(1)
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
-                    .scaleEffect(s.playing ? 1 : 0.9)
-                    .animation(Springs.move, value: s.playing)
+                    .motionScale(s.playing ? 1 : 0.9)
+                    .motion(Springs.move, value: s.playing)
             }
             Spacer(minLength: 0)
             // The title opens its album and the name its person's page, as
@@ -201,8 +209,8 @@ struct FullPlayer: View {
                 .font(.subheadline.weight(.semibold))
             }
             .padding(.top, Space.l)
-            .animation(Springs.move, value: s.on != nil)
-            .animation(Springs.move, value: cues.isEmpty)
+            .motion(Springs.move, value: s.on != nil)
+            .motion(Springs.move, value: cues.isEmpty)
         }
         .task(id: s.now?.id) { if let n = s.now { model.loadTranscript(Id(n.id)) } }
         .padding(.horizontal, Space.xl)
@@ -219,8 +227,13 @@ struct FullPlayer: View {
                     .ignoresSafeArea()
             }
         }
+        // Pulled down, it closes: judged by where the pull would come to
+        // rest (`Momentum`), so a short flick closes it as a long drag does,
+        // and a drag that is going back up does not.
         .gesture(DragGesture(minimumDistance: 40).onEnded { v in
-            if v.translation.height > 120 && abs(v.translation.width) < v.translation.height { close() }
+            let down = v.translation.height
+            let rest = down + CGFloat(Momentum.project(Double(v.velocity.height)))
+            if rest > Self.closes && v.velocity.height >= 0 && abs(v.translation.width) < down { close() }
         })
     }
 
@@ -346,6 +359,7 @@ struct VolumeSlider: View {
     let onMute: () -> Void
     @State private var shown: Double = 0
     @State private var dragging = false
+    @Environment(\.reducesMotion) private var still
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -363,7 +377,7 @@ struct VolumeSlider: View {
             .accessibilityLabel("Volume of \(about)")
         }
         .onAppear { shown = Double(level) / 100 }
-        .onChange(of: level) { _, l in if !dragging { withAnimation(Springs.move) { shown = Double(l) / 100 } } }
+        .onChange(of: level) { _, l in if !dragging { withAnimation(Springs.move.reduced(still)) { shown = Double(l) / 100 } } }
     }
 }
 
@@ -488,7 +502,7 @@ struct TranscriptSheet: View {
                                 .scrollTargetLayout()
                                 .padding(.horizontal, Space.xl)
                                 .padding(.vertical, Space.xxl)
-                                .animation(Springs.move, value: at)
+                                .motion(Springs.move, value: at)
                             }
                             .onScrollPhaseChange { _, phase in
                                 handled = phase == .tracking || phase == .interacting || phase == .decelerating
@@ -515,10 +529,10 @@ struct TranscriptSheet: View {
                                     .buttonStyle(.glassProminent)
                                     .tint(Color.accent)
                                     .padding(.bottom, Space.l)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                    .motionTransition(.move(edge: .bottom).combined(with: .opacity))
                                 }
                             }
-                            .animation(Springs.move, value: following)
+                            .motion(Springs.move, value: following)
                         }
                     }
                 }

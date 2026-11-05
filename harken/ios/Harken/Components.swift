@@ -377,7 +377,7 @@ struct CoverCard: View {
             .frame(width: side, alignment: round ? .center : .leading)
             .multilineTextAlignment(round ? .center : .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
     }
 }
 
@@ -436,7 +436,7 @@ struct Offline: View {
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, Space.page)
         .padding(.vertical, Space.s)
     }
@@ -445,7 +445,9 @@ struct Offline: View {
 /// Who is signed in, round, `side` across: their provider's picture once it
 /// has arrived — fetched and kept as a cover is (`Covers`) — over their
 /// initials on the name's own colour, as the desktop's account button draws
-/// them (`arkui::account::face`) and Android's `Avatar` does.
+/// them (`arkui::account::face`) and Android's `Avatar` does. It grows
+/// with the person's text size, its initials with it, up to half as large
+/// again, so it stays beside the words it is with.
 struct Avatar: View {
     let name: String
     let picture: String
@@ -453,8 +455,10 @@ struct Avatar: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.squares) private var squares
     @State private var image: UIImage? = nil
+    @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
 
     var body: some View {
+        let side = self.side * min(grows, 1.5)
         let set = squares.of(dark: scheme == .dark)
         let rgb = set[Art.pick(set.count, name)]
         ZStack {

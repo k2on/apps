@@ -63,13 +63,17 @@ struct AccountMark: View {
         }
     }
 
-    /// A symbol in `color` on a wash of it: an account's mark, or All Accounts'.
+    /// A symbol in `color` on a wash of it: an account's mark, or All
+    /// Accounts'. It grows with the person's text size, as the row's words
+    /// beside it do, up to half as large again.
     struct Tile: View {
         let symbol: String
         let color: Color
         var side: CGFloat = 32
+        @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
 
         var body: some View {
+            let side = self.side * min(grows, 1.5)
             Image(systemName: symbol)
                 .font(.system(size: side * 0.5, weight: .semibold))
                 .foregroundStyle(color)

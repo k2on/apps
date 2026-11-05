@@ -51,12 +51,12 @@ struct SettingsView: View {
         .overlay(alignment: .bottom) {
             if let s = said {
                 Text(s).font(.footnote).padding(.horizontal, Space.l).padding(.vertical, Space.s)
-                    .glassEffect(.regular, in: Capsule())
+                    .surface(in: Capsule())
                     .padding(.bottom, Space.xl)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .motionTransition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(Springs.move, value: said)
+        .motion(Springs.move, value: said)
     }
 
     private func tapped() {

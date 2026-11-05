@@ -175,12 +175,16 @@ struct AccountButton: View {
 /// initials on the accent, as harken's `Avatar` draws them. `AsyncImage`
 /// fetches it through the shared URL cache, which keeps it the day the
 /// server says (`/auth/picture` answers anybody, so no login goes with it).
+/// It grows with the person's text size, its initials with it, up to half
+/// as large again.
 struct Face: View {
     let name: String
     let picture: String
     var side: CGFloat = 32
+    @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
 
     var body: some View {
+        let side = self.side * min(grows, 1.5)
         ZStack {
             Circle().fill(Color.accent)
             Text(letters)

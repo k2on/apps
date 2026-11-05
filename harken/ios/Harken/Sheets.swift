@@ -277,13 +277,13 @@ struct FollowSheet: View {
                     }
                     ForEach(found) { f in
                         OfferedRow(found: f, following: following.contains(f.feed)) { model.follow(kind, f.feed) }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .motionTransition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
             }
             .listStyle(.plain)
-            .animation(.snappy, value: found)
-            .animation(.snappy, value: answered)
+            .motion(Springs.move, value: found)
+            .motion(Springs.move, value: answered)
             .navigationTitle(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -336,16 +336,16 @@ private struct OfferedRow: View {
                 Label("Following", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.accentText)
-                    .transition(.scale.combined(with: .opacity))
+                    .motionTransition(.scale.combined(with: .opacity))
             } else {
                 Button("Follow", action: follow)
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
                     .tint(Color.accent)
-                    .transition(.scale.combined(with: .opacity))
+                    .motionTransition(.scale.combined(with: .opacity))
             }
         }
-        .animation(.snappy, value: following)
+        .motion(Springs.move, value: following)
         .sensoryFeedback(.success, trigger: following)
     }
 }

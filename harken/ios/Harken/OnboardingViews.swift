@@ -13,15 +13,17 @@ struct OnboardingPage<Content: View>: View {
     let title: String
     let sentence: String
     @ViewBuilder let content: () -> Content
+    /// The mark grows with the person's text size, as the title under it does.
+    @ScaledMetric(relativeTo: .largeTitle) private var mark: CGFloat = 88
 
     var body: some View {
         ScrollView {
             VStack(spacing: Space.s) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 44, weight: .semibold))
+                    .font(.system(size: mark / 2, weight: .semibold))
                     .foregroundStyle(Color.accentText)
-                    .frame(width: 88, height: 88)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .frame(width: mark, height: mark)
+                    .surface(in: RoundedRectangle(cornerRadius: mark * 3 / 11, style: .continuous))
                     .padding(.bottom, Space.l)
                 Text(title).font(.largeTitle.bold()).multilineTextAlignment(.center)
                 Text(sentence).font(.body).foregroundStyle(.quiet).multilineTextAlignment(.center)
@@ -58,7 +60,7 @@ struct ServerScreen: View {
                     .onSubmit { model.send(.check) }
                     .disabled(checking)
                     .padding(Space.l)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
                 Text(error ?? "A name or an address, with a port if it has one.")
                     .font(.footnote)
                     .foregroundStyle(error == nil ? Color.quiet : Color.error)
