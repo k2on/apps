@@ -22,7 +22,9 @@ app=$3
 server=${4:-}
 here=$(dirname "$0")
 shots="$app/screens/shots.json"
-pkg=$(jq -r '.android' "$shots")
+# The package, as the APK itself says (aapt2, the SDK's newest build tools).
+aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
+pkg=$("$aapt2" dump packagename "$apk")
 user=$(jq -r '.server.user // empty' "$shots")
 mkdir -p "$out"
 

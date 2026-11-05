@@ -573,6 +573,8 @@
                   # install reads Google's repository indexes, which change
                   # under any hash recorded of them (nix/android-sdk.nix).
                   "-Pandroid.builder.sdkDownload=false"
+                  # Its id: every app's is `bundlePrefix` and its name.
+                  "-PapplicationId=${bundlePrefix}.${name}"
                 ] ++ flags ++ final.versionFlags;
                 # Read by app/build.gradle.kts; a local build falls back to 1.
                 versionFlags = [
@@ -658,22 +660,22 @@
             inherit lib pkgs;
             apps = [
               {
-                appid = "dev.harken.android";
+                appid = "${bundlePrefix}.harken";
                 apk = harken-apk;
                 apkName = "harken.apk";
-                metadata = ./harken/android/fdroid/metadata/dev.harken.android.yml;
+                metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
                 # The trumpet the browser's tab draws.
                 icon = ./harken/iced/web/favicon.svg;
               }
               {
-                appid = "dev.revelation.android";
+                appid = "${bundlePrefix}.revelation";
                 apk = revelation.apk;
                 apkName = "revelation.apk";
-                metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
+                metadata = ./revelation/android/fdroid/metadata/us.koon.revelation.yml;
                 icon = ./revelation/android/fdroid/icon.svg;
               }
               {
-                appid = "us.koon.money";
+                appid = "${bundlePrefix}.money";
                 apk = money-apk;
                 apkName = "money.apk";
                 metadata = ./money/android/fdroid/metadata/us.koon.money.yml;
@@ -719,6 +721,8 @@
               tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
             in ''
               runHook preBuild
+              # The apps' own deployment target: what ios.yaml's cargo had.
+              export IPHONEOS_DEPLOYMENT_TARGET=17.0
               ${if xcode == null then ''
                 export PATH=/usr/bin:$PATH
                 export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
@@ -806,6 +810,9 @@
           # where every other build is still sandboxed. All of this was found
           # on GitHub's macos-15 runners, step by step, on the branch
           # claude/sleepy-faraday-lcbow5-xcode (its xcode-strict.yaml).
+          # Every app's id, Android's (its applicationId) and the iPhone's (its
+          # bundle id), is this and its name.
+          bundlePrefix = "us.koon";
           xcode = pkgs.requireFile {
             name = "Xcode_26.3.app";
             hashMode = "recursive";
@@ -815,17 +822,48 @@
                 nix-store --add-fixed --recursive sha256 /Applications/Xcode_26.3.app
             '';
           };
-          # One app for the simulator: `name` its directory (<name>/ios, its
+          # One app's kernel, from the pinned Xcode, under the strict sandbox.
+          iosKernel = { ffi, framework }: iosPhone (ffi // { inherit framework xcode; });
+          # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
-          # `framework` its kernel's. As Release, the build TestFlight is
-          # sent, with the bundle id and version its project.yml says.
-          iosSimulator = { name, App, ffi, framework }:
+          # `framework` its kernel's; `kind` "simulator" (the .app, for its
+          # screenshots) or "archive" (the unsigned .xcarchive ios.yaml signs
+          # and sends to TestFlight, giving it its build number there). Its
+          # bundle id is `bundlePrefix`.<name>, every app's; its version
+          # project.yml's.
+          iosApp = { name, App, ffi, framework, kind }:
             let
-              kernel = iosPhone (ffi // { inherit framework xcode; });
+              bundle = "${bundlePrefix}.${name}";
+              kernel = iosKernel { inherit ffi framework; };
               dev = "${xcode}/Contents/Developer";
+              common = ''
+                -project ${App}.xcodeproj -scheme ${App} -configuration Release \
+                -derivedDataPath $TMPDIR/derived \
+                -IDEPackageSupportDisableManifestSandbox=1 \
+                -IDEPackageSupportDisablePluginExecutionSandbox=1 \
+                PRODUCT_BUNDLE_IDENTIFIER=${bundle} \
+                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+                ENABLE_USER_SCRIPT_SANDBOXING=NO \
+                COMPILER_INDEX_STORE_ENABLE=NO'';
+              build = {
+                simulator = ''
+                  xcodebuild build ${common} \
+                    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+                    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+                '';
+                archive = ''
+                  xcodebuild archive ${common} \
+                    -destination 'generic/platform=iOS' \
+                    -archivePath $TMPDIR/${App}.xcarchive
+                '';
+              }.${kind};
+              install = {
+                simulator = "cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/";
+                archive = "cp -R $TMPDIR/${App}.xcarchive $out/";
+              }.${kind};
             in
             pkgs.stdenv.mkDerivation {
-              pname = "${name}-ios-simulator";
+              pname = "${name}-ios-${kind}";
               version = "0.1.0";
               src = only [ "${name}/ios" "swift/ArkUI" ];
               nativeBuildInputs = [ xcodegen ];
@@ -851,28 +889,26 @@
                 xcodegen generate
                 # SwiftPM sandboxes the manifests and plugins it builds, which
                 # cannot be done inside nix's: told not to.
-                xcodebuild build \
-                  -project ${App}.xcodeproj -scheme ${App} -configuration Release \
-                  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-                  -derivedDataPath $TMPDIR/derived \
-                  -IDEPackageSupportDisableManifestSandbox=1 \
-                  -IDEPackageSupportDisablePluginExecutionSandbox=1 \
-                  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
-                  CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= \
-                  ENABLE_USER_SCRIPT_SANDBOXING=NO \
-                  COMPILER_INDEX_STORE_ENABLE=NO
+                ${build}
                 runHook postBuild
               '';
               installPhase = ''
                 mkdir -p $out
-                cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/
+                ${install}
               '';
               dontStrip = true;
               dontFixup = true;
+              passthru = { inherit bundle; };
               meta.platforms = [ "aarch64-darwin" ];
             };
-          money-ios-simulator = iosSimulator { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
-          harken-ios-simulator = iosSimulator { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          money-ios-kernel = iosKernel { inherit (moneyIos) ffi framework; };
+          harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
+          money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
+          harken-ios-simulator = iosApp (harkenIos // { kind = "simulator"; });
+          money-ios-archive = iosApp (moneyIos // { kind = "archive"; });
+          harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -1005,8 +1041,10 @@
         {
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
-            # The iPhone apps for the simulator, from the pinned Xcode.
-            inherit money-ios-simulator harken-ios-simulator;
+            # The iPhone apps from the pinned Xcode: for the simulator (the
+            # screenshots), as the archive TestFlight is sent, and the kernel.
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
+            inherit money-ios-kernel harken-ios-kernel;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
@@ -1223,9 +1261,12 @@
             };
           };
 
-          # Everything the workflow publishes, as data: a page goes up at
-          # k2on.github.io/apps/<name>/, an APK into the F-Droid repository
-          # (and onto a tag's release). Adding one is adding it here; the
+          # Everything the workflows publish, as data, and the one list of
+          # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
+          # into the F-Droid repository (and onto a tag's release), an
+          # iPhone app to TestFlight (ios.yaml); and each app with
+          # <name>/screens/shots.json is photographed on the phones it is
+          # listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #
           # `key` is what says whether it changed: its derivation's hash,
@@ -1245,6 +1286,19 @@
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
               };
+              # An iPhone app (ios.yaml builds and sends each; app-screens.yaml
+              # photographs each): `App` its scheme and product; whether it goes
+              # to TestFlight (its App Store Connect record must exist), and
+              # whether its tests run. Its key is its archive's: the archive
+              # has no build number in it (ios.yaml gives it one), so it moves
+              # only with what the app is built from.
+              iphone = name: App: { testflight ? true, test ? false }:
+                let archive = self.packages.aarch64-darwin."${name}-ios-archive"; in {
+                  inherit name App testflight test;
+                  inherit (archive) bundle;
+                  package = "${name}-ios-archive";
+                  key = key archive;
+                };
             in
             {
               pages = [
@@ -1257,6 +1311,10 @@
                 (apk "revelation" revelation { })
                 # money's kernel for every ABI first, as harken's.
                 (apk "money" money { first = [ "money-android-lib" ]; })
+              ];
+              ios = [
+                (iphone "harken" "Harken" { })
+                (iphone "money" "Money" { test = true; })
               ];
             };
 

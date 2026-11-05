@@ -4,10 +4,11 @@
 # something in it, and driven from outside as a person would. The how is in
 # .github/screens/apps.md.
 #
-# **Nothing here names an app.** An app is taken when it has
-# <app>/screens/shots.json — its package ids, and each shot as the steps
-# that open it — and, if it signs in to a server, <app>/screens/server.sh,
-# which starts that server with something in it. Its builds are the
+# **Nothing here names an app.** The apps are the flake's one list
+# (`publish`: its APKs, its iPhone apps), and of those an app is taken when
+# it has <app>/screens/shots.json — each shot as the steps that open it —
+# and, if it signs in to a server, <app>/screens/server.sh, which starts
+# that server with something in it. Its builds are the
 # artifacts `apk-<app>` (build.yaml), and for the iPhone `nix build
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`).
 #
@@ -81,6 +82,13 @@ jobs:
       ios: ${{ steps.which.outputs.ios }}
     steps:
       - uses: actions/checkout@v4
+      # The apps, as the flake lists them (`publish`): each phone's, of those
+      # with <app>/screens/shots.json.
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: The apps
+        run: |
+          nix eval --json .#publish.x86_64-linux --apply 'p: { android = map (a: a.name) p.apks; ios = map (a: a.name) p.ios; }' > "$RUNNER_TEMP/apps.json"
+          cat "$RUNNER_TEMP/apps.json"
       - id: which
         env:
           GH_TOKEN: ${{ github.token }}
@@ -93,11 +101,8 @@ jobs:
           # The scripts moved, or a run by hand: every app, from what was published.
           if [ -z "$RUN" ]; then
             android="" ios=""
-            for shots in */screens/shots.json; do
-              a=${shots%%/*}
-              jq -e .android "$shots" > /dev/null && android="$android $a"
-              jq -e .ios "$shots" > /dev/null && ios="$ios $a"
-            done
+            for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do if [ -f "$a/screens/shots.json" ]; then android="$android $a"; fi; done
+            for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi; done
             { echo "mode=release"; echo "pr="; echo "android=${android# }"; echo "ios=${ios# }"; } | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -113,18 +118,14 @@ jobs:
             mode=${pr:+pr}
           fi
           made=$(gh api "repos/$repo/actions/runs/$RUN/artifacts" --paginate --jq '.artifacts[] | select(.expired | not) | .name')
-          # Every app with shots, and of those what this run built.
+          # Every app with shots, and of those what this run built: an APK
+          # in build's run; every iPhone app after ios's, as nix has it.
           android="" ios=""
-          for shots in */screens/shots.json; do
-            a=${shots%%/*}
-            if [ "$WORKFLOW" = build ] && grep -qx "apk-$a" <<< "$made" && jq -e .android "$shots" > /dev/null; then
-              android="$android $a"
-            fi
-            # Every iPhone app, built by nix at the run's commit: one that has
-            # not moved is the cache's, not built again.
-            if [ "$WORKFLOW" = ios ] && jq -e .ios "$shots" > /dev/null; then
-              ios="$ios $a"
-            fi
+          for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
+            if [ "$WORKFLOW" = build ] && [ -f "$a/screens/shots.json" ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
+          done
+          for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do
+            if [ "$WORKFLOW" = ios ] && [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi
           done
           { echo "mode=$mode"; echo "pr=$pr"; echo "android=${android# }"; echo "ios=${ios# }"; } | tee -a "$GITHUB_OUTPUT"
 
@@ -245,17 +246,7 @@ jobs:
       # The Xcode the flake pins (flake.nix, `xcode`): its simulators boot
       # here, and if an app must be built, it is put in the store as it is.
       - name: The pinned Xcode
-        run: |
-          name=$(grep -o 'name = "Xcode_[^"]*"' src/flake.nix | head -1 | cut -d'"' -f2)
-          xcode=/Applications/$name
-          if [ ! -d "$xcode" ]; then
-            have=""; for x in /Applications/Xcode_*.app; do have="$have ${x##*/}"; done
-            echo "::error::$name, which flake.nix pins, is not on this runner image: pin one it has ($have)"
-            exit 1
-          fi
-          sudo xcode-select -s "$xcode/Contents/Developer"
-          xcodebuild -version
-          echo "XCODE=$xcode" >> "$GITHUB_ENV"
+        run: bash .github/xcode-pinned.sh src
 
       # As screens.yaml: the newest iPhone Pro, booting under the rest.
       - name: Start booting a simulator

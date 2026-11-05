@@ -24,7 +24,10 @@ android {
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
-        applicationId = "dev.harken.android"
+        // The flake's `bundlePrefix` and the app's name (`-PapplicationId`),
+        // as every app's id, Android's and the iPhone's; a local build without
+        // it falls back to the same.
+        applicationId = providers.gradleProperty("applicationId").getOrElse("us.koon.harken")
         minSdk = 26
         targetSdk = 35
         // Rises with every commit when nix builds it: `harken-apk` passes the

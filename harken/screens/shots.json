@@ -1,7 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
-  "android": "dev.harken.android",
-  "ios": "us.koon.harken",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
   "server": {
     "port": 8787,
     "user": "alex"

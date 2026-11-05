@@ -14,14 +14,18 @@ scripts here, names an app.
 
 ## An app's part
 
+The apps are the flake's one list (`flake.nix`, `publish`: its `apks` and
+its `ios`); an app on it with `<app>/screens/shots.json` is photographed
+on each phone it is listed for. Every app's id, its Android applicationId
+and its iPhone bundle id, is `bundlePrefix` (`us.koon`) and its name, so
+neither driver is told it: Android reads it from the APK, iOS from the app.
+
 All of it is in `<app>/screens/`:
 
-- **`shots.json`**: the app's package ids, its server, and its shots.
+- **`shots.json`**: the app's server, and its shots.
 
   ```json
   {
-    "android": "us.koon.money",
-    "ios": "us.koon.money",
     "server": { "port": 8788, "user": "alex" },
     "shots": [
       { "id": "budget", "steps": [{ "tap": "Budget" }] },
@@ -30,8 +34,7 @@ All of it is in `<app>/screens/`:
   }
   ```
 
-  `android` / `ios`: the package and bundle id; an app missing one is not
-  taken on that phone. `server` (optional): the port its `server.sh`
+  `server` (optional): the port its `server.sh`
   listens on, and the name the server's dev sign-in is given. Each shot is
   the app opened afresh, its `steps` done in order, and the screen taken:
   `{"tap": "<label>"}` taps the element whose accessibility label (what it
