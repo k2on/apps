@@ -146,7 +146,7 @@ jobs:
 
       # Where it goes: to TestFlight from main, when it is new and the list
       # says so; off main, signed and sent nowhere, to check the signing.
-      - name: Whether to send it
+      - name: Where it goes (PRs nowhere, other branches signed only, main to TestFlight)
         env:
           SEEN: ${{ steps.seen.outputs.cache-hit }}
           TESTFLIGHT: ${{ matrix.app.testflight }}
@@ -177,7 +177,7 @@ jobs:
       # nix's archive (flake.nix, `<app>-ios-archive`), the cache's when
       # nothing it is built from moved, and its kernel for the tests; the
       # archive given its build number, the commit's time in seconds.
-      - name: The archive (on main), and the kernel, built by nix
+      - name: Build the kernel, and the archive (not on PRs), with nix
         env:
           APP: ${{ matrix.app.name }}
           NAME: ${{ matrix.app.App }}
@@ -229,7 +229,7 @@ jobs:
           path: ${{ runner.temp }}/${{ matrix.app.App }}-tests.xcresult
           if-no-files-found: ignore
 
-      - name: Signed, and sent to TestFlight (or, off main, only signed)
+      - name: Sign (not on PRs), and send to TestFlight (main only)
         if: env.SEND != ''
         env:
           DESTINATION: ${{ env.SEND }}
@@ -239,12 +239,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash .github/ios-upload.sh "${{ matrix.app.App }}"
 
-      - name: Remove the API key
+      - name: Remove the API key (not on PRs)
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
 
       # Remember it as sent, once it has been.
-      - name: Mark this archive as sent
+      - name: Mark this archive as sent to TestFlight (main only)
         if: success() && env.SEND == 'upload'
         run: mkdir -p ios-seen && git rev-parse HEAD > ios-seen/commit
       - if: success() && env.SEND == 'upload'
