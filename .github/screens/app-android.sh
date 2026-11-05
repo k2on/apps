@@ -156,7 +156,9 @@ if [ -n "$server" ]; then
   sleep 3
 fi
 
-for theme in light dark; do
+# Both themes, or the one THEMES names: CI takes each on an emulator of
+# its own, at once (app-screens.yaml).
+for theme in ${THEMES:-light dark}; do
   if [ "$theme" = dark ]; then adb shell cmd uimode night yes >/dev/null; else adb shell cmd uimode night no >/dev/null; fi
   sleep 2
   mkdir -p "$out/$theme"

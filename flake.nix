@@ -340,6 +340,26 @@
           # DATA` writes what that app's server boots seeded from.
           money-seed = crate { packageId = "money-seed"; };
           harken-seed = crate { packageId = "harken-seed"; };
+          # The catalogue's covers, each a fixed-output fetch pinned by its
+          # hash in harken/seed/covers.json: fetched once, the cache's after,
+          # so seeding fetches nothing (`harken-seed --covers`) and a cover
+          # host that throttles never turns a screenshot's covers into
+          # gradients. Each is named as harken-seed's `media::key` names it:
+          # the first sixteen hex digits of its address's SHA-256.
+          harken-covers = pkgs.linkFarm "harken-covers" (map
+            (c:
+              let key = builtins.substring 0 16 (builtins.hashString "sha256" c.url); in {
+                name = "${key}.${c.ext}";
+                path = pkgs.fetchurl { inherit (c) url hash; name = "cover-${key}"; };
+              })
+            (builtins.fromJSON (builtins.readFile ./harken/seed/covers.json)));
+          # `nix run .#update-covers`: covers.json from the catalogue, each
+          # address's hash and kind, after the catalogue moves.
+          update-covers = pkgs.writeShellApplication {
+            name = "update-covers";
+            runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.file ];
+            text = builtins.readFile ./nix/update-covers.sh;
+          };
           # `nix run .#<app>-demo [ADDR]`: that server on a fresh seeded
           # directory, with dev auth, for a person to try.
           money-demo = pkgs.callPackage ./nix/demo.nix {
@@ -355,6 +375,7 @@
             server = harken-server;
             listen = "127.0.0.1:8787";
             env = ''HARKEN_DEV_AUTH=1 HARKEN_DATA="$dir" HARKEN_MEDIA="$dir/media"'';
+            seedArgs = "--covers ${harken-covers}";
           };
 
           # The desktop window. winit and wgpu open the display and the GPU
@@ -1091,7 +1112,7 @@
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
-            inherit classical update-catalogue update-cargo-nix;
+            inherit classical update-catalogue update-cargo-nix update-covers;
             # `nix run .#update-theme`: the theme's generated files, from
             # arkui/theme.toml.
             inherit update-theme;
@@ -1100,7 +1121,7 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
             inherit money-iced money-web money-web-server money-server;
-            inherit money-seed harken-seed money-demo harken-demo;
+            inherit money-seed harken-seed harken-covers money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;

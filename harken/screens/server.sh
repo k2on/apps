@@ -12,8 +12,10 @@ listen=$2
 # The seed and the server as nix builds them: the cache's, unless they
 # changed. No ffmpeg, no Python: the seed writes the files itself.
 seed=$(nix build --no-link --print-out-paths .#harken-seed)
+# The covers pinned by hash, fetched once (the cache's): none fetched here.
+covers=$(nix build --no-link --print-out-paths .#harken-covers)
 server=$(nix build --no-link --print-out-paths .#harken-server)
-"$seed/bin/harken-seed" "$dir/data"
+"$seed/bin/harken-seed" --covers "$covers" "$dir/data"
 HARKEN_DEV_AUTH=1 HARKEN_DATA="$dir/data" HARKEN_MEDIA="$dir/data/media" \
   nohup "$server/bin/harken-server" "$listen" > "$dir/server.log" 2>&1 &
 echo $! > "$dir/pid"
