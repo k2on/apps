@@ -43,6 +43,8 @@
 //!   `"where": "bottom"` takes the lowest of several, `"optional": true`
 //!   passes over one not there after 5 s, and `"unless": "<text>"` skips
 //!   the step when that is on the screen already.
+//! - `{"hover": "<text>"}` moves the pointer over the middle of that text,
+//!   as `click` finds it, and leaves it there: what a pointer does to it.
 //! - `{"type": "<text>"}` types into what has the keys, and a key no
 //!   widget takes goes on to the app's own (the vim keys); `{"key":
 //!   "ctrl+k"}` presses one, with what is held (`press` spells them).
@@ -315,6 +317,9 @@ struct Window<'a, P: Program> {
     size: Size,
     scale: f32,
     cursor: mouse::Cursor,
+    /// A `hover` step left the pointer where it is, so the shot is drawn
+    /// with it there; otherwise with none.
+    pointed: bool,
     /// When a widget asked to be drawn again.
     redraw: Option<Instant>,
 }
@@ -344,6 +349,7 @@ where
             size,
             scale,
             cursor: mouse::Cursor::Unavailable,
+            pointed: false,
             redraw: Some(Instant::now()),
         };
         window.resubscribe();
@@ -587,6 +593,16 @@ where
                 None if optional => {}
                 None => return Err(format!("nothing on the screen says {label:?}")),
             }
+        } else if let Some(label) = step["hover"].as_str() {
+            match self.wait_for(label, false, if optional { OPTIONAL } else { PATIENCE }) {
+                Some(at) => {
+                    self.interact(Interaction::Mouse(Mouse::Move(Target::Point(at))));
+                    self.pointed = true;
+                    self.settle(Duration::from_millis(300), Duration::from_secs(5));
+                }
+                None if optional => {}
+                None => return Err(format!("nothing on the screen says {label:?}")),
+            }
         } else if let Some(text) = step["type"].as_str() {
             self.interact(Interaction::Keyboard(Keyboard::Typewrite(text.to_string())));
         } else if let Some(key) = step["key"].as_str() {
@@ -611,14 +627,16 @@ where
     }
 
     /// The screen drawn in `theme`, as a PNG at `path`. Drawn with no
-    /// pointer over it, so nothing is lit because the last click was there.
+    /// pointer over it, so nothing is lit because the last click was there,
+    /// unless a `hover` step put it somewhere to be seen.
     fn write(&mut self, theme: &Theme, path: &Path) -> Result<(), String> {
         let style = self.program.style(&self.state, theme);
+        let cursor = if self.pointed { self.cursor } else { mouse::Cursor::Unavailable };
         let (size, scale) = (self.size, self.scale);
         let rgba = self.with_ui(|ui, renderer, clipboard| {
             let _ = ui.update(
                 &[Event::Window(window::Event::RedrawRequested(Instant::now()))],
-                mouse::Cursor::Unavailable,
+                cursor,
                 renderer,
                 clipboard,
                 &mut Vec::new(),
@@ -629,7 +647,7 @@ where
                 &renderer::Style {
                     text_color: style.text_color,
                 },
-                mouse::Cursor::Unavailable,
+                cursor,
             );
             let physical = Size::new((size.width * scale).round() as u32, (size.height * scale).round() as u32);
             (physical, renderer.screenshot(physical, scale, style.background_color))
