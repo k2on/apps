@@ -171,17 +171,23 @@ jobs:
       fail-fast: false
       matrix:
         app: ${{ fromJSON(needs.which.outputs.android-json) }}
-    name: android (${{ matrix.app }})
+        # Each theme on an emulator of its own: a light run and a dark run
+        # at once rather than one after the other (harken's was eight
+        # minutes of its ten). Their captures meet in the same
+        # <app>/android/ (merge-multiple), whole when both are there.
+        theme: [light, dark]
+    name: android (${{ matrix.app }}, ${{ matrix.theme }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
     # same commit's again, from another event: on main both a script
     # change and build) takes over from the one going.
     concurrency:
-      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}
       cancel-in-progress: true
     timeout-minutes: 90
     env:
       APPS: ${{ matrix.app }}
+      THEMES: ${{ matrix.theme }}
       # A run still going: its APK awaited (await-apk.sh), not downloaded.
       EARLY: ${{ github.event.action == 'requested' }}
       GH_TOKEN: ${{ github.token }}
@@ -269,14 +275,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-steps-${{ matrix.app }}
+          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}
           path: ${{ runner.temp }}/steps
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-screens-android-${{ matrix.app }}
+          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
