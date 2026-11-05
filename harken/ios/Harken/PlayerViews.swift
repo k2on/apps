@@ -44,7 +44,7 @@ struct MiniPlayer: View {
                         Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").frame(width: 32, height: 32) }
                             .accessibilityLabel("Forward 30 seconds")
                     } else if !compact {
-                        Button { model.next() } label: { Image(systemName: "forward.fill").frame(width: 32, height: 32) }
+                        Button { model.next() } label: { Image(systemName: "forward.end.fill").frame(width: 32, height: 32) }
                             .disabled(!s.hasNext)
                             .accessibilityLabel("Next")
                     }
@@ -108,18 +108,27 @@ struct FullPlayer: View {
     var body: some View {
         let s = model.player
         let cues = s.now.flatMap { model.transcripts[Id($0.id)] } ?? []
-        VStack(spacing: Space.l) {
+        // Spaced as Android's player (PlayerScreens.kt, `FullFace`): room
+        // only where it is meant (after the title, above the volume and the
+        // chips), the rest the cover's, so the cover is the page's width as
+        // Android's is, not what is left once every gap has had its share.
+        VStack(spacing: 0) {
             HStack {
-                Button(action: close) { Image(systemName: "chevron.down") }
+                // Round, 44 points, as Android's: the glass a circle about its glyph.
+                Button(action: close) { Image(systemName: "chevron.down").frame(width: 24, height: 24) }
                     .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
                     .accessibilityLabel("Close the player")
                 Spacer()
                 Text(s.now.map { $0.album.isEmpty ? "Now Playing" : $0.album } ?? "Now Playing")
                     .font(.footnote.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 if let t = track {
-                    Menu { TrackActions(track: t, from: nil) } label: { Image(systemName: "ellipsis") }
+                    Menu { TrackActions(track: t, from: nil) } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
                         .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
                         .accessibilityLabel("More")
                 } else {
                     Color.clear.frame(width: 44, height: 44)
@@ -158,10 +167,12 @@ struct FullPlayer: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Scrubber()
+                .padding(.top, Space.l)
             Transport()
             if let v = s.volume {
                 VolumeSlider(level: v.level, muted: v.muted, about: s.on?.name ?? "this phone",
                              onLevel: { model.volume($0) }, onDone: { model.volumeDone() }, onMute: { model.mute() })
+                    .padding(.top, Space.s)
             }
             GlassEffectContainer(spacing: Space.s) {
                 HStack(spacing: Space.s) {
@@ -188,6 +199,7 @@ struct FullPlayer: View {
                 }
                 .font(.subheadline.weight(.semibold))
             }
+            .padding(.top, Space.l)
             .animation(Springs.move, value: s.on != nil)
             .animation(Springs.move, value: cues.isEmpty)
         }
@@ -281,7 +293,8 @@ struct Transport: View {
                     Button { model.jog(-Model.jogBack) } label: { Image(systemName: "gobackward.15").font(.title) }
                         .accessibilityLabel("Back 15 seconds")
                 } else {
-                    Button { model.previous() } label: { Image(systemName: "backward.fill").font(.title) }
+                    // |◀ and ▶|, as Android's: a track back and on.
+                    Button { model.previous() } label: { Image(systemName: "backward.end.fill").font(.title) }
                         .accessibilityLabel("Previous")
                 }
                 Spacer()
@@ -300,7 +313,7 @@ struct Transport: View {
                     Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").font(.title) }
                         .accessibilityLabel("Forward 30 seconds")
                 } else {
-                    Button { model.next() } label: { Image(systemName: "forward.fill").font(.title) }
+                    Button { model.next() } label: { Image(systemName: "forward.end.fill").font(.title) }
                         .accessibilityLabel("Next")
                 }
                 Spacer()
