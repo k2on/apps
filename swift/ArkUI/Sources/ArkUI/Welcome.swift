@@ -12,6 +12,8 @@ public struct WelcomePage<Content: View>: View {
     let title: String
     let sentence: String
     let content: Content
+    /// The mark grows with the person's text size, as the title under it does.
+    @ScaledMetric(relativeTo: .largeTitle) private var mark: CGFloat = 88
 
     public init(symbol: String, tint: Color, title: String, sentence: String, @ViewBuilder content: () -> Content) {
         self.symbol = symbol
@@ -25,10 +27,10 @@ public struct WelcomePage<Content: View>: View {
         ScrollView {
             VStack(spacing: Space.s) {
                 Image(systemName: symbol)
-                    .font(.system(size: 44, weight: .semibold))
+                    .font(.system(size: mark / 2, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 88, height: 88)
-                    .glassEffect(.regular.tint(tint.opacity(0.15)), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .frame(width: mark, height: mark)
+                    .surface(in: RoundedRectangle(cornerRadius: mark * 3 / 11, style: .continuous), tint: tint.opacity(0.15))
                     .padding(.bottom, Space.l)
                     .accessibilityHidden(true)
                 Text(title).font(.largeTitle.bold()).multilineTextAlignment(.center)
@@ -69,10 +71,11 @@ private struct Toast: ViewModifier {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, Space.l)
                     .padding(.vertical, Space.m)
-                    .glassEffect(.regular, in: Capsule())
+                    .surface(in: Capsule())
                     .padding(.horizontal, Space.xl)
                     .padding(.top, Space.s)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    // Down from the top and back up it; under Reduce Motion, a fade.
+                    .motionTransition(.move(edge: .top).combined(with: .opacity))
                     .onTapGesture { text = nil }
                     .task(id: t) {
                         try? await Task.sleep(for: .seconds(seconds))
@@ -81,7 +84,7 @@ private struct Toast: ViewModifier {
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
-        .animation(Springs.move, value: text)
+        .motion(Springs.move, value: text)
     }
 }
 #endif

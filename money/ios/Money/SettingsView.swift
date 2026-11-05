@@ -23,7 +23,7 @@ struct SettingsView: View {
             Section {
                 HStack(spacing: Space.l) {
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 44))
+                        .scaledFont(44)
                         .foregroundStyle(Color.accent.gradient)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading) {
@@ -106,6 +106,7 @@ struct BanksSection: View {
 struct AskRow: View {
     let ask: AskLine
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { t in
@@ -128,7 +129,7 @@ struct AskRow: View {
                 }
                 Spacer(minLength: 0)
                 if !BankAsks.isOpen(ask) {
-                    Button { withAnimation(Springs.move) { model.dismiss(ask: ask) } } label: {
+                    Button { withAnimation(Springs.move.reduced(still)) { model.dismiss(ask: ask) } } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet)
                     }
                     .buttonStyle(.borderless)

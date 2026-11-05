@@ -38,19 +38,47 @@ public enum Space {
 }
 
 /// The numbers everything moves by, Android's (`ui/Springs.kt`): one
-/// stiffness, 700 at unit mass, a damping of 0.88 for where a thing is — a
-/// whisper of overshoot, so it lands rather than stops — and 1 for how large
-/// it is and what of it shows. SwiftUI's `spring(response:dampingFraction:)`
+/// stiffness, 700 at unit mass, critically damped — a thing put somewhere
+/// lands there without passing it, as Apple's own moves do — and a little
+/// under that, 0.8, only for a thing that was thrown: let go by a finger
+/// still moving (`released`), which hands the spring its speed, so what it
+/// overshoots by is the throw's. SwiftUI's `spring(response:dampingFraction:)`
 /// takes the same spring as its period, `2π/√(k/m)`: 0.2375 s.
+///
+/// Under Reduce Motion (`\.reducesMotion`) each is `reduced(_:)` into a
+/// short ease with no overshoot.
 public enum Springs {
     public static let stiffness: Double = 700
     public static let response: Double = 2 * Double.pi / stiffness.squareRoot()
-    /// Where a thing is.
-    public static let move = Animation.spring(response: response, dampingFraction: 0.88)
+    /// Where a thing is. No overshoot: nothing threw it.
+    public static let move = Animation.spring(response: response, dampingFraction: 1)
     /// How large a thing is: a scale, a clip, a dim. No overshoot.
     public static let size = Animation.spring(response: response, dampingFraction: 1)
     /// Something going, quickly: critically damped at 2500, about 150 ms.
     public static let fade = Animation.spring(response: 2 * Double.pi / 2500.0.squareRoot(), dampingFraction: 1)
+    /// What a thrown thing lands on: a whisper of overshoot, the throw's.
+    public static let momentum: Double = 0.8
+    /// Let go faster than this, in points a second, a thing was thrown.
+    public static let thrown: Double = 300
+    /// What stands in for a move under Reduce Motion: short, and it never passes where it goes.
+    public static let calm = Animation.easeInOut(duration: 0.2)
+
+    /// What a thing a finger let go of springs on from `from` to `to`, the
+    /// finger going at `velocity` (points a second, along the same axis):
+    /// it starts at that speed, so nothing seams where the drag ends; and
+    /// thrown (`thrown`), it lands on the momentum's damping, otherwise
+    /// critically damped as any move.
+    public static func released(velocity: Double, from: Double, to: Double) -> Animation {
+        let damping = abs(velocity) > thrown ? momentum : 1
+        return .interpolatingSpring(Spring(response: response, dampingRatio: damping),
+                                    initialVelocity: Momentum.relative(velocity, from: from, to: to))
+    }
+}
+
+extension Animation {
+    /// This one, or under Reduce Motion (`\.reducesMotion`, read by the
+    /// view that animates) the short ease that stands in for it.
+    public func reduced(_ still: Bool) -> Animation { still ? Springs.calm : self }
 }
 
 private struct SquaresKey: EnvironmentKey {

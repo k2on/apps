@@ -12,11 +12,13 @@ public let faceSide: CGFloat = 32
 
 /// Who is signed in, round, `side` across: their picture (`picture`, a
 /// whole URL, "" for none) once it has loaded, cropped to fill, over their
-/// initials on the accent.
+/// initials on the accent. It grows with the person's text size, its
+/// initials with it, up to half as large again.
 public struct Face: View {
     let name: String
     let picture: String
     var side: CGFloat
+    @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
 
     public init(name: String, picture: String, side: CGFloat = faceSide) {
         self.name = name
@@ -25,7 +27,8 @@ public struct Face: View {
     }
 
     public var body: some View {
-        ZStack {
+        let side = self.side * min(grows, 1.5)
+        return ZStack {
             Circle().fill(Color.accent)
             Text(letters)
                 .font(.system(size: side * 0.4, weight: .semibold))

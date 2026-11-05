@@ -134,7 +134,7 @@ public struct HeroFigure<Footer: View>: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.quiet)
             CentsText(cents)
-                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .scaledFont(44, weight: .bold, design: .rounded)
                 .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.5)
@@ -150,15 +150,15 @@ public struct HeroFigure<Footer: View>: View {
             LinearGradient(colors: [tint.color.opacity(0.22), tint.color.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .animation(Springs.move, value: cents)
+        .surface(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .motion(Springs.move, value: cents)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(caption)
         .accessibilityValue(CentsText.string(cents) + (note.isEmpty ? "" : ", " + note))
 
         if let action {
             Button(action: action) { face.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityAddTraits(.isButton)
         } else {
             face
@@ -193,12 +193,12 @@ public struct AmountEntry: View {
     public var body: some View {
         VStack(spacing: Space.s) {
             CentsText(cents)
-                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .scaledFont(56, weight: .bold, design: .rounded)
                 .foregroundStyle(cents == 0 ? Color.quiet : tint)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
-                .animation(Springs.move, value: cents)
+                .motion(Springs.move, value: cents)
             if !prompt.isEmpty {
                 Text(prompt).font(.footnote).foregroundStyle(.quiet)
             }
@@ -278,13 +278,13 @@ public struct Pager: View {
                 .font(.headline)
                 .contentTransition(.numericText(value: Double(steps)))
                 .frame(minWidth: 150)
-                .animation(Springs.move, value: title)
+                .motion(Springs.move, value: title)
             Button { steps += 1; forward() } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel("Next")
             if let home {
                 Button(homeLabel, action: home)
                     .font(.subheadline.weight(.semibold))
-                    .transition(.opacity.combined(with: .scale))
+                    .motionTransition(.opacity.combined(with: .scale))
             }
         }
         .buttonStyle(.glass)

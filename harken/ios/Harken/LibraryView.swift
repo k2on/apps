@@ -94,7 +94,7 @@ private struct LibraryChips: View {
                             .background(Capsule().fill(on ? Color.accent : Color.containerHigh))
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
@@ -117,7 +117,7 @@ private struct PlaylistsList: View {
             Button { present(.newPlaylist(then: nil)) } label: {
                 HStack(spacing: Space.l) {
                     Image(systemName: "plus").font(.title2).foregroundStyle(Color.accentText).frame(width: 56, height: 56)
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
+                        .surface(in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
                     Text("New Playlist").font(.headline)
                 }
             }
@@ -143,7 +143,7 @@ private struct PlaylistsList: View {
             }
         }
         .listStyle(.plain)
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdges()
     }
 }
 
@@ -170,12 +170,12 @@ private struct AlbumsGrid: View {
                                 Text(a.playedBy).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                     }
                 }
                 .padding(Space.page)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollEdges()
         }
     }
 }
@@ -225,14 +225,14 @@ private struct ShowsGrid: View {
                                     Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.press)
                         }
                     }
                 }
                 .padding(Space.page)
-                .animation(Springs.move, value: unread.map { $0.url })
+                .motion(Springs.move, value: unread.map { $0.url })
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollEdges()
         }
     }
 }
@@ -255,8 +255,8 @@ private struct UnreadFeed: View {
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .motionTransition(.opacity.combined(with: .move(edge: .top)))
     }
 }
 
@@ -287,7 +287,7 @@ private struct ArtistsList: View {
                 }
             }
             .listStyle(.plain)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollEdges()
         }
     }
 
@@ -340,7 +340,7 @@ struct SongsList: View {
                          onPlay: { model.play(tracks, at: i, from: .songs) }) { RowCover(track: t) }
             }
             .listStyle(.plain)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollEdges()
         }
     }
 }

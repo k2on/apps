@@ -290,7 +290,7 @@ struct AssignSheet: View {
                     // Its rule assigns this month: the amount shown, never typed.
                     VStack(spacing: Space.s) {
                         MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule")
-                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .scaledFont(56, weight: .bold, design: .rounded)
                             .minimumScaleFactor(0.4)
                             .lineLimit(1)
                         Text(words)
@@ -537,6 +537,7 @@ struct AddAccountSheet: View {
 struct ReconcileSheet: View {
     let id: Id
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     @Environment(\.dismiss) private var dismiss
     @State private var differs = false
     @State private var cents: Int64 = 0
@@ -551,7 +552,7 @@ struct ReconcileSheet: View {
                 if !differs {
                     Text("Is your cleared balance")
                         .font(.title3)
-                    CentsText(cleared).font(.system(size: 44, weight: .bold, design: .rounded))
+                    CentsText(cleared).scaledFont(44, weight: .bold, design: .rounded)
                     if let b = a?.bankBalance {
                         Label("The bank last said \(CentsText.string(b))", systemImage: "building.columns")
                             .font(.footnote)
@@ -560,7 +561,7 @@ struct ReconcileSheet: View {
                     HStack(spacing: Space.m) {
                         Button("No") {
                             cents = Int64((a?.bankBalance ?? cleared).magnitude)
-                            withAnimation(Springs.move) { differs = true }
+                            withAnimation(Springs.move.reduced(still)) { differs = true }
                         }
                         .buttonStyle(.glass)
                         .controlSize(.large)
