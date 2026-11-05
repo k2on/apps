@@ -768,7 +768,7 @@
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
             # Xcode, outside the store. Pinned, only its directory is read,
             # from inside the sandbox (`__impureHostDeps`, which the builder's
-            # nix.conf must allow: `extra-allowed-impure-host-deps`).
+            # nix.conf must allow: `allowed-impure-host-deps`).
             __noChroot = xcode == null;
             __impureHostDeps = lib.optional (xcode != null) xcode.app;
             # The iOS targets compile and link with the builder's Xcode: its
