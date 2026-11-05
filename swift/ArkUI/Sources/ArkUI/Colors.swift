@@ -119,3 +119,8 @@ extension ShapeStyle where Self == Color {
     /// What is written on that.
     public static var onAccentContainer: Color { Accent.color { $0.onAccentContainer } }
 }
+
+extension Color {
+    /// A chart's colours, in the order its parts take them: the largest first.
+    public static let chart: [Color] = ChartTokens.series.map { Color($0) }
+}

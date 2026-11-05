@@ -127,6 +127,16 @@ dark = [
   ["#5A5A5E", "#18181A"],
 ]
 
+# The colours a chart tells its parts apart by, in the order the parts take
+# them: the largest first. Hues that sit beside money's green rather than
+# fight it, none of them the error's red (a part is not wrong for being
+# large), each at 3:1 on every ground a chart is drawn on, as a mark has to
+# be. A marker over its colour's own faint wash (an account's tile) reads
+# too.
+[chart]
+light = ["#17734A", "#2F6DB5", "#A86A00", "#7A55C4", "#B8457E", "#0E7C7B"]
+dark = ["#5FD394", "#7FB2F0", "#F0B85A", "#B9A0F5", "#F29AC6", "#4FCDC9"]
+
 # The accents, one per app. Each says, for each side: the accent (a filled
 # button, a slider, a selected tab), what is written on it, the accent as
 # text (a link, the row playing), and a quiet container in the accent with
@@ -202,6 +212,11 @@ on = [
   ["on-caution-container", "caution-container"],
   ["inverse-ink", "inverse-surface"],
   ["quiet", "accent-container"],
+]
+# Every chart colour on every ground, at 3:1: a mark, not text.
+chart = [
+  "background", "surface", "container-lowest", "container-low", "container",
+  "container-high", "container-highest", "glass",
 ]
 large = [
   ["outline", "background"],
