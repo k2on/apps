@@ -1,0 +1,45 @@
+    #content
+              'Home' [text]
+              [button] pressable
+                'Settings'
+                [button]
+              'Last played' [text]
+              [button] pressable
+                'Für Elise' [text]
+                'Ludwig van Beethoven' [text]
+                'Playing on sdk_gphone64_x86_64' [text]
+                [button] pressable
+                  'Play again'
+                  [button]
+              'Recently added' [text]
+              [button] pressable
+                'All songs' [text]
+                [button]
+                [button] pressable
+                  'Für Elise' [text]
+                  'Ludwig van Beethoven' [text]
+                [button] pressable
+                  'Gigue' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Menuet' [text]
+                  'George Frideric Handel' [text]
+              'Your playlists' [text]
+              [button] pressable
+                'New' [text]
+                [button]
+                [button] pressable
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]
+          [button] pressable
+            'Für Elise' [text]
+            'Ludwig van Beethoven' [text]
+            [button] pressable
+              'Pause'
+              [button]
+            [button] pressable
+              'Next'
+              [button]

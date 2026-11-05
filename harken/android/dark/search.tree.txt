@@ -1,0 +1,20 @@
+    #content
+              'Search' [text]
+              [field] pressable
+                'Songs, albums, artists' [text]
+              'Search your library' [text]
+              'Find a song by its title, or everything by somebody, as you type.' [text]
+                [button] pressable
+                  'Home' [text]
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]
+          [button] pressable
+            'Für Elise' [text]
+            'Ludwig van Beethoven' [text]
+            [button] pressable
+              'Play'
+              [button]
+            [button] pressable
+              'Next'
+              [button]

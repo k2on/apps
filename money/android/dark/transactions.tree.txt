@@ -1,0 +1,55 @@
+    #content
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To review · 3' [text]
+                      [button]
+                    'Approve' [text]
+                    [button] pressable
+                      'Thai Basil, -$9.05, Dining Out, new, uncleared'
+                      [button] pressable
+                        'Mark cleared'
+                        [button]
+                      '-$9.05' [text]
+                      'Thai Basil' [text]
+                      'Chase Sapphire · Dining Out' [text]
+                    [button] pressable
+                      'Dining Out' [text]
+                      [button]
+                    'Approve' [text]
+                    [button] pressable
+                      'Netflix, -$15.00, Subscriptions, new, cleared'
+                      [button] pressable
+                        'Mark uncleared'
+                        [button]
+                      '-$15.00' [text]
+                      'Netflix' [text]
+                      'Chase Sapphire · Subscriptions' [text]
+                    [button] pressable
+                      'Subscriptions' [text]
+                      [button]
+                    'Approve' [text]
+                    [button] pressable
+                      'Whole Foods Market, -$135.46, Groceries, new, cleared'
+                      [button] pressable
+                        'Mark uncleared'
+                        [button]
+                      '-$135.46' [text]
+                      'Whole Foods Market' [text]
+                      'Chase Sapphire · Groceries' [text]
+                    [button] pressable
+                      'Groceries' [text]
+                      [button]
+                  [button] pressable
+                    'Approve all' [text]
+                    [button]
+                  'Transactions' [text]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
