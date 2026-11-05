@@ -143,7 +143,7 @@ fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit
             ) {
                 Glyph(Glyphs.SignOut, null, size = 18.dp)
                 Spacer(Modifier.width(Space.s))
-                Text("Sign out")
+                Text("Sign Out")
             }
             Text(
                 "Anything not synced yet stays on this phone, and goes when you sign in again.",
@@ -201,7 +201,7 @@ fun DiagnosticsScreen(d: Diagnostics?, onBack: () -> Unit, heard: Heard = Heard(
                 if (s == null) Line("Opening", "…") else for ((k, v) in numbers(s)) Number(k, v)
             }
             Group("Listening") { for ((k, v) in listeningNumbers(heard)) Number(k, v) }
-            Group("Changes from this phone") {
+            Group("Changes from This Phone") {
                 val changes = d?.changes.orEmpty()
                 if (changes.isEmpty()) Line("None yet", "What you change here is listed with where it stands")
                 for ((what, standing) in changes) Line(what, standing)

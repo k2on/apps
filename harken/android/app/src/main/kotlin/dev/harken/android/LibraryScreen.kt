@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -39,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkui.Cover
@@ -94,7 +96,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
         val kind = tab.kind
         TabTitle("Library") {
             if (kind != null) {
-                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Add sermons" else "Add a podcast") }
+                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Follow sermons" else "Follow a podcast") }
             } else {
                 IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") }
             }
@@ -104,16 +106,23 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             // A library of pop has no works, so no Composers — unless it is the list already shown.
+            // Capsules, as the iPhone's: the one shown filled in the accent, the rest a quiet fill
+            // with no outline.
             for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
+                val on = t == tab
                 FilterChip(
-                    selected = t == tab,
+                    selected = on,
                     onClick = { onTab(t) },
                     label = { Text(t.title) },
+                    shape = CircleShape,
                     colors =
                         FilterChipDefaults.filterChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            labelColor = MaterialTheme.colorScheme.onSurface,
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = Color.Transparent, selectedBorderColor = Color.Transparent),
                 )
             }
         }
@@ -153,8 +162,8 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         Empty(
             if (kind == "sermon") Glyphs.Pulpit else Glyphs.Show,
             if (kind == "sermon") "No sermons yet" else "No podcasts yet",
-            "Tap + to find one in Apple Podcasts, or paste its feed's address. The server downloads its newest episodes and keeps it up to date.",
-            action = if (kind == "sermon") "Add sermons" else "Add a podcast",
+            "Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under ${kind}s/ on the server appears here too.",
+            action = if (kind == "sermon") "Follow Sermons" else "Follow a Podcast",
             onAction = { act.findShow(kind) },
         )
         return
@@ -176,7 +185,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
                 Column(Modifier.weight(1f)) {
                     Text(f.title.ifEmpty { f.url }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (f.error.isNotEmpty()) "Could not read it: ${f.error}" else "not read yet",
+                        if (f.error.isNotEmpty()) "Could not read it: ${f.error}" else "Not read yet",
                         style = quiet(MaterialTheme.typography.bodySmall),
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
@@ -204,7 +213,7 @@ private fun Playlists(playlists: List<Playlist>, act: Do) {
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         item {
-            ListRow(onClick = act::newPlaylist, title = "New playlist", under = null) {
+            ListRow(onClick = act::newPlaylist, title = "New Playlist", under = null) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.size(56.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Glyphs.Plus, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

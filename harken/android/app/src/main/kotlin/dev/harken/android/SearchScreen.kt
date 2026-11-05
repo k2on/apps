@@ -107,7 +107,7 @@ fun SearchScreen(
                 if (recent.isEmpty()) {
                     item { Empty(Glyphs.Search, "Search your library", "Find a song by its title, or everything by somebody, as you type.") }
                 } else {
-                    item { Heading("Recent searches", action = "Clear", onAction = onForget) }
+                    item { Heading("Recent Searches", action = "Clear", onAction = onForget) }
                     items(recent, key = { "recent:$it" }) { r ->
                         Row(
                             Modifier.fillMaxWidth().clickable { onNeedle(r) }.padding(horizontal = Space.page).height(48.dp),

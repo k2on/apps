@@ -131,7 +131,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
             else -> {
                 val last = data.last
                 if (last != null) {
-                    item { Heading("Last played") }
+                    item { Heading("Last Played") }
                     val from =
                         when (val f = last.from) {
                             is Page.ForAlbum -> data.albums.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From an album"
@@ -142,7 +142,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                         }
                     item { LastCard(last, last.on ?: from, onResume = { act.resume(last) }) }
                 }
-                item { Heading("Recently added", action = "All songs", onAction = { act.library(LibraryTab.Songs) }) }
+                item { Heading("Recently Added", action = "All Songs", onAction = { act.library(LibraryTab.Songs) }) }
                 item {
                     Shelf("recent", recent, key = { it.id.hex }) { t ->
                         val album = albumOf(t)
@@ -151,7 +151,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                         })
                     }
                 }
-                item { Heading("Your playlists", action = "New", onAction = act::newPlaylist) }
+                item { Heading("Your Playlists", action = "New", onAction = act::newPlaylist) }
                 if (data.playlists.isEmpty()) {
                     item {
                         Text(
@@ -168,7 +168,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     }
                 }
                 if (data.albums.isNotEmpty()) {
-                    item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
+                    item { Heading("Albums", action = "See All", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
                         Shelf("albums", data.albums, key = { it.id }) { a ->
                             CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
@@ -181,12 +181,13 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     }
 }
 
-// What was played last, and the button that plays it again from there.
+// What was played last, and the button that plays it again from there: the iPhone's card, its
+// corners as round, and where it is playing, while it is, in the accent.
 @Composable
 private fun LastCard(last: LastPlayed, from: String, onResume: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(20.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page).clickable(onClick = onResume),
     ) {
         Row(Modifier.padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
@@ -195,7 +196,12 @@ private fun LastCard(last: LastPlayed, from: String, onResume: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(last.track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(last.track.artist, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(from, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    from,
+                    style = if (last.on != null) MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.primary) else quiet(MaterialTheme.typography.bodySmall),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             FilledIconButton(onClick = onResume) { Glyph(Glyphs.Play, "Play again", size = 18.dp) }
         }

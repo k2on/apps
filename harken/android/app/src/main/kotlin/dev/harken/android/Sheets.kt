@@ -110,18 +110,18 @@ fun TrackMenu(
             }
         }
         HorizontalDivider(Modifier.padding(vertical = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
-        SheetRow(Glyphs.PlayNext, "Play next", actions::playNext)
-        SheetRow(Glyphs.Queue, "Add to queue", actions::addToQueue)
-        SheetRow(Glyphs.AddTo, "Add to playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
-        if (album != null && from != Page.ForAlbum(album.id)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.id)) })
-        if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to show", { actions.goTo(Page.ForShow(show.id)) })
+        SheetRow(Glyphs.PlayNext, "Play Next", actions::playNext)
+        SheetRow(Glyphs.Queue, "Add to Queue", actions::addToQueue)
+        SheetRow(Glyphs.AddTo, "Add to Playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
+        if (album != null && from != Page.ForAlbum(album.id)) SheetRow(Glyphs.Album, "Go to Album", { actions.goTo(Page.ForAlbum(album.id)) })
+        if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to Show", { actions.goTo(Page.ForShow(show.id)) })
         if (track.kind == "song" && track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
-            SheetRow(Glyphs.Artist, "Go to artist", { actions.goTo(Page.ForArtist(track.creator)) })
-        if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from this playlist", actions::remove)
+            SheetRow(Glyphs.Artist, "Go to Artist", { actions.goTo(Page.ForArtist(track.creator)) })
+        if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from This Playlist", actions::remove)
         // An episode: played or not by hand, and each of its chapters to start from.
         if (track.kind != "song") {
             val played = listened?.finished == true
-            SheetRow(Glyphs.Show, if (played) "Mark as unplayed" else "Mark as played", { actions.markPlayed(!played) })
+            SheetRow(Glyphs.Show, if (played) "Mark as Unplayed" else "Mark as Played", { actions.markPlayed(!played) })
             for (c in chapters) SheetRow(Glyphs.Play, "${Media.clock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
         }
     }
@@ -140,7 +140,7 @@ fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggl
                 modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
             )
         }
-        item { SheetRow(Glyphs.Plus, "New playlist", onNew, emphasis = true) }
+        item { SheetRow(Glyphs.Plus, "New Playlist", onNew, emphasis = true) }
         items(playlists, key = { it.id.hex }) { p ->
             val ticked = on?.contains(p.id) == true
             SheetRow(
@@ -158,12 +158,12 @@ fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggl
 fun NewPlaylistCard(name: String, problem: String?, adding: Boolean, onName: (String) -> Unit, onMake: () -> Unit, onCancel: () -> Unit) {
     Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 6.dp) {
         Column(Modifier.padding(Space.xl)) {
-            Text("New playlist", style = MaterialTheme.typography.headlineSmall)
+            Text("New Playlist", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(Space.l))
             NewPlaylist(name, problem, onName)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onCancel) { Text("Cancel") }
-                TextButton(onClick = onMake, enabled = name.isNotBlank() && problem == null) { Text(if (adding) "Make and add" else "Make it") }
+                TextButton(onClick = onMake, enabled = name.isNotBlank() && problem == null) { Text(if (adding) "Make and Add" else "Make It") }
             }
         }
     }
@@ -233,7 +233,7 @@ fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions, onD
         )
         Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Space.s)) {
             Text(
-                "Playing on",
+                "Playing On",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -372,7 +372,7 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
     val rows = Directory.rows(query, found)
     Column(Modifier.fillMaxWidth()) {
         Text(
-            if (kind == "sermon") "Add sermons" else "Add a podcast",
+            if (kind == "sermon") "Follow Sermons" else "Follow a Podcast",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
         )

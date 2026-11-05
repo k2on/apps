@@ -97,6 +97,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arkui.Bar
 import dev.arkui.Cover
@@ -319,7 +320,7 @@ fun FullFace(
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 GlassButton(Glyphs.Down, "Close the player", controls::close)
                 Text(
-                    if (now?.album.isNullOrEmpty()) "Now playing" else now!!.album,
+                    if (now?.album.isNullOrEmpty()) "Now Playing" else now!!.album,
                     style = quiet(MaterialTheme.typography.labelLarge),
                     textAlign = TextAlign.Center,
                     maxLines = 1,
@@ -585,11 +586,11 @@ fun QueueSheet(state: PlayerState, controls: Controls) {
     val keys = remember(keyed) { keyed.map { it.first } }
     val drawn = reorder.order(keyed) { it.first }
     LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl), state = list) {
-        item { Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
+        item { Text("Now Playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
         state.now?.let { now -> item { QueueRow(now, current = true, onClick = {}) } }
         item {
             Text(
-                if (state.shuffle) "Up next, shuffled" else "Up next",
+                if (state.shuffle) "Up Next, Shuffled" else "Up Next",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = Space.xl, end = Space.xl, top = Space.l, bottom = Space.s),
             )
@@ -767,9 +768,9 @@ private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boole
         if (speaker.isNotEmpty()) {
             // A voice told apart is named by tapping its name.
             val named = if (line.voice.isEmpty()) Modifier else Modifier.clickable(onClick = onSpeaker)
-            Text(speaker.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
+            Text(speaker, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
         }
-        Text(line.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = colour)
+        Text(line.text, style = MaterialTheme.typography.titleLarge, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = colour)
     }
 }
 

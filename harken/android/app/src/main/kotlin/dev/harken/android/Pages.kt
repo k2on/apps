@@ -354,7 +354,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
             Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.l)) {
                 if (composer.isNotEmpty()) {
                     Text(
-                        composer.uppercase() + "  ›",
+                        composer + "  ›",
                         style = quiet(MaterialTheme.typography.labelLarge),
                         modifier = Modifier.clickable { act.open(Page.ForArtist(composer)) }.padding(vertical = Space.xs),
                     )
@@ -498,7 +498,7 @@ fun ShowPage(
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
-    // What "2 days ago" is counted from: the page's opening, not every frame.
+    // What "Today" is counted from: the page's opening, not every frame.
     val now = remember { System.currentTimeMillis() }
     // Each row's, found once rather than by every row as it scrolls in.
     val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
@@ -581,7 +581,7 @@ fun ShowPage(
         if (feed != null && feed.hasOlder) {
             item(key = "older") {
                 OutlinedButton(onClick = { onFetchOlder(feed, 20) }, modifier = Modifier.padding(start = Space.page, end = Space.page, top = Space.l)) {
-                    Text("Fetch ${minOf(feed.items - feed.keep, 20L)} older")
+                    Text("Fetch ${minOf(feed.items - feed.keep, 20L)} Older Episodes")
                 }
             }
         }
@@ -671,13 +671,13 @@ private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
 }
 
 /**
- * One episode, as a podcast app lists them: when it came out, in small capitals; its title, bold;
+ * One episode, as a podcast app lists them: when it came out, in small type; its title, bold;
  * what it is about, a few lines of it; and under them its play and how much of it there is — its
  * length, the time left once begun, Played, or how its download to the server goes while the file
  * is not there yet — with anybody else's place beside it. Begun, a bar across the row says how far
  * in the listener is. Whoever else was on it (`guests`) is under what it is about, their faces and
  * their names, opening their page. The whole row plays it; its menu is at its top right. Off its
- * show's page, the small capitals name the `show` too.
+ * show's page, the small type name the `show` too.
  */
 @Composable
 fun EpisodeRow(
@@ -695,7 +695,7 @@ fun EpisodeRow(
     show: String = "",
 ) {
     Recompositions.hit("EpisodeRow")
-    val dated = facts(show.uppercase(), Episodes.dated(detail?.publishedMs ?: 0, now))
+    val dated = facts(show, Episodes.dated(detail?.publishedMs ?: 0, now))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {

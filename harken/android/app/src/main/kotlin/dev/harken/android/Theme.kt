@@ -54,15 +54,19 @@ object Palette {
     val OnShade = Color(0xFFFFFFFF)
 }
 
-/** One type scale for every screen: the platform's sans, in a few sizes and two weights. */
+/**
+ * One type scale for every screen: the platform's sans, in a few sizes and two weights, sized as
+ * the iPhone's are — a tab's title (headlineLarge) its large title, a section's heading (titleLarge)
+ * its title 2, both bold.
+ */
 val HarkenType: Typography =
     Typography().run {
         copy(
             displaySmall = displaySmall.copy(fontWeight = FontWeight.Bold),
-            headlineLarge = headlineLarge.copy(fontWeight = FontWeight.Bold),
+            headlineLarge = headlineLarge.copy(fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 41.sp),
             headlineMedium = headlineMedium.copy(fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp),
             headlineSmall = headlineSmall.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp),
-            titleLarge = titleLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 20.sp),
+            titleLarge = titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp),
             titleMedium = titleMedium.copy(fontWeight = FontWeight.SemiBold),
             titleSmall = titleSmall.copy(fontWeight = FontWeight.SemiBold),
             labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),

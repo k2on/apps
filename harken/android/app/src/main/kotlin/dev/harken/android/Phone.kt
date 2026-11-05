@@ -234,11 +234,11 @@ data class EpisodeDetail(val mediaId: Id, val description: String, val published
 
 /** What an episode's row says, as a podcast app's do: when it came out, and how much of it is left. */
 object Episodes {
-    private val MONTHS = arrayOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+    private val MONTHS = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
     /**
-     * When it came out, in small capitals: "TODAY", "YESTERDAY", "3 DAYS AGO" in its first week, then
-     * its day — "OCT 21" — with its year when that is not this one. Nothing, for nobody said.
+     * When it came out, as the iPhone's row says it: "Today", "Yesterday", then its day — "Oct 21" —
+     * with its year when that is not this one. Nothing, for nobody said.
      */
     fun dated(publishedMs: Long, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
         if (publishedMs <= 0) return ""
@@ -246,9 +246,8 @@ object Episodes {
         val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
         val ago = java.time.temporal.ChronoUnit.DAYS.between(day, today)
         return when {
-            ago == 0L -> "TODAY"
-            ago == 1L -> "YESTERDAY"
-            ago in 2L..6L -> "$ago DAYS AGO"
+            ago == 0L -> "Today"
+            ago == 1L -> "Yesterday"
             day.year == today.year -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}"
             else -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}, ${day.year}"
         }

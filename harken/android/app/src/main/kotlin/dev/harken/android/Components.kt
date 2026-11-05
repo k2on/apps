@@ -213,7 +213,7 @@ fun PageHeader(
         // Where the art a page grew from lands.
         Box(LocalPageFrame.current?.art?.modifier ?: Modifier) { cover() }
         Spacer(Modifier.height(Space.l))
-        Text(kind.uppercase(), style = quiet(MaterialTheme.typography.labelMedium))
+        Text(kind, style = quiet(MaterialTheme.typography.labelMedium))
         Spacer(Modifier.height(Space.xs))
         Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         if (by != null) {
@@ -290,7 +290,7 @@ fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).co
  * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
  * fill, run up under the status bar (its page says [dev.arkui.UnderStatusBar]) and that
  * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
- * capitals and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
+ * type and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
  * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the
  * derived square is drawn instead, so the name is already where it will be. A page grows out of a
  * portrait into it, the part under the bar included.
@@ -307,7 +307,7 @@ fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> 
             // And a little shade at the very top, under the bar's icons and back.
             Box(Modifier.fillMaxWidth().height(bar + BANNER_TOP_SHADE).background(Brush.verticalGradient(0f to Palette.Shade.copy(alpha = 0.35f), 1f to Palette.Clear)))
             Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
-                Text(kind.uppercase(), style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
+                Text(kind, style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
                 Spacer(Modifier.height(Space.xs))
                 Text(name, style = MaterialTheme.typography.headlineLarge, color = Palette.OnShade)
             }
@@ -336,7 +336,7 @@ fun PlayPill(onPlay: () -> Unit, enabled: Boolean = true) {
 
 /**
  * The header a record's page opens with, as a catalogue sets one: the cover beside a line of small
- * capitals (`over`, whose it is), the title in bold, who played it in the accent, a small line
+ * type (`over`, whose it is), the title in bold, who played it in the accent, a small line
  * under (`small`), and Play and Shuffle. A line that goes somewhere opens it.
  */
 @Composable
@@ -361,7 +361,7 @@ fun CoverHeader(
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             if (!over.isNullOrEmpty()) {
-                Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
+                Text(over, style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
                 Spacer(Modifier.height(Space.xs))
             }
             Text(title, style = MaterialTheme.typography.headlineSmall)
@@ -384,7 +384,7 @@ fun CoverHeader(
 
 /**
  * One thing set apart at the head of a section, the one to start with: its cover beside `label`
- * in small capitals, its title, its facts, and a Play. The cover and the title open it, the page
+ * in small type, its title, its facts, and a Play. The cover and the title open it, the page
  * growing out of the cover.
  */
 @Composable
@@ -395,7 +395,7 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
         Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).clickable(onClick = open), corner = 6.dp)
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
-            Text(label.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
+            Text(label, style = quiet(MaterialTheme.typography.labelSmall))
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = open))
             if (facts.isNotEmpty()) Text(facts, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(Space.s))
@@ -406,7 +406,7 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
 
 /**
  * One entry of a catalogue's listing over its hairline: a picture at its left when it has one,
- * a line of small capitals over its title (who it is by), a line under, a count at its right, and
+ * a line of small type over its title (who it is by), a line under, a count at its right, and
  * the chevron. The whole entry opens it.
  */
 @Composable
@@ -419,7 +419,7 @@ fun Entry(title: String, over: String, under: String, count: String, onOpen: () 
                 Spacer(Modifier.width(Space.m))
             }
             Column(Modifier.weight(1f)) {
-                if (over.isNotEmpty()) Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
+                if (over.isNotEmpty()) Text(over, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
                 Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (under.isNotEmpty()) Text(under, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -440,14 +440,14 @@ fun MoreLine(label: String, onOpen: () -> Unit) {
 }
 
 /**
- * A work's heading on a record: its composer in small capitals over its title, and
+ * A work's heading on a record: its composer in small type over its title, and
  * how long the run of it under the heading lasts, where the tracks' lengths are.
  */
 @Composable
 fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
     Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs + 48.dp + Space.s, top = if (first) Space.s else Space.xl, bottom = Space.xs), verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
-            if (composer.isNotEmpty()) Text(composer.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
+            if (composer.isNotEmpty()) Text(composer, style = quiet(MaterialTheme.typography.labelSmall))
             Text(work, style = MaterialTheme.typography.titleMedium)
         }
         if (ms > 0) Text(Media.clock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
@@ -464,7 +464,7 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
         for (terms in licences) Text(terms, style = quiet(MaterialTheme.typography.bodySmall))
         if (label.isNotEmpty()) {
             Spacer(Modifier.height(Space.l))
-            Text("RECORD LABEL", style = quiet(MaterialTheme.typography.labelSmall))
+            Text("Record Label", style = quiet(MaterialTheme.typography.labelSmall))
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         }
     }

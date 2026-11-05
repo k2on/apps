@@ -90,20 +90,24 @@ public fun Heading(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        if (action != null) TextButton(onClick = onAction) { Text(action) }
+        // In the body's weight, as the iPhone's is: the heading carries the weight, not its action.
+        if (action != null) TextButton(onClick = onAction) { Text(action, style = MaterialTheme.typography.bodyLarge) }
     }
 }
 
-/** A tab's own title, large, with what it offers at the end. */
+/**
+ * A tab's own title, with what it offers at the end: the theme's largest headline, bold, so it reads
+ * as the iPhone's large title does.
+ */
 @Composable
 public fun TabTitle(title: String, actions: @Composable RowScope.() -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth()
             .padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs)
-            .height(48.dp),
+            .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
     }
 }
@@ -143,10 +147,11 @@ public fun Empty(
         modifier.fillMaxWidth().padding(horizontal = Space.xxl, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // Quiet, not the accent: the words are what the empty list says, as on the iPhone.
         Icon(
             icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(40.dp))
         Spacer(Modifier.height(Space.l))
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
