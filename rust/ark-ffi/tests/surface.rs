@@ -289,37 +289,6 @@ fn a_view_made_again_after_a_reset_is_made_from_its_input() {
     assert!(!every.take().ops.is_empty(), "and kept up after");
 }
 
-/// A tap in the app is the root of what it causes: what is mutated between
-/// `begin` and `end` reaches the server under the span `begin` said.
-/// Falsified by `begin` opening nothing on the peer: the server's entry had
-/// no cause.
-#[test]
-fn a_tap_begun_through_the_bridge_is_the_servers_cause() {
-    let hub = server();
-    let d = tempfile::tempdir().unwrap();
-    let alice = device(&d, "phone", Some(login("alice@phone")));
-    alice.connect_with("", hub.dialer(Arc::new(dev)));
-    until("alice linked", || alice.status().linked);
-    let span = alice.begin("tap new playlist".into());
-    let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
-    alice.end();
-    until("confirmed", || {
-        alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
-    });
-    let cause = hub
-        .with(move |p| {
-            p.log
-                .log()
-                .entries()
-                .into_iter()
-                .find(|l| ark::hash::hex(&l.entry.id.0) == made)
-                .and_then(|l| l.entry.cause)
-        })
-        .flatten()
-        .expect("the server's entry has a cause");
-    assert_eq!(format!("{}/{}", ark::hash::hex(&cause.trace.0), ark::hash::hex(&cause.id)), span);
-}
-
 /// An app's mutate with no span opened is somebody's doing too: it reaches
 /// the server as the root of a trace of its own, not as an answer to
 /// whatever the device was last told. Falsified by `mutate` authoring

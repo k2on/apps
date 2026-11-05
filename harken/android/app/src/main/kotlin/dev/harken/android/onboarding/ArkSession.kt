@@ -30,7 +30,6 @@ package dev.harken.android.onboarding
 import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Login
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.socketUrl
 import dev.harken.android.gen.Device
 import dev.harken.android.gen.Harken
 import dev.harken.ffi.harkenOpen
@@ -269,7 +268,7 @@ private constructor(
                     val dir = directory(root, server).apply { mkdirs() }
                     s.dir = dir.path
                     val peer = harkenOpen(dir.path, login, device.json())
-                    peer.connect(socketUrl(server))
+                    peer.connect(server)
                     s.start(Harken(peer))
                 } catch (e: Refusal) {
                     s.failed(onFailed, e)

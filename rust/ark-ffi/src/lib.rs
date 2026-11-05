@@ -342,9 +342,10 @@ impl Peer {
         *self.shared.listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }
 
-    /// Dial `url` (`ws://…/sync`, [`socket_url`]) whenever signed in.
-    pub fn connect(&self, url: String) {
-        self.shared.act(|s| s.peer.connect(&url));
+    /// Dial the server at `server` (`http://host:port`; its sync socket,
+    /// `ark_auth::socket_url`) whenever signed in.
+    pub fn connect(&self, server: String) {
+        self.shared.act(|s| s.peer.connect(&ark_auth::socket_url(&server)));
     }
 
     /// Offline on purpose, or back online.
@@ -368,11 +369,10 @@ impl Peer {
         let id = self.shared.act(|s| {
             let input = s.peer.input_json(&name, &input)?;
             // An app's mutate of the log is somebody's doing — a tap — and
-            // the root of what it causes, unless the app opened a span
-            // around it; a job's own steps answer what made the job due
-            // instead, and a live call what woke it.
+            // the root of what it causes; a job's own steps answer what made
+            // the job due instead, and a live call what woke it.
             let job = [".claim", ".finish", ".cancel"].iter().any(|v| name.ends_with(v));
-            if job || s.peer.open_span().is_some() || s.peer.function(&name)?.space == ark::schema::Space::Volatile {
+            if job || s.peer.function(&name)?.space == ark::schema::Space::Volatile {
                 return s.peer.mutate(&name, input);
             }
             s.peer.begin(&name);
@@ -423,32 +423,6 @@ impl Peer {
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
         let args = self.shared.lock().peer.input_json(&name, &input)?;
         self.view_bytes(name, args)
-    }
-
-    /// A trace begun here, named `name` — what a tap, a gesture, a scan in
-    /// the app opens — and everything this peer authors under it until
-    /// [`Peer::end`]: what it caused, everywhere, is one trace. Its span, as
-    /// `trace/span` in hex.
-    pub fn begin(&self, name: String) -> String {
-        let s = self.shared.act(|s| s.peer.begin(&name));
-        format!("{}/{}", ark::hash::hex(&s.trace.0), ark::hash::hex(&s.id))
-    }
-
-    /// The span [`Peer::begin`] opened, closed.
-    pub fn end(&self) {
-        self.shared.act(|s| s.peer.end());
-    }
-
-    /// Something the app saw, said among this peer's events under the span
-    /// it authors under now: `name`, and `detail` as the app writes it.
-    pub fn event(&self, name: String, detail: String) {
-        let s = self.shared.lock();
-        let span = s
-            .peer
-            .cause(ark::schema::Space::Durable, ark_peer::now_ms())
-            .map(|s| ark::hash::hex(&s.id))
-            .unwrap_or_default();
-        tracing::info!(target: "ark", peer = %s.peer.label(), span = %span, name = %name, detail = %detail, "app");
     }
 
     /// The rows of the live space's `table` this device holds, as JSON.
@@ -591,12 +565,6 @@ impl Drop for ViewHandle {
             k.view.close(&mut s.peer);
         }
     }
-}
-
-/// The sync socket of the server at `server` (`http://host:port`).
-#[uniffi::export]
-pub fn socket_url(server: String) -> String {
-    ark_auth::socket_url(&server)
 }
 
 /// Where a sign-in starts: the server's own page, which sends its code on

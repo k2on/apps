@@ -21,12 +21,12 @@ use ark::row::Describe;
 
 use crate::{Peer, Refusal, ViewHandle};
 
-/// A type and the record or enum it crosses the bridge as. `UT` is the
+/// A type and the record or enum it crosses the bridge as, one way: a
+/// view's rows go out, nothing comes back typed. `UT` is the
 /// crate whose UniFFI scaffolding the twin is in (UniFFI's tag).
 pub trait Twin<UT>: Sized {
     type Ffi;
     fn ffi(self) -> Self::Ffi;
-    fn from_ffi(f: Self::Ffi) -> Self;
 }
 
 macro_rules! itself {
@@ -35,9 +35,6 @@ macro_rules! itself {
             type Ffi = $t;
             fn ffi(self) -> $t {
                 self
-            }
-            fn from_ffi(f: $t) -> $t {
-                f
             }
         }
     )*};
@@ -49,18 +46,12 @@ impl<UT, T: Twin<UT>> Twin<UT> for Option<T> {
     fn ffi(self) -> Self::Ffi {
         self.map(T::ffi)
     }
-    fn from_ffi(f: Self::Ffi) -> Self {
-        f.map(T::from_ffi)
-    }
 }
 
 impl<UT, T: Twin<UT>> Twin<UT> for Vec<T> {
     type Ffi = Vec<T::Ffi>;
     fn ffi(self) -> Self::Ffi {
         self.into_iter().map(T::ffi).collect()
-    }
-    fn from_ffi(f: Self::Ffi) -> Self {
-        f.into_iter().map(T::from_ffi).collect()
     }
 }
 
@@ -81,9 +72,6 @@ impl<UT, R> Twin<UT> for ark::row::Id<R> {
     type Ffi = RowId;
     fn ffi(self) -> RowId {
         RowId(self.0)
-    }
-    fn from_ffi(f: RowId) -> Self {
-        ark::row::Id::new(f.0)
     }
 }
 

@@ -240,7 +240,7 @@ final class Bridge {
             // login's session — the server fills in an empty one — so a device is a login.
             let device = Device(canPlay: true, id: "", kind: "phone", name: name, user: "")
             let peer = try harkenOpen(dir: dir.path, login: login, device: device.json)
-            peer.connect(url: socketUrl(server: server))
+            peer.connect(server: server)
             h = Harken(peer: peer)
         } catch {
             closed = true

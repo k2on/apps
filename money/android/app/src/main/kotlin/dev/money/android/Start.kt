@@ -20,7 +20,6 @@ import androidx.lifecycle.viewModelScope
 import dev.arkdb.ffi.Login
 import dev.arkdb.ffi.exchange
 import dev.arkdb.ffi.loginUrl
-import dev.arkdb.ffi.socketUrl
 import dev.arkui.SignInPhase
 import dev.arkui.server.Found
 import dev.arkui.server.Probe
@@ -306,7 +305,7 @@ class Start(app: Application) : AndroidViewModel(app) {
         fun openServer(app: Application, server: String, login: Login): Book {
             val dir = File(app.filesDir, "money/server-" + server.replace(Regex("[^A-Za-z0-9]"), "_") + "/replica").apply { mkdirs() }
             val peer = moneyOpen(dir.path, login)
-            peer.connect(socketUrl(server))
+            peer.connect(server)
             return Book.open(peer, moneyToday(), demo = false, server = server)
         }
     }

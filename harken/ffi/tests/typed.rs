@@ -91,8 +91,8 @@ mod nested {
     }
 }
 
-/// Falsified by the enum twin's way back dropping a lone unnamed field
-/// (`unreachable!()` in its place): the round trip of `Wraps` panicked.
+/// Falsified by the enum twin dropping a lone unnamed field (its
+/// `value` left out): `Wraps` was not a record of its value.
 #[test]
 fn nested_sums_options_lists_and_ids_have_twins() {
     use nested::{Inner, InnerFfi, Outer, OuterFfi};
@@ -108,13 +108,19 @@ fn nested_sums_options_lists_and_ids_have_twins() {
         Outer::Wraps(inner.clone()),
         Outer::Nothing,
     ];
-    for o in all {
-        let t = <Outer as Twin<crate::UniFfiTag>>::ffi(o.clone());
-        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::from_ffi(t), o);
-    }
-    let w = <Outer as Twin<crate::UniFfiTag>>::ffi(Outer::Wraps(inner));
-    let OuterFfi::Wraps { value: InnerFfi { at, ids } } = w else {
-        panic!("Wraps is a record of its value: {w:?}")
+    let twin = || InnerFfi {
+        at: Some(3),
+        ids: vec![RowId([7; 16])],
     };
-    assert_eq!((at, ids), (Some(3), vec![RowId([7; 16])]));
+    let twins = [
+        OuterFfi::Has {
+            inner: twin(),
+            tags: vec![Some("a".into()), None],
+        },
+        OuterFfi::Wraps { value: twin() },
+        OuterFfi::Nothing {},
+    ];
+    for (o, t) in all.into_iter().zip(twins) {
+        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::ffi(o), t, "Wraps is a record of its value");
+    }
 }

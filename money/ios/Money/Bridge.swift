@@ -191,7 +191,7 @@ final class Bridge {
                 let dir = Bridge.directory(root, server)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 peer = try moneyOpen(dir: dir.path, login: login)
-                peer.connect(url: socketUrl(server: server))
+                peer.connect(server: server)
             case let .demo(today):
                 peer = try moneyDemo(today: today)
                 bank = DemoBank()
