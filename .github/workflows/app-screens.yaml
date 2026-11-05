@@ -371,6 +371,7 @@ jobs:
             sandbox = relaxed
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+            ${{ env.XCODE_NIX_CONF }}
 
       # Main's builds go to the cache; Xcode never (Apple's licence).
       - if: env.PUSH == 'true' && vars.CACHIX_NAME != ''
@@ -378,7 +379,7 @@ jobs:
         with:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          pushFilter: "Xcode_"
+          pushFilter: "[Xx]code([^Gg]|$)"
 
       # The app's server, as nix builds it (its server.sh): the cache's once
       # main's run has pushed it, or else built, under the app's build.
