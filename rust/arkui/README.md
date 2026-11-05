@@ -154,3 +154,11 @@ looks like on screen is not. The browser halves of `route::Browser` and
 `images` (the history API, the Cache API snippet, `createImageBitmap`) compile
 for wasm and have never run. The native picture fetch has only been run as far
 as a refused connection.
+
+## Motion
+
+`motion` (`Spring`, `Slide`, `Shown`, `reduced`, `ALWAYS_ANIMATE`, the
+veil) and the modules that move by it (`dialog`, `sheet`, `reorder`,
+`swipe`, `edge`) follow `docs/motion.md`, the same rules the phones'
+arkui follows: read it, and run its checklist, before adding or retuning
+a motion.

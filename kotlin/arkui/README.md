@@ -63,3 +63,10 @@ the same action on the row for TalkBack.
 The pieces harken uses are its tests' and screenshots' (`harken/android`).
 The Material You pieces are money's tests' (`AmountsTests`) and its
 screenshots'; none has been seen on a phone.
+
+## Motion
+
+How anything here moves, presses or buzzes is `docs/motion.md`: the
+principles, which of `Springs`, `Press`, `SensoryFeedback` and
+`reducedMotion` each kind of motion uses, and the checklist a change is
+reviewed against. Read it before adding or retuning one.
