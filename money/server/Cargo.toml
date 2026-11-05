@@ -10,16 +10,9 @@ workspace = "../../rust"
 name = "money-server"
 path = "src/main.rs"
 
-# The demo's household written into a data directory before the server
-# first starts: what the app screenshots sign in to (.github/screens/apps.md).
-[[bin]]
-name = "money-seed"
-path = "src/bin/money-seed.rs"
-
 [dependencies]
 ark = { path = "../../rust/ark" }
-# `seed`: the demo's household, for money-seed.
-money-domain = { path = "../domain", features = ["seed"] }
+money-domain = { path = "../domain" }
 # The server is a peer that listens; the importer is a peer in this process
 # that reaches it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
@@ -42,3 +35,6 @@ axum = "0.7"
 
 [dev-dependencies]
 tempfile = "3"
+# The demo's household, seeded into a data directory as money-seed does it
+# (tests/seed.rs).
+money-seed = { path = "../seed", default-features = false }

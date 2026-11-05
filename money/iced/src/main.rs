@@ -3,7 +3,7 @@
 //! Two builds of one window. Without features it is the household's
 //! client: it signs in to a money server and dials it (`live.rs`), and
 //! "Sync" asks the server's importer to ask the banks now. With `demo` it
-//! is the demo: no server and no sign-in, a seeded household (`money_domain::seed`)
+//! is the demo: no server and no sign-in, a seeded household (`money_seed`)
 //! on a peer that is its own authority, and the card's bank standing in
 //! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
 //! build on purpose, as harken's is: a flag could be set by accident, a
@@ -47,9 +47,9 @@ use arkui::{glyphs, menu, vim};
 use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
 use money_domain::dates::{add_months, day_of_ms, month_of};
-#[cfg(any(feature = "demo", test))]
-use money_domain::seed;
 use money_domain::*;
+#[cfg(any(feature = "demo", test))]
+use money_seed as seed;
 
 use peer::{Ledger, Peer};
 

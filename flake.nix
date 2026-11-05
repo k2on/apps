@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/iced/src/catalogue.json, the copy
+    # library is made of (harken/seed/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -68,11 +68,12 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's crates join it from
-      # `harken/` by path, so both trees are the source of every Rust build.
+      # The Rust workspace is `rust/`, and the apps' crates join it from
+      # `harken/` and `money/` by path (each app's `seed/` among them), so those trees are the
+      # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
@@ -335,6 +336,26 @@
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
           money-server = crate { packageId = "money-server"; };
+          # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
+          # DATA` writes what that app's server boots seeded from.
+          money-seed = crate { packageId = "money-seed"; };
+          harken-seed = crate { packageId = "harken-seed"; };
+          # `nix run .#<app>-demo [ADDR]`: that server on a fresh seeded
+          # directory, with dev auth, for a person to try.
+          money-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "money";
+            seed = money-seed;
+            server = money-server;
+            listen = "127.0.0.1:8788";
+            env = ''MONEY_DEV_AUTH=1 MONEY_DATA="$dir"'';
+          };
+          harken-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "harken";
+            seed = harken-seed;
+            server = harken-server;
+            listen = "127.0.0.1:8787";
+            env = ''HARKEN_DEV_AUTH=1 HARKEN_DATA="$dir" HARKEN_MEDIA="$dir/media"'';
+          };
 
           # The desktop window. winit and wgpu open the display and the GPU
           # by dlopen at run time, so the libraries go on the library path.
@@ -1049,9 +1070,9 @@
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/iced/src/catalogue.json
-            chmod 644 harken/iced/src/catalogue.json
-            echo "harken/iced/src/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/seed/catalogue.json
+            chmod 644 harken/seed/catalogue.json
+            echo "harken/seed/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
@@ -1070,6 +1091,7 @@
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
             inherit money-iced money-web money-web-server money-server;
+            inherit money-seed harken-seed money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
@@ -1112,8 +1134,8 @@
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/iced/src/catalogue.json} || {
-                echo "harken/iced/src/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/seed/catalogue.json} || {
+                echo "harken/seed/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
               touch $out

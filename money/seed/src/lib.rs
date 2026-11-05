@@ -1,14 +1,16 @@
 //! The demo's household: three months of a family's money, up to today —
-//! what the demo window (`money/iced`) and the phones' demo and previews
-//! (`money/ffi`, `money_demo`) open on, behind the `seed` feature.
+//! what the demo window (`money/iced`), the phones' demo and previews
+//! (`money/ffi`, `money_demo`) and a seeded server (`money-seed`, beside
+//! this file) open on. It lives beside the app, not in it (`docs/seed.md`), so the
+//! client and the server carry none of it unless they ask for it.
 //!
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
 //! the bank feeds through Plaid ([`Bank`]) — applied once each over one
 //! store and kept as the snapshot a peer alone opens on, which is what
-//! harken's demo does with its library (`harken/iced/src/seed.rs`). The
-//! dates are today's, so the month on screen is this one; the amounts are
-//! drawn from a fixed sequence, so every load is the same household.
+//! harken's demo does with its library (`harken/seed`). The dates are
+//! today's, so the month on screen is this one; the amounts are drawn from
+//! a fixed sequence, so every load is the same household.
 //!
 //! Two people keep this budget, as a household signed in through its
 //! OpenID provider would: the window is Alex's, and some of what is in it
@@ -22,12 +24,12 @@ use ark::peer::Ctx;
 use ark::store::Store;
 use ark_peer::{Config, Disk, Memory, Peer as Replica};
 
-use crate::dates::{add_days, add_months, day_of_ms, month_of};
-use crate::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
-use crate::*;
+use money_domain::dates::{add_days, add_months, day_of_ms, month_of};
+use money_domain::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
+use money_domain::*;
 
 fn domain() -> std::sync::Arc<ark::domain::Domain> {
-    crate::shared()
+    money_domain::shared()
 }
 
 /// Whose window the demo is.
@@ -226,8 +228,8 @@ const HABITS: &[Habit] = &[
 
 /// The day `d` of `month`, when it has come yet.
 fn day_in(month: &str, d: i64, today: &str) -> Option<String> {
-    let (y, m) = crate::dates::parse_month(month)?;
-    let day = crate::dates::day(y, m, d.min(crate::dates::days_in_month(y, m)));
+    let (y, m) = money_domain::dates::parse_month(month)?;
+    let day = money_domain::dates::day(y, m, d.min(money_domain::dates::days_in_month(y, m)));
     (day.as_str() <= today).then_some(day)
 }
 
@@ -358,7 +360,7 @@ pub fn card(owed: i64) -> PlaidAccount {
         mask: Some("4417".into()),
         kind: "credit".into(),
         subtype: Some("credit card".into()),
-        balances: crate::plaid::Balances {
+        balances: money_domain::plaid::Balances {
             current: Some(-owed as f64 / 100.0),
         },
     }
@@ -569,7 +571,7 @@ fn household(today: &str, now: i64) -> Store {
         // so the statement it pays next month is all set aside. This
         // month's last days are not filed yet: their debt waits.
         if !current {
-            let pay = crate::cards::payment_category(card);
+            let pay = money_domain::cards::payment_category(card);
             let short = s
                 .ask::<BudgetLine>("month", &Month { month: month.clone() })
                 .into_iter()
@@ -789,11 +791,28 @@ impl Bank {
             },
             _ => Pulled::default(),
         };
-        let added: i64 = pulled.added.iter().filter(|t| !t.pending).map(|t| -crate::plaid::cents(t.amount)).sum();
+        let added: i64 = pulled
+            .added
+            .iter()
+            .filter(|t| !t.pending)
+            .map(|t| -money_domain::plaid::cents(t.amount))
+            .sum();
         let pulled = Pulled {
             cursor: format!("live-{k}"),
             ..pulled
         };
         import_of(BANK_NAME, INSTITUTION, &[card(owed + added)], &pulled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Falsified by a mutation the domain refuses (each is an assertion) or
+    /// an amount drawn from anything but the fixed sequence: the household
+    /// is the same every time it is seeded for a day.
+    #[test]
+    fn the_household_is_the_same_every_time() {
+        let (today, now) = ("2026-10-26", 1_793_016_000_000);
+        assert_eq!(super::household(today, now).state_hash(), super::household(today, now).state_hash());
     }
 }
