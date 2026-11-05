@@ -157,7 +157,7 @@ struct AccountButton: View {
         let wanting = Banks.wanting(model.snapshot.banks)
         let who = model.who.isEmpty ? "?" : model.who
         NavigationLink(value: Route.settings) {
-            Face(name: who, picture: model.picture, side: 32)
+            Face(name: who, picture: model.picture)
                 .overlay(alignment: .topTrailing) {
                     if wanting > 0 {
                         Circle().fill(Color.error).frame(width: 9, height: 9).offset(x: 2, y: -2)
@@ -167,41 +167,6 @@ struct AccountButton: View {
         .accessibilityLabel("Signed in as \(who)")
         .accessibilityHint("Account and settings")
         .accessibilityValue(wanting > 0 ? "Banks need a look" : "")
-    }
-}
-
-/// Who is signed in, round, `side` across: their picture (`picture`, a
-/// whole URL, "" for none) once it has loaded, cropped to fill, over their
-/// initials on the accent, as harken's `Avatar` draws them. `AsyncImage`
-/// fetches it through the shared URL cache, which keeps it the day the
-/// server says (`/auth/picture` answers anybody, so no login goes with it).
-/// It grows with the person's text size, its initials with it, up to half
-/// as large again.
-struct Face: View {
-    let name: String
-    let picture: String
-    var side: CGFloat = 32
-    @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
-
-    var body: some View {
-        let side = self.side * min(grows, 1.5)
-        ZStack {
-            Circle().fill(Color.accent)
-            Text(letters)
-                .font(.system(size: side * 0.4, weight: .semibold))
-                .foregroundStyle(Color.onAccent)
-            if let url = URL(string: picture), !picture.isEmpty {
-                AsyncImage(url: url) { phase in phase.image?.resizable().scaledToFill() }
-            }
-        }
-        .frame(width: side, height: side)
-        .clipShape(Circle())
-    }
-
-    // The initials, or the name's first character when it has no letters ("?").
-    private var letters: String {
-        let l = Faces.initials(name)
-        return l.isEmpty ? String(name.prefix(1)) : l
     }
 }
 

@@ -17,8 +17,9 @@
 //! was broken.
 //!
 //! The colour is applied through the `svg` style's colour filter rather than
-//! written into the file, so one drawing is right on a plain row, a zebra row
-//! and the accent-filled row under the cursor.
+//! written into the file. The cursor's row is a faint wash now
+//! ([`crate::style::row`]), so a glyph is the same colour on it as off it;
+//! the `on_cursor` and `lit` the functions below still take say nothing.
 use iced::theme::palette::Extended;
 use iced::widget::{svg, Svg};
 use iced::{Color, Theme};
@@ -53,14 +54,9 @@ pub fn plain<'a>(shape: &'static [u8], dim: bool) -> Svg<'a> {
     })
 }
 
-/// In the accent — "this one": what is playing, a list this row is on. On the
-/// cursor's own row, which is filled with the accent, it takes the one colour
-/// that background was paired with.
-pub fn accent<'a>(shape: &'static [u8], on_cursor: bool) -> Svg<'a> {
-    tinted(shape, SIZE, move |p| match on_cursor {
-        true => p.primary.base.text,
-        false => p.primary.base.color,
-    })
+/// In the accent — "this one": what is playing, a list this row is on.
+pub fn accent<'a>(shape: &'static [u8], _on_cursor: bool) -> Svg<'a> {
+    tinted(shape, SIZE, |p| p.primary.base.color)
 }
 
 /// The tick beside a chosen row. The accent, the same as the title of the row
@@ -72,23 +68,17 @@ pub fn tick<'a>(on_cursor: bool) -> Svg<'a> {
 
 /// A glyph beside a line of text — a sidebar row, a menu entry.
 ///
-/// Dimmer than the words beside it, on both sides of the highlight: the icon is
+/// Dimmer than the words beside it: the icon is
 /// *which kind of thing this row is*, and a shape as loud as the name would
 /// compete with every name for the same glance.
-pub fn line<'a>(shape: &'static [u8], lit: bool) -> Svg<'a> {
-    tinted(shape, SIZE, move |p| match lit {
-        true => p.primary.base.text.scale_alpha(0.9),
-        false => p.background.base.text.scale_alpha(0.6),
-    })
+pub fn line<'a>(shape: &'static [u8], _lit: bool) -> Svg<'a> {
+    tinted(shape, SIZE, |p| p.background.base.text.scale_alpha(0.6))
 }
 
 /// Something drawn on every row, faintly: on every row, a shape as loud as the
 /// title is a shape competing with a hundred titles.
-pub fn faint<'a>(shape: &'static [u8], on_cursor: bool) -> Svg<'a> {
-    tinted(shape, SIZE, move |p| match on_cursor {
-        true => p.primary.base.text.scale_alpha(0.8),
-        false => p.background.base.text.scale_alpha(0.45),
-    })
+pub fn faint<'a>(shape: &'static [u8], _on_cursor: bool) -> Svg<'a> {
+    tinted(shape, SIZE, |p| p.background.base.text.scale_alpha(0.45))
 }
 
 /// The three dots that open a row's menu.
@@ -102,9 +92,6 @@ pub fn more<'a>(on_cursor: bool) -> Svg<'a> {
 /// say: `Add to playlist…` and `Rename…` are the same three dots, and one opens
 /// a panel *beside* the entry while the other replaces what is under it. Dimmer
 /// than the label: it says *how* the entry behaves, not what it does.
-pub fn chevron<'a>(lit: bool) -> Svg<'a> {
-    tinted(glyphs::CHEVRON, SIZE, move |p| match lit {
-        true => p.primary.base.text.scale_alpha(0.8),
-        false => p.background.base.text.scale_alpha(0.55),
-    })
+pub fn chevron<'a>(_lit: bool) -> Svg<'a> {
+    tinted(glyphs::CHEVRON, SIZE, |p| p.background.base.text.scale_alpha(0.55))
 }

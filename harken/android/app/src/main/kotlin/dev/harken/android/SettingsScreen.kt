@@ -6,10 +6,7 @@
 // signed in as a face, their picture round, which Home's bar opens this by.
 package dev.harken.android
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
@@ -30,29 +26,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.arkdb.ffi.Status
-import dev.arkui.Art
 import dev.arkui.Glyph
-import dev.arkui.LocalArkTheme
-import dev.arkui.LocalCoverLoader
 import dev.arkui.PageBar
 import dev.arkui.Space
 import dev.arkui.quiet
@@ -95,28 +76,6 @@ data class Who(val name: String, val picture: String = "") {
     }
 }
 
-/**
- * Who is signed in, round, `side` across: their provider's picture once it has arrived — fetched
- * from the provider and kept as a cover is, by the app's cover loader — over their initials on
- * the name's own colour, as the desktop's account button draws them (`arkui::account::face`). It
- * says `description` and nothing else to a screen reader.
- */
-@Composable
-fun Avatar(who: Who, side: Dp, description: String? = null, modifier: Modifier = Modifier) {
-    val tint = Art.pick(LocalArkTheme.current.art, who.name).first
-    val said = Modifier.clearAndSetSemantics { if (description != null) contentDescription = description }
-    Box(modifier.then(said).size(side).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
-        Text(Who.initials(who.name), color = Who.inkOn(tint), fontSize = (side.value * 0.4f).sp, fontWeight = FontWeight.SemiBold)
-        val covers = LocalCoverLoader.current
-        val url = remember(covers, who.picture) { covers?.urlOf(who.picture) }
-        if (covers != null && url != null) {
-            var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(covers.cached(url)) }
-            if (bitmap == null) LaunchedEffect(url) { bitmap = covers.load(url, side) }
-            bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-        }
-    }
-}
-
 @Composable
 fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
@@ -124,7 +83,7 @@ fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
             Group("Account") {
                 Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(Who(data.name, data.picture), 48.dp)
+                    dev.arkui.Face(data.name, data.picture, 48.dp)
                     Spacer(Modifier.width(Space.l))
                     Column {
                         Text(data.name, style = MaterialTheme.typography.titleMedium)

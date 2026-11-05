@@ -824,7 +824,7 @@ class MotionTests {
                     frames(300)
                     motion.rose = 0
                     shots.series = "rise"
-                    described(view, "Settings").first().config[SemanticsActions.OnClick].action!!.invoke()
+                    described(view, "Signed in as").first().config[SemanticsActions.OnClick].action!!.invoke()
                     frames(500)
                     shots.series = null
                     settings = motion.taken

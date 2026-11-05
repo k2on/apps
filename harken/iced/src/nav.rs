@@ -6,8 +6,9 @@
 //! button, a work's heading between its movements, the performer under a
 //! track, a shelf of records, the people on a recording. **Every one of
 //! those is a cell too**, numbered after the main list and placed where it
-//! is drawn ([`vim::Page`]), so `j`, `k`, `h` and `l` reach whatever the
-//! pointer can, and `<Enter>` does what its click does.
+//! is drawn ([`vim::Page`]). `j`, `k`, `h` and `l` walk only the ones that
+//! are items ([`Mark::reachable`]), a record or a face as a row is; a name
+//! in a line of text or a button is the pointer's, and Tab's.
 //!
 //! The view asks [`Layout::cell`] which number a thing has, to draw the
 //! cursor on it and to say where the pointer is; the keyboard asks
@@ -64,6 +65,17 @@ pub enum Mark {
     Follow,
 }
 
+impl Mark {
+    /// Whether the keys walk onto it: an item, as a row of the main list
+    /// is — a record on a shelf, a face, what a page sets apart, an
+    /// episode. A name in a line of text and a button are not: `h`, `j`,
+    /// `k` and `l` move between rows and items, and a link or a button is
+    /// reached by the pointer, and by Tab.
+    pub fn reachable(self) -> bool {
+        matches!(self, Mark::Album(_) | Mark::Person(_) | Mark::Featured | Mark::Episode(_))
+    }
+}
+
 /// A page, as the keyboard walks it.
 #[derive(Debug, Default)]
 pub struct Layout {
@@ -95,11 +107,42 @@ impl Layout {
         self.page.main + self.marks.len() - 1
     }
 
-    /// A block of cells, `columns` across, where it is drawn.
+    /// Whether the keys walk onto cell `id`: the main list's always, a
+    /// mark's as [`Mark::reachable`] says.
+    fn walked(&self, id: usize) -> bool {
+        self.mark_at(id).is_none_or(Mark::reachable)
+    }
+
+    /// A block of cells, `columns` across, where it is drawn, less the
+    /// cells the keys do not walk onto: each line of the block keeps what
+    /// is left of it, and the lines are as wide as the widest again, a
+    /// shorter one naming its last cell again as before.
     fn block(&mut self, ids: Vec<usize>, columns: usize) {
-        if !ids.is_empty() {
-            self.page.sections.push(Section { ids, columns });
+        let lines: Vec<Vec<usize>> = ids
+            .chunks(columns.max(1))
+            .map(|line| {
+                let mut kept: Vec<usize> = vec![];
+                for &id in line {
+                    if self.walked(id) && !kept.contains(&id) {
+                        kept.push(id);
+                    }
+                }
+                kept
+            })
+            .filter(|line| !line.is_empty())
+            .collect();
+        let columns = lines.iter().map(Vec::len).max().unwrap_or(0);
+        if columns == 0 {
+            return;
         }
+        let mut ids = vec![];
+        for line in lines {
+            let last = *line.last().unwrap_or(&0);
+            let n = line.len();
+            ids.extend(line);
+            ids.extend(std::iter::repeat_n(last, columns - n));
+        }
+        self.page.sections.push(Section { ids, columns });
     }
 
     /// One cell on a line of its own.
@@ -347,7 +390,7 @@ impl App {
             },
             marks: vec![],
         };
-        let detailed = !(self.help || self.debug);
+        let detailed = !self.debug;
         match &p.source {
             Source::Album(id, _) if detailed => {
                 let album = p.albums().iter().find(|a| a.id == *id);

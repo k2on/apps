@@ -340,6 +340,10 @@ pub enum Message {
     Wake,
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
+    /// The account's picture, fetched.
+    Picture(arkui::images::Loaded),
+    /// The which-key panel's delay went by for the prefix it was armed for.
+    WhichDue(u64),
     /// Items' category: the dropdown, under the pointer.
     FileItems(Vec<ItemRef>),
     /// The form's transaction split: into two lines, or (none) back into one.
@@ -430,6 +434,12 @@ pub struct App {
     pub paper: Option<receipt::Paper>,
     /// The photo the photo modal shows, by its file, once decoded.
     pub photo: Option<(String, iced::widget::image::Handle)>,
+    /// The signed-in person's picture, for the account button: fetched
+    /// once, kept on disk as harken's covers are (`arkui::images`).
+    pub pictures: arkui::images::Images,
+    /// The which-key panel: what can follow a prefix half typed, or with
+    /// `?` every key (`arkui::which`), read from [`KEYS`] and the grammar's.
+    pub which: arkui::which::Which,
 }
 
 impl App {
@@ -476,6 +486,8 @@ impl App {
             settings: stores::Settings::default(),
             paper: None,
             photo: None,
+            pictures: arkui::images::Images::new("money/pictures"),
+            which: arkui::which::Which::new(),
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -635,6 +647,9 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The account's picture is asked for once somebody is signed in,
+        // whichever message signed them in.
+        let task = Task::batch([task, self.want_picture()]);
         // The receipt beside the register is the selected transaction's (the
         // one in the form, else the cursor's); a receipt typed goes with the
         // transaction it was for.
@@ -1254,6 +1269,8 @@ impl App {
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
             Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
+            Message::Picture(done) => self.pictures.loaded(done),
+            Message::WhichDue(key) => self.which.due(key),
         }
         Task::none()
     }
@@ -1366,6 +1383,7 @@ impl App {
     fn key(&mut self, key: Key, mods: Modifiers) -> Task<Message> {
         if key == Key::Named(Named::Escape) {
             self.keys.press(&key, mods);
+            self.which.dismiss();
             return self.update(Message::Escape);
         }
         // The budget binds its sequences; the register none, so its `c`
@@ -1374,9 +1392,21 @@ impl App {
             (Pane::Page, Page::Budget) => &MONEY_KEYS,
             _ => &[],
         });
-        let Some(action) = self.keys.press(&key, mods) else {
+        let action = self.keys.press(&key, mods);
+        // The which-key panel follows what is half typed; a search is
+        // typed, not a prefix.
+        let prefix = match self.keys.mode() {
+            vim::Mode::Normal => self.keys.pending(),
+            vim::Mode::Search(_) => String::new(),
+        };
+        self.which.typed(&prefix);
+        let Some(action) = action else {
             return Task::none();
         };
+        if action == vim::Action::Key('?') {
+            self.which.ask();
+            return Task::none();
+        }
         // A menu that is up has the keys.
         if self.ctx.is_open() {
             return match action {
@@ -1403,6 +1433,9 @@ impl App {
                 Pane::Page => Pane::Sidebar,
             };
             return Task::none();
+        }
+        if let vim::Action::Scroll(place) = action {
+            return self.scroll_cursor(place);
         }
         match (self.pane, self.page) {
             (Pane::Sidebar, _) => self.sidebar_act(action),
@@ -2047,9 +2080,43 @@ impl App {
         self.peer.account(account).filter(|a| a.kind == "credit" && a.on_budget).map(|a| a.id)
     }
 
-    /// Keep row `n` in view.
+    /// Keep row `n` in view, the budget moving only once it would leave.
     fn reveal(&self, n: usize) -> Task<Message> {
-        arkui::scroll::reveal_to(look::BUDGET, outline::progress(&self.sizes(), n))
+        let (line, lines) = outline::line_of(&self.sizes(), n);
+        arkui::scroll::follow(look::BUDGET, line, lines, arkui::scroll::Place::Near)
+    }
+
+    /// `zz`, `zt` and `zb`: the page's list scrolled so its cursor's row is
+    /// in the middle, at the top or at the foot, the cursor where it was.
+    fn scroll_cursor(&mut self, place: arkui::scroll::Place) -> Task<Message> {
+        match (self.pane, self.page) {
+            (Pane::Page, Page::Budget) => match self.at() {
+                Some(n) => {
+                    let (line, lines) = outline::line_of(&self.sizes(), n);
+                    arkui::scroll::follow(look::BUDGET, line, lines, place)
+                }
+                None => Task::none(),
+            },
+            (Pane::Page, Page::Ledger(_)) => {
+                let Some(i) = self.txn_at.and_then(|id| self.peer.register.rows.iter().position(|t| t.id == id)) else {
+                    return Task::none();
+                };
+                // The register's rows are one height, and a new
+                // transaction's form one more above them.
+                let above = usize::from(self.form.as_ref().is_some_and(|f| f.editing.is_none()));
+                let rows = self.peer.register.rows.len() + above;
+                let content = rows as f32 * view::TXN_ROW;
+                match arkui::scroll::offset_for(i + above, rows, self.register_view(), content, self.register_scroll, place) {
+                    Some(y) => {
+                        self.register_scroll = y;
+                        self.history.scrolled(&self.place(), y);
+                        iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
+                    }
+                    None => Task::none(),
+                }
+            }
+            _ => Task::none(),
+        }
     }
 
     fn reveal_cursor(&self) -> Task<Message> {
@@ -2301,6 +2368,15 @@ impl App {
         if self.history.active() || self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
             subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
         }
+        // A prefix half typed: the which-key panel after its delay. Keyed
+        // from the top of the range, clear of the deadlines' milliseconds.
+        if let Some(key) = self.which.waiting() {
+            subs.push(
+                arkui::wake::at(u64::MAX - key, arkui::which::DELAY)
+                    .with(key)
+                    .map(|(key, ())| Message::WhichDue(key)),
+            );
+        }
         if let Some(s) = &self.server {
             subs.push(s.bell.subscription().map(|()| Message::Wake));
             if let Some(at) = self.peer.client.deadline() {
@@ -2361,14 +2437,20 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::MONEY);
-    iced::application(App::boot, App::update, App::view)
+    let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((1200.0, 760.0))
         .font(arkui::hero::FIRA_SANS_BOLD)
         // A receipt's paper is monospace, and the system's may not draw.
-        .font(arkui::fonts::FIRA_MONO)
-        .run()
+        .font(arkui::fonts::FIRA_MONO);
+    // The screenshots' run (.github/screens/apps.md): this application, its
+    // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(shots) = arkui_shots::asked() {
+        shots.run(app);
+    }
+    app.run()
 }
 
 /// A group as the budget draws it: every line it sums, and the rows the
@@ -2380,8 +2462,66 @@ pub struct Shown<'a> {
 }
 
 /// The budget's sequences: `cc` a category and `cg` a group made, `rc` and
-/// `rg` one renamed.
-const MONEY_KEYS: [&str; 4] = ["cc", "cg", "rc", "rg"];
+/// `rg` one renamed. The first four of [`KEYS`], which say what they do.
+const MONEY_KEYS: [&str; 4] = [KEYS[0].keys, KEYS[1].keys, KEYS[2].keys, KEYS[3].keys];
+
+/// The keys money binds for itself, beside the grammar's
+/// (`arkui::vim::GRAMMAR`): what the which-key panel lists, and what the
+/// budget's and the register's `act` dispatch. The sequences come first,
+/// and are [`MONEY_KEYS`].
+pub const KEYS: &[vim::Binding] = &[
+    vim::Binding {
+        keys: "cc",
+        what: "a new category",
+    },
+    vim::Binding {
+        keys: "cg",
+        what: "a new group",
+    },
+    vim::Binding {
+        keys: "rc",
+        what: "rename the category",
+    },
+    vim::Binding {
+        keys: "rg",
+        what: "rename the group",
+    },
+    vim::Binding {
+        keys: "J",
+        what: "move it down",
+    },
+    vim::Binding {
+        keys: "K",
+        what: "move it up",
+    },
+    vim::Binding {
+        keys: "{",
+        what: "the group up",
+    },
+    vim::Binding {
+        keys: "}",
+        what: "the group down",
+    },
+    vim::Binding {
+        keys: "c",
+        what: "categorize (register)",
+    },
+    vim::Binding {
+        keys: "a",
+        what: "approve (register)",
+    },
+    vim::Binding {
+        keys: "i",
+        what: "a new transaction",
+    },
+    vim::Binding {
+        keys: "?",
+        what: "these keys",
+    },
+];
+
+/// money's prefixes, for the which-key panel.
+pub const GROUPS: &[vim::Group] = &[vim::Group { key: "c", what: "create" }, vim::Group { key: "r", what: "rename" }];
 
 /// The grammar, with the budget's sequences bound.
 fn money_keys() -> vim::Keys {
