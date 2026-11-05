@@ -328,6 +328,22 @@ class Screens {
         }
     }
 
+    // The device chip's glass grown into the picker, over the full player, as the iPhone's menus
+    // grow out of their buttons: open, while the browser plays; and held a quarter and half of the
+    // way, the chip's face going and the list coming in as the glass grows up from the chip.
+    @Test
+    fun d3_player_devices() {
+        val on = player.copy(on = Where("Browser", "computer", here = false))
+        val rows = Picker.rows(heard(session(Output.Device("s-web", false), playing = true)).listening!!, "s-phone")
+        for ((name, held) in listOf("open" to null, "p25" to 0.25f, "p50" to 0.5f)) {
+            shot(name) {
+                CompositionLocalProvider(LocalDeviceMenu provides DeviceMenu(true, rows, Picker.cursor(rows), object : PickerActions {}, held = held)) {
+                    FullPlayer(on, Still, at)
+                }
+            }
+        }
+    }
+
     // What rises over a page -------------------------------------------------
 
     @Test

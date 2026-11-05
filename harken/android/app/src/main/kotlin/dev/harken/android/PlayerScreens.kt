@@ -13,7 +13,9 @@
 //
 // While the phone is part of the listening session the full player says
 // where the sound is (`PlayerState.on`): a chip beside the queue's, the
-// device's kind and name, that opens the picker; and the mini player says it
+// device's kind and name, whose glass grows into the picker over the player
+// (ark-ui's `GlassMorph`) as an iPhone's menu grows out of its button, and
+// shrinks back into the chip as it closes; and the mini player says it
 // under the title when the sound is somewhere else. The session has no
 // shuffle and no repeat, so neither toggle is drawn then.
 //
@@ -79,6 +81,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,7 +99,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arkui.Bar
 import dev.arkui.Cover
+import dev.arkui.Glass
+import dev.arkui.GlassContainer
+import dev.arkui.GlassMorph
 import dev.arkui.Glyph
+import dev.arkui.glass
 import dev.arkui.Recompositions
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
@@ -201,10 +209,10 @@ private fun seedOf(p: Playing): String = p.album.ifEmpty { p.title }
 fun MiniPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start) {
     if (state.now == null) return
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(Space.corner),
-        shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clickable(onClick = controls::open),
+        color = Glass.fill(),
+        shape = CircleShape,
+        shadowElevation = BAR_SHADOW,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clip(CircleShape).clickable(onClick = controls::open),
     ) {
         MiniFace(state, controls, position)
     }
@@ -302,9 +310,12 @@ fun FullFace(
         // sharp cover behind the text.
         if (now != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             Cover(seedOf(now), now.art, 64.dp, Modifier.fillMaxSize().blur(80.dp).alpha(BACKDROP), corner = 0.dp)
+        // Its buttons and chips on glass, in one space, so the device chip's glass can grow into the
+        // picker over the whole player, as the iPhone's menus grow out of their buttons.
+        GlassContainer(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = controls::close) { Glyph(Glyphs.Down, "Close the player") }
+                GlassButton(Glyphs.Down, "Close the player", controls::close)
                 Text(
                     if (now?.album.isNullOrEmpty()) "Now playing" else now!!.album,
                     style = quiet(MaterialTheme.typography.labelLarge),
@@ -313,7 +324,7 @@ fun FullFace(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = controls::more, enabled = now != null) { Glyph(Glyphs.More, "More") }
+                GlassButton(Glyphs.More, "More", controls::more, enabled = now != null)
             }
             Spacer(Modifier.weight(0.5f))
             // The card draws the cover in the slot as it travels (PlayerSheet.kt), as this one would:
@@ -410,6 +421,7 @@ fun FullFace(
             }
             Spacer(Modifier.height(Space.l))
         }
+        }
     }
 }
 
@@ -423,11 +435,25 @@ val COVER_SHADOW = 16.dp
 /** How much of the cover shows through behind the full player. */
 private const val BACKDROP = 0.45f
 
+// A glyph on a glass capsule: the full player's close and its more, as the iPhone's are.
+@Composable
+private fun GlassButton(icon: ImageVector, description: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Box(
+        Modifier.glass(id = description).size(width = 60.dp, height = 44.dp).clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = description, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f), modifier = Modifier.size(22.dp))
+    }
+}
+
+/** A chip's room inside its glass: the iPhone's, about 44 tall. */
+private val ChipPadding = PaddingValues(horizontal = Space.l, vertical = Space.m)
+
 // What plays after this: the queue's sheet.
 @Composable
 private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier = Modifier) {
     Row(
-        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::queue).padding(horizontal = Space.l, vertical = Space.s),
+        modifier.glass(id = "queue").clip(CircleShape).clickable(onClick = controls::queue).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Glyph(Glyphs.Queue, null, size = 18.dp)
@@ -439,18 +465,52 @@ private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier
 // What is being said, a line at a time: the transcript's sheet. Its glyph alone, after the queue's.
 @Composable
 private fun TranscriptChip(controls: Controls) {
-    Box(Modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::transcript).padding(horizontal = Space.l, vertical = Space.s)) {
+    Box(Modifier.glass(id = "transcript").clip(CircleShape).clickable(onClick = controls::transcript).padding(ChipPadding)) {
         Glyph(Glyphs.Transcript, "Transcript", size = 18.dp)
     }
 }
 
+/**
+ * The device picker as the full player's device chip opens it: its rows, what they do, and whether
+ * it is open. `held` holds the chip's glass that much of the way to the picker: a screenshot's
+ * frame.
+ */
+class DeviceMenu(
+    val open: Boolean,
+    val rows: List<DeviceRow>,
+    val cursor: Int,
+    val actions: PickerActions,
+    val close: () -> Unit = {},
+    val held: Float? = null,
+)
+
+/** The picker the device chip opens; with none, the chip asks [Controls.devices] and opens nothing itself. */
+val LocalDeviceMenu = compositionLocalOf<DeviceMenu?> { null }
+
 // Where the sound is, and the way to move it: lit while it is this phone's — or nowhere, which is
-// where the next press plays.
+// where the next press plays. Its glass is the picker's: pressed, it grows into the list of devices
+// over the player and, closed, shrinks back into the chip, as the iPhone's menus do.
 @Composable
 private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modifier) {
+    val menu = LocalDeviceMenu.current
+    GlassMorph(
+        expanded = menu?.open == true,
+        onDismiss = { menu?.close?.invoke() },
+        modifier = modifier,
+        id = "device",
+        held = menu?.held,
+        collapsed = { DeviceFace(on, controls) },
+    ) {
+        if (menu != null) Box(Modifier.padding(top = Space.m)) { DevicesSheet(menu.rows, menu.cursor, menu.actions) }
+    }
+}
+
+// The device chip's face: the device's kind and name.
+@Composable
+private fun DeviceFace(on: Where, controls: Controls) {
     val tint = if (on.here && !on.away) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Row(
-        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::devices).padding(horizontal = Space.l, vertical = Space.s),
+        Modifier.clip(CircleShape).clickable(onClick = controls::devices).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyphs.device(on.kind, on.name), contentDescription = "Playing on", tint = tint, modifier = Modifier.size(18.dp))

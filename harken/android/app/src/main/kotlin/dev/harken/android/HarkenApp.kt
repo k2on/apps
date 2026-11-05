@@ -398,10 +398,12 @@ fun HarkenApp(
             }
 
             override fun close() {
+                devices = false
                 scope.launch { sheet.close() }
             }
 
             override fun goTo(page: Page) {
+                devices = false
                 scope.launch { sheet.close() }
                 // An episode's name is its show's, and the show is its page: nobody is called that.
                 val show = (page as? Page.ForArtist)?.let { p -> shows.firstOrNull { it.title == p.name }?.takeIf { artists.none { a -> a.name == p.name } } }
@@ -465,7 +467,33 @@ fun HarkenApp(
     }
     // Its transcript, held while it plays: one the server reads meanwhile comes in.
     val nowLines = playing?.let { p -> heldWhile(library, transcriptKey(Id(p))) { it.transcript(Id(p)) }.value }.orEmpty()
+    // The device picker, which the full player's device chip grows into (PlayerScreens.kt): its rows
+    // read again as the session changes, kept while it closes so the glass shrinks round them.
+    val pickerActions =
+        remember(session) {
+            object : PickerActions {
+                override fun pick(row: DeviceRow) {
+                    Picker.pick(row, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
+                    devices = false
+                }
+
+                override fun level(row: DeviceRow, level: Int) = playback.level(row.level, level)
+
+                override fun levelDone() = playback.volumeDone()
+
+                override fun mute(row: DeviceRow) {
+                    Picker.mute(row)?.let(playback::ask)
+                }
+
+                override fun join(row: DeviceRow) {
+                    Picker.join(row)?.let(playback::ask)
+                }
+            }
+        }
+    val deviceRows = remember(heard) { heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty() }
+    val deviceMenu = DeviceMenu(devices, deviceRows, Picker.cursor(deviceRows), pickerActions, close = { devices = false })
     CompositionLocalProvider(
+        LocalDeviceMenu provides deviceMenu,
         LocalCoverLoader provides covers,
         LocalPageMotion provides motion,
         LocalDownloads provides downloads,
@@ -831,33 +859,6 @@ fun HarkenApp(
                 // Opened all the way: the keyboard comes up with it, and the results want the room.
                 ModalBottomSheet(onDismissRequest = { finding = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
                     FindShow(kind, subscriptions, onFollow = { feed -> library.follow(kind, feed) })
-                }
-            }
-            if (devices) {
-                val rows = heard.listening?.let { Picker.rows(it, heard.me) }.orEmpty()
-                ModalBottomSheet(onDismissRequest = { devices = false }) {
-                    DevicesSheet(
-                        rows,
-                        Picker.cursor(rows),
-                        object : PickerActions {
-                            override fun pick(row: DeviceRow) {
-                                Picker.pick(row, heard.listening)?.let { (it as? Press.Transfer)?.let { t -> playback.transfer(t.to) } }
-                                devices = false
-                            }
-
-                            override fun level(row: DeviceRow, level: Int) = playback.level(row.level, level)
-
-                            override fun levelDone() = playback.volumeDone()
-
-                            override fun mute(row: DeviceRow) {
-                                Picker.mute(row)?.let(playback::ask)
-                            }
-
-                            override fun join(row: DeviceRow) {
-                                Picker.join(row)?.let(playback::ask)
-                            }
-                        },
-                    )
                 }
             }
         }

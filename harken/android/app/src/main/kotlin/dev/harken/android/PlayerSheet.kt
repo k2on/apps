@@ -8,7 +8,7 @@
 // skips — left the next track, right the one before — and a tap opens it.
 // The cover travels as the full player draws it (`FullFace`): its corners,
 // its shadow, and a little smaller while paused, as the iPhone's player has
-// it.
+// it. The bar is on glass, a capsule, as the iPhone's mini player is.
 // The tab bar slides away under it (HarkenApp.kt). How it moves, settles and
 // answers the back gesture is the card's, and `docs/plan-android.md` says
 // why.
@@ -39,6 +39,9 @@ fun rememberPlayerSheet(): PlayerSheet = rememberExpandingCard()
 /** The bar's height: its row and the hairline under it. */
 val BAR = 58.dp
 
+/** The bar's shadow on glass, at rest. */
+val BAR_SHADOW = 6.dp
+
 /**
  * The player over the page and the tabs: the dim, and the card with its two faces and the art. `tabs`
  * is the tab bar's height, which the bar stands on.
@@ -48,7 +51,7 @@ fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, posit
     val now = state.now ?: return
     val seed = now.album.ifEmpty { now.title }
     val scale by animateFloatAsState(coverScale(state.playing), spring(Springs.MOVE, Springs.STIFFNESS), label = "cover")
-    val spec = remember { ExpandingCardSpec(bigCorner = COVER_CORNER, bigShadow = COVER_SHADOW) }
+    val spec = remember { ExpandingCardSpec(bigCorner = COVER_CORNER, bigShadow = COVER_SHADOW, glass = true, shadow = BAR_SHADOW) }
     ExpandingCard(
         sheet,
         stand = tabs,
