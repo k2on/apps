@@ -51,7 +51,7 @@ shape is the most likely to need a fix at the first build (README.md,
 | Queue sheet: now playing, up next (100), tap to play from there | Same, and swipe to remove and drag to reorder — each the session's `remove` / `move` | `List`, `.onDelete`, `.onMove`, `EditButton` | PlayerViews.swift | yes (more than Android: its sheet has no remove/reorder; Media3's controller does) |
 | Device picker (`DevicesSheet`): rows by name, ticked where the sound is, the group first ("Kitchen + 1"), slider and mute per row, join `+` / leave `−`, cursor on the output | Same rows (`DevicePicker`, held by `PressTests`) | `List`, `Slider` | Sheets.swift, Session.swift | yes |
 | Snackbar for a refusal or rejection, said once | An alert, said once | `.alert(_:isPresented:)` | Shell.swift | yes |
-| Account: sign out in Settings | And the account menu at the top right of every tab, as the browser has it: the person's picture (their initials until it arrives), who, the link, Settings, Sign out | `ToolbarItem(placement: .topBarTrailing)`, `Menu`, `sharedBackgroundVisibility(.hidden)` † | Components.swift `AccountMenu` | yes |
+| Account: sign out in Settings | And the account button at the top left of every tab, as money has it: the person's face (ArkUI's `Face`, their initials on the accent until the picture arrives), opening Settings — who, the link, Sign out | `ToolbarItem(placement: .topBarLeading)`, `NavigationLink(value: Route.settings)` | Components.swift `AccountButton` | yes |
 
 ## The player
 

@@ -97,10 +97,24 @@ public fun Heading(
 
 /**
  * A tab's own title, with what it offers at the end: the theme's largest headline, bold, so it reads
- * as the iPhone's large title does.
+ * as the iPhone's large title does. [bar] is what sits in the row above it, at its end — the
+ * account's face — where a large top app bar has its actions, so a tab drawn this way and one
+ * under Material's large bar put the face in the same place.
  */
 @Composable
-public fun TabTitle(title: String, actions: @Composable RowScope.() -> Unit = {}) {
+public fun TabTitle(
+    title: String,
+    bar: (@Composable RowScope.() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    if (bar != null) {
+        Row(
+            Modifier.fillMaxWidth().height(64.dp).padding(end = Space.xs),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+            content = bar,
+        )
+    }
     Row(
         Modifier.fillMaxWidth()
             .padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs)
