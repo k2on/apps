@@ -1,8 +1,12 @@
 // Android's `ExpandingCard` (ui/ExpandingCard.kt), as iOS draws it: a bar on
 // glass above the tab bar (`tabViewBottomAccessory`) that zooms into a whole
 // screen and back (`matchedTransitionSource` / `navigationTransition(.zoom)`).
-// The system does the motion, a finger on the screen included; this is only
-// the wiring, so every app's bar and screen are the same pair.
+// The system does the motion, a finger on the screen included — the pull
+// down that closes it projects and hands off its speed by itself, and under
+// Reduce Motion the zoom is a cross-fade by itself, the system's setting
+// being the one it reads — and the bar is on the system's glass, which
+// frosts under Reduce Transparency by itself. This is only the wiring, so
+// every app's bar and screen are the same pair.
 #if os(iOS)
 import SwiftUI
 

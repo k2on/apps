@@ -39,7 +39,7 @@ private struct CataloguePage<Content: View>: View {
                 .padding(.bottom, Space.xl)
         }
         .ignoresSafeArea(.container, edges: under)
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdges()
         .onScrollGeometryChange(for: Bool.self) { g in
             g.contentOffset.y + g.contentInsets.top < fold
         } action: { _, now in
@@ -458,7 +458,7 @@ struct ShowPage: View {
             }
         }
         .listStyle(.plain)
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdges()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // The show's own settings, where it is followed: Unfollow.
@@ -520,7 +520,7 @@ struct PlaylistPage: View {
             }
         }
         .listStyle(.plain)
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdges()
         .navigationBarTitleDisplayMode(.inline)
     }
 }

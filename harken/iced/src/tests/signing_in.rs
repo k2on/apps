@@ -67,7 +67,7 @@ fn signing_in_moves_the_same_replica_on() {
     let now = app.peer.client.lock().log.pending[0].entry.id;
     assert_eq!(now, id, "its id kept");
     assert_eq!(app.peer.client.lock().standing(&id), Standing::Pending);
-    assert!(app.note.contains("1 change from before"), "{}", app.note);
+    assert!(app.note.contains("1 change made signed out"), "{}", app.note);
 
     // Signing out revokes the session through the domain, keeps the
     // replica and goes on as her, offline. Falsified by `SignOut` only

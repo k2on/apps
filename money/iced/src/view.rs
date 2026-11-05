@@ -34,6 +34,18 @@ const SIDEBAR_SCROLL: &str = "sidebar";
 type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 pub const PAD: f32 = 18.0;
+
+/// A page's padding around a list that scrolls: on the top and the sides,
+/// and none under it, so the list runs down to the window's foot. With
+/// `PAD` under it too the list stopped short of the edge with its last
+/// visible row cut off mid-line over an empty strip; the padding under the
+/// last row is inside what scrolls instead, so that row scrolls clear.
+fn page_pad() -> Padding {
+    Padding {
+        bottom: 0.0,
+        ..Padding::new(PAD)
+    }
+}
 const MONEY_COL: f32 = 120.0;
 /// The goal's column, and the pill's.
 const GOAL_COL: f32 = 110.0;
@@ -121,22 +133,11 @@ impl App {
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
-        // What the last thing done came to, under the page — or what is
-        // half-typed: a count, a `c`, a `/search`. In the page's flow, as
-        // harken's status line is, not laid over it: over it, it was drawn
-        // across whatever the page had at its foot, an inspector's last
-        // section among them. Only while there is something to say, so a
-        // page with nothing to say has all the height.
-        let pending = self.keys.pending();
-        let note = if pending.is_empty() { self.note.clone() } else { pending };
-        let page: Element<'_, Message> = match note.is_empty() {
-            true => page,
-            false => column![
-                page,
-                container(dim(note, 11)).width(Length::Fill).padding([6, 14]).align_x(Alignment::End)
-            ]
-            .into(),
-        };
+        // Nothing under the page: it runs to the window's foot. What the
+        // last thing done came to, and a search or a count as it is typed,
+        // are said for a moment in a pill laid over it (`arkui::toast`,
+        // below) — a line under it, kept there by a note that was nearly
+        // always there, cut off whatever the page had at its foot.
         // The sidebar is a surface, a step off the page's ground, with a
         // hairline where it meets the page, as harken's is.
         let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
@@ -169,7 +170,7 @@ impl App {
         if let Some(prefix) = self.which.showing() {
             let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
             if !entries.is_empty() {
-                layers = layers.push(arkui::which::view(prefix, &entries, 36.0));
+                layers = layers.push(arkui::which::view(prefix, &entries, arkui::toast::MARGIN));
             }
         }
         if let Some(m) = &self.modal {
@@ -208,6 +209,14 @@ impl App {
             layers = layers
                 .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
                 .push(layer::pinned(menu::view(m, true, Message::MenuAt, Message::MenuActivate), m.origin));
+        }
+        // What the last thing done came to, or what is being typed: for a
+        // moment, at the foot of the window, over everything — a modal's
+        // refusal is said over the modal. It hears nothing, so what is
+        // under it still does.
+        let pending = self.keys.pending();
+        if let Some(words) = arkui::toast::says(&self.toast, &pending) {
+            layers = layers.push(arkui::toast::view(words, arkui::toast::MARGIN));
         }
         // The window's root: arkui's own needs of the platform.
         arkui::window::view(layers)
@@ -466,15 +475,18 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(body)
-                    .id(look::BUDGET)
-                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars)
+                scrollable(container(body).padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::BUDGET)
+                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars)
             ],
         ]
         .spacing(12)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
 
         row![page, self.view_inspector()].into()
@@ -1024,15 +1036,18 @@ impl App {
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body)
-                    .id(look::REGISTER)
-                    .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars),
+                scrollable(body.padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::REGISTER)
+                .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars),
             ],
         ]
         .spacing(LEDGER_GAP)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
         // The selected transaction's receipt beside it, as the inspector is
         // beside the budget.
@@ -1394,11 +1409,13 @@ impl App {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
             tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
         }
-        column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
+        // All of it scrolls, its padding inside: a month of many categories
+        // is taller than the window, and was cut off at the foot.
+        let page = column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
             .spacing(16)
             .padding(PAD)
-            .width(Length::Fill)
-            .into()
+            .width(Length::Fill);
+        scrollable(page).height(Length::Fill).style(style::bars).into()
     }
 
     fn tile<'a>(&self, label: &str, cents: i64, tone: Tone) -> Element<'a, Message> {

@@ -26,7 +26,7 @@ struct ServerScreen: View {
                     .onSubmit { model.send(.check) }
                     .disabled(checking)
                     .padding(Space.l)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
                     .accessibilityLabel("Server address")
                 Text(error ?? "Where your household's budget is kept.")
                     .font(.footnote)

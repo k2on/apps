@@ -250,6 +250,13 @@ impl App {
                 layers = layers.push(arkui::which::view(prefix, &entries, crate::BAR_HEIGHT + 32.0));
             }
         }
+        // What the last thing done came to, or what is being typed: for a
+        // moment, over everything, standing on the play bar. It hears
+        // nothing, so what is under it still does.
+        let pending = self.keys.pending();
+        if let Some(words) = arkui::toast::says(&self.toast, &pending) {
+            layers = layers.push(arkui::toast::view(words, crate::BAR_HEIGHT + 1.0 + arkui::toast::MARGIN));
+        }
 
         // The window's root: the pointer heard over every layer, in the
         // window's own coordinates, and arkui's own needs of the platform.
@@ -440,7 +447,7 @@ impl App {
             container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
         ]
         .width(Length::Fill);
-        self.scrolled(None, page, false)
+        self.scrolled(None, page)
     }
 
     /// A shows page: its title and its +, which opens the dialog that
@@ -456,7 +463,7 @@ impl App {
             page = page.push(self.view_unread(&l, k, s));
         }
         page = page.push(self.view_show_cards());
-        self.scrolled(None, page, false)
+        self.scrolled(None, page)
     }
 
     /// The shows of the page's kind, as cards.
@@ -630,9 +637,10 @@ impl App {
     /// edge to edge (a banner runs the whole width of the page and under
     /// the scrollbar), the rest on the page's gutter and clear of the
     /// scrollbar — the room `SHELF.room` counts — with the gutter again
-    /// under its last line, so a shelf is never cut off at the foot; and, on
-    /// a page of tracks, the status line under it all.
-    fn scrolled<'a>(&'a self, top: Option<Element<'a, Message>>, body: iced::widget::Column<'a, Message>, status: bool) -> Element<'a, Message> {
+    /// under its last line, so a shelf is never cut off at the foot. Nothing
+    /// under it: the page runs down to the play bar, and what there is to
+    /// say is said over it (`arkui::toast`).
+    fn scrolled<'a>(&'a self, top: Option<Element<'a, Message>>, body: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
         // With no top of its own, the page starts on the window's padding,
         // level with the account's picture floating over it.
         let body = container(body.width(Length::Fill)).padding(Padding {
@@ -645,18 +653,12 @@ impl App {
             Some(top) => column![top, body],
             None => column![body],
         };
-        let page = scrollable(page.width(Length::Fill))
+        scrollable(page.width(Length::Fill))
             .id(TRACKS)
             .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
             .style(style::bars)
-            .height(Length::Fill);
-        match status && self.says_status() {
-            true => column![page, container(self.view_status()).padding([0.0, GUTTER])]
-                .spacing(10)
-                .width(Length::Fill)
-                .into(),
-            false => page.into(),
-        }
+            .height(Length::Fill)
+            .into()
     }
 
     /// Where the page's cursor is, while the page has the keyboard.
@@ -1040,7 +1042,7 @@ impl App {
             self.view_foot(year, label),
             self.view_faces(&l, "On This Album", people)
         ];
-        self.scrolled(None, page, true)
+        self.scrolled(None, page)
     }
 
     /// A playlist's page, laid out as an album's: its cover — the covers of
@@ -1100,7 +1102,7 @@ impl App {
             let label = text(format!("Fetch {n} older {}", plural(n, "episode"))).size(13).into();
             page = page.push(container(self.ringed(&l, Mark::Older, label, false)).center_x(Length::Fill));
         }
-        self.scrolled(None, page, false)
+        self.scrolled(None, page)
     }
 
     /// Episodes as a podcast app lists them: when each went out in small
@@ -1406,11 +1408,9 @@ impl App {
         .id(TRACKS)
         .style(style::bars)
         .height(Length::Fill);
-        let mut page = column![head, rule::horizontal(1).style(style::hairline), lines].width(Length::Fill);
-        if self.says_status() {
-            page = page.push(container(self.view_status()).padding([0.0, GUTTER]));
-        }
-        page.into()
+        column![head, rule::horizontal(1).style(style::hairline), lines]
+            .width(Length::Fill)
+            .into()
     }
 
     /// A list's cover: the first four different records on it, two by two —
@@ -1571,7 +1571,7 @@ impl App {
             page = page.push(hero::heading("Episodes"));
             page = page.push(self.view_episodes(&l, on, |at| l.cell(Mark::Episode(at)), true));
         }
-        self.scrolled(top, page, works == 0)
+        self.scrolled(top, page)
     }
 
     /// Records as a shelf of cards, as many across as the index pages draw
@@ -1653,7 +1653,7 @@ impl App {
         let takes = p.recordings();
         if takes.is_empty() {
             page = page.push(container(text("No recordings of it yet.").size(13).style(style::faint(0.5))).padding([18, 0]));
-            return self.scrolled(None, page, false);
+            return self.scrolled(None, page);
         }
         let who = |r: &crate::rows::Recording| match r.performers.is_empty() {
             // A recording nobody is credited on — the demo has one — says
@@ -1703,7 +1703,7 @@ impl App {
             })
             .collect();
         page = page.push(hero::grid(entries, self.listing_columns()));
-        self.scrolled(None, page, false)
+        self.scrolled(None, page)
     }
 
     /// One performance's page, laid out as its album's is: the cover beside
@@ -1756,7 +1756,7 @@ impl App {
         }
         let composers: Vec<String> = (!composer.is_empty()).then_some(composer).into_iter().collect();
         page = page.push(self.view_faces(&l, "On This Recording", self.people(&composers)));
-        self.scrolled(None, page, true)
+        self.scrolled(None, page)
     }
 
     /// The track table.
@@ -1904,17 +1904,23 @@ impl App {
         if self.debug {
             return main.push(self.view_debug()).push(self.view_status()).into();
         }
-        let main = main.push(head).push(rule::horizontal(1)).push(
-            scrollable(rows)
-                .id(TRACKS)
-                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                .style(style::bars)
-                .height(Length::Fill),
-        );
-        match self.says_status() {
-            true => main.push(self.view_status()).into(),
-            false => main.into(),
-        }
+        // Down to the play bar, with the gutter under the last row inside
+        // what scrolls, as `scrolled` has it: scrolled to the end, the last
+        // row stands clear of the bar rather than against it.
+        let rows = container(rows).padding(Padding {
+            bottom: GUTTER,
+            ..Padding::ZERO
+        });
+        main.push(head)
+            .push(rule::horizontal(1))
+            .push(
+                scrollable(rows)
+                    .id(TRACKS)
+                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                    .style(style::bars)
+                    .height(Length::Fill),
+            )
+            .into()
     }
 
     /// The top of the page, on every page: joining a server while this
@@ -1951,23 +1957,14 @@ impl App {
     /// peer has done that nobody has confirmed, the last thing worth saying —
     /// and which grid has the keys, with anything half-typed.
     ///
-    /// **All of it only under `D`** (and `?`). Otherwise only what somebody needs to
-    /// see as they type: the last thing worth saying, and what is half-typed
-    /// — a count, a `g`, a search — and nothing at all when there is neither.
-    /// Whether the status line has anything to say: a note, keys half
-    /// typed, or the debug view, which keeps it whole. When it
-    /// has not, a page leaves it no room at all — not even the gap above it.
-    fn says_status(&self) -> bool {
-        let typing = !self.keys.pending().is_empty() || matches!(self.keys.mode(), arkui::vim::Mode::Search(_));
-        self.debug || !self.note.is_empty() || typing
-    }
-
+    /// **Only under `D`**, for whoever is working on harken. Otherwise there
+    /// is no line at all: it took the foot of every page of tracks for words
+    /// that were nearly always "signed in as …", and cut off the last row.
+    /// What somebody needs to see as they use the window — the last thing
+    /// worth saying, a search or a count as it is typed — is said for a
+    /// moment over the page instead (`arkui::toast`, in [`App::view`]).
     fn view_status(&self) -> Element<'_, Message> {
         let p = &self.peer;
-        let whole = self.debug;
-        if !self.says_status() {
-            return iced::widget::Space::new().height(Length::Fixed(0.0)).into();
-        }
         let (cursor, pending) = {
             let c = p.client.lock();
             (c.cursor(), c.pending_len())
@@ -1997,9 +1994,6 @@ impl App {
         if !self.note.is_empty() {
             line = format!("{line}  \u{b7}  {}", self.note);
         }
-        if !whole {
-            line = self.note.clone();
-        }
         let mode = match self.focus() {
             Focus::Pane(Pane::Sidebar) => "browse",
             Focus::Pane(Pane::Tracks) => "tracks",
@@ -2024,7 +2018,7 @@ impl App {
                 },
             ]
             .align_y(Alignment::Center),
-            text(if whole { mode } else { "" }).size(12).style(style::dim),
+            text(mode).size(12).style(style::dim),
         ]
         .spacing(12)
         .into()
@@ -2199,8 +2193,9 @@ impl App {
         let table = rows.into_iter().fold(column![].spacing(4), |col, (k, v)| {
             col.push(row![text(k).size(13).style(style::dim).width(Length::Fixed(260.0)), text(v).size(13)].spacing(12))
         });
-        container(scrollable(column![text("the session, in numbers").size(16), table].spacing(12)).style(style::bars))
-            .padding(12)
+        // The padding inside what scrolls, so its last line scrolls clear.
+        scrollable(column![text("the session, in numbers").size(16), table].spacing(12).padding(12))
+            .style(style::bars)
             .height(Length::Fill)
             .into()
     }
@@ -2313,6 +2308,12 @@ impl App {
             self.queue_settle.as_ref().map(|s| &s.settle),
             now,
         );
+        // Down to the window's foot, the sheet's padding under the last
+        // row inside what scrolls (`arkui::sheet::PADDING`).
+        let list = container(list).padding(Padding {
+            bottom: arkui::sheet::PADDING,
+            ..Padding::ZERO
+        });
         body = body.push(scrollable(list).id(QUEUE).style(style::bars).height(Length::Fill));
         let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
             .style(style::quiet)

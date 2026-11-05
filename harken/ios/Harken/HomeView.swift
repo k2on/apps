@@ -38,7 +38,7 @@ struct HomeView: View {
         }
         // On the scroll view itself, so the fade under the tab bar and the
         // mini player is this one's, not only an environment value above it.
-        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdges()
         .navigationTitle("Home")
         .animation(Springs.fade, value: s.loaded)
     }
@@ -97,11 +97,11 @@ private struct LastCard: View {
                 }
                 Spacer()
                 Image(systemName: "play.fill").font(.title3).frame(width: 44, height: 44)
-                    .glassEffect(.regular.tint(Color.accent).interactive(), in: Circle())
+                    .surface(in: Circle(), tint: Color.accent, interactive: true)
                     .accessibilityLabel("Play again")
             }
             .padding(Space.m)
-            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .surface(in: RoundedRectangle(cornerRadius: 20, style: .continuous), interactive: true)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Space.page)

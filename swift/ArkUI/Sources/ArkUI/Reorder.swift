@@ -2,7 +2,11 @@
 // app's queue has it: the row lifts — a little larger, a shadow under it —
 // and follows the finger, and the rows it passes slide out of its way on
 // Springs.move, so the gap it would land in is always open under it. Let
-// go, it settles into that gap, and the app is told from where to where.
+// go, it settles into the gap it was going for — where it would come to
+// rest, carried on by the finger's speed (`Momentum`), so a flick takes it
+// a row or so further — starting at the finger's speed, and the app is
+// told from where to where. Under Reduce Motion it neither grows nor
+// springs: the rows ease into place.
 //
 // The row being dragged is drawn over the stack, where the finger has it,
 // and its place in the stack is left empty: the stack is laid out in the
@@ -57,6 +61,7 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
     @State private var heights: [Key: CGFloat] = [:]
     /// Rings once as a row lifts.
     @State private var lifts = 0
+    @Environment(\.reducesMotion) private var still
 
     /// How long an order dragged into is drawn ahead of the app's saying so.
     static var pending: Duration { .seconds(2) }
@@ -74,9 +79,9 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
                 }
             }
             if let held, let item = order.first(where: { $0.0 == held })?.1 {
-                row(item, ReorderHandle(changed: { _ in }, ended: {}))
+                row(item, ReorderHandle(changed: { _ in }, ended: { _ in }))
                     .background(.background)
-                    .scaleEffect(lifted ? 1.02 : 1)
+                    .scaleEffect(lifted && !still ? 1.02 : 1)
                     .shadow(color: .black.opacity(lifted ? 0.18 : 0), radius: 12, y: 4)
                     .offset(y: settling ? top(of: held, in: order.map(\.0)) : liftedTop(order.map(\.0)))
                     .allowsHitTesting(false)
@@ -115,7 +120,7 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
     }
 
     private func handle(_ k: Key) -> ReorderHandle {
-        ReorderHandle(changed: { dy in drag(k, dy) }, ended: { drop() })
+        ReorderHandle(changed: { dy in drag(k, dy) }, ended: { v in drop(velocity: v) })
     }
 
     private func drag(_ k: Key, _ dy: CGFloat) {
@@ -128,12 +133,19 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
             startTop = top(of: k, in: order)
             settling = false
             lifts += 1
-            withAnimation(Springs.size) { lifted = true }
+            withAnimation(Springs.size.reduced(still)) { lifted = true }
         }
-        guard held == k, var order = drawn else { return }
+        guard held == k, let order = drawn else { return }
         travel = dy
-        // The lifted row lands where its middle is among the others.
-        let middle = liftedTop(order) + height(k) / 2
+        let landing = landed(k, in: order, middle: liftedTop(order) + height(k) / 2)
+        if landing != drawn {
+            withAnimation(Springs.move.reduced(still)) { drawn = landing }
+        }
+    }
+
+    /// `order` with `k` where its middle, at `middle`, lands among the others.
+    private func landed(_ k: Key, in order: [Key], middle: CGFloat) -> [Key] {
+        var order = order
         order.removeAll { $0 == k }
         var y: CGFloat = 0
         var to = 0
@@ -142,15 +154,26 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
             y += height(other) + spacing
         }
         order.insert(k, at: to)
-        if order != drawn {
-            withAnimation(Springs.move) { drawn = order }
-        }
+        return order
     }
 
-    private func drop() {
-        guard let held, let order = drawn, let to = order.firstIndex(of: held) else { return }
+    private func drop(velocity: CGFloat) {
+        guard let held, var order = drawn else { return }
+        // Where the row would come to rest, thrown on at the finger's speed:
+        // snappily, so a flick goes a row or so and not to the end.
+        let at = liftedTop(order)
+        let total = order.reduce(0) { $0 + height($1) } + spacing * CGFloat(max(order.count - 1, 0))
+        let rest = min(max(at + CGFloat(Momentum.project(Double(velocity), rate: Momentum.snappy)), 0), max(total - height(held), 0))
+        let thrown = landed(held, in: order, middle: rest + height(held) / 2)
+        if thrown != order {
+            withAnimation(Springs.move.reduced(still)) { drawn = thrown }
+            order = thrown
+        }
+        guard let to = order.firstIndex(of: held) else { return }
         let from = from
-        withAnimation(Springs.move) {
+        let settle = still ? Springs.calm
+            : Springs.released(velocity: Double(velocity), from: Double(at), to: Double(top(of: held, in: order)))
+        withAnimation(settle) {
             settling = true
             lifted = false
         } completion: {
@@ -171,7 +194,8 @@ public struct Reorderable<Item, Key: Hashable, Row: View>: View {
 /// trailing edge.
 public struct ReorderHandle: View {
     let changed: (CGFloat) -> Void
-    let ended: () -> Void
+    /// Let go, at this speed down, in points a second.
+    let ended: (CGFloat) -> Void
 
     public var body: some View {
         Image(systemName: "line.3.horizontal")
@@ -181,7 +205,7 @@ public struct ReorderHandle: View {
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { changed($0.translation.height) }
-                    .onEnded { _ in ended() }
+                    .onEnded { ended($0.velocity.height) }
             )
             .accessibilityLabel("Reorder")
     }

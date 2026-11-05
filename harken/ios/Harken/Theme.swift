@@ -20,7 +20,9 @@ extension Space {
 extension Springs {
     /// A sideways drag on the mini player let go past this share of its width, or…
     static let wide: CGFloat = 0.25
-    /// …faster than this, in points a second, is a skip.
+    /// …faster than this, in points a second, is a skip. (A speed past which
+    /// a thing counts as thrown at all, for its landing, is ArkUI's
+    /// `Springs.thrown`.)
     static let flick: CGFloat = 600
 }
 
