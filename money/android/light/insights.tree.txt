@@ -1,0 +1,24 @@
+    #content
+                  [button] pressable
+                    'Previous month'
+                    [button]
+                  'November 2026' [text]
+                  [button] pressable
+                    'Next month'
+                    [button]
+                  'Spending' [text]
+                    'Spent $2,187.49 in November: Bills $2,010.00, Everyday $162.49, Quality of Life $15.00'
+                    'Bills, 92%, $2,010.00'
+                    'Everyday, 7%, $162.49'
+                    'Quality of Life, 1%, $15.00'
+                  'The Month' [text]
+                    'Income' [text]
+                    '$5,390.00' [text]
+                  'Insights' [text]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                    'Insights' [text]

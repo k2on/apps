@@ -1,0 +1,53 @@
+    #content
+                    "Net Worth, -$227,116.43, Every open account, less what's owed"
+                    'Net Worth' [text]
+                    '-$227,116.43' [text]
+                    "Every open account, less what's owed" [text]
+                    [button] pressable
+                      'All Accounts' [text]
+                      '$21,033.57' [text]
+                  'Budget' [text]
+                  '$21,033.57' [text]
+                    [button] pressable
+                      'Checking, Checking, $14,236.90'
+                      'Checking' [text]
+                      'Checking' [text]
+                      '$14,236.90' [text]
+                    [button] pressable
+                      'Savings, Savings, $6,900.00'
+                      'Savings' [text]
+                      'Savings' [text]
+                      '$6,900.00' [text]
+                    [button] pressable
+                      'Cash, Cash, $74.16'
+                      'Cash' [text]
+                      'Cash' [text]
+                      '$74.16' [text]
+                    [button] pressable
+                      'Chase Sapphire, Chase ••4417, -$177.49, 3 to review'
+                      'Chase Sapphire' [text]
+                      'Chase ••4417' [text]
+                      '3 to review'
+                        '3' [text]
+                      '-$177.49' [text]
+                  'Tracking' [text]
+                  '-$248,150.00' [text]
+                    [button] pressable
+                      'Mortgage, Loan, -$312,450.00'
+                      'Mortgage' [text]
+                      'Loan' [text]
+                      '-$312,450.00' [text]
+                  [button] pressable
+                    'Signed in as Alex'
+                    [button]
+                  'Accounts' [text]
+                [button] pressable
+                  'Add a transaction'
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
