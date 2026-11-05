@@ -23,7 +23,7 @@ on:
     inputs:
       sandbox:
         description: "nix's sandbox: strict (true) or relaxed"
-        default: relaxed
+        default: "true"
   push:
     paths:
       - ".github/workflows/xcode-strict.yaml"
@@ -55,13 +55,16 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
         with:
-          # Relaxed, not strict: every build is still sandboxed unless it
-          # says otherwise, and none here says __noChroot; but a
-          # derivation's own rules (__sandboxProfile) are only applied
-          # when relaxed, and run four showed xcodebuild needs one
-          # (FSEvents). SANDBOX=strict for the strict runs.
+          # Strict, with what run seven saw it deny xcodebuild that is the
+          # system's and not the store's, let in to read (on macOS a sandbox
+          # path is a path a build may read, nothing more): the OS's own
+          # cryptexes, where parts of the system now live; the private
+          # frameworks Xcode installs system-wide (CoreDevice); and the user
+          # database. Runs five to seven were relaxed: a derivation's own
+          # sandbox rules turned out not to be applied at all.
           extra_nix_config: |
-            sandbox = ${{ github.event.inputs.sandbox || 'relaxed' }}
+            sandbox = ${{ github.event.inputs.sandbox || 'true' }}
+            extra-sandbox-paths = /System/Cryptexes /Library/Developer/PrivateFrameworks /private/etc/passwd /private/etc/group
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 

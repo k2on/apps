@@ -954,7 +954,9 @@
                     ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
                     CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= \
                     ENABLE_USER_SCRIPT_SANDBOXING=NO \
-                    COMPILER_INDEX_STORE_ENABLE=NO
+                    COMPILER_INDEX_STORE_ENABLE=NO \
+                    -IDEPackageSupportDisableManifestSandbox=1 \
+                    -IDEPackageSupportDisablePluginExecutionSandbox=1
                   runHook postBuild
                 '';
                 installPhase = ''
