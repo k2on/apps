@@ -46,7 +46,7 @@ struct Protocol {
 fn run_protocol(text: &str) -> Result<(), String> {
     let v: Protocol = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let bytes = ark::hash::unhex(&v.bytes).ok_or("the bytes are not hex")?;
-    let f = Frame::dec(&bytes).map_err(|r| r.0)?;
+    let f = Frame::dec(&bytes)?;
     if f.enc() != bytes {
         return Err("the bytes are not the frame's one encoding".into());
     }

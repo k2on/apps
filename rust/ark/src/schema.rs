@@ -29,7 +29,6 @@ use crate::hash::SchemaHash;
 use crate::json::{typed_bytes, typed_key};
 use crate::json::{Seed, Typed};
 use crate::row::Type;
-use crate::Refusal;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -97,12 +96,12 @@ impl Schema {
 /// its place, with its columns, key, indexes, references and space as they
 /// were, columns appended only as an `Option` or with a default; tables
 /// appended only.
-pub fn compat(old: &Schema, new: &Schema) -> Result<(), Refusal> {
+pub fn compat(old: &Schema, new: &Schema) -> Result<(), String> {
     if new.tables.len() < old.tables.len() {
-        return Err(Refusal::new("a table was removed"));
+        return Err("a table was removed".into());
     }
     for (o, n) in old.tables.iter().zip(&new.tables) {
-        let at = |what: &str| Refusal(format!("{}: {what}", o.name));
+        let at = |what: &str| format!("{}: {what}", o.name);
         if o.name != n.name || o.space != n.space || o.key != n.key {
             return Err(at("renamed, moved, rekeyed or moved to another space"));
         }
@@ -174,18 +173,18 @@ impl Table {
 
     /// A row read: its columns as JSON, checking its bytes are the row's
     /// one encoding; and its key's bytes and each index's entry.
-    pub fn parse(&self, row: &[u8]) -> Result<Parsed, Refusal> {
+    pub fn parse(&self, row: &[u8]) -> Result<Parsed, String> {
         self.read(row, true)
     }
 
     /// [`Table::parse`] of a row known to be its one encoding — one the
     /// store holds — not checked again.
-    pub fn parse_held(&self, row: &[u8]) -> Result<Parsed, Refusal> {
+    pub fn parse_held(&self, row: &[u8]) -> Result<Parsed, String> {
         self.read(row, false)
     }
 
-    fn read(&self, row: &[u8], check: bool) -> Result<Parsed, Refusal> {
-        let cols = self.columns_of(row, check).map_err(|e| Refusal(format!("{}: {e}", self.name)))?;
+    fn read(&self, row: &[u8], check: bool) -> Result<Parsed, String> {
+        let cols = self.columns_of(row, check).map_err(|e| format!("{}: {e}", self.name))?;
         let col = |c: usize| cols[c].as_ref().expect("a key's or an index's column is read");
         let mut key = vec![];
         for c in 0..self.key {
@@ -235,7 +234,7 @@ impl Table {
                 break;
             }
             let (v, r) = take_seed(Seed(&c.ty), rest).map_err(|e| format!("{}: {e}", c.name))?;
-            if check && encode(&Typed(&c.ty, &v)).map_err(|e| e.0)? != rest[..rest.len() - r.len()] {
+            if check && encode(&Typed(&c.ty, &v))? != rest[..rest.len() - r.len()] {
                 return Err("not a row's one encoding".into());
             }
             (cols[i], rest) = (Some(v), r);
@@ -245,7 +244,7 @@ impl Table {
 
     /// [`Table::parse`] of a row as some schema of this table wrote it,
     /// read under this one ([`Table::fit`]): the row as this one has it.
-    pub fn parse_fit(&self, row: &[u8]) -> Result<(Vec<u8>, Parsed), Refusal> {
+    pub fn parse_fit(&self, row: &[u8]) -> Result<(Vec<u8>, Parsed), String> {
         match self.parse(row) {
             Ok(p) => Ok((row.to_vec(), p)),
             Err(e) => {
@@ -259,11 +258,11 @@ impl Table {
     /// one: as it is; completed with the defaults of the columns appended
     /// since (an older schema's); or without the columns this one lacks (a
     /// newer one's).
-    pub fn fit(&self, row: &[u8]) -> Result<Vec<u8>, Refusal> {
+    pub fn fit(&self, row: &[u8]) -> Result<Vec<u8>, String> {
         if self.parse(row).is_ok() {
             return Ok(row.to_vec());
         }
-        let at = |e: String| Refusal(format!("{}: {e}", self.name));
+        let at = |e: String| format!("{}: {e}", self.name);
         // A column beyond this table's is dropped.
         let (written, _) = self.columns_upto(row, self.columns.len(), false).map_err(at)?;
         let mut out = Map::new();
@@ -293,7 +292,7 @@ pub struct Parsed {
 impl Parsed {
     /// The key bytes a reference from column `c` names, if it names one:
     /// none for an `Option` column that is null.
-    pub fn named(&self, t: &Table, c: usize) -> Result<Option<Vec<u8>>, Refusal> {
+    pub fn named(&self, t: &Table, c: usize) -> Result<Option<Vec<u8>>, String> {
         let col = &t.columns[c];
         let v = self.cols[c].as_ref().expect("a reference's column is read");
         let (ty, v) = match (&col.ty, v) {

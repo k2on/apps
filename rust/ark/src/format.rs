@@ -25,28 +25,27 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as J;
 
 use crate::hash::{hex, unhex};
-use crate::Refusal;
 
-fn no(e: impl std::fmt::Display) -> Refusal {
-    Refusal(e.to_string())
+fn no(e: impl std::fmt::Display) -> String {
+    e.to_string()
 }
 
 /// A value's bytes in the format.
-pub fn encode<T: Serialize + ?Sized>(v: &T) -> Result<Vec<u8>, Refusal> {
+pub fn encode<T: Serialize + ?Sized>(v: &T) -> Result<Vec<u8>, String> {
     postcard::to_stdvec(v).map_err(no)
 }
 
 /// A value read by `seed` from bytes that are it whole: nothing after it.
-pub fn decode_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<S::Value, Refusal> {
+pub fn decode_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<S::Value, String> {
     let (v, rest) = take_seed(seed, b)?;
     match rest.is_empty() {
         true => Ok(v),
-        false => Err(Refusal::new("bytes after the value")),
+        false => Err("bytes after the value".into()),
     }
 }
 
 /// A value read by `seed` from the front of `b`, and the bytes after it.
-pub fn take_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<(S::Value, &'de [u8]), Refusal> {
+pub fn take_seed<'de, S: DeserializeSeed<'de>>(seed: S, b: &'de [u8]) -> Result<(S::Value, &'de [u8]), String> {
     let mut d = postcard::Deserializer::from_bytes(b);
     let v = seed.deserialize(&mut d).map_err(no)?;
     Ok((v, d.finalize().map_err(no)?))
@@ -58,7 +57,7 @@ pub trait Encode: Serialize + DeserializeOwned {
         encode(self).expect("a value serializes")
     }
 
-    fn from_bytes(b: &[u8]) -> Result<Self, Refusal> {
+    fn from_bytes(b: &[u8]) -> Result<Self, String> {
         decode_seed(std::marker::PhantomData::<Self>, b)
     }
 }

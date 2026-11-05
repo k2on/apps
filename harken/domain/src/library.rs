@@ -118,9 +118,9 @@ pub fn summary(db: &Db<Harken>, work: &Work) -> WorkSummary {
 
 /// The library's role, or a refusal: what every library mutation runs
 /// first.
-pub fn is_library(ctx: &Ctx) -> Result<(), Refusal> {
+pub fn is_library(ctx: &Ctx) -> Result<(), String> {
     if !ctx.has_role(LIBRARY) {
-        return Err(Refusal::new("only the library writes the library"));
+        return Err("only the library writes the library".into());
     }
     Ok(())
 }
@@ -149,7 +149,7 @@ pub fn has(text: &str, needle: &str) -> bool {
 /// no longer is — a recording, a movement, a work — goes when nothing else
 /// is part of it.
 #[mutator("library.add_song")]
-pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Refusal> {
+pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), String> {
     is_library(ctx)?;
     let (now, user) = (ctx.now, ctx.user().to_string());
     let was = db.media.by(Media::FILE).from(&input.file).first().filter(|m| !m.file.is_empty());
@@ -341,10 +341,10 @@ pub fn add_song(ctx: &Ctx, db: &mut Db<Harken>, input: AddSong) -> Result<(), Re
 /// unknown one is refused; every field is fill-if-given, and one that says
 /// nothing new writes nothing (a catalogue says it again at every sync).
 #[mutator("library.describe_work")]
-pub fn describe_work(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeWork) -> Result<(), Refusal> {
+pub fn describe_work(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeWork) -> Result<(), String> {
     is_library(ctx)?;
     let Some(work) = db.work.get(&input.id) else {
-        return Err(Refusal(format!("no work {}; a work exists because a song named it", input.id)));
+        return Err(format!("no work {}; a work exists because a song named it", input.id));
     };
     let or = |given: &str, was: &str| if given.is_empty() { was.to_string() } else { given.to_string() };
     let next = Work {
@@ -366,10 +366,10 @@ pub fn describe_work(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeWork) -> Res
 /// Say more about a performance; refuses an unknown one, and writes nothing
 /// when it says nothing new.
 #[mutator("library.describe_recording")]
-pub fn describe_recording(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeRecording) -> Result<(), Refusal> {
+pub fn describe_recording(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeRecording) -> Result<(), String> {
     is_library(ctx)?;
     let Some(r) = db.recording.get(&input.id) else {
-        return Err(Refusal(format!("no recording {}; one exists because a song is part of it", input.id)));
+        return Err(format!("no recording {}; one exists because a song is part of it", input.id));
     };
     let or = |given: &str, was: &str| if given.is_empty() { was.to_string() } else { given.to_string() };
     let next = Recording {
@@ -388,7 +388,7 @@ pub fn describe_recording(ctx: &Ctx, db: &mut Db<Harken>, input: DescribeRecordi
 
 /// Say more about somebody, making the row when it is not there.
 #[mutator("library.describe_person")]
-pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) -> Result<(), Refusal> {
+pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) -> Result<(), String> {
     is_library(ctx)?;
     let p = db.person.get(&input.name);
     let text = |given: &str, was: Option<&String>| {
@@ -417,10 +417,10 @@ pub fn describe_person(ctx: &Ctx, db: &mut Db<Harken>, input: DescribePerson) ->
 /// person may hold two roles and a second entry is a correction. A real
 /// credit is at least 1; 0 is the lumped fallback's.
 #[mutator("library.credit_recording")]
-pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) -> Result<(), Refusal> {
+pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) -> Result<(), String> {
     is_library(ctx)?;
     if !db.recording.has(&input.recording_id) {
-        return Err(Refusal(format!("no recording {} to credit anybody on", input.recording_id)));
+        return Err(format!("no recording {} to credit anybody on", input.recording_id));
     }
     let (now, user) = (ctx.now, ctx.user().to_string());
     if !db.person.has(&input.person_name) {
@@ -471,7 +471,7 @@ pub fn credit_recording(ctx: &Ctx, db: &mut Db<Harken>, input: CreditRecording) 
 /// A look at the media directory asked for: a [`Look`] due now, which the
 /// scanner's handler claims and does.
 #[mutator("library.look")]
-pub fn look(ctx: &Ctx, db: &mut Db<Harken>, input: LookAt) -> Result<(), Refusal> {
+pub fn look(ctx: &Ctx, db: &mut Db<Harken>, input: LookAt) -> Result<(), String> {
     is_library(ctx)?;
     let state = ark::effect::Job::Pending { due_ms: ctx.now };
     db.look.insert(Look {
@@ -483,14 +483,14 @@ pub fn look(ctx: &Ctx, db: &mut Db<Harken>, input: LookAt) -> Result<(), Refusal
 
 /// Take something out of the library, and off every playlist holding it.
 #[mutator("library.remove_media")]
-pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Result<(), Refusal> {
+pub fn remove_media(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveMedia) -> Result<(), String> {
     is_library(ctx)?;
     take_out(db, input.id)
 }
 
 /// A media row out of the library, and everything that names it: the
 /// playlists holding it, its song or episode, its download.
-pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), Refusal> {
+pub fn take_out(db: &mut Db<Harken>, id: Id<Media>) -> Result<(), String> {
     for item in db.playlist_item.scan().into_iter().filter(|i| i.media_id == id) {
         db.playlist_item.remove(&item)?;
     }

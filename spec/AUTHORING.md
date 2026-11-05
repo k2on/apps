@@ -66,9 +66,9 @@ words (`at least 1 character`, `must not be empty`).
 
 ```rust
 #[mutator("demo.add_to_playlist")]
-pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
+pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), String> {
     if !db.playlist.has(input.playlist_id) {
-        return Err(Refusal::new("playlist_id: no such playlist"));
+        return Err("playlist_id: no such playlist".into());
     }
     // …
     let last = db.item.by(Item::PLAYLIST_ID_POS).from(input.playlist_id).last();
@@ -80,13 +80,13 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
 }
 ```
 
-- **A mutator** is `fn(&Ctx, &mut Db<S>, I) -> Result<(), Refusal>`, run
+- **A mutator** is `fn(&Ctx, &mut Db<S>, I) -> Result<(), String>`, run
   as an intent; a refusal undoes every write it made. Over `Db<S,
   Volatile>` it writes the live space's tables (§1.9) and its intents
   are on that space: a peer's `mutate` sends each to the space its
   function writes.
 - **A query** (`Domain::query`, as a job's `due` is) is `fn(&Ctx, &Db<S>,
-  I) -> Result<T, Refusal>`, answered once.
+  I) -> Result<T, String>`, answered once.
 - **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date.
 - **A scope** (`#[scope]`) says per table which rows a connection fed by
   it holds (§1.8).
@@ -129,7 +129,7 @@ so a function reads what it wrote.
 
 ```rust
 #[view("playlists.playlist")]
-pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, String> {
     let playlist = owned(ctx, db, input.playlist_id)?;
     Ok(scan_from::<Harken, PlaylistItem, _, _>(playlist.id)
         .filter_with(|db, i| db.media.has(i.media_id))

@@ -18,30 +18,29 @@ use serde_json::{Map, Value as Json};
 use crate::json::{typed_bytes, typed_value};
 use crate::schema::{Schema, Space, Table};
 use crate::store::Store;
-use crate::Refusal;
 
 /// Every row of every table, as objects of their columns, by table.
 pub type Tables = BTreeMap<String, Vec<Map<String, Json>>>;
 
 /// A table's row as JSON: an object of its columns.
-pub fn row(table: &Table, bytes: &[u8]) -> Result<Json, Refusal> {
-    typed_value(&table.row_type(), bytes).map_err(|e| Refusal(format!("a row of {}: {e}", table.name)))
+pub fn row(table: &Table, bytes: &[u8]) -> Result<Json, String> {
+    typed_value(&table.row_type(), bytes).map_err(|e| format!("a row of {}: {e}", table.name))
 }
 
 /// A row's bytes from its JSON object, a column missing read as null: the
 /// row's one encoding, as its Rust type's would be.
-pub fn row_bytes(table: &Table, v: &Json) -> Result<Vec<u8>, Refusal> {
+pub fn row_bytes(table: &Table, v: &Json) -> Result<Vec<u8>, String> {
     typed_bytes(&table.row_type(), v)
 }
 
 /// A store's rows in their human form, table by table in key order.
-pub fn tables(store: &Store) -> Result<Tables, Refusal> {
+pub fn tables(store: &Store) -> Result<Tables, String> {
     let mut out = Tables::new();
     for (name, rs) in store.snapshot_rows() {
         let (_, t) = store.schema_arc().table(&name).expect("a store's table is its schema's");
         let objects = rs.iter().map(|r| match row(t, r)? {
             Json::Object(o) => Ok(o),
-            _ => Err(Refusal(format!("a row of {name} is not an object"))),
+            _ => Err(format!("a row of {name} is not an object")),
         });
         let objects = objects.collect::<Result<_, _>>()?;
         out.insert(name, objects);
@@ -52,9 +51,9 @@ pub fn tables(store: &Store) -> Result<Tables, Refusal> {
 /// A store of `schema`'s `space` holding exactly these rows, each judged:
 /// a table it lacks is refused, a column it lacks left out, one a row
 /// lacks its default (or null).
-pub fn store(schema: Arc<Schema>, space: Space, tables: &Tables) -> Result<Store, Refusal> {
+pub fn store(schema: Arc<Schema>, space: Space, tables: &Tables) -> Result<Store, String> {
     if let Some(t) = tables.keys().find(|t| schema.table(t).is_none()) {
-        return Err(Refusal(format!("no table {t}")));
+        return Err(format!("no table {t}"));
     }
     let mut rows = vec![];
     for t in schema.tables.iter().filter(|t| t.space == space) {

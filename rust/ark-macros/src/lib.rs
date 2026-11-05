@@ -56,7 +56,7 @@ pub fn schema(input: TokenStream) -> TokenStream {
 }
 
 /// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S, P>, I) ->
-/// Result<(), Refusal>` by name, on the space `P` it writes (`Db<S>` the
+/// Result<(), String>` by name, on the space `P` it writes (`Db<S>` the
 /// log's, `Db<S, Volatile>` the live space's).
 #[proc_macro_attribute]
 pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -64,7 +64,7 @@ pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// `#[view("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
-/// Refusal>`, a query kept up to date.
+/// String>`, a query kept up to date.
 #[proc_macro_attribute]
 pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
     out(domain::register("view", attr.into(), item.into()))

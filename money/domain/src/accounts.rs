@@ -25,16 +25,7 @@ pub const STARTING_BALANCE: &str = "Starting Balance";
 /// `date`. On budget, that money is ready to assign — but a card's debt,
 /// which is its payment category's to cover ([`cards::starting_category`]).
 #[allow(clippy::too_many_arguments)]
-pub fn open(
-    ctx: &Ctx,
-    db: &mut Db<Money>,
-    id: Id<Account>,
-    name: &str,
-    kind: &str,
-    on_budget: bool,
-    balance: i64,
-    date: &str,
-) -> Result<(), Refusal> {
+pub fn open(ctx: &Ctx, db: &mut Db<Money>, id: Id<Account>, name: &str, kind: &str, on_budget: bool, balance: i64, date: &str) -> Result<(), String> {
     ensure_setup(ctx, db)?;
     let pos = db.account.by(Account::POS).whole().last().map_or(0, |a| a.pos) + 1;
     let account = Account {
@@ -66,7 +57,7 @@ pub fn open(
 }
 
 #[mutator("accounts.open_account")]
-pub fn open_account(ctx: &Ctx, db: &mut Db<Money>, input: OpenAccount) -> Result<(), Refusal> {
+pub fn open_account(ctx: &Ctx, db: &mut Db<Money>, input: OpenAccount) -> Result<(), String> {
     open(
         ctx,
         db,
@@ -79,13 +70,13 @@ pub fn open_account(ctx: &Ctx, db: &mut Db<Money>, input: OpenAccount) -> Result
     )
 }
 
-pub fn account_of(db: &Db<Money>, id: Id<Account>) -> Result<Account, Refusal> {
-    db.account.get(id).ok_or_else(|| Refusal::new("no such account"))
+pub fn account_of(db: &Db<Money>, id: Id<Account>) -> Result<Account, String> {
+    db.account.get(id).ok_or_else(|| String::from("no such account"))
 }
 
 /// An account named again — a card's payment category with it.
 #[mutator("accounts.rename_account")]
-pub fn rename_account(ctx: &Ctx, db: &mut Db<Money>, input: RenameAccount) -> Result<(), Refusal> {
+pub fn rename_account(ctx: &Ctx, db: &mut Db<Money>, input: RenameAccount) -> Result<(), String> {
     let a = Account {
         name: input.name,
         ..account_of(db, input.id)?
@@ -98,10 +89,10 @@ pub fn rename_account(ctx: &Ctx, db: &mut Db<Money>, input: RenameAccount) -> Re
 /// money has to go somewhere first. A closed card's payment category is
 /// hidden, and back when it opens again.
 #[mutator("accounts.close_account")]
-pub fn close_account(ctx: &Ctx, db: &mut Db<Money>, input: CloseAccount) -> Result<(), Refusal> {
+pub fn close_account(ctx: &Ctx, db: &mut Db<Money>, input: CloseAccount) -> Result<(), String> {
     let a = account_of(db, input.id)?;
     if input.closed && balances(db, a.id).0 != 0 {
-        return Err(Refusal::new("an account is closed with nothing in it"));
+        return Err("an account is closed with nothing in it".into());
     }
     let a = Account { closed: input.closed, ..a };
     db.account.update(a.clone())?;
@@ -124,7 +115,7 @@ pub fn balances(db: &Db<Money>, id: Id<Account>) -> (i64, i64, i64) {
 
 /// Every account, in order, with its balances and the bank that feeds it.
 #[view("accounts.accounts")]
-pub fn accounts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<AccountLine>, Refusal> {
+pub fn accounts(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<AccountLine>, String> {
     Ok(scan::<Money, Account>()
         .map_with(|db, a| {
             let (balance, cleared, unapproved) = balances(db, a.id);

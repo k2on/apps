@@ -17,7 +17,6 @@ use serde_json::Value as J;
 
 use crate::hash::{hex, unhex};
 use crate::row::Type;
-use crate::Refusal;
 
 // * A value under a type
 
@@ -111,20 +110,20 @@ impl Serialize for Typed<'_> {
 
 /// A value's bytes in the value format under its type, or why it is not
 /// one of it.
-pub fn typed_bytes(t: &Type, v: &J) -> Result<Vec<u8>, Refusal> {
+pub fn typed_bytes(t: &Type, v: &J) -> Result<Vec<u8>, String> {
     crate::format::encode(&Typed(t, v))
 }
 
 /// A value of a type from its bytes in the value format, whole: the JSON
 /// its Rust type is written as.
-pub fn typed_value(t: &Type, b: &[u8]) -> Result<J, Refusal> {
+pub fn typed_value(t: &Type, b: &[u8]) -> Result<J, String> {
     crate::format::decode_seed(Seed(t), b)
 }
 
 /// A value's key under its type, appended to `out`, or why it is not one.
-pub fn typed_key(t: &Type, v: &J, out: &mut Vec<u8>) -> Result<(), Refusal> {
+pub fn typed_key(t: &Type, v: &J, out: &mut Vec<u8>) -> Result<(), String> {
     let mut s = memcomparable::Serializer::new(std::mem::take(out));
-    let r = Typed(t, v).serialize(&mut s).map_err(|e| Refusal(e.to_string()));
+    let r = Typed(t, v).serialize(&mut s).map_err(|e| e.to_string());
     *out = s.into_inner();
     r
 }
@@ -132,16 +131,16 @@ pub fn typed_key(t: &Type, v: &J, out: &mut Vec<u8>) -> Result<(), Refusal> {
 /// A value's bytes in the value format from its JSON text under its type:
 /// how a value crosses from a host that speaks JSON (a phone, a command
 /// line). No text is `null`.
-pub fn from_text(t: &Type, text: &str) -> Result<Vec<u8>, Refusal> {
+pub fn from_text(t: &Type, text: &str) -> Result<Vec<u8>, String> {
     let v: J = match text.trim() {
         "" => J::Null,
-        t => serde_json::from_str(t).map_err(|e| Refusal(e.to_string()))?,
+        t => serde_json::from_str(t).map_err(|e| e.to_string())?,
     };
     typed_bytes(t, &v)
 }
 
 /// A value's JSON text under its type, from its bytes in the value format.
-pub fn to_text(t: &Type, b: &[u8]) -> Result<String, Refusal> {
+pub fn to_text(t: &Type, b: &[u8]) -> Result<String, String> {
     typed_value(t, b).map(|v| v.to_string())
 }
 

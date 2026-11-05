@@ -27,7 +27,6 @@ use ark::format::Encode;
 use ark::log::Record;
 use ark::peer::{Ctx, Fold, Input, Output, Peer as Machine, Role};
 use ark::schema::{Schema, Space};
-use ark::Refusal;
 
 use crate::{draw_origin, now_ms, Disk};
 
@@ -163,7 +162,7 @@ impl Instance {
 
     /// `f` over its tables as `S`'s, writing `P`'s: what it made is the
     /// facts of one entry naming no function, all or none, and its answer.
-    pub fn write<S: Tables, P: Writes, T>(&mut self, f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>) -> Result<T, Refusal> {
+    pub fn write<S: Tables, P: Writes, T>(&mut self, f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, String>) -> Result<T, String> {
         let (t, facts) = ark::db::write_in::<S, P, T>(&mut self.machine.store, f)?;
         if facts.is_empty() {
             return Ok(t);
@@ -179,7 +178,7 @@ impl Instance {
             Output::Settled(_, Err(why)) => Some(why),
             _ => None,
         }) {
-            Some(why) => Err(Refusal::new(why)),
+            Some(why) => Err(why),
             None => Ok(t),
         }
     }

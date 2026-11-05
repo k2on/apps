@@ -20,7 +20,7 @@ use common::{domain, on, App, Memory};
 /// Author `name` as `ctx` over the hub's store: the refusal's text.
 fn run(hub: &Memory, ctx: &ark::peer::Ctx, name: &str, input: &impl Encode) -> Result<(), String> {
     let f = domain().get(name).and_then(|f| f.proc.clone()).unwrap();
-    f(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ()).map_err(|r| r.0)
+    f(&mut hub.0.lock().unwrap(), ctx, &input.to_bytes()).map(|_| ())
 }
 
 fn current(hub: &Memory, ctx: &ark::peer::Ctx) -> Option<SignIn> {
@@ -110,7 +110,7 @@ fn only_an_admin_grants() {
         user: "bob".into(),
         role: "admin".into(),
     };
-    let roles = |h: &Memory| ark::db::read::<App, _>(&h.0.lock().unwrap(), |db| Ok::<_, ark::Refusal>(db.role.scan())).unwrap();
+    let roles = |h: &Memory| ark::db::read::<App, _>(&h.0.lock().unwrap(), |db| Ok::<_, String>(db.role.scan())).unwrap();
     assert_eq!(run(&hub, &bob, "role.grant", &grant), Err("only an admin grants roles".into()));
     assert!(roles(&hub).is_empty());
     let admin = on("root", "r1", &["admin"], 2_000);

@@ -11,7 +11,7 @@ use ark::format::Encode;
 use ark::log::{EntryId, Origin};
 use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
 use ark::plan::{splice, Maintained};
-use ark::prelude::{scan, Db, Desc, Id, Plan, Refusal};
+use ark::prelude::{scan, Db, Desc, Id, Plan};
 use ark::store::{Change, Store};
 use ark::Domain;
 use demo::*;
@@ -27,7 +27,7 @@ fn ctx() -> Ctx {
 /// Every playlist by name, with its last three items, last first.
 type WithItems = (Id<Playlist>, String, Vec<Item>);
 
-fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, Refusal> {
+fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, String> {
     Ok(scan::<Demo, Playlist>().sort(|p| (p.name.clone(), p.id)).map_with(|db, p| {
         let mut items = db.item.by(Item::KEY).from(p.id).all();
         items.sort_by_key(|i| std::cmp::Reverse(i.pos));
@@ -37,7 +37,7 @@ fn with_items(_: &Ctx, _: &Db<Demo>, _: ()) -> Result<Plan<Demo, WithItems>, Ref
 }
 
 /// A playlist's first two items by place.
-fn top_two(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+fn top_two(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, String> {
     let p = input.playlist_id;
     Ok(scan::<Demo, Item>()
         .filter(move |i| i.playlist_id == p)

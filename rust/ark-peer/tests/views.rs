@@ -12,14 +12,14 @@ use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlayli
 /// The items of the playlist of this name of the reader's: refused when
 /// there is none, which is read as the view is made.
 #[view("demo.named")]
-pub fn named(ctx: &Ctx, db: &Db<Demo>, input: CreatePlaylist) -> Result<Plan<Demo, Item>, Refusal> {
+pub fn named(ctx: &Ctx, db: &Db<Demo>, input: CreatePlaylist) -> Result<Plan<Demo, Item>, String> {
     let key = (ctx.user().to_string(), input.name);
     let p: Playlist = db
         .playlist
         .by(Playlist::USER_ID_NAME)
         .from(key)
         .first()
-        .ok_or_else(|| Refusal::new("no such playlist"))?;
+        .ok_or_else(|| String::from("no such playlist"))?;
     Ok(scan::<Demo, Item>().filter(move |i| i.playlist_id == p.id))
 }
 

@@ -135,23 +135,23 @@ pub fn live(s: &SignIn, now: i64) -> bool {
 /// this store does not hold is nothing here — a device signing out before
 /// its session synced — and the server's run, which holds every one,
 /// judges it.
-pub fn revoke<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result<(), Refusal> {
+pub fn revoke<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result<(), String> {
     match S::sign_in(db).get(input.id) {
         Some(s) if s.user == ctx.user() => S::sign_in_mut(db).update(SignIn { revoked: true, ..s }),
-        Some(_) => Err(Refusal::new("not your session")),
+        Some(_) => Err("not your session".into()),
         None => Ok(()),
     }
 }
 
-fn admin(ctx: &Ctx) -> Result<(), Refusal> {
+fn admin(ctx: &Ctx) -> Result<(), String> {
     match ctx.has_role(ADMIN) {
         true => Ok(()),
-        false => Err(Refusal::new("only an admin grants roles")),
+        false => Err("only an admin grants roles".into()),
     }
 }
 
 /// A role granted; held already, nothing.
-pub fn grant<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), Refusal> {
+pub fn grant<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
     admin(ctx)?;
     S::role_mut(db).put(Role {
         user: input.user,
@@ -160,7 +160,7 @@ pub fn grant<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(
 }
 
 /// A grant taken back; not held, nothing.
-pub fn revoke_role<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), Refusal> {
+pub fn revoke_role<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
     admin(ctx)?;
     S::role_mut(db).delete((input.user, input.role))
 }
@@ -187,7 +187,7 @@ pub fn current(ctx: &Ctx, store: &ark::store::Store) -> Option<SignIn> {
 }
 
 /// The caller's live sign-ins, newest first.
-pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn>, Refusal> {
+pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn>, String> {
     let (user, now) = (ctx.user().to_string(), ctx.now);
     Ok(scan::<S, SignIn>()
         .filter(move |s| s.user == user && live(s, now))

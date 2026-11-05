@@ -91,7 +91,7 @@ impl Lib {
             .get(&full(name))
             .and_then(|f| f.proc.clone())
             .unwrap_or_else(|| panic!("{name} writes nothing"));
-        self.last = f(&mut self.store, ctx, input).map_err(|r| r.0)?;
+        self.last = f(&mut self.store, ctx, input)?;
         Ok(self.last.len())
     }
 
@@ -104,7 +104,7 @@ impl Lib {
             now: self.now,
             ..Default::default()
         };
-        let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes()).map_err(|r| r.0)?;
+        let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes())?;
         Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
     }
 

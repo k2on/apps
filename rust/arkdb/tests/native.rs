@@ -38,7 +38,7 @@ fn the_demo_registers_its_functions_and_refines_its_inputs() {
     let mut store = Store::new(d.schema.clone(), ark::schema::Space::Durable);
     let f = d.get("demo.create_playlist").unwrap().proc.clone().unwrap();
     let refused = f(&mut store, &ctx(), &blank.to_bytes());
-    assert_eq!(refused.unwrap_err().0, "a playlist needs a name");
+    assert_eq!(refused.unwrap_err(), "a playlist needs a name");
     let made = f(&mut store, &ctx(), &named.to_bytes()).unwrap();
     assert_eq!(made.len(), 1);
 }

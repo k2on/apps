@@ -6,7 +6,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ark::dynamic::Tables;
-use ark::Refusal;
 use serde_json::{Map, Value as Json};
 
 use crate::keys;
@@ -20,7 +19,7 @@ use crate::keys;
 /// none until their files offer one; a picture of no folder's (one taken
 /// out of a file, `.art/…`) is each one's. An album no song was on goes,
 /// as the albums page never listed it.
-pub fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
+pub fn albums_by_folder(t: &mut Tables) -> Result<(), String> {
     let file_of: BTreeMap<String, String> = t
         .get("media")
         .into_iter()
@@ -39,7 +38,7 @@ pub fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
             Some(Json::String(name)) => {
                 let file = file_of
                     .get(&song["media_id"].to_string())
-                    .ok_or(Refusal::new("a song without its media"))?;
+                    .ok_or(String::from("a song without its media"))?;
                 let folder = keys::folder_of(file);
                 folders.entry(name.clone()).or_default().insert(folder.to_string());
                 Json::String(keys::album_id(folder, &name))
@@ -51,7 +50,7 @@ pub fn albums_by_folder(t: &mut Tables) -> Result<(), Refusal> {
     let from = |art: &str, folder: &str| art.starts_with(&format!("{folder}/")) || art.contains(&format!("/{folder}/"));
     let mut albums = vec![];
     for (name, folders) in folders {
-        let row = by_name.get(&name).ok_or(Refusal(format!("a song on {name}, an album with no row")))?;
+        let row = by_name.get(&name).ok_or(format!("a song on {name}, an album with no row"))?;
         let art = row["art"].as_str().unwrap_or_default();
         let taken_from = folders.iter().any(|f| from(art, f));
         for folder in &folders {

@@ -40,7 +40,6 @@ use crate::db::{read, recorded, Db, Dep, Tables};
 use crate::peer::Ctx;
 use crate::row::{Key, Row, Value};
 use crate::store::{Change, Read, Store};
-use crate::Refusal;
 
 /// An element's place in a list, as bytes.
 pub type Okey = Vec<u8>;
@@ -663,7 +662,7 @@ pub fn splice<T: Clone>(ps: &[Patch<T>], xs: &[T]) -> Vec<T> {
 
 /// How a view is made: its plan, built over the store as `ctx` reads it —
 /// or why not.
-pub type Make<S, T> = Arc<dyn for<'t> Fn(&Ctx, &Db<'t, S>) -> Result<Plan<S, T>, Refusal> + Send + Sync>;
+pub type Make<S, T> = Arc<dyn for<'t> Fn(&Ctx, &Db<'t, S>) -> Result<Plan<S, T>, String> + Send + Sync>;
 
 /// A plan kept up to date (§1.10).
 pub struct View<S: Tables, T> {
@@ -677,7 +676,7 @@ pub struct View<S: Tables, T> {
 
 impl<S: Tables, T: Elem> View<S, T> {
     /// The view, hydrated over `store`.
-    pub fn new(make: Make<S, T>, ctx: Ctx, store: &Store) -> Result<View<S, T>, Refusal> {
+    pub fn new(make: Make<S, T>, ctx: Ctx, store: &Store) -> Result<View<S, T>, String> {
         let (plan, built) = recorded::<S, _>(store, |db| make(&ctx, db));
         let mut v = View {
             make,
@@ -698,12 +697,12 @@ impl<S: Tables, T: Elem> View<S, T> {
     /// A settle's changes, the store after them: the patches that take the
     /// list to the new answer. A view whose plan cannot be built again any
     /// more refuses, and is stale.
-    pub fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<T>>, Refusal> {
+    pub fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<T>>, String> {
         self.pushed(&Pushed::of(store, changes))
     }
 
     /// [`View::push`], of a settle read once for every view it moves.
-    pub fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<T>>, Refusal> {
+    pub fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<T>>, String> {
         if p.is_empty() {
             return Ok(vec![]);
         }
@@ -746,15 +745,15 @@ impl<S: Tables, T: Elem> View<S, T> {
 /// their encodings.
 pub trait Maintained: Send {
     /// A settle read once for every view it moves ([`Pushed`]).
-    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, Refusal>;
-    fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<Vec<u8>>>, Refusal> {
+    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, String>;
+    fn push(&mut self, changes: &[Change], store: &Store) -> Result<Vec<Patch<Vec<u8>>>, String> {
         self.pushed(&Pushed::of(store, changes))
     }
     fn rows(&self) -> Vec<Vec<u8>>;
 }
 
 impl<S: Tables, T: Value> Maintained for View<S, T> {
-    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, Refusal> {
+    fn pushed(&mut self, p: &Pushed) -> Result<Vec<Patch<Vec<u8>>>, String> {
         Ok(View::pushed(self, p)?.into_iter().map(|p| p.map(|t| t.encode())).collect())
     }
     fn rows(&self) -> Vec<Vec<u8>> {
@@ -764,7 +763,7 @@ impl<S: Tables, T: Value> Maintained for View<S, T> {
 
 /// A plan's answer afresh over `store` as `ctx` reads it: what a query
 /// asked once is.
-pub fn answer<S: Tables, T: Elem>(make: &Make<S, T>, ctx: &Ctx, store: &Store) -> Result<Vec<T>, Refusal> {
+pub fn answer<S: Tables, T: Elem>(make: &Make<S, T>, ctx: &Ctx, store: &Store) -> Result<Vec<T>, String> {
     let plan = read::<S, _>(store, |db| make(ctx, db))?;
     Ok(plan.run(store, ctx))
 }

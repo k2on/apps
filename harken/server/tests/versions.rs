@@ -77,8 +77,8 @@ fn with_note(mut s: Schema) -> Schema {
     s
 }
 
-fn refused(r: Result<(), ark::Refusal>) -> String {
-    r.expect_err("refused").0
+fn refused(r: Result<(), String>) -> String {
+    r.expect_err("refused")
 }
 
 /// **The compat check.** A schema follows itself; the release that grew a

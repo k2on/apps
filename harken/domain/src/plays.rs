@@ -11,7 +11,7 @@ use crate::types::*;
 /// A track was played: authored by the device making the sound once it has
 /// played long enough to count, dated by its own clock.
 #[mutator("listening.record_play")]
-pub fn record_play(ctx: &Ctx, db: &mut Db<Harken>, input: RecordPlay) -> Result<(), Refusal> {
+pub fn record_play(ctx: &Ctx, db: &mut Db<Harken>, input: RecordPlay) -> Result<(), String> {
     db.play.insert(Play {
         id: ctx.new_id(),
         user_id: ctx.user().into(),
@@ -37,12 +37,12 @@ fn newest(ctx: &Ctx, n: usize) -> Plan<Play> {
 
 /// The caller's newest play.
 #[view("listening.last_played")]
-pub fn last_played(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Play>, Refusal> {
+pub fn last_played(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Play>, String> {
     Ok(newest(ctx, 1))
 }
 
 /// The caller's plays, newest first, the last fifty of them.
 #[view("listening.recently_played")]
-pub fn recently_played(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Play>, Refusal> {
+pub fn recently_played(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Play>, String> {
     Ok(newest(ctx, 50))
 }

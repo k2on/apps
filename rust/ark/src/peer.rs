@@ -132,7 +132,6 @@ pub use crate::log::Ctx;
 use crate::log::{Cursor, EntryId, Logged, Origin, Record, Rows, Seq, Span};
 use crate::schema::Space;
 use crate::store::{Change, Log, Store, LOG};
-use crate::Refusal;
 
 /// An event of the machine's, `tracing`'s at target `ark`, said where what
 /// it says happens: an entry's with its id, its trace and span (an entry's
@@ -426,7 +425,7 @@ impl Peer {
         self.store.log_push(l);
     }
 
-    fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, Refusal> {
+    fn of_rows(&self, rows: &[(String, Vec<Vec<u8>>)]) -> Result<Store, String> {
         Store::from_rows(self.store.schema_arc().clone(), self.space, rows)
     }
 
@@ -475,7 +474,7 @@ impl Peer {
     // * Running
 
     /// Runs an intent over the store and applies what it did, all or none.
-    fn attempt(&mut self, e: &Ctx, o: &mut Out) -> Result<Vec<Change>, Refusal> {
+    fn attempt(&mut self, e: &Ctx, o: &mut Out) -> Result<Vec<Change>, String> {
         let f = self.domain.fns.get(&e.func);
         let p = match f.and_then(|f| f.proc.clone()) {
             Some(p) => p,
@@ -486,8 +485,8 @@ impl Peer {
                 o.tell(Some(e.span()), facts.iter().cloned());
                 return Ok(facts);
             }
-            None if f.is_some() => return Err(Refusal(format!("{} writes nothing", e.func))),
-            None => return Err(Refusal(format!("no function {}", e.func))),
+            None if f.is_some() => return Err(format!("{} writes nothing", e.func)),
+            None => return Err(format!("no function {}", e.func)),
         };
         let s = e.span();
         let run = tracing::debug_span!(target: "ark", "run", func = %e.func, trace = %crate::hash::hex(&s.trace.0), span = %crate::hash::hex(&s.id));
@@ -495,7 +494,7 @@ impl Peer {
         let schema = self.store.schema_arc().clone();
         if let Some(c) = changes.iter().find(|c| schema.table(c.table()).is_some_and(|t| t.1.space != self.space)) {
             self.store.undo(&changes).expect("an inverse applies");
-            return Err(Refusal(format!("{} is not in this space", c.table())));
+            return Err(format!("{} is not in this space", c.table()));
         }
         o.tell(Some(e.span()), changes.iter().cloned());
         Ok(changes)
@@ -559,8 +558,8 @@ impl Peer {
         // judge, the intent pending unrun.
         match self.attempt(&entry, o) {
             Err(why) if self.fill.is_none() => {
-                said!(warn, "refused", &entry, why = why.0.as_str());
-                o.out.push(Output::Settled(id, Err(why.0)))
+                said!(warn, "refused", &entry, why = why.as_str());
+                o.out.push(Output::Settled(id, Err(why)))
             }
             run => {
                 self.local = local;
@@ -573,12 +572,12 @@ impl Peer {
 
     /// An intent judged by what its run did: its origin's `local` passed,
     /// and it logged with its facts and told everyone, or its refusal kept.
-    fn judged(&mut self, entry: Ctx, run: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
+    fn judged(&mut self, entry: Ctx, run: Result<Vec<Change>, String>, o: &mut Out) -> Result<Seq, String> {
         let id = entry.id;
         self.journal().pass(entry.origin, &entry.actor, entry.local);
         let facts = match run {
             Ok(facts) => facts,
-            Err(Refusal(why)) => {
+            Err(why) => {
                 tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
                 self.journal().refused.insert(id, why.clone());
                 return Err(why);
@@ -659,7 +658,7 @@ impl Peer {
         let key = |h: EntryHash| feed.as_ref().map_or(h, |f| f.key(h));
         let has = self.log().hash_at(at.0).is_some_and(|h| key(h) == at.1);
         if has {
-            let after: Result<Vec<Logged>, Refusal> = self.log().after(at.0).map(|l| Feed::fed(feed.as_ref(), l)).collect();
+            let after: Result<Vec<Logged>, String> = self.log().after(at.0).map(|l| Feed::fed(feed.as_ref(), l)).collect();
             let Ok(after) = after else { return };
             for page in pages(&after, most, Logged::weight) {
                 o.send(Frame::Page {
@@ -1090,8 +1089,8 @@ struct Feed {
 }
 
 impl Feed {
-    fn holds(&self, table: &str, row: &[u8]) -> Result<bool, Refusal> {
-        self.holds.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&self.who, table, row)
+    fn holds(&self, table: &str, row: &[u8]) -> Result<bool, String> {
+        self.holds.as_ref().ok_or_else(|| String::from("no such scope"))?(&self.who, table, row)
     }
 
     /// The log's hash at an entry, as this connection's chain has it.
@@ -1101,23 +1100,23 @@ impl Feed {
 
     /// A logged entry as this connection is sent it: its facts through the
     /// scope, its hash keyed.
-    fn logged(&self, l: Logged) -> Result<Logged, Refusal> {
+    fn logged(&self, l: Logged) -> Result<Logged, String> {
         let facts = scoped(&l.facts, |t, r| self.holds(t, r))?;
         let hash = self.key(l.hash);
         Ok(Logged { facts, hash, ..l })
     }
 
     /// `l` as a connection fed as `feed` says is sent it.
-    fn fed(feed: Option<&Feed>, l: Logged) -> Result<Logged, Refusal> {
+    fn fed(feed: Option<&Feed>, l: Logged) -> Result<Logged, String> {
         feed.map_or(Ok(l.clone()), |f| f.logged(l))
     }
 
     /// The rows of `p`'s store the scope holds, as a store: refused unless
     /// it holds every row they reference.
-    fn union(&self, p: &Peer) -> Result<Store, Refusal> {
+    fn union(&self, p: &Peer) -> Result<Store, String> {
         let mut rows = vec![];
         for (t, rs) in p.store.snapshot_rows() {
-            let held: Result<_, Refusal> = rs
+            let held: Result<_, String> = rs
                 .into_iter()
                 .filter_map(|r| self.holds(&t, &r).map(|h| h.then_some(r)).transpose())
                 .collect();
@@ -1131,7 +1130,7 @@ impl Feed {
 /// rows it holds — an edit across its line as the add or the remove it is.
 /// `holds` is the scope's verdict on a row of a table; a scope is a
 /// function of the row alone, so the filter keeps nothing.
-fn scoped(facts: &[Change], mut holds: impl FnMut(&str, &[u8]) -> Result<bool, Refusal>) -> Result<Vec<Change>, Refusal> {
+fn scoped(facts: &[Change], mut holds: impl FnMut(&str, &[u8]) -> Result<bool, String>) -> Result<Vec<Change>, String> {
     let mut out = vec![];
     for c in facts {
         let t = || c.table().to_string();

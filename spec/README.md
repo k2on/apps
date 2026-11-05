@@ -45,7 +45,7 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | 1.16 | `db.rs` | the typed store a function reads and writes, a run reading its own writes, a refusal undoing them |
 | 1.16 | `domain.rs` | a `Domain`: the schema and functions by name — mutators (of the space each writes), queries, views, scopes |
 | — | `file.rs` | `FileRef`, how a row names a file: the hex sha256 of its bytes, their size and media type, an ordinary record column; the files a value names (`named`), and whether a store holds a row naming one (`held`, who may read a file) |
-| — | `lib.rs` | `Refusal` and the prelude a domain uses; the derives and attributes are `rust/ark-macros` |
+| — | `lib.rs` | the prelude a domain uses (a refusal is its words, a `String`); the derives and attributes are `rust/ark-macros` |
 
 The drivers are the reference reading, not the specification:
 `rust/ark-peer` (the one peer, dialling or listening: storage, the link,

@@ -14,7 +14,7 @@ pub type Plan<T> = ark::plan::Plan<Harken, T>;
 /// sits on one playlist. An episode of a show is on its show's page
 /// (`shows.rs`), not here.
 #[view("library.library")]
-pub fn library(_: &Ctx, _: &Db<Harken>, input: Library) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn library(_: &Ctx, _: &Db<Harken>, input: Library) -> Result<Plan<LibraryEntry>, String> {
     let on = input.playlist_id;
     Ok(scan::<Harken, Media>()
         .filter(|m| m.kind == "song")
@@ -25,7 +25,7 @@ pub fn library(_: &Ctx, _: &Db<Harken>, input: Library) -> Result<Plan<LibraryEn
 /// The library's rows whose title or creator holds the needle, case
 /// folded, in library order.
 #[view("library.search")]
-pub fn search(_: &Ctx, _: &Db<Harken>, input: Search) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn search(_: &Ctx, _: &Db<Harken>, input: Search) -> Result<Plan<LibraryEntry>, String> {
     let (on, needle) = (input.playlist_id, input.needle);
     Ok(scan::<Harken, Media>()
         .filter(move |m| has(&m.title, &needle) || has(&m.creator, &needle))
@@ -37,7 +37,7 @@ pub fn search(_: &Ctx, _: &Db<Harken>, input: Search) -> Result<Plan<LibraryEntr
 /// (in the song table's order), who played most of it, and how many tracks
 /// it has.
 #[view("library.albums")]
-pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refusal> {
+pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, String> {
     Ok(scan::<Harken, Album>()
         .map_with(|db, a| {
             let tracks: Vec<(String, String)> = db
@@ -68,7 +68,7 @@ pub fn albums(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<AlbumsEntry>, Refus
 /// Everyone who made a song in the library, by name, with the picture
 /// `person` has for the name. A show is not a person.
 #[view("library.artists")]
-pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, Refusal> {
+pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, String> {
     Ok(scan::<Harken, Media>().filter(|m| m.kind == "song").group(
         |m| m.creator.clone(),
         |db, name, tracks| {
@@ -88,7 +88,7 @@ pub fn artists(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ArtistsEntry>, Ref
 
 /// Every song, with the columns only a song has.
 #[view("library.track_details")]
-pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetailsEntry>, Refusal> {
+pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetailsEntry>, String> {
     Ok(scan::<Harken, Song>().map_with(|db, song| {
         let movement = movement_of(db, song);
         let work = movement.as_ref().and_then(|m| db.work.get(&m.work_id));
@@ -114,7 +114,7 @@ pub fn track_details(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<TrackDetails
 /// One album's tracks in the order it plays: disc, then track; an untagged
 /// track (0) after the rest, by its part, then title, then the key.
 #[view("library.album")]
-pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryEntry>, String> {
     let (on, id) = (input.playlist_id, input.id);
     Ok(scan::<Harken, Song>()
         .filter_with(move |db, s| s.album_id.as_ref() == Some(&id) && db.media.has(s.media_id))
@@ -131,7 +131,7 @@ pub fn album(_: &Ctx, _: &Db<Harken>, input: AlbumInput) -> Result<Plan<LibraryE
 
 /// One artist's tracks, in library order.
 #[view("library.artist")]
-pub fn artist(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn artist(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, String> {
     let (on, name) = (input.playlist_id, input.name);
     Ok(scan::<Harken, Media>()
         .filter(move |m| m.kind == "song" && m.creator == name)
@@ -142,7 +142,7 @@ pub fn artist(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntr
 /// Everyone some work here is by, with how many tracks are movements of
 /// their works and how many works.
 #[view("library.composers")]
-pub fn composers(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ComposersEntry>, Refusal> {
+pub fn composers(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ComposersEntry>, String> {
     Ok(scan::<Harken, Person>()
         .map_with(|db, p| {
             let works = db.work.scan().into_iter().filter(|w| w.composer == p.name);
@@ -164,7 +164,7 @@ pub fn composers(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ComposersEntry>,
 
 /// One composer's works, by catalogue and then title.
 #[view("library.works")]
-pub fn works(_: &Ctx, _: &Db<Harken>, input: Works) -> Result<Plan<WorkSummary>, Refusal> {
+pub fn works(_: &Ctx, _: &Db<Harken>, input: Works) -> Result<Plan<WorkSummary>, String> {
     Ok(scan::<Harken, Work>()
         .filter(move |w| w.composer == input.composer)
         .sort(|w| (w.catalogue.clone(), w.title.clone()))
@@ -173,14 +173,14 @@ pub fn works(_: &Ctx, _: &Db<Harken>, input: Works) -> Result<Plan<WorkSummary>,
 
 /// One work by its key: none or one.
 #[view("library.work")]
-pub fn work(_: &Ctx, _: &Db<Harken>, input: WorkInput) -> Result<Plan<WorkSummary>, Refusal> {
+pub fn work(_: &Ctx, _: &Db<Harken>, input: WorkInput) -> Result<Plan<WorkSummary>, String> {
     Ok(scan_from::<Harken, Work, _, _>(input.id).map_with(summary))
 }
 
 /// Every performance of one work, with how long its tracks run: the most
 /// complete first, then the oldest, then the key.
 #[view("library.recordings")]
-pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<RecordingsEntry>, Refusal> {
+pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<RecordingsEntry>, String> {
     Ok(scan::<Harken, Recording>()
         .filter(move |r| r.work_id.as_ref() == Some(&input.work_id))
         .map_with(|db, r| {
@@ -217,7 +217,7 @@ pub fn recordings(_: &Ctx, _: &Db<Harken>, input: Recordings) -> Result<Plan<Rec
 /// Who is on one recording, the roles kept, in billing order: the real
 /// credits where there are any.
 #[view("library.credits")]
-pub fn credits(_: &Ctx, _: &Db<Harken>, input: Credits) -> Result<Plan<CreditsEntry>, Refusal> {
+pub fn credits(_: &Ctx, _: &Db<Harken>, input: Credits) -> Result<Plan<CreditsEntry>, String> {
     Ok(scan::<Harken, Credit>()
         .filter(move |c| c.recording_id == input.recording_id)
         .filter_with(|db, c| credited(&credits_of(db, &c.recording_id)).contains(c))
@@ -233,7 +233,7 @@ pub fn credits(_: &Ctx, _: &Db<Harken>, input: Credits) -> Result<Plan<CreditsEn
 /// One performance's tracks in the order the work goes: by movement number,
 /// a track of no movement after the rest.
 #[view("library.recording")]
-pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<LibraryEntry>, String> {
     let (on, id) = (input.playlist_id, input.id);
     Ok(scan::<Harken, Song>()
         .filter_with(move |db, s| s.recording_id == id && db.media.has(s.media_id))
@@ -251,7 +251,7 @@ pub fn recording(_: &Ctx, _: &Db<Harken>, input: RecordingInput) -> Result<Plan<
 /// joined to the album's songs by recording, so a credit costs a probe of
 /// them rather than a read of every song, and a song moved touches its own.
 #[view("library.album_credits")]
-pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Plan<CreditsEntry>, Refusal> {
+pub fn album_credits(_: &Ctx, _: &Db<Harken>, input: AlbumCredits) -> Result<Plan<CreditsEntry>, String> {
     let id = input.id;
     let songs = scan::<Harken, Song>().filter(move |s| s.album_id.as_ref() == Some(&id));
     Ok(scan::<Harken, Credit>()

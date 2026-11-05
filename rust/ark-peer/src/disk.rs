@@ -81,7 +81,7 @@ pub fn export(disk: &mut dyn Disk) -> io::Result<(Schema, Tables)> {
     if let Some(why) = read.failure {
         return Err(io::Error::other(why));
     }
-    let tables = ark::dynamic::tables(&read.store).map_err(|e| io::Error::other(e.0))?;
+    let tables = ark::dynamic::tables(&read.store).map_err(|e| io::Error::other(e))?;
     Ok((schema, tables))
 }
 
@@ -89,11 +89,11 @@ pub fn export(disk: &mut dyn Disk) -> io::Result<(Schema, Tables)> {
 /// rows of an empty `disk` under `schema`, which grows from `from`, every
 /// row judged, its log starting afresh.
 pub fn import(disk: &mut dyn Disk, from: &Schema, schema: Arc<Schema>, tables: &Tables) -> io::Result<()> {
-    compat(from, &schema).map_err(|e| io::Error::other(format!("the schema does not grow from the export's: {}", e.0)))?;
+    compat(from, &schema).map_err(|e| io::Error::other(format!("the schema does not grow from the export's: {}", e)))?;
     if disk.get("kv")?.is_some() || disk.get("log")?.is_some_and(|l| !l.is_empty()) {
         return Err(io::Error::other("an import is into a disk that holds no rows"));
     }
-    let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(|e| io::Error::other(e.0))?;
+    let store = ark::dynamic::store(schema.clone(), Space::Durable, tables).map_err(|e| io::Error::other(e))?;
     let rows = ark::log::standing(store.snapshot_rows(), 0, Default::default());
     disk.record(&Record::Rows(rows).to_bytes())?;
     put_schema(disk, &schema)

@@ -212,12 +212,12 @@ pub fn view_ctx(user: &str, session: &str) -> ark::peer::Ctx {
 
 fn row_json(s: &ark::schema::Schema, table: &str, b: &[u8]) -> Result<Value, String> {
     let t = s.table(table).ok_or(format!("no table {table}"))?.1;
-    ark::dynamic::row(t, b).map_err(|r| r.0)
+    ark::dynamic::row(t, b)
 }
 
 fn row_of(s: &ark::schema::Schema, table: &str, v: &Value) -> Result<Vec<u8>, String> {
     let t = s.table(table).ok_or(format!("no table {table}"))?.1;
-    ark::dynamic::row_bytes(t, v).map_err(|r| r.0)
+    ark::dynamic::row_bytes(t, v)
 }
 
 /// A change as the protocol's facts read: its kind, its table, its rows.
@@ -271,13 +271,12 @@ pub fn view_steps(
     batches: &[Vec<Change>],
 ) -> Result<(Value, Vec<Value>), String> {
     use ark::plan::{splice, Patch};
-    let input = d.input_json(view, &input.to_string()).map_err(|r| r.0)?;
-    let json = |b: &[u8]| -> Result<Value, String> { serde_json::from_str(&d.element_json(view, b).map_err(|r| r.0)?).map_err(|e| e.to_string()) };
+    let input = d.input_json(view, &input.to_string())?;
+    let json = |b: &[u8]| -> Result<Value, String> { serde_json::from_str(&d.element_json(view, b)?).map_err(|e| e.to_string()) };
     let list = |rows: Vec<Vec<u8>>| rows.iter().map(|r| json(r)).collect::<Result<Vec<_>, _>>();
     let holds = |store: &Store, rows: &[Value], before: &[Value], patches: &[Patch<Value>]| -> Result<(), String> {
-        let fresh: Value = serde_json::from_str(&d.answer_json(view, &d.ask(store, ctx, view, &input).map_err(|r| r.0)?).map_err(|r| r.0)?)
-            .map_err(|e| e.to_string())?;
-        let again = list(d.watch(store, ctx, view, &input).map_err(|r| r.0)?.rows())?;
+        let fresh: Value = serde_json::from_str(&d.answer_json(view, &d.ask(store, ctx, view, &input)?)?).map_err(|e| e.to_string())?;
+        let again = list(d.watch(store, ctx, view, &input)?.rows())?;
         match () {
             _ if fresh != Value::Array(rows.to_vec()) => Err("the view is not its answer afresh".into()),
             _ if again != rows => Err("the view is not a view made again".into()),
@@ -285,7 +284,7 @@ pub fn view_steps(
             _ => Ok(()),
         }
     };
-    let mut v = d.watch(&store, ctx, view, &input).map_err(|r| r.0)?;
+    let mut v = d.watch(&store, ctx, view, &input)?;
     let first = list(v.rows())?;
     holds(&store, &first, &first, &[])?;
     let (mut was, mut steps) = (first.clone(), vec![]);
@@ -366,7 +365,7 @@ pub fn run_view(text: &str) -> Result<(), String> {
             rows.iter().map(|r| row_of(&d.schema, &t.name, r)).collect::<Result<_, _>>()?,
         ));
     }
-    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by).map_err(|r| r.0)?;
+    let store = Store::from_rows(d.schema.clone(), ark::schema::Space::Durable, &by)?;
     let batches = (v["batches"].as_array().ok_or("no batches")?.iter())
         .map(|b| {
             b.as_array()

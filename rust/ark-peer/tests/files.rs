@@ -30,7 +30,7 @@ pub struct Add {
 }
 
 #[mutator("photos.add")]
-pub fn add(ctx: &Ctx, db: &mut Db<Photos>, input: Add) -> Result<(), Refusal> {
+pub fn add(ctx: &Ctx, db: &mut Db<Photos>, input: Add) -> Result<(), String> {
     let owner = ctx.user().to_string();
     db.photo.insert(Photo {
         id: input.id,

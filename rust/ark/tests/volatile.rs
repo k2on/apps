@@ -49,7 +49,7 @@ pub struct Wave {
 
 /// `wave(name)`: the caller's row of `here`, put.
 #[mutator("waves.wave")]
-pub fn wave(ctx: &Ctx, db: &mut Db<Waves, Volatile>, input: Wave) -> Result<(), Refusal> {
+pub fn wave(ctx: &Ctx, db: &mut Db<Waves, Volatile>, input: Wave) -> Result<(), String> {
     db.here.delete(ctx.device())?;
     db.here.insert(Here {
         session: ctx.device().into(),
@@ -302,7 +302,7 @@ fn moody() -> Arc<Schema> {
 }
 
 /// A wave as the newer build writes it, with a mood.
-fn moody_wave(store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<ark::store::Change>, Refusal> {
+fn moody_wave(store: &mut ark::store::Store, ctx: &Ctx, input: &[u8]) -> Result<Vec<ark::store::Change>, String> {
     let Wave { name } = <Wave as ark::format::Encode>::from_bytes(input)?;
     let t = moody().tables.iter().find(|t| t.name == "here").unwrap().clone();
     let row = ark::dynamic::row_bytes(&t, &serde_json::json!({"session": ctx.device(), "name": name, "mood": "glad"}))?;

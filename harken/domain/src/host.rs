@@ -111,7 +111,7 @@ impl Active {
 
 impl LibraryEntry {
     /// The rows of a query's answer, a list of entries.
-    pub fn list(bytes: &[u8]) -> Result<Vec<LibraryEntry>, ark::Refusal> {
+    pub fn list(bytes: &[u8]) -> Result<Vec<LibraryEntry>, String> {
         Vec::<LibraryEntry>::decode(bytes)
     }
 

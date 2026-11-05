@@ -214,7 +214,7 @@ pub mod jobs {
         pub after_ms: i64,
     }
 
-    fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+    fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), String> {
         let state = Job::Pending {
             due_ms: ctx.now + i.after_ms,
         };
@@ -231,10 +231,10 @@ pub mod jobs {
 
     /// Every job, as a plan that reads the row `id` names, so that a write
     /// to it makes the plan again — which refuses once when asked to.
-    fn every(_: &Ctx, db: &Db<Jobs>, i: Of) -> Result<Plan<Jobs, Fetch>, Refusal> {
+    fn every(_: &Ctx, db: &Db<Jobs>, i: Of) -> Result<Plan<Jobs, Fetch>, String> {
         let _ = db.fetch.get(i.id);
         match REFUSE.swap(false, Ordering::SeqCst) {
-            true => Err(Refusal("refused once".into())),
+            true => Err("refused once".into()),
             false => Ok(scan::<Jobs, Fetch>()),
         }
     }

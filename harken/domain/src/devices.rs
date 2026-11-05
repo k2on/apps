@@ -9,8 +9,8 @@ use crate::listening::*;
 use crate::schema::*;
 use crate::types::*;
 
-fn refuse(why: &str) -> Result<(), Refusal> {
-    Err(Refusal::new(why))
+fn refuse(why: &str) -> Result<(), String> {
+    Err(why.into())
 }
 
 fn key(user: &str, device: &str) -> (String, String) {
@@ -24,15 +24,15 @@ pub fn devices_of(db: &Db<Harken, Volatile>, user: &str) -> Vec<ListeningDevice>
 
 /// A device standing in the session; refused when it is not (every caller
 /// has held it there first).
-pub fn present_of(db: &Db<Harken, Volatile>, user: &str, device: &str) -> Result<Present, Refusal> {
+pub fn present_of(db: &Db<Harken, Volatile>, user: &str, device: &str) -> Result<Present, String> {
     db.listening_device
         .get(key(user, device))
         .map(|d| d.present)
-        .ok_or_else(|| Refusal::new("unwrapped none"))
+        .ok_or_else(|| String::from("unwrapped none"))
 }
 
 /// A device's entry, written.
-pub fn put_present(db: &mut Db<Harken, Volatile>, user: &str, device: &str, present: Present) -> Result<(), Refusal> {
+pub fn put_present(db: &mut Db<Harken, Volatile>, user: &str, device: &str, present: Present) -> Result<(), String> {
     db.listening_device.update(ListeningDevice {
         user: user.into(),
         device: device.into(),
@@ -65,7 +65,7 @@ pub fn has_volume(db: &Db<Harken, Volatile>, user: &str, device: &str) -> bool {
 /// What a device says of itself once it stands here. A family that moves
 /// takes it out of any group it was in.
 #[mutator("listening.equip")]
-pub fn equip(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Equip) -> Result<(), Refusal> {
+pub fn equip(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Equip) -> Result<(), String> {
     let (user, me) = (ctx.user(), ctx.device());
     if !db.listening_device.has(key(user, me)) {
         return refuse("not here");
@@ -89,16 +89,16 @@ pub fn equip(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Equip) -> Result<(
 }
 
 /// The guard of a volume moved from anywhere.
-fn voiced_device(db: &Db<Harken, Volatile>, user: &str, device: &str) -> Result<Present, Refusal> {
+fn voiced_device(db: &Db<Harken, Volatile>, user: &str, device: &str) -> Result<Present, String> {
     if !has_volume(db, user, device) {
-        return Err(Refusal::new("that device is not here, or has no volume"));
+        return Err("that device is not here, or has no volume".into());
     }
     present_of(db, user, device)
 }
 
 /// A device's volume, from anywhere. Moving the volume unmutes.
 #[mutator("listening.set_volume")]
-pub fn set_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetVolume) -> Result<(), Refusal> {
+pub fn set_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetVolume) -> Result<(), String> {
     let present = voiced_device(db, ctx.user(), &input.device)?;
     let p = Present {
         muted: false,
@@ -110,7 +110,7 @@ pub fn set_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetVolume) ->
 
 /// …moved by so much, clamped: what a volume button sends.
 #[mutator("listening.nudge_volume")]
-pub fn nudge_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: NudgeVolume) -> Result<(), Refusal> {
+pub fn nudge_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: NudgeVolume) -> Result<(), String> {
     let present = voiced_device(db, ctx.user(), &input.device)?;
     let p = Present {
         muted: false,
@@ -121,7 +121,7 @@ pub fn nudge_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: NudgeVolume
 }
 
 #[mutator("listening.set_mute")]
-pub fn set_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetMute) -> Result<(), Refusal> {
+pub fn set_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetMute) -> Result<(), String> {
     let present = voiced_device(db, ctx.user(), &input.device)?;
     let p = Present {
         muted: input.muted,
@@ -132,7 +132,7 @@ pub fn set_mute(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: SetMute) -> Res
 
 /// The device's own word on its volume: its own entry only.
 #[mutator("listening.report_volume")]
-pub fn report_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportVolume) -> Result<(), Refusal> {
+pub fn report_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportVolume) -> Result<(), String> {
     if !has_volume(db, ctx.user(), ctx.device()) {
         return refuse("not here, or no volume");
     }
@@ -148,7 +148,7 @@ pub fn report_volume(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: ReportVolu
 /// Ephemeral: where this device's scrubber is being dragged to, or nowhere
 /// once it is let go. It reads nothing ordered and writes its own row.
 #[mutator("listening.scrub")]
-pub fn scrub(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Scrub) -> Result<(), Refusal> {
+pub fn scrub(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Scrub) -> Result<(), String> {
     db.listening_scrub.delete(key(ctx.user(), ctx.device()))?;
     if let Some(at_ms) = input.at_ms {
         db.listening_scrub.insert(ListeningScrub {
@@ -173,7 +173,7 @@ fn as_login(ctx: &Ctx, device: Device) -> Device {
 /// still paused. Authored by the server as the device's login, on what its
 /// `Hello` said.
 #[mutator("listening.on_join")]
-pub fn on_join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
+pub fn on_join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), String> {
     let device = as_login(ctx, device);
     let (user, id) = (device.user.clone(), device.id.clone());
     db.listening_device.delete(key(&user, &id))?;
@@ -197,7 +197,7 @@ pub fn on_join(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Resu
 /// which is its id, revoked): signing in again is another session, so
 /// another device, and the sound goes nowhere, kept for whichever plays.
 #[mutator("listening.on_leave")]
-pub fn on_leave(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), Refusal> {
+pub fn on_leave(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Result<(), String> {
     let device = as_login(ctx, device);
     let (user, id) = (device.user.clone(), device.id.clone());
     dissolved(db, &user, &id)?;
@@ -231,7 +231,7 @@ pub fn on_leave(ctx: &Ctx, db: &mut Db<Harken, Volatile>, device: Device) -> Res
 /// the end of the track), with no output and nobody here. Authored over the
 /// ordered tables a restart kept; the scrubbers were never kept.
 #[mutator("listening.on_restore")]
-pub fn on_restore(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
+pub fn on_restore(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), String> {
     for d in db.listening_device.scan() {
         db.listening_device.remove(&d)?;
     }

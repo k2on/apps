@@ -87,7 +87,7 @@ pub struct Needle {
     pub needle: String,
 }
 
-type View<T> = Result<Plan<Library, T>, Refusal>;
+type View<T> = Result<Plan<Library, T>, String>;
 
 /// A playlist's first two items by place.
 #[view("library.top_two_by_pos")]
@@ -279,7 +279,7 @@ pub mod colors {
 
     /// Per colour, last first: the colour, how many, the sum of `k1`.
     #[view("colors.kept_sums")]
-    pub fn kept_sums(_: &Ctx, _: &Db<Colors>, _: ()) -> Result<Plan<Colors, Sum>, Refusal> {
+    pub fn kept_sums(_: &Ctx, _: &Db<Colors>, _: ()) -> Result<Plan<Colors, Sum>, String> {
         Ok(scan::<Colors, T1>()
             .group(
                 |r| r.c12.clone(),
@@ -335,7 +335,7 @@ pub mod pairs {
     /// The rows of `t0` whose `p0` is not the input's, per `c00`: those of
     /// two or more, each its `c00`, how many, the sum of `n0`.
     #[view("pairs.kept_sums")]
-    pub fn kept_sums(_: &Ctx, _: &Db<Pairs>, input: Other) -> Result<Plan<Pairs, (i64, i64, i64)>, Refusal> {
+    pub fn kept_sums(_: &Ctx, _: &Db<Pairs>, input: Other) -> Result<Plan<Pairs, (i64, i64, i64)>, String> {
         Ok(scan::<Pairs, T0>()
             .filter(move |r| r.p0 != input.f_p0)
             .group(|r| r.c00, |_, k: &i64, ms| (*k, ms.len() as i64, total(ms.map(|m| m.n0))))

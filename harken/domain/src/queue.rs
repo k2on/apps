@@ -6,14 +6,14 @@ use crate::listening::*;
 use crate::schema::*;
 use crate::types::*;
 
-fn refuse(why: &str) -> Result<(), Refusal> {
-    Err(Refusal::new(why))
+fn refuse(why: &str) -> Result<(), String> {
+    Err(why.into())
 }
 
 /// Tracks put after the one playing ("Play next") or at the end ("Add to
 /// queue"); into nothing queued it is `start` of them from the first.
 #[mutator("listening.enqueue")]
-pub fn enqueue(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Enqueue) -> Result<(), Refusal> {
+pub fn enqueue(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Enqueue) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     if !(is_active(&session) || can_play(db, ctx.user(), ctx.device())) {
         return refuse("nothing here can play it");
@@ -44,7 +44,7 @@ pub fn enqueue(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Enqueue) -> Resu
 /// playing, from its start — or with nothing after it, the one before,
 /// paused at its start; the last track of all taken out is nothing queued.
 #[mutator("listening.remove")]
-pub fn remove(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Remove) -> Result<(), Refusal> {
+pub fn remove(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Remove) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
     if !in_queue(&session, input.index) {
@@ -87,7 +87,7 @@ pub fn remove(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Remove) -> Result
 
 /// A track of the queue somewhere else in it; the one playing plays on.
 #[mutator("listening.move")]
-pub fn move_track(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Move) -> Result<(), Refusal> {
+pub fn move_track(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Move) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
     if !(in_queue(&session, input.from) && in_queue(&session, input.to)) {
@@ -108,7 +108,7 @@ pub fn move_track(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Move) -> Resu
 
 /// Everything after the track playing, gone; it plays on.
 #[mutator("listening.clear_upcoming")]
-pub fn clear_upcoming(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
+pub fn clear_upcoming(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     queued(&session)?;
     let next = with_active(&session, |a| Active {
@@ -121,7 +121,7 @@ pub fn clear_upcoming(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result
 // * What the output says
 
 /// The guard of what the output says.
-fn the_output(ctx: &Ctx, session: &Session) -> Result<(), Refusal> {
+fn the_output(ctx: &Ctx, session: &Session) -> Result<(), String> {
     if !is_output(session, ctx.device()) {
         return refuse("not the output");
     }
@@ -130,7 +130,7 @@ fn the_output(ctx: &Ctx, session: &Session) -> Result<(), Refusal> {
 
 /// The output has the hand-off, at this point in the track.
 #[mutator("listening.started")]
-pub fn started(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<(), Refusal> {
+pub fn started(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     the_output(ctx, &session)?;
     let next = with_active(&session, |a| Active {
@@ -144,7 +144,7 @@ pub fn started(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<()
 /// The output's track ended: the next one, or paused at the start of the
 /// last when there is none. About a track no longer playing, nothing.
 #[mutator("listening.advance")]
-pub fn advance(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Advance) -> Result<(), Refusal> {
+pub fn advance(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Advance) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     the_output(ctx, &session)?;
     let next = match &session {
@@ -169,7 +169,7 @@ pub fn advance(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Advance) -> Resu
 
 /// The output stopped making a sound by itself, here.
 #[mutator("listening.stalled")]
-pub fn stalled(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<(), Refusal> {
+pub fn stalled(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     the_output(ctx, &session)?;
     let next = with_active(&session, |a| Active {
@@ -182,7 +182,7 @@ pub fn stalled(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: At) -> Result<()
 /// The output, playing, says where it is; the clock is re-anchored there.
 /// About a clock that has moved since, or a hand-off in flight, nothing.
 #[mutator("listening.report_position")]
-pub fn report_position(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Report) -> Result<(), Refusal> {
+pub fn report_position(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Report) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     the_output(ctx, &session)?;
     let next = match &session {
@@ -211,7 +211,7 @@ pub fn report_position(ctx: &Ctx, db: &mut Db<Harken, Volatile>, input: Report) 
 /// The output lets the sound go: the queue stays, paused, and nothing is
 /// the output.
 #[mutator("listening.release")]
-pub fn release(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), Refusal> {
+pub fn release(ctx: &Ctx, db: &mut Db<Harken, Volatile>, _: ()) -> Result<(), String> {
     let session = session_of(db, ctx.user());
     the_output(ctx, &session)?;
     let next = with_active(&session, |a| Active {

@@ -347,7 +347,7 @@ impl Net {
     /// its patches.
     pub fn watch(&mut self, i: i64, space: Space, name: &str, input: Vec<u8>, ctx: Ctx) -> Result<usize, String> {
         let c = self.client(i);
-        let v = c.watch(space, name, &input, ctx.clone()).map_err(|r| r.0)?;
+        let v = c.watch(space, name, &input, ctx.clone())?;
         let rows = c.rows(v).unwrap_or_default();
         self.views.insert((i, v), (space, name.into(), input, ctx, rows));
         Ok(v)
@@ -363,7 +363,7 @@ impl Net {
                 Space::Volatile => c.config.live.as_ref(),
             };
             let store = &c.machine(*space).unwrap().store;
-            let fresh = d.expect("a domain").watch(store, ctx, f, input).map_err(|r| r.0)?.rows();
+            let fresh = d.expect("a domain").watch(store, ctx, f, input)?.rows();
             if c.rows(*v).as_ref() != Some(&fresh) || *mirror != fresh {
                 return Err(format!("client {i}'s view {v} is not a fresh evaluation"));
             }

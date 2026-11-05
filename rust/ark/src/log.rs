@@ -46,7 +46,6 @@ use serde::{Deserialize, Serialize};
 use crate::format::Encode;
 use crate::hash::{sha256, EntryHash};
 use crate::store::Change;
-use crate::Refusal;
 
 /// A position in the log. The first entry is 1; 0 is the empty chain.
 pub type Seq = i64;
@@ -389,7 +388,7 @@ impl Record {
         b.first() == Some(&1)
     }
 
-    pub fn dec(b: &[u8]) -> Result<Record, Refusal> {
+    pub fn dec(b: &[u8]) -> Result<Record, String> {
         Record::from_bytes(b)
     }
 }

@@ -17,8 +17,6 @@
 //! without a Rust type are JSON under the schema ([`dynamic`]); effects
 //! are rows, jobs a handler claims and finishes ([`effect`]).
 
-use ::std::fmt;
-
 extern crate self as ark;
 
 pub use domain::{effect, Domain};
@@ -38,24 +36,6 @@ pub mod row;
 pub mod schema;
 pub mod store;
 
-/// Why something was not done, as a sentence: a parse that failed, a write
-/// a constraint refused, an intent its function refused. What a form shows
-/// and what a refused `Verdict` carries.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Refusal(pub String);
-
-impl Refusal {
-    pub fn new(why: impl Into<String>) -> Refusal {
-        Refusal(why.into())
-    }
-}
-
-impl fmt::Display for Refusal {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// What a domain written in plain Rust uses (§1.16): the derives and the
 /// attributes that register a function by name, the context, the typed
 /// store, plans, ids and indexes.
@@ -67,7 +47,6 @@ pub mod prelude {
     pub use crate::peer::Ctx;
     pub use crate::plan::{scan, scan_from, Desc, Plan};
     pub use crate::row::{Describe, Id, Index, Input, Row};
-    pub use crate::Refusal;
     pub use ark_macros::{mutator, scope, view, Describe, Effect, Input, Row, Schema};
     pub use serde::{Deserialize, Serialize};
 }

@@ -233,7 +233,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
             let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();
             rows.push((name, held));
         }
-        let union = Store::from_rows(schema, Space::Durable, &rows).map_err(|r| r.0)?;
+        let union = Store::from_rows(schema, Space::Durable, &rows)?;
         if c.log.store != union || !c.log.pending.is_empty() {
             return Err("the partial client is not exactly its union".into());
         }

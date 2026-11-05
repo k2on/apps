@@ -91,7 +91,7 @@ use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To, Told};
 use ark::plan::Maintained;
 use ark::schema::Space;
 use ark::store::Change;
-use ark::{Domain, Refusal};
+use ark::Domain;
 
 pub use app::{nobody, Arg, Outcome};
 pub use ark::file::FileRef;
@@ -802,9 +802,9 @@ impl Peer {
     /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
     /// comes as its patches ([`Peer::update`]), under its number for as
     /// long as it is held.
-    pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, Refusal> {
-        let d = self.config.domain_of(space).ok_or_else(|| Refusal::new("no domain here"))?;
-        let store = &self.machine(space).ok_or_else(|| Refusal::new("no machine of that space"))?.store;
+    pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, String> {
+        let d = self.config.domain_of(space).ok_or_else(|| String::from("no domain here"))?;
+        let store = &self.machine(space).ok_or_else(|| String::from("no machine of that space"))?.store;
         let view = Some(d.watch(store, &ctx, name, input)?);
         let (name, input) = (name.into(), input.to_vec());
         self.views.push(Some(Kept {

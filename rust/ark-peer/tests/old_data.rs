@@ -49,7 +49,7 @@ pub struct App {
 ark_auth::install!(App);
 
 #[mutator("app.create_playlist")]
-fn create_playlist(ctx: &Ctx, db: &mut Db<App>, input: CreatePlaylist) -> Result<(), Refusal> {
+fn create_playlist(ctx: &Ctx, db: &mut Db<App>, input: CreatePlaylist) -> Result<(), String> {
     db.playlist.insert(Playlist {
         id: ctx.new_id(),
         name: input.name,

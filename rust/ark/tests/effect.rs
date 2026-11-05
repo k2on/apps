@@ -51,7 +51,7 @@ fn ctx(actor: &str, roles: &[&str], now: i64) -> Ctx {
 /// One function run as the authority would in log order: its verdict.
 fn run(d: &Domain, s: &mut Store, f: &str, c: &Ctx, input: Vec<u8>) -> Result<(), String> {
     let p = d.get(&format!("fetch.{f}")).and_then(|f| f.proc.clone()).unwrap();
-    p(s, c, &input).map(|_| ()).map_err(|r| r.0)
+    p(s, c, &input).map(|_| ())
 }
 
 fn claim(by: &str) -> Vec<u8> {

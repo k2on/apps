@@ -19,20 +19,20 @@ use crate::types::*;
 pub const STATES: &[&str] = &["queued", "downloading", "failed"];
 
 /// The media row whose file is `file`.
-fn media_of(db: &Db<Harken>, file: &str) -> Result<Media, Refusal> {
+fn media_of(db: &Db<Harken>, file: &str) -> Result<Media, String> {
     db.media
         .by(Media::FILE)
         .from(&file.to_string())
         .first()
         .filter(|m| m.file == file)
-        .ok_or_else(|| Refusal(format!("no media has the file {file}")))
+        .ok_or_else(|| format!("no media has the file {file}"))
 }
 
 /// A file still to come: queued, from `source`. Said again of a file
 /// queued from there already, it writes nothing; of one that was
 /// downloading or failed, it is queued again.
 #[mutator("library.queue_download")]
-pub fn queue_download(ctx: &Ctx, db: &mut Db<Harken>, input: QueueDownload) -> Result<(), Refusal> {
+pub fn queue_download(ctx: &Ctx, db: &mut Db<Harken>, input: QueueDownload) -> Result<(), String> {
     is_library(ctx)?;
     let media = media_of(db, &input.file)?;
     let was = db.download.get(media.id);
@@ -50,11 +50,11 @@ pub fn queue_download(ctx: &Ctx, db: &mut Db<Harken>, input: QueueDownload) -> R
 /// How a file still to come is going. One not queued is refused: it is
 /// here, or was never asked for.
 #[mutator("library.download_progress")]
-pub fn download_progress(ctx: &Ctx, db: &mut Db<Harken>, input: DownloadProgress) -> Result<(), Refusal> {
+pub fn download_progress(ctx: &Ctx, db: &mut Db<Harken>, input: DownloadProgress) -> Result<(), String> {
     is_library(ctx)?;
     let media = media_of(db, &input.file)?;
     let Some(was) = db.download.get(media.id) else {
-        return Err(Refusal(format!("{} is not being downloaded", input.file)));
+        return Err(format!("{} is not being downloaded", input.file));
     };
     db.download.put(Download {
         state: input.state,
@@ -68,7 +68,7 @@ pub fn download_progress(ctx: &Ctx, db: &mut Db<Harken>, input: DownloadProgress
 /// A file downloaded: on the server now. Of one that was never still to
 /// come, it writes nothing.
 #[mutator("library.downloaded")]
-pub fn downloaded(ctx: &Ctx, db: &mut Db<Harken>, input: Downloaded) -> Result<(), Refusal> {
+pub fn downloaded(ctx: &Ctx, db: &mut Db<Harken>, input: Downloaded) -> Result<(), String> {
     is_library(ctx)?;
     let media = media_of(db, &input.file)?;
     db.download.delete(media.id)
@@ -76,7 +76,7 @@ pub fn downloaded(ctx: &Ctx, db: &mut Db<Harken>, input: Downloaded) -> Result<(
 
 /// Every file still to come, with its title, by when it was asked for.
 #[view("library.downloads")]
-pub fn downloads(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<DownloadsEntry>, Refusal> {
+pub fn downloads(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<DownloadsEntry>, String> {
     Ok(scan::<Harken, Download>()
         .sort(|d| (d.asked_ms, d.media_id))
         .map_with(|db, d| DownloadsEntry {

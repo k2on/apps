@@ -17,7 +17,6 @@ use ark::peer::{Ctx, Input, Journal, Peer, Role};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::store::{Change, Store};
-use ark::Refusal;
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
 
@@ -36,7 +35,7 @@ fn wider() -> Arc<Schema> {
 }
 
 /// Tags a row in the appended table: what only the wider schema can log.
-fn tag_it(store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, Refusal> {
+fn tag_it(store: &mut Store, _: &Ctx, input: &[u8]) -> Result<Vec<Change>, String> {
     let c = Change::Add {
         table: "tag".into(),
         row: input.to_vec(),

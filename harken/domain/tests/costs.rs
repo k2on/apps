@@ -68,7 +68,7 @@ fn domain() -> &'static Domain {
 }
 
 /// A mutator run over `st`, as the machine runs it.
-fn run(st: &mut Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<ark::store::Change>, ark::Refusal> {
+fn run(st: &mut Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<ark::store::Change>, String> {
     domain().get(name).and_then(|f| f.proc.clone()).expect("a mutator")(st, ctx, input)
 }
 

@@ -50,7 +50,7 @@ pub fn is_feed(url: &String) -> bool {
 /// episodes. Said again, it is the same feed, its kind as said now and
 /// the rest as it was.
 #[mutator("library.subscribe")]
-pub fn subscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Subscribe) -> Result<(), Refusal> {
+pub fn subscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Subscribe) -> Result<(), String> {
     is_library(ctx)?;
     let was = db.subscription.get(&input.url);
     let next = match was {
@@ -70,10 +70,10 @@ pub fn subscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Subscribe) -> Result<(),
 /// Follow a feed no more: it, its show and every episode of it out of the
 /// library, and off every playlist holding one.
 #[mutator("library.unsubscribe")]
-pub fn unsubscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Unsubscribe) -> Result<(), Refusal> {
+pub fn unsubscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Unsubscribe) -> Result<(), String> {
     is_library(ctx)?;
     if !db.subscription.has(&input.url) {
-        return Err(Refusal(format!("not following {}", input.url)));
+        return Err(format!("not following {}", input.url));
     }
     db.subscription.delete(input.url.clone())?;
     for show in db.show.scan().into_iter().filter(|s| s.feed == input.url) {
@@ -88,10 +88,10 @@ pub fn unsubscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Unsubscribe) -> Result
 /// More of a followed feed's older episodes: `more` past what it keeps,
 /// or 0 for every one. One that keeps every one already writes nothing.
 #[mutator("library.fetch_older")]
-pub fn fetch_older(ctx: &Ctx, db: &mut Db<Harken>, input: FetchOlder) -> Result<(), Refusal> {
+pub fn fetch_older(ctx: &Ctx, db: &mut Db<Harken>, input: FetchOlder) -> Result<(), String> {
     is_library(ctx)?;
     let Some(was) = db.subscription.get(&input.url) else {
-        return Err(Refusal(format!("not following {}", input.url)));
+        return Err(format!("not following {}", input.url));
     };
     let keep = match (was.keep, input.more) {
         (0, _) | (_, 0) => 0,
@@ -105,10 +105,10 @@ pub fn fetch_older(ctx: &Ctx, db: &mut Db<Harken>, input: FetchOlder) -> Result<
 /// count kept from the last read that had them. A feed not followed is
 /// refused, so a read that finishes after an unsubscribe adds nothing.
 #[mutator("library.feed_read")]
-pub fn feed_read(ctx: &Ctx, db: &mut Db<Harken>, input: FeedRead) -> Result<(), Refusal> {
+pub fn feed_read(ctx: &Ctx, db: &mut Db<Harken>, input: FeedRead) -> Result<(), String> {
     is_library(ctx)?;
     let Some(was) = db.subscription.get(&input.url) else {
-        return Err(Refusal(format!("not following {}", input.url)));
+        return Err(format!("not following {}", input.url));
     };
     let read = input.error.is_empty();
     db.subscription.put(Subscription {
@@ -122,7 +122,7 @@ pub fn feed_read(ctx: &Ctx, db: &mut Db<Harken>, input: FeedRead) -> Result<(), 
 /// Every followed feed, by when it was added, with its show where a read
 /// has made it and how many of its episodes are in the library.
 #[view("library.subscriptions")]
-pub fn subscriptions(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<SubscriptionsEntry>, Refusal> {
+pub fn subscriptions(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<SubscriptionsEntry>, String> {
     Ok(scan::<Harken, Subscription>().sort(|s| (s.added_ms, s.url.clone())).map_with(|db, s| {
         let show = db.show.scan().into_iter().find(|show| show.feed == s.url);
         let episodes = show.as_ref().map_or(0, |show| db.episode.by(Episode::SHOW_ID).from(&show.id).count());
@@ -144,7 +144,7 @@ pub fn subscriptions(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Subscription
 /// its title, every field fill-if-given, and one that says nothing new
 /// writes nothing (a feed says it again at every refresh).
 #[mutator("library.add_show")]
-pub fn add_show(ctx: &Ctx, db: &mut Db<Harken>, input: AddShow) -> Result<(), Refusal> {
+pub fn add_show(ctx: &Ctx, db: &mut Db<Harken>, input: AddShow) -> Result<(), String> {
     is_library(ctx)?;
     let id = keys::show_key(&input.kind, &input.title);
     let was = db.show.get(&id);
@@ -172,10 +172,10 @@ pub fn add_show(ctx: &Ctx, db: &mut Db<Harken>, input: AddShow) -> Result<(), Re
 /// whom it was added, and the same file with nothing new writes no row. An
 /// episode of a show the library has not got is refused.
 #[mutator("library.add_episode")]
-pub fn add_episode(ctx: &Ctx, db: &mut Db<Harken>, input: AddEpisode) -> Result<(), Refusal> {
+pub fn add_episode(ctx: &Ctx, db: &mut Db<Harken>, input: AddEpisode) -> Result<(), String> {
     is_library(ctx)?;
     let Some(show) = db.show.get(&input.show) else {
-        return Err(Refusal(format!("no show {}; add the show first", input.show)));
+        return Err(format!("no show {}; add the show first", input.show));
     };
     let (now, user) = (ctx.now, ctx.user().to_string());
     let was = db.media.by(Media::FILE).from(&input.file).first().filter(|m| !m.file.is_empty());
@@ -211,7 +211,7 @@ pub fn add_episode(ctx: &Ctx, db: &mut Db<Harken>, input: AddEpisode) -> Result<
 /// Every show, by title, with how many episodes it has here and when the
 /// newest went out.
 #[view("library.shows")]
-pub fn shows(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ShowsEntry>, Refusal> {
+pub fn shows(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ShowsEntry>, String> {
     Ok(scan::<Harken, Show>()
         .map_with(|db, s| {
             let episodes: Vec<Episode> = db.episode.by(Episode::SHOW_ID).from(&s.id).all();
@@ -235,7 +235,7 @@ pub fn shows(_: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<ShowsEntry>, Refusal
 /// One show's episodes, the newest first: by when each went out, then by
 /// when it was added.
 #[view("library.show")]
-pub fn show(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn show(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<LibraryEntry>, String> {
     let (on, id) = (input.playlist_id, input.id);
     Ok(scan::<Harken, Episode>()
         .filter_with(move |db, e| e.show_id == id && db.media.has(e.media_id))
@@ -249,13 +249,13 @@ pub fn show(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<LibraryEnt
 /// An episode's chapters, by its file: what its feed says now, in place
 /// of what it said before. Said again the same, it writes nothing.
 #[mutator("library.set_chapters")]
-pub fn set_chapters(ctx: &Ctx, db: &mut Db<Harken>, input: SetChapters) -> Result<(), Refusal> {
+pub fn set_chapters(ctx: &Ctx, db: &mut Db<Harken>, input: SetChapters) -> Result<(), String> {
     is_library(ctx)?;
     let Some(media) = db.media.by(Media::FILE).from(&input.file).first().filter(|m| m.file == input.file) else {
-        return Err(Refusal(format!("no media has the file {}", input.file)));
+        return Err(format!("no media has the file {}", input.file));
     };
     if !db.episode.has(media.id) {
-        return Err(Refusal::new("only an episode has chapters"));
+        return Err("only an episode has chapters".into());
     }
     let mut next: Vec<Chapter> = input
         .chapters
@@ -283,7 +283,7 @@ pub fn set_chapters(ctx: &Ctx, db: &mut Db<Harken>, input: SetChapters) -> Resul
 
 /// An episode's chapters, in the order they come.
 #[view("library.chapters")]
-pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<ChaptersEntry>, Refusal> {
+pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<ChaptersEntry>, String> {
     let id = input.media_id;
     Ok(scan_from::<Harken, Chapter, _, _>(id).map(|c| ChaptersEntry {
         image: c.image.clone(),
@@ -294,12 +294,12 @@ pub fn chapters(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<Cha
 }
 
 /// The episode a file is, for what its feed says of it beside it.
-fn episode_of_file(db: &Db<Harken>, file: &str, what: &str) -> Result<Id<Media>, Refusal> {
+fn episode_of_file(db: &Db<Harken>, file: &str, what: &str) -> Result<Id<Media>, String> {
     let Some(media) = db.media.by(Media::FILE).from(&file.to_string()).first().filter(|m| m.file == file) else {
-        return Err(Refusal(format!("no media has the file {file}")));
+        return Err(format!("no media has the file {file}"));
     };
     if !db.episode.has(media.id) {
-        return Err(Refusal(format!("only an episode has {what}")));
+        return Err(format!("only an episode has {what}"));
     }
     Ok(media.id)
 }
@@ -310,7 +310,7 @@ fn episode_of_file(db: &Db<Harken>, file: &str, what: &str) -> Result<Id<Media>,
 /// have none, without taking anything a catalogue said of them. Said again
 /// the same, it writes nothing.
 #[mutator("library.set_people")]
-pub fn set_people(ctx: &Ctx, db: &mut Db<Harken>, input: SetPeople) -> Result<(), Refusal> {
+pub fn set_people(ctx: &Ctx, db: &mut Db<Harken>, input: SetPeople) -> Result<(), String> {
     is_library(ctx)?;
     let id = episode_of_file(db, &input.file, "people")?;
     let mut next: Vec<Appearance> = Vec::new();
@@ -356,7 +356,7 @@ pub fn set_people(ctx: &Ctx, db: &mut Db<Harken>, input: SetPeople) -> Result<()
 
 /// An episode's people, as its feed lists them.
 #[view("library.people")]
-pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<PeopleEntry>, Refusal> {
+pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<PeopleEntry>, String> {
     let id = input.media_id;
     Ok(scan_from::<Harken, Appearance, _, _>(id).sort(|a| a.pos).map_with(|db, a| {
         let p = db.person.get(&a.person_name).unwrap_or_default();
@@ -373,7 +373,7 @@ pub fn people(_: &Ctx, _: &Db<Harken>, input: EpisodeInput) -> Result<Plan<Peopl
 /// each episode's people in its feed's order: a show's page reads its rows'
 /// people once, as it reads `episode_details`, rather than a view a row.
 #[view("library.show_people")]
-pub fn show_people(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<ShowPeopleEntry>, Refusal> {
+pub fn show_people(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<ShowPeopleEntry>, String> {
     let id = input.id;
     Ok(scan::<Harken, Appearance>()
         .filter_with(move |db, a| db.episode.get(a.media_id).is_some_and(|e| e.show_id == id))
@@ -396,7 +396,7 @@ pub fn show_people(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<Sho
 
 /// Every episode somebody is on, newest first: their page's episodes.
 #[view("library.appearances")]
-pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<LibraryEntry>, String> {
     let (on, name) = (input.playlist_id, input.name);
     Ok(scan::<Harken, Appearance>()
         .filter_with(move |db, a| a.person_name == name && db.media.has(a.media_id))
@@ -417,7 +417,7 @@ pub fn appearances(_: &Ctx, _: &Db<Harken>, input: Artist) -> Result<Plan<Librar
 /// (`server/src/transcribe.rs`), in place of what it had. Said again the same, it
 /// writes nothing.
 #[mutator("library.set_transcript")]
-pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> Result<(), Refusal> {
+pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> Result<(), String> {
     is_library(ctx)?;
     let id = episode_of_file(db, &input.file, "a transcript")?;
     let mut next: Vec<Cue> = input
@@ -475,10 +475,10 @@ pub fn set_transcript(ctx: &Ctx, db: &mut Db<Harken>, input: SetTranscript) -> R
 /// nobody has named otherwise ([`transcript`]). Named nobody, it is again
 /// whoever it sounds like.
 #[mutator("library.name_voice")]
-pub fn name_voice(ctx: &Ctx, db: &mut Db<Harken>, input: NameVoice) -> Result<(), Refusal> {
+pub fn name_voice(ctx: &Ctx, db: &mut Db<Harken>, input: NameVoice) -> Result<(), String> {
     is_library(ctx)?;
     if !db.voice.has((input.media_id, input.voice.clone())) {
-        return Err(Refusal::new("no such voice in that episode"));
+        return Err("no such voice in that episode".into());
     }
     let row = VoiceName {
         media_id: input.media_id,
@@ -548,7 +548,7 @@ fn cosine(a: &[i64], b: &[i64]) -> f64 {
 /// lines read, by the key's leading column, not every episode's — a key
 /// orders them by when they begin.
 #[view("library.transcript")]
-pub fn transcript(_: &Ctx, db: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, Refusal> {
+pub fn transcript(_: &Ctx, db: &Db<Harken>, input: EpisodeInput) -> Result<Plan<TranscriptEntry>, String> {
     let id = input.media_id;
     let voices = voices_of(db, id);
     Ok(scan_from::<Harken, Cue, _, _>(id).map(move |c| TranscriptEntry {
@@ -567,7 +567,7 @@ pub fn transcript(_: &Ctx, db: &Db<Harken>, input: EpisodeInput) -> Result<Plan<
 /// about, when it went out — in the order `show` lists them, so a show's
 /// page can say each beside its row.
 #[view("library.episode_details")]
-pub fn episode_details(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<EpisodeDetailsEntry>, Refusal> {
+pub fn episode_details(_: &Ctx, _: &Db<Harken>, input: ShowInput) -> Result<Plan<EpisodeDetailsEntry>, String> {
     let id = input.id;
     Ok(scan::<Harken, Episode>()
         .filter_with(move |db, e| e.show_id == id && db.media.has(e.media_id))

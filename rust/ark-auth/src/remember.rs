@@ -8,7 +8,6 @@
 
 use ark::db::Db;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
-use ark::Refusal;
 
 use crate::{Account, Login};
 
@@ -54,7 +53,7 @@ pub fn recall(db: &Db<Remembered>, server: &str) -> Option<Login> {
     })
 }
 
-pub fn remember(db: &mut Db<Remembered>, server: &str, l: &Login) -> Result<(), Refusal> {
+pub fn remember(db: &mut Db<Remembered>, server: &str, l: &Login) -> Result<(), String> {
     db.login.put(Remember {
         server: server.into(),
         user: l.user.id.clone(),
@@ -68,7 +67,7 @@ pub fn remember(db: &mut Db<Remembered>, server: &str, l: &Login) -> Result<(), 
     })
 }
 
-pub fn forget(db: &mut Db<Remembered>, server: &str) -> Result<(), Refusal> {
+pub fn forget(db: &mut Db<Remembered>, server: &str) -> Result<(), String> {
     db.login.delete(server)
 }
 

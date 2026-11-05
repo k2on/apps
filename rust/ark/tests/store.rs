@@ -51,7 +51,7 @@ fn row_of(t: &Table, v: serde_json::Value) -> Vec<u8> {
 }
 
 fn whys(s: &mut Store, c: Change) -> String {
-    s.apply(&c).expect_err("refused").0
+    s.apply(&c).expect_err("refused")
 }
 
 /// Each constraint refuses by what it is, and a refused write leaves the
@@ -239,8 +239,8 @@ fn a_row_still_named_is_not_removed() {
     let pin = row_of(&s.schema().tables[2].clone(), serde_json::json!({"n": 1, "of": hex(&id(2))}));
     s.put("pin", pin).unwrap();
     let before = s.clone();
-    assert!(s.delete("playlist", &key(pid(1))).unwrap_err().0.contains("named by item.playlist_id"));
-    assert!(s.delete("playlist", &key(pid(2))).unwrap_err().0.contains("named by pin.of"));
+    assert!(s.delete("playlist", &key(pid(1))).unwrap_err().contains("named by item.playlist_id"));
+    assert!(s.delete("playlist", &key(pid(2))).unwrap_err().contains("named by pin.of"));
     assert_eq!(s, before, "refused, nothing moved");
     s.delete("pin", &key(1i64)).unwrap();
     s.delete("playlist", &key(pid(2))).unwrap();

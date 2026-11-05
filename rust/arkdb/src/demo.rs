@@ -74,7 +74,7 @@ pub struct Items {
 /// A playlist, unless the person has one of that name; its id the entry's
 /// first draw.
 #[mutator("demo.create_playlist")]
-pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), Refusal> {
+pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> Result<(), String> {
     let user = ctx.user().to_string();
     if !db.playlist.by(Playlist::USER_ID_NAME).from((user.clone(), input.name.clone())).any() {
         db.playlist.insert(Playlist {
@@ -88,9 +88,9 @@ pub fn create_playlist(ctx: &Ctx, db: &mut Db<Demo>, input: CreatePlaylist) -> R
 
 /// A track at one past the playlist's last place, unless it is on it.
 #[mutator("demo.add_to_playlist")]
-pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), Refusal> {
+pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Result<(), String> {
     if !db.playlist.has(input.playlist_id) {
-        return Err(Refusal::new("playlist_id: no such playlist"));
+        return Err("playlist_id: no such playlist".into());
     }
     if db.item.has((input.playlist_id, input.track_id.clone())) {
         return Ok(());
@@ -104,19 +104,19 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
 }
 
 #[mutator("demo.rename_playlist")]
-pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), Refusal> {
-    let p = db.playlist.get(input.playlist_id).ok_or_else(|| Refusal::new("no such playlist"))?;
+pub fn rename_playlist(_: &Ctx, db: &mut Db<Demo>, input: RenamePlaylist) -> Result<(), String> {
+    let p = db.playlist.get(input.playlist_id).ok_or_else(|| String::from("no such playlist"))?;
     db.playlist.update(Playlist { name: input.name, ..p })
 }
 
 #[mutator("demo.remove_from_playlist")]
-pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), Refusal> {
+pub fn remove_from_playlist(_: &Ctx, db: &mut Db<Demo>, input: RemoveFromPlaylist) -> Result<(), String> {
     db.item.delete((input.playlist_id, input.track_id))
 }
 
 /// A playlist's items, in order.
 #[view("demo.items")]
-pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, Refusal> {
+pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, String> {
     Ok(scan::<Demo, Item>().filter(move |i| i.playlist_id == input.playlist_id).sort(|i| i.pos))
 }
 
@@ -177,7 +177,7 @@ pub struct Rename {
 }
 
 #[mutator("room.on_join")]
-pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), Refusal> {
+pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(), String> {
     db.here.delete(ctx.device())?;
     db.here.insert(Here {
         session: ctx.device().into(),
@@ -187,14 +187,14 @@ pub fn on_join(ctx: &Ctx, db: &mut Db<Room, Volatile>, a: Arrival) -> Result<(),
 }
 
 #[mutator("room.on_leave")]
-pub fn on_leave(ctx: &Ctx, db: &mut Db<Room, Volatile>, _: Arrival) -> Result<(), Refusal> {
+pub fn on_leave(ctx: &Ctx, db: &mut Db<Room, Volatile>, _: Arrival) -> Result<(), String> {
     db.pointer.delete(ctx.device())?;
     db.here.delete(ctx.device())
 }
 
 /// After a restart: who was here is kept, every pointer let go.
 #[mutator("room.on_restore")]
-pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), Refusal> {
+pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), String> {
     for p in db.pointer.scan() {
         db.pointer.remove(&p)?;
     }
@@ -202,7 +202,7 @@ pub fn on_restore(_: &Ctx, db: &mut Db<Room, Volatile>, _: ()) -> Result<(), Ref
 }
 
 #[mutator("room.point")]
-pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(), Refusal> {
+pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(), String> {
     db.pointer.delete(ctx.device())?;
     db.pointer.insert(Pointer {
         session: ctx.device().into(),
@@ -211,13 +211,13 @@ pub fn point(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Point) -> Result<(),
 }
 
 #[mutator("room.rename")]
-pub fn rename(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Rename) -> Result<(), Refusal> {
-    let one = db.here.get(ctx.device()).ok_or_else(|| Refusal::new("not here"))?;
+pub fn rename(ctx: &Ctx, db: &mut Db<Room, Volatile>, input: Rename) -> Result<(), String> {
+    let one = db.here.get(ctx.device()).ok_or_else(|| String::from("not here"))?;
     db.here.update(Here { name: input.name, ..one })
 }
 
 #[view("room.present")]
-pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, Refusal> {
+pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, String> {
     Ok(scan::<Room, Here>().filter(|h| h.since >= 0))
 }
 

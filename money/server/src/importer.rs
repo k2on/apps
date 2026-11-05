@@ -339,7 +339,7 @@ impl Job {
 
     /// A read of what the importer holds.
     fn read<T>(&self, f: impl FnOnce(&ark::db::Db<money_domain::Money>) -> T) -> Option<T> {
-        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, ark::Refusal>(f(db))).ok()
+        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, String>(f(db))).ok()
     }
 
     /// The day of the first transaction any bank brought; none before one

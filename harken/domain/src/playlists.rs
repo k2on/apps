@@ -16,10 +16,10 @@ use crate::types::*;
 
 /// The playlist a function is about, when it is the caller's; refused
 /// otherwise.
-pub fn owned(ctx: &Ctx, db: &Db<Harken>, playlist_id: Id<Playlist>) -> Result<Playlist, Refusal> {
+pub fn owned(ctx: &Ctx, db: &Db<Harken>, playlist_id: Id<Playlist>) -> Result<Playlist, String> {
     match db.playlist.get(playlist_id) {
         Some(p) if p.user_id == ctx.user() => Ok(p),
-        _ => Err(Refusal::new("not your playlist")),
+        _ => Err("not your playlist".into()),
     }
 }
 
@@ -55,7 +55,7 @@ pub fn playlist_name(names: &[String], name: &str) -> String {
 /// `name` up to `name )` are read — the name and its numbered siblings.
 /// The same entry twice is one playlist: its id is the key.
 #[mutator("playlists.create_playlist")]
-pub fn create_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: CreatePlaylist) -> Result<(), Refusal> {
+pub fn create_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: CreatePlaylist) -> Result<(), String> {
     make(ctx, db, ctx.new_id(), ctx.user(), &input.name)
 }
 
@@ -67,9 +67,9 @@ pub const FAVORITES: &str = "Favorites";
 /// another already has. Its id is the person's, so two first sign-ins at
 /// once make one. Only the server's authority runs it.
 #[mutator("playlists.welcome")]
-pub fn welcome(ctx: &Ctx, db: &mut Db<Harken>, input: ark_auth::Welcome) -> Result<(), Refusal> {
+pub fn welcome(ctx: &Ctx, db: &mut Db<Harken>, input: ark_auth::Welcome) -> Result<(), String> {
     if ctx.user() != "authority" {
-        return Err(Refusal::new("only the server welcomes"));
+        return Err("only the server welcomes".into());
     }
     make(ctx, db, favorites_of(&input.user), &input.user, FAVORITES)
 }
@@ -81,7 +81,7 @@ pub fn favorites_of(user: &str) -> Id<Playlist> {
 }
 
 /// Playlist `id`, `user`'s, called `name` or numbered after it.
-fn make(ctx: &Ctx, db: &mut Db<Harken>, id: Id<Playlist>, user: &str, name: &str) -> Result<(), Refusal> {
+fn make(ctx: &Ctx, db: &mut Db<Harken>, id: Id<Playlist>, user: &str, name: &str) -> Result<(), String> {
     if db.playlist.has(id) {
         return Ok(());
     }
@@ -110,7 +110,7 @@ fn last_pos(db: &Db<Harken>, playlist: Id<Playlist>) -> Option<i64> {
 /// once, so adding one already there keeps its place; something no longer
 /// in the library is a no-op.
 #[mutator("playlists.add_to_playlist")]
-pub fn add_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddToPlaylist) -> Result<(), Refusal> {
+pub fn add_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddToPlaylist) -> Result<(), String> {
     let playlist = owned(ctx, db, input.playlist_id)?;
     if db.media.has(input.media_id) && !db.playlist_item.has((playlist.id, input.media_id)) {
         let pos = last_pos(db, playlist.id).unwrap_or(0) + 1;
@@ -128,7 +128,7 @@ pub fn add_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddToPlaylist) -> 
 /// Put everything in the library on a playlist, in library order. One
 /// entry, an intent: replayed, it covers whatever the library held by then.
 #[mutator("playlists.add_all_to_playlist")]
-pub fn add_all_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddAllToPlaylist) -> Result<(), Refusal> {
+pub fn add_all_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddAllToPlaylist) -> Result<(), String> {
     let playlist = owned(ctx, db, input.playlist_id)?;
     for track in db.media.by(Media::POS).whole().all() {
         if !db.playlist_item.has((playlist.id, track.id)) {
@@ -147,14 +147,14 @@ pub fn add_all_to_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: AddAllToPlayli
 
 /// Take something off a playlist. The item stays in the library.
 #[mutator("playlists.remove_from_playlist")]
-pub fn remove_from_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveFromPlaylist) -> Result<(), Refusal> {
+pub fn remove_from_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: RemoveFromPlaylist) -> Result<(), String> {
     let playlist = owned(ctx, db, input.playlist_id)?;
     db.playlist_item.delete((playlist.id, input.media_id))
 }
 
 /// The caller's playlists, in the order they were made.
 #[view("playlists.playlists")]
-pub fn playlists(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Playlist>, Refusal> {
+pub fn playlists(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Playlist>, String> {
     let user = ctx.user().to_string();
     Ok(scan::<Harken, Playlist>().filter(move |p| p.user_id == user).sort(|p| p.pos))
 }
@@ -162,7 +162,7 @@ pub fn playlists(ctx: &Ctx, _: &Db<Harken>, _: ()) -> Result<Plan<Playlist>, Ref
 /// Which of the caller's playlists a track is on: what makes a playlist
 /// sheet a toggle.
 #[view("playlists.playlists_of")]
-pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Plan<Playlist>, Refusal> {
+pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Plan<Playlist>, String> {
     let user = ctx.user().to_string();
     Ok(scan::<Harken, Playlist>()
         .filter_with(move |db, p| p.user_id == user && db.playlist_item.has((p.id, input.media_id)))
@@ -172,7 +172,7 @@ pub fn playlists_of(ctx: &Ctx, _: &Db<Harken>, input: PlaylistsOf) -> Result<Pla
 /// One playlist's contents, in playlist order, as the library's own rows;
 /// an entry whose media has gone is dropped.
 #[view("playlists.playlist")]
-pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, Refusal> {
+pub fn playlist(ctx: &Ctx, db: &Db<Harken>, input: PlaylistInput) -> Result<Plan<LibraryEntry>, String> {
     let playlist = owned(ctx, db, input.playlist_id)?;
     Ok(scan_from::<Harken, PlaylistItem, _, _>(playlist.id)
         .filter_with(|db, i| db.media.has(i.media_id))

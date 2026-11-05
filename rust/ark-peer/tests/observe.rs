@@ -32,7 +32,7 @@ pub struct Ask {
     pub id: String,
 }
 
-fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), Refusal> {
+fn ask(ctx: &Ctx, db: &mut Db<Jobs>, i: Ask) -> Result<(), String> {
     let state = Job::Pending { due_ms: ctx.now };
     db.fetch.insert(Fetch {
         id: i.id,

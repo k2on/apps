@@ -31,7 +31,6 @@ use crate::hash::{EntryHash, StateHash};
 use crate::log::{Ctx, EntryId, Logged, Origin, Span, TraceId};
 use crate::schema::{Column, Table};
 use crate::store::Change;
-use crate::Refusal;
 
 /// A value a domain stores, takes or answers: its bytes in the value
 /// format ([`crate::format`]), read back from them alone.
@@ -39,7 +38,7 @@ pub trait Value: Serialize + DeserializeOwned + Clone + fmt::Debug + PartialEq +
     fn encode(&self) -> Vec<u8> {
         self.to_bytes()
     }
-    fn decode(b: &[u8]) -> Result<Self, Refusal> {
+    fn decode(b: &[u8]) -> Result<Self, String> {
         Self::from_bytes(b)
     }
 }
@@ -403,8 +402,8 @@ pub trait Input: Value + Describe {
     fn check(self) -> Result<Self, Vec<(String, String)>>;
 
     /// [`Input::check`], the first failure its refusal.
-    fn refine(self) -> Result<Self, Refusal> {
-        self.check().map_err(|mut fs| Refusal(fs.remove(0).1))
+    fn refine(self) -> Result<Self, String> {
+        self.check().map_err(|mut fs| fs.remove(0).1)
     }
 }
 

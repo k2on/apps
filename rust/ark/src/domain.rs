@@ -6,11 +6,11 @@
 //! `#[view(..)]` and `#[scope(..)]` only register a function by name
 //! ([`register!`]); what it does is the Rust.
 //!
-//! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>`:
+//! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>`:
 //!   the machine of the space it writes (`P`, durable unless it says
 //!   [`Volatile`](crate::db::Volatile): a live transition, §1.9) runs it
 //!   ([`Run`]), its input read and refined first ([`Input`]);
-//! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>`,
+//! - a **view** is `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, String>`,
 //!   kept up to date ([`crate::plan::View`]) or answered afresh;
 //! - a **scope** is a [`Scope`]: per table, `fn(&Ctx, &R) -> bool`, which
 //!   rows a connection fed by it holds (§1.8).
@@ -34,7 +34,6 @@ use crate::plan::{answer, Maintained, Plan, View};
 use crate::row::{Describe, Input, Row, Type, Value};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Store};
-use crate::Refusal;
 
 /// What a function is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,14 +46,14 @@ pub enum Kind {
 /// What the machine runs of a mutator, opaque to it: run over the store,
 /// its changes left applied, all or none — or its refusal. It reads its
 /// own writes as it makes them.
-pub type Run = Arc<dyn Fn(&mut Store, &Ctx, &[u8]) -> Result<Vec<Change>, Refusal> + Send + Sync>;
+pub type Run = Arc<dyn Fn(&mut Store, &Ctx, &[u8]) -> Result<Vec<Change>, String> + Send + Sync>;
 /// What a scope holds (§1.8): whether the union of who reads holds a row
 /// of the table named, by the row's bytes.
-pub type Holds = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+pub type Holds = Arc<dyn Fn(&Ctx, &str, &[u8]) -> Result<bool, String> + Send + Sync>;
 /// A function's answer over a store, encoded.
-pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, Refusal> + Send + Sync>;
+pub type Ask = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 /// A view of a function, kept.
-pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, Refusal> + Send + Sync>;
+pub type Watch = Arc<dyn Fn(&Store, &Ctx, &[u8]) -> Result<Box<dyn Maintained>, String> + Send + Sync>;
 /// An input's refinements over its encoding: every field that fails, and why.
 pub type Check = Arc<dyn Fn(&[u8]) -> Result<(), Vec<(String, String)>> + Send + Sync>;
 
@@ -114,11 +113,11 @@ pub struct Domain {
 }
 
 fn check_of<I: Input>() -> Check {
-    Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e.0)])?.check().map(|_| ()))
+    Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e)])?.check().map(|_| ()))
 }
 
 /// An input from its encoding (no bytes are `()`'s), refined.
-fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
+fn input_of<I: Input>(b: &[u8]) -> Result<I, String> {
     match b.is_empty() {
         true => I::decode(&crate::format::encode(&())?)?.refine(),
         false => I::decode(b)?.refine(),
@@ -126,13 +125,13 @@ fn input_of<I: Input>(b: &[u8]) -> Result<I, Refusal> {
 }
 
 /// A mutator's function (`P` the space it writes).
-pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), Refusal>;
+pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>;
 
 /// A scope's predicate on a row's encoding.
-type OnRow = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, Refusal> + Send + Sync>;
+type OnRow = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, String> + Send + Sync>;
 
 /// A view's function, as a domain writes it.
-pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, Refusal>;
+pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, String>;
 
 /// Which rows a connection fed by a scope holds (§1.8): per table, a
 /// predicate on its rows; a table the scope does not name holds none.
@@ -207,7 +206,7 @@ impl Domain {
     }
 
     pub fn view<S: Tables, I: Input, T: Value + Describe>(self, name: &str, f: ViewFn<S, I, T>) -> Domain {
-        let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, Refusal> {
+        let make = move |b: &[u8]| -> Result<crate::plan::Make<S, T>, String> {
             let input = input_of::<I>(b)?;
             Ok(Arc::new(move |ctx: &Ctx, db: &Db<S>| f(ctx, db, input.clone())))
         };
@@ -262,43 +261,43 @@ impl Domain {
     }
 
     /// A view's answer over a store, as `ctx` reads it.
-    pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, Refusal> {
-        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
-        let ask = f.ask.as_ref().ok_or_else(|| Refusal(format!("{name} answers nothing")))?;
+    pub fn ask(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
+        let f = self.get(name).ok_or_else(|| format!("no function {name}"))?;
+        let ask = f.ask.as_ref().ok_or_else(|| format!("{name} answers nothing"))?;
         ask(store, ctx, input)
     }
 
-    fn func(&self, name: &str) -> Result<&Function, Refusal> {
-        self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))
+    fn func(&self, name: &str) -> Result<&Function, String> {
+        self.get(name).ok_or_else(|| format!("no function {name}"))
     }
 
     /// A function's input from its JSON text (none is `()`'s), in the value
     /// format: what a host that speaks JSON calls it with.
-    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, Refusal> {
+    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
         crate::json::from_text(&self.func(name)?.input, text)
     }
 
     /// What [`Domain::ask`] answered, as JSON: a view's list.
-    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
+    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
         let t = self.func(name)?.output.clone().unwrap_or(Type::Unit);
         crate::json::to_text(&Type::List(Box::new(t)), bytes)
     }
 
     /// One element of a view of a function, as JSON.
-    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, Refusal> {
+    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
         crate::json::to_text(self.func(name)?.output.as_ref().unwrap_or(&Type::Unit), bytes)
     }
 
     /// A row of a table of the schema, as JSON.
-    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, Refusal> {
-        let (_, t) = self.schema.table(table).ok_or_else(|| Refusal(format!("no table {table}")))?;
+    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
+        let (_, t) = self.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
         crate::json::to_text(&t.row_type(), bytes)
     }
 
     /// A view of a function, kept over `store`.
-    pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, Refusal> {
-        let f = self.get(name).ok_or_else(|| Refusal(format!("no function {name}")))?;
-        let w = f.watch.as_ref().ok_or_else(|| Refusal(format!("{name} is not a view")))?;
+    pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, String> {
+        let f = self.get(name).ok_or_else(|| format!("no function {name}"))?;
+        let w = f.watch.as_ref().ok_or_else(|| format!("{name} is not a view"))?;
         w(store, ctx, input)
     }
 }

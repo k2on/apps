@@ -29,7 +29,6 @@ use crate::domain::Domain;
 use crate::peer::Ctx;
 use crate::plan::{scan, Plan};
 use crate::row::{Describe, Input, Row, Type, Value};
-use crate::Refusal;
 
 /// Where a job stands.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -216,35 +215,33 @@ macro_rules! unrefined {
 }
 unrefined!(Claim, Finish, Cancel);
 
-fn job<S: Tables, R: Effect>(db: &Db<S>, id: R::Id) -> Result<R, Refusal> {
-    db.tab::<R>()
-        .at(&R::key_of(id))
-        .ok_or_else(|| Refusal::new(format!("{}: no such job", R::TABLE)))
+fn job<S: Tables, R: Effect>(db: &Db<S>, id: R::Id) -> Result<R, String> {
+    db.tab::<R>().at(&R::key_of(id)).ok_or_else(|| format!("{}: no such job", R::TABLE))
 }
 
-fn role<R: Effect>(ctx: &Ctx) -> Result<(), Refusal> {
+fn role<R: Effect>(ctx: &Ctx) -> Result<(), String> {
     match R::ROLE {
-        Some(r) if !ctx.has_role(r) => Err(Refusal::new(format!("{}: only the {r} role runs it", R::TABLE))),
+        Some(r) if !ctx.has_role(r) => Err(format!("{}: only the {r} role runs it", R::TABLE)),
         _ => Ok(()),
     }
 }
 
-fn claim<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Claim<R>) -> Result<(), Refusal> {
+fn claim<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Claim<R>) -> Result<(), String> {
     role::<R>(ctx)?;
     let mut r = job::<S, R>(db, i.id)?;
     match r.job().due(R::LEASE_MS) {
         Some(due) if ctx.now >= due => *r.job_mut() = Job::Claimed { by: i.by, at_ms: ctx.now },
-        Some(_) => return Err(Refusal::new(format!("{}: not due", R::TABLE))),
-        None => return Err(Refusal::new(format!("{}: over", R::TABLE))),
+        Some(_) => return Err(format!("{}: not due", R::TABLE)),
+        None => return Err(format!("{}: over", R::TABLE)),
     }
     db.tab::<R>().update(r)
 }
 
-fn finish<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Finish<R>) -> Result<(), Refusal> {
+fn finish<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Finish<R>) -> Result<(), String> {
     role::<R>(ctx)?;
     let mut r = job::<S, R>(db, i.id)?;
     if !matches!(r.job(), Job::Claimed { by, .. } if *by == i.by) {
-        return Err(Refusal::new(format!("{}: not claimed by {}", R::TABLE, i.by)));
+        return Err(format!("{}: not claimed by {}", R::TABLE, i.by));
     }
     *r.job_mut() = match i.outcome {
         Ok(t) => Job::Done(t),
@@ -256,21 +253,21 @@ fn finish<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Finish<R>) -> Resu
     db.tab::<R>().update(r)
 }
 
-fn cancel<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Cancel<R>) -> Result<(), Refusal> {
+fn cancel<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Cancel<R>) -> Result<(), String> {
     let mut r = job::<S, R>(db, i.id)?;
     match r.owner() {
-        Some(o) if o != ctx.user() => return Err(Refusal::new(format!("{}: not yours", R::TABLE))),
+        Some(o) if o != ctx.user() => return Err(format!("{}: not yours", R::TABLE)),
         None => role::<R>(ctx)?,
         Some(_) => {}
     }
     if !matches!(r.job(), Job::Pending { .. }) {
-        return Err(Refusal::new(format!("{}: not pending", R::TABLE)));
+        return Err(format!("{}: not pending", R::TABLE));
     }
     *r.job_mut() = Job::Cancelled;
     db.tab::<R>().update(r)
 }
 
-fn due<S: Tables, R: Effect>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, R>, Refusal> {
+fn due<S: Tables, R: Effect>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, R>, String> {
     let now = ctx.now;
     Ok(scan::<S, R>().filter(move |r| r.job().due(R::LEASE_MS).is_some_and(|d| d <= now)))
 }

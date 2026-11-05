@@ -4,7 +4,6 @@
 //! `tests/schema.json` then), for `arkdb import` under this one.
 
 use ark::dynamic::Tables;
-use ark::Refusal;
 use serde_json::{json, Value as Json};
 
 /// Groups were a table of their own, and a category named its group; now
@@ -12,7 +11,7 @@ use serde_json::{json, Value as Json};
 /// with no parent, its id, name, place, hidden and income as they were and
 /// no target; a category's parent is its group. A transaction is for one
 /// category, as every one was (`split` false).
-pub fn categories_as_a_tree(t: &mut Tables) -> Result<(), Refusal> {
+pub fn categories_as_a_tree(t: &mut Tables) -> Result<(), String> {
     let groups = t.remove("group").unwrap_or_default();
     let mut tree = Vec::with_capacity(groups.len());
     for g in groups {
@@ -34,7 +33,7 @@ pub fn categories_as_a_tree(t: &mut Tables) -> Result<(), Refusal> {
         tree.push(row);
     }
     for mut c in t.remove("category").unwrap_or_default() {
-        let parent = c.remove("group_id").ok_or_else(|| Refusal::new("a category with no group"))?;
+        let parent = c.remove("group_id").ok_or_else(|| String::from("a category with no group"))?;
         c.insert("parent_id".into(), parent);
         c.insert("income".into(), json!(false));
         tree.push(c);

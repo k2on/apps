@@ -58,7 +58,7 @@ pub fn ready_to_assign() -> Id<Category> {
 /// The budget's own group and category, when it has not got them. Every
 /// function that may need them calls this first, so that no device has to
 /// guess whether another already did.
-pub fn ensure_setup(ctx: &Ctx, db: &mut Db<Money>) -> Result<(), Refusal> {
+pub fn ensure_setup(ctx: &Ctx, db: &mut Db<Money>) -> Result<(), String> {
     if db.category.has(ready_to_assign()) {
         return Ok(());
     }
@@ -86,7 +86,7 @@ pub fn ensure_setup(ctx: &Ctx, db: &mut Db<Money>) -> Result<(), Refusal> {
 
 /// A new budget's own group and category; again, nothing.
 #[mutator("budget.setup")]
-pub fn setup(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), Refusal> {
+pub fn setup(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), String> {
     ensure_setup(ctx, db)
 }
 
@@ -162,15 +162,15 @@ pub fn is_income(db: &Db<Money>, id: Id<Category>) -> bool {
 
 /// A category money can be assigned to: an envelope, and not the budget's
 /// own. A kind of one is given money through it.
-pub fn budgetable(db: &Db<Money>, id: Id<Category>) -> Result<Category, Refusal> {
-    let c = db.category.get(id).ok_or_else(|| Refusal::new("no such category"))?;
+pub fn budgetable(db: &Db<Money>, id: Id<Category>) -> Result<Category, String> {
+    let c = db.category.get(id).ok_or_else(|| String::from("no such category"))?;
     if is_income(db, id) {
-        return Err(Refusal::new("money is assigned from Ready to Assign, not to it"));
+        return Err("money is assigned from Ready to Assign, not to it".into());
     }
     match depth(db, id) {
         Some(1) => Ok(c),
-        Some(0) => Err(Refusal::new("money is assigned to a category, not a group")),
-        _ => Err(Refusal::new(format!("money for {} is assigned to the category it is a kind of", c.name))),
+        Some(0) => Err("money is assigned to a category, not a group".into()),
+        _ => Err(format!("money for {} is assigned to the category it is a kind of", c.name)),
     }
 }
 
@@ -202,7 +202,7 @@ pub fn assigned_in(db: &Db<Money>, month: &str, id: Id<Category>) -> i64 {
 }
 
 /// A category's assignment for a month, set: no row for nothing.
-fn set_assigned(ctx: &Ctx, db: &mut Db<Money>, month: &str, id: Id<Category>, amount: i64) -> Result<(), Refusal> {
+fn set_assigned(ctx: &Ctx, db: &mut Db<Money>, month: &str, id: Id<Category>, amount: i64) -> Result<(), String> {
     let key = (month.to_string(), id);
     if amount == 0 {
         return db.assigned.delete(key);
@@ -218,7 +218,7 @@ fn set_assigned(ctx: &Ctx, db: &mut Db<Money>, month: &str, id: Id<Category>, am
 
 /// Give a category an amount for a month, in place of what it had.
 #[mutator("budget.assign")]
-pub fn assign(ctx: &Ctx, db: &mut Db<Money>, input: Assign) -> Result<(), Refusal> {
+pub fn assign(ctx: &Ctx, db: &mut Db<Money>, input: Assign) -> Result<(), String> {
     budgetable(db, input.category_id)?;
     crate::formulas::refuse(db, input.category_id, &input.month)?;
     set_assigned(ctx, db, &input.month, input.category_id, input.amount)
@@ -228,9 +228,9 @@ pub fn assign(ctx: &Ctx, db: &mut Db<Money>, input: Assign) -> Result<(), Refusa
 /// either side is ready to assign. The amount is said once, so it is the
 /// same on both sides however the categories stood when it lands.
 #[mutator("budget.move_money")]
-pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(), Refusal> {
+pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(), String> {
     if input.from == input.to {
-        return Err(Refusal::new("money moves between two places"));
+        return Err("money moves between two places".into());
     }
     if let Some(from) = input.from {
         budgetable(db, from)?;
@@ -253,7 +253,7 @@ pub fn move_money(ctx: &Ctx, db: &mut Db<Money>, input: MoveMoney) -> Result<(),
 /// what they cover of their card spending is money the payment category
 /// then already has.
 #[mutator("budget.auto_assign")]
-pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(), Refusal> {
+pub fn auto_assign(ctx: &Ctx, db: &mut Db<Money>, input: AutoAssign) -> Result<(), String> {
     let last = add_months(&input.month, -1);
     let all = db.category.by(Category::POS).whole().all();
     let (payments, others): (Vec<Category>, Vec<Category>) = all
@@ -574,7 +574,7 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
 
 /// The groups the budget draws, in order; not the budget's own.
 #[view("budget.groups")]
-pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, Refusal> {
+pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, String> {
     Ok(scan::<Money, Category>()
         .filter(|g| g.parent_id.is_none() && !g.income)
         .sort(|g| (g.pos, g.id))
@@ -591,7 +591,7 @@ pub fn groups(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<GroupLine>, Refusal>
 /// transactions and split lines — so a transaction moves the one line it is
 /// for.
 #[view("budget.month")]
-pub fn month(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<BudgetLine>, Refusal> {
+pub fn month(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<BudgetLine>, String> {
     let month = input.month;
     Ok(scan::<Money, Category>()
         .filter_with(|db, c| budgetable(db, c.id).is_ok())
@@ -601,7 +601,7 @@ pub fn month(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<BudgetLine>, R
 
 /// The month as a whole, one row: what is ready to assign, and the totals.
 #[view("budget.summary")]
-pub fn summary(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<Summary>, Refusal> {
+pub fn summary(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<Summary>, String> {
     let month = input.month;
     Ok(scan::<Money, Category>().group(|_| 0i64, move |db, _, cats| summary_of(db, cats.cloned(), &month)))
 }
@@ -610,7 +610,7 @@ pub fn summary(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<Summary>, Re
 /// a card is not spending (what it bought was, from its own category), so
 /// the card payments' group is not here.
 #[view("budget.spending")]
-pub fn spending(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<SpendingLine>, Refusal> {
+pub fn spending(_: &Ctx, _: &Db<Money>, input: Month) -> Result<Plan<SpendingLine>, String> {
     let month = input.month;
     Ok(scan::<Money, Category>()
         .filter_with(|db, c| c.parent_id.is_some() && !is_income(db, c.id))

@@ -76,7 +76,6 @@ use crate::format::Encode;
 use crate::hash::EntryHash;
 use crate::log::{Ctx, Cursor, EntryId, Logged, Rows, Seq};
 use crate::schema::Space;
-use crate::Refusal;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
@@ -218,7 +217,7 @@ impl Frame {
     }
 
     /// A frame from canonical bytes, whole, or why not.
-    pub fn dec(b: &[u8]) -> Result<Frame, Refusal> {
+    pub fn dec(b: &[u8]) -> Result<Frame, String> {
         Frame::from_bytes(b)
     }
 }

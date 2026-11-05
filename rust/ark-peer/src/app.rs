@@ -221,7 +221,7 @@ impl Peer {
     /// its encoding.
     pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
         let b = &self.function(name)?.name;
-        self.domain().ask(&self.log.store, &self.ctx(), b, input).map_err(|r| r.0)
+        self.domain().ask(&self.log.store, &self.ctx(), b, input)
     }
 
     /// An intent of the function `name` (its binding, or the binding's last
@@ -253,19 +253,19 @@ impl Peer {
     /// that speaks JSON authors and asks with.
     pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
         let (d, f) = self.found(name)?;
-        d.input_json(&f.name, text).map_err(|r| r.0)
+        d.input_json(&f.name, text)
     }
 
     /// What [`Peer::ask`] answered, as JSON.
     pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
         let (d, f) = self.found(name)?;
-        d.answer_json(&f.name, bytes).map_err(|r| r.0)
+        d.answer_json(&f.name, bytes)
     }
 
     /// One row of a view of `name`, as JSON.
     pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
         let (d, f) = self.found(name)?;
-        d.element_json(&f.name, bytes).map_err(|r| r.0)
+        d.element_json(&f.name, bytes)
     }
 
     /// A row of a table of either space, as JSON.
@@ -273,7 +273,7 @@ impl Peer {
         let live = self.config.live.as_deref();
         let mut ds = [&*self.config.log].into_iter().chain(live);
         let d = ds.find(|d| d.schema.table(table).is_some()).ok_or_else(|| format!("no table {table}"))?;
-        d.row_json(table, bytes).map_err(|r| r.0)
+        d.row_json(table, bytes)
     }
 
     /// A view's answer over the optimistic state, as this login reads it.
@@ -287,7 +287,7 @@ impl Peer {
     /// function, called as it is.
     pub fn answer<S: ark::db::Tables, I, T: ark::plan::Elem>(&self, f: ark::domain::ViewFn<S, I, T>, input: I) -> Result<Vec<T>, String> {
         let ctx = self.ctx();
-        let plan = ark::db::read::<S, _>(&self.log.store, |db| f(&ctx, db, input)).map_err(|r| r.0)?;
+        let plan = ark::db::read::<S, _>(&self.log.store, |db| f(&ctx, db, input))?;
         Ok(plan.run(&self.log.store, &ctx))
     }
 
@@ -295,7 +295,7 @@ impl Peer {
     /// reads it: its number, or the view's refusal.
     pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
         let (ctx, b) = (self.ctx(), self.function(name)?.name.clone());
-        self.watch(Space::Durable, &b, input, ctx).map_err(|r| r.0)
+        self.watch(Space::Durable, &b, input, ctx)
     }
 
     /// What a view did since it was last asked: its patches, in order.

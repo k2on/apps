@@ -461,7 +461,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
             }
             Err(x) => {
                 refused += 1;
-                said.extend(format!("{} refused: {}\n", s.name, x.0).bytes());
+                said.extend(format!("{} refused: {}\n", s.name, x).bytes());
             }
         }
         said.extend(a.state_hash().0);
@@ -475,7 +475,7 @@ fn run(seed: u64) -> (String, String, usize, usize) {
                     let input = view_input(&a, v);
                     match native.ask(&a, &ctx, v, &input) {
                         Ok(x) => said.extend(x),
-                        Err(e) => said.extend(e.0.bytes()),
+                        Err(e) => said.extend(e.bytes()),
                     }
                 }
             }

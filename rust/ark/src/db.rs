@@ -31,7 +31,7 @@
 //! #[derive(Schema)]
 //! pub struct Room { pub here: Here }
 //! // A durable mutator: `Db<Room>` is `Db<Room, Durable>`.
-//! fn arrive(_: &Ctx, db: &mut Db<Room>, h: Here) -> Result<(), Refusal> {
+//! fn arrive(_: &Ctx, db: &mut Db<Room>, h: Here) -> Result<(), String> {
 //!     db.here.insert(h)
 //! }
 //! ```
@@ -46,7 +46,7 @@
 //! pub struct Here { #[ark(key)] pub who: String }
 //! #[derive(Schema)]
 //! pub struct Room { pub here: Here }
-//! fn arrive(_: &Ctx, db: &mut Db<Room, Volatile>, h: Here) -> Result<(), Refusal> {
+//! fn arrive(_: &Ctx, db: &mut Db<Room, Volatile>, h: Here) -> Result<(), String> {
 //!     db.here.insert(h)
 //! }
 //! ```
@@ -67,7 +67,6 @@ use std::ops::{Bound, Deref, DerefMut};
 use crate::row::{Index, Lead, Row};
 use crate::schema::{Schema, Space};
 use crate::store::{Change, Dir, Read, Scan, Store};
-use crate::Refusal;
 
 /// A read a function made: a table, its key (`None`) or an index, and the
 /// prefix of the key or entries it covered (empty: all of them).
@@ -135,10 +134,10 @@ impl<'t> Txn<'t> {
         }
     }
 
-    fn apply(&mut self, c: Change) -> Result<(), Refusal> {
+    fn apply(&mut self, c: Change) -> Result<(), String> {
         match &mut self.store {
             Backing::Write(s) => s.apply(&c)?,
-            Backing::Read(_) => return Err(Refusal::new("a read is not a write")),
+            Backing::Read(_) => return Err("a read is not a write".into()),
         }
         self.changes.push(c);
         Ok(())
@@ -215,8 +214,8 @@ impl<'t, S: Tables, P: Writes> DerefMut for Db<'t, S, P> {
 /// changes it made, left applied — or, when it refuses, none of them.
 pub fn write_in<S: Tables, P: Writes, T>(
     store: &mut Store,
-    f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, Refusal>,
-) -> Result<(T, Vec<Change>), Refusal> {
+    f: impl for<'t> FnOnce(&mut Db<'t, S, P>) -> Result<T, String>,
+) -> Result<(T, Vec<Change>), String> {
     let cell = RefCell::new(Txn {
         store: Backing::Write(store),
         changes: vec![],
@@ -358,7 +357,7 @@ impl<'t, R: Row, P> Tab<'t, R, P> {
 /// A table's writes: only in a run of its own space.
 impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
     /// A new row; refused when its key is taken.
-    pub fn insert(&mut self, row: R) -> Result<(), Refusal> {
+    pub fn insert(&mut self, row: R) -> Result<(), String> {
         let c = Change::Add {
             table: R::TABLE.into(),
             row: row.encode(),
@@ -368,14 +367,14 @@ impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
 
     /// A row in place of the one with its key; refused when there is none.
     /// The row as it was is no change.
-    pub fn update(&mut self, row: R) -> Result<(), Refusal> {
+    pub fn update(&mut self, row: R) -> Result<(), String> {
         let old = self
             .get_bytes(row.key_bytes())
-            .ok_or_else(|| Refusal(format!("{}: no row has this key", R::TABLE)))?;
+            .ok_or_else(|| format!("{}: no row has this key", R::TABLE))?;
         self.edit(old, row.encode())
     }
 
-    fn edit(&mut self, old: Vec<u8>, new: Vec<u8>) -> Result<(), Refusal> {
+    fn edit(&mut self, old: Vec<u8>, new: Vec<u8>) -> Result<(), String> {
         if old == new {
             return Ok(());
         }
@@ -385,7 +384,7 @@ impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
 
     /// A row, new or in place of the one with its key (as it was: no
     /// change).
-    pub fn put(&mut self, row: R) -> Result<(), Refusal> {
+    pub fn put(&mut self, row: R) -> Result<(), String> {
         let new = row.encode();
         match self.get_bytes(row.key_bytes()) {
             Some(old) => self.edit(old, new),
@@ -397,7 +396,7 @@ impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
     }
 
     /// The row with this key gone; nothing when there is none.
-    pub fn delete<Q, M>(&mut self, key: Q) -> Result<(), Refusal>
+    pub fn delete<Q, M>(&mut self, key: Q) -> Result<(), String>
     where
         R::Key: Whole<Q, M>,
     {
@@ -410,7 +409,7 @@ impl<'t, R: Row<Space = P>, P: Writes> Tab<'t, R, P> {
     }
 
     /// This row gone, by its key.
-    pub fn remove(&mut self, row: &R) -> Result<(), Refusal> {
+    pub fn remove(&mut self, row: &R) -> Result<(), String> {
         match self.get_bytes(row.key_bytes()) {
             Some(row) => self.txn.borrow_mut().apply(Change::Remove { table: R::TABLE.into(), row }),
             None => Ok(()),
