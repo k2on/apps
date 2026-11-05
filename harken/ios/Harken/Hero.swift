@@ -180,7 +180,7 @@ struct Featured: View {
             Button { open(opens) } label: {
                 CoverView(seed: seed, url: url, side: 120, corner: 6).frame(width: 120, height: 120).zoomSource(opens, zoom)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.quiet)
@@ -248,10 +248,11 @@ struct EntryRow<Picture: View>: View {
                 .padding(.vertical, Space.m - 2)
                 Divider()
             }
+            // Inside the press, so a pressed row darkens the page's width.
+            .padding(.horizontal, Space.page)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Space.page)
+        .buttonStyle(.pressRow)
     }
 }
 
@@ -269,10 +270,10 @@ struct MoreRow: View {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
             }
             .padding(.vertical, Space.m)
+            .padding(.horizontal, Space.page)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Space.page)
+        .buttonStyle(.pressRow)
     }
 }
 

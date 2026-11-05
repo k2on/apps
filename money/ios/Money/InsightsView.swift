@@ -12,6 +12,7 @@ import SwiftUI
 
 struct InsightsView: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     @State private var picked: Int64? = nil
 
     var body: some View {
@@ -21,9 +22,9 @@ struct InsightsView: View {
         List {
             Section {
                 Pager(model.monthName,
-                      home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move) { model.showThisMonth() } },
-                      back: { withAnimation(Springs.move) { model.stepMonth(-1) } },
-                      forward: { withAnimation(Springs.move) { model.stepMonth(1) } })
+                      home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move.reduced(still)) { model.showThisMonth() } },
+                      back: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(-1) } },
+                      forward: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(1) } })
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
             }
@@ -139,7 +140,7 @@ struct InsightsView: View {
             }
         }
         .sensoryFeedback(.selection, trigger: sel?.groupId)
-        .animation(Springs.move, value: sel?.groupId)
+        .motion(Springs.move, value: sel?.groupId)
     }
 
     private func bars(_ groups: [GroupMonth]) -> some View {

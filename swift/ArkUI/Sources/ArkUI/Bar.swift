@@ -1,7 +1,7 @@
 // A slider with no handle: a capsule track, filled from its start to where
 // the value is, as the system's player draws its scrubber and its volume.
 // Held, the track thickens a little (`Springs.size`), so it is plain that it
-// is held; a touch puts the value where it touches and a drag follows the
+// is held; its track is stronger under Increase Contrast (`Color.track`); a touch puts the value where it touches and a drag follows the
 // finger. Said to VoiceOver as an adjustable value. Android's twin is
 // arkui's `Bar` (kotlin/arkui).
 import SwiftUI
@@ -22,7 +22,7 @@ public struct Bar: View {
 
     /// A handleless slider over `0...1`. `onValue` is said for every value the
     /// finger passes, and `onDone` when it lets go.
-    public init(value: Double, fill: Color = Color.accent, track: Color = Color.quiet.opacity(0.25), enabled: Bool = true,
+    public init(value: Double, fill: Color = Color.accent, track: Color = Color.track, enabled: Bool = true,
                 onValue: @escaping (Double) -> Void, onDone: @escaping () -> Void = {}) {
         self.value = value
         self.fill = fill
@@ -43,7 +43,7 @@ public struct Bar: View {
             }
             .frame(height: thick)
             .frame(maxHeight: .infinity)
-            .animation(Springs.size, value: holding)
+            .motion(Springs.size, value: holding)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { v in
                 guard enabled else { return }

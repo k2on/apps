@@ -33,6 +33,7 @@ import SwiftUI
 
 struct BudgetView: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     @Environment(\.present) private var present
     @AppStorage("budget.hidden") private var showHidden = false
     @State private var collapsed: Set<Id> = []
@@ -60,9 +61,9 @@ struct BudgetView: View {
             Section {
                 VStack(spacing: Space.l) {
                     Pager(model.monthName,
-                          home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move) { model.showThisMonth() } },
-                          back: { withAnimation(Springs.move) { model.stepMonth(-1) } },
-                          forward: { withAnimation(Springs.move) { model.stepMonth(1) } })
+                          home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move.reduced(still)) { model.showThisMonth() } },
+                          back: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(-1) } },
+                          forward: { withAnimation(Springs.move.reduced(still)) { model.stepMonth(1) } })
                     ready(s.summary)
                 }
                 .listRowInsets(EdgeInsets())
@@ -97,7 +98,7 @@ struct BudgetView: View {
             ToolbarItem(placement: .topBarLeading) { AccountButton() }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if editing {
-                    Button("Done") { withAnimation(Springs.move) { editing = false } }
+                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
                         .fontWeight(.semibold)
                 } else {
                     options
@@ -132,7 +133,7 @@ struct BudgetView: View {
             Section {
                 Button { present(.newCategory(group: nil)) } label: { Label("New Category", systemImage: "plus.circle") }
                 Button { typed = ""; naming = .newGroup } label: { Label("New Group", systemImage: "folder.badge.plus") }
-                Button { withAnimation(Springs.move) { editing = true } } label: { Label("Reorder Categories", systemImage: "arrow.up.arrow.down") }
+                Button { withAnimation(Springs.move.reduced(still)) { editing = true } } label: { Label("Reorder Categories", systemImage: "arrow.up.arrow.down") }
                 Toggle(isOn: $showHidden) { Label("Show Hidden Categories", systemImage: "eye") }
             }
         } label: {
@@ -174,13 +175,13 @@ struct BudgetView: View {
     /// go of once the session agrees, or after a while if it never does.
     private func drop(_ groups: [GroupMonth], _ from: IndexSet, _ to: Int) {
         guard let f = from.first, let r = Arranging.drop(Arranging.rows(groups), from: f, to: to) else { return }
-        withAnimation(Springs.move) { ahead = Arranging.applied(r, to: groups) }
+        withAnimation(Springs.move.reduced(still)) { ahead = Arranging.applied(r, to: groups) }
         model.rearrange(r)
         drops += 1
         let mine = drops
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if drops == mine { withAnimation(Springs.move) { ahead = nil } }
+            if drops == mine { withAnimation(Springs.move.reduced(still)) { ahead = nil } }
         }
     }
 
@@ -198,7 +199,7 @@ struct BudgetView: View {
                     Button { model.autoAssign(.underfunded) } label: {
                         Pill(.caution) { Label("\(s.underfunded) underfunded", systemImage: "target") }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityHint("Assigns every underfunded category its target")
                 }
                 if s.overspent == 0 && s.underfunded == 0 && s.assigned > 0 {
@@ -243,7 +244,7 @@ struct BudgetView: View {
             }
         } header: {
             Button {
-                withAnimation(Springs.move) {
+                withAnimation(Springs.move.reduced(still)) {
                     if open { collapsed.insert(g.id) } else { collapsed.remove(g.id) }
                 }
             } label: {
