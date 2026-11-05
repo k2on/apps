@@ -243,6 +243,18 @@ impl Table {
         Ok((cols, rest))
     }
 
+    /// [`Table::parse`] of a row as some schema of this table wrote it,
+    /// read under this one ([`Table::fit`]): the row as this one has it.
+    pub fn parse_fit(&self, row: &[u8]) -> Result<(Vec<u8>, Parsed), Refusal> {
+        match self.parse(row) {
+            Ok(p) => Ok((row.to_vec(), p)),
+            Err(e) => {
+                let r = self.fit(row).map_err(|_| e)?;
+                Ok((r.clone(), self.parse(&r)?))
+            }
+        }
+    }
+
     /// A row of this table as some schema of it wrote it, read under this
     /// one: as it is; completed with the defaults of the columns appended
     /// since (an older schema's); or without the columns this one lacks (a

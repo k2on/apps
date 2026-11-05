@@ -309,9 +309,8 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     let hello = Frame::Hello {
         space: Space::Volatile,
         cursor: 0,
-        hash: None,
+        hash: Default::default(),
         fill: None,
-        schema: Default::default(),
         most: ark::peer::PART as u64,
     };
     hub.frame(c, device.enc(), 1);

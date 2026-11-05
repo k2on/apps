@@ -5,7 +5,7 @@ mod demo;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Reply, Verdict};
-use ark::hash::{EntryHash, SchemaHash};
+use ark::hash::EntryHash;
 use ark::log::{Ctx, Cursor, EntryId, Logged, Origin, Record, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
@@ -54,20 +54,18 @@ fn every_frame() -> Vec<Frame> {
         Frame::Hello {
             space: Space::Durable,
             cursor: 0,
-            hash: None,
+            hash: EntryHash([0; 32]),
             fill: None,
-            schema: SchemaHash([0; 32]),
             most: ark::peer::PART as u64,
         },
         Frame::Hello {
             space: Space::Volatile,
             cursor: 4,
-            hash: Some(EntryHash([0xFF; 32])),
+            hash: EntryHash([0xFF; 32]),
             fill: Some(Cursor {
                 table: "item".into(),
                 key: vec![0, 1],
             }),
-            schema: SchemaHash([2; 32]),
             most: 16 << 10,
         },
         Frame::push(Space::Volatile, 0, [entry.clone()]),

@@ -28,10 +28,11 @@
 //! keyed by sequence, each row a [`Logged`]'s encoding. It is not the
 //! schema's — not in its hash or the state hash, not in a snapshot sent,
 //! not a table a function names, not in a store's equality — and its
-//! invariant is the chain: a row is added at either end only when it
-//! links onto its neighbour, removed only at either end, never edited
-//! ([`Store::apply_kv`]). The store's rows with the log's are what a peer
-//! makes durable ([`Store::kv_rows`]).
+//! invariant is the sequence: a row is added at the head only when it
+//! follows it, removed only at either end, never edited. On an authority
+//! it is also the chain ([`Log::chained`]); a replica holds the hashes it
+//! was sent. The store's rows with the log's are what a peer makes durable
+//! ([`Store::kv_rows`]).
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -221,9 +222,15 @@ impl<'a> Log<'a> {
         self.index(seq).filter(|i| *i > 0).map(|i| self.0[i].clone())
     }
 
-    /// Whether this log has `hash` at `seq`: one history up to there.
-    pub fn has(&self, seq: Seq, hash: &EntryHash) -> bool {
-        self.index(seq).is_some_and(|i| self.0[i].hash == *hash)
+    /// The chain's hash at `seq`, the row the log stands on or above it.
+    pub fn hash_at(&self, seq: Seq) -> Option<EntryHash> {
+        self.index(seq).map(|i| self.0[i].hash)
+    }
+
+    /// Whether each entry links onto the row before it: the chain, as an
+    /// authority holds it (a replica holds the hashes it was sent).
+    pub fn chained(&self) -> bool {
+        self.0.windows(2).all(|w| w[1].links(&w[0].hash))
     }
 
     /// The entries after `seq`, in order.
@@ -290,13 +297,13 @@ impl Store {
     }
 
     /// The log emptied and these rows, in order, written to it: each after
-    /// the first linking onto the one before it (§1.6).
+    /// the first the sequence after the one before it (§1.6).
     pub fn start_log(&mut self, rows: impl IntoIterator<Item = Vec<u8>>) -> Result<(), Refusal> {
         self.log.clear();
         for row in rows {
             let l = Logged::from_bytes(&row)?;
-            if let Some(b) = self.log.last().filter(|b| l.seq != b.seq + 1 || !l.links(&b.hash)) {
-                return Err(Refusal(format!("{LOG}: entry {} does not link onto {}", l.seq, b.seq)));
+            if let Some(b) = self.log.last().filter(|b| l.seq != b.seq + 1) {
+                return Err(Refusal(format!("{LOG}: entry {} does not follow {}", l.seq, b.seq)));
             }
             self.log.push(l);
         }
@@ -304,11 +311,10 @@ impl Store {
     }
 
     /// A logged entry appended, as a peer opens its log (§1.6): the entry
-    /// must link onto the head, and its facts apply ([`Store::apply_facts`]).
+    /// must follow the head, and its facts apply ([`Store::apply_facts`]).
     pub fn append(&mut self, l: &Logged) -> Result<(), Refusal> {
-        let (n, h) = self.log().head();
-        if l.seq != n + 1 || !l.links(&h) {
-            return Err(Refusal(format!("{LOG}: entry {} does not link onto the head", l.seq)));
+        if l.seq != self.log().head().0 + 1 {
+            return Err(Refusal(format!("{LOG}: entry {} does not follow the head", l.seq)));
         }
         self.apply_facts(&l.facts)?;
         self.log_push(l);
@@ -335,13 +341,6 @@ impl Store {
     /// onto the head, or checked that it links there.
     pub(crate) fn log_push(&mut self, l: &Logged) {
         self.log.push(l.clone());
-    }
-
-    /// The log's entries above `seq` deleted.
-    pub fn log_truncate(&mut self, seq: Seq) {
-        if let Some(i) = self.log().index(seq) {
-            self.log.truncate(i + 1);
-        }
     }
 
     /// The horizon: the log's rows below `seq` deleted, so that it stands
@@ -613,15 +612,7 @@ impl Store {
             // A table this schema lacks is a newer one's: none of its.
             let Ok(t) = s.find(table) else { continue };
             for row in rs {
-                let tab = &schema.tables[t];
-                let (row, p) = match tab.parse(row) {
-                    Ok(p) => (row.clone(), p),
-                    Err(e) => {
-                        let r = tab.fit(row).map_err(|_| e)?;
-                        let p = tab.parse(&r)?;
-                        (r, p)
-                    }
-                };
+                let (row, p) = schema.tables[t].parse_fit(row)?;
                 if s.tables[t].rows.contains_key(&p.key) {
                     return Err(Refusal(format!("{table}: two rows have one key")));
                 }
@@ -675,9 +666,7 @@ impl Store {
     // nothing; a table this schema lacks is none of its.
     fn force_row(&mut self, table: &str, row: &[u8], gone: bool) -> Result<Option<Change>, Refusal> {
         let Ok(t) = self.find(table) else { return Ok(None) };
-        let tab = &self.schema.tables[t];
-        let row = tab.fit(row)?;
-        let p = tab.parse(&row)?;
+        let (row, p) = self.schema.tables[t].parse_fit(row)?;
         let key = p.key.clone();
         self.force(t, &key, (!gone).then_some((row, p)))
     }

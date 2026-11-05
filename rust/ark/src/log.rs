@@ -9,9 +9,11 @@
 //!
 //! **The log is a table.** Its entries are the rows of the store's `_log`
 //! table ([`crate::store::LOG`]), keyed by sequence, each row a
-//! [`Logged`]'s encoding; the chain is that table's invariant, judged at
-//! every write to it ([`Logged::links`]), and its first row is the one the
-//! log stands on (the horizon, or a fill's head), not checked. What a
+//! [`Logged`]'s encoding; each follows the one before, and on an
+//! authority, which makes the chain, links onto it ([`Logged::links`]) —
+//! a replica holds the hashes it was sent, its feed's (§1.8) — and its
+//! first row is the one the log stands on (the horizon, or a fill's head),
+//! not checked. What a
 //! peer makes durable is the store's rows whole, the log's table's among
 //! them, and the rows appended to the log's table since ([`Record`]): an
 //! entry's facts are in its row, so the rows they write to the schema's
@@ -21,7 +23,8 @@
 //! **The chain is the log's identity.** Two peers at one sequence with one
 //! [`EntryHash`] hold one history; a peer that says `(cursor, hash)` is
 //! paged from there by an authority that has that hash at that sequence
-//! and is filled by one that does not.
+//! (keyed by the scope it is fed by, if one) and is filled by one that
+//! does not.
 //!
 //! **Deterministic ids.** An entry's id is `sha256(len(origin) ‖ origin ‖
 //! local)[..16]`, the length and `local` eight bytes big-endian: `origin` is sixteen bytes a replica draws once,
@@ -111,18 +114,6 @@ pub struct Span {
 impl std::fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Span({}/{})", crate::hash::hex(&self.trace.0[..6]), crate::hash::hex(&self.id[..6]))
-    }
-}
-
-impl Span {
-    /// A span of its own inside this one's trace, named by `bytes` (a run
-    /// of a job, a call through the bridge).
-    pub fn child(&self, bytes: impl AsRef<[u8]>) -> Span {
-        Span {
-            trace: self.trace,
-            id: first16(sha256(&[&self.id, bytes.as_ref()])),
-            began: self.began,
-        }
     }
 }
 

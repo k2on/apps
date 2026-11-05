@@ -351,11 +351,7 @@ impl Peer {
             return true;
         }
         let Some(who) = self.who(c) else { return false };
-        let store = match (self.config.feed)(&who) {
-            None => Some(&self.log.store),
-            Some(_) => self.log.served.get(&who.session).map(|s| &s.union),
-        };
-        let may = store.is_some_and(|s| ark::file::held(s, hash));
+        let may = ark::file::held(&self.log.store, hash, self.log.reads(&who));
         if may {
             self.files.let_read.entry(c).or_default().insert(hash.into());
         }

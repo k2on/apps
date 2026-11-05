@@ -4,16 +4,18 @@
 //!
 //! **Routing.** A frame from a connection goes to the machine of its space
 //! with the connection's verified identity. What the machine says goes:
-//! a frame `Send` back to that connection, to all — every connection fed
-//! the log whole, or, for the volatile space, every connection that said
-//! `Hello` in it — or to the connections of a session; and `Send(To::Disk)` to the
+//! a frame `Send` back to that connection, or to all — every connection
+//! fed the log, each through its feed, or, for the volatile space, every
+//! connection that said `Hello` in it; and `Send(To::Disk)` to the
 //! disk **first** — nothing a step says is delivered until its records are
 //! written, and while a write fails every delivery waits with it, in
 //! order, for a write that succeeds ([`Peer::failure`]).
 //!
 //! **Feeds.** Each connection is fed as the app says of its login
-//! (`Config::feed`): whole, or by a scope (§1.8), which the authority asks
-//! of the same function (`Peer::feed`) at the connection's `Hello`.
+//! (`Config::feed`): whole, or by a scope (§1.8) — the authority asks the
+//! same function (`Peer::feed`) at the connection's `Hello`, and every
+//! page sent to all goes to it through its scope (`ark::peer::Peer::fed`),
+//! once it has said `Hello`.
 //!
 //! **Devices** (§1.9). A connection may say what its device is, in a call
 //! before its `Hello`s (`ark::frames::DEVICE`); the server authors the live domain's `on_join` on what it
@@ -38,7 +40,7 @@ use std::collections::BTreeMap;
 use ark::format::Encode;
 use ark::frames::Frame;
 use ark::log::{EntryId, Origin, Record};
-use ark::peer::{Ctx, Input, Journal, Peer as Machine, Role};
+use ark::peer::{Ctx, Input, Journal, Role};
 use ark::schema::Space;
 
 use crate::{machine, Config, Disk, Fold, Peer};
@@ -101,28 +103,6 @@ pub struct Called {
     pub input: Vec<u8>,
 }
 
-impl Hub {
-    pub fn fanout(&mut self, space: Space, b: &[u8]) {
-        let to = self
-            .conns
-            .iter()
-            .filter(|(_, c)| if space == Space::Durable { c.whole } else { c.hello[1] });
-        self.held.extend(to.map(|(i, _)| (*i, b.to_vec())).collect::<Vec<_>>());
-    }
-
-    pub fn to(&mut self, session: &str, b: &[u8]) {
-        let to = self.conns.iter().filter(|(_, c)| c.hello[0] && c.who.session == session);
-        self.held.extend(to.map(|(i, _)| (*i, b.to_vec())).collect::<Vec<_>>());
-    }
-}
-
-fn journal(p: &mut Machine) -> &mut Journal {
-    match &mut p.role {
-        Role::Authority { journal } => journal,
-        Role::Replica => unreachable!("a server's machines are authorities"),
-    }
-}
-
 /// Who a server's authorities author as.
 pub fn authority() -> Ctx {
     Ctx::who("authority", "authority", vec![])
@@ -146,10 +126,10 @@ impl Peer {
         let mine = log.log().entries().into_iter().filter(|l| l.entry.origin == origin);
         log.local = mine.map(|l| l.entry.local).max().unwrap_or(0);
         let (last, refused): (Lasts, Vec<(EntryId, String)>) = kept(&mut local, JOURNAL).unwrap_or_default();
-        let j = journal(&mut log);
+        let j = log.journal();
         last.into_iter().for_each(|(origin, (actor, l))| j.pass(origin, &actor, l));
         j.refused.extend(refused);
-        log.local = log.local.max(journal(&mut log).last_of(&origin));
+        log.local = log.local.max(log.journal().last_of(&origin));
         // The live authority's origin is another at every open, as a
         // device's live machine's is: under the log's, its first `local` and
         // the log's had one id.
@@ -165,7 +145,7 @@ impl Peer {
         p.keep_files(files);
         (p.hub.serving, p.hub.next) = (true, 1);
         if let (Some(live), Some(j)) = (&mut p.live, kept::<Journal>(&mut p.local, LIVE)) {
-            *journal(live) = j;
+            *live.journal() = j;
         }
         if let (Some(Record::Rows(rows)), Some(live)) = (kept(&mut p.local, VOLATILE), &mut p.live) {
             live.step(Input::Open(vec![Record::Rows(rows)]));
@@ -184,7 +164,7 @@ impl Peer {
         let Some(live) = &mut self.live else { return };
         let (seq, hash) = live.log().head();
         let rows = Record::Rows(ark::log::standing(live.store.snapshot_rows(), seq, hash));
-        let j = journal(live).to_bytes();
+        let j = live.journal().to_bytes();
         self.put_beside(VOLATILE, &rows.enc());
         self.put_beside(LIVE, &j);
     }
@@ -343,6 +323,20 @@ impl Peer {
         }
     }
 
+    /// A frame sent to all, for every connection of its space: the
+    /// volatile one's that said `Hello` in it; the log's fed whole, and
+    /// those fed by a scope that said `Hello`, each through it (§1.8).
+    pub(crate) fn fanout(&mut self, space: Space, b: &[u8]) {
+        let m = &self.log.machine;
+        let to = self.hub.conns.iter().filter_map(|(c, conn)| match space {
+            Space::Durable if conn.whole => Some((*c, b.to_vec())),
+            Space::Durable => conn.hello[0].then(|| m.fed(&conn.who, b.to_vec())).flatten().map(|b| (*c, b)),
+            Space::Volatile => conn.hello[1].then(|| (*c, b.to_vec())),
+        });
+        let to: Vec<Deliver> = to.collect();
+        self.hub.held.extend(to);
+    }
+
     /// After a server's step on its log: the journal written when a
     /// refusal or the horizon moved.
     pub(crate) fn kept(&mut self) {
@@ -356,13 +350,13 @@ impl Peer {
     /// What the journal moves with: the refusals, the horizon.
     fn mark(&mut self) -> (usize, i64) {
         let base = self.log.log().base_seq();
-        let j = journal(&mut self.log);
+        let j = self.log.journal();
         (j.refused.len(), base)
     }
 
     /// The journal whole: each origin's last, and what it refused.
     fn keep_journal(&mut self) {
-        let j = journal(&mut self.log);
+        let j = self.log.journal();
         let refused: Vec<(EntryId, String)> = j.refused.iter().map(|(id, why)| (*id, why.clone())).collect();
         let bytes = ark::format::encode(&(&j.last, refused)).expect("a journal serializes");
         self.put_beside(JOURNAL, &bytes);

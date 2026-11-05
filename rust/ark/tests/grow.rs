@@ -110,9 +110,8 @@ fn a_log_reopened_under_a_wider_schema_keeps_head_chain_and_rows() {
         &Frame::Hello {
             space: ark::schema::Space::Durable,
             cursor: 0,
-            hash: None,
+            hash: Default::default(),
             fill: None,
-            schema: Default::default(),
             most: ark::peer::PART as u64,
         },
     )));

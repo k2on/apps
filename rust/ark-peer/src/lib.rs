@@ -452,8 +452,7 @@ impl Peer {
                     None if self.linked => self.frames.push(b.clone()),
                     None => {}
                 },
-                Output::Send(To::All, b) => self.hub.fanout(space, b),
-                Output::Send(To::Session(session), bytes) => self.hub.to(session, bytes),
+                Output::Send(To::All, b) => self.fanout(space, b),
                 Output::Changes(told) => {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {
                         self.woke[space as usize] = Some(by);

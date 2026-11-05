@@ -3,7 +3,7 @@
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash: Option<EntryHash>, fill: Option<{ table, key }>, schema, most }
+//! Hello   { space, cursor, hash, fill: Option<{ table, key }>, most }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
 //! Part    { space, seq, hash, from: Option<{ table, key }>, rows: [(table, [row])], next }
@@ -65,7 +65,7 @@
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
-//! `schema` is the hash of the schema the peer runs. A frame
+//! A frame
 //! is its bytes in the value format, serde's derived form (`crate::format`;
 //! `tests/frames.rs` holds every frame to
 //! reading back as itself).
@@ -73,7 +73,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
-use crate::hash::{EntryHash, SchemaHash};
+use crate::hash::EntryHash;
 use crate::log::{Ctx, Cursor, EntryId, Logged, Rows, Seq};
 use crate::schema::Space;
 use crate::Refusal;
@@ -83,10 +83,9 @@ pub enum Frame {
     Hello {
         space: Space,
         cursor: Seq,
-        hash: Option<EntryHash>,
+        hash: EntryHash,
         /// Where its fill stands, filling: the part from there is asked.
         fill: Option<Cursor>,
-        schema: SchemaHash,
         most: u64,
     },
     Page {

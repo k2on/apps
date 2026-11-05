@@ -4,14 +4,14 @@
 //! ```text
 //! Role  = Replica | Authority { journal }
 //! Input = Frame { from, bytes } | Mutate { fn, input, now, cause } | Open | Connected
-//! Output= Send(Back | All | Session | Disk) | Changes(by span) | Settled(id, Ok | Err(why))
+//! Output= Send(Back | All | Disk) | Changes(by span) | Settled(id, Ok | Err(why))
 //! ```
 //!
 //! Sans-io: [`Peer::step`] takes one input and says what to do — no
 //! socket, clock or file is inside. A hub, a client, a simulator and a
 //! trace player are drivers that feed it and route what it says: a frame
-//! `Send` back where the input came from (a replica's upstream), to every
-//! connection, or to one session's; and a record `Send` to the disk, written
+//! `Send` back where the input came from (a replica's upstream), or to
+//! every connection ([`Peer::fed`]); and a record `Send` to the disk, written
 //! before anything after it is sent: a row appended to the store's `_log` table, which is the log
 //! (§1.6) and holds the entry's facts, or the store's rows whole. `from` on a frame is the identity the driver verified for its
 //! connection; an authority judges and stamps by it.
@@ -81,19 +81,20 @@
 //! nothing runs it again. Only an authority's own: one pushed is not judged.
 //!
 //! **Partial sync is a view** (§1.8). A connection whose identity the
-//! authority's feed ([`Peer::feed`]) gives a scope is served its union: the rows its scope —
-//! a domain's function of its own kind, asked of a table's row — holds,
-//! under the connection's identity. At
-//! its `Hello` the authority takes the union from its store and sends it as
-//! a fill of one part at the head; every entry after is sent to it alone
-//! (`To::Session`) with the facts the scope's filter makes of the entry's
-//! (`scoped`), the union's state hash after them, and a
-//! chain of its own from that fill. `To::All` is for connections fed
-//! whole. The replica is the same machine: it applies facts like every
-//! replica, its own intents previewed over what it holds and confirmed by
-//! the authority's facts, a difference being the authority's answer. A
-//! union must hold the rows its rows reference; a `Hello` from a
-//! connection whose union does not is answered with nothing.
+//! authority's feed ([`Peer::feed`]) gives a scope — a domain's function
+//! of its own kind, asked of a table's row under the connection's identity
+//! — is sent everything through it, and the authority keeps nothing of it:
+//! each entry with the facts the scope's filter makes of its own
+//! (`scoped`), and a fill of the rows the scope holds, its union, in one
+//! part — sent only when the union holds the rows its rows reference. Its
+//! chain is the log's, each hash keyed by who it is and its scope, so a
+//! `Hello` stands in the log only for a replica fed as it is now: one fed
+//! otherwise is filled afresh. What goes to all goes through each
+//! connection's scope ([`Peer::fed`]). The replica is the same machine: it
+//! applies facts like every replica, its own intents previewed over what
+//! it holds and confirmed by the authority's facts, a difference being the
+//! authority's answer. A replica takes the chain it is sent as it is: where
+//! it stands is the authority's to judge, at its `Hello`.
 //!
 //! **Offline is not a mode.** A replica with no server, or one not reached
 //! for a while, is a replica not connected: its intents stay pending, the
@@ -123,7 +124,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-use crate::domain::Domain;
+use crate::domain::{Domain, Holds};
 use crate::format::Encode;
 use crate::frames::{Frame, Verdict};
 use crate::hash::EntryHash;
@@ -182,16 +183,6 @@ impl Journal {
 pub enum Role {
     Replica,
     Authority { journal: Journal },
-}
-
-/// A connection an authority serves by a scope: who it is, the scope, the
-/// union it holds, and the head of the chain it was sent.
-#[derive(Clone, Debug)]
-pub struct Served {
-    pub who: Ctx,
-    pub scope: String,
-    pub union: Store,
-    pub head: Option<(Seq, EntryHash)>,
 }
 
 /// The scope a connection is fed by, by who it is (§1.8): its union, by
@@ -261,14 +252,13 @@ pub enum Output {
 }
 
 /// Where a frame goes: back where the input came from (a replica's
-/// upstream, or the connection a frame came on), to every connection fed
-/// the log whole, or to the connections of one session fed by a scope; and
-/// where a record goes, the disk, before anything after it is sent.
+/// upstream, or the connection a frame came on), or to every connection,
+/// each through its feed ([`Peer::fed`]); and where a record goes, the
+/// disk, before anything after it is sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum To {
     Back,
     All,
-    Session(String),
     Disk,
 }
 
@@ -329,8 +319,6 @@ pub struct Peer {
     pub diverged: Vec<Seq>,
     /// The cursor a `Hello` is outstanding at, and the fill's it asked.
     asked: Option<(Seq, Option<Cursor>)>,
-    /// The connections an authority serves by a scope, by session.
-    pub served: BTreeMap<String, Served>,
     /// When it folds its log (none: never).
     pub fold: Option<Fold>,
     /// A replica filling: where its next part begins (the start: none
@@ -381,7 +369,6 @@ impl Peer {
             local: 0,
             diverged: vec![],
             asked: None,
-            served: BTreeMap::new(),
             fold: None,
             fill: None,
             part: None,
@@ -429,9 +416,9 @@ impl Peer {
     /// A logged entry made part of the log, its facts already applied, and
     /// durable as its row of the log's table alone: the facts are in it —
     /// unless filling, when nothing is durable until the fill is done.
-    /// The entry links onto the head: this peer chained it, or checked it.
+    /// The entry follows the head: this peer chained it, or was sent it so.
     fn logged(&mut self, l: &Logged, o: &mut Out) {
-        debug_assert!(l.seq == self.log().head().0 + 1 && l.links(&self.log().head().1));
+        debug_assert!(l.seq == self.log().head().0 + 1);
         let row = l.to_bytes();
         if self.fill.is_none() {
             o.out.push(Output::Send(To::Disk, Record::logged(&row)));
@@ -443,13 +430,6 @@ impl Peer {
         Store::from_rows(self.store.schema_arc().clone(), self.space, rows)
     }
 
-    /// A store of these rows, and a log standing on `log`.
-    fn on_fit(&self, rows: &[(String, Vec<Vec<u8>>)], log: impl IntoIterator<Item = Vec<u8>>) -> Result<Store, Refusal> {
-        let mut s = self.of_rows(rows)?;
-        s.start_log(log)?;
-        Ok(s)
-    }
-
     /// The id this peer's next intent will have (§1.6).
     pub fn next_id(&self) -> EntryId {
         EntryId::of(self.origin, self.local + 1)
@@ -459,7 +439,8 @@ impl Peer {
         matches!(self.role, Role::Authority { .. })
     }
 
-    fn journal(&mut self) -> &mut Journal {
+    /// An authority's journal.
+    pub fn journal(&mut self) -> &mut Journal {
         match &mut self.role {
             Role::Authority { journal } => journal,
             Role::Replica => panic!("a replica keeps no journal"),
@@ -567,7 +548,12 @@ impl Peer {
                 // Its facts are the entry.
                 entry.input.clear();
             }
-            return self.decide(entry, run, o);
+            // Logged, its `local` drawn; or refused, drawing none.
+            let v = self.judged(entry, run, o).map(|_| ());
+            if v.is_ok() {
+                self.local = local;
+            }
+            return o.out.push(Output::Settled(id, v));
         }
         // Filling, a refusal may be of rows not sent yet: the authority's to
         // judge, the intent pending unrun.
@@ -585,64 +571,35 @@ impl Peer {
         }
     }
 
-    /// An authority's own intent judged by what its run did — a function's
-    /// or its driver's facts — and the verdict told: logged, its `local`
-    /// drawn, or refused, drawing none.
-    fn decide(&mut self, entry: Ctx, run: Result<Vec<Change>, Refusal>, o: &mut Out) {
-        let (id, local) = (entry.id, entry.local);
-        match self.judged(entry, run, o) {
-            Ok(_) => {
-                self.local = self.local.max(local);
-                o.out.push(Output::Settled(id, Ok(())));
-            }
-            Err(why) => o.out.push(Output::Settled(id, Err(why))),
-        }
-    }
-
-    /// An intent judged: logged with its facts and told everyone, or
-    /// refused; the verdict kept.
-    fn judged(&mut self, entry: Ctx, r: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
-        let (id, origin, local, actor) = (entry.id, entry.origin, entry.local, entry.actor.clone());
-        let v = match r {
-            Err(why) => Err(why.0),
-            Ok(facts) => {
-                let (n, prev) = self.log().head();
-                let hash = Logged::chain(&prev, n + 1, &entry, &facts);
-                let l = Logged {
-                    seq: n + 1,
-                    entry,
-                    facts,
-                    hash,
-                };
-                self.logged(&l, o);
-                o.out.push(Output::Send(
-                    To::All,
-                    Frame::Page {
-                        space: self.space,
-                        from: l.seq - 1,
-                        logged: vec![l.clone()],
-                    }
-                    .enc(),
-                ));
-                self.feed_scoped(&l, o);
-                Ok(l.seq)
+    /// An intent judged by what its run did: its origin's `local` passed,
+    /// and it logged with its facts and told everyone, or its refusal kept.
+    fn judged(&mut self, entry: Ctx, run: Result<Vec<Change>, Refusal>, o: &mut Out) -> Result<Seq, String> {
+        let id = entry.id;
+        self.journal().pass(entry.origin, &entry.actor, entry.local);
+        let facts = match run {
+            Ok(facts) => facts,
+            Err(Refusal(why)) => {
+                tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
+                self.journal().refused.insert(id, why.clone());
+                return Err(why);
             }
         };
-        match &v {
-            Ok(seq) => tracing::debug!(target: "ark", entry = %crate::hash::hex(&id.0), seq, "ok"),
-            Err(why) => tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused"),
-        }
-        self.verdict(origin, &actor, local, id, v.as_ref().err());
-        v
-    }
-
-    /// An intent judged: its origin's `local` passed, and a refusal kept.
-    fn verdict(&mut self, origin: Origin, actor: &str, local: i64, id: EntryId, refused: Option<&String>) {
-        let j = self.journal();
-        j.pass(origin, actor, local);
-        if let Some(why) = refused {
-            j.refused.insert(id, why.clone());
-        }
+        let (n, prev) = self.log().head();
+        tracing::debug!(target: "ark", entry = %crate::hash::hex(&id.0), seq = n + 1, "ok");
+        let l = Logged {
+            seq: n + 1,
+            hash: Logged::chain(&prev, n + 1, &entry, &facts),
+            entry,
+            facts,
+        };
+        self.logged(&l, o);
+        let page = Frame::Page {
+            space: self.space,
+            from: n,
+            logged: vec![l],
+        };
+        o.out.push(Output::Send(To::All, page.enc()));
+        Ok(n + 1)
     }
 
     // * Frames
@@ -651,23 +608,17 @@ impl Peer {
         if f.space() != self.space {
             return;
         }
-        let scope = from.as_ref().zip(self.feed.as_ref()).and_then(|(w, feed)| feed(w));
-        let scoped = scope.is_some();
-        // Never past [`PART`].
-        let most = |most: u64| (most as usize).clamp(1, PART);
         match (f, self.is_authority(), from) {
-            (Frame::Hello { cursor, hash, .. }, true, Some(who)) if scoped => self.serve_scoped(who, scope.unwrap(), cursor, hash, o),
             (
                 Frame::Hello {
-                    cursor, hash, fill, most: m, ..
+                    cursor, hash, fill, most, ..
                 },
                 true,
-                from,
+                who,
             ) => {
-                if let Some(w) = from {
-                    self.served.remove(&w.session);
-                }
-                self.serve(cursor, hash, fill, most(m), o)
+                // Never past [`PART`].
+                let feed = who.and_then(|w| self.feed_of(w));
+                self.serve(feed, (cursor, hash), fill, (most as usize).clamp(1, PART), o)
             }
             // A peer's intents, each a push.
             (Frame::Page { from, logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, from, l.entry, o)),
@@ -699,17 +650,17 @@ impl Peer {
         }
     }
 
-    /// A `Hello` at `(cursor, hash)`: the pages from there, each of about
-    /// `most` bytes, when this log has that hash there, and then, when its
-    /// fill stands at `fill`, the part from there; a fill's first part when
-    /// it does not. A part is of about `most` bytes of rows.
-    fn serve(&mut self, cursor: Seq, hash: Option<EntryHash>, fill: Option<Cursor>, most: usize, o: &mut Out) {
-        let has = match hash {
-            Some(h) => self.log().has(cursor, &h),
-            None => cursor == 0 && self.log().base_seq() == 0,
-        };
+    /// A `Hello` at `at` from a connection fed as `feed` says: the pages
+    /// from there, each of about `most` bytes, when this log has that hash
+    /// there, and then, when its fill stands at `fill`, the part from
+    /// there; a fill's first part when it does not — of about `most` bytes
+    /// of rows, or of the union whole.
+    fn serve(&mut self, feed: Option<Feed>, at: (Seq, EntryHash), fill: Option<Cursor>, most: usize, o: &mut Out) {
+        let key = |h: EntryHash| feed.as_ref().map_or(h, |f| f.key(h));
+        let has = self.log().hash_at(at.0).is_some_and(|h| key(h) == at.1);
         if has {
-            let after: Vec<Logged> = self.log().after(cursor).collect();
+            let after: Result<Vec<Logged>, Refusal> = self.log().after(at.0).map(|l| Feed::fed(feed.as_ref(), l)).collect();
+            let Ok(after) = after else { return };
             for page in pages(&after, most, Logged::weight) {
                 o.send(Frame::Page {
                     space: self.space,
@@ -719,8 +670,16 @@ impl Peer {
             }
         }
         if !has || fill.is_some() {
-            let from = fill.filter(|_| has);
-            o.send(part(self.space, &self.store, &self.fill_order(), self.log().head(), from, most));
+            let (seq, hash) = self.log().head();
+            let order = self.fill_order();
+            let part = match &feed {
+                None => part(self.space, &self.store, &order, (seq, hash), fill.filter(|_| has), most),
+                Some(f) => {
+                    let Ok(union) = f.union(self) else { return };
+                    part(self.space, &union, &order, (seq, f.key(hash)), None, usize::MAX)
+                }
+            };
+            o.send(part);
         }
     }
 
@@ -732,86 +691,37 @@ impl Peer {
         first.into_iter().chain(later).collect()
     }
 
-    /// A scope's verdict on a row of `table`, for the connection it serves.
-    fn holder(&self, session: &str) -> impl FnMut(&str, &[u8]) -> Result<bool, Refusal> {
-        let s = &self.served[session];
-        let scope = self.domain.fns.get(&s.scope).and_then(|f| f.scope.clone());
-        let ctx = s.who.clone();
-        move |table, row| scope.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&ctx, table, row)
+    /// How `who` is fed (§1.8): none, the log whole; or by its scope.
+    fn feed_of(&self, who: Ctx) -> Option<Feed> {
+        let scope = self.feed.as_ref()?(&who)?;
+        let holds = self.domain.fns.get(&scope).and_then(|f| f.scope.clone());
+        let key = crate::hash::sha256(&[&crate::format::encode(&(&scope, &who)).expect("who serializes")]);
+        Some(Feed { who, holds, key })
     }
 
-    /// A `Hello` from a connection fed by a scope: nothing when it stands at
-    /// the head of what it was sent, and otherwise its union, afresh, as a
-    /// fill of one part at the head.
-    fn serve_scoped(&mut self, who: Ctx, scope: String, cursor: Seq, hash: Option<EntryHash>, o: &mut Out) {
-        let session = &who.session.clone();
-        if self.served.get(session).is_none_or(|s| (&s.who, &s.scope) != (&who, &scope)) {
-            let union = self.blank();
-            let s = Served {
-                who,
-                scope,
-                union,
-                head: None,
-            };
-            self.served.insert(session.clone(), s);
-        }
-        let head = self.log().head();
-        if self.served[session].head == Some(head) && hash == Some(head.1) && cursor == head.0 {
-            return;
-        }
-        let mut holds = self.holder(session);
-        let mut rows = vec![];
-        for (t, rs) in self.store.snapshot_rows() {
-            let mut held = vec![];
-            for r in rs {
-                match holds(&t, &r) {
-                    Ok(true) => held.push(r),
-                    Ok(false) => {}
-                    Err(_) => return,
-                }
-            }
-            rows.push((t, held));
-        }
-        let Ok(union) = self.of_rows(&rows) else {
-            return;
+    /// What `who` is sent of a frame sent to all ([`To::All`]): as it is,
+    /// when fed whole; a page through its scope; none, when its scope
+    /// cannot say.
+    pub fn fed(&self, who: &Ctx, bytes: Vec<u8>) -> Option<Vec<u8>> {
+        let Some(feed) = self.feed_of(who.clone()) else { return Some(bytes) };
+        let Ok(Frame::Page { space, from, logged }) = Frame::dec(&bytes) else {
+            return None;
         };
-        let bytes = part(self.space, &union, &self.fill_order(), head, None, usize::MAX).enc();
-        let s = self.served.get_mut(session).unwrap();
-        (s.union, s.head) = (union, Some(head));
-        o.out.push(Output::Send(To::Session(session.into()), bytes));
+        let logged: Result<_, _> = logged.into_iter().map(|l| feed.logged(l)).collect();
+        Some(
+            Frame::Page {
+                space,
+                from,
+                logged: logged.ok()?,
+            }
+            .enc(),
+        )
     }
 
-    /// A logged entry to every connection fed by a scope that stands just
-    /// below it: its facts through the scope, the union's state after them,
-    /// chained from what the connection was sent.
-    fn feed_scoped(&mut self, l: &Logged, o: &mut Out) {
-        let sessions: Vec<String> = self.served.keys().cloned().collect();
-        for session in sessions {
-            let Some((at, prev)) = self.served[&session].head.filter(|h| h.0 + 1 == l.seq) else {
-                continue;
-            };
-            let facts = scoped(&l.facts, &mut self.holder(&session));
-            let s = self.served.get_mut(&session).unwrap();
-            let Some(facts) = facts.ok().filter(|fs| s.union.apply_all(fs).is_ok()) else {
-                s.head = None;
-                continue;
-            };
-            let hash = Logged::chain(&prev, l.seq, &l.entry, &facts);
-            s.head = Some((l.seq, hash));
-            let logged = vec![Logged {
-                seq: l.seq,
-                entry: l.entry.clone(),
-                facts,
-                hash,
-            }];
-            let bytes = Frame::Page {
-                space: self.space,
-                from: at,
-                logged,
-            }
-            .enc();
-            o.out.push(Output::Send(To::Session(session), bytes));
-        }
+    /// Which rows `who` reads, by table: every one, fed whole.
+    pub fn reads(&self, who: &Ctx) -> impl Fn(&str, &[u8]) -> bool {
+        let feed = self.feed_of(who.clone());
+        move |table, row| feed.as_ref().is_none_or(|f| f.holds(table, row).unwrap_or(false))
     }
 
     /// A pushed intent judged, its device's pending beginning past `from`,
@@ -837,10 +747,7 @@ impl Peer {
             return Verdict::Refused { why };
         }
         // What its device no longer holds pending is nowhere: passed.
-        let from = from.min(entry.local - 1);
-        if from > j.last_of(&entry.origin) {
-            j.pass(entry.origin, &who.actor, from);
-        }
+        j.pass(entry.origin, &who.actor, from.min(entry.local - 1));
         let last = j.last_of(&entry.origin);
         // Not the next of its origin, or naming no function here: where its
         // origin stands. At or below the last and not refused, it is in the
@@ -871,12 +778,12 @@ impl Peer {
     fn confirm(&mut self, ls: Vec<Logged>, o: &mut Out) {
         let mut undone = false;
         for l in ls {
-            let (n, prev) = self.log().head();
+            let n = self.log().head().0;
             if l.seq <= n {
                 continue;
             }
-            if l.seq > n + 1 || !l.links(&prev) {
-                // A gap, or another history: say where this peer stands.
+            if l.seq > n + 1 {
+                // A gap: say where this peer stands.
                 if undone {
                     self.redo_pending(o);
                 }
@@ -926,9 +833,8 @@ impl Peer {
             o.send(Frame::Hello {
                 space: self.space,
                 cursor: n,
-                hash: Some(h),
+                hash: h,
                 fill: self.fill.clone(),
-                schema: self.store.schema_hash(),
                 most: self.most(),
             });
         }
@@ -946,12 +852,17 @@ impl Peer {
         tracing::warn!(target: "ark", seq, "diverged");
         self.diverged.push(seq);
         self.undo_pending(o);
-        let fresh = self.standing(seq, EntryHash::default());
-        o.tell(None, self.store.diff(&fresh));
-        self.store = fresh;
+        self.stand((seq, EntryHash::default()), o);
         self.redo_pending(o);
-        (self.fill, self.asked) = (Some(Cursor::default()), None);
+        self.fill = Some(Cursor::default());
         self.ask(o);
+    }
+
+    /// The store emptied, its log standing on `at`, told as what moved.
+    fn stand(&mut self, at: (Seq, EntryHash), o: &mut Out) {
+        let fresh = self.standing(at.0, at.1);
+        o.tell(None, self.store.diff(&fresh));
+        (self.store, self.asked) = (fresh, None);
     }
 
     /// A part of a fill, taken at `(seq, hash)`. The first (`from` none)
@@ -982,9 +893,7 @@ impl Peer {
         }
         self.undo_pending(o);
         if first {
-            let fresh = self.standing(at.0, at.1);
-            o.tell(None, self.store.diff(&fresh));
-            (self.store, self.asked) = (fresh, None);
+            self.stand(at, o);
         }
         for (table, rows) in &rows {
             match self.store.put_rows(table, rows) {
@@ -1082,15 +991,17 @@ impl Peer {
         let log = log.into_iter().flat_map(|(_, rs)| rs);
         let opened = match filling {
             true => Ok(self.blank()),
-            false => self.on_fit(&rows, log),
+            false => self.of_rows(&rows).and_then(|mut s| s.start_log(log).map(|_| s)),
         };
-        if let Ok(mut store) = opened {
+        // An authority's log is its chain, checked as it is read (§1.6).
+        let chain = self.is_authority();
+        if let Some(mut store) = opened.ok().filter(|s| !chain || s.log().chained()) {
             // Every entry read once: those the rows hold, from their rows,
             // and those appended, as their records were read.
             let mut entries = store.log().entries();
             let (n, held) = (logged.len(), entries.len());
             for l in logged.into_iter().filter(|_| !filling) {
-                if store.append(&l).is_err() {
+                if chain && !l.links(&store.log().head().1) || store.append(&l).is_err() {
                     break;
                 }
                 entries.push(l);
@@ -1166,6 +1077,53 @@ fn part(space: Space, store: &Store, order: &[String], (seq, hash): (Seq, EntryH
         from,
         rows,
         next,
+    }
+}
+
+/// How a connection fed by a scope is fed (§1.8): who it is, its scope's
+/// verdict on a row (none: its domain has no such scope, and nothing is
+/// sent), and the key its chain is the log's under.
+struct Feed {
+    who: Ctx,
+    holds: Option<Holds>,
+    key: [u8; 32],
+}
+
+impl Feed {
+    fn holds(&self, table: &str, row: &[u8]) -> Result<bool, Refusal> {
+        self.holds.as_ref().ok_or_else(|| Refusal::new("no such scope"))?(&self.who, table, row)
+    }
+
+    /// The log's hash at an entry, as this connection's chain has it.
+    fn key(&self, h: EntryHash) -> EntryHash {
+        EntryHash(crate::hash::sha256(&[&self.key, &h.0]))
+    }
+
+    /// A logged entry as this connection is sent it: its facts through the
+    /// scope, its hash keyed.
+    fn logged(&self, l: Logged) -> Result<Logged, Refusal> {
+        let facts = scoped(&l.facts, |t, r| self.holds(t, r))?;
+        let hash = self.key(l.hash);
+        Ok(Logged { facts, hash, ..l })
+    }
+
+    /// `l` as a connection fed as `feed` says is sent it.
+    fn fed(feed: Option<&Feed>, l: Logged) -> Result<Logged, Refusal> {
+        feed.map_or(Ok(l.clone()), |f| f.logged(l))
+    }
+
+    /// The rows of `p`'s store the scope holds, as a store: refused unless
+    /// it holds every row they reference.
+    fn union(&self, p: &Peer) -> Result<Store, Refusal> {
+        let mut rows = vec![];
+        for (t, rs) in p.store.snapshot_rows() {
+            let held: Result<_, Refusal> = rs
+                .into_iter()
+                .filter_map(|r| self.holds(&t, &r).map(|h| h.then_some(r)).transpose())
+                .collect();
+            rows.push((t, held?));
+        }
+        p.of_rows(&rows)
     }
 }
 

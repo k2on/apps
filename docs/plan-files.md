@@ -95,7 +95,7 @@ wanted it, and they want it again.
 
 **Who may read.** The server answers a `Want` when the connection may read
 a row that names the hash: for a connection fed the log whole, any row of
-the store; for one fed by a scope, a row of its union (`Served.union`).
+the store; for one fed by a scope, a row its scope holds (`Peer::reads`).
 Rows are searched by their type: each table's columns that are, or hold,
 a `FileRef`. Anyone signed in may upload; an upload is checked against its
 hash, so nobody can put other bytes under a file's name.

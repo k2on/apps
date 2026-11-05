@@ -279,15 +279,13 @@ impl Fleet {
             from: Some(self.clients[i].me.clone()),
             bytes: b,
         });
-        let whole: Vec<bool> = self.clients.iter().map(|c| whole(&self.server, c)).collect();
         for x in o {
             match x {
                 Output::Send(To::Back, b) => self.down[i].push(b),
-                Output::Send(To::All, b) => (0..3).filter(|j| self.linked[*j] && whole[*j]).for_each(|j| self.down[j].push(b.clone())),
-                Output::Send(To::Session(session), bytes) => {
-                    let j = self.clients.iter().position(|c| c.me.session == session).unwrap();
-                    if self.linked[j] {
-                        self.down[j].push(bytes);
+                Output::Send(To::All, b) => {
+                    for j in (0..3).filter(|j| self.linked[*j]) {
+                        // Each through its feed.
+                        self.down[j].extend(self.server.fed(&self.clients[j].me, b.clone()));
                     }
                 }
                 _ => {}

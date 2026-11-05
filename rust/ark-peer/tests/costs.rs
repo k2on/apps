@@ -161,9 +161,8 @@ fn fanout(c: usize) -> usize {
     let hello = Frame::Hello {
         space: Space::Durable,
         cursor: head,
-        hash: Some(hash),
+        hash,
         fill: None,
-        schema: Default::default(),
         most: ark::peer::PART as u64,
     }
     .enc();

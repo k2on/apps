@@ -269,9 +269,8 @@ fn compaction_and_the_horizon() {
     let hello = |cursor, hash| Frame::Hello {
         space: ark::schema::Space::Durable,
         cursor,
-        hash: Some(hash),
+        hash,
         fill: None,
-        schema: Default::default(),
         most: ark::peer::PART as u64,
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
