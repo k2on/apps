@@ -10,7 +10,7 @@
 //! the row, whose key is its idempotency key, and the peer, to author
 //! what it found; its answer is the `<table>.finish`. Nothing runs during a replay or an open: rows only
 //! move what is kept, and a handler runs when its driver pumps the peer
-//! ([`Peer::jobs`]), never on a peer that did not register it. A claim
+//! ([`Peer::pump`]), never on a peer that did not register it. A claim
 //! from before a restart is another's: its row is due again only when its
 //! lease runs out. The handler is a plain function on the driver's
 //! thread: ark-peer has no executor (it is pumped, natively and in a
@@ -154,7 +154,7 @@ impl Peer {
     }
 
     /// The handlers' turn: what is due claimed, what is confirmed run.
-    pub fn jobs(&mut self, now: i64) {
+    pub(crate) fn jobs(&mut self, now: i64) {
         let mut runners = std::mem::take(&mut self.runners);
         self.missed = Some(vec![]);
         for r in &mut runners {

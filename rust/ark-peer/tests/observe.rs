@@ -147,7 +147,7 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     net.d(1).end();
     let a = net.logged("fetch.ask").pop().unwrap();
     for _ in 0..3 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     let claim = net.logged("fetch.claim").pop().expect("claimed");
@@ -197,7 +197,7 @@ fn a_jobs_own_words_are_collected_in_its_trace() {
     asks(&mut net, 1, "words");
     net.d(1).end();
     for _ in 0..3 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     let me = net.devices[0].0.label();

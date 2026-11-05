@@ -146,12 +146,12 @@ fn a_claim_and_a_cancel_race_in_the_servers_order() {
         let n = Arc::new(AtomicUsize::new(0));
         net.d(0).handle::<Fetch>(counting(&n));
         asked(&mut net, 1);
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.d(1).mutate("fetch.cancel", &Cancel::<Fetch> { id: "a".into() }).unwrap();
         let order = if claim_first { [0, 1] } else { [1, 0] };
         order.into_iter().for_each(|i| net.carry_from(i));
         net.carry();
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
         match claim_first {
             true => assert_eq!(net.state(), Job::Done("body of u".into())),
@@ -173,7 +173,7 @@ fn a_handler_runs_once_across_a_restart() {
     net.d(0)
         .handle::<Fetch>(|_: &mut Peer, _: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
     asked(&mut net, 0);
-    net.d(0).jobs(now_ms());
+    net.d(0).pump();
     net.carry();
     assert!(matches!(net.state(), Job::Claimed { .. }), "claimed, confirmed");
     let (d, _) = net.devices.remove(0);
@@ -181,13 +181,13 @@ fn a_handler_runs_once_across_a_restart() {
     d.handle::<Fetch>(counting(&n));
     let i = net.join(d);
     for _ in 0..2 {
-        net.d(i).jobs(now_ms());
+        net.d(i).pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 0, "the lease holds");
     std::thread::sleep(std::time::Duration::from_millis(160));
     for _ in 0..3 {
-        net.d(i).jobs(now_ms());
+        net.d(i).pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 1, "run once the lease ran out");
@@ -207,14 +207,13 @@ fn a_handler_runs_only_where_it_is_registered() {
     asked(&mut net, 0);
     for _ in 0..3 {
         net.d(1).pump();
-        net.d(1).jobs(now_ms() + 10_000);
-        net.hub.jobs(now_ms() + 10_000);
+        net.hub.pump();
         net.carry();
     }
     assert_eq!(n.load(Ordering::Relaxed), 0);
     assert!(matches!(net.state(), Job::Pending { .. }));
     for _ in 0..2 {
-        net.d(0).jobs(now_ms());
+        net.d(0).pump();
         net.carry();
     }
     assert_eq!((n.load(Ordering::Relaxed), net.state()), (1, Job::Done("body of u".into())));
