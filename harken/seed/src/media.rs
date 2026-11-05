@@ -37,17 +37,25 @@ pub struct Written {
 
 /// Every album of `catalogue` under `root`, which is made if it is not
 /// there. Each album is reported to `done` as it is finished.
-pub fn write(catalogue: &Catalogue, root: &Path, mut done: impl FnMut(&Written)) -> io::Result<()> {
+///
+/// `covers`, when given, is a folder of the catalogue's covers fetched
+/// already (the flake's `harken-covers`, each pinned by its hash in
+/// covers.json and so fetched once and the cache's after), each named
+/// [`key`] of its address and the kind it is: an album's is taken from
+/// there, and fetched only when it is not.
+pub fn write(catalogue: &Catalogue, root: &Path, covers: Option<&Path>, mut done: impl FnMut(&Written)) -> io::Result<()> {
+    // Named as Wikimedia's policy asks a program to be, with where it is
+    // from: a bare name is throttled, and its covers were all gradients.
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(30))
         .try_proxy_from_env(true)
-        .user_agent(concat!("harken-seed/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("harken-seed/", env!("CARGO_PKG_VERSION"), " (https://github.com/k2on/apps)"))
         .build();
     for a in &catalogue.albums {
         let performer = a.tracks.iter().map(|t| t.performer.as_str()).find(|p| !p.is_empty()).unwrap_or("Various");
         let at = root.join("music").join(safe(performer)).join(safe(&a.name));
         std::fs::create_dir_all(&at)?;
-        let fetched = cover(&agent, a, &at)?;
+        let fetched = cover(&agent, covers, a, &at)?;
         for t in &a.tracks {
             let seconds = (t.ms / 1000).clamp(1, 3600) as u64;
             let artist = if t.performer.is_empty() { &t.composer } else { &t.performer };
@@ -87,13 +95,30 @@ fn safe(name: &str) -> String {
 /// The album's cover in `at`: the catalogue's, named for what its bytes are
 /// (`cover.jpg`, `cover.png`, `cover.webp`), or a gradient of its own as
 /// `cover.png`. Whether it was the catalogue's.
-fn cover(agent: &ureq::Agent, a: &Album, at: &Path) -> io::Result<bool> {
-    if let Some((bytes, ext)) = fetch(agent, &a.art) {
+fn cover(agent: &ureq::Agent, covers: Option<&Path>, a: &Album, at: &Path) -> io::Result<bool> {
+    if let Some((bytes, ext)) = covers.and_then(|d| pinned(d, &a.art)).or_else(|| fetch(agent, &a.art)) {
         std::fs::write(at.join(format!("cover.{ext}")), bytes)?;
         return Ok(true);
     }
     std::fs::write(at.join("cover.png"), gradient(&a.name))?;
     Ok(false)
+}
+
+/// What a cover's address is called in a folder of them: the first sixteen
+/// hex digits of its SHA-256, as the flake's `harken-covers` names it.
+pub fn key(url: &str) -> String {
+    Sha256::digest(url.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The cover at `url` from a folder of them fetched already, if it is there.
+fn pinned(dir: &Path, url: &str) -> Option<(Vec<u8>, &'static str)> {
+    if url.is_empty() {
+        return None;
+    }
+    let key = key(url);
+    ["jpg", "png", "webp"]
+        .into_iter()
+        .find_map(|ext| std::fs::read(dir.join(format!("{key}.{ext}"))).ok().map(|b| (b, ext)))
 }
 
 /// A picture at `url`, and the extension its bytes are, when it can be had
@@ -114,12 +139,25 @@ fn fetch(agent: &ureq::Agent, url: &str) -> Option<(Vec<u8>, &'static str)> {
     Some((bytes, ext))
 }
 
-/// A PNG from one corner to the other between two colours drawn from
+/// harken's derived squares against white, as `art.gold` in arkui/theme.toml.
+const GOLD: [([u8; 3], [u8; 3]); 6] = [
+    ([0xE8, 0xD1, 0x9A], [0xC9, 0xA8, 0x5F]),
+    ([0xEF, 0xDC, 0xAE], [0xD2, 0xB3, 0x70]),
+    ([0xE2, 0xD2, 0xAC], [0xBF, 0xA6, 0x71]),
+    ([0xF0, 0xDF, 0xA8], [0xCB, 0xAA, 0x5C]),
+    ([0xE6, 0xD0, 0xA0], [0xC3, 0xA0, 0x5A]),
+    ([0xF3, 0xE6, 0xBE], [0xD6, 0xB8, 0x77]),
+];
+
+/// A PNG from one corner to the other between two of harken's colours, picked by
 /// `seed`'s hash, so an album without its cover still has one of its own,
 /// the same every time.
 fn gradient(seed: &str) -> Vec<u8> {
+    // One of harken's own squares (arkui/theme.toml, `art.gold`, light),
+    // picked by the hash: a cover that could not be had reads as the app's,
+    // not as whatever two colours the hash happened to name.
     let h = Sha256::digest(seed.as_bytes());
-    let (from, to) = (&h[0..3], &h[3..6]);
+    let (from, to) = GOLD[h[0] as usize % GOLD.len()];
     let span = 2 * (SIDE - 1);
     let mut pixels = Vec::with_capacity((SIDE * SIDE * 3) as usize);
     for y in 0..SIDE {
