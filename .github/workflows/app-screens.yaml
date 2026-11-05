@@ -41,10 +41,14 @@
 name: app-screens
 
 on:
-  # Android once build has finished (its APKs are that run's artifacts);
-  # the iPhone as soon as ios has started, since it builds the commit
-  # itself and needs nothing of ios's run: both events of both, and
-  # `which` says which one this is for.
+  # The iPhone as soon as ios has started, since it builds the commit
+  # itself and needs nothing of ios's run. A pull request's Android as
+  # soon as build has started too: its emulator boots and its server
+  # starts while the APK builds, and each app is taken once its APK is
+  # uploaded (await-apk.sh), not once the run (its tests) has ended. Main's
+  # Android once build has ended and deployed, so that what is published
+  # is what F-Droid offers. Both events of both; `which` says which one
+  # this run is for.
   workflow_run:
     workflows: [build, ios]
     types: [requested, completed]
@@ -138,19 +142,25 @@ jobs:
             mode=${pr:+pr}
           fi
           made=
-          if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ]; then
+          if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ]; then
             made=$(gh api "repos/$repo/actions/runs/$RUN/artifacts" --paginate --jq '.artifacts[] | select(.expired | not) | .name')
           fi
           # Every app with shots, and of those what this run built: an APK
           # in build's run; every iPhone app after ios's, as nix has it.
           android="" ios=""
           for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
-            if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ -f "$a/screens/shots.json" ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
+            [ -f "$a/screens/shots.json" ] || continue
+            # Main's: what the ended run built. A PR's: every app, from the
+            # run's start, each waiting for its APK (or for none).
+            if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
+            if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" = pr ]; then android="$android $a"; fi
           done
           for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do
             if [ "$WORKFLOW" = ios ] && [ "$ACTION" = requested ] && [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi
           done
           android=${android# } ios=${ios# }
+          # Nothing for this event (ios's end, main's build starting): nothing to do, publish included.
+          [ -n "$android$ios" ] || mode=
           { echo "mode=$mode"; echo "pr=$pr"; echo "android=$android"; echo "ios=$ios"; lists; } | tee -a "$GITHUB_OUTPUT"
 
   # A job per app, at once: each its own emulator.
@@ -163,9 +173,18 @@ jobs:
         app: ${{ fromJSON(needs.which.outputs.android-json) }}
     name: android (${{ matrix.app }})
     runs-on: ubuntu-latest
+    # One of each app's at a time on a branch: a newer commit's (or the
+    # same commit's again, from another event: on main both a script
+    # change and build) takes over from the one going.
+    concurrency:
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      cancel-in-progress: true
     timeout-minutes: 90
     env:
       APPS: ${{ matrix.app }}
+      # A run still going: its APK awaited (await-apk.sh), not downloaded.
+      EARLY: ${{ github.event.action == 'requested' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -175,14 +194,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # In the background: nothing needs the room until the emulator does.
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          df -h /
+        run: nohup sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost > /dev/null 2>&1 &
 
       # The APKs the run built — what F-Droid offers, or the PR's — each in
       # apk-<app>/; with no run, each as the F-Droid repository offers it.
-      - if: env.RUN != ''
+      - if: env.RUN != '' && env.EARLY != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: apk-*
@@ -238,7 +256,9 @@ jobs:
           arch: x86_64
           profile: pixel_7
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash .github/screens/meanwhile.sh wait servers && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          # The emulator boots first, under the APK's build; then the APK,
+          # if the run is still making it (none: apps-android.sh skips it).
+          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
       - name: The servers' logs
         if: always()
@@ -272,6 +292,12 @@ jobs:
         app: ${{ fromJSON(needs.which.outputs.ios-json) }}
     name: ios (${{ matrix.app }})
     runs-on: macos-15
+    # As Android's: one of each app's at a time on a branch. On main a push
+    # that moves the scripts and starts ios would otherwise take the
+    # iPhone's shots twice, a macOS runner each.
+    concurrency:
+      group: app-screens-ios-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}
+      cancel-in-progress: true
     timeout-minutes: 120
     # It builds the commit's code, one step of it outside nix's sandbox
     # (flake.nix, `iosSimulator`): it can read and nothing more, and only

@@ -45,9 +45,12 @@
 # the flake's list.)
 name: ios
 
+# Main's pushes (TestFlight) and pull requests: not every branch's push,
+# each holding a macOS runner per app for an archive nothing uploads.
 on:
   push:
-    paths:
+    branches: [main]
+    paths: &paths
       - "harken/ios/**"
       - "harken/ffi/**"
       - "harken/domain/**"
@@ -76,6 +79,8 @@ on:
       - "flake.nix"
       - "flake.lock"
       - "nix/**"
+  pull_request:
+    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -108,11 +113,16 @@ jobs:
       - id: plan
         run: |
           nix eval --json .#publish.x86_64-linux.ios > ios.json
+          # A pull request's: only the apps with tests to run. Each app's
+          # Swift is built for the simulator by the PR's screenshots
+          # (app-screens.yaml) anyway, and off main an archive goes nowhere.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then jq -c 'map(select(.test))' ios.json > t && mv t ios.json; fi
           jq . ios.json
           echo "ios=$(jq -c . ios.json)" >> "$GITHUB_OUTPUT"
 
   app:
     needs: plan
+    if: needs.plan.outputs.ios != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -141,7 +151,11 @@ jobs:
           SEEN: ${{ steps.seen.outputs.cache-hit }}
           TESTFLIGHT: ${{ matrix.app.testflight }}
         run: |
-          if [ "$GITHUB_REF" != refs/heads/main ]; then send="export"
+          # A pull request's is built and tested, and signed by nothing: a
+          # fork's has no keys, and what an export would prove the archive
+          # already has.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then send=
+          elif [ "$GITHUB_REF" != refs/heads/main ]; then send="export"
           elif [ "$TESTFLIGHT" = true ] && [ "$SEEN" != true ]; then send="upload"
           else send=; fi
           echo "SEND=$send" | tee -a "$GITHUB_ENV"

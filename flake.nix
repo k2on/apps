@@ -607,7 +607,10 @@
                   export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                   mkdir -p "$ANDROID_USER_HOME"
                 '';
-                gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+                # The APK alone: its tests are a build of their own (`tests`,
+                # below), so the APK is there for its screenshots while they
+                # run, and the F-Droid deploy waits for both.
+                gradleBuildTask = ":app:assembleRelease";
                 # The recording runs the same tasks, and the screenshots' and a
                 # laptop's debug build, so that one recording serves all three.
                 gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
@@ -615,6 +618,17 @@
                 installPhase = ''
                   mkdir -p $out
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
+                '';
+              });
+              # The app's unit tests, as a build: what the APK used to run
+              # before it was made. Their results are its output.
+              tests = apk.overrideAttrs (old: {
+                pname = "${name}-android-tests";
+                gradleBuildTask = ":app:testDebugUnitTest";
+                versionFlags = [ ];
+                installPhase = ''
+                  mkdir -p $out
+                  if [ -d app/build/test-results ]; then cp -r app/build/test-results $out/; fi
                 '';
               });
               screens = apk.overrideAttrs (old: {
@@ -632,7 +646,7 @@
                 '';
               });
             in
-            { inherit apk screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk tests screens; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -647,6 +661,7 @@
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
           harken-apk = harken.apk;
+          harken-android-tests = harken.tests;
           harken-android-screens = harken.screens;
 
           # money's phone (money/android/README.md): Compose over
@@ -663,6 +678,7 @@
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
           money-apk = money.apk;
+          money-android-tests = money.tests;
           money-android-screens = money.screens;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
@@ -1079,13 +1095,14 @@
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
-            inherit harken-apk harken-android-screens;
+            inherit harken-apk harken-android-tests harken-android-screens;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
+            revelation-android-tests = revelation.tests;
             revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
             # money's phone, over money-android-lib (money/android/README.md).
-            inherit money-apk money-android-screens;
+            inherit money-apk money-android-tests money-android-screens;
             money-apk-deps = money.deps;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
@@ -1305,6 +1322,7 @@
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
+                tests = "${name}-android-tests";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
               };
