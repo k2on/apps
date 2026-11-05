@@ -21,7 +21,7 @@ struct AddToPlaylistSheet: View {
         NavigationStack {
             List {
                 Button { present(.newPlaylist(then: track)) } label: { Label("New Playlist", systemImage: "plus") }
-                    .foregroundStyle(Color.gold)
+                    .foregroundStyle(Color.accentText)
                 ForEach(model.playlists) { p in
                     let ticked = on?.contains(p.id) == true
                     Button {
@@ -32,7 +32,7 @@ struct AddToPlaylistSheet: View {
                     } label: {
                         HStack {
                             Label(p.name, systemImage: ticked ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(ticked ? Color.gold : .primary)
+                                .foregroundStyle(ticked ? Color.accentText : .ink)
                             Spacer()
                         }
                     }
@@ -63,7 +63,7 @@ struct NewPlaylist: View {
                     TextField("Name", text: $name).focused($focused).submitLabel(.done).onSubmit(make)
                 } footer: {
                     if let p = problem, !name.isEmpty {
-                        Text(p.prefix(1).uppercased() + p.dropFirst()).foregroundStyle(.red)
+                        Text(p.prefix(1).uppercased() + p.dropFirst()).foregroundStyle(.error)
                     } else {
                         Text("A name you already use gets a number after it.")
                     }
@@ -107,7 +107,7 @@ struct DevicesSheet: View {
         NavigationStack {
             List {
                 if rows.isEmpty {
-                    Text("Nothing else is listening. A device signed in as you appears here once it is open.").foregroundStyle(.secondary)
+                    Text("Nothing else is listening. A device signed in as you appears here once it is open.").foregroundStyle(.quiet)
                 }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
                     DeviceLine(row: r, at: i == cursor) {
@@ -136,7 +136,7 @@ private struct DeviceLine: View {
                 Image(systemName: symbol(forDevice: row.kind, name: row.name)).frame(width: 24)
                 VStack(alignment: .leading) {
                     Text(row.name).lineLimit(1)
-                    if let u = row.under { Text(u).font(.caption).foregroundStyle(.secondary) }
+                    if let u = row.under { Text(u).font(.caption).foregroundStyle(.quiet) }
                 }
                 Spacer()
                 if let join = row.join {
@@ -147,7 +147,7 @@ private struct DeviceLine: View {
                 if row.group { Image(systemName: "waveform").accessibilityLabel("Playing") }
                 else if row.ticked { Image(systemName: "checkmark").accessibilityLabel("Playing here") }
             }
-            .foregroundStyle(lit ? Color.gold : (row.takeable ? .primary : .secondary))
+            .foregroundStyle(lit ? Color.accentText : (row.takeable ? .ink : .quiet))
             .contentShape(Rectangle())
             .onTapGesture { if row.takeable { pick() } }
             if let v = row.volume {
@@ -155,7 +155,7 @@ private struct DeviceLine: View {
                     .padding(.leading, 40)
             }
         }
-        .listRowBackground(at ? Color.gold.opacity(0.08) : nil)
+        .listRowBackground(at ? Color.accent.opacity(0.08) : nil)
     }
 }
 
@@ -246,7 +246,7 @@ struct FollowSheet: View {
         NavigationStack {
             List {
                 HStack(spacing: Space.s) {
-                    Image(systemName: feed ? "link" : "magnifyingglass").foregroundStyle(.secondary)
+                    Image(systemName: feed ? "link" : "magnifyingglass").foregroundStyle(.quiet)
                     TextField("Search Apple Podcasts, or paste a feed", text: $typed)
                         .focused($focused)
                         .textInputAutocapitalization(.never)
@@ -260,20 +260,20 @@ struct FollowSheet: View {
                     Text(kind == "sermon"
                          ? "Search for a church or a preacher, or paste the address of its sermons' feed."
                          : "Search for a podcast by its name or who makes it, or paste the address of its feed.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(.quiet)
                         .listRowSeparator(.hidden)
                 } else {
                     if answered != words {
                         HStack(spacing: Space.s) {
                             ProgressView()
-                            Text("Searching…").foregroundStyle(.secondary)
+                            Text("Searching…").foregroundStyle(.quiet)
                         }
                         .listRowSeparator(.hidden)
                         .transition(.opacity)
                     } else if let p = problem {
-                        Text(p).font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                        Text(p).font(.subheadline).foregroundStyle(.quiet).listRowSeparator(.hidden)
                     } else if found.isEmpty {
-                        Text("Nothing found for “\(words)”.").font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                        Text("Nothing found for “\(words)”.").font(.subheadline).foregroundStyle(.quiet).listRowSeparator(.hidden)
                     }
                     ForEach(found) { f in
                         OfferedRow(found: f, following: following.contains(f.feed)) { model.follow(kind, f.feed) }
@@ -329,19 +329,19 @@ private struct OfferedRow: View {
             CoverView(seed: found.title, url: found.art, side: 56).frame(width: 56, height: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(found.title).font(.headline).lineLimit(2)
-                if !found.author.isEmpty { Text(found.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+                if !found.author.isEmpty { Text(found.author).font(.subheadline).foregroundStyle(.quiet).lineLimit(1) }
             }
             Spacer(minLength: 0)
             if following {
                 Label("Following", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.gold)
+                    .foregroundStyle(Color.accentText)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 Button("Follow", action: follow)
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
-                    .tint(Color.gold)
+                    .tint(Color.accent)
                     .transition(.scale.combined(with: .opacity))
             }
         }

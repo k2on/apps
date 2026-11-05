@@ -19,6 +19,8 @@ struct HarkenApp: App {
     private let nowPlaying: NowPlayingHolder
 
     init() {
+        // harken's accent, the gold, before the first view draws it.
+        Accent.use(.gold)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, engine: AVEngine())
         _model = StateObject(wrappedValue: m)
@@ -29,7 +31,7 @@ struct HarkenApp: App {
         WindowGroup {
             Root()
                 .environmentObject(model)
-                .tint(.gold)
+                .tint(Color.accent)
                 // The derived square in harken's colours (ArkUI's are neutral).
                 .environment(\.squares, .harken)
                 .onOpenURL { model.open(url: $0) }

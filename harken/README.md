@@ -161,7 +161,7 @@ not on the server yet.
 The desktop and the browser have **Podcasts** and **Sermons** under a
 Shows heading, each a line only when there is a show of its kind; the
 demo has Gospel in Life's sermons and Full Time Nix, the newest ten of
-each as their feeds said them (`iced/src/shows.json`), played from their
+each as their feeds said them (`harken/seed/shows.json`), played from their
 hosts.
 
 ## The listening session

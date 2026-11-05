@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/iced/src/catalogue.json, the copy
+    # library is made of (harken/seed/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -68,11 +68,12 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's crates join it from
-      # `harken/` by path, so both trees are the source of every Rust build.
+      # The Rust workspace is `rust/`, and the apps' crates join it from
+      # `harken/` and `money/` by path (each app's `seed/` among them), so those trees are the
+      # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
@@ -335,6 +336,26 @@
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
           money-server = crate { packageId = "money-server"; };
+          # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
+          # DATA` writes what that app's server boots seeded from.
+          money-seed = crate { packageId = "money-seed"; };
+          harken-seed = crate { packageId = "harken-seed"; };
+          # `nix run .#<app>-demo [ADDR]`: that server on a fresh seeded
+          # directory, with dev auth, for a person to try.
+          money-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "money";
+            seed = money-seed;
+            server = money-server;
+            listen = "127.0.0.1:8788";
+            env = ''MONEY_DEV_AUTH=1 MONEY_DATA="$dir"'';
+          };
+          harken-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "harken";
+            seed = harken-seed;
+            server = harken-server;
+            listen = "127.0.0.1:8787";
+            env = ''HARKEN_DEV_AUTH=1 HARKEN_DATA="$dir" HARKEN_MEDIA="$dir/media"'';
+          };
 
           # The desktop window. winit and wgpu open the display and the GPU
           # by dlopen at run time, so the libraries go on the library path.
@@ -586,7 +607,10 @@
                   export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                   mkdir -p "$ANDROID_USER_HOME"
                 '';
-                gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+                # The APK alone: its tests are a build of their own (`tests`,
+                # below), so the APK is there for its screenshots while they
+                # run, and the F-Droid deploy waits for both.
+                gradleBuildTask = ":app:assembleRelease";
                 # The recording runs the same tasks, and the screenshots' and a
                 # laptop's debug build, so that one recording serves all three.
                 gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
@@ -594,6 +618,17 @@
                 installPhase = ''
                   mkdir -p $out
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
+                '';
+              });
+              # The app's unit tests, as a build: what the APK used to run
+              # before it was made. Their results are its output.
+              tests = apk.overrideAttrs (old: {
+                pname = "${name}-android-tests";
+                gradleBuildTask = ":app:testDebugUnitTest";
+                versionFlags = [ ];
+                installPhase = ''
+                  mkdir -p $out
+                  if [ -d app/build/test-results ]; then cp -r app/build/test-results $out/; fi
                 '';
               });
               screens = apk.overrideAttrs (old: {
@@ -611,7 +646,7 @@
                 '';
               });
             in
-            { inherit apk screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk tests screens; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -626,6 +661,7 @@
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
           harken-apk = harken.apk;
+          harken-android-tests = harken.tests;
           harken-android-screens = harken.screens;
 
           # money's phone (money/android/README.md): Compose over
@@ -642,6 +678,7 @@
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
           money-apk = money.apk;
+          money-android-tests = money.tests;
           money-android-screens = money.screens;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
@@ -1029,13 +1066,19 @@
               done
             '';
           };
+          # `nix run .#update-theme`, from the repository's root: the colours
+          # every app is drawn in, written from arkui/theme.toml into the
+          # Kotlin, Swift and Rust each platform's arkui reads (arkui/README.md).
+          update-theme = pkgs.writeShellScriptBin "update-theme" ''
+            ${pkgs.python3}/bin/python3 arkui/theme.py write
+          '';
           # The catalogue as its repository builds it, and the copy the demo
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/iced/src/catalogue.json
-            chmod 644 harken/iced/src/catalogue.json
-            echo "harken/iced/src/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/seed/catalogue.json
+            chmod 644 harken/seed/catalogue.json
+            echo "harken/seed/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
@@ -1049,21 +1092,26 @@
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
             inherit classical update-catalogue update-cargo-nix;
+            # `nix run .#update-theme`: the theme's generated files, from
+            # arkui/theme.toml.
+            inherit update-theme;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
             inherit money-iced money-web money-web-server money-server;
+            inherit money-seed harken-seed money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
-            inherit harken-apk harken-android-screens;
+            inherit harken-apk harken-android-tests harken-android-screens;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
+            revelation-android-tests = revelation.tests;
             revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
             # money's phone, over money-android-lib (money/android/README.md).
-            inherit money-apk money-android-screens;
+            inherit money-apk money-android-tests money-android-screens;
             money-apk-deps = money.deps;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
@@ -1095,10 +1143,31 @@
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/iced/src/catalogue.json} || {
-                echo "harken/iced/src/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/seed/catalogue.json} || {
+                echo "harken/seed/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
+              touch $out
+            '';
+            # What is generated from arkui/theme.toml is what is committed:
+            # edit the tokens, then `nix run .#update-theme`.
+            theme = pkgs.runCommand "theme-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              python3 ${./arkui}/theme.py write generated > /dev/null
+              status=0
+              for f in $(python3 ${./arkui}/theme.py files); do
+                cmp "generated/$f" "${self}/$f" || {
+                  echo "$f is not what arkui/theme.toml makes: nix run .#update-theme" >&2
+                  status=1
+                }
+              done
+              if [ $status != 0 ]; then exit 1; fi
+              touch $out
+            '';
+            # Every text colour the tokens define is legible on every ground
+            # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
+            # a control's edge), the player's wash among them.
+            theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              python3 ${./arkui}/theme.py contrast
               touch $out
             '';
             # The fleet run mixed (docs/plan-db.md D1): every pinned
@@ -1283,6 +1352,7 @@
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
+                tests = "${name}-android-tests";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
               };

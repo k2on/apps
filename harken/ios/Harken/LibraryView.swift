@@ -85,12 +85,12 @@ private struct PlaylistsList: View {
         List {
             Button { present(.newPlaylist(then: nil)) } label: {
                 HStack(spacing: Space.l) {
-                    Image(systemName: "plus").font(.title2).foregroundStyle(Color.gold).frame(width: 56, height: 56)
+                    Image(systemName: "plus").font(.title2).foregroundStyle(Color.accentText).frame(width: 56, height: 56)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
                     Text("New Playlist").font(.headline)
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
             if model.playlists.isEmpty {
                 ContentUnavailableView("No playlists yet", systemImage: "music.note.list", description: Text("Make one, then put songs on it from any song's menu."))
                     .listRowSeparator(.hidden)
@@ -102,13 +102,13 @@ private struct PlaylistsList: View {
                         CoverView(seed: p.name, url: "", side: 56).frame(width: 56, height: 56).zoomSource(r, zoom)
                         VStack(alignment: .leading) {
                             Text(p.name).font(.headline).lineLimit(1)
-                            Text("Playlist").font(.subheadline).foregroundStyle(.secondary)
+                            Text("Playlist").font(.subheadline).foregroundStyle(.quiet)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.outline)
                     }
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(.ink)
             }
         }
         .listStyle(.plain)
@@ -135,7 +135,7 @@ private struct AlbumsGrid: View {
                                     .zoomSource(r, zoom)
                                     .padding(.bottom, Space.s - 2)
                                 Text(a.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text(a.playedBy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(a.playedBy).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)
@@ -189,7 +189,7 @@ private struct ShowsGrid: View {
                                         .zoomSource(r, zoom)
                                         .padding(.bottom, Space.s - 2)
                                     Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -211,10 +211,10 @@ private struct UnreadFeed: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Image(systemName: feed.error.isEmpty ? "clock" : "exclamationmark.triangle").foregroundStyle(.secondary).frame(width: 24)
+            Image(systemName: feed.error.isEmpty ? "clock" : "exclamationmark.triangle").foregroundStyle(.quiet).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(feed.title.isEmpty ? feed.url : feed.title).font(.subheadline.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                Text(feed.error.isEmpty ? "Not read yet" : "Could not read it: \(feed.error)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                Text(feed.error.isEmpty ? "Not read yet" : "Could not read it: \(feed.error)").font(.caption).foregroundStyle(.quiet).lineLimit(3)
             }
             Spacer(minLength: 0)
             Button("Unfollow", role: .destructive) { model.unfollow(feed) }.buttonStyle(.borderless).font(.subheadline)
@@ -280,13 +280,13 @@ private struct PersonRow: View {
                 CoverView(seed: name, url: RowCover.url(model, art), side: 56, round: true).frame(width: 56, height: 56).zoomSource(to, zoom)
                 VStack(alignment: .leading) {
                     Text(name).font(.headline).lineLimit(1)
-                    Text(under).font(.subheadline).foregroundStyle(.secondary)
+                    Text(under).font(.subheadline).foregroundStyle(.quiet)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.outline)
             }
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(.ink)
     }
 }
 

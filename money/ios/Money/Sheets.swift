@@ -36,7 +36,7 @@ struct TransactionSheet: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                     AmountEntry(cents: $draft.cents, prompt: draft.inflow ? "Coming in" : "Going out",
-                                tint: draft.inflow ? Color.green : Color.primary)
+                                tint: draft.inflow ? Color.positive : Color.ink)
                         .padding(.vertical, Space.l)
                         .listRowBackground(Color.clear)
                 }
@@ -62,22 +62,22 @@ struct TransactionSheet: View {
                                 payeeFocused = false
                             } label: {
                                 HStack {
-                                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.quiet)
                                     Text(p.name)
                                     Spacer()
-                                    if let c = s.line(p.categoryId) { Text(c.name).font(.caption).foregroundStyle(.secondary) }
+                                    if let c = s.line(p.categoryId) { Text(c.name).font(.caption).foregroundStyle(.quiet) }
                                 }
                             }
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.ink)
                         }
                     }
                     // What the bank called it, under the payee as Wallet
                     // shows a merchant's statement name: whole, and copyable.
                     if let bank = draft.bank {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Bank Description").font(.caption).foregroundStyle(.secondary)
+                            Text("Bank Description").font(.caption).foregroundStyle(.quiet)
                             Text(bank)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quiet)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -100,7 +100,7 @@ struct TransactionSheet: View {
                             }
                         }
                     } label: {
-                        LabeledContent("Category") { Text(categoryWords(s)).foregroundStyle(draft.category == nil && draft.transferTo == nil ? Color.orange : Color.secondary) }
+                        LabeledContent("Category") { Text(categoryWords(s)).foregroundStyle(draft.category == nil && draft.transferTo == nil ? Color.caution : Color.quiet) }
                     }
                 }
                 Section {
@@ -244,10 +244,10 @@ struct CategoryPicker: View {
             dismiss()
         } label: {
             HStack {
-                Text(name).foregroundStyle(.primary)
+                Text(name).foregroundStyle(.ink)
                 Spacer()
-                if let c = cents { CentsText(c).foregroundStyle(c < 0 ? Color.red : Color.secondary) }
-                if on { Image(systemName: "checkmark").foregroundStyle(Color.money).fontWeight(.semibold) }
+                if let c = cents { CentsText(c).foregroundStyle(c < 0 ? Color.error : Color.quiet) }
+                if on { Image(systemName: "checkmark").foregroundStyle(Color.accentText).fontWeight(.semibold) }
             }
         }
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -295,12 +295,12 @@ struct AssignSheet: View {
                             .lineLimit(1)
                         Text(words)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quiet)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                 } else {
-                    AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.money)
+                    AmountEntry(cents: $cents, prompt: "Assigned in \(model.monthName)", tint: Color.accent)
                 }
                 if let l, !ruled {
                     HStack(spacing: Space.s) {
@@ -313,7 +313,7 @@ struct AssignSheet: View {
                 if let s = model.snapshot.summary, !ruled {
                     Text("\(CentsText.string(s.readyToAssign - (cents - (l?.assigned ?? 0)))) left to assign")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quiet)
                         .contentTransition(.numericText())
                 }
                 Spacer()
@@ -343,7 +343,7 @@ struct AssignSheet: View {
     private func chip(_ label: String, _ c: Int64) -> some View {
         Button { cents = c } label: {
             VStack(spacing: 2) {
-                Text(label).font(.caption2).foregroundStyle(.secondary)
+                Text(label).font(.caption2).foregroundStyle(.quiet)
                 CentsText(c).font(.caption.weight(.semibold))
             }
         }
@@ -370,14 +370,14 @@ struct MoveSheet: View {
             List {
                 Section {
                     AmountEntry(cents: $cents, prompt: covering ? "To cover \(l?.name ?? "")" : "From \(l?.name ?? "Ready to Assign")",
-                                tint: covering ? Color.red : Color.money)
+                                tint: covering ? Color.error : Color.accent)
                         .padding(.vertical, Space.m)
                         .listRowBackground(Color.clear)
                 }
                 Section(covering ? "Cover It From" : "Move It To") {
                     if let l, let words = Ruled.words(l) {
                         // Its rule assigns this month: nothing moves to or from it.
-                        Label(words, systemImage: Ruled.symbol).foregroundStyle(.secondary)
+                        Label(words, systemImage: Ruled.symbol).foregroundStyle(.quiet)
                     } else {
                         if id != nil {
                             target("Ready to Assign", model.snapshot.summary?.readyToAssign, nil, l)
@@ -413,9 +413,9 @@ struct MoveSheet: View {
             }
         } label: {
             HStack {
-                Text(name).foregroundStyle(.primary)
+                Text(name).foregroundStyle(.ink)
                 Spacer()
-                if let c = has { CentsText(c).foregroundStyle(c < 0 ? Color.red : Color.secondary) }
+                if let c = has { CentsText(c).foregroundStyle(c < 0 ? Color.error : Color.quiet) }
             }
         }
         .disabled(cents <= 0)
@@ -434,7 +434,7 @@ struct TargetSheet: View {
         let l = model.snapshot.line(id)
         NavigationStack {
             VStack(spacing: Space.l) {
-                AmountEntry(cents: $cents, prompt: "Set aside each month", tint: Color.money)
+                AmountEntry(cents: $cents, prompt: "Set aside each month", tint: Color.accent)
                 if let l, l.averageSpent > 0 {
                     Button("Use the average spent, \(CentsText.string(l.averageSpent))") { cents = l.averageSpent }
                         .buttonStyle(.glass)
@@ -507,7 +507,7 @@ struct AddAccountSheet: View {
                                   : "Tracking only: its balance counts toward net worth, and none of it is budgeted.")
                 }
                 if let why {
-                    Section { Text(why).foregroundStyle(Color.red) }
+                    Section { Text(why).foregroundStyle(Color.error) }
                 }
             }
             .navigationTitle("Add Account")
@@ -555,7 +555,7 @@ struct ReconcileSheet: View {
                     if let b = a?.bankBalance {
                         Label("The bank last said \(CentsText.string(b))", systemImage: "building.columns")
                             .font(.footnote)
-                            .foregroundStyle(b == cleared ? Color.green : Color.orange)
+                            .foregroundStyle(b == cleared ? Color.positive : Color.caution)
                     }
                     HStack(spacing: Space.m) {
                         Button("No") {
@@ -566,19 +566,19 @@ struct ReconcileSheet: View {
                         .controlSize(.large)
                         Button("Yes") { finish(cleared) }
                             .buttonStyle(.glassProminent)
-                            .tint(Color.money)
+                            .tint(Color.accent)
                             .controlSize(.large)
                     }
                     .padding(.top, Space.m)
                 } else {
-                    AmountEntry(cents: $cents, prompt: "What the bank says it is" + (owes ? ", owed" : ""), tint: Color.money)
+                    AmountEntry(cents: $cents, prompt: "What the bank says it is" + (owes ? ", owed" : ""), tint: Color.accent)
                     Text("The difference is entered as an adjustment, and everything cleared is locked.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quiet)
                         .multilineTextAlignment(.center)
                     Button("Reconcile") { finish(owes ? -cents : cents) }
                         .buttonStyle(.glassProminent)
-                        .tint(Color.money)
+                        .tint(Color.accent)
                         .controlSize(.large)
                 }
                 Spacer()

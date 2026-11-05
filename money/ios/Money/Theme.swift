@@ -1,15 +1,11 @@
 // money's look on the phone, over ArkUI's (swift/ArkUI: the spacing, the
-// springs, the figures): the system's own colours, which follow light and
-// dark by themselves, and a green for money — the accent, `AccentColor` in
-// the asset catalog, the same two greens as here. Liquid Glass brings its
+// springs, the figures, the colours): arkui's theme (arkui/theme.toml) — the
+// neutrals every Ark app shares, as `.ink`, `.quiet` and the rest, and
+// money's accent, the green, which `MoneyApp` names (`Accent.use(.green)`)
+// and `AccentColor` in the asset catalog holds too. Liquid Glass brings its
 // own materials; what is here is only what a figure is tinted with.
 import ArkUI
 import SwiftUI
-
-extension Color {
-    /// The accent: a deep green on a white page, a brighter one on a dark one.
-    static let money = Color(light: 0x1E8E4E, dark: 0x3DD27A)
-}
 
 extension Tone {
     /// The figure's tint, as ArkUI's pill and hero draw it.

@@ -12,7 +12,8 @@
 //               [{"id": …, "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
 //               A tap's label is what the element says or its accessibility
 //               identifier; `role` ("tab", "button", "field", "text") says
-//               which kind it is when several say it.
+//               which kind it is when several say it; `a|b` is whichever is
+//               there, and "optional": true passes over a tap with nothing to tap.
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
 //               which is what a step can name
@@ -30,9 +31,11 @@ struct Shot: Decodable {
         var type: String?
         var wait: Double?
         var relaunch: Bool?
+        /// A tap with nothing to tap passed over, a few seconds on.
+        var optional: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case tap, role, `where`, unless, type, wait, relaunch
+            case tap, role, `where`, unless, type, wait, relaunch, optional
             case waitFor = "await"
         }
     }
@@ -113,8 +116,9 @@ final class Drive: XCTestCase {
                     XCTAssertTrue(there.waitForExistence(timeout: 20), "\(label) came, for \(shot.id)")
                 }
                 if let label = step.tap {
-                    let c = step.where == "bottom" ? lowest(app, label) : control(app, label, role: step.role)
-                    if !c.waitForExistence(timeout: 30) {
+                    let c = find(app, label, step: step, timeout: step.optional == true ? 3 : 30)
+                    if step.optional == true && !c.exists { continue }
+                    if !c.exists {
                         try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
                         XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
                         return
@@ -185,11 +189,27 @@ final class Drive: XCTestCase {
         app.typeText(user + "\n")
     }
 
+    /// What a tap names, once it is there (up to `timeout` seconds): `a|b`,
+    /// whichever of them is there first.
+    private func find(_ app: XCUIApplication, _ label: String, step: Shot.Step, timeout: Double) -> XCUIElement {
+        let each = label.split(separator: "|").map(String.init)
+        let until = Date().addingTimeInterval(timeout)
+        var c = app.descendants(matching: .any)[each[0]].firstMatch
+        repeat {
+            for one in each {
+                c = step.where == "bottom" ? lowest(app, one, timeout: 0) : control(app, one, role: step.role)
+                if c.exists { return c }
+            }
+            sleep(1)
+        } while Date() < until
+        return c
+    }
+
     /// Of every element that says `label`, the lowest on the screen, once
     /// one is there: a mini player saying the title a row above it says.
-    private func lowest(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+    private func lowest(_ app: XCUIApplication, _ label: String, timeout: Double = 30) -> XCUIElement {
         let all = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
-        _ = all.firstMatch.waitForExistence(timeout: 30)
+        if timeout > 0 { _ = all.firstMatch.waitForExistence(timeout: timeout) }
         return all.allElementsBoundByIndex.filter { $0.isHittable }.max { $0.frame.maxY < $1.frame.maxY } ?? all.firstMatch
     }
 
@@ -204,7 +224,11 @@ final class Drive: XCTestCase {
         default:
             let tab = app.tabBars.buttons[label]
             if tab.exists { return tab }
-            let button = app.buttons[label].firstMatch
+            // Of several, one that can be touched: the full player's Pause, not
+            // the mini player's under it.
+            let buttons = app.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
+            if let b = buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) { return b }
+            let button = buttons.firstMatch
             return button.exists ? button : app.descendants(matching: .any)[label].firstMatch
         }
     }

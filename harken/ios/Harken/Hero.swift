@@ -147,10 +147,10 @@ struct RecordHeader<Cover: View>: View {
             HStack(alignment: .center, spacing: Space.l + 4) {
                 cover().frame(width: Space.record, height: Space.record)
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    if !over.isEmpty { Linked(words: over.uppercased(), font: .caption.weight(.semibold), color: .secondary, action: onOver) }
+                    if !over.isEmpty { Linked(words: over.uppercased(), font: .caption.weight(.semibold), color: .quiet, action: onOver) }
                     Text(title).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
-                    if !by.isEmpty { Linked(words: by, font: .headline, color: .gold, action: onBy) }
-                    if !small.isEmpty { Linked(words: small, font: .caption, color: .secondary, action: onSmall) }
+                    if !by.isEmpty { Linked(words: by, font: .headline, color: .accentText, action: onBy) }
+                    if !small.isEmpty { Linked(words: small, font: .caption, color: .quiet, action: onSmall) }
                 }
                 Spacer(minLength: 0)
             }
@@ -183,18 +183,18 @@ struct Featured: View {
             .buttonStyle(.plain)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(label.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                Text(label.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.quiet)
                 Button { open(opens) } label: {
                     Text(title).font(.headline).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(.plain)
-                if !facts.isEmpty { Text(facts).font(.footnote).foregroundStyle(.secondary) }
+                if !facts.isEmpty { Text(facts).font(.footnote).foregroundStyle(.quiet) }
                 Button(action: onPlay) {
                     Image(systemName: "play.fill").font(.body.weight(.semibold)).frame(width: 36, height: 36)
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .tint(.gold)
+                .tint(Color.accent)
                 .padding(.top, Space.s)
                 .accessibilityLabel("Play \(title)")
             }
@@ -237,13 +237,13 @@ struct EntryRow<Picture: View>: View {
                 HStack(spacing: Space.m) {
                     picture()
                     VStack(alignment: .leading, spacing: 2) {
-                        if !over.isEmpty { Text(over.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
-                        Text(title).font(.body).foregroundStyle(.primary).multilineTextAlignment(.leading)
-                        if !under.isEmpty { Text(under).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
+                        if !over.isEmpty { Text(over.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.quiet) }
+                        Text(title).font(.body).foregroundStyle(.ink).multilineTextAlignment(.leading)
+                        if !under.isEmpty { Text(under).font(.footnote).foregroundStyle(.quiet).lineLimit(2) }
                     }
                     Spacer(minLength: Space.s)
-                    if !count.isEmpty { Text(count).font(.subheadline).foregroundStyle(.secondary).monospacedDigit() }
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    if !count.isEmpty { Text(count).font(.subheadline).foregroundStyle(.quiet).monospacedDigit() }
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
                 }
                 .padding(.vertical, Space.m - 2)
                 Divider()
@@ -264,9 +264,9 @@ struct MoreRow: View {
     var body: some View {
         Button(action: action) {
             HStack {
-                Text(title).foregroundStyle(Color.gold)
+                Text(title).foregroundStyle(Color.accentText)
                 Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
             }
             .padding(.vertical, Space.m)
             .contentShape(Rectangle())
@@ -288,11 +288,11 @@ struct WorkHeading: View {
     var body: some View {
         HStack(alignment: .lastTextBaseline, spacing: Space.m) {
             VStack(alignment: .leading, spacing: 2) {
-                if !composer.isEmpty { Text(composer.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                if !composer.isEmpty { Text(composer.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.quiet) }
                 Text(work).font(.headline).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
         }
         // In from where a track's title starts; and short of where its menu
         // is, so the lengths line up.
@@ -355,13 +355,13 @@ struct RecordFoot: View {
             if !label.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("RECORD LABEL").font(.caption2.weight(.semibold))
-                    Text(label).font(.subheadline).foregroundStyle(Color.gold)
+                    Text(label).font(.subheadline).foregroundStyle(Color.accentText)
                 }
                 .padding(.top, Space.m)
             }
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quiet)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Space.page)
         .padding(.top, Space.xl)

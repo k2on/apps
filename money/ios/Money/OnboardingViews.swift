@@ -14,7 +14,7 @@ struct ServerScreen: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
-        WelcomePage(symbol: "dollarsign.circle.fill", tint: Color.money, title: "Money",
+        WelcomePage(symbol: "dollarsign.circle.fill", tint: Color.accent, title: "Money",
                     sentence: "Your household's budget, every dollar given a job, on your own server.") {
             VStack(alignment: .leading, spacing: Space.s) {
                 TextField(Onboarding.usual, text: Binding(get: { typed }, set: { model.send(.typed($0)) }))
@@ -30,7 +30,7 @@ struct ServerScreen: View {
                     .accessibilityLabel("Server address")
                 Text(error ?? "Where your household's budget is kept.")
                     .font(.footnote)
-                    .foregroundStyle(error == nil ? Color.secondary : Color.red)
+                    .foregroundStyle(error == nil ? Color.quiet : Color.error)
                     .padding(.horizontal, Space.xs)
             }
             Button { model.send(.check) } label: {
@@ -41,7 +41,7 @@ struct ServerScreen: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
-            .tint(Color.money)
+            .tint(Color.accent)
             .controlSize(.large)
             .disabled(checking || typed.trimmingCharacters(in: .whitespaces).isEmpty)
             .padding(.top, Space.l)
@@ -53,7 +53,7 @@ struct ServerScreen: View {
             .disabled(checking)
             Text("A household of two with three months of spending, on this phone alone.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
                 .multilineTextAlignment(.center)
         }
     }
@@ -66,16 +66,16 @@ struct SignInScreen: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
-        WelcomePage(symbol: "person.badge.key.fill", tint: Color.money, title: "Sign In",
+        WelcomePage(symbol: "person.badge.key.fill", tint: Color.accent, title: "Sign In",
                     sentence: "You'll sign in on \(Probe.display(server))'s own page, and come straight back here.") {
             if let e = error {
-                Text(e).font(.callout).foregroundStyle(Color.red).multilineTextAlignment(.center).padding(.bottom, Space.l)
+                Text(e).font(.callout).foregroundStyle(Color.error).multilineTextAlignment(.center).padding(.bottom, Space.l)
             }
             switch phase {
             case .browser:
-                Label("Waiting for the sign-in…", systemImage: "safari").foregroundStyle(.secondary)
+                Label("Waiting for the sign-in…", systemImage: "safari").foregroundStyle(.quiet)
             case .exchanging:
-                HStack(spacing: Space.m) { ProgressView(); Text("Signing in…") }.foregroundStyle(.secondary)
+                HStack(spacing: Space.m) { ProgressView(); Text("Signing in…") }.foregroundStyle(.quiet)
             case .idle:
                 EmptyView()
             }
@@ -95,7 +95,7 @@ struct OpeningScreen: View {
     var body: some View {
         SwiftUI.Group {
             if shown {
-                WelcomePage(symbol: "dollarsign.circle.fill", tint: Color.money, title: "Money",
+                WelcomePage(symbol: "dollarsign.circle.fill", tint: Color.accent, title: "Money",
                             sentence: "Getting your budget from \(Probe.display(server))…") { ProgressView() }
                     .transition(.opacity)
             } else {

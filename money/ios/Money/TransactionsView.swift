@@ -68,7 +68,7 @@ struct TransactionsView: View {
                     } label: {
                         TxnRow(txn: t, showAccount: true)
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.ink)
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         if !Registers.needsCategory(t) {
                             Button {

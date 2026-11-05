@@ -58,7 +58,7 @@ struct HomeView: View {
         Heading(title: "Your Playlists", action: "New") { present(.newPlaylist(then: nil)) }
         if s.playlists.isEmpty {
             Text("None yet. Make one, then put songs on it from any song's menu.")
-                .font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, Space.page)
+                .font(.subheadline).foregroundStyle(.quiet).padding(.horizontal, Space.page)
         } else {
             CoverShelf(items: s.playlists) { p in
                 CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .page(.playlist(p.id))) {
@@ -89,12 +89,12 @@ private struct LastCard: View {
                 CoverView(seed: last.track.seed, url: last.track.art, side: 64).frame(width: 64, height: 64)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(last.track.title).font(.headline).lineLimit(1)
-                    Text(last.track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    Text(from).font(.caption).foregroundStyle(last.on != nil ? Color.gold : .secondary).lineLimit(1)
+                    Text(last.track.artist).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
+                    Text(from).font(.caption).foregroundStyle(last.on != nil ? Color.accentText : .quiet).lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "play.fill").font(.title3).frame(width: 44, height: 44)
-                    .glassEffect(.regular.tint(.gold).interactive(), in: Circle())
+                    .glassEffect(.regular.tint(Color.accent).interactive(), in: Circle())
                     .accessibilityLabel("Play again")
             }
             .padding(Space.m)

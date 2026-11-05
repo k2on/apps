@@ -99,7 +99,10 @@ import kotlinx.coroutines.launch
 
 /** The glass's look, said once. */
 public object Glass {
-    /** What glass is filled with: the scheme's brightest surface, white on a light page. */
+    /**
+     * What glass is filled with: the theme's glass (arkui/theme.toml), which `arkuiScheme` puts in
+     * the scheme's brightest surface — white on a light page, a lifted charcoal on a dark one.
+     */
     @Composable
     @ReadOnlyComposable
     public fun fill(): Color = MaterialTheme.colorScheme.surfaceBright

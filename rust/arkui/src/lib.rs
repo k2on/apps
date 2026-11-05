@@ -51,6 +51,7 @@ pub mod style;
 pub mod swipe;
 pub mod table;
 pub mod theme;
+pub mod tokens;
 pub mod url;
 pub mod vim;
 pub mod wake;

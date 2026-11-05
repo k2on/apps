@@ -46,13 +46,13 @@ struct SearchView: View {
             Section {
                 ForEach(model.recent, id: \.self) { r in
                     Button { model.searchFor(r) } label: { Label(r, systemImage: "clock.arrow.circlepath") }
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.ink)
                 }
             } header: {
                 HStack {
                     Text("Recent Searches")
                     Spacer()
-                    Button("Clear") { model.forgetSearches() }.foregroundStyle(Color.gold)
+                    Button("Clear") { model.forgetSearches() }.foregroundStyle(Color.accentText)
                 }
             }
         }

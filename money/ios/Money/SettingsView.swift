@@ -24,12 +24,12 @@ struct SettingsView: View {
                 HStack(spacing: Space.l) {
                     Image(systemName: "person.crop.circle.fill")
                         .font(.system(size: 44))
-                        .foregroundStyle(Color.money.gradient)
+                        .foregroundStyle(Color.accent.gradient)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading) {
                         Text(model.who.isEmpty ? "Signed In" : model.who).font(.headline)
                         Text(model.isDemo ? "The demo's household, on this phone alone" : model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quiet)
                     }
                 }
             }
@@ -122,14 +122,14 @@ struct AskRow: View {
                         if let m = BankAsks.minutesLeft(ask, now: now) {
                             Text(m < 1 ? "It closes in under a minute." : "It closes in \(m) min.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quiet)
                         }
                     }
                 }
                 Spacer(minLength: 0)
                 if !BankAsks.isOpen(ask) {
                     Button { withAnimation(Springs.move) { model.dismiss(ask: ask) } } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet)
                     }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Dismiss")
@@ -143,8 +143,8 @@ struct AskRow: View {
         switch ask.state {
         case .asked: ProgressView()
         case .waiting: Image(systemName: "safari.fill").foregroundStyle(.blue)
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .failed, .expired: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.positive)
+        case .failed, .expired: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.caution)
         }
     }
 }
@@ -173,7 +173,7 @@ struct BankRow: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Color.orange, in: Capsule())
+                    .background(Color.caution, in: Capsule())
                     .accessibilityLabel("\(bank.waiting) account\(bank.waiting == 1 ? "" : "s") to choose for")
             }
         }
@@ -187,12 +187,12 @@ struct BankHealthText: View {
 
     var body: some View {
         switch Banks.health(bank) {
-        case .needsLogin: Text("Log in again to keep it syncing").foregroundStyle(.red)
-        case .failed: Text("The last import failed").foregroundStyle(.red)
-        case .new: Text("Waiting for its first import").foregroundStyle(.secondary)
+        case .needsLogin: Text("Log in again to keep it syncing").foregroundStyle(.error)
+        case .failed: Text("The last import failed").foregroundStyle(.error)
+        case .new: Text("Waiting for its first import").foregroundStyle(.quiet)
         case let .synced(ms):
             Text("Synced \(Date(timeIntervalSince1970: Double(ms) / 1000), format: .relative(presentation: .named))")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
         }
     }
 }
@@ -231,10 +231,10 @@ struct BankView: View {
                             Text("Log In Again").font(.headline)
                             Text("\(title) wants its login again before it sends anything new.")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quiet)
                         }
                     } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.error)
                     }
                     Button { model.reconnect(bank: b.name) } label: { Label("Reconnect", systemImage: "arrow.clockwise") }
                         .fontWeight(.semibold)
@@ -242,7 +242,7 @@ struct BankView: View {
                 }
             case let .failed(why):
                 Section("Last Import") {
-                    Text(why).foregroundStyle(.red)
+                    Text(why).foregroundStyle(.error)
                     LabeledContent("Failed") {
                         Text(Date(timeIntervalSince1970: Double(b.failedMs) / 1000), format: .relative(presentation: .named))
                     }
@@ -309,7 +309,7 @@ struct LinkedRow: View {
             AccountMark(kind: line.opensAs.isEmpty ? line.kind : line.opensAs)
             VStack(alignment: .leading, spacing: 2) {
                 Text(Banks.name(line)).lineLimit(1)
-                Text(about).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(about).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                 feeds.font(.caption).lineLimit(1)
             }
             Spacer(minLength: Space.s)
@@ -319,7 +319,7 @@ struct LinkedRow: View {
                 Text(line.waiting ? "Choose" : "Change")
             }
             .buttonStyle(.bordered)
-            .tint(line.waiting ? Color.orange : nil)
+            .tint(line.waiting ? Color.caution : nil)
             .controlSize(.small)
             .accessibilityLabel(line.waiting ? "Choose what \(line.name) feeds" : "Change what \(line.name) feeds")
         }
@@ -332,11 +332,11 @@ struct LinkedRow: View {
 
     @ViewBuilder private var feeds: some View {
         if line.waiting {
-            Text("Waiting for a choice").foregroundStyle(.orange)
+            Text("Waiting for a choice").foregroundStyle(.caution)
         } else if line.ignored {
-            Text("Not imported").foregroundStyle(.secondary)
+            Text("Not imported").foregroundStyle(.quiet)
         } else {
-            Text("Feeds \(line.account)").foregroundStyle(.secondary)
+            Text("Feeds \(line.account)").foregroundStyle(.quiet)
         }
     }
 

@@ -175,7 +175,7 @@ public struct ReorderHandle: View {
 
     public var body: some View {
         Image(systemName: "line.3.horizontal")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quiet)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
             .gesture(

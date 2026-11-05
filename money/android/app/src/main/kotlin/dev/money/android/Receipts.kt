@@ -84,6 +84,7 @@ import androidx.compose.ui.window.DialogProperties
 import dev.arkdb.ffi.Id
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
+import dev.arkui.Tokens
 import dev.money.android.gen.FileRef
 import dev.money.android.gen.ItemLine
 import dev.money.android.gen.PhotoLine
@@ -97,10 +98,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The paper's colours: a receipt is white whatever the phone's theme. */
-private val Paper = Color(0xFFFFFFFF)
-private val Ink = Color(0xFF1C1C1C)
-private val Faded = Color(0xFF6B6B6B)
+/** The paper's colours: a receipt is white whatever the phone's theme, so the light side's. */
+private val Paper = Tokens.Light.surface
+private val Ink = Tokens.Light.ink
+private val Faded = Tokens.Light.quiet
 
 private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 18.sp, color = Ink)
 

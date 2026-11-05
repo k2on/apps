@@ -33,7 +33,7 @@ public struct WelcomePage<Content: View>: View {
                     .accessibilityHidden(true)
                 Text(title).font(.largeTitle.bold()).multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
-                Text(sentence).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(sentence).font(.body).foregroundStyle(.quiet).multilineTextAlignment(.center)
                     .padding(.bottom, Space.xxl)
                 content
             }

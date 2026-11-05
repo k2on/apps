@@ -105,7 +105,7 @@ struct Shell: View {
         .toast($model.notice)
         // Plaid's page, as soon as the server answers with it, wherever the
         // person is; closed by its Done, or once the server is finished.
-        .safari(model.bankPage, tint: Color.money) { model.bankPageClosed() }
+        .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
     }
 
     private func present(_ s: Sheet) {

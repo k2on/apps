@@ -92,17 +92,17 @@ struct TrackRow<Leading: View>: View {
         HStack(spacing: Space.m) {
             leading().frame(width: Space.thumb, height: Space.thumb)
             VStack(alignment: .leading, spacing: 2) {
-                Text(track.title).font(.body).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(1)
-                Text(under).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(track.title).font(.body).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(1)
+                Text(under).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer(minLength: 0)
             // Its file not on the server yet: how its download goes, in place of its length.
-            Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
             Menu { TrackActions(track: track, from: from) } label: {
                 Image(systemName: "ellipsis").frame(width: 32, height: 44).contentShape(Rectangle())
             }
             .accessibilityLabel("More for \(track.title)")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quiet)
         }
         .frame(minHeight: 64)
         .contentShape(Rectangle())
@@ -144,11 +144,11 @@ struct EpisodeRow: View {
         let over = Spell.facts([show, day]).uppercased()
         VStack(alignment: .leading, spacing: Space.xs) {
             if !over.isEmpty {
-                Text(over).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                Text(over).font(.caption.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
             }
-            Text(track.title).font(.headline).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(2)
+            Text(track.title).font(.headline).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(2)
             if let about = detail?.description, !about.isEmpty {
-                Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+                Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(3)
             }
             if !people.isEmpty {
                 PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
@@ -169,22 +169,22 @@ struct EpisodeRow: View {
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
-                .tint(Color.gold)
+                .tint(Color.accent)
                 .accessibilityLabel(said.isEmpty ? "Play \(track.title)" : "Play \(track.title), \(said)")
                 if !others.isEmpty {
-                    Text(others).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(others).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Menu { TrackActions(track: track, from: from) } label: {
                     Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
                 }
                 .accessibilityLabel("More for \(track.title)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             }
             .padding(.top, Space.xs)
             if begun, let m = mine {
                 ProgressView(value: Double(min(m.positionMs, whole)), total: Double(whole))
-                    .tint(Color.gold)
+                    .tint(Color.accent)
                     .accessibilityLabel("\(Spell.left(track.durationMs, m))")
             }
         }
@@ -216,7 +216,7 @@ struct PeopleLine: View {
                         .overlay { Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1.5) }
                 }
             }
-            Text(words).font(font).foregroundStyle(.secondary).lineLimit(1)
+            Text(words).font(font).foregroundStyle(.quiet).lineLimit(1)
         }
         .contentShape(Rectangle())
         if people.count == 1, let p = people.first {
@@ -307,9 +307,9 @@ struct TrackNumber: View {
 
     var body: some View {
         if playing {
-            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: true).foregroundStyle(Color.gold)
+            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: true).foregroundStyle(Color.accentText)
         } else {
-            Text(n > 0 ? "\(n)" : "").foregroundStyle(.secondary).monospacedDigit()
+            Text(n > 0 ? "\(n)" : "").foregroundStyle(.quiet).monospacedDigit()
         }
     }
 }
@@ -324,7 +324,7 @@ struct Heading: View {
         HStack {
             Text(title).font(.title2.bold())
             Spacer()
-            if let a = action { Button(a, action: onAction).buttonStyle(.borderless).foregroundStyle(Color.gold) }
+            if let a = action { Button(a, action: onAction).buttonStyle(.borderless).foregroundStyle(Color.accentText) }
         }
         .padding(.horizontal, Space.page)
         .padding(.top, Space.xl)
@@ -372,7 +372,7 @@ struct CoverCard: View {
                 .frame(width: side, height: side)
                 .padding(.bottom, Space.s - 2)
                 Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                if !under.isEmpty { Text(under).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if !under.isEmpty { Text(under).font(.caption).foregroundStyle(.quiet).lineLimit(1) }
             }
             .frame(width: side, alignment: round ? .center : .leading)
             .multilineTextAlignment(round ? .center : .leading)
@@ -398,12 +398,12 @@ struct PageHeader<Cover: View>: View {
     var body: some View {
         VStack(spacing: Space.xs) {
             cover().padding(.top, Space.s).padding(.bottom, Space.l)
-            Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
             Text(title).font(.title2.bold()).multilineTextAlignment(.center)
             if let by = by {
-                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.gold).disabled(onBy == nil)
+                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.accentText).disabled(onBy == nil)
             }
-            Text(facts).font(.footnote).foregroundStyle(.secondary)
+            Text(facts).font(.footnote).foregroundStyle(.quiet)
             GlassEffectContainer(spacing: Space.m) {
                 HStack(spacing: Space.m) {
                     Button(action: onPlay) { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -430,9 +430,9 @@ struct Offline: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Image(systemName: "icloud.slash").foregroundStyle(.secondary)
+            Image(systemName: "icloud.slash").foregroundStyle(.quiet)
             Text("Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.quiet)
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -492,8 +492,8 @@ struct Fetching: View {
     var body: some View {
         VStack(spacing: Space.l) {
             if shown {
-                Text("Getting your library from \(host)…").font(.subheadline).foregroundStyle(.secondary)
-                ProgressView().tint(.gold)
+                Text("Getting your library from \(host)…").font(.subheadline).foregroundStyle(.quiet)
+                ProgressView().tint(Color.accent)
             }
         }
         .frame(maxWidth: .infinity)

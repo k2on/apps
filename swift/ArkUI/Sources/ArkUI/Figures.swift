@@ -55,7 +55,7 @@ public struct MarkedCents: View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Image(systemName: mark)
                 .imageScale(.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             CentsText(cents)
         }
         .accessibilityElement(children: .ignore)
@@ -63,17 +63,18 @@ public struct MarkedCents: View {
     }
 }
 
-/// What a figure says about itself: the colour of its pill and its text.
+/// What a figure says about itself: the colour of its pill and its text, the
+/// theme's signals (arkui/theme.toml), each legible on the page.
 public enum Tint: Equatable, Sendable {
     case neutral, good, caution, bad, accent
 
     public var color: Color {
         switch self {
-        case .neutral: return .secondary
-        case .good: return .green
-        case .caution: return .orange
-        case .bad: return .red
-        case .accent: return .accentColor
+        case .neutral: return .quiet
+        case .good: return .positive
+        case .caution: return .caution
+        case .bad: return .error
+        case .accent: return .accentText
         }
     }
 }
@@ -92,10 +93,10 @@ public struct Pill<Content: View>: View {
         content
             .font(.subheadline.weight(.semibold))
             .monospacedDigit()
-            .foregroundStyle(tint == .neutral ? Color.secondary : tint.color)
+            .foregroundStyle(tint == .neutral ? Color.quiet : tint.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(tint == .neutral ? Color.secondary.opacity(0.12) : tint.color.opacity(0.16), in: Capsule())
+            .background(tint == .neutral ? Color.quiet.opacity(0.12) : tint.color.opacity(0.16), in: Capsule())
     }
 }
 
@@ -131,16 +132,16 @@ public struct HeroFigure<Footer: View>: View {
         let face = VStack(alignment: .leading, spacing: Space.xs) {
             Text(caption)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
                 .textCase(.uppercase)
             CentsText(cents)
                 .font(.system(size: 44, weight: .bold, design: .rounded))
-                .foregroundStyle(tint == .neutral ? Color.primary : tint.color)
+                .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
             if !note.isEmpty {
-                Text(note).font(.footnote).foregroundStyle(.secondary)
+                Text(note).font(.footnote).foregroundStyle(.quiet)
             }
             footer.padding(.top, Space.s)
         }
@@ -184,7 +185,7 @@ public struct AmountEntry: View {
     @FocusState private var focused: Bool
     @State private var typed = ""
 
-    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .primary) {
+    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .ink) {
         _cents = cents
         self.prompt = prompt
         self.tint = tint
@@ -194,13 +195,13 @@ public struct AmountEntry: View {
         VStack(spacing: Space.s) {
             CentsText(cents)
                 .font(.system(size: 56, weight: .bold, design: .rounded))
-                .foregroundStyle(cents == 0 ? Color.secondary : tint)
+                .foregroundStyle(cents == 0 ? Color.quiet : tint)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
                 .animation(Springs.move, value: cents)
             if !prompt.isEmpty {
-                Text(prompt).font(.footnote).foregroundStyle(.secondary)
+                Text(prompt).font(.footnote).foregroundStyle(.quiet)
             }
         }
         .frame(maxWidth: .infinity)
