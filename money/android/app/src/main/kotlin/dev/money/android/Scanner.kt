@@ -46,7 +46,7 @@ import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -105,6 +105,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import dev.arkui.Accent
 import dev.arkui.Space
+import dev.arkui.Springs
+import dev.arkui.reducedMotion
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -177,6 +179,9 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
     var page by remember { mutableStateOf<ImageBitmap?>(null) }
     val flash = remember { Animatable(0f) }
     val away = remember { Animatable(0f) }
+    // With motion reduced the page fades where it is rather than shrinking into the corner, and the
+    // flash is a softer one: a jump in brightness is what reduced motion asks to be spared.
+    val reduced = reducedMotion()
     val camera =
         remember {
             PageCamera(
@@ -213,7 +218,12 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     failed = "The camera didn't take the picture"
                     return@launch
                 }
-                launch { flash.snapTo(0.9f); flash.animateTo(0f, tween(280)) }
+                // The flash dies away, and the page goes, on arkui's critically damped springs: a
+                // shutter is not a throw.
+                launch {
+                    flash.snapTo(if (reduced) 0.3f else 0.9f)
+                    flash.animateTo(0f, spring(Springs.SIZE, Springs.STIFFNESS, 0.001f))
+                }
                 val flat = withContext(Dispatchers.Default) { runCatching { flatPage(jpeg, quad, w, h, camera.turns) }.getOrNull() }
                 if (flat == null) {
                     taking = false
@@ -221,7 +231,7 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     return@launch
                 }
                 page = flat.first
-                away.animateTo(1f, tween(520))
+                away.animateTo(1f, if (reduced) Springs.fade() else Springs.move())
                 onPage(flat.second)
             }
         }
@@ -268,6 +278,10 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     contentDescription = null,
                     modifier =
                         Modifier.fillMaxSize().padding(Space.xl).graphicsLayer {
+                            if (reduced) {
+                                alpha = 1f - t
+                                return@graphicsLayer
+                            }
                             val s = 1f - 0.8f * t
                             scaleX = s
                             scaleY = s

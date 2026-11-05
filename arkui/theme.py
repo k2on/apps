@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # The theme's generator and its contrast check: arkui/theme.toml, the one
-# place a colour is written down, said in each platform's language.
+# place a colour or a motion is written down, said in each platform's language.
 #
 #   theme.py write [ROOT]   # the generated files, under ROOT (the repository's root by default)
 #   theme.py contrast       # every text colour on every ground it is drawn on, at WCAG's ratio
@@ -22,6 +22,28 @@ KOTLIN = "kotlin/arkui/src/dev/arkui/Tokens.kt"
 SWIFT_CORE = "swift/ArkUI/Sources/ArkUICore/Tokens.swift"
 SWIFT_UI = "swift/ArkUI/Sources/ArkUI/Colors.swift"
 RUST = "rust/arkui/src/tokens.rs"
+KOTLIN_MOTION = "kotlin/arkui/src/dev/arkui/MotionTokens.kt"
+SWIFT_MOTION = "swift/ArkUI/Sources/ArkUICore/MotionTokens.swift"
+RUST_MOTION = "rust/arkui/src/motion_tokens.rs"
+
+# The motion tokens, in the order they are written, and each one's sentence.
+MOTION = {
+    "stiffness": "The one stiffness every move rides: a page, the player, a sheet, a row.",
+    "move": "The damping of a move nothing threw: arrives and stops.",
+    "momentum": "The damping of a move a flick threw: its momentum spending itself.",
+    "size": "The damping of how large a thing is and what of it shows: never past its size.",
+    "fade-stiffness": "The stiffness of a fade, a hover, and the stand-in when motion is reduced.",
+    "rest": "Where a 0..1 progress counts as there.",
+    "rest-px": "Where a move in pixels counts as there.",
+    "cap-ms": "The most a settle may take, in milliseconds.",
+    "flick": "A release at least this fast, a second, was a flick.",
+    "deceleration": "How much of its speed a projected release keeps each millisecond.",
+    "snappy": "The same, for a release that decides an act: a skip, going back.",
+    "preview": "The most a back gesture's preview comes, as a share of what it previews.",
+    "give": "How much of the gesture brings the preview 63% of the way.",
+    "press": "How small a pressed cover or chip gives.",
+    "enter-scale": "The least a thing scales from when it enters.",
+}
 
 # The roles of one side, in the order they are written, and each one's
 # sentence for the generated code's documentation.
@@ -557,6 +579,69 @@ def rust(t):
     return "\n".join(out).rstrip() + "\n"
 
 
+def response(stiffness):
+    """A spring's period at unit mass, Apple's `response`: 2π/√k."""
+    import math
+    return 2 * math.pi / math.sqrt(stiffness)
+
+
+def motion_values(t):
+    m = t["motion"]
+    missing = [k for k in MOTION if k not in m]
+    if missing:
+        sys.exit(f"theme.toml [motion] lacks {', '.join(missing)}")
+    return m
+
+
+def kotlin_motion(t):
+    m = motion_values(t)
+    out = [f"// {HEADER}", "package dev.arkui", "", "/** How everything moves (arkui/theme.toml `[motion]`, docs/motion.md). */", "public object MotionTokens {"]
+    for k, doc in MOTION.items():
+        v = m[k]
+        out.append(f"    /** {doc} */")
+        if isinstance(v, int) and not isinstance(v, bool):
+            out.append(f"    public const val {screaming(k)}: Int = {v}")
+        else:
+            out.append(f"    public const val {screaming(k)}: Float = {float(v)!r}f")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
+def swift_motion(t):
+    m = motion_values(t)
+    out = [f"// {HEADER}", "import Foundation", "", "/// How everything moves (arkui/theme.toml `[motion]`, docs/motion.md).", "public enum MotionTokens {"]
+    for k, doc in MOTION.items():
+        v = m[k]
+        out.append(f"    /// {doc}")
+        if isinstance(v, int) and not isinstance(v, bool):
+            out.append(f"    public static let {camel(k)}: Int = {v}")
+        else:
+            out.append(f"    public static let {camel(k)}: Double = {float(v)!r}")
+    out.append("    /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.")
+    out.append(f"    public static let response: Double = {round(response(m['stiffness']), 6)!r}")
+    out.append("    /// A fade's response.")
+    out.append(f"    public static let fadeResponse: Double = {round(response(m['fade-stiffness']), 6)!r}")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
+def rust_motion(t):
+    m = motion_values(t)
+    out = [f"//! {HEADER}", "//!", "//! How everything moves (arkui/theme.toml `[motion]`, docs/motion.md).", ""]
+    for k, doc in MOTION.items():
+        v = m[k]
+        out.append(f"/// {doc}")
+        if isinstance(v, int) and not isinstance(v, bool):
+            out.append(f"pub const {screaming(k)}: u64 = {v};")
+        else:
+            out.append(f"pub const {screaming(k)}: f32 = {float(v)!r};")
+    out.append("/// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.")
+    out.append(f"pub const RESPONSE: f32 = {round(response(m['stiffness']), 6)!r};")
+    out.append("/// A fade's response.")
+    out.append(f"pub const FADE_RESPONSE: f32 = {round(response(m['fade-stiffness']), 6)!r};")
+    return "\n".join(out) + "\n"
+
+
 def colorset(accent):
     def color(hex_):
         r, g, b = rgb(hex_)
@@ -574,6 +659,7 @@ def colorset(accent):
 
 def files(t):
     out = {KOTLIN: kotlin(t), SWIFT_CORE: swift_core(t), SWIFT_UI: swift_ui(t), RUST: rust(t)}
+    out |= {KOTLIN_MOTION: kotlin_motion(t), SWIFT_MOTION: swift_motion(t), RUST_MOTION: rust_motion(t)}
     for accent in t["accent"].values():
         for path in accent["colorsets"]:
             out[os.path.join(path, "Contents.json")] = colorset(accent)

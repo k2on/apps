@@ -73,6 +73,8 @@ import dev.arkui.Stat
 import dev.arkui.SwipeToAct
 import uniffi.money_domain.Cleared
 import uniffi.money_domain.TxnLine
+import dev.arkui.pressable
+import dev.arkui.Press
 
 @Composable
 fun RegisterScreen(ledger: Ledger, account: Id?, onBack: () -> Unit) {
@@ -215,7 +217,7 @@ fun TxnRow(
             if (divided) RowDivider(inset = Space.l + 8.dp + Space.m)
             Row(
                 Modifier.fillMaxWidth()
-                    .clickable(onClickLabel = if (onClick == null) "Edit" else "Open", onClick = { onClick?.invoke() ?: shell.onEdit(t) })
+                    .pressable(onClickLabel = if (onClick == null) "Edit" else "Open", onClick = { onClick?.invoke() ?: shell.onEdit(t) }, press = Press.Highlight)
                     .padding(start = Space.l, end = Space.l, top = Space.m, bottom = Space.m)
                     .semantics(mergeDescendants = true) {
                         contentDescription =

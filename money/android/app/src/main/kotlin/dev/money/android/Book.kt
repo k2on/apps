@@ -89,6 +89,11 @@ import uniffi.money_domain.PayeeLine
 import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
 import uniffi.money_domain.TxnLine
+import dev.arkui.Feedback
+import kotlinx.coroutines.flow.update
+
+/** What the hand last felt of the book's changes, and how many there have been (`Book.felt`). */
+data class Felt(val count: Int, val kind: Feedback)
 
 /** The link to the server, in what a screen says of it. */
 data class Link(
@@ -266,6 +271,15 @@ private constructor(
     /** Sentences to show once each: a refusal, what a sync brought. */
     val notes: SharedFlow<String> = _notes.asSharedFlow()
 
+    /**
+     * The last change the hand should feel, and how many there have been: bumped once the domain
+     * has taken a change the iPhone answers with `.sensoryFeedback` — saved, approved, assigned,
+     * moved, reconciled, a photo kept (a success); cleared (a selection) — and never for one it
+     * refused. The app's root performs it (`SensoryFeedback`) as the change is composed.
+     */
+    val felt: StateFlow<Felt> get() = _felt
+    private val _felt = MutableStateFlow(Felt(0, Feedback.Success))
+
     /** Every note said, in order: the diagnostics' and the tests'. */
     val said: MutableList<String> = CopyOnWriteArrayList()
 
@@ -412,10 +426,12 @@ private constructor(
         _notes.tryEmit(note)
     }
 
-    // A change by the domain's function: its refusal said in its sentence.
-    private fun act(what: String, f: (Money) -> Unit) = post {
+    // A change by the domain's function: its refusal said in its sentence, and what the hand feels
+    // of it, if anything, once it is taken.
+    private fun act(what: String, feel: Feedback? = null, f: (Money) -> Unit) = post {
         try {
             f(money)
+            if (feel != null) _felt.update { Felt(it.count + 1, feel) }
         } catch (e: Refusal) {
             say("Couldn't $what: ${why(e)}")
         }
@@ -444,15 +460,15 @@ private constructor(
     }
 
     fun assign(category: Id, amount: Long) =
-        act("assign it") { it.assign(Assign(month, category, amount)) }
+        act("assign it", Feedback.Success) { it.assign(Assign(month, category, amount)) }
 
     /** Last month's amounts, each target's shortfall, or nothing — for `only` these, or every one. */
     fun autoAssign(how: Auto, only: List<Id> = emptyList()) =
-        act("assign the month") { it.autoAssign(AutoAssign(month, how, only)) }
+        act("assign the month", Feedback.Success) { it.autoAssign(AutoAssign(month, how, only)) }
 
     /** `amount` from one category to another; none is Ready to Assign. */
     fun moveMoney(from: Id?, to: Id?, amount: Long) =
-        act("move the money") { it.moveMoney(MoveMoney(month, from, to, amount)) }
+        act("move the money", Feedback.Success) { it.moveMoney(MoveMoney(month, from, to, amount)) }
 
     /** An overspent category made whole from `from` (none: Ready to Assign). */
     fun cover(category: Id, from: Id?) = post {
@@ -506,7 +522,7 @@ private constructor(
 
     /** A new transaction, or the one corrected; one corrected into a transfer becomes one (`transfer_to`). */
     fun save(f: TxnForm) =
-        act("save the transaction") { m ->
+        act("save the transaction", Feedback.Success) { m ->
             val editing = f.editing
             if (editing != null) {
                 m.editTransaction(
@@ -528,15 +544,16 @@ private constructor(
 
     fun delete(ids: List<Id>) = act("delete it") { it.deleteTransactions(Txns(ids)) }
 
-    fun approve(ids: List<Id>) = act("approve it") { it.approve(Txns(ids)) }
+    fun approve(ids: List<Id>) = act("approve it", Feedback.Success) { it.approve(Txns(ids)) }
 
     fun categorize(ids: List<Id>, category: Id?) = act("file it") { it.categorize(Categorize(ids, category)) }
 
-    fun setCleared(id: Id, cleared: Boolean) = act("clear it") { it.setCleared(SetCleared(id, cleared)) }
+    fun setCleared(id: Id, cleared: Boolean) =
+        act("clear it", Feedback.Selection) { it.setCleared(SetCleared(id, cleared)) }
 
     /** The account agreed with the bank at `balance`, today; a difference becomes an adjustment. */
     fun reconcile(account: Id, balance: Long) =
-        act("reconcile") {
+        act("reconcile", Feedback.Success) {
             it.reconcile(Reconcile(account, balance, today))
             say("Reconciled")
         }
@@ -598,7 +615,7 @@ private constructor(
      * A change by the domain's function as it is, said as `what` when refused: what the server's
      * importer does, which a test stands in for (the demo holds its role).
      */
-    internal fun change(what: String, f: (Money) -> Unit) = act(what, f)
+    internal fun change(what: String, f: (Money) -> Unit) = act(what, f = f)
 
     /**
      * Ask the bank for anything new. The demo's bank answers at once; a server's importer is asked
@@ -663,7 +680,7 @@ private constructor(
      * server now or on its next connection, where it is read.
      */
     fun addPhoto(jpeg: ByteArray, txn: Id?, media: String = "image/jpeg") =
-        act("keep the photo") { m ->
+        act("keep the photo", Feedback.Success) { m ->
             val hash = peer.putFile(jpeg, media)
             m.addPhoto(AddPhoto(FileRef(hash, jpeg.size.toLong(), media), txn))
             say(if (state.value.link.linked) "Photo kept: reading it" else "Photo kept: it's read once you're online")

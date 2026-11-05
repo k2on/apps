@@ -65,6 +65,8 @@ import dev.arkui.Space
 import dev.arkui.Tapped
 import dev.arkui.quiet
 import dev.arkui.rememberHero
+import dev.arkui.pressable
+import dev.arkui.Press
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -133,7 +135,7 @@ fun TrackRow(
 ) {
     Recompositions.hit("TrackRow")
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Space.page, end = Space.xs).height(ROW),
+        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(start = Space.page, end = Space.xs).height(ROW),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(Space.thumb), contentAlignment = Alignment.Center) { leading() }
@@ -388,7 +390,7 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
     val hero = rememberHero(6.dp)
     val open = hero.lifting(onOpen)
     Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.l, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-        Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).clickable(onClick = open), corner = 6.dp)
+        Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).pressable(onClick = open), corner = 6.dp)
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             Text(label, style = quiet(MaterialTheme.typography.labelSmall))
@@ -408,7 +410,7 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
 @Composable
 fun Entry(title: String, over: String, under: String, count: String, onOpen: () -> Unit, picture: (@Composable (Modifier) -> Unit)? = null) {
     val hero = if (picture != null) rememberHero(4.dp) else null
-    Column(Modifier.fillMaxWidth().clickable(onClick = hero?.lifting(onOpen) ?: onOpen).padding(start = Space.page)) {
+    Column(Modifier.fillMaxWidth().pressable(onClick = hero?.lifting(onOpen) ?: onOpen, press = Press.Highlight).padding(start = Space.page)) {
         Row(Modifier.fillMaxWidth().padding(end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
             if (picture != null && hero != null) {
                 picture(hero.modifier)
@@ -429,7 +431,7 @@ fun Entry(title: String, over: String, under: String, count: String, onOpen: () 
 /** The line under a section that opens the rest of it — "See All 40 Works" — in the accent. */
 @Composable
 fun MoreLine(label: String, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().pressable(onClick = onOpen, press = Press.Highlight).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
         Chevron()
     }
@@ -471,7 +473,7 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
 fun Face(name: String, art: String, role: String, onOpen: (() -> Unit)?) {
     val hero = if (onOpen != null) rememberHero(Space.corner, round = true) else null
     Column(
-        Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.clickable(onClick = hero.lifting(onOpen)) else Modifier),
+        Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.pressable(onClick = hero.lifting(onOpen)) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Cover(name, art, 88.dp, Modifier.size(88.dp).then(hero?.modifier ?: Modifier), round = true)

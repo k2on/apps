@@ -221,7 +221,7 @@ public fun CoverCard(
     val hero = if (opens) rememberHero(Space.corner, round = round) else null
     Column(
         Modifier.width(side)
-            .clickable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
+            .pressable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
             Cover(
                 seed,
                 art,
@@ -264,7 +264,7 @@ public fun ListRow(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .clickable(onClick = onClick)
+            .pressable(onClick = onClick, press = Press.Highlight)
             .padding(horizontal = Space.page, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -304,7 +304,7 @@ public fun SheetRow(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .clickable(onClick = onClick)
+            .pressable(onClick = onClick, press = Press.Highlight)
             .padding(horizontal = Space.xl)
             .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,

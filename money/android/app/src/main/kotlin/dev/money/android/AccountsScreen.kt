@@ -10,7 +10,6 @@
 // top bar, as Google's apps put them.
 package dev.money.android
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +68,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.style.TextOverflow
 import org.json.JSONObject
 import uniffi.money_domain.AccountLine
+import dev.arkui.pressable
+import dev.arkui.Press
 
 @Composable
 fun AccountsScreen(ledger: Ledger) {
@@ -160,7 +161,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
     val a = LocalAmounts.current
     Row(
         Modifier.fillMaxWidth()
-            .clickable(onClickLabel = "Open the register", onClick = onClick)
+            .pressable(onClickLabel = "Open the register", onClick = onClick, press = Press.Highlight)
             .padding(horizontal = Space.l, vertical = Space.m)
             .semantics(mergeDescendants = true) {
                 contentDescription =
@@ -199,7 +200,7 @@ private fun LinkRow(
     accent: Boolean = false,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.l, vertical = Space.m).height(32.dp),
+        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.m).height(32.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }

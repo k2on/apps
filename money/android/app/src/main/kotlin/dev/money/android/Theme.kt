@@ -21,11 +21,16 @@ import dev.arkui.LocalAmounts
 import dev.arkui.LocalArkTheme
 import dev.arkui.MaterialYou
 import dev.arkui.arkuiScheme
+import dev.arkui.expressiveTypography
+import dev.arkui.tracked
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+
+/** money's type scale: arkui's expressive one, tracked for each size. */
+private val MoneyType = expressiveTypography().tracked()
 
 /** The palette, both sides: arkui's, in the green. */
 object Palette {
@@ -41,7 +46,9 @@ object Palette {
 fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
     val locale = ConfigurationCompat.getLocales(LocalConfiguration.current)[0] ?: Locale.getDefault()
     val amounts = remember(locale) { Amounts(locale) }
-    MaterialYou(light = Palette.Light, dark = Palette.Dark, darkTheme = dark, dynamic = dynamic) {
+    // Material's expressive scale, tracked and led for each size as the iPhone's is (arkui's
+    // `tracked`): the big figures and titles tight, body text as drawn, captions a little open.
+    MaterialYou(light = Palette.Light, dark = Palette.Dark, darkTheme = dark, dynamic = dynamic, typography = MoneyType) {
         CompositionLocalProvider(LocalAmounts provides amounts, LocalArkTheme provides ArkTheme(Accent.Green.art(dark)), content = content)
     }
 }

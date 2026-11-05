@@ -8,7 +8,6 @@
 package dev.money.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +46,7 @@ import dev.arkui.Space
 import dev.arkui.Stepper
 import dev.arkui.Tone
 import dev.arkui.chartPalette
+import dev.arkui.pressable
 
 /** A card's corners, as the iPhone's grouped lists round theirs. */
 val CardCorner: Dp = 20.dp
@@ -87,10 +87,11 @@ fun HeroCard(
     Column(
         modifier
             .fillMaxWidth()
+            // Before the clip and the fills, so the whole card gives under the finger.
+            .then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .background(Brush.linearGradient(listOf(ink.copy(alpha = 0.22f), ink.copy(alpha = 0.04f))))
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(Space.xl)
             .semantics(mergeDescendants = true) { contentDescription = "$caption, ${a.format(cents)}" + if (note.isNotEmpty()) ", $note" else "" },
         verticalArrangement = Arrangement.spacedBy(Space.xs),

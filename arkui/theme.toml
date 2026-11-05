@@ -222,3 +222,41 @@ large = [
   ["outline", "background"],
   ["outline", "container"],
 ]
+
+# How everything moves, for every platform: the one place a spring, a fade,
+# a flick or a press is written down (docs/motion.md says when each is
+# used). Kotlin takes the stiffness, Swift and Rust the response worked out
+# from it (2π/√stiffness), so the three move alike. No app writes a number
+# of its own: one it needs that is not here is added here.
+[motion]
+# The one stiffness every move rides: a page, the player, a sheet, a row.
+stiffness = 700.0
+# A move nothing threw: arrives and stops (Apple's default).
+move = 1.0
+# A move a flick threw: the flick's momentum spending itself.
+momentum = 0.8
+# How large a thing is and what of it shows: never past its size.
+size = 1.0
+# A fade, a hover, the gentle stand-in when motion is reduced: ~150 ms.
+fade-stiffness = 2500.0
+# Where a 0..1 progress counts as there: a twentieth of a pixel of a page.
+rest = 0.0005
+# Where a move in pixels counts as there.
+rest-px = 0.5
+# The most a settle may take, in ms: a critically damped settle is at
+# rest first, so it bounds only a release the tuning did not see.
+cap-ms = 450
+# A release at least this fast (dp, pt or logical px a second) was a flick.
+flick = 500.0
+# How quickly a projected release slows, per ms: iOS's normal rate, and its
+# fast one for a release that decides an act (a skip, going back).
+deceleration = 0.998
+snappy = 0.99
+# A back gesture's preview: at most this share of what it previews, and
+# this much of the gesture to come 63% of the way.
+preview = 0.1
+give = 0.12
+# A cover or a chip pressed: how small it gives.
+press = 0.97
+# The least a thing scales from when it enters: never from nothing.
+enter-scale = 0.95

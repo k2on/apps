@@ -16,6 +16,12 @@
 // when the menu closes, as iOS's menus and popovers grow out of the button
 // that opened them.
 //
+// It all moves on arkui's critically damped spring for where a thing is:
+// nothing here was thrown, so nothing overshoots. With motion reduced
+// (`reducedMotion`), nothing glides or buds — a piece is simply where its
+// layout has it — and a morph does not grow: the menu fades in where it
+// opens, over the button, and fades out back into it, on `Springs.fade`.
+//
 // Everything is drawn with what every Android version has: a path, a
 // clip and a paint's shadow layer (drawn on hardware from Android 9; below
 // it the glass has no shadow), so a screenshot on the JVM draws what a
@@ -181,6 +187,7 @@ public fun GlassContainer(
     val scope = rememberCoroutineScope()
     val space = remember { GlassSpace(scope) }
     space.density = density
+    space.reduced = reducedMotion()
     space.reach = with(density) { spacing.toPx() }
     space.fill = Glass.fill()
     space.blur = with(density) { Glass.shadow.toPx() }
@@ -235,11 +242,16 @@ public fun GlassMorph(
         return
     }
     val p = remember { Animatable(held ?: if (expanded) 1f else 0f) }
+    val reduced = reducedMotion()
     LaunchedEffect(expanded, held) {
         if (held != null) p.snapTo(held)
-        else p.animateTo(if (expanded) 1f else 0f, spring(Springs.MOVE, Springs.STIFFNESS, REST))
+        else
+            p.animateTo(
+                if (expanded) 1f else 0f,
+                if (reduced) Springs.fade() else spring(Springs.MOVE, Springs.STIFFNESS, REST))
     }
     val m = remember(space) { Morph(p).also { space.morphs += it } }
+    m.reduced = reduced
     DisposableEffect(space, m) { onDispose { space.morphs -= m } }
     m.expanded = expanded && held == null
     m.shape = shape
@@ -300,6 +312,9 @@ private class Ghost(val shape: GlassShape, from: Rect) {
 /** A [GlassMorph] as its container draws it: how far out it is, and what it holds. */
 private class Morph(val p: Animatable<Float, *>) {
     var expanded by mutableStateOf(false)
+
+    /** Reduced motion: the menu fades in and out where it opens, rather than growing there. */
+    var reduced: Boolean = false
     var shape: GlassShape = GlassShape.Capsule
     var menuWidth: Dp = Glass.menuWidth
     var menuCorner: Dp = Glass.menuCorner
@@ -322,6 +337,7 @@ private class Morph(val p: Animatable<Float, *>) {
 @Stable
 private class GlassSpace(val scope: CoroutineScope) {
     var density: Density = Density(1f)
+    var reduced = false
     var reach = 0f
     var fill = Color.White
     var blur = 0f
@@ -335,7 +351,7 @@ private class GlassSpace(val scope: CoroutineScope) {
 
     /** A piece first laid out at `r`: there, on the first frame; budding from a neighbour after. */
     fun join(shape: GlassShape, r: Rect, hidden: (() -> Boolean)?): Piece {
-        val start = if (settled) bud(r, null) else r
+        val start = if (settled && !reduced) bud(r, null) else r
         val p = Piece(shape, start, hidden)
         pieces += p
         if (start != r) scope.launch { p.drawn.animateTo(r, glide()) }
@@ -345,13 +361,13 @@ private class GlassSpace(val scope: CoroutineScope) {
     fun move(p: Piece, r: Rect) {
         if (r == p.target) return
         p.target = r
-        scope.launch { p.drawn.animateTo(r, glide()) }
+        scope.launch { if (reduced) p.drawn.snapTo(r) else p.drawn.animateTo(r, glide()) }
     }
 
     /** A piece gone: it shrinks into its nearest neighbour, or to nothing, and is forgotten. */
     fun leave(p: Piece) {
         pieces -= p
-        if (!settled || p.hidden?.invoke() == true) return
+        if (!settled || reduced || p.hidden?.invoke() == true) return
         val from = p.drawn.value
         val g = Ghost(p.shape, from)
         ghosts += g
@@ -635,6 +651,9 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
                             detectTapGestures { at -> if (!m.at.contains(at)) m.onDismiss() }
                         }
                     else Modifier)
+                .then(
+                    if (m.reduced) Modifier.graphicsLayer { alpha = m.p.value.coerceIn(0f, 1f) }
+                    else Modifier)
                 .drawWithContent {
                     val r = m.at
                     if (r.width <= 0f || r.height <= 0f) return@drawWithContent
@@ -691,7 +710,8 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
                     (if (up) slot.bottom - n.height else slot.top).coerceIn(
                         margin, max(margin, h - margin - n.height))
             val menuAt = Rect(Offset(left, top), Size(n.width.toFloat(), n.height.toFloat()))
-            val p = m.p.value
+            // Reduced motion: the glass is the menu's whole way, and only its opacity moves.
+            val p = if (m.reduced) 1f else m.p.value
             val q = p.coerceIn(0f, 1f)
             val r =
                 Rect(
