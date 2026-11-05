@@ -1,0 +1,44 @@
+    #content
+                  [field] pressable
+                    'Payee, category, memo or amount' [text]
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To Review (3)' [text]
+                      [button]
+                  '3 to Review' [text]
+                  [button] pressable
+                    'Approve All' [text]
+                    [button]
+                    [button] pressable
+                      'Thai Basil, -$9.05, Dining Out, waiting for review, uncleared'
+                      'Thai Basil' [text]
+                      'Dining Out' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$9.05' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Netflix, -$15.00, Subscriptions, waiting for review, cleared'
+                      'Netflix' [text]
+                      'Subscriptions' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$15.00' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Whole Foods Market, -$135.46, Groceries, waiting for review, cleared'
+                      'Whole Foods Market' [text]
+                      'Groceries' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$135.46' [text]
+                      [button] pressable
+                  'Swipe right to approve. Tap one to choose its category or change it.' [text]
+                  'Transactions' [text]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
