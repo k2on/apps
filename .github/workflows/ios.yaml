@@ -1,7 +1,9 @@
 # harken and money for iOS: each app's archive built by nix (flake.nix,
 # `<app>-ios-archive`), signed and sent to TestFlight from main. The same
 # derivations as the apps' iPhone screenshots (`<app>-ios-simulator`): one
-# kernel (`<app>-ios-kernel`), one pinned Xcode.
+# kernel, each slice built only where linked (the simulator's,
+# `<app>-ios-kernel-simulator`, for the tests and the shots; the phone's for
+# the archive), one pinned Xcode.
 #
 # **Built by nix, Xcode pinned by its version.** flake.nix pins the Xcode of
 # GitHub's macos-15 image by its version and build number (`xcode`);
@@ -172,7 +174,30 @@ jobs:
             ${{ env.NIX_CONFIG }}
             ${{ env.XCODE_NIX_CONF }}
 
-      - if: github.ref == 'refs/heads/main' && vars.CACHIX_NAME != ''
+      # The tests' simulator, booting under the nix build (meanwhile.sh), as
+      # app-screens' does: a cold boot after the build was up to nine
+      # minutes before the first test. Started once nix is installed, whose
+      # build users' setting up a booting CoreSimulator slowed. The newest
+      # iPhone the image has for the newest iOS 26 runtime, its id left in
+      # $RUNNER_TEMP/udid.
+      - if: matrix.app.test
+        name: Start booting the tests' simulator
+        run: |
+          bash .github/screens/meanwhile.sh start boot bash -c '
+            id=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)[\"devices\"]
+          rts = sorted((k for k in d if \"iOS-26\" in k), key=lambda k: [int(x) for x in k.split(\"iOS-\")[1].split(\"-\")])
+          phones = [x for k in reversed(rts) for x in d[k] if x[\"name\"].startswith(\"iPhone\")]
+          print(phones[0][\"udid\"] if phones else \"\")")
+            [ -n "$id" ] || { echo "no iOS 26 iPhone simulator on this image"; exit 1; }
+            echo "$id" > "$RUNNER_TEMP/udid"
+            echo "Booting $id"
+            xcrun simctl boot "$id" && xcrun simctl bootstatus "$id" -b'
+
+      # Main's builds, and a pull request's of this repository's (a fork's
+      # has no token), go to the cache: app-screens' Mac takes them from it.
+      - if: (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
@@ -181,31 +206,38 @@ jobs:
           # store any more: Apple's licence keeps it off any cache.
           pushFilter: "[Xx]code([^Gg]|$)"
 
-      # nix's archive (flake.nix, `<app>-ios-archive`), the cache's when
-      # nothing it is built from moved, and its kernel for the tests; the
-      # archive given its build number, the commit's time in seconds.
+      # nix's archive (flake.nix, `<app>-ios-archive`, over the phone's
+      # slice alone), the cache's when nothing it is built from moved, and
+      # the simulator's slice for the tests (`<app>-ios-kernel-simulator`);
+      # the archive given its build number, the commit's time in seconds.
+      #
+      # **One kernel per commit.** A pull request's of this repository's
+      # goes to the cache too (the push above; a fork's has no token), with
+      # the screenshots' app over the same slice: app-screens takes a PR's
+      # iPhone shots once this run has ended, so its Mac fetches both rather
+      # than build them a second time.
       - name: Build the kernel, and the archive (not on PRs), with nix
         env:
           APP: ${{ matrix.app.name }}
           NAME: ${{ matrix.app.App }}
         run: |
-          # A pull request's: the kernel its tests link, and no archive, which
-          # nothing would sign or send (its Swift is built by its screenshots).
+          # A pull request's: the kernel its tests link and the screenshots'
+          # app, and no archive, which nothing would sign or send.
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel" "$APP-ios-simulator" > "$RUNNER_TEMP/built"
+            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel-simulator" "$APP-ios-simulator" > "$RUNNER_TEMP/built"
           else
-            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-archive" "$APP-ios-kernel" > "$RUNNER_TEMP/built"
+            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-archive" "$APP-ios-kernel-simulator" > "$RUNNER_TEMP/built"
           fi
           cat "$RUNNER_TEMP/built"
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             bash .github/ios-archive.sh "$NAME" "$(awk -v p="$APP-ios-archive" '$1 == p {print $2}' "$RUNNER_TEMP/built")" "$(git log -1 --format=%ct)"
           fi
-          kernel=$(awk -v p="$APP-ios-kernel" '$1 == p {print $2}' "$RUNNER_TEMP/built")
+          kernel=$(awk -v p="$APP-ios-kernel-simulator" '$1 == p {print $2}' "$RUNNER_TEMP/built")
           mkdir -p "$APP/ffi/ios" && cp -R "$kernel"/*.xcframework "$kernel"/swift "$APP/ffi/ios/" && chmod -R u+w "$APP/ffi/ios"
 
-      # Its tests, when the list says it has them run: on a simulator, the
-      # newest iPhone the image has for the newest iOS 26 runtime, the app
-      # built here over the same kernel.
+      # Its tests, when the list says it has them run: on the simulator
+      # booted meanwhile, the app built here over the same kernel (the
+      # simulator's slice, as the screenshots' app links).
       - name: Test
         if: matrix.app.test
         working-directory: ${{ matrix.app.name }}/ios
@@ -214,13 +246,9 @@ jobs:
         run: |
           # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
           "$(nix build --no-link --print-out-paths "$GITHUB_WORKSPACE#xcodegen")/bin/xcodegen" generate
-          id=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          d = json.load(sys.stdin)["devices"]
-          rts = sorted((k for k in d if "iOS-26" in k), key=lambda k: [int(x) for x in k.split("iOS-")[1].split("-")])
-          phones = [x for k in reversed(rts) for x in d[k] if x["name"].startswith("iPhone")]
-          print(phones[0]["udid"] if phones else "")')
-          if [ -z "$id" ]; then echo "::error::no iOS 26 iPhone simulator on this image"; exit 1; fi
+          # The simulator booted under the build.
+          bash "$GITHUB_WORKSPACE/.github/screens/meanwhile.sh" wait boot
+          id=$(cat "$RUNNER_TEMP/udid")
           xcodebuild test \
             -project "$NAME.xcodeproj" \
             -scheme "$NAME" \
