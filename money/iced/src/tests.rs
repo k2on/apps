@@ -372,7 +372,7 @@ use arkui::vim::{Action, Motion};
 fn drawn(app: &App) -> Vec<String> {
     app.shown()
         .iter()
-        .flat_map(|s| std::iter::once(s.group.name.to_uppercase()).chain(s.rows.iter().map(|l| l.name.clone())))
+        .flat_map(|s| std::iter::once(s.group.name.clone()).chain(s.rows.iter().map(|l| l.name.clone())))
         .collect()
 }
 
