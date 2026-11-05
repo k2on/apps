@@ -6,8 +6,9 @@
 # On its own time, after a push: nothing waits on it, and the docs page reads
 # the branch through raw.githubusercontent.com when it loads, so a capture
 # appears with nothing redeployed. A phone whose job fails keeps what it had
-# on the branch. Pushed from a claude/** branch it captures and uploads, and
-# publishes nothing.
+# on the branch. On a pull request it captures and uploads, and publishes
+# nothing. Only main and pull requests: a branch with no PR has nobody to
+# look at its captures, and each run holds one of the few macOS runners.
 #
 # The shots come from the showcase apps (showcase/), one per phone: the
 # shared components and a screen that draws one shot of them by name, with
@@ -17,17 +18,32 @@ name: screens
 
 on:
   push:
-    branches: [main, "claude/**"]
-    paths:
+    branches: [main]
+    paths: &paths
       - "showcase/**"
       - "swift/ArkUI/**"
       - "kotlin/arkui/**"
       - "docs/site/src/components.rs"
-      - ".github/screens/**"
+      # Its own scripts, not the app screenshots' beside them; and not the
+      # flake, which moves for every reason and whose tools here (ffmpeg,
+      # XcodeGen) are keyed by it in the cache anyway.
+      - ".github/screens/android.sh"
+      - ".github/screens/ios.sh"
+      - ".github/screens/ios-tools.sh"
+      - ".github/screens/encode.sh"
+      - ".github/screens/record.swift"
+      - ".github/screens/timewarp.c"
+      - ".github/screens/bundle.sh"
+      - ".github/screens/tools.sh"
+      - ".github/screens/manifest.py"
       - ".github/workflows/screens.yaml"
-      # Its tools: screens-ffmpeg and xcodegen.
-      - "flake.nix"
-      - "flake.lock"
+  # Pull requests into main only: the recordings are the docs site's, which
+  # main publishes, and a branch's pull request into another branch (a
+  # piece of work merged into a larger one) is recorded when that one
+  # reaches main. Each run is a Mac's half hour.
+  pull_request:
+    branches: [main]
+    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -255,6 +271,11 @@ jobs:
     needs: [android, ios]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    # One writer of the branch at a time, with app-screens.yaml's publish,
+    # whose apps/ this keeps.
+    concurrency:
+      group: screens-branch
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 

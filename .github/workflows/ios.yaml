@@ -1,48 +1,56 @@
-# harken and money for iOS: their Rust kernels built once, together, then
-# each app archived (and money's tested) side by side, and sent to
-# TestFlight from main. One workflow so the kernels share one cargo build
-# and one cache: ArkDB and everything else both link is compiled once.
-# Nothing here depends on build.yaml.
+# harken and money for iOS: each app's archive built by nix (flake.nix,
+# `<app>-ios-archive`), signed and sent to TestFlight from main. The same
+# derivations as the apps' iPhone screenshots (`<app>-ios-simulator`): one
+# kernel (`<app>-ios-kernel`), one pinned Xcode.
 #
-# **kernel** builds harken's and money's libraries with rustup and cargo for
-# a phone and the simulator, in one target directory, and binds each into
-# its xcframework with the Swift UniFFI writes for it (the flake's
-# `.#harken-ios-xcframework` and `.#money-ios-xcframework`, built natively
-# because a nix build user cannot use the system xcrun the iOS SDK is found
-# through). The frameworks go to the app jobs as an artifact.
+# **Built by nix, Xcode pinned by its hash.** flake.nix pins the Xcode of
+# GitHub's macos-15 image by its hash (`xcode`); ../xcode-pinned.sh selects
+# it, and ../nix-xcode.sh builds each app with it, or takes it from the cache
+# when nothing it is built from moved, putting the runner's Xcode in the
+# store only when something must be built. The kernel is built under nix's
+# strict sandbox; the app's own xcodebuild is the one step that cannot be
+# (flake.nix says why), so the runner's nix is relaxed, where every other
+# build is still sandboxed. Main's builds go to Cachix, Xcode never (Apple's
+# licence).
 #
-# **harken** and **money** generate their Xcode projects (XcodeGen, from
-# each app's project.yml), archive unsigned, and from main sign and upload
-# (../ios-upload.sh) with xcodebuild's export: automatic signing with an App
-# Store Connect API key (cloud signing: the distribution certificate is
-# Apple's, kept in the cloud, and the App Store profile is made or reused
-# there) and `destination: upload`, which sends the build straight to App
-# Store Connect, where it appears in TestFlight once Apple has processed it.
-# money's tests run on a simulator against the demo's household.
+# **The archive is unsigned on purpose**, and given its build number after it
+# is built (../ios-archive.sh): the commit's time, always rising and never
+# the same twice, as App Store Connect insists; nix builds it with
+# project.yml's, so its hash moves only with what it is built from. Signed,
+# it would be signed for development, and a fresh runner has no development
+# certificate, so every run had Xcode make one through the API, until the
+# team held as many as Apple allows. Unsigned, nothing is made per run;
+# ../ios-upload.sh's export signs for the App Store with the cloud's
+# certificate (automatic signing with an App Store Connect API key) and
+# sends it with `destination: upload`, after which it appears in TestFlight.
+# Off main it is signed the same way and sent nowhere (`destination:
+# export`): what a branch checks. money's tests run on a simulator against
+# the demo's household, over the same kernel.
 #
-# **The archive is unsigned on purpose.** Signed, it is signed for
-# development, and a fresh runner has no development certificate, so every
-# run had Xcode make one through the API — until the team held as many as
-# Apple allows and the archive failed with "Your account has reached the
-# maximum number of certificates". Unsigned, nothing is made per run; the
-# export signs for the App Store with the cloud's certificate. Neither app
-# has an entitlements file for an unsigned archive to lose.
+# **The apps are the flake's list** (`publish.ios`), one job each: an app is
+# sent only when its archive is new to TestFlight (its key, its derivation's
+# hash, not seen sent before, as build.yaml's APKs), and only when the list
+# says it goes there; its tests run when the list says so.
 #
 # Repository secrets (Settings > Secrets and variables > Actions > Secrets):
 #   ASC_KEY_ID          the API key's Key ID
 #   ASC_ISSUER_ID       the Issuer ID shown above the keys list
 #   ASC_KEY_P8          the .p8 file's whole contents, BEGIN/END lines included
 #   APPLE_TEAM_ID       the ten-character Team ID
-# Repository variables (the Variables tab), optional:
-#   IOS_BUNDLE_ID          harken's bundle ID; us.koon.harken when unset
-#   MONEY_IOS_BUNDLE_ID    money's bundle ID; us.koon.money when unset
-#   MONEY_IOS_UPLOAD       `true` to upload money from main (once its App
-#                          Store Connect record exists); else it builds only
+#   CACHIX_AUTH_TOKEN   to push main's builds to the cache (CACHIX_NAME, a
+#                       variable, names it)
+# Repository variables (the Variables tab):
+#   CACHIX_NAME            the cache main's builds are pushed to
+# (An app's bundle id is its project.yml's; whether it goes to TestFlight is
+# the flake's list.)
 name: ios
 
+# Main's pushes (TestFlight) and pull requests: not every branch's push,
+# each holding a macOS runner per app for an archive nothing uploads.
 on:
   push:
-    paths:
+    branches: [main]
+    paths: &paths
       - "harken/ios/**"
       - "harken/ffi/**"
       - "harken/domain/**"
@@ -50,6 +58,8 @@ on:
       - "money/ios/**"
       - "money/ffi/**"
       - "money/domain/**"
+      # The demo's household, which money's library links for its demo.
+      - "money/seed/**"
       # The crates the phones link, not the whole workspace: arkui, arkdb
       # and the desktop apps are none of an iPhone's.
       - "rust/ark/**"
@@ -62,7 +72,15 @@ on:
       - "swift/ArkUI/**"
       - ".github/workflows/ios.yaml"
       - ".github/ios-upload.sh"
-      - ".github/changed.sh"
+      - ".github/ios-archive.sh"
+      - ".github/nix-xcode.sh"
+      - ".github/xcode-pinned.sh"
+      # What the archives are built by.
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+  pull_request:
+    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -74,213 +92,121 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
+# nix's macOS sandbox, relaxed: every build is sandboxed but the one that
+# says __noChroot, each app's own xcodebuild (flake.nix says why).
+env:
+  NIX_CONFIG: |
+    sandbox = relaxed
+    extra-substituters = https://k2on.cachix.org
+    extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
 jobs:
-  kernel:
-    runs-on: macos-15
-    timeout-minutes: 90
-    # Which apps this push moved (../changed.sh): an app is built and tested
-    # whatever, and sent to TestFlight only when its own inputs moved, so a
-    # change to the other app, the desktop or the docs publishes nothing.
+  # The iPhone apps, as the flake lists them (`publish.ios`): evaluated,
+  # not built.
+  plan:
+    runs-on: ubuntu-latest
     outputs:
-      harken: ${{ steps.changed.outputs.harken }}
-      money: ${{ steps.changed.outputs.money }}
+      ios: ${{ steps.plan.outputs.ios }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Which apps moved
-        id: changed
-        env:
-          BEFORE: ${{ github.event.before }}
+      - uses: DeterminateSystems/nix-installer-action@main
+      - id: plan
         run: |
-          # What an app is built from; the workflow itself is none of it.
-          kernel="rust/ark rust/ark-macros rust/ark-auth rust/ark-peer rust/ark-ffi rust/Cargo.lock rust/Cargo.toml swift/ArkUI"
-          echo "harken=$(bash .github/changed.sh "$BEFORE" $kernel harken/ios harken/ffi harken/domain harken/player)" >> "$GITHUB_OUTPUT"
-          echo "money=$(bash .github/changed.sh "$BEFORE" $kernel money/ios money/ffi money/domain)" >> "$GITHUB_OUTPUT"
-          cat "$GITHUB_OUTPUT"
+          nix eval --json .#publish.x86_64-linux.ios > ios.json
+          # A pull request's: only the apps with tests to run. Each app's
+          # Swift is built for the simulator by the PR's screenshots
+          # (app-screens.yaml) anyway, and off main an archive goes nowhere.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then jq -c 'map(select(.test))' ios.json > t && mv t ios.json; fi
+          jq . ios.json
+          echo "ios=$(jq -c . ios.json)" >> "$GITHUB_OUTPUT"
 
-      # The newest Xcode 26 on the image: Liquid Glass needs the iOS 26 SDK.
-      - name: Select Xcode
-        run: |
-          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
-          if [ -z "$xcode" ]; then
-            echo "::error::no Xcode 26 on this runner image"; exit 1
-          fi
-          sudo xcode-select -s "$xcode/Contents/Developer"
-          xcodebuild -version
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-
-      # One cache for both kernels: what they share is built once and kept.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust
-          key: ios-kernels
-
-      # Both libraries for each iOS target and for this Mac (which UniFFI
-      # reads the Swift from), each cargo call building both so what they
-      # share compiles once, without their default features (money's `page`,
-      # the scanner's corner model, is Android's: VisionKit finds an iPhone's
-      # pages); then each app's two iOS builds bound as one
-      # xcframework with UniFFI's headers, and its Swift beside it with the
-      # bridge's typed half.
-      - name: Build the kernels
-        working-directory: rust
-        env:
-          IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-        run: |
-          for t in aarch64-apple-ios aarch64-apple-ios-sim; do
-            cargo build --locked --release -p harken-ffi -p money-ffi --lib --no-default-features --target "$t"
-          done
-          cargo build --locked --release -p harken-ffi -p money-ffi --lib --no-default-features
-          for pair in harken:Harken money:Money; do
-            app=${pair%%:*} Name=${pair##*:}
-            gen="$RUNNER_TEMP/$app/bindings" heads="$RUNNER_TEMP/$app/headers"
-            cargo run --locked --release -p ark-ffi --features bindgen --bin uniffi-bindgen -- \
-              generate --library "target/release/lib${app}_ffi.dylib" \
-              --language swift --no-format --out-dir "$gen"
-            mkdir -p "$heads"
-            cp "$gen"/*.h "$heads/"
-            cat "$gen"/*.modulemap > "$heads/module.modulemap"
-            out="../$app/ffi/ios"
-            rm -rf "$out" && mkdir -p "$out/swift"
-            xcodebuild -create-xcframework \
-              -library "target/aarch64-apple-ios/release/lib${app}_ffi.a" -headers "$heads" \
-              -library "target/aarch64-apple-ios-sim/release/lib${app}_ffi.a" -headers "$heads" \
-              -output "$out/${Name}FFI.xcframework"
-            cp "$gen"/*.swift ark-ffi/swift/Typed.swift "$out/swift/"
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kernels
-          path: |
-            harken/ffi/ios
-            money/ffi/ios
-          if-no-files-found: error
-          retention-days: 3
-
-  harken:
-    needs: kernel
+  app:
+    needs: plan
+    if: needs.plan.outputs.ios != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.ios) }}
+    name: ${{ matrix.app.name }}
     runs-on: macos-15
-    timeout-minutes: 90
-    env:
-      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'us.koon.harken' }}
-      UPLOAD: ${{ github.ref == 'refs/heads/main' && needs.kernel.outputs.harken == 'true' }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: |
-          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
-          if [ -z "$xcode" ]; then
-            echo "::error::no Xcode 26 on this runner image"; exit 1
-          fi
-          sudo xcode-select -s "$xcode/Contents/Developer"
-          xcodebuild -version
-
-      - uses: actions/download-artifact@v4
+      # Whether this archive was sent before: its key is its derivation's
+      # hash, which moves only with what it is built from, so an app whose
+      # inputs have not moved is not sent again (as build.yaml's APKs).
+      - id: seen
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@v4
         with:
-          name: kernels
+          path: ios-seen
+          key: ios-${{ matrix.app.name }}-${{ matrix.app.key }}
+          lookup-only: true
 
-      - name: Generate the Xcode project
-        working-directory: harken/ios
-        run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          xcodegen generate
-
-      # The build number is the commit's time in seconds: always rising, and
-      # never the same twice, which App Store Connect insists on. The
-      # marketing version stays what project.yml says. Unsigned: the upload
-      # signs it (see the top of this file).
-      - name: Archive
-        working-directory: harken/ios
+      # Where it goes: to TestFlight from main, when it is new and the list
+      # says so; off main, signed and sent nowhere, to check the signing.
+      - name: Where it goes (PRs nowhere, other branches signed only, main to TestFlight)
         env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SEEN: ${{ steps.seen.outputs.cache-hit }}
+          TESTFLIGHT: ${{ matrix.app.testflight }}
         run: |
-          build=$(git log -1 --format=%ct)
-          xcodebuild archive \
-            -project Harken.xcodeproj \
-            -scheme Harken \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Harken.xcarchive" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY= \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            CURRENT_PROJECT_VERSION="$build"
+          # A pull request's is built and tested, and signed by nothing: a
+          # fork's has no keys, and what an export would prove the archive
+          # already has.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then send=
+          elif [ "$GITHUB_REF" != refs/heads/main ]; then send="export"
+          elif [ "$TESTFLIGHT" = true ] && [ "$SEEN" != true ]; then send="upload"
+          else send=; fi
+          echo "SEND=$send" | tee -a "$GITHUB_ENV"
 
-      - name: Upload to TestFlight
-        if: env.UPLOAD == 'true'
-        env:
-          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash .github/ios-upload.sh Harken
+      - name: The pinned Xcode
+        run: bash .github/xcode-pinned.sh .
 
-      - name: Remove the API key
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/asc"
-
-  money:
-    needs: kernel
-    runs-on: macos-15
-    timeout-minutes: 90
-    env:
-      BUNDLE_ID: ${{ vars.MONEY_IOS_BUNDLE_ID || 'us.koon.money' }}
-      UPLOAD: ${{ github.ref == 'refs/heads/main' && vars.MONEY_IOS_UPLOAD == 'true' && needs.kernel.outputs.money == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: |
-          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
-          if [ -z "$xcode" ]; then
-            echo "::error::no Xcode 26 on this runner image"; exit 1
-          fi
-          sudo xcode-select -s "$xcode/Contents/Developer"
-          xcodebuild -version
-
-      - uses: actions/download-artifact@v4
+      - uses: cachix/install-nix-action@v31
         with:
-          name: kernels
+          extra_nix_config: ${{ env.NIX_CONFIG }}
 
-      - name: Generate the Xcode project
-        working-directory: money/ios
-        run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          xcodegen generate
+      - if: github.ref == 'refs/heads/main' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "Xcode_"
 
-      - name: Archive
-        working-directory: money/ios
+      # nix's archive (flake.nix, `<app>-ios-archive`), the cache's when
+      # nothing it is built from moved, and its kernel for the tests; the
+      # archive given its build number, the commit's time in seconds.
+      - name: Build the kernel, and the archive (not on PRs), with nix
         env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP: ${{ matrix.app.name }}
+          NAME: ${{ matrix.app.App }}
         run: |
-          build=$(git log -1 --format=%ct)
-          xcodebuild archive \
-            -project Money.xcodeproj \
-            -scheme Money \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Money.xcarchive" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY= \
-            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
-            CURRENT_PROJECT_VERSION="$build"
+          # A pull request's: the kernel its tests link, and no archive, which
+          # nothing would sign or send (its Swift is built by its screenshots).
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel" > "$RUNNER_TEMP/built"
+          else
+            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-archive" "$APP-ios-kernel" > "$RUNNER_TEMP/built"
+          fi
+          cat "$RUNNER_TEMP/built"
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            bash .github/ios-archive.sh "$NAME" "$(awk -v p="$APP-ios-archive" '$1 == p {print $2}' "$RUNNER_TEMP/built")" "$(git log -1 --format=%ct)"
+          fi
+          kernel=$(awk -v p="$APP-ios-kernel" '$1 == p {print $2}' "$RUNNER_TEMP/built")
+          mkdir -p "$APP/ffi/ios" && cp -R "$kernel"/*.xcframework "$kernel"/swift "$APP/ffi/ios/" && chmod -R u+w "$APP/ffi/ios"
 
-      # The tests on a simulator: the newest iPhone the image has for the
-      # newest iOS 26 runtime.
+      # Its tests, when the list says it has them run: on a simulator, the
+      # newest iPhone the image has for the newest iOS 26 runtime, the app
+      # built here over the same kernel.
       - name: Test
-        working-directory: money/ios
+        if: matrix.app.test
+        working-directory: ${{ matrix.app.name }}/ios
+        env:
+          NAME: ${{ matrix.app.App }}
         run: |
+          # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
+          "$(nix build --no-link --print-out-paths "$GITHUB_WORKSPACE#xcodegen")/bin/xcodegen" generate
           id=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           d = json.load(sys.stdin)["devices"]
@@ -289,29 +215,40 @@ jobs:
           print(phones[0]["udid"] if phones else "")')
           if [ -z "$id" ]; then echo "::error::no iOS 26 iPhone simulator on this image"; exit 1; fi
           xcodebuild test \
-            -project Money.xcodeproj \
-            -scheme Money \
+            -project "$NAME.xcodeproj" \
+            -scheme "$NAME" \
             -destination "id=$id" \
-            -resultBundlePath "$RUNNER_TEMP/MoneyTests.xcresult" \
+            -resultBundlePath "$RUNNER_TEMP/$NAME-tests.xcresult" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Keep the test results
-        if: always()
+        if: always() && matrix.app.test
         uses: actions/upload-artifact@v4
         with:
-          name: MoneyTests.xcresult
-          path: ${{ runner.temp }}/MoneyTests.xcresult
+          name: ${{ matrix.app.App }}-tests.xcresult
+          path: ${{ runner.temp }}/${{ matrix.app.App }}-tests.xcresult
           if-no-files-found: ignore
 
-      - name: Upload to TestFlight
-        if: env.UPLOAD == 'true'
+      - name: Sign (not on PRs), and send to TestFlight (main only)
+        if: env.SEND != ''
         env:
+          DESTINATION: ${{ env.SEND }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash .github/ios-upload.sh Money
+        run: bash .github/ios-upload.sh "${{ matrix.app.App }}"
 
-      - name: Remove the API key
+      - name: Remove the API key (not on PRs)
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
+
+      # Remember it as sent, once it has been.
+      - name: Mark this archive as sent to TestFlight (main only)
+        if: success() && env.SEND == 'upload'
+        run: mkdir -p ios-seen && git rev-parse HEAD > ios-seen/commit
+      - if: success() && env.SEND == 'upload'
+        uses: actions/cache/save@v4
+        with:
+          path: ios-seen
+          key: ios-${{ matrix.app.name }}-${{ matrix.app.key }}

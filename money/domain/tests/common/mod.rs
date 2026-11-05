@@ -171,7 +171,7 @@ impl Book {
 
     /// A transaction as the bank brings one in: there, and waiting for
     /// somebody to approve it — what a receipt may split.
-    pub fn from_bank(&mut self, account: Id<Account>, date: &str, payee: &str, category: Option<Id<Category>>, amount: i64) {
+    pub fn bank_spends(&mut self, account: Id<Account>, date: &str, payee: &str, category: Option<Id<Category>>, amount: i64) {
         self.spend(account, date, payee, category, amount);
         let t = self
             .rows::<Txn>("txn")

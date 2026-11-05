@@ -13,7 +13,10 @@ case $1 in
     shift
     targets=()
     for p in "$@"; do targets+=(".#$p"); done
-    if nix build --dry-run "${targets[@]}" 2>&1 | grep -q 'will be built'; then
+    # Taken whole, then searched: `nix … | grep -q` under pipefail reads a
+    # match as a failure when grep leaves before nix has said everything.
+    plan=$(nix build --dry-run "${targets[@]}" 2>&1)
+    if grep -q 'will be built' <<< "$plan"; then
       echo "not all in the cache: building, and pushing at the end"
       touch "$list.built"
     fi

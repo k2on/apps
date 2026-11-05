@@ -61,12 +61,27 @@ async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap, Query(q): Quer
     }
     match &auth.mode {
         Mode::Dev => {
-            let Some(user) = q.user.filter(|u| !u.trim().is_empty()) else {
+            // The name asked for, or a dev server's own (`ARK_DEV_USER`): who
+            // it signs in, with no page between, when a login names nobody —
+            // what the app screenshots run their servers with, so a phone's
+            // sign-in sheet opens and comes straight back
+            // (.github/screens/apps.md). Only in dev mode, where anyone is
+            // whoever they say already.
+            let user = q.user.filter(|u| !u.trim().is_empty()).or_else(dev_user);
+            let Some(user) = user else {
                 return Html(dev_form(&q.redirect)).into_response();
             };
             // `name:role,role` is a login holding those roles
             // ([`dev_account`]), which the announcement says.
-            let account = dev_account(user.trim());
+            let mut account = dev_account(user.trim());
+            // The dev server's own user wears the picture it was given
+            // (`ARK_DEV_PICTURE`, a file on this machine): the demo's and
+            // the screenshots' person has a face, not only initials.
+            if dev_user().is_some_and(|d| dev_account(d.trim()).id == account.id) {
+                if let Some(p) = dev_picture() {
+                    account.picture = p;
+                }
+            }
             finished(auth.clone(), account, device(&headers), q.redirect).await
         }
         Mode::Oidc(provider) => {
@@ -178,6 +193,20 @@ fn bad(why: String) -> Response {
 
 fn failed(why: String) -> Response {
     (StatusCode::BAD_GATEWAY, format!("sign-in failed: {why}")).into_response()
+}
+
+/// A dev server's own name for a login that names nobody (`ARK_DEV_USER`).
+fn dev_user() -> Option<String> {
+    std::env::var("ARK_DEV_USER").ok().filter(|u| !u.trim().is_empty())
+}
+
+/// The dev server's own user's picture (`ARK_DEV_PICTURE`): an image file
+/// on this machine, as the `file://` address [`Auth::picture`] reads in dev
+/// mode alone.
+fn dev_picture() -> Option<String> {
+    let path = std::env::var("ARK_DEV_PICTURE").ok().filter(|p| !p.trim().is_empty())?;
+    let path = std::fs::canonicalize(path.trim()).ok()?;
+    Some(format!("file://{}", path.display()))
 }
 
 /// Dev mode's provider: a text box.

@@ -2,7 +2,8 @@
 # The archive `$RUNNER_TEMP/<App>.xcarchive` signed for the App Store and
 # sent to App Store Connect (workflows/ios.yaml says how): the API key
 # written from ASC_KEY_P8, the export's options, and xcodebuild's export with
-# `destination: upload`.
+# `destination: upload`. With DESTINATION=export it is signed the same way
+# and written out as an .ipa, sent nowhere: what a branch's run checks.
 set -euo pipefail
 app=$1
 
@@ -17,7 +18,7 @@ cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>upload</string>
+  <key>destination</key><string>${DESTINATION:-upload}</string>
   <key>teamID</key><string>$APPLE_TEAM_ID</string>
   <key>signingStyle</key><string>automatic</string>
   <key>uploadSymbols</key><true/>

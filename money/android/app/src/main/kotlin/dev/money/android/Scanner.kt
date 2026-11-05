@@ -24,8 +24,10 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
 import android.graphics.ImageFormat
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -33,6 +35,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -103,6 +106,8 @@ import androidx.core.content.ContextCompat
 import dev.arkui.Space
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
@@ -356,25 +361,54 @@ private fun Overlay(seen: Seen, turns: Int, viewWidth: Float, steady: Boolean) {
 private fun flatPage(jpeg: ByteArray, quad: Quad?, w: Int, h: Int, turns: Int): Pair<ImageBitmap, ByteArray> {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-    var sample = 1
-    // The server reads at most 1920 across; a little more than that keeps the small print.
-    while (max(bounds.outWidth, bounds.outHeight) / sample > 2600) sample *= 2
-    val photo = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options().apply { inSampleSize = sample })
-    var flat: Bitmap = photo
-    if (quad != null && abs(photo.width.toFloat() / photo.height - w.toFloat() / h) < 0.05f) {
-        val q = quad.scaled(photo.width.toFloat() / w)
-        val (fw, fh) = q.flatSize()
-        val px = IntArray(photo.width * photo.height)
-        photo.getPixels(px, 0, photo.width, 0, 0, photo.width, photo.height)
-        val out = Warp.flatten(px, photo.width, photo.height, q, fw, fh)
-        flat = Bitmap.createBitmap(out, fw, fh, Bitmap.Config.ARGB_8888)
-    }
+    val (pw, ph) = bounds.outWidth to bounds.outHeight
+    val page = quad?.takeIf { abs(pw.toFloat() / ph - w.toFloat() / h) < 0.05f }?.scaled(pw.toFloat() / w)
+    var flat: Bitmap = if (page == null) wholePhoto(jpeg, pw, ph) else pageAlone(jpeg, page, pw, ph)
     if (turns % 4 != 0) flat = Bitmap.createBitmap(flat, 0, 0, flat.width, flat.height, Matrix().apply { postRotate(90f * turns) }, true)
     val bytes = ByteArrayOutputStream().use { o ->
         flat.compress(Bitmap.CompressFormat.JPEG, 90, o)
         o.toByteArray()
     }
     return flat.asImageBitmap() to bytes
+}
+
+/** The longest side the whole photo is kept at, a page not found in it: a little past the 1920 the server reads at. */
+private const val WHOLE = 2600
+
+/** The longest side the rectangle round a page is decoded at before it is halved. */
+private const val PAGE = 4000
+
+/** The whole photo, `pw` by `ph`, halved until it is at most [WHOLE] on its longest side. */
+private fun wholePhoto(jpeg: ByteArray, pw: Int, ph: Int): Bitmap {
+    var sample = 1
+    while (max(pw, ph) / sample > WHOLE) sample *= 2
+    return BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, BitmapFactory.Options().apply { inSampleSize = sample })
+}
+
+/**
+ * The page alone, flat, at the photo's own resolution: only the rectangle round `q` (in the photo's
+ * pixels, `pw` by `ph`) is decoded, halved only past [PAGE]. A receipt is a strip of the photo, and
+ * halving the whole photo first left one 420 pixels across, its small print read wrong.
+ */
+private fun pageAlone(jpeg: ByteArray, q: Quad, pw: Int, ph: Int): Bitmap {
+    val xs = q.corners.map { it.x }
+    val ys = q.corners.map { it.y }
+    val left = floor(xs.min()).toInt().coerceIn(0, pw - 1)
+    val top = floor(ys.min()).toInt().coerceIn(0, ph - 1)
+    val rect = Rect(left, top, ceil(xs.max()).toInt().coerceIn(left + 1, pw), ceil(ys.max()).toInt().coerceIn(top + 1, ph))
+    var sample = 1
+    while (max(rect.width(), rect.height()) / sample > PAGE) sample *= 2
+    val decoder =
+        if (Build.VERSION.SDK_INT >= 31) BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size)
+        else @Suppress("DEPRECATION") checkNotNull(BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size, false)) { "the photo does not decode" }
+    val part = decoder.decodeRegion(rect, BitmapFactory.Options().apply { inSampleSize = sample })
+    decoder.recycle()
+    val local = q.shifted(-left.toFloat(), -top.toFloat()).scaled(part.width.toFloat() / rect.width())
+    val (fw, fh) = local.flatSize()
+    val px = IntArray(part.width * part.height)
+    part.getPixels(px, 0, part.width, 0, 0, part.width, part.height)
+    val out = Warp.flatten(px, part.width, part.height, local, fw, fh)
+    return Bitmap.createBitmap(out, fw, fh, Bitmap.Config.ARGB_8888)
 }
 
 private tailrec fun Context.activity(): Activity? =

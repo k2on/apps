@@ -327,9 +327,9 @@ fn found<'a, M: Clone + 'a>(
                     .center_y(Length::Fixed(ROW))
                     .width(Length::Fill)
                     .style(move |t| container::Style {
-                        background: lit.then(|| Background::Color(of(t).background.strong.color)),
+                        background: lit.then(|| Background::Color(crate::style::focus(t, true))),
                         border: Border {
-                            radius: 4.0.into(),
+                            radius: crate::style::FOCUS_RADIUS.into(),
                             ..Border::default()
                         },
                         ..container::Style::default()

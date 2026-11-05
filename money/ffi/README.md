@@ -15,7 +15,7 @@ Three ways in, each an `ark_ffi::Peer`:
   disk, one directory per server, as whoever last signed in there or as
   `login`. Then `peer.connect(server)`: it dials whenever
   signed in, and redials by itself.
-- **`moneyDemo(today)`** — the demo's household (`money_domain::seed`, the
+- **`moneyDemo(today)`** — the demo's household (`money/seed`, the
   demo window's to the cent) in memory, its own authority, signed in as
   Alex with the importer's role: what the apps run with no server, their
   previews draw, and the screenshots are taken of. A fixed `today`

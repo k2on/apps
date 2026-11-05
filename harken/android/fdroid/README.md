@@ -35,9 +35,9 @@ No secret is needed for any of this.
 
 `nix build .#fdroid-repo` is the repository for the APKs this flake
 builds (Revelation's beside this app's), exactly as it is served:
-`dev.harken.android_<versionCode>.apk`, the trumpet as the app's icon and
+`us.koon.harken_<versionCode>.apk`, the trumpet as the app's icon and
 the repository's, the metadata from
-`metadata/dev.harken.android.yml`, and `entry.jar`, `index-v2.json` and
+`metadata/us.koon.harken.yml`, and `entry.jar`, `index-v2.json` and
 the v1 indexes, signed. The build ends by checking what the client checks —
 `entry.jar`'s signature and signer, the index's hash in `entry.json`, and
 every APK's hash in the index — so a repository that would be refused is

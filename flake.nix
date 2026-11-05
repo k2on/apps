@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/iced/src/catalogue.json, the copy
+    # library is made of (harken/seed/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -68,11 +68,12 @@
           !build && lib.any (d: under d || leadsTo d) dirs;
       };
 
-      # The Rust workspace is `rust/`, and harken's crates join it from
-      # `harken/` by path, so both trees are the source of every Rust build.
+      # The Rust workspace is `rust/`, and the apps' crates join it from
+      # `harken/` and `money/` by path (each app's `seed/` among them), so those trees are the
+      # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" ];
+      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
@@ -283,6 +284,10 @@
           # CPU (tiny-skia: no window, no GPU), which the sandbox allows.
           docs = pkgs.runCommand "docs" { } "${docsCrate { }}/bin/docs $out";
 
+          # Python with Pillow, which draws the README's heroes from the
+          # published screenshots (.github/screens/hero.py).
+          screens-python = pkgs.python3.withPackages (ps: [ ps.pillow ]);
+
           # The ffmpeg the screens workflow cuts the phones' recordings with
           # (.github/screens/encode.sh), and nothing else: H.264 out through
           # x264, the native decoders and the MP4 and MOV containers, the
@@ -335,6 +340,41 @@
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
           money-server = crate { packageId = "money-server"; };
+          # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
+          # DATA` writes what that app's server boots seeded from.
+          money-seed = crate { packageId = "money-seed"; };
+          harken-seed = crate { packageId = "harken-seed"; };
+          # The catalogue's covers, kept in the repository (harken/seed/covers,
+          # each 600 pixels at most, named as harken-seed's `media::key` names
+          # them: the first sixteen hex digits of the address's SHA-256), so
+          # seeding fetches nothing (`harken-seed --covers`) and every run has
+          # the same bytes: a host's thumbnails are not the same bytes from
+          # one fetch to the next, which a hash pinned against them failed on.
+          harken-covers = builtins.path { path = ./harken/seed/covers; name = "harken-covers"; };
+          # `nix run .#update-covers`: harken/seed/covers from the catalogue,
+          # each fetched and made small, after the catalogue moves.
+          update-covers = pkgs.writeShellApplication {
+            name = "update-covers";
+            runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.curl pkgs.imagemagick ];
+            text = builtins.readFile ./nix/update-covers.sh;
+          };
+          # `nix run .#<app>-demo [ADDR]`: that server on a fresh seeded
+          # directory, with dev auth, for a person to try.
+          money-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "money";
+            seed = money-seed;
+            server = money-server;
+            listen = "127.0.0.1:8788";
+            env = ''MONEY_DEV_AUTH=1 MONEY_DATA="$dir"'';
+          };
+          harken-demo = pkgs.callPackage ./nix/demo.nix {
+            name = "harken";
+            seed = harken-seed;
+            server = harken-server;
+            listen = "127.0.0.1:8787";
+            env = ''HARKEN_DEV_AUTH=1 HARKEN_DATA="$dir" HARKEN_MEDIA="$dir/media"'';
+            seedArgs = "--covers ${harken-covers}";
+          };
 
           # The desktop window. winit and wgpu open the display and the GPU
           # by dlopen at run time, so the libraries go on the library path.
@@ -413,10 +453,18 @@
               ${uniffiBindgen}/bin/uniffi-bindgen generate ${lib} --language ${language} --no-format \
                 --config ${config} --out-dir "${out}/${language}"
             '';
-          # UniFFI's bindgen binary (rust/ark-ffi/src/bin/uniffi-bindgen.rs),
-          # which is UniFFI's main: ark-ffi with its `bindgen-roots` feature,
-          # which runs no cargo.
-          uniffiBindgen = crate { packageId = "ark-ffi"; features = [ "default" "bindgen-roots" ]; };
+          # UniFFI's bindgen binary (nix/uniffi-bindgen), which is UniFFI's
+          # main at the bridge's version: its own crate and lockfile, built in
+          # one cargo build. Crate by crate, `uniffi` and `uniffi_bindgen`
+          # came from different runs whose `uniffi_bindgen` hashed
+          # differently, and would not link (x86_64 CI, 2026-11-04).
+          uniffiBindgen = rustPlatform.buildRustPackage {
+            pname = "uniffi-bindgen";
+            version = "0.32.2";
+            src = ./nix/uniffi-bindgen;
+            cargoLock.lockFile = ./nix/uniffi-bindgen/Cargo.lock;
+            doCheck = false;
+          };
           # An app's library for the host (`crate` its ffi crate, `so` the
           # library's name), which UniFFI reads the bindings from and the
           # app's JVM tests load; with the crate's `features`, which are the
@@ -552,6 +600,8 @@
                   # install reads Google's repository indexes, which change
                   # under any hash recorded of them (nix/android-sdk.nix).
                   "-Pandroid.builder.sdkDownload=false"
+                  # Its id: every app's is `bundlePrefix` and its name.
+                  "-PapplicationId=${bundlePrefix}.${name}"
                 ] ++ flags ++ final.versionFlags;
                 # Read by app/build.gradle.kts; a local build falls back to 1.
                 versionFlags = [
@@ -563,7 +613,10 @@
                   export HOME="$TMPDIR/home" ANDROID_USER_HOME="$TMPDIR/home/.android"
                   mkdir -p "$ANDROID_USER_HOME"
                 '';
-                gradleBuildTask = ":app:testDebugUnitTest :app:assembleRelease";
+                # The APK alone: its tests are a build of their own (`tests`,
+                # below), so the APK is there for its screenshots while they
+                # run, and the F-Droid deploy waits for both.
+                gradleBuildTask = ":app:assembleRelease";
                 # The recording runs the same tasks, and the screenshots' and a
                 # laptop's debug build, so that one recording serves all three.
                 gradleUpdateTask = ":app:testDebugUnitTest :app:recordPaparazziDebug :app:assembleDebug :app:assembleRelease";
@@ -571,6 +624,17 @@
                 installPhase = ''
                   mkdir -p $out
                   cp app/build/outputs/apk/release/app-release.apk $out/${name}.apk
+                '';
+              });
+              # The app's unit tests, as a build: what the APK used to run
+              # before it was made. Their results are its output.
+              tests = apk.overrideAttrs (old: {
+                pname = "${name}-android-tests";
+                gradleBuildTask = ":app:testDebugUnitTest";
+                versionFlags = [ ];
+                installPhase = ''
+                  mkdir -p $out
+                  if [ -d app/build/test-results ]; then cp -r app/build/test-results $out/; fi
                 '';
               });
               screens = apk.overrideAttrs (old: {
@@ -588,7 +652,7 @@
                 '';
               });
             in
-            { inherit apk screens; deps = apk.mitmCache.updateScript; };
+            { inherit apk tests screens; deps = apk.mitmCache.updateScript; };
 
           # The phone (harken/android/README.md): the app — its onboarding
           # and its look are its own code — over `harken-android-lib` (the
@@ -603,6 +667,7 @@
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
           harken-apk = harken.apk;
+          harken-android-tests = harken.tests;
           harken-android-screens = harken.screens;
 
           # money's phone (money/android/README.md): Compose over
@@ -619,6 +684,7 @@
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
           money-apk = money.apk;
+          money-android-tests = money.tests;
           money-android-screens = money.screens;
 
           # The Bible as one scroll, zoomed like a map (revelation/README.md,
@@ -637,22 +703,22 @@
             inherit lib pkgs;
             apps = [
               {
-                appid = "dev.harken.android";
+                appid = "${bundlePrefix}.harken";
                 apk = harken-apk;
                 apkName = "harken.apk";
-                metadata = ./harken/android/fdroid/metadata/dev.harken.android.yml;
+                metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
                 # The trumpet the browser's tab draws.
                 icon = ./harken/iced/web/favicon.svg;
               }
               {
-                appid = "dev.revelation.android";
+                appid = "${bundlePrefix}.revelation";
                 apk = revelation.apk;
                 apkName = "revelation.apk";
-                metadata = ./revelation/android/fdroid/metadata/dev.revelation.android.yml;
+                metadata = ./revelation/android/fdroid/metadata/us.koon.revelation.yml;
                 icon = ./revelation/android/fdroid/icon.svg;
               }
               {
-                appid = "us.koon.money";
+                appid = "${bundlePrefix}.money";
                 apk = money-apk;
                 apkName = "money.apk";
                 metadata = ./money/android/fdroid/metadata/us.koon.money.yml;
@@ -675,8 +741,10 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name.
-          iosPhone = { name, crate, so, framework }: pkgs.stdenv.mkDerivation {
+          # framework's name. With `xcode`, an Xcode.app in the store
+          # (`xcode` below), it is built from that and nothing outside the
+          # store, under the strict sandbox; without, from the builder's.
+          iosPhone = { name, crate, so, framework, xcode ? null }: pkgs.stdenv.mkDerivation {
             pname = "${name}-ios-xcframework";
             version = "0.1.0";
             src = only rustDirs;
@@ -684,32 +752,71 @@
             cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
             nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store.
-            __noChroot = true;
+            # Xcode, outside the store — unless one in the store is given.
+            __noChroot = xcode == null;
             # The iOS targets compile and link with the builder's Xcode: its
             # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
             # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
             # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
             # fails under them: both are taken back for these two targets. The
             # Swift is UniFFI's from the library built for this Mac.
-            buildPhase = ''
+            buildPhase = let
+              tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+            in ''
               runHook preBuild
-              export PATH=/usr/bin:$PATH
-              export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              # The apps' own deployment target: what ios.yaml's cargo had.
+              export IPHONEOS_DEPLOYMENT_TARGET=17.0
+              ${if xcode == null then ''
+                export PATH=/usr/bin:$PATH
+                export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              '' else ''
+                export DEVELOPER_DIR=${xcode}/Contents/Developer
+                export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
+                export HOME=$TMPDIR/home
+                mkdir -p "$HOME"
+              ''}
               unset SDKROOT
               ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
-                export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+                export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
+                export CARGO_TARGET_${u}_LINKER=${tc}/clang
                 cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
               '') iosTargets}
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              /usr/bin/xcodebuild -create-xcframework \
-                -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
-                -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
-                -output ${framework}.xcframework
+              ${if xcode == null then ''
+                /usr/bin/xcodebuild -create-xcframework \
+                  -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
+                  -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
+                  -output ${framework}.xcframework
+              '' else ''
+                # By hand, as xcodebuild lays it out: under the strict sandbox
+                # `xcodebuild -create-xcframework` crashes (xcode-strict.yaml),
+                # and an xcframework of static libraries is only this.
+                for slice in ios-arm64:aarch64-apple-ios ios-arm64-simulator:aarch64-apple-ios-sim; do
+                  id=''${slice%%:*} target=''${slice##*:}
+                  mkdir -p ${framework}.xcframework/$id
+                  cp target/$target/release/lib${so}.a ${framework}.xcframework/$id/
+                  cp -r headers ${framework}.xcframework/$id/Headers
+                done
+                slice() {
+                  echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
+                  echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
+                  echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                  [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
+                  echo "</dict>"
+                }
+                {
+                  echo '<?xml version="1.0" encoding="UTF-8"?>'
+                  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                  echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
+                  slice ios-arm64 ""
+                  slice ios-arm64-simulator simulator
+                  echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
+                  echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
+                } > ${framework}.xcframework/Info.plist
+              ''}
               runHook postBuild
             '';
             installPhase = ''
@@ -721,6 +828,130 @@
           };
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
+
+          # **The iPhone apps, built by nix** (what app-screens.yaml takes
+          # their iOS screenshots from: .github/screens/apps.md).
+          #
+          # Xcode is an input like any other, pinned by its hash: the
+          # Xcode.app of a runner image, put in the store as it is
+          # (`nix-store --add-fixed --recursive sha256 <Xcode.app>`; nothing
+          # is downloaded, and Apple's licence keeps it off any cache, so
+          # Cachix's push filters it out). A different Xcode is a different
+          # hash, and so a different build; an unchanged app with the same
+          # Xcode is the cache's, and Xcode need not even be on the machine.
+          #
+          # Most of it is built under nix's strict sandbox: the kernel, its
+          # C and Rust compiled by the stored Xcode's toolchain for the
+          # simulator and the phone. The app's own `xcodebuild` cannot be:
+          # Xcode's file watcher (DVTFilePathEventWatcher) asks
+          # DiskArbitration and other system services for what it watches,
+          # which nix's macOS sandbox lets no build reach — its list of
+          # services is nix's own, sandbox paths only add paths, and a
+          # derivation's `__sandboxProfile` is not applied to a sandboxed
+          # build — and it falls (SIGSEGV) when refused. So that one step is
+          # `__noChroot`, which needs `sandbox = relaxed` on the builder,
+          # where every other build is still sandboxed. All of this was found
+          # on GitHub's macos-15 runners, step by step, on the branch
+          # claude/sleepy-faraday-lcbow5-xcode (its xcode-strict.yaml).
+          # Every app's id, Android's (its applicationId) and the iPhone's (its
+          # bundle id), is this and its name.
+          bundlePrefix = "us.koon";
+          xcode = pkgs.requireFile {
+            name = "Xcode_26.3.app";
+            hashMode = "recursive";
+            hash = "sha256-qrPSc036x3tW1TWWfX10+IS2c08dRCa6KFc+++35ueM=";
+            message = ''
+              Xcode 26.3 (17C529), as GitHub's macos-15 image installs it. Put it in the store:
+                nix-store --add-fixed --recursive sha256 /Applications/Xcode_26.3.app
+            '';
+          };
+          # One app's kernel, from the pinned Xcode, under the strict sandbox.
+          iosKernel = { ffi, framework }: iosPhone (ffi // { inherit framework xcode; });
+          # One app, as Release: `name` its directory (<name>/ios, its
+          # XcodeGen project), `App` its scheme and product, `ffi` and
+          # `framework` its kernel's; `kind` "simulator" (the .app, for its
+          # screenshots) or "archive" (the unsigned .xcarchive ios.yaml signs
+          # and sends to TestFlight, giving it its build number there). Its
+          # bundle id is `bundlePrefix`.<name>, every app's; its version
+          # project.yml's.
+          iosApp = { name, App, ffi, framework, kind }:
+            let
+              bundle = "${bundlePrefix}.${name}";
+              kernel = iosKernel { inherit ffi framework; };
+              dev = "${xcode}/Contents/Developer";
+              common = ''
+                -project ${App}.xcodeproj -scheme ${App} -configuration Release \
+                -derivedDataPath $TMPDIR/derived \
+                -IDEPackageSupportDisableManifestSandbox=1 \
+                -IDEPackageSupportDisablePluginExecutionSandbox=1 \
+                PRODUCT_BUNDLE_IDENTIFIER=${bundle} \
+                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+                ENABLE_USER_SCRIPT_SANDBOXING=NO \
+                COMPILER_INDEX_STORE_ENABLE=NO'';
+              build = {
+                simulator = ''
+                  xcodebuild build ${common} \
+                    -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+                    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+                '';
+                archive = ''
+                  xcodebuild archive ${common} \
+                    -destination 'generic/platform=iOS' \
+                    -archivePath $TMPDIR/${App}.xcarchive
+                '';
+              }.${kind};
+              install = {
+                simulator = "cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/";
+                archive = "cp -R $TMPDIR/${App}.xcarchive $out/";
+              }.${kind};
+            in
+            pkgs.stdenv.mkDerivation {
+              pname = "${name}-ios-${kind}";
+              version = "0.1.0";
+              src = only [ "${name}/ios" "swift/ArkUI" ];
+              nativeBuildInputs = [ xcodegen ];
+              # xcodebuild, and nothing else here: see above.
+              __noChroot = true;
+              buildPhase = ''
+                runHook preBuild
+                # The stored Xcode, a home of its own, a name for the build
+                # user (XcodeGen stops without one), and none of nixpkgs'
+                # compiler settings, which Xcode's tools would take for theirs.
+                export DEVELOPER_DIR=${dev}
+                export PATH=${dev}/usr/bin:$PATH
+                export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home USER=nixbld LOGNAME=nixbld
+                mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
+                unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+                for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                  case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+                done
+                mkdir -p ${name}/ffi/ios
+                cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
+                chmod -R u+w ${name}/ffi/ios
+                cd ${name}/ios
+                xcodegen generate
+                # SwiftPM sandboxes the manifests and plugins it builds, which
+                # cannot be done inside nix's: told not to.
+                ${build}
+                runHook postBuild
+              '';
+              installPhase = ''
+                mkdir -p $out
+                ${install}
+              '';
+              dontStrip = true;
+              dontFixup = true;
+              passthru = { inherit bundle; };
+              meta.platforms = [ "aarch64-darwin" ];
+            };
+          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          money-ios-kernel = iosKernel { inherit (moneyIos) ffi framework; };
+          harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
+          money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
+          harken-ios-simulator = iosApp (harkenIos // { kind = "simulator"; });
+          money-ios-archive = iosApp (moneyIos // { kind = "archive"; });
+          harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -845,33 +1076,39 @@
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/iced/src/catalogue.json
-            chmod 644 harken/iced/src/catalogue.json
-            echo "harken/iced/src/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/seed/catalogue.json
+            chmod 644 harken/seed/catalogue.json
+            echo "harken/seed/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
           packages = {
             inherit ark vectors fuzz harken-domain harken-android-lib harken-ios-xcframework;
+            # The iPhone apps from the pinned Xcode: for the simulator (the
+            # screenshots), as the archive TestFlight is sent, and the kernel.
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
+            inherit money-ios-kernel harken-ios-kernel;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
-            inherit classical update-catalogue update-cargo-nix;
+            inherit classical update-catalogue update-cargo-nix update-covers;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg xcodegen;
+            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg screens-python xcodegen;
             inherit money-iced money-web money-web-server money-server;
+            inherit money-seed harken-seed harken-covers money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
-            inherit harken-apk harken-android-screens;
+            inherit harken-apk harken-android-tests harken-android-screens;
             harken-apk-deps = harken.deps;
             revelation-apk = revelation.apk;
+            revelation-android-tests = revelation.tests;
             revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
             # money's phone, over money-android-lib (money/android/README.md).
-            inherit money-apk money-android-screens;
+            inherit money-apk money-android-tests money-android-screens;
             money-apk-deps = money.deps;
             # The workflow builds these first and keeps them as gc roots.
             inherit aapt2;
@@ -903,8 +1140,8 @@
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/iced/src/catalogue.json} || {
-                echo "harken/iced/src/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/seed/catalogue.json} || {
+                echo "harken/seed/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
               touch $out
@@ -1054,9 +1291,12 @@
             };
           };
 
-          # Everything the workflow publishes, as data: a page goes up at
-          # k2on.github.io/apps/<name>/, an APK into the F-Droid repository
-          # (and onto a tag's release). Adding one is adding it here; the
+          # Everything the workflows publish, as data, and the one list of
+          # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
+          # into the F-Droid repository (and onto a tag's release), an
+          # iPhone app to TestFlight (ios.yaml); and each app with
+          # <name>/screens/shots.json is photographed on the phones and the
+          # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #
           # `key` is what says whether it changed: its derivation's hash,
@@ -1073,9 +1313,23 @@
               apk = name: app: { first ? [ ] }: {
                 inherit name first;
                 package = "${name}-apk";
+                tests = "${name}-android-tests";
                 file = "${name}.apk";
                 key = key (app.apk.overrideAttrs (_: { versionFlags = [ ]; }));
               };
+              # An iPhone app (ios.yaml builds and sends each; app-screens.yaml
+              # photographs each): `App` its scheme and product; whether it goes
+              # to TestFlight (its App Store Connect record must exist), and
+              # whether its tests run. Its key is its archive's: the archive
+              # has no build number in it (ios.yaml gives it one), so it moves
+              # only with what the app is built from.
+              iphone = name: App: { testflight ? true, test ? false }:
+                let archive = self.packages.aarch64-darwin."${name}-ios-archive"; in {
+                  inherit name App testflight test;
+                  inherit (archive) bundle;
+                  package = "${name}-ios-archive";
+                  key = key archive;
+                };
             in
             {
               pages = [
@@ -1089,6 +1343,14 @@
                 # money's kernel for every ABI first, as harken's.
                 (apk "money" money { first = [ "money-android-lib" ]; })
               ];
+              ios = [
+                (iphone "harken" "Harken" { })
+                (iphone "money" "Money" { test = true; })
+              ];
+              # The desktop windows (`<name>-iced`), published nowhere yet but
+              # photographed beside the phones (app-screens.yaml), each built
+              # by nix at the commit.
+              desktop = map (name: { inherit name; package = "${name}-iced"; key = key self.packages.${pkgs.system}."${name}-iced"; }) [ "harken" "money" ];
             };
 
           # A laptop's cargo builds four crates at a time, not one a core:

@@ -17,7 +17,7 @@ struct ServerScreen: View {
         WelcomePage(symbol: "dollarsign.circle.fill", tint: Color.money, title: "Money",
                     sentence: "Your household's budget, every dollar given a job, on your own server.") {
             VStack(alignment: .leading, spacing: Space.s) {
-                TextField("money.example.com", text: Binding(get: { typed }, set: { model.send(.typed($0)) }))
+                TextField(Onboarding.usual, text: Binding(get: { typed }, set: { model.send(.typed($0)) }))
                     .textContentType(.URL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)

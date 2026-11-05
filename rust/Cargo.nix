@@ -107,6 +107,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "arkui-shots" = rec {
+      packageId = "arkui-shots";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-shots";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-domain" = rec {
       packageId = "harken-domain";
       build = internal.buildRustCrateWithFeatures {
@@ -147,6 +157,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "harken-seed" = rec {
+      packageId = "harken-seed";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "harken-seed";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-server" = rec {
       packageId = "harken-server";
       build = internal.buildRustCrateWithFeatures {
@@ -181,6 +201,16 @@ rec {
       packageId = "money-iced";
       build = internal.buildRustCrateWithFeatures {
         packageId = "money-iced";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-seed" = rec {
+      packageId = "money-seed";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-seed";
       };
 
       # Debug support which might change between releases.
@@ -813,7 +843,7 @@ rec {
           {
             name = "uniffi-bindgen";
             path = "src/bin/uniffi-bindgen.rs";
-            requiredFeatures = [ "bindgen-roots" ];
+            requiredFeatures = [ "bindgen" ];
           }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-ffi; };
@@ -866,10 +896,9 @@ rec {
           }
         ];
         features = {
-          "bindgen" = [ "bindgen-roots" "uniffi/cargo-metadata" ];
-          "bindgen-roots" = [ "uniffi/cli" ];
+          "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
         };
-        resolvedDefaultFeatures = [ "bindgen" "bindgen-roots" ];
+        resolvedDefaultFeatures = [ "bindgen" ];
       };
       "ark-macros" = rec {
         crateName = "ark-macros";
@@ -1108,6 +1137,36 @@ rec {
             name = "iced_test";
             packageId = "iced_test";
             target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+        ];
+
+      };
+      "arkui-shots" = rec {
+        crateName = "arkui-shots";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-shots; };
+        libName = "arkui_shots";
+        dependencies = [
+          {
+            name = "iced";
+            packageId = "iced";
+            features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
+          }
+          {
+            name = "iced_test";
+            packageId = "iced_test";
+          }
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "png" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
           }
         ];
 
@@ -7060,12 +7119,23 @@ rec {
             packageId = "arkui";
           }
           {
+            name = "arkui-shots";
+            packageId = "arkui-shots";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "harken-domain";
             packageId = "harken-domain";
           }
           {
             name = "harken-player";
             packageId = "harken-player";
+          }
+          {
+            name = "harken-seed";
+            packageId = "harken-seed";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "iced";
@@ -7128,6 +7198,7 @@ rec {
           }
         ];
         features = {
+          "demo" = [ "dep:harken-seed" ];
         };
         resolvedDefaultFeatures = [ "demo" ];
       };
@@ -7163,6 +7234,64 @@ rec {
           }
         ];
 
+      };
+      "harken-seed" = rec {
+        crateName = "harken-seed";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "harken-seed";
+            path = "src/main.rs";
+            requiredFeatures = [ "cli" ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/seed; };
+        libName = "harken_seed";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "harken-domain";
+            packageId = "harken-domain";
+          }
+          {
+            name = "png";
+            packageId = "png 0.18.1";
+            optional = true;
+          }
+          {
+            name = "sha2";
+            packageId = "sha2";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "tls" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "lofty";
+            packageId = "lofty";
+          }
+        ];
+        features = {
+          "cli" = [ "dep:ureq" "dep:png" "dep:sha2" ];
+          "default" = [ "cli" ];
+        };
+        resolvedDefaultFeatures = [ "cli" "default" ];
       };
       "harken-server" = rec {
         crateName = "harken-server";
@@ -10912,12 +11041,6 @@ rec {
             optional = true;
           }
           {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -10943,9 +11066,8 @@ rec {
         ];
         features = {
           "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-          "seed" = [ "dep:ark-peer" ];
         };
-        resolvedDefaultFeatures = [ "ffi" "seed" ];
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "money-ffi" = rec {
         crateName = "money-ffi";
@@ -10970,7 +11092,12 @@ rec {
           {
             name = "money-domain";
             packageId = "money-domain";
-            features = [ "ffi" "seed" ];
+            features = [ "ffi" ];
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+            usesDefaultFeatures = false;
           }
           {
             name = "serde_json";
@@ -11047,6 +11174,11 @@ rec {
             packageId = "arkui";
           }
           {
+            name = "arkui-shots";
+            packageId = "arkui-shots";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "iced";
             packageId = "iced";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -11061,7 +11193,11 @@ rec {
           {
             name = "money-domain";
             packageId = "money-domain";
-            features = [ "seed" ];
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+            usesDefaultFeatures = false;
           }
           {
             name = "web-sys";
@@ -11096,6 +11232,45 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "demo" ];
+      };
+      "money-seed" = rec {
+        crateName = "money-seed";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "money-seed";
+            path = "src/main.rs";
+            requiredFeatures = [ "cli" ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
+        libName = "money_seed";
+        dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+            optional = true;
+          }
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-domain";
+            packageId = "money-domain";
+          }
+        ];
+        features = {
+          "cli" = [ "dep:anyhow" ];
+          "default" = [ "cli" ];
+        };
+        resolvedDefaultFeatures = [ "cli" "default" ];
       };
       "money-server" = rec {
         crateName = "money-server";
@@ -11175,6 +11350,11 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+            usesDefaultFeatures = false;
+          }
           {
             name = "tempfile";
             packageId = "tempfile";

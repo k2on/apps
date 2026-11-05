@@ -366,6 +366,8 @@ pub enum Message {
     Wake,
     /// A deadline this window armed came due: the redial after a close.
     Due,
+    /// The which-key panel's delay went by for the prefix it was armed for.
+    WhichDue(u64),
     /// A clock, running only while something on screen moves by itself: 50
     /// ms while a submenu's dwell counts,
     /// 250 ms while audio plays (the scrubber and the media session) —
@@ -709,8 +711,9 @@ pub struct App {
     pub keys: vim::Keys,
     /// The last accepted `/` search, for `n` and `N`.
     pub search: String,
-    /// `?` — a keymap nobody can guess is a keymap nobody uses.
-    pub help: bool,
+    /// The which-key panel: what can follow a prefix half typed, or with
+    /// `?` every key (`arkui::which`), read from [`KEYS`] and the grammar's.
+    pub which: arkui::which::Which,
     /// What Settings' Resync last came to, to say under it.
     pub resync: Option<String>,
     /// The command box, Ctrl+K, while it is up; and the one closed, drawn
@@ -841,7 +844,7 @@ impl App {
             cursors: [0; 2],
             keys: vim::Keys::new(),
             search: String::new(),
-            help: false,
+            which: arkui::which::Which::new(),
             resync: None,
             command: None,
             command_leaving: None,
@@ -1345,19 +1348,20 @@ impl App {
             }
             vim::Action::Match(delta) => self.seek(Some(self.at(self.pane)), delta),
             vim::Action::Cancel => {
-                self.help = false;
+                self.which.dismiss();
                 self.debug = false;
                 self.note.clear();
                 self.narrow(None);
                 Task::none()
             }
+            vim::Action::Scroll(place) => self.reveal_at(place),
             // No range is selected here and no sequence is bound.
             vim::Action::Visual(_) | vim::Action::Inner(_) | vim::Action::Bound(_) => Task::none(),
             // Keys this app binds for itself, kept out of the grammar so a
             // convenience cannot collide with a motion by accident.
             vim::Action::Key(c) => match c {
                 '?' => {
-                    self.help = !self.help;
+                    self.which.ask();
                     Task::none()
                 }
                 'D' => {
@@ -1417,7 +1421,7 @@ impl App {
                         if let Some(a) = self.adding.as_mut() {
                             a.at = to;
                         }
-                        arkui::scroll::reveal(FOUND, grid, to)
+                        arkui::scroll::reveal(FOUND, grid, to, arkui::scroll::Place::Near)
                     }
                     None if matches!(motion, vim::Motion::Up(_)) => self.update(Message::FocusQuery),
                     None => Task::none(),
@@ -1428,7 +1432,7 @@ impl App {
                 match grid.step(self.queue_panel.unwrap_or(0), motion) {
                     Some(at) => {
                         self.queue_panel = Some(at);
-                        arkui::scroll::reveal(QUEUE, grid, at)
+                        arkui::scroll::reveal(QUEUE, grid, at, arkui::scroll::Place::Near)
                     }
                     None => Task::none(),
                 }
@@ -1497,13 +1501,22 @@ impl App {
 
     /// Keep the cursor on screen — on a transcript's line, in the middle.
     fn reveal(&self) -> Task<Message> {
+        self.reveal_at(arkui::scroll::Place::Near)
+    }
+
+    /// Scroll the pane with the keys so its cursor is where `place` says:
+    /// in view, moving the list only once it would leave (`Place::Near`),
+    /// or in the middle, at the top or at the foot (`zz`, `zt`, `zb`). A
+    /// transcript keeps its line in the middle whatever is asked.
+    fn reveal_at(&self, place: arkui::scroll::Place) -> Task<Message> {
         let at = self.at(self.pane);
         let id = match self.pane {
             Pane::Sidebar => SIDEBAR,
             Pane::Tracks if self.peer.source == Source::Transcript && at < self.cues().len() => return self.centre(at),
             Pane::Tracks => TRACKS,
         };
-        arkui::scroll::reveal_to(id, self.shape(self.pane).progress(at))
+        let (row, rows) = self.shape(self.pane).line(at);
+        arkui::scroll::follow(id, row, rows, place)
     }
 
     /// What is said in the episode playing, line by line: none for a song,
@@ -2837,6 +2850,13 @@ impl App {
                 // `None` is still typing: a count, a `g`, a search — drawn in
                 // the status line so nothing swallowed is a mystery.
                 let action = self.keys.press(&key, mods);
+                // The which-key panel follows what is half typed; a search
+                // is typed, not a prefix.
+                let prefix = match self.keys.mode() {
+                    vim::Mode::Normal => self.keys.pending(),
+                    vim::Mode::Search(_) => String::new(),
+                };
+                self.which.typed(&prefix);
                 // harken selects no ranges: visual mode is never left on, so `i`
                 // stays the app's.
                 self.keys.leave_visual();
@@ -3213,6 +3233,7 @@ impl App {
             }
             // What woke the window is whatever `react` finds.
             Message::Wake | Message::Due => {}
+            Message::WhichDue(key) => self.which.due(key),
         }
         Task::none()
     }
@@ -3400,6 +3421,15 @@ impl App {
         if let Some(every) = self.clock() {
             subs.push(iced::time::every(every).map(|_| Message::Tick));
         }
+        // A prefix half typed: the which-key panel after its delay. Keyed
+        // from the top of the range, clear of the deadlines' milliseconds.
+        if let Some(key) = self.which.waiting() {
+            subs.push(
+                arkui::wake::at(u64::MAX - key, arkui::which::DELAY)
+                    .with(key)
+                    .map(|(key, ())| Message::WhichDue(key)),
+            );
+        }
         // A transcript following the line being said stops when the wheel
         // scrolls it by hand.
         if self.peer.source == Source::Transcript && self.following {
@@ -3458,10 +3488,76 @@ pub fn main() -> iced::Result {
     // What this device does goes to its server (docs/plan-observe.md).
     let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
-    iced::application(App::boot, App::update, App::view)
+    let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))
-        .font(arkui::hero::FIRA_SANS_BOLD)
-        .run()
+        .font(arkui::hero::FIRA_SANS_BOLD);
+    // The screenshots' run (.github/screens/apps.md): this application, its
+    // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(shots) = arkui_shots::asked() {
+        shots.run(app);
+    }
+    app.run()
 }
+
+/// The keys harken binds for itself, beside the grammar's
+/// (`arkui::vim::GRAMMAR`): what the which-key panel lists, and what
+/// [`App::act`] dispatches as `Action::Key`. A test presses each one.
+pub const KEYS: &[arkui::vim::Binding] = &[
+    arkui::vim::Binding {
+        keys: "<Space>",
+        what: "play or pause",
+    },
+    arkui::vim::Binding {
+        keys: "m",
+        what: "this track's menu",
+    },
+    arkui::vim::Binding {
+        keys: "a",
+        what: "the playlists it is on",
+    },
+    arkui::vim::Binding {
+        keys: "d",
+        what: "devices and their volume",
+    },
+    arkui::vim::Binding {
+        keys: "q",
+        what: "the queue",
+    },
+    arkui::vim::Binding {
+        keys: "t",
+        what: "the transcript",
+    },
+    arkui::vim::Binding {
+        keys: "f",
+        what: "follow the line being said",
+    },
+    arkui::vim::Binding {
+        keys: "{",
+        what: "previous, or back 15 s",
+    },
+    arkui::vim::Binding {
+        keys: "}",
+        what: "next, or on 30 s",
+    },
+    arkui::vim::Binding { keys: "+", what: "louder" },
+    arkui::vim::Binding { keys: "-", what: "quieter" },
+    arkui::vim::Binding {
+        keys: "M",
+        what: "mute or unmute",
+    },
+    arkui::vim::Binding {
+        keys: "J",
+        what: "join a speaker (devices)",
+    },
+    arkui::vim::Binding {
+        keys: "D",
+        what: "the session's numbers",
+    },
+    arkui::vim::Binding {
+        keys: "?",
+        what: "these keys",
+    },
+];

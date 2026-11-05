@@ -47,7 +47,7 @@ const val SCHEME: String = "money"
 /** Where the app is on its way to a budget. */
 sealed class Step {
     /** The server's address, as typed; the last check's sentence; whether one is under way. */
-    data class Welcome(val typed: String = DEFAULT_SERVER, val error: String? = null, val checking: Boolean = false) : Step()
+    data class Welcome(val typed: String = "", val error: String? = null, val checking: Boolean = false) : Step()
 
     data class SignIn(val server: String, val phase: SignInPhase = SignInPhase.Idle, val error: String? = null) : Step()
 

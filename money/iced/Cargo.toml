@@ -15,7 +15,9 @@ demo = []
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-money-domain = { path = "../domain", features = ["seed"] }
+money-domain = { path = "../domain" }
+# The demo's household (`money/seed`), and the bank its "Sync" asks.
+money-seed = { path = "../seed", default-features = false }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
@@ -28,6 +30,9 @@ arkui = { path = "../../rust/arkui" }
 # the keys by.
 # `fira-sans` is the typeface, as harken's.
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
+# (.github/screens/apps.md): this same application, run headless.
+arkui-shots = { path = "../../rust/arkui-shots" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach, as harken's page.

@@ -534,16 +534,18 @@ fn a_guests_page_is_the_episodes_they_are_on() {
     );
     assert!(app.layout().cell(Mark::By(0)).is_some(), "the host in the header opens their page too");
 
-    // From the newest episode's row, `l` along who is on it to Jacek, and
-    // `<Enter>` opens his page.
+    // Who is on the newest episode is beside its row, Jacek a click away:
+    // a name, which the keys do not walk onto (`l` stays on the row).
     let k = app.guests(&rows[0]).iter().position(|p| p.name == jacek).expect("Jacek was at NixCon");
     let (_, entries) = app.row_entries(rows[0].id).unwrap();
     assert!(entries.iter().any(|e| e.label == format!("Go to {jacek}")), "its menu goes to him");
     app.pane = Pane::Tracks;
     app.cursors[Pane::Tracks as usize] = 0;
     let _ = app.act(Action::Move(Motion::Right(k + 1)));
-    assert_eq!(Some(app.at(Pane::Tracks)), app.layout().cell(Mark::Guest(0, k)));
-    let _ = app.act(Action::Activate);
+    assert_eq!(app.at(Pane::Tracks), 0, "the keys stay on the row");
+    let l = app.layout();
+    let click = l.cell(Mark::Guest(0, k)).and_then(|c| l.message(c).cloned()).expect("his name opens him");
+    let _ = app.update(click);
     assert_eq!(app.peer.source, Source::Artist(jacek.into()));
     assert_eq!(
         app.peer.source_of(&Place::Artist(jacek.into())),

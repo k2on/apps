@@ -152,8 +152,11 @@ fn every_page_draws_without_holding_the_peer_twice() {
     let name = crate::domain::CreatePlaylist { name: "Hymns".into() };
     assert!(app.author("make a playlist".into(), "create_playlist", &name));
     let _ = app.update(Message::Wake);
-    for (help, debug) in [(false, false), (true, false), (false, true)] {
-        (app.help, app.debug) = (help, debug);
+    for (which, debug) in [(false, false), (true, false), (false, true)] {
+        if which {
+            app.which.ask();
+        }
+        app.debug = debug;
         let _ = app.view();
     }
 }

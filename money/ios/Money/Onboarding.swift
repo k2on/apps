@@ -27,7 +27,7 @@ enum Step: Equatable {
     /// The demo's household, on this phone alone.
     case demo
 
-    static let start = Step.server(typed: Onboarding.usual, checking: false, error: nil)
+    static let start = Step.server(typed: "", checking: false, error: nil)
 }
 
 enum SignInPhase: Equatable {
@@ -89,7 +89,7 @@ struct Onboarding {
     /// Where the sign-in sends the code back to.
     static let scheme = "money"
     static var redirect: String { scheme + "://auth" }
-    /// The server the field starts with: the household's.
+    /// The server the empty field suggests, as its placeholder: the household's.
     static let usual = "money.koon.us"
 
     private(set) var step: Step

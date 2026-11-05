@@ -475,6 +475,12 @@ impl Auth {
         if let Some((p, _)) = kept.filter(|(_, at)| now - at < PICTURE_TTL_MS) {
             return Ok(Some(p));
         }
+        // A dev server's own user's picture is a file on this machine
+        // (`ARK_DEV_PICTURE`), read here and nowhere else: a provider's
+        // address is fetched over https alone, below.
+        if let (Mode::Dev, Some(path)) = (&self.mode, url.strip_prefix("file://")) {
+            return local_picture(std::path::Path::new(path)).map(Some);
+        }
         let issuer = match &self.mode {
             Mode::Oidc(p) => host(p.issuer()).map(str::to_string),
             Mode::Dev => None,
@@ -488,6 +494,23 @@ impl Auth {
         kept.insert(url, (p.clone(), now));
         Ok(Some(p))
     }
+}
+
+/// A picture read from a file, as a dev server's own user's is: its kind
+/// from its first bytes, one of those handed on, and no bigger than a
+/// fetched one may be.
+pub(crate) fn local_picture(path: &std::path::Path) -> Result<Picture, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("the picture {}: {e}", path.display()))?;
+    if bytes.len() > PICTURE_MAX {
+        return Err("the picture is too big".into());
+    }
+    let kind = match bytes.as_slice() {
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x89, b'P', b'N', b'G', ..] => "image/png",
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "image/webp",
+        _ => return Err(format!("{} is not a jpeg, png or webp", path.display())),
+    };
+    Ok(Picture { kind: kind.into(), bytes })
 }
 
 /// The host of an `https` URL, port and all.

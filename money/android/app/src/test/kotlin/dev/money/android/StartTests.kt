@@ -44,9 +44,9 @@ class StartTests {
             io = Dispatchers.Unconfined,
         ).also { it.begin() }
 
-    @Test fun aFirstLaunchWelcomesWithTheHouseholdsServer() {
+    @Test fun aFirstLaunchWelcomesWithAnEmptyField() {
         val s = starter()
-        assertEquals(Step.Welcome(typed = DEFAULT_SERVER), s.step.value)
+        assertEquals(Step.Welcome(typed = ""), s.step.value)
     }
 
     @Test fun theDemoIsRememberedUntilItIsLeft() {
@@ -73,6 +73,7 @@ class StartTests {
 
     @Test fun aServerIsSignedInToInABrowserTab() {
         val s = starter()
+        s.type(DEFAULT_SERVER)
         s.check()
         assertEquals(Step.SignIn("https://money.koon.us"), s.step.value)
         assertEquals("https://money.koon.us", Remembered(shelf).server)
@@ -97,6 +98,7 @@ class StartTests {
 
     @Test fun aCodeThatDoesNotExchangeSaysSoAndKeepsTheServer() {
         val s = starter(exchange = { _, _ -> throw IllegalStateException("the code was used") })
+        s.type(DEFAULT_SERVER)
         s.check()
         s.openSignIn()
         s.code("stale")
@@ -107,6 +109,7 @@ class StartTests {
 
     @Test fun signingOutKeepsTheServerAndForgetsTheLogin() {
         val s = starter()
+        s.type(DEFAULT_SERVER)
         s.check()
         s.code("c")
         s.signOut("The server signed this phone out.")

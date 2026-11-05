@@ -301,7 +301,7 @@ each quarter of the way up, the queue, an episode's transcript, a song's
 menu, adding to a playlist, naming one (and a name refused), Settings and
 diagnostics — in light and dark, at a Pixel 5's 1080×2340, from
 `app/src/test/.../Demo.kt`: rows taken from harken's demo seed
-(`harken/iced/src/seed.rs`). `index.html` lays them out light beside dark.
+(`harken/seed`). `index.html` lays them out light beside dark.
 A bottom sheet and a dialog are windows of their own, which layoutlib does
 not draw, so the screenshots frame the same composables over a scrim
 instead. Nothing behind them talks to a server, so every cover is the
