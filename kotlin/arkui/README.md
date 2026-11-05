@@ -58,6 +58,17 @@ when swiped toward the end, Gmail's way — the action's colour and glyph
 from under it, a tick where letting go acts, the row home after — with
 the same action on the row for TalkBack.
 
+**How things move and answer** (Apple's *Designing Fluid Interfaces*,
+carried over): critically damped springs for anything a tap or the app
+moved, a momentum spring only for a release at a flick's speed, and a
+release sent to the rest nearest where it was going (`Springs.settle`,
+`Springs.nearest`); reduced motion said once (`reducedMotion`,
+`LocalReducedMotion`, `ReducedMotion.ALWAYS_ANIMATE`, `keepMotion`), every
+travel becoming a cross-fade under it; the give a cover or card has under
+the finger and a row's highlight, from touch-down (`pressable`, `Press`);
+the iPhone's `.sensoryFeedback` on the same events (`SensoryFeedback`);
+and tracking and leading by size (`Typeset`, `tracked`).
+
 ## Verified
 
 The pieces harken uses are its tests' and screenshots' (`harken/android`).

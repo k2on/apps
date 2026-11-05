@@ -27,6 +27,7 @@ import dev.arkui.ArkTheme
 import dev.arkui.LocalArkTheme
 import dev.arkui.LocalMoreGlyph
 import dev.arkui.arkuiScheme
+import dev.arkui.tracked
 
 /** The palette, both sides: arkui's, in the gold. */
 object Palette {
@@ -57,7 +58,8 @@ object Palette {
 /**
  * One type scale for every screen: the platform's sans, in a few sizes and two weights, sized as
  * the iPhone's are — a tab's title (headlineLarge) its large title, a section's heading (titleLarge)
- * its title 2, both bold.
+ * its title 2, both bold — and tracked and led for each size as the iPhone's are (arkui's
+ * `tracked`): the big titles tight, body text as drawn, captions a little open.
  */
 val HarkenType: Typography =
     Typography().run {
@@ -71,7 +73,7 @@ val HarkenType: Typography =
             titleSmall = titleSmall.copy(fontWeight = FontWeight.SemiBold),
             labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),
         )
-    }
+    }.tracked()
 
 /**
  * The theme: the scheme for the side asked (the system's by default), the type, and what `ark-ui`

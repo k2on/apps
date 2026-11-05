@@ -122,6 +122,8 @@ import dev.arkui.toneColors
 import dev.money.android.gen.Auto
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
+import dev.arkui.pressable
+import dev.arkui.Press
 
 /**
  * Whether what a category is given this month is anybody's to change here: not Ready to Assign's, and
@@ -557,7 +559,7 @@ private fun CategoryRow(l: BudgetLine, first: Boolean, lifted: Boolean, actions:
         if (!first) RowDivider(inset = if (card) Space.l + 28.dp + Space.m else Space.l)
         Row(
             Modifier.fillMaxWidth()
-                .clickable(onClickLabel = "Open", onClick = onClick)
+                .pressable(onClickLabel = "Open", onClick = onClick, press = Press.Highlight)
                 .padding(horizontal = Space.l, vertical = Space.m)
                 .semantics(mergeDescendants = true) {
                     contentDescription = "${l.name}, ${a.format(l.available)} available" + if (story.isNotEmpty()) ". $story" else ""

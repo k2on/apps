@@ -15,9 +15,15 @@
 // threshold and the page finishes the whole shrink into its card from
 // wherever the preview was; short of it, it springs back.
 //
-// Everything is a spring (`Springs.kt`): a page's size and clip on a
-// critically damped one, where it is on one with a whisper of overshoot,
-// and the dim under it on the size's.
+// Everything is a spring (`Springs.kt`): a page's size, clip and place on
+// critically damped ones — a tap starts the move from rest, and nothing
+// threw it, so it arrives and stops — and the dim under it on the size's.
+//
+// With motion reduced (`reducedMotion`) a page neither grows nor shrinks:
+// it cross-fades over the page under it on `Springs.fade`, in place, at its
+// full size, and the page under it does not dim. The back gesture's preview
+// is then the page fading a little under the finger, not shrinking toward
+// it, and letting go fades it the rest of the way.
 //
 // Drawn, not laid out: the page is laid out once at its full size and the
 // move is a scale, an offset and a clip as it is drawn, so a page moving costs
@@ -121,6 +127,9 @@ import kotlinx.coroutines.launch
 /** How dark the page underneath gets while a page covers it. */
 public const val PAGE_DIM: Float = 0.25f
 
+/** How much of a page reduced motion's back preview fades, at the preview's limit. */
+private const val REDUCED_PREVIEW = 0.3f
+
 /**
  * What one navigation does: a page grows over the one it came from, shrinks back off it, or
  * neither.
@@ -177,6 +186,12 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
 
     public var top: String? = null
         private set
+
+    /**
+     * Whether motion is reduced for the pages: set as each destination is composed, and read as the
+     * move runs.
+     */
+    public var reduced: Boolean = false
 
     /** Frames drawn with a page part-way through a move: a test's measure of "no transition". */
     public var movingFrames: Int = 0
@@ -240,12 +255,24 @@ public class PageMotion(private val tabs: Set<String> = emptySet()) {
         top = if (m == Move.Cut) null else moving.id
     }
 
-    /** How a page's size, clip and dim run for the move under way: not at all, for a cut. */
-    public fun size(): FiniteAnimationSpec<Float> = if (move == Move.Cut) snap() else Springs.size()
+    /**
+     * How a page's size, clip and dim run for the move under way: not at all, for a cut; as a quick
+     * cross-fade, with motion reduced.
+     */
+    public fun size(): FiniteAnimationSpec<Float> =
+        when {
+            move == Move.Cut -> snap()
+            reduced -> Springs.fade()
+            else -> Springs.size()
+        }
 
-    /** How a page's place runs for the move under way. */
+    /** How a page's place runs for the move under way: with motion reduced, it has none. */
     public fun place(): FiniteAnimationSpec<Float> =
-        if (move == Move.Cut) snap() else Springs.move()
+        when {
+            move == Move.Cut -> snap()
+            reduced -> Springs.fade()
+            else -> Springs.move()
+        }
 
     public fun isPage(entry: NavBackStackEntry): Boolean = entry.destination.route !in tabs
 
@@ -563,12 +590,14 @@ internal constructor(
     private val inset = with(density) { PageMotion.PREVIEW_INSET.toPx() }
     private val previewCorner = with(density) { PageMotion.PREVIEW_CORNER.toPx() }
 
-    // The grow: `e` is how open the page's size is, `p` where it is (the one that may overshoot).
+    // The grow: `e` is how open the page's size is, `p` where it is.
     private fun growing(size: Size, e: Float, p: Float): Placing? {
         if (e >= 1f && p == 1f) return null
         val w = size.width
         val h = size.height
         val page = Rect(0f, 0f, w, h)
+        // Reduced motion: in place, at its size, fading in over what it covers.
+        if (motion.reduced) return Placing(1f, 0f, 0f, page, 0f, e, 0f)
         val from =
             origin
                 ?.bounds
@@ -618,6 +647,11 @@ internal constructor(
         val v = motion.previewOf(id, e)
         if (v <= 0f) return g
         val q = v / Springs.PREVIEW
+        // Reduced motion: the preview is a fade under the finger, the page staying where it is.
+        if (motion.reduced) {
+            val page = Rect(0f, 0f, size.width, size.height)
+            return Placing(1f, 0f, 0f, page, 0f, (g?.alpha ?: 1f) * (1f - REDUCED_PREVIEW * q), 0f)
+        }
         val sp = 1f - v
         val aside = q * (size.width / 20f - inset).coerceAtLeast(0f)
         val tx =
@@ -702,9 +736,12 @@ internal constructor(
         else motion.atBar(pictured)
     }
 
-    /** How much darker this destination is drawn: only while another page moves over it. */
+    /**
+     * How much darker this destination is drawn: only while another page moves over it, and not
+     * under a cross-fade, which is opacity enough.
+     */
     private fun dim(shown: Float): Float {
-        if (motion.move == Move.Cut || motion.top == id || shown >= 1f) return 0f
+        if (motion.move == Move.Cut || motion.reduced || motion.top == id || shown >= 1f) return 0f
         return PAGE_DIM * (1f - shown.coerceIn(0f, 1f))
     }
 }
@@ -723,6 +760,7 @@ public fun AnimatedVisibilityScope.Moving(
     content: @Composable () -> Unit
 ) {
     val page = motion.isPage(entry)
+    motion.reduced = reducedMotion()
     // Two numbers per destination, 1 while it is the page shown and 0 while it is not: how open its
     // size is, and where it is. A page that is the one moving is drawn as open as they say; one
     // under
@@ -996,7 +1034,11 @@ public class Pull(
 
     override suspend fun onPreFling(available: Velocity): Velocity {
         if (!pulling) return Velocity.Zero
-        val far = progress >= COMMIT || available.y >= FLICK * height
+        // Where the pull was going, not where it was let go: how far it came, and the projection of
+        // its speed at the snappier rate going back is decided at — a short, quick pull goes back,
+        // a long one let go moving up does not.
+        val to = pulled + Springs.project(available.y, Springs.SNAPPY)
+        val far = to / (height * REACH) >= COMMIT
         pulling = false
         pulled = 0f
         if (far) back.onBackPressed() else back.dispatchOnBackCancelled()
@@ -1009,10 +1051,7 @@ public class Pull(
         /** How far down, as a share of the page's height, a pull runs for a progress of 1. */
         const val REACH = 0.6f
 
-        /** A pull let go past this much of the way goes back. */
+        /** A pull going past this much of the way when it is let go goes back. */
         const val COMMIT = 0.2f
-
-        /** Or one let go moving down faster than this many page heights a second. */
-        const val FLICK = 1.2f
     }
 }
