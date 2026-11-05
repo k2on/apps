@@ -1,0 +1,37 @@
+[package]
+name = "harken-seed"
+version = "0.1.0"
+workspace = "../../rust"
+edition.workspace = true
+license.workspace = true
+description = "harken's demo library: the classical catalogue and the shows, which the demo window opens on, and (harken-seed) the same albums as a media root of tagged files a server's scanner reads."
+
+[lib]
+name = "harken_seed"
+path = "src/lib.rs"
+
+# `harken-seed DATA`: the catalogue written as a media root, `DATA/media`.
+# Only with `cli`, so the demo that links the library (in a browser too)
+# builds no binary and none of what it fetches and draws with.
+[[bin]]
+name = "harken-seed"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:ureq", "dep:png", "dep:sha2"]
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+harken-domain = { path = "../../harken/domain" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+# A cover from the catalogue's address, as harken-iced fetches one.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+# A cover of its own when that cannot be had, and the colours it is drawn in.
+png = { version = "0.18", optional = true }
+sha2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+# What harken-server's scanner reads a file's tags with (`media`'s tests).
+lofty = "0.25"

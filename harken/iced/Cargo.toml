@@ -11,11 +11,13 @@ description = "harken's desktop and browser client: the library, the table, the 
 # authority. What GitHub Pages publishes, and a separate build from the real
 # client on purpose — a flag could be set by accident, a feature has to be
 # asked for at build time.
-demo = []
+demo = ["dep:harken-seed"]
 
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
+# The demo's library (`seed/harken`), with the `demo` feature only.
+harken-seed = { path = "../../seed/harken", default-features = false, optional = true }
 # The one reconciler, the phones' and the speakers', over this window's player.
 harken-player = { path = "../player" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }

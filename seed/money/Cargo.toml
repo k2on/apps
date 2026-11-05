@@ -1,0 +1,29 @@
+[package]
+name = "money-seed"
+version = "0.1.0"
+workspace = "../../rust"
+edition.workspace = true
+license.workspace = true
+description = "money's demo household: three months of a family's budget up to today, which the demo window, the phones' demo and a seeded server's data directory (money-seed) open on."
+
+[lib]
+name = "money_seed"
+path = "src/lib.rs"
+
+# `money-seed DATA`: the household written into a server's data directory.
+# Only with `cli`, so the demos that link the library (one of them wasm)
+# build no binary and none of its dependencies.
+[[bin]]
+name = "money-seed"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:anyhow"]
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+money-domain = { path = "../../money/domain" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+anyhow = { version = "1", optional = true }

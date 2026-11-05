@@ -49,6 +49,11 @@ import ArkOS's `money-sync` did for Actual Budget, as a mutator) and
 server's OpenID provider lets in shares one budget. `money/README.md`
 says what is built and what is not.
 
+`seed/` is the apps' demo data, outside the apps: a crate per app
+(`money-seed`, `harken-seed`) that the demos and tests link and whose
+binary seeds a server's data directory for the screenshots or for
+`nix run .#<app>-demo`. `seed/README.md` says what each holds.
+
 `revelation/` is another app, and not on ArkDB: an Android app in plain
 Kotlin, no Rust and no native library, that is the Bible as one scroll
 zoomed like a map. `revelation/README.md` says how to build and run it and

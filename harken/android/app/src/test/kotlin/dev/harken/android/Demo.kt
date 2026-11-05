@@ -1,5 +1,5 @@
 // The library the screenshots are drawn from: rows taken from harken's demo
-// seed (`harken/iced/src/seed.rs`) — six of its records, their titles,
+// seed (`seed/harken`) — six of its records, their titles,
 // composers, parts, track numbers, performers and lengths as the seed has
 // them — laid out as the module's queries answer them: `library` in the
 // order added, `albums` and `artists` by name, `track_details` per song.

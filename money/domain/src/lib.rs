@@ -8,9 +8,9 @@
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
-//! [`feed`]. [`domain`] registers every function by its name. Behind
-//! features: the demo's household (`seed`), and the rows the
-//! phones read typed as UniFFI records (`ffi`, for `money/ffi`).
+//! [`feed`]. [`domain`] registers every function by its name. Behind a
+//! feature: the rows the phones read typed as UniFFI records (`ffi`, for
+//! `money/ffi`). The demo's household is outside the app, in `seed/money`.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
@@ -36,8 +36,6 @@ pub mod migrations;
 pub mod plaid;
 pub mod receipts;
 pub mod schema;
-#[cfg(feature = "seed")]
-pub mod seed;
 pub mod setup;
 pub mod stores;
 pub mod transactions;

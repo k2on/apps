@@ -68,10 +68,14 @@ All of it is in `<app>/screens/`:
 - **`server.sh`** (only for an app with a server):
   `server.sh <dir> <listen address>`, run from the repository's root,
   starts the app's server with dev auth and something in it, writes its pid
-  to `<dir>/pid` and its log to `<dir>/server.log`, and returns. money's
-  writes the demo household into a fresh data directory first
-  (`money-seed`); harken's makes a media folder of tagged files from the
-  demo catalogue (`media.py`) for the server's own scanner to read.
+  to `<dir>/pid` and its log to `<dir>/server.log`, and returns. Each
+  seeds a fresh data directory first with the app's seed, which lives
+  outside the app (`seed/README.md`): `nix build .#<app>-seed`, then
+  `<app>-seed <dir>/data`, then the server from `nix build .#<app>-server`
+  on it. money's writes the demo household as the log the server boots on
+  (`money-seed`); harken's writes the demo catalogue as a media root of
+  tagged FLAC files and covers, `<dir>/data/media`, for the server's own
+  scanner to read (`harken-seed`, no ffmpeg).
 
 And the builds: on Android the artifact `apk-<app>` of `build.yaml`
 (already the case for every APK in the flake's `publish`); on the iPhone

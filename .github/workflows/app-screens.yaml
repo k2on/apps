@@ -53,6 +53,8 @@ on:
     paths:
       - ".github/screens/**"
       - "*/screens/**"
+      # What the servers are seeded with.
+      - "seed/**"
       - ".github/workflows/app-screens.yaml"
   workflow_dispatch:
 
