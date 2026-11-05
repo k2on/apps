@@ -340,6 +340,8 @@ pub enum Message {
     Wake,
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
+    /// The account's picture, fetched.
+    Picture(arkui::images::Loaded),
     /// Items' category: the dropdown, under the pointer.
     FileItems(Vec<ItemRef>),
     /// The form's transaction split: into two lines, or (none) back into one.
@@ -430,6 +432,9 @@ pub struct App {
     pub paper: Option<receipt::Paper>,
     /// The photo the photo modal shows, by its file, once decoded.
     pub photo: Option<(String, iced::widget::image::Handle)>,
+    /// The signed-in person's picture, for the account button: fetched
+    /// once, kept on disk as harken's covers are (`arkui::images`).
+    pub pictures: arkui::images::Images,
 }
 
 impl App {
@@ -476,6 +481,7 @@ impl App {
             settings: stores::Settings::default(),
             paper: None,
             photo: None,
+            pictures: arkui::images::Images::new("money/pictures"),
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -635,6 +641,9 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The account's picture is asked for once somebody is signed in,
+        // whichever message signed them in.
+        let task = Task::batch([task, self.want_picture()]);
         // The receipt beside the register is the selected transaction's (the
         // one in the form, else the cursor's); a receipt typed goes with the
         // transaction it was for.
@@ -1254,6 +1263,7 @@ impl App {
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
             Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
+            Message::Picture(done) => self.pictures.loaded(done),
         }
         Task::none()
     }

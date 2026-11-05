@@ -151,7 +151,7 @@ impl App {
         // opens Settings and signs out.
         if let Some(account) = self.account() {
             layers = layers.push(
-                container(arkui::account::button(&account, None, Message::AccountMenu))
+                container(arkui::account::button(&account, self.account_picture(), Message::AccountMenu))
                     .width(Length::Fill)
                     .padding(PAD)
                     .align_x(Alignment::End),
