@@ -1,0 +1,30 @@
+    #content
+          [button] pressable
+            [button] pressable
+              'Close the player'
+              [button]
+            'Bagatelles' [text]
+            [button] pressable
+              'More'
+              [button]
+            'Für Elise' [button] pressable
+            'Ludwig van Beethoven' [button] pressable
+            '0:06' [text]
+            '-2:50' [text]
+            [button] pressable
+              'Previous'
+              [button]
+            [button] pressable
+              'Play'
+              [button]
+            [button] pressable
+              'Next'
+              [button]
+            [button] pressable
+              'Mute sdk_gphone64_x86_64'
+              [button]
+            [button] pressable
+              'Playing on'
+              'sdk_gphone64_x86_64' [text]
+            [button] pressable
+              'Up next: Gigue' [text]

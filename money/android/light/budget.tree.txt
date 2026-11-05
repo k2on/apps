@@ -1,0 +1,55 @@
+    #content
+                    'Ready to assign' [text]
+                    '$1,284.50' 'Ready to assign, $1,284.50' [text]
+                    [button] pressable
+                      'Fund 3 underfunded' [text]
+                      [button]
+                    'Income' [text]
+                    '$5,390.00' [text]
+                    'Assigned' [text]
+                    '$4,105.50' [text]
+                    'Activity' [text]
+                    '-$3,897.94' [text]
+                  [button] pressable
+                    '3 transactions to review' [text]
+                    [button]
+                    [button] pressable
+                      'Credit Card Payments' [text]
+                      '$177.49' [text]
+                      [button]
+                  [button] pressable
+                    'Chase Sapphire, $177.49 available. Covered: $177.49 owed'
+                    'Chase Sapphire' [text]
+                    'Covered: $177.49 owed' [text]
+                      '$177.49' [text]
+                    [button] pressable
+                      'Bills' [text]
+                      '$353.35' [text]
+                      [button]
+                  [button] pressable
+                    'Rent, $0.00 available. Spent $1,850.00 of $1,850.00'
+                    'Rent' [text]
+                    'Spent $1,850.00 of $1,850.00' [text]
+                      '$0.00' [text]
+                  [button] pressable
+                    'Electric, $143.73 available. Funded'
+                    'Electric' [text]
+                  [button] pressable
+                    'Previous month'
+                    [button]
+                  [button] pressable
+                    'Next month'
+                    [button]
+                  [button] pressable
+                    'More'
+                    [button]
+                  'November 2026' [text]
+                [button] pressable
+                  [button]
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]

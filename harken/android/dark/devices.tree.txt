@@ -1,0 +1,11 @@
+    #content
+              'Close sheet' [button] pressable
+                  'Drag handle'
+                  'Playing on' [text]
+                  [button] pressable
+                    'sdk_gphone64_x86_64' [text]
+                    'this phone' [text]
+                    'Playing here'
+                  [button] pressable
+                    'Mute sdk_gphone64_x86_64'
+                    [button]
