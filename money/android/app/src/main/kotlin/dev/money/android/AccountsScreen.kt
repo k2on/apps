@@ -10,7 +10,6 @@
 // top bar, as Google's apps put them.
 package dev.money.android
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Badge
@@ -56,7 +54,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -88,7 +85,7 @@ fun AccountsScreen(ledger: Ledger) {
         actions = {
             // The face opens Settings, badged while a bank wants somebody there.
             IconButton(onClick = shell.onSettings) {
-                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }) }
+                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }, ledger.picture) }
             }
         },
         fab = {
@@ -145,19 +142,6 @@ fun AccountsScreen(ledger: Ledger) {
         }
     }
     if (adding) AddAccountSheet(onDismiss = { adding = false })
-}
-
-@Composable
-fun Avatar(name: String) {
-    Box(
-        Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-        contentAlignment = Alignment.Center) {
-            Text(
-                name.take(1).uppercase(),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.semantics { contentDescription = "Signed in as $name" })
-        }
 }
 
 /** What an account says under its name: the bank and its last digits when one feeds it, else its kind. */

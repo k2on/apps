@@ -120,6 +120,8 @@ data class Ledger(
     val link: Link = Link(),
     /** Who is signed in, as a name to show. */
     val who: String = "",
+    /** Their picture, as this phone loads it ([Faces.url]); empty for none, and for the demo. */
+    val picture: String = "",
     val demo: Boolean = false,
     /** The server's address; empty for the demo. */
     val server: String = "",
@@ -371,7 +373,8 @@ private constructor(
         }
         val s = peer.status()
         // The demo is Alex's, as the demo window is, with no session row to say so.
-        val who = peer.signedIn()?.let { it.name.ifEmpty { it.user } } ?: if (demo) "alex" else ""
+        val signed = peer.signedIn()
+        val who = signed?.let { it.name.ifEmpty { it.user } } ?: if (demo) "alex" else ""
         _state.value =
             Ledger(
                 today = today,
@@ -389,6 +392,7 @@ private constructor(
                 asks = asks?.rows?.toList().orEmpty(),
                 link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
+                picture = signed?.let { Faces.url(server, it.user, it.picture) }.orEmpty(),
                 demo = demo,
                 server = server,
                 syncing = syncing,
