@@ -10,12 +10,12 @@
 // address pasted.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,10 +27,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -63,6 +65,7 @@ import dev.arkui.quiet
 import dev.arkui.rememberTransientListState
 import dev.arkui.rememberTransientScrollState
 import kotlinx.coroutines.delay
+import uniffi.harken_domain.Playlist
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -216,19 +219,56 @@ interface PickerActions {
  * beside and under it are their own targets.
  */
 @Composable
-fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions) {
+fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions, onDone: (() -> Unit)? = null) {
+    // Laid out as the iPhone's (Sheets.swift, `DevicesSheet`): its grabber, the title in the middle
+    // and Done at its end, and the devices together in one rounded group, the cursor's tinted.
     // Scrolled, for a house of speakers taller than the screen; a sheet's place is not kept.
     Column(Modifier.fillMaxWidth().verticalScroll(rememberTransientScrollState()).padding(bottom = Space.l)) {
-        Text("Playing on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s))
+        Box(
+            Modifier.padding(top = Space.s)
+                .align(Alignment.CenterHorizontally)
+                .size(36.dp, 5.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+        )
+        Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Space.s)) {
+            Text(
+                "Playing on",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            if (onDone != null)
+                TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterEnd)) {
+                    Text("Done", style = MaterialTheme.typography.titleMedium)
+                }
+        }
         if (rows.isEmpty())
             Text(
                 "Nothing else is listening. A device signed in as you appears here once it is open.",
                 style = quiet(MaterialTheme.typography.bodyMedium),
                 modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
             )
-        rows.forEachIndexed { i, r -> DeviceLine(r, at = i == cursor, actions) }
+        else
+            Column(
+                Modifier.padding(horizontal = Space.l, vertical = Space.s)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(DEVICE_GROUP_CORNER))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+            ) {
+                rows.forEachIndexed { i, r ->
+                    if (i > 0)
+                        HorizontalDivider(
+                            Modifier.padding(start = Space.l + 22.dp + Space.l),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                        )
+                    DeviceLine(r, at = i == cursor, actions)
+                }
+            }
     }
 }
+
+// The group's corners: the iPhone's inset lists'.
+private val DEVICE_GROUP_CORNER = 20.dp
 
 // One device: its kind, its name, what it cannot do, its join, a tick where the sound is — and
 // under it, where it has one, its volume.
@@ -246,11 +286,12 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
             r.me -> "this phone"
             else -> null
         }
-    Column(Modifier.fillMaxWidth().let { if (at) it.background(MaterialTheme.colorScheme.surfaceContainerHighest) else it }) {
+    // The cursor's row tinted with the accent, as the iPhone's, over the group whatever it is on.
+    Column(Modifier.fillMaxWidth().let { if (at) it.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)) else it }) {
         Row(
             Modifier.fillMaxWidth()
                 .let { if (r.takeable) it.clickable { actions.pick(r) } else it }
-                .padding(horizontal = Space.xl)
+                .padding(horizontal = Space.l)
                 .height(60.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -283,7 +324,7 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
                 { actions.level(r, it) },
                 actions::levelDone,
                 { actions.mute(r) },
-                Modifier.fillMaxWidth().padding(start = Space.xl + 22.dp + Space.l - 12.dp, end = Space.xl).padding(bottom = Space.xs),
+                Modifier.fillMaxWidth().padding(start = Space.l + 22.dp + Space.l - 12.dp, end = Space.l).padding(bottom = Space.xs),
                 about = r.name,
             )
         }

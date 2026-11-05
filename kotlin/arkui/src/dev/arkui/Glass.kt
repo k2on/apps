@@ -115,6 +115,12 @@ public object Glass {
 
     /** A menu's margin from the edges of the space it opens in. */
     public val margin: Dp = Space.l
+
+    /** A sheet's margin from the space's sides and foot: the iPhone's floating sheets'. */
+    public val sheetMargin: Dp = 8.dp
+
+    /** A sheet's corners: the iPhone's, near the screen's own. */
+    public val sheetCorner: Dp = 36.dp
 }
 
 /** A piece of glass's outline: a capsule, its ends half its height, or a rounded rectangle. */
@@ -198,6 +204,10 @@ public fun GlassContainer(
  * its trailing edge in the last third, centred on it between. A tap outside the menu, or back,
  * calls `onDismiss`.
  *
+ * `sheet`: the menu opens as the iPhone's sheets do in iOS 26, rather than as a menu: as wide as
+ * the space less [Glass.sheetMargin] each side, resting on its foot that far up, its corners
+ * `menuCorner` — still grown out of the button, and shrunk back into it.
+ *
  * It must be in a [GlassContainer], which is where the menu opens; outside one it is the button
  * alone. `held` holds it at that much of the way, 0 to 1, whatever `expanded` says: a screenshot's
  * frame of the morph.
@@ -211,6 +221,7 @@ public fun GlassMorph(
     id: Any? = null,
     menuWidth: Dp = Glass.menuWidth,
     menuCorner: Dp = Glass.menuCorner,
+    sheet: Boolean = false,
     held: Float? = null,
     collapsed: @Composable () -> Unit,
     content: @Composable () -> Unit,
@@ -231,6 +242,7 @@ public fun GlassMorph(
     m.shape = shape
     m.menuWidth = menuWidth
     m.menuCorner = menuCorner
+    m.sheet = sheet
     m.onDismiss = onDismiss
     m.collapsed = collapsed
     m.content = content
@@ -288,6 +300,7 @@ private class Morph(val p: Animatable<Float, *>) {
     var shape: GlassShape = GlassShape.Capsule
     var menuWidth: Dp = Glass.menuWidth
     var menuCorner: Dp = Glass.menuCorner
+    var sheet: Boolean = false
     var onDismiss: () -> Unit = {}
     var collapsed: @Composable () -> Unit by mutableStateOf({})
     var content: @Composable () -> Unit by mutableStateOf({})
@@ -630,13 +643,16 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
     ) { measurables, c ->
         val w = c.maxWidth.toFloat()
         val h = c.maxHeight.toFloat()
-        val margin = Glass.margin.toPx()
+        val margin = (if (m.sheet) Glass.sheetMargin else Glass.margin).toPx()
         val home = space.coords
         val slot =
             m.slot
                 ?.takeIf { it.isAttached && home != null && home.isAttached }
                 ?.let { home!!.localBoundingBoxOf(it, clipBounds = false) }
-        val wide = min(m.menuWidth.toPx(), w - 2 * margin).roundToInt().coerceAtLeast(0)
+        val wide =
+            (if (m.sheet) w - 2 * margin else min(m.menuWidth.toPx(), w - 2 * margin))
+                .roundToInt()
+                .coerceAtLeast(0)
         val tall = (h * MENU_TALL).roundToInt().coerceAtLeast(0)
         var face: androidx.compose.ui.layout.Placeable? = null
         var menu: androidx.compose.ui.layout.Placeable? = null
@@ -667,8 +683,10 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
                     else -> slot.center.x - n.width / 2f
                 }.coerceIn(margin, max(margin, w - margin - n.width))
             val top =
-                (if (up) slot.bottom - n.height else slot.top).coerceIn(
-                    margin, max(margin, h - margin - n.height))
+                if (m.sheet) max(margin, h - margin - n.height)
+                else
+                    (if (up) slot.bottom - n.height else slot.top).coerceIn(
+                        margin, max(margin, h - margin - n.height))
             val menuAt = Rect(Offset(left, top), Size(n.width.toFloat(), n.height.toFloat()))
             val p = m.p.value
             val q = p.coerceIn(0f, 1f)

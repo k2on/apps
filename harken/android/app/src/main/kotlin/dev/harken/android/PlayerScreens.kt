@@ -498,10 +498,13 @@ private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modif
         onDismiss = { menu?.close?.invoke() },
         modifier = modifier,
         id = "device",
+        // As the iPhone's picker: a sheet floating over the player's foot, not a menu at the chip.
+        menuCorner = Glass.sheetCorner,
+        sheet = true,
         held = menu?.held,
         collapsed = { DeviceFace(on, controls) },
     ) {
-        if (menu != null) Box(Modifier.padding(top = Space.m)) { DevicesSheet(menu.rows, menu.cursor, menu.actions) }
+        if (menu != null) DevicesSheet(menu.rows, menu.cursor, menu.actions, onDone = menu.close)
     }
 }
 
