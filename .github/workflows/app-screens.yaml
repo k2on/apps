@@ -169,7 +169,14 @@ jobs:
             if [ "$WORKFLOW" = build ] && [ "$ACTION" = completed ] && [ "$mode" = release ] && grep -qx "apk-$a" <<< "$made"; then android="$android $a"; fi
             if [ "$WORKFLOW" = build ] && [ "$ACTION" = requested ] && [ "$mode" = pr ]; then android="$android $a"; fi
           done
+          # The iPhone's only for main and for a pull request into main: a
+          # Mac is the scarce runner, and a piece of work merged into a
+          # larger branch is shot again when that branch's pull request
+          # runs. Android's and the desktop's (Linux) are shot for every one.
+          base=
+          if [ "$mode" = pr ]; then base=$(gh api "repos/$repo/pulls/$pr" --jq .base.ref); fi
           for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do
+            [ "$mode" != pr ] || [ "$base" = main ] || continue
             if [ "$WORKFLOW" = ios ] && [ "$ACTION" = requested ] && [ -f "$a/screens/shots.json" ]; then ios="$ios $a"; fi
           done
           for a in $(jq -r '.desktop[]' "$RUNNER_TEMP/apps.json"); do
