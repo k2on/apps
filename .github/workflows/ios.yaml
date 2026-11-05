@@ -192,7 +192,7 @@ jobs:
           # A pull request's: the kernel its tests link, and no archive, which
           # nothing would sign or send (its Swift is built by its screenshots).
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel" "$APP-ios-simulator" > "$RUNNER_TEMP/built"
+            bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-kernel" > "$RUNNER_TEMP/built"
           else
             bash .github/nix-xcode.sh . "$XCODE" "$APP-ios-archive" "$APP-ios-kernel" > "$RUNNER_TEMP/built"
           fi
