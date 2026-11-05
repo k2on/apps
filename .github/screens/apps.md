@@ -50,8 +50,10 @@ All of it is in `<app>/screens/`:
   (the mini player, if one is playing; else Recently added's, which plays
   it), then, once something plays ("Pause") or the player is open
   ("Close the player", its button), the mini player, unless the player is
-  open already. A song left paused (the app is stopped between shots)
-  opens a player saying Play, not Pause.
+  open already, with a second try (the mini player slides in when it
+  comes, and a tap the moment it is there can miss it), and the shot is
+  taken once the player is open. A song left paused (the app is stopped
+  between shots) opens a player saying Play, not Pause.
 
   **Write steps from the accessibility tree, not by guessing.** Every shot
   is saved with the tree of the screen it was taken from, beside its
