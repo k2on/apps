@@ -35,12 +35,27 @@ type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 pub const PAD: f32 = 18.0;
 
+/// What scrolls from the window's top under the account's face, which
+/// floats at the top right: scrolled, it goes soft under the face's band
+/// rather than being drawn through it (`arkui::edge`), on `ground`, the
+/// colour of what it is on; at rest it is as it was. The inspector, the
+/// receipt beside the register, Settings and Reflect; the budget's and
+/// the register's lists start below their headings and never pass under it.
+pub(crate) fn under_face<'a>(content: impl Into<Element<'a, Message>>, ground: fn(&iced::Theme) -> iced::Color) -> Element<'a, Message> {
+    arkui::edge::faded(content, PAD + arkui::account::HEIGHT, ground)
+}
+
+/// The page's own ground, for [`under_face`].
+pub(crate) fn page_ground(theme: &iced::Theme) -> iced::Color {
+    arkui::theme::of(theme).background.base.color
+}
+
 /// A page's padding around a list that scrolls: on the top and the sides,
 /// and none under it, so the list runs down to the window's foot. With
 /// `PAD` under it too the list stopped short of the edge with its last
 /// visible row cut off mid-line over an empty strip; the padding under the
 /// last row is inside what scrolls instead, so that row scrolls clear.
-fn page_pad() -> Padding {
+pub(crate) fn page_pad() -> Padding {
     Padding {
         bottom: 0.0,
         ..Padding::new(PAD)
@@ -646,11 +661,15 @@ impl App {
             top: PAD + arkui::account::HEIGHT + 6.0,
             ..Padding::new(PAD)
         };
-        container(scrollable(body.spacing(12).padding(pad)).height(Length::Fill).style(style::bars))
-            .width(Length::Fixed(INSPECTOR))
-            .height(Length::Fill)
-            .style(style::surface)
-            .into()
+        container(
+            scrollable(under_face(body.spacing(12).padding(pad), style::surface_color))
+                .height(Length::Fill)
+                .style(style::bars),
+        )
+        .width(Length::Fixed(INSPECTOR))
+        .height(Length::Fill)
+        .style(style::surface)
+        .into()
     }
 
     pub(crate) fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
@@ -1415,7 +1434,7 @@ impl App {
             .spacing(16)
             .padding(PAD)
             .width(Length::Fill);
-        scrollable(page).height(Length::Fill).style(style::bars).into()
+        scrollable(under_face(page, page_ground)).height(Length::Fill).style(style::bars).into()
     }
 
     fn tile<'a>(&self, label: &str, cents: i64, tone: Tone) -> Element<'a, Message> {

@@ -232,9 +232,12 @@ impl App {
             ..iced::Padding::new(crate::view::PAD)
         };
         container(
-            scrollable(column![head.spacing(2), body].spacing(12).padding(pad))
-                .height(Length::Fill)
-                .style(style::bars),
+            scrollable(crate::view::under_face(
+                column![head.spacing(2), body].spacing(12).padding(pad),
+                style::surface_color,
+            ))
+            .height(Length::Fill)
+            .style(style::bars),
         )
         .width(Length::Fixed(SIDE))
         .height(Length::Fill)

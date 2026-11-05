@@ -653,12 +653,18 @@ impl App {
             Some(top) => column![top, body],
             None => column![body],
         };
-        scrollable(page.width(Length::Fill))
-            .id(TRACKS)
-            .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-            .style(style::bars)
-            .height(Length::Fill)
-            .into()
+        // The page starts at the window's top, under the account's face:
+        // scrolled, it goes soft under the face's band rather than being
+        // drawn through it (`arkui::edge`), and at rest it is as it was.
+        let band = PAGE_PADDING + account::HEIGHT;
+        scrollable(arkui::edge::faded(page.width(Length::Fill), band, |t| {
+            arkui::theme::of(t).background.base.color
+        }))
+        .id(TRACKS)
+        .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+        .style(style::bars)
+        .height(Length::Fill)
+        .into()
     }
 
     /// Where the page's cursor is, while the page has the keyboard.

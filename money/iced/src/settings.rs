@@ -99,9 +99,12 @@ impl App {
             account,
         ]
         .width(Length::Fill);
-        scrollable(container(page).padding(PAD).max_width(980))
-            .height(Length::Fill)
-            .style(style::bars)
-            .into()
+        scrollable(crate::view::under_face(
+            container(page).padding(PAD).max_width(980),
+            crate::view::page_ground,
+        ))
+        .height(Length::Fill)
+        .style(style::bars)
+        .into()
     }
 }
