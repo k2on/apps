@@ -1,5 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken.",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken. The player is paused and put halfway before it is taken, so that what it shows is the same each run.",
   "server": {
     "port": 8787,
     "user": "alex"
@@ -51,6 +51,50 @@
         },
         {
           "await": "Close the player"
+        },
+        {
+          "tap": "Pause",
+          "optional": true
+        },
+        {
+          "tap": "Position",
+          "optional": true
+        },
+        {
+          "wait": 2
+        }
+      ]
+    },
+    {
+      "id": "devices",
+      "steps": [
+        {
+          "tap": "Für Elise",
+          "where": "bottom"
+        },
+        {
+          "await": "Pause|Close the player"
+        },
+        {
+          "relaunch": true
+        },
+        {
+          "tap": "Für Elise",
+          "where": "bottom"
+        },
+        {
+          "await": "Close the player"
+        },
+        {
+          "tap": "Pause",
+          "optional": true
+        },
+        {
+          "tap": "Position",
+          "optional": true
+        },
+        {
+          "tap": "Playing on|iPhone 17 Pro"
         },
         {
           "wait": 2

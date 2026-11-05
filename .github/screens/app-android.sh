@@ -14,7 +14,8 @@
 # "role" ("tab", "button", "field", "text") to prefer when several say
 # it, "where": "bottom" for the lowest of them on the screen, and "unless":
 # "<label>" to skip the step when that is on the screen already (what it
-# opens is open); {"await": "<label>"} waits for that label to be there (`a|b`, either);
+# opens is open), "optional": true to pass over a tap with nothing to tap
+# (after a few seconds), and `a|b` for whichever of two is there; {"await": "<label>"} waits for that label to be there (`a|b`, either);
 # {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
@@ -36,16 +37,23 @@ dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 
 # Tap what says `text` (or, as `--field`, the first text field), waiting
 # up to `seconds` for it to be there; of several, the `role` one.
+# `a|b`: whichever is there. `optional`: nothing there is no failure.
 tap() {
-  local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} at
+  local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} optional=${5:-} at one screen
+  local -a each
+  IFS='|' read -ra each <<< "$text"
   for _ in $(seq 1 "$seconds"); do
-    if at=$(dump | python3 -I "$here/ui.py" "$text" "$role" "$where"); then
-      # shellcheck disable=SC2086
-      adb shell input tap $at
-      return 0
-    fi
+    screen=$(dump)
+    for one in "${each[@]}"; do
+      if at=$(python3 -I "$here/ui.py" "$one" "$role" "$where" <<< "$screen"); then
+        # shellcheck disable=SC2086
+        adb shell input tap $at
+        return 0
+      fi
+    done
     sleep 1
   done
+  [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; return 0; }
   echo "::error::$app: nothing on the screen says '$text'"
   adb exec-out screencap -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
@@ -57,22 +65,27 @@ says() { dump | python3 -I "$here/ui.py" "$1" >/dev/null; }
 
 # A step of a shot, as JSON.
 step() {
-  local s=$1 done
-  done=$(jq -r '.unless // ""' <<< "$s")
-  if [ -n "$done" ] && says "$done"; then return 0; fi
+  local s=$1 skip
+  skip=$(jq -r '.unless // ""' <<< "$s")
+  if [ -n "$skip" ] && says "$skip"; then return 0; fi
   if jq -e 'has("relaunch")' <<< "$s" > /dev/null; then
     open_app
   elif jq -e 'has("await")' <<< "$s" > /dev/null; then
-    local label i one
+    local label one
     label=$(jq -r '.await' <<< "$s")
     # `a|b`: either will do.
-    for i in $(seq 1 20); do
+    for _ in $(seq 1 20); do
       IFS='|' read -ra each <<< "$label"
       for one in "${each[@]}"; do says "$one" && return 0; done
       sleep 1
     done
     echo "::error::$app: '$label' never came"; return 1
-  elif jq -e 'has("tap")' <<< "$s" > /dev/null; then tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
+  elif jq -e 'has("tap")' <<< "$s" > /dev/null; then
+    if jq -e '.optional == true' <<< "$s" > /dev/null; then
+      tap "$(jq -r .tap <<< "$s")" 3 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" optional
+    else
+      tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
+    fi
   elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
   elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
   else echo "::error::$app: no such step: $s"; return 1

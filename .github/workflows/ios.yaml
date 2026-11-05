@@ -181,8 +181,8 @@ jobs:
         env:
           NAME: ${{ matrix.app.App }}
         run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          xcodegen generate
+          # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
+          "$(nix build --no-link --print-out-paths "$GITHUB_WORKSPACE#xcodegen")/bin/xcodegen" generate
           id=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           d = json.load(sys.stdin)["devices"]
