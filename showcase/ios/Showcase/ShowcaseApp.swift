@@ -164,6 +164,12 @@ struct Screen: View {
             if #available(iOS 26.0, *) { ExpandingCardShot() } else { Text("Needs iOS 26") }
         case "scroll-to-top":
             ScrollToTopShot()
+        case "glass-menu", "glass-menu-open":
+            if #available(iOS 26.0, *) { GlassMenuShot(still: shot == "glass-menu-open") } else { Text("Needs iOS 26") }
+        case "glass-sheet":
+            if #available(iOS 26.0, *) { GlassSheetShot() } else { Text("Needs iOS 26") }
+        case "glass-merge":
+            if #available(iOS 26.0, *) { GlassMergeShot() } else { Text("Needs iOS 26") }
         default:
             Text("No showcase for \(shot)")
         }
@@ -304,6 +310,205 @@ private struct ScrollToTopShot: View {
                 if done { timer.invalidate() }
             }
         }
+    }
+}
+
+// The glass shots are the system's Liquid Glass, laid out as Android's are
+// (showcase/android, which draws arkui's Glass.kt), number for number, so the
+// two recordings can be watched side by side: a ground a step from the
+// page's, for the glass to stand on, and the page's title.
+
+/// How near two pieces of glass come before they join: Android's
+/// GlassContainer's spacing.
+private let glassReach: CGFloat = 24
+
+/// What the glass button opens: the same entries on both phones.
+private let sorts = ["Name", "Distance", "Most visited", "Recently visited"]
+
+/// A glass shot's move as Android's: `set(true)` on Springs.move, held, and
+/// `set(false)`, each with time slowed for it (`move`); then done.
+private func thereAndBack(_ set: @escaping (Bool) -> Void) {
+    after(0.4) {
+        move(for: 0.6, { withAnimation(Springs.move) { set(true) } }) {
+            after(0.9) {
+                move(for: 0.6, { withAnimation(Springs.move) { set(false) } }) { after(0.4) { say("done") } }
+            }
+        }
+    }
+}
+
+/// The move once at life's speed as a shot appears, off the recording, so
+/// that what is recorded is never the first glass the simulator sets up;
+/// then ready.
+private func warm(_ set: @escaping (Bool) -> Void) {
+    after(0.5) { withAnimation(Springs.move) { set(true) } }
+    after(1.5) { withAnimation(Springs.move) { set(false) } }
+    after(3) { say("ready") }
+}
+
+/// A page with a glass button at its foot that becomes a menu of `sorts`:
+/// one glass, the button's and the panel's, by its `glassEffectID` in one
+/// `GlassEffectContainer`, so that as one goes and the other comes the glass
+/// changes shape between them. The still is the menu open.
+@available(iOS 26.0, *)
+private struct GlassMenuShot: View {
+    let still: Bool
+    @EnvironmentObject private var go: Go
+    @Namespace private var glass
+    @State private var open: Bool
+
+    init(still: Bool) {
+        self.still = still
+        _open = State(initialValue: still)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color(uiColor: .secondarySystemBackground).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: Space.m) {
+                Text("Glass").font(.largeTitle.bold())
+                ForEach(places.prefix(5), id: \.self) { Row(name: $0) }
+                Spacer()
+            }
+            .padding(.horizontal, Space.page)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            GlassEffectContainer(spacing: glassReach) {
+                if open {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(sorts, id: \.self) { s in
+                            Text(s)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, Space.m)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, Space.s)
+                    .frame(width: 250)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .glassEffectID("sort", in: glass)
+                } else {
+                    Text("Sort")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 20)
+                        .frame(height: 44)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .glassEffectID("sort", in: glass)
+                }
+            }
+            .padding(.bottom, Space.xl)
+        }
+        .onAppear { if !still { warm { open = $0 } } }
+        .onChange(of: go.told) { thereAndBack { open = $0 } }
+    }
+}
+
+/// The same page and button, the button opening a sheet of `sorts` at a
+/// height of its own: in iOS 26 a sheet short of the screen floats, inset
+/// from its edges, on glass, and zoomed out of its button
+/// (`matchedTransitionSource`, `navigationTransition(.zoom)`) it grows out
+/// of it and shrinks back into it.
+@available(iOS 26.0, *)
+private struct GlassSheetShot: View {
+    @EnvironmentObject private var go: Go
+    @Namespace private var glass
+    @State private var open = false
+    @State private var warm = false
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color(uiColor: .secondarySystemBackground).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: Space.m) {
+                Text("Glass").font(.largeTitle.bold())
+                ForEach(places.prefix(5), id: \.self) { Row(name: $0) }
+                Spacer()
+            }
+            .padding(.horizontal, Space.page)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Sort")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 20)
+                .frame(height: 44)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .matchedTransitionSource(id: "sort", in: glass)
+                .padding(.bottom, Space.xl)
+        }
+        .sheet(isPresented: $open) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Sort by")
+                    .font(.headline)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, Space.s)
+                ForEach(sorts, id: \.self) { s in
+                    Text(s)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, Space.m)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, Space.l)
+            .presentationDetents([.height(260)])
+            .navigationTransition(.zoom(sourceID: "sort", in: glass))
+            .onAppear { if !warm { after(1.5) { open = false } } }
+            .onDisappear {
+                if !warm {
+                    warm = true
+                    after(1) { say("ready") }
+                }
+            }
+        }
+        // Opened and closed once as it appears, off the recording, at life's
+        // speed, as the expanding card's zoom is: the first sheet in a fresh
+        // simulator pays for setting itself up. The sheet is the system's,
+        // slowed for a recording with the rest (timewarp.c), on the card's
+        // timing.
+        .onAppear { after(0.5) { open = true } }
+        .onChange(of: go.told) {
+            after(0.4) {
+                move(for: 0.9, { open = true }) {
+                    after(0.9) {
+                        move(for: 0.8, { open = false }) { after(0.4) { say("done") } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Three capsules of glass in one `GlassEffectContainer`, sliding together
+/// until they touch and are one surface, held, and parting.
+@available(iOS 26.0, *)
+private struct GlassMergeShot: View {
+    @EnvironmentObject private var go: Go
+    @Namespace private var glass
+    @State private var together = false
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .secondarySystemBackground).ignoresSafeArea()
+            VStack(alignment: .leading) {
+                Text("Glass").font(.largeTitle.bold())
+                Spacer()
+            }
+            .padding(.horizontal, Space.page)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            GlassEffectContainer(spacing: glassReach) {
+                // Far enough apart that their slide together is seen frame
+                // by frame, rather than over in the spring's first few
+                // (Android's is the same).
+                HStack(spacing: together ? 0 : 80) {
+                    ForEach(["A", "B", "C"], id: \.self) { l in
+                        Text(l)
+                            .font(.headline)
+                            .frame(width: 64, height: 44)
+                            .glassEffect(.regular, in: Capsule())
+                            .glassEffectID(l, in: glass)
+                    }
+                }
+            }
+        }
+        .onAppear { warm { together = $0 } }
+        .onChange(of: go.told) { thereAndBack { together = $0 } }
     }
 }
 
