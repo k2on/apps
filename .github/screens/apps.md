@@ -46,14 +46,13 @@ All of it is in `<app>/screens/`:
   `"where": "bottom"` on a tap takes the lowest on the screen of all that
   match, and `"unless": "<label>"` skips a step when that label is on the
   screen already; `{"await": "<label>"}` waits (up to 20 s) until it is (`a|b`: either).
-  harken's `player` shot is all three: the lowest "Für Elise"
-  (the mini player, if one is playing; else Recently added's, which plays
-  it), then, once something plays ("Pause") or the player is open
-  ("Close the player", its button), the mini player, unless the player is
-  open already, with a second try (the mini player slides in when it
-  comes, and a tap the moment it is there can miss it), and the shot is
-  taken once the player is open. A song left paused (the app is stopped
-  between shots) opens a player saying Play, not Pause.
+  `{"relaunch": true}` stops and opens the app again. harken's `player`
+  shot: the lowest "Für Elise" (the mini player, if one is there; else
+  Recently added's, which plays it), until something plays ("Pause") or
+  the player is open ("Close the player"); then the app opened again, so
+  that the mini player is there from the start (on Android one that has
+  only just come does not open on a tap), the mini player tapped, and the
+  shot taken once the player is open.
 
   **Write steps from the accessibility tree, not by guessing.** Every shot
   is saved with the tree of the screen it was taken from, beside its

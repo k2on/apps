@@ -43,20 +43,11 @@
           "await": "Pause|Close the player"
         },
         {
-          "wait": 2
+          "relaunch": true
         },
         {
           "tap": "Für Elise",
-          "where": "bottom",
-          "unless": "Close the player"
-        },
-        {
-          "wait": 2
-        },
-        {
-          "tap": "Für Elise",
-          "where": "bottom",
-          "unless": "Close the player"
+          "where": "bottom"
         },
         {
           "await": "Close the player"

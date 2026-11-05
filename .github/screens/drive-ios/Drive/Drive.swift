@@ -29,9 +29,10 @@ struct Shot: Decodable {
         var waitFor: String?
         var type: String?
         var wait: Double?
+        var relaunch: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case tap, role, `where`, unless, type, wait
+            case tap, role, `where`, unless, type, wait, relaunch
             case waitFor = "await"
         }
     }
@@ -119,6 +120,11 @@ final class Drive: XCTestCase {
                         return
                     }
                     c.tap()
+                }
+                if step.relaunch == true {
+                    app.terminate()
+                    app.launch()
+                    sleep(2)
                 }
                 if let text = step.type { app.typeText(text) }
                 if let seconds = step.wait { sleep(UInt32(seconds)) }
