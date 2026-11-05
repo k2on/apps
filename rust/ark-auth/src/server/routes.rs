@@ -61,7 +61,14 @@ async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap, Query(q): Quer
     }
     match &auth.mode {
         Mode::Dev => {
-            let Some(user) = q.user.filter(|u| !u.trim().is_empty()) else {
+            // The name asked for, or a dev server's own (`ARK_DEV_USER`): who
+            // it signs in, with no page between, when a login names nobody —
+            // what the app screenshots run their servers with, so a phone's
+            // sign-in sheet opens and comes straight back
+            // (.github/screens/apps.md). Only in dev mode, where anyone is
+            // whoever they say already.
+            let user = q.user.filter(|u| !u.trim().is_empty()).or_else(dev_user);
+            let Some(user) = user else {
                 return Html(dev_form(&q.redirect)).into_response();
             };
             // `name:role,role` is a login holding those roles
@@ -178,6 +185,11 @@ fn bad(why: String) -> Response {
 
 fn failed(why: String) -> Response {
     (StatusCode::BAD_GATEWAY, format!("sign-in failed: {why}")).into_response()
+}
+
+/// A dev server's own name for a login that names nobody (`ARK_DEV_USER`).
+fn dev_user() -> Option<String> {
+    std::env::var("ARK_DEV_USER").ok().filter(|u| !u.trim().is_empty())
 }
 
 /// Dev mode's provider: a text box.

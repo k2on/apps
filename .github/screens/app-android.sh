@@ -106,11 +106,20 @@ if [ -n "$server" ]; then
     says "a name" && break
     sleep 1
   done
-  # The server's dev sign-in page: a name, sent.
-  tap --field 30
-  sleep 1
-  adb shell input text "$user"
-  adb shell input keyevent 66
+  # The server signs in its own user (ARK_DEV_USER, app-server.sh), and the
+  # browser comes straight back; a server that asks instead shows its page,
+  # which is given the name.
+  for _ in $(seq 1 30); do
+    if says "a name"; then
+      tap --field 5
+      sleep 1
+      adb shell input text "$user"
+      adb shell input keyevent 66
+      break
+    fi
+    says "Server address" || says "Sign in" || break
+    sleep 1
+  done
   # Back in the app; a permission it asks for is allowed, once; then
   # whatever its onboarding says until the server's page and Allow are gone.
   for _ in $(seq 1 30); do
