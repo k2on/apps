@@ -99,15 +99,18 @@ impl Inner {
         held(&self.peer)
     }
 
-    /// A pump — and, serving, what its connections said taken in — and
-    /// what it did kept for the app; said when it took longer than
-    /// [`PUMP_BUDGET_MS`].
+    /// A pump, and what it did kept for the app; said when it took longer
+    /// than [`PUMP_BUDGET_MS`]. A server's is what its connections said,
+    /// taken in.
     fn pump(&self) -> Pumped {
         let mut peer = self.lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        if peer.hub.serving {
+            self.serve(&mut peer);
+            return Pumped::default();
+        }
         let began = crate::monotonic_ms();
         let p = peer.pump();
-        #[cfg(not(target_arch = "wasm32"))]
-        self.serve(&mut peer);
         let took = crate::monotonic_ms() - began;
         if took > PUMP_BUDGET_MS {
             let (frames, backlog) = (p.frames[0] + p.frames[1], peer.backlog());
