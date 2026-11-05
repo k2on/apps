@@ -5,7 +5,7 @@
 // setting of it. The iPhone's twin is ArkUI's `Bar` (swift/ArkUI).
 package dev.arkui
 
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 
 /** How thick a [Bar]'s track is at rest, and held. */
 public object BarDefaults {
@@ -59,7 +60,9 @@ public fun Bar(
     label: String? = null,
 ) {
     var held by remember { mutableStateOf(false) }
-    val thick by animateDpAsState(if (held) BarDefaults.Held else BarDefaults.Thickness, Springs.move(), label = "bar")
+    // Held, over 0..1, on the spring a thing's size moves by; the thickness is drawn from it.
+    val hold by animateFloatAsState(if (held) 1f else 0f, Springs.size(), label = "bar")
+    val thick = lerp(BarDefaults.Thickness, BarDefaults.Held, hold)
     val say by rememberUpdatedState(onValue)
     val done by rememberUpdatedState(onDone)
     val shown = value.coerceIn(0f, 1f)

@@ -14,7 +14,7 @@
 #   nix/android-shots.sh harken --tests '*d1_player*' # one
 #
 # The PNGs land in <app>/android/app/src/test/snapshots/images (ignored by
-# git), named <appid>_Screens_<test>[_<theme>].png; their paths are printed.
+# git), named <appid>_Screens_<test>_<state>-<theme>.png.
 set -euo pipefail
 app=${1:?which app}
 shift
@@ -22,16 +22,20 @@ root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 home=${XDG_CACHE_HOME:-$HOME/.cache}/ark-shots/$app
 mkdir -p "$home"
 shots="$root/$app/android/app/src/test/snapshots/images"
-since=$(mktemp)
+# shellcheck disable=SC2016 # the script is for the inner shell to expand
 nix develop "$root#$app-android-screens" \
   --option extra-substituters https://k2on.cachix.org \
   --option extra-trusted-public-keys "k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=" \
   --command bash -c '
-    set -euo pipefail
+    # The setup of the derivation: its hooks are shell functions, which a
+    # command run in its environment does not inherit.
+    # shellcheck disable=SC1091
+    source "$stdenv/setup"
+    set -eo pipefail  # not -u: the hooks read what may be unset
     export GRADLE_USER_HOME=$1
     shift
-    # The derivation'"'"'s configure hooks: the dependency cache served as a
-    # proxy, and gradle'"'"'s flags pointed at it.
+    # The configure hooks of the derivation: the dependency cache served as a
+    # proxy, and the flags of gradle pointed at it.
     runHook preConfigure
     cd "$1/$2/android"
     shift 2
@@ -40,5 +44,4 @@ nix develop "$root#$app-android-screens" \
     # has its own proxy, which a daemon could not follow.
     gradle --build-cache :app:recordPaparazziDebug "$@"
   ' _ "$home/gradle" "$root" "$app" "$@"
-find "$shots" -name '*.png' -newer "$since" | sort
-rm -f "$since"
+echo "$(find "$shots" -name '*.png' | wc -l) shots in $shots"
