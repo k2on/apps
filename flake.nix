@@ -340,24 +340,18 @@
           # DATA` writes what that app's server boots seeded from.
           money-seed = crate { packageId = "money-seed"; };
           harken-seed = crate { packageId = "harken-seed"; };
-          # The catalogue's covers, each a fixed-output fetch pinned by its
-          # hash in harken/seed/covers.json: fetched once, the cache's after,
-          # so seeding fetches nothing (`harken-seed --covers`) and a cover
-          # host that throttles never turns a screenshot's covers into
-          # gradients. Each is named as harken-seed's `media::key` names it:
-          # the first sixteen hex digits of its address's SHA-256.
-          harken-covers = pkgs.linkFarm "harken-covers" (map
-            (c:
-              let key = builtins.substring 0 16 (builtins.hashString "sha256" c.url); in {
-                name = "${key}.${c.ext}";
-                path = pkgs.fetchurl { inherit (c) url hash; name = "cover-${key}"; };
-              })
-            (builtins.fromJSON (builtins.readFile ./harken/seed/covers.json)));
-          # `nix run .#update-covers`: covers.json from the catalogue, each
-          # address's hash and kind, after the catalogue moves.
+          # The catalogue's covers, kept in the repository (harken/seed/covers,
+          # each 600 pixels at most, named as harken-seed's `media::key` names
+          # them: the first sixteen hex digits of the address's SHA-256), so
+          # seeding fetches nothing (`harken-seed --covers`) and every run has
+          # the same bytes: a host's thumbnails are not the same bytes from
+          # one fetch to the next, which a hash pinned against them failed on.
+          harken-covers = builtins.path { path = ./harken/seed/covers; name = "harken-covers"; };
+          # `nix run .#update-covers`: harken/seed/covers from the catalogue,
+          # each fetched and made small, after the catalogue moves.
           update-covers = pkgs.writeShellApplication {
             name = "update-covers";
-            runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.file ];
+            runtimeInputs = [ pkgs.jq pkgs.coreutils pkgs.curl pkgs.imagemagick ];
             text = builtins.readFile ./nix/update-covers.sh;
           };
           # `nix run .#<app>-demo [ADDR]`: that server on a fresh seeded
