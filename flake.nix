@@ -837,6 +837,9 @@
                 fsevents = ''
                   (allow mach-lookup (global-name "com.apple.FSEvents"))
                 '';
+                # Everything, for this one build: if xcodebuild falls even so,
+                # a derivation's own rules are not applied at all.
+                everything = "(allow default)";
                 # Only to see whether a derivation's own rules are applied
                 # at all under the strict sandbox (F).
                 hosts = ''
@@ -867,7 +870,8 @@
               # /etc/hosts is outside what the strict sandbox lets a build
               # read; with `hosts` it is let in, if profiles count.
               hostsWith = profile: step "hosts-${profile}" { __sandboxProfile = profiles.${profile}; } ''
-                if /bin/cat /etc/hosts > /dev/null 2>&1; then echo "read" | tee $out/result; else echo "denied" | tee $out/result; fi
+                # The shell's own read: /bin/cat itself may be kept out.
+                if { read -r _ < /etc/hosts; } 2>/dev/null; then echo "read" | tee $out/result; else echo "denied" | tee $out/result; fi
               '';
               # G: who the build is, as the C library says, under each profile:
               # a framework that asks and is told nothing may be what falls.
@@ -930,6 +934,8 @@
               e-xcframework-xcode-services = xcframeworkWith "xcode-services";
               e-xcframework-all-services = xcframeworkWith "all-services";
               e-xcframework-fsevents = xcframeworkWith "fsevents";
+              e-xcframework-everything = xcframeworkWith "everything";
+              f-hosts-everything = hostsWith "everything";
               f-hosts-none = hostsWith "none";
               f-hosts-hosts = hostsWith "hosts";
               g-who-none = whoWith "none";

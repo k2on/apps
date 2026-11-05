@@ -113,6 +113,13 @@ jobs:
         continue-on-error: true
         run: bash .github/strict-ios.sh e-xcframework-fsevents
 
+      # Run five: it fell under every rule tried, so: are a derivation's
+      # rules applied at all? Everything allowed, for this one build.
+      - name: E, xcodebuild with everything allowed
+        id: e6
+        continue-on-error: true
+        run: bash .github/strict-ios.sh e-xcframework-everything
+
       # Is it the sandbox, or the store's copy of Xcode? The same command
       # outside any sandbox: with the store's xcodebuild, and with the
       # runner's own as it is installed. Then what macOS wrote of each
@@ -153,6 +160,7 @@ jobs:
         run: |
           bash .github/strict-ios.sh f-hosts-none
           bash .github/strict-ios.sh f-hosts-hosts
+          bash .github/strict-ios.sh f-hosts-everything
 
       # Who the build user is, as the C library says, in the sandbox:
       # a framework told nothing may be what falls.
@@ -225,6 +233,7 @@ jobs:
             echo "| E, xcodebuild, Xcode's and CoreSimulator's services | ${{ steps.e2.outcome }} |"
             echo "| E, xcodebuild, any service | ${{ steps.e3.outcome }} |"
             echo "| E, xcodebuild, FSEvents alone | ${{ steps.e5.outcome }} |"
+            echo "| E, xcodebuild, everything allowed | ${{ steps.e6.outcome }} |"
             echo "| E, outside the sandbox (see its log) | ${{ steps.e4.outcome }} |"
             echo "| F, own sandbox rules applied (see its log) | ${{ steps.f.outcome }} |"
             echo "| G, who the build is (see its log) | ${{ steps.g.outcome }} |"
