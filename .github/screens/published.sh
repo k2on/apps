@@ -6,13 +6,11 @@
 #                                         offers it ($FDROID, its index's
 #                                         newest for the app's package), at
 #                                         <dir>/apk-<app>/<app>.apk
-#   published.sh ios <dir> <app>...       main's newest simulator-<app>
-#                                         artifact (ios.yaml makes one on
-#                                         main only with a TestFlight send),
-#                                         at <dir>/simulator-<app>/
 #
+# The iPhone's needs no such thing: nix builds it, or has it cached
+# (ios-build.sh).
 # An app with nothing published is said and left out; the others are still
-# fetched. The iOS half asks GitHub's API as $GH_TOKEN, of $GITHUB_REPOSITORY.
+# fetched.
 set -uo pipefail
 phone=$1
 dir=$2
@@ -29,16 +27,5 @@ case $phone in
         { echo "::warning::$a: $name would not download"; rm -rf "${dir:?}/apk-$a"; }
     done
     ;;
-  ios)
-    for a in "$@"; do
-      id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=simulator-$a&per_page=100" \
-        --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "main")][0].id // empty')
-      if [ -z "$id" ]; then echo "::warning::main has no simulator-$a kept (90 days); $a's iOS shots are kept"; continue; fi
-      mkdir -p "$dir/simulator-$a"
-      gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$dir/simulator-$a.zip" &&
-        unzip -q -o "$dir/simulator-$a.zip" -d "$dir/simulator-$a" && rm "$dir/simulator-$a.zip" && echo "$a: artifact $id" ||
-        { echo "::warning::$a: artifact $id would not download"; rm -rf "${dir:?}/simulator-$a"; }
-    done
-    ;;
-  *) echo "usage: published.sh android|ios <dir> <app>..."; exit 1 ;;
+  *) echo "usage: published.sh android <dir> <app>..."; exit 1 ;;
 esac

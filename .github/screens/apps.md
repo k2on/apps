@@ -60,10 +60,10 @@ All of it is in `<app>/screens/`:
   (`money-seed`); harken's makes a media folder of tagged files from the
   demo catalogue (`media.py`) for the server's own scanner to read.
 
-And the builds, as artifacts of the workflows that publish them:
-`apk-<app>` from `build.yaml` (already the case for every APK in the
-flake's `publish`) and `simulator-<app>` from `ios.yaml`
-(`../ios-simulator.sh <App>` in the app's job).
+And the builds: on Android the artifact `apk-<app>` of `build.yaml`
+(already the case for every APK in the flake's `publish`); on the iPhone
+the flake's `<app>-ios-simulator`, which nix builds at the commit (see
+below).
 
 ## What is shared
 
@@ -87,8 +87,11 @@ flake's `publish`) and `simulator-<app>` from `ios.yaml`
   shot's PNG.
 - **`apps-android.sh`**, **`apps-ios.sh`**: each app in turn, so one that
   fails does not stop the others.
-- **`published.sh`**: each app's last published build, for a run that
-  builds nothing.
+- **`published.sh`**: each APK as the F-Droid repository offers it, for a
+  run that builds nothing.
+- **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
+  the cache's when its inputs have not moved, with the runner's Xcode put
+  in the store only when something must be built.
 - **`apps-lay.sh`**: lays a run's captures over a tree. A phone taken only
   in part keeps what the tree had.
 - **`manifest.py`**: the docs' manifest, written for each app
@@ -102,12 +105,13 @@ flake's `publish`) and `simulator-<app>` from `ios.yaml`
 After `build` or `ios` finishes, from that run's artifacts:
 
 - **On main**: an APK is there only when its inputs moved and it went to
-  F-Droid, and only once the deploy has succeeded. A simulator build is
-  there only when that app went to TestFlight. Each phone taken whole
-  replaces what the `screens` branch had at `apps/<app>/<phone>/`.
+  F-Droid, and only once the deploy has succeeded. Every iPhone app is
+  built by nix at the commit `ios` ran on, an unchanged one taken from the
+  cache. Each phone taken whole replaces what the `screens` branch had at
+  `apps/<app>/<phone>/`.
 - **On a pull request**: `build` builds the APKs whose inputs differ from
-  what main published, and `ios` builds the simulator apps for any branch
-  push. The shots go to the branch `screens-pr-<number>`, and one comment on
+  what main published, and the iPhone apps are built by nix at the PR's
+  commit (after `ios` runs for a push to the PR's branch). The shots go to the branch `screens-pr-<number>`, and one comment on
   the PR, kept up to date, has a row for each screen that changed or is new
   on either phone: Android's on main and on the PR, then the iPhone's on
   main and on the PR, so both phones' before and after are side by side.
@@ -115,12 +119,35 @@ After `build` or `ios` finishes, from that run's artifacts:
   its Android shots only.
 
 - **When only the screenshots' scripts change** (`.github/screens/`, an
-  app's `screens/`, the workflow) on main, nothing is built. Every app is
-  taken again from what was last published (`published.sh`): each APK as
-  the F-Droid repository's index offers it, and each iPhone build as main's
-  newest `simulator-<app>` artifact. Main makes that artifact only when it
-  sends the app to TestFlight, and keeps it 90 days. Running the workflow by
-  hand does the same.
+  app's `screens/`, the workflow) on main, every app is taken again: each
+  APK as the F-Droid repository's index offers it (`published.sh`), and
+  each iPhone app as nix builds main, which, as its inputs have not moved,
+  is the cache's. Running the workflow by hand does the same.
+
+## The iPhone builds, in nix
+
+`nix build .#money-ios-simulator` (and `harken-ios-simulator`) is the app
+in Release for the simulator, the build TestFlight is sent. Xcode is one of
+its inputs, pinned in `flake.nix` by its hash: the Xcode.app of GitHub's
+macos-15 image, put in the store as it is installed (`nix-store
+--add-fixed --recursive sha256 /Applications/Xcode_26.3.app`; nothing is
+downloaded). Apple's licence keeps Xcode off any cache, so the job's
+Cachix push filters it out; the apps themselves are cached. A different
+Xcode is a different hash and so a different build. When GitHub's image
+moves to another Xcode, `ios-build.sh` says so and builds nothing: the
+pin is moved to the new Xcode's hash (the same `nix-store --add-fixed`
+prints its path, `nix hash path` its hash).
+
+The kernel is built under nix's strict sandbox, from the stored Xcode's
+toolchain alone. The app's own `xcodebuild` cannot be: Xcode's file
+watcher asks DiskArbitration and other system services about what it
+watches, which nix's macOS sandbox lets no build reach (its list of
+services is nix's own; sandbox paths only add paths; a derivation's
+`__sandboxProfile` is not applied to a sandboxed build), and it falls
+when refused. So that one step is `__noChroot`, and the macOS runner's nix
+is `sandbox = relaxed`, where every other build is still sandboxed. How
+that was found, step by step on GitHub's runners, is the branch
+`claude/sleepy-faraday-lcbow5-xcode` (its `xcode-strict.yaml`).
 
 The scripts are always main's: a workflow_run workflow runs with this
 repository's token, so it never runs a PR's code. It only reads the PR
