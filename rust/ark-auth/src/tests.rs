@@ -115,3 +115,21 @@ fn a_picture_host_is_trusted_as_the_providers_is() {
     assert!(!picture_trusted("https://photos.example/a.png", issuer, &[]), "none told");
     assert!(!picture_trusted("https://photos.example/a.png", None, &[]));
 }
+
+/// A dev server's own user's picture is a file, read by its first bytes:
+/// a JPEG is one, and what is not a picture is refused.
+#[test]
+fn a_dev_picture_is_read_from_its_file() {
+    use crate::server::local_picture;
+    let dir = std::env::temp_dir().join(format!("ark-auth-picture-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jpeg = dir.join("a.jpg");
+    std::fs::write(&jpeg, [0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]).unwrap();
+    let p = local_picture(&jpeg).unwrap();
+    assert_eq!(p.kind, "image/jpeg");
+    let text = dir.join("a.txt");
+    std::fs::write(&text, b"not a picture").unwrap();
+    assert!(local_picture(&text).is_err());
+    assert!(local_picture(&dir.join("none.jpg")).is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
