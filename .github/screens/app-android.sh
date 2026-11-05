@@ -103,6 +103,10 @@ adb install -r "$apk" >/dev/null
 adb shell pm clear "$pkg" >/dev/null
 read -r w h < <(adb shell wm size | tr -d '\r' | awk -F'[ x]' '/Physical/ {print $3, $4}')
 printf '{"name":"Pixel 7","width":%s,"height":%s,"corner":110,"cutout":"hole"}\n' "$w" "$h" > "$out/device.json"
+# The phone's name, as a Pixel 7 out of the box has it (Settings, About
+# phone, Device name): the emulator's own is its build's ("sdk_gphone64…"),
+# which the app's device chip and picker would say.
+adb shell settings put global device_name "Pixel 7"
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1
