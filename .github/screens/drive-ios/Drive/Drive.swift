@@ -25,8 +25,15 @@ struct Shot: Decodable {
         var role: String?
         var `where`: String?
         var unless: String?
+        /// `await` in shots.json, which Swift keeps for itself.
+        var waitFor: String?
         var type: String?
         var wait: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case tap, role, `where`, unless, type, wait
+            case waitFor = "await"
+        }
     }
 
     var id: String
@@ -97,6 +104,10 @@ final class Drive: XCTestCase {
                 // A step that is done already: what it opens is on the screen.
                 if let done = step.unless, app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", done, done)).firstMatch.waitForExistence(timeout: 2) {
                     continue
+                }
+                if let label = step.waitFor {
+                    let there = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label)).firstMatch
+                    XCTAssertTrue(there.waitForExistence(timeout: 20), "\(label) came, for \(shot.id)")
                 }
                 if let label = step.tap {
                     let c = step.where == "bottom" ? lowest(app, label) : control(app, label, role: step.role)
