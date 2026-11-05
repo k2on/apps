@@ -19,9 +19,8 @@
 # there) and `destination: upload`, which sends the build straight to App
 # Store Connect, where it appears in TestFlight once Apple has processed it.
 # money's tests run on a simulator against the demo's household.
-# Each app sent to TestFlight, and each app on a branch, is also built for
-# the simulator (../ios-simulator.sh), the artifact `simulator-<app>` that
-# app-screens.yaml takes its screenshots from (../screens/apps.md).
+# The apps' iPhone screenshots are taken from nix's build of the same
+# commit, after this runs (app-screens.yaml; flake.nix, `iosSimulator`).
 #
 # **The archive is unsigned on purpose.** Signed, it is signed for
 # development, and a fresh runner has no development certificate, so every
@@ -227,23 +226,6 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash .github/ios-upload.sh Harken
 
-      # What the app screenshots take (app-screens.yaml, .github/screens/
-      # apps.md): on main this commit, the one just sent to TestFlight; on a
-      # branch, the PR's (../ios-simulator.sh).
-      - name: Build for the simulator, for the screenshots
-        if: env.UPLOAD == 'true' || github.ref != 'refs/heads/main'
-        run: bash .github/ios-simulator.sh Harken
-
-      - if: env.UPLOAD == 'true' || github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulator-harken
-          path: ${{ runner.temp }}/simulator.tgz
-          if-no-files-found: error
-          # Main's is the last TestFlight build, which the screenshots take
-          # again when only their scripts change: kept as long as allowed.
-          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
-
       - name: Remove the API key
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
@@ -331,23 +313,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash .github/ios-upload.sh Money
-
-      # What the app screenshots take (app-screens.yaml, .github/screens/
-      # apps.md): on main this commit, the one just sent to TestFlight; on a
-      # branch, the PR's (../ios-simulator.sh).
-      - name: Build for the simulator, for the screenshots
-        if: env.UPLOAD == 'true' || github.ref != 'refs/heads/main'
-        run: bash .github/ios-simulator.sh Money
-
-      - if: env.UPLOAD == 'true' || github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: simulator-money
-          path: ${{ runner.temp }}/simulator.tgz
-          if-no-files-found: error
-          # Main's is the last TestFlight build, which the screenshots take
-          # again when only their scripts change: kept as long as allowed.
-          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 7 }}
 
       - name: Remove the API key
         if: always()

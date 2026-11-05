@@ -1,28 +1,27 @@
-# The apps' screenshots, from the builds that were published: the APKs
-# build.yaml put in the F-Droid repository and the commit ios.yaml sent to
-# TestFlight, signed in to each app's own server run here with something in
-# it, and driven from outside as a person would. The how is in
+# The apps' screenshots: Android's from the APKs build.yaml put in the
+# F-Droid repository, the iPhone's from nix's build of the commit ios.yaml
+# sent to TestFlight; each signed in to its own server run here with
+# something in it, and driven from outside as a person would. The how is in
 # .github/screens/apps.md.
 #
 # **Nothing here names an app.** An app is taken when it has
 # <app>/screens/shots.json — its package ids, and each shot as the steps
 # that open it — and, if it signs in to a server, <app>/screens/server.sh,
 # which starts that server with something in it. Its builds are the
-# artifacts `apk-<app>` (build.yaml) and `simulator-<app>` (ios.yaml).
+# artifacts `apk-<app>` (build.yaml), and for the iPhone `nix build
+# .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`).
 #
-# **After the publish, from what it published.** This runs when build or ios
-# finishes and takes that run's own artifacts: an APK is in build's run only
-# when its inputs moved and it was built (and so offered on F-Droid), and a
-# simulator build is in ios's only when that app was sent to TestFlight. An
-# app neither run built is not taken again; what the branch has of it stays.
+# **After the publish.** This runs when build or ios finishes. Android takes
+# that run's own APKs: one is there only when its inputs moved and it was
+# built (and so offered on F-Droid). The iPhone takes nix's build at that
+# run's commit, of every app: one whose inputs have not moved is the cache's
+# (Cachix), and Xcode need not even be put in the store for it. An app
+# neither takes is not taken again; what the branch has of it stays.
 #
-# **The screenshots' own scripts changed, nothing rebuilt.** A push to main
-# that moves only what takes the shots (.github/screens/, an app's screens/,
-# this file) takes every app again from what was last published, building
-# nothing: each APK as the F-Droid repository offers it (its index's newest
-# for the package), and each iPhone build as main's newest `simulator-<app>`
-# artifact, which main makes only when it sends that app to TestFlight
-# (kept 90 days; an older one is said, and that app's iOS shots are kept).
+# **The screenshots' own scripts changed.** A push to main that moves only
+# what takes the shots (.github/screens/, an app's screens/, this file)
+# takes every app again: each APK as the F-Droid repository offers it (its
+# index's newest for the package), each iPhone app as nix builds main.
 #
 # **On main, published**: to the `screens` branch beside the docs' shots, as
 # apps/<app>/<phone>/<theme>/<id>.png with apps/<app>/manifest.json. **On a
@@ -33,9 +32,10 @@
 #
 # A workflow_run workflow runs as this file is on the default branch, with
 # this repository's token, whoever's run started it: it checks out the
-# scripts from main, never the PR's, and of a PR's run it reads only its
-# artifacts (an APK installed on an emulator, an app on a simulator, PNGs
-# compared).
+# scripts from main, never the PR's. Of a PR's run Android reads only its
+# artifacts (an APK installed on an emulator); the iPhone builds the PR's
+# commit, only for a branch of this repository, with a token that can only
+# read, and pushing nothing to the cache (only main's run does).
 name: app-screens
 
 on:
@@ -120,7 +120,9 @@ jobs:
             if [ "$WORKFLOW" = build ] && grep -qx "apk-$a" <<< "$made" && jq -e .android "$shots" > /dev/null; then
               android="$android $a"
             fi
-            if [ "$WORKFLOW" = ios ] && grep -qx "simulator-$a" <<< "$made" && jq -e .ios "$shots" > /dev/null; then
+            # Every iPhone app, built by nix at the run's commit: one that has
+            # not moved is the cache's, not built again.
+            if [ "$WORKFLOW" = ios ] && jq -e .ios "$shots" > /dev/null; then
               ios="$ios $a"
             fi
           done
@@ -216,21 +218,44 @@ jobs:
 
   ios:
     needs: which
-    if: needs.which.outputs.mode != '' && needs.which.outputs.ios != ''
+    # Built from the run's own commit, so only a run of this repository's.
+    if: >-
+      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
+    # It builds the commit's code, one step of it outside nix's sandbox
+    # (flake.nix, `iosSimulator`): it can read and nothing more, and only
+    # main's run pushes to the cache.
+    permissions:
+      contents: read
     env:
       APPS: ${{ needs.which.outputs.ios }}
+      SOURCE: ${{ github.event.workflow_run.head_sha || github.sha }}
+      PUSH: ${{ needs.which.outputs.mode == 'release' }}
     steps:
+      # The scripts, main's; and the commit whose apps are built, beside them.
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE }}
+          path: src
+          persist-credentials: false
 
-      - name: Select Xcode
+      # The Xcode the flake pins (flake.nix, `xcode`): its simulators boot
+      # here, and if an app must be built, it is put in the store as it is.
+      - name: The pinned Xcode
         run: |
-          xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
-          if [ -z "$xcode" ]; then
-            echo "::error::no Xcode 26 on this runner image"; exit 1
+          name=$(grep -o 'name = "Xcode_[^"]*"' src/flake.nix | head -1 | cut -d'"' -f2)
+          xcode=/Applications/$name
+          if [ ! -d "$xcode" ]; then
+            have=""; for x in /Applications/Xcode_*.app; do have="$have ${x##*/}"; done
+            echo "::error::$name, which flake.nix pins, is not on this runner image: pin one it has ($have)"
+            exit 1
           fi
           sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+          echo "XCODE=$xcode" >> "$GITHUB_ENV"
 
       # As screens.yaml: the newest iPhone Pro, booting under the rest.
       - name: Start booting a simulator
@@ -243,21 +268,29 @@ jobs:
             echo "$device" > "$RUNNER_TEMP/device"
             xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
 
-      # The simulator builds of the commit sent to TestFlight, or the PR's;
-      # each simulator-<app>/simulator.tgz, one .app inside. With no run,
-      # main's newest of each: the last sent to TestFlight.
-      - if: env.RUN != ''
-        uses: actions/download-artifact@v4
+      # Relaxed: every build is sandboxed but the one that says __noChroot
+      # (the app's own xcodebuild, flake.nix says why).
+      - uses: cachix/install-nix-action@v31
         with:
-          pattern: simulator-*
-          path: ${{ runner.temp }}/apps
-          run-id: ${{ env.RUN }}
-          github-token: ${{ github.token }}
-      - if: env.RUN == ''
-        run: bash .github/screens/published.sh ios "$RUNNER_TEMP/apps" $APPS
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - run: for d in "$RUNNER_TEMP"/apps/simulator-*; do tar -xzf "$d/simulator.tgz" -C "$d"; done
+          extra_nix_config: |
+            sandbox = relaxed
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+      # Main's builds go to the cache; Xcode never (Apple's licence).
+      - if: env.PUSH == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "Xcode_"
+
+      # Each app as nix has it at the commit (ios-build.sh): the cache's, or
+      # built, with Xcode put in the store first only then.
+      - name: The apps, built by nix
+        # One that fails is said; the others are still taken.
+        continue-on-error: true
+        run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

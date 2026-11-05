@@ -696,8 +696,10 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name.
-          iosPhone = { name, crate, so, framework }: pkgs.stdenv.mkDerivation {
+          # framework's name. With `xcode`, an Xcode.app in the store
+          # (`xcode` below), it is built from that and nothing outside the
+          # store, under the strict sandbox; without, from the builder's.
+          iosPhone = { name, crate, so, framework, xcode ? null }: pkgs.stdenv.mkDerivation {
             pname = "${name}-ios-xcframework";
             version = "0.1.0";
             src = only rustDirs;
@@ -705,32 +707,69 @@
             cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
             nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store.
-            __noChroot = true;
+            # Xcode, outside the store — unless one in the store is given.
+            __noChroot = xcode == null;
             # The iOS targets compile and link with the builder's Xcode: its
             # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
             # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
             # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
             # fails under them: both are taken back for these two targets. The
             # Swift is UniFFI's from the library built for this Mac.
-            buildPhase = ''
+            buildPhase = let
+              tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+            in ''
               runHook preBuild
-              export PATH=/usr/bin:$PATH
-              export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              ${if xcode == null then ''
+                export PATH=/usr/bin:$PATH
+                export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+              '' else ''
+                export DEVELOPER_DIR=${xcode}/Contents/Developer
+                export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
+                export HOME=$TMPDIR/home
+                mkdir -p "$HOME"
+              ''}
               unset SDKROOT
               ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CC_${l}=/usr/bin/clang CXX_${l}=/usr/bin/clang++ AR_${l}=/usr/bin/ar
-                export CARGO_TARGET_${u}_LINKER=/usr/bin/clang
+                export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
+                export CARGO_TARGET_${u}_LINKER=${tc}/clang
                 cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
               '') iosTargets}
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              /usr/bin/xcodebuild -create-xcframework \
-                -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
-                -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
-                -output ${framework}.xcframework
+              ${if xcode == null then ''
+                /usr/bin/xcodebuild -create-xcframework \
+                  -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
+                  -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
+                  -output ${framework}.xcframework
+              '' else ''
+                # By hand, as xcodebuild lays it out: under the strict sandbox
+                # `xcodebuild -create-xcframework` crashes (xcode-strict.yaml),
+                # and an xcframework of static libraries is only this.
+                for slice in ios-arm64:aarch64-apple-ios ios-arm64-simulator:aarch64-apple-ios-sim; do
+                  id=''${slice%%:*} target=''${slice##*:}
+                  mkdir -p ${framework}.xcframework/$id
+                  cp target/$target/release/lib${so}.a ${framework}.xcframework/$id/
+                  cp -r headers ${framework}.xcframework/$id/Headers
+                done
+                slice() {
+                  echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
+                  echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
+                  echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                  [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
+                  echo "</dict>"
+                }
+                {
+                  echo '<?xml version="1.0" encoding="UTF-8"?>'
+                  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                  echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
+                  slice ios-arm64 ""
+                  slice ios-arm64-simulator simulator
+                  echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
+                  echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
+                } > ${framework}.xcframework/Info.plist
+              ''}
               runHook postBuild
             '';
             installPhase = ''
@@ -742,6 +781,98 @@
           };
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
+
+          # **The iPhone apps, built by nix** (what app-screens.yaml takes
+          # their iOS screenshots from: .github/screens/apps.md).
+          #
+          # Xcode is an input like any other, pinned by its hash: the
+          # Xcode.app of a runner image, put in the store as it is
+          # (`nix-store --add-fixed --recursive sha256 <Xcode.app>`; nothing
+          # is downloaded, and Apple's licence keeps it off any cache, so
+          # Cachix's push filters it out). A different Xcode is a different
+          # hash, and so a different build; an unchanged app with the same
+          # Xcode is the cache's, and Xcode need not even be on the machine.
+          #
+          # Most of it is built under nix's strict sandbox: the kernel, its
+          # C and Rust compiled by the stored Xcode's toolchain for the
+          # simulator and the phone. The app's own `xcodebuild` cannot be:
+          # Xcode's file watcher (DVTFilePathEventWatcher) asks
+          # DiskArbitration and other system services for what it watches,
+          # which nix's macOS sandbox lets no build reach — its list of
+          # services is nix's own, sandbox paths only add paths, and a
+          # derivation's `__sandboxProfile` is not applied to a sandboxed
+          # build — and it falls (SIGSEGV) when refused. So that one step is
+          # `__noChroot`, which needs `sandbox = relaxed` on the builder,
+          # where every other build is still sandboxed. All of this was found
+          # on GitHub's macos-15 runners, step by step, on the branch
+          # claude/sleepy-faraday-lcbow5-xcode (its xcode-strict.yaml).
+          xcode = pkgs.requireFile {
+            name = "Xcode_26.3.app";
+            hashMode = "recursive";
+            hash = "sha256-qrPSc036x3tW1TWWfX10+IS2c08dRCa6KFc+++35ueM=";
+            message = ''
+              Xcode 26.3 (17C529), as GitHub's macos-15 image installs it. Put it in the store:
+                nix-store --add-fixed --recursive sha256 /Applications/Xcode_26.3.app
+            '';
+          };
+          # One app for the simulator: `name` its directory (<name>/ios, its
+          # XcodeGen project), `App` its scheme and product, `ffi` and
+          # `framework` its kernel's. As Release, the build TestFlight is
+          # sent, with the bundle id and version its project.yml says.
+          iosSimulator = { name, App, ffi, framework }:
+            let
+              kernel = iosPhone (ffi // { inherit framework xcode; });
+              dev = "${xcode}/Contents/Developer";
+            in
+            pkgs.stdenv.mkDerivation {
+              pname = "${name}-ios-simulator";
+              version = "0.1.0";
+              src = only [ "${name}/ios" "swift/ArkUI" ];
+              nativeBuildInputs = [ xcodegen ];
+              # xcodebuild, and nothing else here: see above.
+              __noChroot = true;
+              buildPhase = ''
+                runHook preBuild
+                # The stored Xcode, a home of its own, a name for the build
+                # user (XcodeGen stops without one), and none of nixpkgs'
+                # compiler settings, which Xcode's tools would take for theirs.
+                export DEVELOPER_DIR=${dev}
+                export PATH=${dev}/usr/bin:$PATH
+                export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home USER=nixbld LOGNAME=nixbld
+                mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
+                unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+                for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                  case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+                done
+                mkdir -p ${name}/ffi/ios
+                cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
+                chmod -R u+w ${name}/ffi/ios
+                cd ${name}/ios
+                xcodegen generate
+                # SwiftPM sandboxes the manifests and plugins it builds, which
+                # cannot be done inside nix's: told not to.
+                xcodebuild build \
+                  -project ${App}.xcodeproj -scheme ${App} -configuration Release \
+                  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+                  -derivedDataPath $TMPDIR/derived \
+                  -IDEPackageSupportDisableManifestSandbox=1 \
+                  -IDEPackageSupportDisablePluginExecutionSandbox=1 \
+                  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+                  CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= \
+                  ENABLE_USER_SCRIPT_SANDBOXING=NO \
+                  COMPILER_INDEX_STORE_ENABLE=NO
+                runHook postBuild
+              '';
+              installPhase = ''
+                mkdir -p $out
+                cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/
+              '';
+              dontStrip = true;
+              dontFixup = true;
+              meta.platforms = [ "aarch64-darwin" ];
+            };
+          money-ios-simulator = iosSimulator { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
+          harken-ios-simulator = iosSimulator { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
           # its schema's hash held to the one its tests pin.
@@ -874,6 +1005,8 @@
         {
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
+            # The iPhone apps for the simulator, from the pinned Xcode.
+            inherit money-ios-simulator harken-ios-simulator;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
