@@ -12,20 +12,28 @@
 //! enough to keep it in view without the widgets reporting where each row
 //! was drawn.
 //!
-//! **A trackpad scrolls as a browser's does** ([`elastic`]). Let go while
-//! moving, a list coasts on and slows as a scroll does — its speed read
-//! from the fingers' last moves ([`crate::velocity`]), kept
-//! [`crate::motion_tokens::DECELERATION`] a millisecond — and stops of
-//! itself; the next touch of the wheel, a click or a key stops it at once.
-//! Pulled past its top or its foot it goes on with resistance, the page
-//! drawn [`band`] of the whole pull past its edge, and springs back when
-//! the fingers lift, on the shared critically damped move
-//! ([`crate::motion::SMOOTH`]) from the speed it was drawn going, never
-//! past the edge; a coast that reaches an end carries on into the band as
-//! fast as it was going and springs back the same way. The coast scrolls
-//! the scrollable as more of the wheel would; the band is only drawn, and
-//! the scroll is never moved past its end: [`follow`], the scroll edge and
-//! the small header read the offset they always did.
+//! **A trackpad scrolls as Firefox scrolls it** ([`elastic`]). Let go
+//! while moving, a list coasts on and slows as a scroll does — its speed
+//! read from the fingers' last moves ([`crate::velocity`]), kept
+//! [`crate::motion_tokens::DECELERATION`] a millisecond, which is Gecko's
+//! desktop fling — and stops of itself; fingers landing on the trackpad
+//! (Wayland's hold gesture, [`crate::touchpad`]), any word from the wheel,
+//! a click or a key stop it at once. Pulled past its top or its foot it
+//! goes on with Gecko's resistance ([`band`]): each pixel more of pull is
+//! drawn less far than the last, so it is harder and harder to pull and
+//! never stops. It springs back when the fingers lift, on Firefox's
+//! overscroll spring ([`BACK`]), to the edge and no further; held still
+//! with the fingers down it stays where it is. A coast that reaches an end
+//! carries on into the band and springs back the same way. The coast
+//! scrolls the scrollable as more of the wheel would; the band is only
+//! drawn, and the scroll is never moved past its end: [`follow`], the
+//! scroll edge and the small header read the offset they always did.
+//!
+//! The band, the spring and the fling re-implement Gecko's (Mozilla's
+//! `gfx/layers/apz`, MPL-2.0: `Axis::ApplyResistance`,
+//! `Axis::StartOverscrollAnimation`, `AxisPhysicsMSDModel`,
+//! `DesktopFlingPhysics`), with its constants in `arkui/theme.toml`;
+//! none of its code is copied.
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use iced::advanced::layout::{self, Layout};
@@ -38,7 +46,7 @@ use iced::widget::operation::{snap_to, RelativeOffset};
 use iced::widget::scrollable::AbsoluteOffset;
 use iced::{keyboard, window, Element, Event, Length, Point, Rectangle, Size, Task, Theme, Transformation, Vector};
 
-use crate::motion::{self, rubberband, unband, Slide, Spring};
+use crate::motion::{self, Slide, Spring};
 use crate::motion_tokens as tokens;
 use crate::velocity::Velocity;
 use crate::vim::Grid;
@@ -148,17 +156,24 @@ pub fn centred(at: usize, rows: usize, seen: f32) -> f32 {
     }
 }
 
-/// What a band past an end springs back on: the shared move
-/// ([`motion::SMOOTH`]), critically damped, so it comes to the edge and
-/// stops there.
-pub const BACK: Spring = motion::SMOOTH;
+/// What a band past an end springs back on: Firefox's overscroll spring
+/// (Gecko's `apz.overscroll.spring_stiffness` 200 and `.damping` 1.1 on a
+/// unit mass, [`tokens::BAND_STIFFNESS`], [`tokens::BAND_DAMPING`]), a
+/// touch over critically damped, so it comes to the edge without passing
+/// it.
+pub const BACK: Spring = Spring {
+    damping: tokens::BAND_DAMPING,
+    response: tokens::BAND_RESPONSE,
+};
 
-/// The most a band is drawn past its end, as a share of the view
-/// ([`tokens::BAND_REACH`]): however far it is pulled, never further.
-pub const REACH: f32 = tokens::BAND_REACH;
-
-/// A coast slower than this, a second, has stopped ([`tokens::COAST_STOP`]).
+/// A coast slower than this, a second, has stopped ([`tokens::COAST_STOP`],
+/// Gecko's `apz.fling_stopped_threshold`).
 pub const STOP: f32 = tokens::COAST_STOP;
+
+/// A release slower than this, a second, does not coast, and a band let go
+/// slower springs back from a standstill ([`tokens::COAST_MIN`], Gecko's
+/// `apz.fling_min_velocity_threshold`).
+pub const START: f32 = tokens::COAST_MIN;
 
 /// A lift seen only by its stillness, slower than this share of the
 /// gesture's fastest, ran down by itself first — a browser's own coast
@@ -166,9 +181,15 @@ pub const STOP: f32 = tokens::COAST_STOP;
 /// and coasts no further ([`tokens::COAST_SPENT`]).
 pub const SPENT: f32 = tokens::COAST_SPENT;
 
-/// Where the system never says the fingers lifted, a trackpad still this
-/// long has been let go ([`tokens::LIFT_MS`]).
+/// Where the system never says the fingers lifted (X11, a browser), a
+/// trackpad still this long has been let go ([`tokens::LIFT_MS`]).
 pub const LIFT: Duration = Duration::from_millis(tokens::LIFT_MS);
+
+/// The same while it is pulled past an end ([`tokens::BAND_LIFT_MS`]):
+/// longer, so a band held still under the fingers is not let go, at the
+/// cost of a band let go waiting this long to spring back. Where the
+/// system says when fingers lift (Wayland, macOS) neither is waited for.
+pub const BAND_LIFT: Duration = Duration::from_millis(tokens::BAND_LIFT_MS);
 
 /// The shortest the scrollbar's thumb is drawn while a band squeezes it:
 /// about as long as it is wide (iced's scrollbar is 10 px wide).
@@ -178,9 +199,10 @@ pub const THUMB_MIN: f32 = 10.0;
 /// sending its coast on as more of the wheel: macOS does (its momentum
 /// phase), and so does a browser on a Mac, which hands a page the
 /// system's coast as more `wheel` events. There the coast is followed,
-/// never made, so it is not doubled. Everywhere else — Wayland, which
-/// only says the fingers lifted, and a browser elsewhere, which says
-/// nothing — it is made here.
+/// never made, so it is not doubled — and it stops when the fingers land
+/// because the system's stops. Everywhere else — Wayland, which only says
+/// the fingers lifted, X11 and a browser elsewhere, which say nothing — it
+/// is made here.
 pub fn system_coasts() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -202,47 +224,63 @@ pub fn system_coasts() -> bool {
     }
 }
 
-/// The system says when fingers lift from a trackpad (a wheel event that
-/// moved nowhere: Wayland's `axis_stop`, macOS's end of a phase), so only
-/// that lets go. Learned the first time it happens, for every scrollable:
-/// it is the system's, not one list's. Until then [`LIFT`] of stillness
-/// is a lift.
+/// The system has said when fingers lift from a trackpad (a wheel event
+/// that moved nowhere: Wayland's `axis_stop`, macOS's end of a phase), so
+/// on the desktop only that lets go. Learned the first time it happens, for
+/// every scrollable: it is the system's, not one list's. Never in a
+/// browser, where a wheel that moves nowhere is a lift when it comes but
+/// may not come every time.
 static TOLD: AtomicBool = AtomicBool::new(false);
 
-/// How far a band `pull` pixels past an end, in a view `view` tall, is
-/// drawn past it: Apple's [`rubberband`] of the whole pull in the view,
-/// held to [`REACH`] of it. Of the whole pull, never of each move: the same
-/// pull is always drawn the same, however it came.
+/// Whether only the system's word lets the fingers go, never stillness:
+/// on macOS, on Wayland once [`crate::touchpad::listen`] has seen the
+/// window's display, or once the desktop has said so ([`TOLD`]).
+fn told() -> bool {
+    crate::touchpad::says_lift() || (!cfg!(target_arch = "wasm32") && TOLD.load(Ordering::Relaxed))
+}
+
+/// How many pixels a band is drawn for each pixel of pull at the edge:
+/// Gecko's resistance, `1 / band-resistance` of each of its pixels, and
+/// `band-gain` of them in each of a trackpad's ([`tokens::BAND_GAIN`]).
+fn give_at_edge() -> f32 {
+    tokens::BAND_GAIN / tokens::BAND_RESISTANCE
+}
+
+/// How far a band pulled `pull` pixels past an end from the edge, in a
+/// view `view` tall, is drawn past it: Firefox's resistance (Gecko's
+/// `Axis::ApplyResistance`, MPL-2.0, re-implemented), in which each pixel
+/// more of pull is drawn `(1 − |band| / view) · k` further, `k`
+/// [`give_at_edge`]. Integrated, that is `view · (1 − e^(−k · pull / view))`:
+/// a quarter of a pixel for each pixel at first, ever less after, and
+/// always some — harder and harder, never a wall. No more than the view,
+/// which no pull reaches.
 pub fn band(pull: f32, view: f32) -> f32 {
-    let most = view * REACH;
-    rubberband(pull, view).clamp(-most, most)
+    stretch(0.0, pull, view, f32::INFINITY)
 }
 
-/// How far a band drawn `drawn` past an end was pulled: [`band`] undone.
-fn unbanded(drawn: f32, view: f32) -> f32 {
-    unband(drawn, view)
-}
-
-/// How fast a band pulled `pull` past its end is drawn going, for each
-/// pixel a second of pull: [`rubberband`]'s slope, and nothing once held at
-/// [`REACH`].
-fn band_rate(pull: f32, view: f32) -> f32 {
-    match rubberband(pull, view).abs() < view * REACH {
-        true => motion::rubberband_slope(pull, view),
-        false => 0.0,
+/// A band drawn `over` past an end, pulled `pull` pixels further out (the
+/// same way, or from the edge): where it is drawn now. Gecko's resistance
+/// integrated over the move rather than stepped, so a pull drawn in many
+/// small moves lands where one move would, and a move draws at most `most`
+/// more (Gecko holds each to 8 px, [`tokens::BAND_STEP`]).
+fn stretch(over: f32, pull: f32, view: f32, most: f32) -> f32 {
+    if view <= 0.0 || pull == 0.0 {
+        return over;
     }
+    let side = pull.signum();
+    let at = (over * side).max(0.0);
+    let room = (view - at).max(0.0);
+    let more = -room * (-give_at_edge() * pull.abs() / view).exp_m1();
+    side * (at + more.min(most))
 }
 
-/// The fastest a band may set off outward from `from`, drawn, and not be
-/// drawn past [`REACH`] of the view: a critically damped spring set off
-/// at `v` from `x` goes no further than `x + v / (ω e)`.
-fn capped(speed: f32, from: f32, side: f32, view: f32) -> f32 {
-    let w = std::f32::consts::TAU / BACK.response;
-    let most = ((view * REACH - from.abs()).max(0.0)) * w * std::f32::consts::E;
-    match speed * side > 0.0 {
-        true => speed.signum() * speed.abs().min(most),
-        false => speed,
-    }
+/// The speed a band springs back set off at, for a release or a coast at
+/// `speed`: [`tokens::BAND_THROW`] of it in Gecko's pixels
+/// ([`tokens::BAND_GAIN`] of a trackpad's), never faster than
+/// [`tokens::BAND_FLING_MAX`] (Gecko's `Axis::StartOverscrollAnimation`).
+fn thrown(speed: f32) -> f32 {
+    let most = tokens::BAND_FLING_MAX;
+    (speed * tokens::BAND_GAIN * tokens::BAND_THROW).clamp(-most, most)
 }
 
 /// The scrollbar's thumb, as `(top, length)`, on a rail from `rail_top`
@@ -251,9 +289,10 @@ fn capped(speed: f32, from: f32, side: f32, view: f32) -> f32 {
 /// past an end (positive past the top). At rest, iced's own thumb: as long
 /// as the share of the content seen, as far down as the scroll. Banded it
 /// stays at that end and is drawn shorter, as if the band were more
-/// content — `length · view / (view + |overshoot|)` — but never shorter
-/// than [`THUMB_MIN`], as macOS and the iPhone draw it. `None` for content
-/// that fits.
+/// content — `length · view / (view + |overshoot|)`, so a band the size of
+/// the view, which no pull reaches, would halve it — but never shorter than
+/// [`THUMB_MIN`], as macOS and the iPhone draw it. `None` for content that
+/// fits.
 pub fn thumb(rail_top: f32, rail: f32, view: f32, content: f32, scrolled: f32, overshoot: f32) -> Option<(f32, f32)> {
     if content <= view || rail <= 0.0 {
         return None;
@@ -271,20 +310,24 @@ pub fn thumb(rail_top: f32, rail: f32, view: f32, content: f32, scrolled: f32, o
 }
 
 /// `content` — a `scrollable`, or something holding one — scrolled by a
-/// trackpad as a browser and a Mac scroll: let go while moving, it coasts
-/// on and slows as a scroll does ([`motion::coast`]), and pulled past its
-/// top or its foot it goes on with resistance ([`band`] of how far past
-/// it went) and springs back when the fingers lift, on [`BACK`], from the
-/// speed it was drawn going, and stops at the edge. A coast that reaches an
-/// end carries on into the band as fast as it was going, and springs back
-/// the same way. While it bands, the scrollbar's thumb stays at that end
-/// and is drawn shorter ([`thumb`]).
+/// trackpad as Firefox scrolls one: let go while moving, it coasts on and
+/// slows as a scroll does ([`motion::coast`], Gecko's desktop fling), and
+/// pulled past its top or its foot it goes on with ever more resistance
+/// ([`band`]) and springs back when the fingers lift, on [`BACK`], and
+/// stops at the edge. A coast that reaches an end carries on into the band,
+/// and springs back the same way. While it bands, the scrollbar's thumb
+/// stays at that end and is drawn shorter ([`thumb`]).
+///
+/// Fingers that land stop it: two fingers resting on a Linux trackpad
+/// stop a coast or a band springing back where it is, as Firefox's do
+/// (Wayland's hold gesture, [`crate::touchpad`]); so does any word from the
+/// wheel, even one that moved nowhere, a click, a touch or a key.
 ///
 /// Only a trackpad's pixels coast or band ([`pulls`]): a wheel that turns
 /// in lines steps and stops at the end as it always did. Where the system
 /// asks for less motion ([`motion::reduced`]) nothing coasts or bands at
 /// all. A key pressed puts a band back at once (keyboard motion is never
-/// animated) and stops a coast, as a click, a touch or the wheel does.
+/// animated).
 ///
 /// The coast scrolls the scrollable itself — as more of the wheel, so it
 /// says where it is as ever — and the band is only drawn: the scroll stays
@@ -319,13 +362,12 @@ pub fn pulls(delta: ScrollDelta, reduced: bool) -> Option<(f32, f32)> {
 enum Phase {
     #[default]
     Idle,
-    /// The fingers are on the trackpad, `pull` pixels past an end: positive
-    /// past the top (the content drawn lower), negative past the foot, none
-    /// while it scrolls.
-    Down { pull: f32 },
+    /// The fingers are on the trackpad, the band drawn [`Kinetic::over`]
+    /// past an end (none while it scrolls).
+    Down,
     /// Let go while moving: `speed` at `since`, and how much of its way has
-    /// been handed to the scroll; `told` whether the system said the
-    /// fingers lifted (so a word from it now is new fingers).
+    /// been handed on; `told` whether the system said the fingers lifted.
+    /// A band it was let go from, inward, is given back first.
     Coasting { since: Instant, speed: f32, gone: f32, told: bool },
     /// The system's own coast ([`system_coasts`]): its wheel scrolls as it
     /// comes, and only an end is this one's.
@@ -335,7 +377,7 @@ enum Phase {
 }
 
 /// One scrollable's coast and band: whether the fingers are down, how far
-/// past an end it is pulled, how it is coasting or springing back, and the
+/// past an end it is drawn, how it is coasting or springing back, and the
 /// wheel's last moves, which say how fast it was let go. Pure, so it is
 /// tested without a window; [`elastic`] feeds it.
 ///
@@ -344,6 +386,17 @@ enum Phase {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Kinetic {
     phase: Phase,
+    /// How far past an end the band is drawn while the fingers are down or
+    /// a coast gives it back: positive past the top (the content drawn
+    /// lower), negative past the foot. Gecko keeps the band itself, not the
+    /// pull, so pulled back it is given back pixel for pixel.
+    over: f32,
+    /// Fingers that came to rest stopped it ([`Kinetic::touch`]) and have
+    /// not moved since: their lifting lets a band go.
+    held: bool,
+    /// How many times fingers have come to rest, as last felt
+    /// ([`crate::touchpad::Fingers`]).
+    holds: u64,
     /// The fingers' moves, added up, with when.
     moves: Velocity,
     travelled: f32,
@@ -376,11 +429,10 @@ struct Seen {
 }
 
 impl Kinetic {
-    /// How far the content is drawn moved at `now`, in a view `view` tall:
-    /// down past the top, up past the foot, never across the edge.
-    pub fn offset(&self, now: Instant, view: f32) -> f32 {
+    /// How far the content is drawn moved at `now`: down past the top, up
+    /// past the foot, never across the edge.
+    pub fn offset(&self, now: Instant) -> f32 {
         match self.phase {
-            Phase::Down { pull } => band(pull, view),
             Phase::Settling { side, back } => {
                 let at = back.at(now);
                 match at * side > 0.0 {
@@ -388,17 +440,7 @@ impl Kinetic {
                     false => 0.0,
                 }
             }
-            _ => 0.0,
-        }
-    }
-
-    /// How far past an end it is pulled at `now`, in the wheel's pixels:
-    /// springing back, the pull that would draw it where it is.
-    pub fn pull(&self, now: Instant, view: f32) -> f32 {
-        match self.phase {
-            Phase::Down { pull } => pull,
-            Phase::Settling { .. } => unbanded(self.offset(now, view), view),
-            _ => 0.0,
+            _ => self.over,
         }
     }
 
@@ -410,6 +452,11 @@ impl Kinetic {
     /// Whether it is coasting by itself.
     pub fn coasting(&self) -> bool {
         matches!(self.phase, Phase::Coasting { .. })
+    }
+
+    /// Whether a band is springing back.
+    pub fn settling(&self) -> bool {
+        matches!(self.phase, Phase::Settling { .. })
     }
 
     /// Whether what comes now, `y`, is the system's coast going on
@@ -425,12 +472,37 @@ impl Kinetic {
             }
     }
 
+    /// `y` of the wheel's motion, or a coast's, given to the band first:
+    /// further out it stretches ([`stretch`]); back in it is given back
+    /// pixel for pixel, as Gecko's `Axis::AdjustDisplacement` gives an
+    /// overscroll back before it scrolls. What is left is the scroll's.
+    fn give(&mut self, y: f32, view: f32) -> f32 {
+        if self.over == 0.0 || y == 0.0 {
+            return y;
+        }
+        if y * self.over > 0.0 {
+            self.over = stretch(self.over, y, view, tokens::BAND_STEP);
+            return 0.0;
+        }
+        let to = self.over + y;
+        match to * self.over > 0.0 {
+            true => {
+                self.over = to;
+                0.0
+            }
+            false => {
+                self.over = 0.0;
+                to
+            }
+        }
+    }
+
     /// The wheel moved `y` (a trackpad's pixels) at `now`, over a scrollable
     /// in a view `view` tall: how much of it is for the scrollable to
     /// scroll. The fingers are down: a coast stops where it is, and a band
-    /// springing back is grabbed from where it is drawn. While it is pulled
-    /// past an end the wheel goes to the band — further out, or back in, and
-    /// once all the way in what is left scrolls.
+    /// springing back is grabbed from where it is drawn. While it is past an
+    /// end the wheel goes to the band — further out, or back in, and once
+    /// all the way in what is left scrolls.
     pub fn wheel(&mut self, y: f32, now: Instant, view: f32) -> f32 {
         let system = self.system_coast(y, now);
         self.heard = Some(now);
@@ -446,55 +518,43 @@ impl Kinetic {
                 _ => 0.0,
             };
         }
-        let pull = match self.phase {
-            Phase::Down { pull } => pull,
-            Phase::Settling { .. } => self.pull(now, view),
-            _ => 0.0,
-        };
-        if !matches!(self.phase, Phase::Down { .. }) {
+        if let Phase::Settling { .. } = self.phase {
+            // Grabbed: the band stays where it is drawn (Gecko's
+            // `CancelAnimation` with `ExcludeOverscroll`).
+            self.over = self.offset(now);
+        }
+        if !matches!(self.phase, Phase::Down) {
             // New fingers: a new drag, read afresh.
             self.moves.clear();
             self.travelled = 0.0;
             self.spending = false;
             self.fastest = 0.0;
         }
+        self.held = false;
         self.travelled += y;
         self.moves.add(now, self.travelled);
         self.fastest = self.fastest.max(self.moves.speed().abs());
         if y != 0.0 {
             self.going = y.signum();
         }
-        if pull == 0.0 {
-            self.phase = Phase::Down { pull: 0.0 };
-            return y;
-        }
-        let to = pull + y;
-        match to.signum() == pull.signum() && to != 0.0 {
-            true => {
-                self.phase = Phase::Down { pull: to };
-                0.0
-            }
-            false => {
-                self.phase = Phase::Down { pull: 0.0 };
-                to
-            }
-        }
+        self.phase = Phase::Down;
+        self.give(y, view)
     }
 
     /// The scrollable reached its end with `y` of the wheel's motion left
-    /// over: that much past it, if the fingers are down; and if it was
-    /// coasting, the coast carries on into the band as fast as it was going.
+    /// over: that much more pull past it, if the fingers are down; and if it
+    /// was coasting, the coast carries on into the band.
     pub fn overshoot(&mut self, y: f32, now: Instant, view: f32) {
         self.now = Some(now);
         match self.phase {
-            Phase::Down { pull } => self.phase = Phase::Down { pull: pull + y },
+            Phase::Down => self.over = stretch(self.over, y, view, tokens::BAND_STEP),
             Phase::Coasting { since, speed, .. } => {
                 let (_, speed) = motion::coast(speed, ms(now, since));
-                self.hit(speed, now, view);
+                self.hit(speed, now);
             }
             Phase::Following => {
                 let speed = self.moves.speed();
-                self.hit(speed, now, view);
+                self.hit(speed, now);
                 self.spending = true;
             }
             _ => {}
@@ -502,31 +562,48 @@ impl Kinetic {
     }
 
     /// A coast reached an end going at `speed`: on into the band from the
-    /// edge, slowing on [`BACK`] as it goes (faster than it slowed while it
-    /// scrolled), and back, never past the edge.
-    fn hit(&mut self, speed: f32, now: Instant, view: f32) {
+    /// edge, set off [`thrown`] on [`BACK`], and back, never past the edge
+    /// (Gecko's fling handing its speed to `HandleFlingOverscroll`).
+    fn hit(&mut self, speed: f32, now: Instant) {
         let side = match speed > 0.0 {
             true => 1.0,
             false => -1.0,
         };
-        let speed = capped(speed, 0.0, side, view);
+        self.over = 0.0;
         self.phase = Phase::Settling {
             side,
-            back: Slide::new(0.0, 0.0, now, BACK).moving_at(speed),
+            back: Slide::new(0.0, 0.0, now, BACK).moving_at(thrown(speed)).resting_within(tokens::BAND_REST),
+        };
+    }
+
+    /// The band springs back from where it is drawn, set off at `speed`.
+    fn settle(&mut self, speed: f32, now: Instant) {
+        let from = self.over;
+        self.over = 0.0;
+        self.held = false;
+        self.phase = match from == 0.0 {
+            true => Phase::Idle,
+            false => Phase::Settling {
+                side: from.signum(),
+                back: Slide::new(from, 0.0, now, BACK).moving_at(speed).resting_within(tokens::BAND_REST),
+            },
         };
     }
 
     /// The fingers lifted at `now` (`told`: the system said so, rather than
-    /// [`LIFT`] of stillness): a band springs back from where it is drawn
-    /// and as fast as it was drawn going, and a scroll coasts on at the
-    /// speed it was let go — or, where the system coasts, its coast is
-    /// followed. A word from the system while a coast it was told of goes
-    /// on is new fingers on the trackpad: the coast stops.
-    pub fn lift(&mut self, now: Instant, view: f32, told: bool) {
+    /// stillness): a band springs back from where it is drawn — set off as
+    /// fast as it was let go going out, as Gecko's fling into an overscroll
+    /// does, or from a standstill — or, let go inward fast enough, is given
+    /// back by a coast that goes on into the list; and a scroll coasts on at
+    /// the speed it was let go, or, where the system coasts, its coast is
+    /// followed. Any word from the system while it coasts stops the coast:
+    /// fingers landing.
+    pub fn lift(&mut self, now: Instant, told: bool) {
         self.now = Some(now);
         self.heard = Some(now);
         match self.phase {
-            Phase::Down { pull } => {
+            Phase::Down => {
+                self.held = false;
                 // Held still before the lift: let go at no speed.
                 let still = self.moves.last().is_none_or(|t| now.saturating_duration_since(t) > crate::velocity::GAP);
                 let speed = match still && told {
@@ -536,46 +613,110 @@ impl Kinetic {
                 // Seen only by its stillness, and run down by itself first:
                 // a coast the browser or the system already made.
                 let spent = !told && speed.abs() < self.fastest * SPENT;
-                if pull != 0.0 {
-                    let side = pull.signum();
-                    let from = band(pull, view);
-                    let speed = capped(speed * band_rate(pull, view), from, side, view);
-                    self.phase = Phase::Settling {
-                        side,
-                        back: Slide::new(from, 0.0, now, BACK).moving_at(speed),
-                    };
-                    self.spending = system_coasts();
-                    return;
-                }
                 // Read at the last move, so a lift only seen later has
                 // slowed as the coast would have meanwhile.
                 let late = self.moves.last().map_or(0.0, |t| ms(now, t));
-                let (_, speed) = motion::coast(speed, late);
+                let (_, coasting) = motion::coast(speed, late);
+                if self.over != 0.0 {
+                    let inward = speed * self.over < 0.0;
+                    let fast = speed.abs() >= START && !spent;
+                    match () {
+                        _ if inward && fast && !system_coasts() => {
+                            self.phase = Phase::Coasting {
+                                since: now,
+                                speed: coasting,
+                                gone: 0.0,
+                                told,
+                            };
+                        }
+                        _ if fast && !inward => self.settle(thrown(speed), now),
+                        _ => self.settle(0.0, now),
+                    }
+                    self.spending = system_coasts();
+                    return;
+                }
                 self.phase = match () {
                     _ if system_coasts() => Phase::Following,
                     _ if spent => Phase::Idle,
-                    _ if speed.abs() >= STOP => Phase::Coasting {
+                    _ if speed.abs() >= START && coasting.abs() >= STOP => Phase::Coasting {
                         since: now,
-                        speed,
+                        speed: coasting,
                         gone: 0.0,
                         told,
                     },
                     _ => Phase::Idle,
                 };
             }
-            // The system's coast is over.
+            // The system's coast is over, or new fingers stopped it.
             Phase::Following => self.phase = Phase::Idle,
             Phase::Settling { .. } => self.spending = false,
-            Phase::Coasting { told: true, .. } if told => self.phase = Phase::Idle,
+            // A word from the system while coasting is fingers on the
+            // trackpad — unless it came before the coast's first frame: the
+            // same lift said twice, as some Wayland compositors do (Gecko's
+            // `OnPanEnd` ignores a second pan-end the same way).
+            Phase::Coasting { gone, .. } if told && gone != 0.0 => self.stop(),
             _ => {}
         }
     }
 
-    /// A click, a touch or a wheel elsewhere: a coast stops where it is. A
-    /// band goes on springing back.
+    /// Fingers came to rest on the trackpad at `now` (Wayland's hold
+    /// gesture beginning; Gecko's `PANGESTURE_MAYSTART`, which cancels
+    /// every animation but keeps the overscroll): a coast stops where it
+    /// is, and a band springing back stops where it is drawn and is held
+    /// there until they lift or move.
+    pub fn touch(&mut self, now: Instant) {
+        self.now = Some(now);
+        match self.phase {
+            Phase::Coasting { .. } | Phase::Following | Phase::Settling { .. } => {
+                self.over = self.offset(now);
+                self.moves.clear();
+                self.travelled = 0.0;
+                self.fastest = 0.0;
+                self.spending = false;
+                self.held = self.over != 0.0;
+                self.phase = match self.held {
+                    true => Phase::Down,
+                    false => Phase::Idle,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    /// The fingers that came to rest lifted, or moved on into a scroll, at
+    /// `now` (the hold gesture ending, cancelled or not; Gecko's
+    /// `PANGESTURE_CANCELLED`, which snaps an overscroll back): a band they
+    /// held springs back from a standstill. Nothing else: a scroll that
+    /// follows is the wheel's.
+    pub fn untouch(&mut self, now: Instant) {
+        if self.held && self.phase == Phase::Down {
+            self.lift(now, true);
+        }
+        self.held = false;
+    }
+
+    /// What the fingers on the trackpad have done since last felt
+    /// ([`crate::touchpad::fingers`]): come to rest ([`Kinetic::touch`]),
+    /// and lifted again ([`Kinetic::untouch`]). Whether anything changed.
+    pub fn feel(&mut self, fingers: crate::touchpad::Fingers, now: Instant) -> bool {
+        let before = (self.phase, self.over);
+        if fingers.holds != self.holds {
+            self.holds = fingers.holds;
+            self.touch(now);
+        }
+        if !fingers.resting {
+            self.untouch(now);
+        }
+        before != (self.phase, self.over)
+    }
+
+    /// A click, a touch or a wheel elsewhere: a coast stops where it is,
+    /// and a band it was giving back springs back. A band springing back
+    /// goes on.
     pub fn stop(&mut self) {
         if matches!(self.phase, Phase::Coasting { .. } | Phase::Following) {
-            self.phase = Phase::Idle;
+            let now = self.now.unwrap_or_else(Instant::now);
+            self.settle(0.0, now);
         }
         self.spending = false;
     }
@@ -585,78 +726,67 @@ impl Kinetic {
         *self = Kinetic {
             heard: self.heard,
             seen: self.seen,
+            holds: self.holds,
             ..Kinetic::default()
         };
     }
 
-    /// A frame at `now`, `told` whether the system says when fingers lift:
-    /// how far a coast has gone since the last frame, for the scrollable
-    /// to scroll, and what it wants next — a frame, a wake at a time, or
-    /// nothing. Fingers held still are let go once still for [`LIFT`] where
-    /// the system never says; a band comes to rest at the edge; and a band
-    /// let go inward hard enough to cross it coasts on into the list.
+    /// A frame at `now`, `told` whether only the system's word lets the
+    /// fingers go: how far a coast has gone since the last frame, for the
+    /// scrollable to scroll, and what it wants next — a frame, a wake at a
+    /// time, or nothing. Fingers held still are let go once still for
+    /// [`LIFT`] ([`BAND_LIFT`] past an end) where the system never says,
+    /// and never where it does; a coast gives back a band first; a band
+    /// comes to rest at the edge.
     pub fn tick(&mut self, now: Instant, view: f32, told: bool) -> (f32, Wake) {
         self.now = Some(now);
         match self.phase {
             Phase::Idle => (0.0, Wake::Never),
-            Phase::Down { .. } if told => (0.0, Wake::Never),
-            Phase::Down { .. } | Phase::Following => {
+            Phase::Down if told || self.held => (0.0, Wake::Never),
+            Phase::Down | Phase::Following => {
                 let since = self.heard.unwrap_or(now);
-                match now.saturating_duration_since(since) >= LIFT {
+                let wait = match self.over != 0.0 {
+                    true => BAND_LIFT,
+                    false => LIFT,
+                };
+                match now.saturating_duration_since(since) >= wait {
                     true if self.phase == Phase::Following => {
                         self.phase = Phase::Idle;
                         (0.0, Wake::Never)
                     }
                     true => {
-                        self.lift(now, view, false);
+                        self.lift(now, false);
                         (0.0, Wake::Frame)
                     }
-                    false => (0.0, Wake::At(since + LIFT)),
+                    false => (0.0, Wake::At(since + wait)),
                 }
             }
             Phase::Coasting { since, speed, gone, told } => {
                 let (at, now_speed) = motion::coast(speed, ms(now, since));
-                let step = at - gone;
+                let step = self.give(at - gone, view);
+                self.phase = Phase::Coasting {
+                    since,
+                    speed,
+                    gone: at,
+                    told,
+                };
                 match now_speed.abs() < STOP {
                     true => {
-                        self.phase = Phase::Idle;
+                        self.settle(0.0, now);
                         (step, Wake::Never)
                     }
-                    false => {
-                        self.phase = Phase::Coasting {
-                            since,
-                            speed,
-                            gone: at,
-                            told,
-                        };
-                        (step, Wake::Frame)
-                    }
+                    false => (step, Wake::Frame),
                 }
             }
-            Phase::Settling { side, back } => {
-                let at = back.at(now);
-                if at * side < 0.0 {
-                    // Across the edge, going inward: on into the list.
-                    let speed = back.speed(now);
-                    self.phase = match !system_coasts() && speed.abs() >= STOP {
-                        true => Phase::Coasting {
-                            since: now,
-                            speed,
-                            gone: 0.0,
-                            told: false,
-                        },
-                        false => Phase::Idle,
-                    };
-                    return (0.0, Wake::Frame);
+            Phase::Settling { side, back } => match back.at(now) * side >= 0.0 && back.moving(now) {
+                true => (0.0, Wake::Frame),
+                // At rest at the edge, or across it: there it stops
+                // (Gecko's `Axis::SampleOverscrollAnimation`).
+                false => {
+                    self.phase = Phase::Idle;
+                    (0.0, Wake::Never)
                 }
-                match back.moving(now) {
-                    true => (0.0, Wake::Frame),
-                    false => {
-                        self.phase = Phase::Idle;
-                        (0.0, Wake::Never)
-                    }
-                }
-            }
+            },
         }
     }
 }
@@ -730,11 +860,10 @@ impl<M> Elastic<'_, M> {
     }
 }
 
-/// How far the content in `tree` is drawn moved, in a scrollable `view`
-/// tall, and the move itself.
-fn moved(tree: &Tree, view: f32) -> (f32, Transformation) {
+/// How far the content in `tree` is drawn moved, and the move itself.
+fn moved(tree: &Tree) -> (f32, Transformation) {
     let kinetic = tree.state.downcast_ref::<Kinetic>();
-    let offset = kinetic.offset(kinetic.now.unwrap_or_else(Instant::now), view);
+    let offset = kinetic.offset(kinetic.now.unwrap_or_else(Instant::now));
     (offset, Transformation::translate(0.0, offset))
 }
 
@@ -746,6 +875,16 @@ fn clock(now: Instant) -> Instant {
         return fake;
     }
     now
+}
+
+/// What the fingers on the trackpad have done ([`crate::touchpad::fingers`]),
+/// or, in a test, what it says.
+fn fingers() -> crate::touchpad::Fingers {
+    #[cfg(test)]
+    if let Some(fake) = tests::FINGERS.with(|c| c.get()) {
+        return fake;
+    }
+    crate::touchpad::fingers()
 }
 
 /// What a scrollable wants, asked of the shell.
@@ -798,9 +937,7 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) {
-        let bounds = layout.bounds();
         let inner = layout.children().next().expect("the content's layout");
-        let view = bounds.height;
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => self.frame(tree, clock(*now), inner, renderer, clipboard, shell, viewport),
             Event::Keyboard(keyboard::Event::KeyPressed { .. }) => {
@@ -822,7 +959,7 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
             },
             _ => {}
         }
-        let (offset, moved) = moved(tree, view);
+        let (offset, moved) = moved(tree);
         let (cursor, viewport) = match offset != 0.0 {
             true => {
                 let inverse = moved.inverse();
@@ -849,7 +986,7 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         let bounds = layout.bounds();
         let inner = layout.children().next().expect("the content's layout");
         let content = self.content.as_widget();
-        let (offset, moved) = moved(tree, bounds.height);
+        let (offset, moved) = moved(tree);
         #[cfg(test)]
         tests::trace(tree.state.downcast_ref::<Kinetic>(), offset);
         if offset == 0.0 {
@@ -930,7 +1067,7 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         let inner = layout.children().next().expect("the content's layout");
-        let inverse = moved(tree, layout.bounds().height).1.inverse();
+        let inverse = moved(tree).1.inverse();
         self.content
             .as_widget()
             .mouse_interaction(&tree.children[0], inner, cursor * inverse, &(*viewport * inverse), renderer)
@@ -950,7 +1087,7 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         offset: Vector,
     ) -> Option<overlay::Element<'b, M, Theme, iced::Renderer>> {
         let inner = layout.children().next().expect("the content's layout");
-        let (by, _) = moved(tree, layout.bounds().height);
+        let (by, _) = moved(tree);
         self.content
             .as_widget_mut()
             .overlay(&mut tree.children[0], inner, renderer, viewport, offset + Vector::new(0.0, by))
@@ -982,7 +1119,9 @@ impl<M> Elastic<'_, M> {
     ) {
         let view = inner.bounds().height;
         let kinetic = tree.state.downcast_mut::<Kinetic>();
-        let (step, wake) = kinetic.tick(now, view, TOLD.load(Ordering::Relaxed));
+        // Fingers that came to rest since the last frame stop it first.
+        kinetic.feel(fingers(), now);
+        let (step, wake) = kinetic.tick(now, view, told());
         let aim = kinetic.aim.unwrap_or(inner.bounds().center());
         ask(shell, wake);
         if step == 0.0 {
@@ -1058,12 +1197,16 @@ impl<M> Elastic<'_, M> {
     ) -> bool {
         let now = clock(Instant::now());
         let view = inner.bounds().height;
-        // Moved nowhere: the fingers lifted (or, on a Mac, touched).
+        if tree.state.downcast_mut::<Kinetic>().feel(fingers(), now) {
+            shell.request_redraw();
+        }
+        // Moved nowhere: the fingers lifted (or, on a Mac, touched). Any
+        // such word stops a coast.
         if x == 0.0 && y == 0.0 {
             TOLD.store(true, Ordering::Relaxed);
             let kinetic = tree.state.downcast_mut::<Kinetic>();
             if kinetic.active() {
-                kinetic.lift(now, view, true);
+                kinetic.lift(now, true);
                 shell.request_redraw();
             }
             return false;
@@ -1159,7 +1302,8 @@ mod tests {
 
     /// In a window: a trackpad pulled past the top bands the list rather
     /// than scrolling it, and pulled back gives the band back before the
-    /// list moves — 50 out, 20 and then 40 back is 10 scrolled. A mouse's
+    /// list moves — 50 out draws 8, so 20 and then 40 back is 12 and then
+    /// 52 scrolled. A mouse's
     /// notches at the top do nothing, and the next scrolls at once.
     /// Falsified by the wheel handed to the list while it is pulled (it
     /// scrolled 60), or by banding the notches (the notch back gave the
@@ -1168,7 +1312,11 @@ mod tests {
     #[test]
     fn a_list_pulled_past_its_top_gives_the_band_back_before_it_scrolls() {
         let px = |y| ScrollDelta::Pixels { x: 0.0, y };
-        assert_eq!(scrolled_by(&[px(50.0), px(-20.0), px(-40.0)]), [10]);
+        // The window is 300 tall; one move draws at most 8 px of band.
+        let drawn = stretch(0.0, 50.0, 300.0, tokens::BAND_STEP);
+        assert_eq!(drawn, tokens::BAND_STEP);
+        let back = |y: f32| (y - drawn).round() as i32;
+        assert_eq!(scrolled_by(&[px(50.0), px(-20.0), px(-40.0)]), [back(20.0), back(60.0)]);
         assert_eq!(scrolled_by(&[px(-30.0)]), [30], "not pulled, it scrolls as ever");
         let line = |y| ScrollDelta::Lines { x: 0.0, y };
         assert_eq!(scrolled_by(&[line(1.0), line(-1.0)]), [60]);
@@ -1210,16 +1358,61 @@ mod tests {
         assert!(last < fingers + 1500.0, "and stopped: {last}");
     }
 
+    /// In a window, in real time: the same flick, and two fingers landing
+    /// three frames into its coast (the hold gesture, as
+    /// [`crate::touchpad`] hears it): the coast goes no further than the
+    /// frame they landed in. Falsified by a coast that read the fingers
+    /// only on the wheel (it ran on to its end).
+    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+    #[test]
+    fn fingers_landing_stop_a_coast_in_a_window() {
+        use iced::widget::{column, scrollable, text};
+        let rows = column((0..400).map(|n| text(format!("row {n}")).height(40).into()));
+        let list = scrollable(rows).height(Length::Fill).on_scroll(|v| v.absolute_offset().y);
+        let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (400.0, 300.0), elastic(list));
+        ui.point_at(iced::Point::new(20.0, 150.0));
+        let wheel = |y| {
+            Event::Mouse(mouse::Event::WheelScrolled {
+                delta: ScrollDelta::Pixels { x: 0.0, y },
+            })
+        };
+        FINGERS.with(|f| f.set(Some(crate::touchpad::Fingers::default())));
+        for _ in 0..10 {
+            let _ = ui.simulate([wheel(-16.0)]);
+            std::thread::sleep(ms(8));
+        }
+        let _ = ui.simulate([wheel(0.0)]);
+        let lifted = Instant::now();
+        let frame = |ui: &mut iced_test::Simulator<'_, f32>, n: u64| {
+            let _ = ui.simulate([Event::Window(window::Event::RedrawRequested(lifted + ms(16 * n)))]);
+        };
+        for n in 1..=3 {
+            frame(&mut ui, n);
+        }
+        FINGERS.with(|f| f.set(Some(crate::touchpad::Fingers { holds: 1, resting: true })));
+        for n in 4..=150 {
+            frame(&mut ui, n);
+        }
+        FINGERS.with(|f| f.set(None));
+        let seen: Vec<f32> = ui.into_messages().collect();
+        let fingers = 160.0;
+        let last = *seen.last().expect("it scrolled");
+        assert!(last > fingers, "it had coasted: {last}");
+        assert!(last < fingers + 160.0, "and stopped when they landed: {last}");
+    }
+
     const VIEW: f32 = 600.0;
 
     /// A list to feed a [`Kinetic`] as [`elastic`] does: `room` to scroll,
     /// scrolled `at`, the wheel and the frames handed on and what its end
-    /// leaves over handed back.
+    /// leaves over handed back. `told`: the system says when fingers lift
+    /// (Wayland, macOS), so only its word lets go.
     struct List {
         kinetic: Kinetic,
         at: f32,
         room: f32,
         t: Instant,
+        told: bool,
     }
 
     impl List {
@@ -1229,6 +1422,7 @@ mod tests {
                 at,
                 room,
                 t: Instant::now(),
+                told: true,
             }
         }
 
@@ -1251,20 +1445,52 @@ mod tests {
             self.scroll(left, now);
         }
 
+        /// The system's word that the fingers lifted: a wheel event that
+        /// moved nowhere.
         fn lift(&mut self, after: u64) {
-            self.kinetic.lift(self.t + ms(after), VIEW, true);
+            self.kinetic.lift(self.t + ms(after), true);
         }
 
         fn frame(&mut self, after: u64) -> Wake {
             let now = self.t + ms(after);
-            let (step, wake) = self.kinetic.tick(now, VIEW, true);
+            let (step, wake) = self.kinetic.tick(now, VIEW, self.told);
             self.scroll(step, now);
             wake
         }
 
+        /// The band, drawn.
+        fn band(&self, after: u64) -> f32 {
+            self.kinetic.offset(self.t + ms(after))
+        }
+
         /// Where it is drawn: scrolled, less the band.
         fn drawn(&self, after: u64) -> f32 {
-            self.at - self.kinetic.offset(self.t + ms(after), VIEW)
+            self.at - self.band(after)
+        }
+
+        /// Fingers came to rest, the `n`th time, or lifted again.
+        fn rest(&mut self, n: u64, after: u64) {
+            let _ = self
+                .kinetic
+                .feel(crate::touchpad::Fingers { holds: n, resting: true }, self.t + ms(after));
+        }
+
+        fn unrest(&mut self, n: u64, after: u64) {
+            let _ = self
+                .kinetic
+                .feel(crate::touchpad::Fingers { holds: n, resting: false }, self.t + ms(after));
+        }
+
+        /// Coasting down a long list, a frame on.
+        fn coasting() -> List {
+            let mut list = List::new(5000.0, 100_000.0);
+            for n in 0..=8u64 {
+                list.wheel(-20.0, 8 * n);
+            }
+            list.lift(64);
+            list.frame(80);
+            assert!(list.kinetic.coasting());
+            list
         }
     }
 
@@ -1309,149 +1535,185 @@ mod tests {
         assert!(frames > 60, "{frames}");
     }
 
-    /// Past the top the wheel pulls the band, drawn [`band`] of the whole
-    /// pull however it came; back the other way it gives the band back
-    /// first, continuously, and only what is left over scrolls; the scroll
-    /// stays at its end the while. Falsified by a band compounded move by
-    /// move (the same pull, in more moves, was drawn less far), or by the
-    /// scroll moved while the band showed.
+    /// Gecko's desktop fling is ours: `v · (1 − apz.fling_friction)^ms`,
+    /// 0.002 of its speed lost a millisecond, stepped frame by frame
+    /// (`DesktopFlingPhysics::Sample`), lands where [`motion::coast`]'s
+    /// closed form does, to well under a pixel a hundred. Falsified by a
+    /// deceleration that drifted from Gecko's friction.
     #[test]
-    fn the_band_follows_the_whole_pull_and_gives_it_back_first() {
+    fn the_coast_is_geckos_desktop_fling() {
+        let (mut v, mut gone, mut t) = (2000.0f64 / 1000.0, 0.0f64, 0.0f64);
+        while v.abs() > tokens::COAST_STOP as f64 / 1000.0 {
+            // A frame of 16 ms: the speed it has now, then the friction.
+            v *= (1.0 - 0.002f64).powf(16.0);
+            gone += v * 16.0;
+            t += 16.0;
+        }
+        let (ours, _) = motion::coast(2000.0, t as f32);
+        assert!((ours as f64 - gone).abs() < 0.02 * gone, "{ours} against Gecko's {gone}");
+        assert_eq!(tokens::DECELERATION, 1.0 - 0.002);
+    }
+
+    /// Past the top, each pull draws the band further, ever less each time
+    /// and never nothing: Gecko's resistance, `(1 − band/view)/16` of each of
+    /// its pixels, four to a trackpad's. However long it is pulled it goes
+    /// on — well past where the old band stopped (a third of the view) —
+    /// and never reaches the view. Small moves draw what one move would.
+    /// Falsified by a cap (a pull that drew nothing more), or by a band
+    /// that grew as fast far out as at the edge.
+    #[test]
+    fn the_band_gets_harder_and_harder_and_never_stops() {
         let mut list = List::new(0.0, 2000.0);
-        list.wheel(30.0, 0);
-        let mut drawn = Vec::new();
-        for n in 1..=20 {
+        let mut drawn = vec![0.0];
+        for n in 1..=1200u64 {
             list.wheel(10.0, 8 * n);
-            drawn.push(list.kinetic.offset(list.t + ms(8 * n), VIEW));
+            drawn.push(list.band(8 * n));
             assert_eq!(list.at, 0.0, "pinned at the edge");
         }
-        assert_eq!(list.kinetic.pull(list.t, VIEW), 230.0);
-        assert_eq!(list.kinetic.offset(list.t, VIEW), band(230.0, VIEW));
-        let mut once = List::new(0.0, 2000.0);
-        once.wheel(230.0, 0);
-        assert_eq!(
-            once.kinetic.offset(once.t, VIEW),
-            list.kinetic.offset(list.t, VIEW),
-            "the same pull, drawn the same"
-        );
+        let more: Vec<f32> = drawn.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(more.iter().all(|&d| d > 0.0), "always further");
+        assert!(more.windows(2).all(|w| w[1] < w[0]), "and ever less so");
         assert!(
-            drawn.windows(2).all(|w| w[1] > w[0] && w[1] - w[0] < 10.0 * tokens::RUBBER_BAND),
-            "ever less"
+            (more[0] - 10.0 * give_at_edge()).abs() < 0.01,
+            "a quarter of a pixel at the edge: {}",
+            more[0]
         );
-        // Back, in small moves: the band comes back, smoothly, to nothing.
-        let mut last = list.kinetic.offset(list.t, VIEW);
-        for n in 21..=43 {
-            list.wheel(-10.0, 8 * n);
-            let now = list.kinetic.offset(list.t, VIEW);
-            assert!(now < last || now == 0.0, "{n}");
-            assert!(last - now < 10.0, "{n}: no jump, {last} to {now}");
+        let far = *drawn.last().unwrap();
+        assert!(far < VIEW && far > VIEW * 0.95, "20 views of pull: near the view, not at it: {far}");
+        assert!(drawn[400] > VIEW * 0.33, "past the old cap: {}", drawn[400]);
+        assert!((drawn[400] - band(4000.0, VIEW)).abs() < 0.05, "small moves draw what one would");
+        assert!((band(4000.0, VIEW) - VIEW * (1.0 - (-4000.0 / 4.0 / VIEW).exp())).abs() < 1e-3);
+        // One move draws at most Gecko's 8 px more, however far it pulls.
+        let mut jerk = List::new(2000.0, 2000.0);
+        jerk.wheel(-1_000_000.0, 0);
+        assert_eq!(jerk.band(0), -tokens::BAND_STEP);
+        assert_eq!(band(-300.0, VIEW), -band(300.0, VIEW), "either way alike");
+    }
+
+    /// Pulled back, the band is given back first, pixel for pixel, as
+    /// Gecko's `AdjustDisplacement` gives an overscroll back, with no jump,
+    /// and only what is left over scrolls; the scroll stays at its end the
+    /// while. Then out again, it stretches from where it is. Falsified by a
+    /// band undone through the curve (pulling back gave less than it took),
+    /// or by the scroll moved while the band showed.
+    #[test]
+    fn pulled_back_the_band_is_given_back_first() {
+        let mut list = List::new(0.0, 2000.0);
+        for n in 0..40u64 {
+            list.wheel(10.0, 8 * n);
+        }
+        let out = list.band(320);
+        assert!(out > 50.0, "{out}");
+        let mut last = out;
+        let mut n = 40;
+        while list.band(8 * n) > 0.0 {
+            list.wheel(-5.0, 8 * n);
+            n += 1;
+            let now = list.band(8 * n);
+            assert!(((last - now) - 5.0).abs() < 1e-3 || now == 0.0, "{n}: five back, {last} to {now}");
+            match now == 0.0 {
+                false => assert_eq!(list.at, 0.0, "the band first"),
+                true => assert!((list.at - (5.0 - last)).abs() < 1e-3, "the rest of the move scrolls"),
+            }
             last = now;
         }
-        assert_eq!(list.kinetic.offset(list.t, VIEW), 0.0);
-        assert_eq!(list.at, 0.0);
-        list.wheel(-25.0, 8 * 44);
-        assert_eq!(list.at, 25.0, "what is left over scrolls");
-        // However far it is pulled, never more than REACH of the view.
-        let mut far = List::new(2000.0, 2000.0);
-        far.wheel(-1_000_000.0, 0);
-        assert_eq!(far.kinetic.offset(far.t, VIEW), -VIEW * REACH);
-        // Apple's band of the whole pull in the whole view, up to there.
-        let mut some = List::new(2000.0, 2000.0);
-        some.wheel(-300.0, 0);
-        assert_eq!(some.kinetic.offset(some.t, VIEW), rubberband(-300.0, VIEW));
+        let gone = list.at;
+        list.wheel(-25.0, 8 * n);
+        assert_eq!(list.at, gone + 25.0, "then it scrolls");
+        // A single move across the edge: the band back, the rest scrolled.
+        let mut list = List::new(0.0, 2000.0);
+        list.wheel(40.0, 0);
+        let drawn = list.band(0);
+        list.wheel(-30.0, 8);
+        assert_eq!(list.band(8), 0.0);
+        assert!((list.at - (30.0 - drawn)).abs() < 1e-3, "{} after {drawn}", list.at);
     }
 
-    /// A flick into the foot: the coast reaches the end, carries on into the
-    /// band as fast as it was going, slows, springs back and stops exactly
-    /// at the edge — drawn first out and then back, each way once, never
-    /// past the edge into the list, and no further than REACH. Falsified by
-    /// a coast that stopped dead at the end (no band), or by the spring's
-    /// overshoot drawn (the list dipped back past its foot).
-    #[cfg(not(target_os = "macos"))]
+    /// Held still past the edge where the system says when fingers lift
+    /// (Wayland's `axis_stop`, macOS's phases): it stays exactly where it
+    /// is for as long as they are down — half a second, two — and springs
+    /// back only on the word that they lifted, from where it is drawn,
+    /// back to the edge and no further, and stops. Falsified by a timer
+    /// that let it go with the fingers still down (it sprang back held), or
+    /// by the spring's overshoot drawn (the page dipped past its top).
     #[test]
-    fn a_coast_into_an_end_carries_into_the_band_and_springs_back() {
-        let mut list = List::new(1500.0, 2000.0);
-        for n in 0..=10u64 {
-            list.wheel(-24.0, 8 * n);
-        }
-        list.lift(80);
-        let mut drawn = Vec::new();
-        let mut n = 1;
-        loop {
-            let wake = list.frame(80 + 8 * n);
-            drawn.push(list.drawn(80 + 8 * n));
-            n += 1;
-            if wake == Wake::Never || n > 1000 {
-                break;
-            }
-        }
-        let peak = drawn.iter().cloned().fold(f32::MIN, f32::max);
-        assert!(peak > 2000.0 + 10.0, "it went on into the band: {peak}");
-        assert!(peak < 2000.0 + VIEW * REACH, "no further than the reach: {peak}");
-        let top = drawn.iter().position(|&d| d == peak).unwrap();
-        assert!(drawn[..=top].windows(2).all(|w| w[1] >= w[0]), "out, without turning");
-        assert!(drawn[top..].windows(2).all(|w| w[1] <= w[0] + 1e-3), "back, without turning");
-        assert!(drawn[top..].iter().all(|&d| d >= 2000.0 - 1e-3), "never back into the list");
-        assert_eq!(*drawn.last().unwrap(), 2000.0, "exactly at the edge");
-        assert_eq!(list.at, 2000.0);
-        assert!(!list.kinetic.active());
-    }
-
-    /// Pulled past the top and let go, it springs back from where it is
-    /// drawn, as fast as it was drawn going, comes to the edge and stops —
-    /// only when the fingers lift: held still past the edge, told the
-    /// system says, it stays. Falsified by a timer that let it go with the
-    /// fingers still down, or by the spring's overshoot drawn (the page
-    /// dipped past its top).
-    #[test]
-    fn let_go_it_springs_back_to_the_edge_and_no_further() {
+    fn a_held_pull_stays_until_the_fingers_lift_then_springs_back_to_the_edge() {
         let mut list = List::new(0.0, 2000.0);
         for n in 0..=6u64 {
             list.wheel(20.0, 8 * n);
         }
-        // Held still for two seconds: still pulled.
-        assert_eq!(list.frame(2048), Wake::Never);
-        let pulled = list.kinetic.offset(list.t + ms(2048), VIEW);
-        assert!(pulled > 0.0, "still pulled with the fingers down");
+        let pulled = list.band(48);
+        assert!(pulled > 0.0);
+        for at in [100, 500, 548, 2048] {
+            assert_eq!(list.frame(at), Wake::Never, "{at} ms: nothing to wait for");
+            assert_eq!(list.band(at), pulled, "{at} ms: still pulled with the fingers down");
+        }
         list.lift(2048);
-        assert!((list.kinetic.offset(list.t + ms(2048), VIEW) - pulled).abs() < 1e-3, "no jump");
+        assert!(list.kinetic.settling());
+        assert!((list.band(2048) - pulled).abs() < 1e-3, "no jump");
         let mut last = pulled;
-        for n in 1..300u64 {
-            let at = 2048 + 4 * n;
-            list.frame(at);
-            let now = list.kinetic.offset(list.t + ms(at), VIEW);
+        let mut n = 1;
+        while list.frame(2048 + 4 * n) != Wake::Never {
+            let now = list.band(2048 + 4 * n);
             assert!(now >= 0.0 && now <= last + 1e-3, "{n}: back, never past");
             last = now;
+            n += 1;
+            assert!(n < 1000, "it comes to rest");
         }
         assert!(!list.kinetic.active(), "at rest");
+        assert_eq!(list.band(2048 + 4 * n), 0.0, "exactly at the edge");
         assert_eq!(list.at, 0.0);
+        // Firefox's spring: a unit mass at 200, damped 1.1 — about half a
+        // second back from a small pull, and no swing past.
+        assert!((300..900).contains(&(4 * n)), "{} ms", 4 * n);
 
-        // Let go still moving out: it goes on out a moment, then back.
+        // Let go still moving out: thrown on out a moment, then back.
         let mut list = List::new(0.0, 2000.0);
         for n in 0..=6u64 {
             list.wheel(20.0, 8 * n);
         }
-        let drawn = list.kinetic.offset(list.t + ms(48), VIEW);
+        let drawn = list.band(48);
         list.lift(50);
-        assert!(list.kinetic.offset(list.t + ms(60), VIEW) > drawn, "still going out, a moment on");
-        for n in 0..200u64 {
-            assert!(list.kinetic.offset(list.t + ms(50 + 5 * n), VIEW) >= 0.0);
+        assert!(list.band(70) > drawn, "still going out, a moment on");
+        for n in 0..300u64 {
+            list.frame(50 + 4 * n);
+            assert!(list.band(50 + 4 * n) >= 0.0);
         }
+        assert_eq!(list.band(50 + 4 * 300), 0.0);
     }
 
-    /// Where the system never says the fingers lifted, a short stillness
-    /// is a lift; where it does, only its word is. Falsified by waiting
-    /// for a word that never comes (the band stayed pulled).
+    /// Where the system never says the fingers lifted (X11, a browser), a
+    /// short stillness is a lift in the middle of the list, so a flick
+    /// coasts soon after; but past an end it waits far longer, so a pull
+    /// held still is not let go under the fingers. Falsified by the one
+    /// short wait everywhere (the held band sprang back at 50 ms), or by
+    /// waiting for a word that never comes (it stayed pulled).
     #[test]
-    fn untold_a_stillness_lets_go() {
+    fn untold_a_stillness_lets_go_and_a_held_band_waits_longer() {
         let mut kinetic = Kinetic::default();
         let t = Instant::now();
         let left = kinetic.wheel(40.0, t, VIEW);
         kinetic.overshoot(left, t, VIEW);
         let _ = kinetic.wheel(40.0, t + ms(8), VIEW);
-        assert_eq!(kinetic.tick(t + ms(20), VIEW, false).1, Wake::At(t + ms(8) + LIFT), "not yet");
-        assert_eq!(kinetic.tick(t + ms(8) + LIFT, VIEW, false).1, Wake::Frame, "still that long: let go");
-        assert!(matches!(kinetic.phase, Phase::Settling { .. }));
+        let pulled = kinetic.offset(t + ms(8));
+        assert_eq!(kinetic.tick(t + ms(20), VIEW, false).1, Wake::At(t + ms(8) + BAND_LIFT), "not yet");
+        assert_eq!(
+            kinetic.tick(t + ms(508), VIEW, false).1,
+            Wake::At(t + ms(8) + BAND_LIFT),
+            "held half a second"
+        );
+        assert_eq!(kinetic.offset(t + ms(508)), pulled);
+        assert_eq!(kinetic.tick(t + ms(8) + BAND_LIFT, VIEW, false).1, Wake::Frame, "still that long: let go");
+        assert!(kinetic.settling());
+
+        let mut list = List::new(500.0, 100_000.0);
+        list.told = false;
+        for n in 0..12u64 {
+            list.wheel(-16.0, 8 * n);
+        }
+        assert_eq!(list.frame(100), Wake::At(list.t + ms(88) + LIFT), "mid-list: the short wait");
+        let _ = list.frame(88 + LIFT.as_millis() as u64);
+        assert!(list.kinetic.coasting());
     }
 
     /// Untold (a browser): a flick let go at speed coasts once it has been
@@ -1492,49 +1754,183 @@ mod tests {
         assert_eq!(pulls(ScrollDelta::Pixels { x: 0.0, y: 12.0 }, true), None);
     }
 
-    /// A coast stops at once for new fingers (the wheel), a click or a key;
-    /// a band springing back is grabbed from where it is drawn, and a key
-    /// puts it back at once. Falsified by a coast that went on under the
-    /// fingers' next move (the two added up).
+    /// A coast stops at once for new fingers (the wheel), any word from the
+    /// wheel even one that moved nowhere, a click or a key; but the same
+    /// lift said twice before the coast's first frame (as some Wayland
+    /// compositors say it, and Gecko ignores) does not stop it. A band
+    /// springing back is grabbed from where it is drawn, and a key puts it
+    /// back at once. Falsified by a coast that went on under the fingers'
+    /// next move (the two added up), or by one a zero-delta wheel left
+    /// coasting.
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn any_input_stops_a_coast() {
-        let coasting = || {
-            let mut list = List::new(5000.0, 100_000.0);
-            for n in 0..=8u64 {
-                list.wheel(-20.0, 8 * n);
-            }
-            list.lift(64);
-            list.frame(80);
-            assert!(list.kinetic.coasting());
-            list
-        };
-        let mut list = coasting();
+        let mut list = List::coasting();
         list.wheel(-3.0, 90);
         assert!(!list.kinetic.coasting(), "new fingers");
         let at = list.at;
         list.frame(96);
         assert_eq!(list.at, at, "and it does not move by itself");
 
-        let mut list = coasting();
+        let mut list = List::coasting();
+        list.lift(90);
+        assert!(!list.kinetic.coasting(), "a wheel that moved nowhere");
+        let at = list.at;
+        assert_eq!(list.frame(96), Wake::Never);
+        assert_eq!(list.at, at);
+
+        let mut list = List::new(5000.0, 100_000.0);
+        for n in 0..=8u64 {
+            list.wheel(-20.0, 8 * n);
+        }
+        list.lift(64);
+        list.lift(65);
+        assert!(list.kinetic.coasting(), "the lift said twice is one lift");
+
+        let mut list = List::coasting();
         list.kinetic.stop();
         let at = list.at;
         assert_eq!(list.frame(96), Wake::Never, "a click");
         assert_eq!(list.at, at);
 
-        let mut list = coasting();
+        let mut list = List::coasting();
         list.kinetic.reset();
         assert!(!list.kinetic.active(), "a key");
 
         // Grabbed springing back: carries on from where it is drawn.
         let mut list = List::new(0.0, 2000.0);
-        list.wheel(120.0, 0);
-        list.lift(0);
-        list.frame(40);
-        let drawn = list.kinetic.offset(list.t + ms(40), VIEW);
-        list.wheel(-1.0, 40);
-        let grabbed = list.kinetic.offset(list.t + ms(40), VIEW);
-        assert!(grabbed > 0.0 && (grabbed - drawn).abs() < 1.0, "{drawn} to {grabbed}");
+        for n in 0..12u64 {
+            list.wheel(12.0, 8 * n);
+        }
+        list.lift(200);
+        list.frame(240);
+        let drawn = list.band(240);
+        list.wheel(-1.0, 240);
+        let grabbed = list.band(240);
+        assert!(grabbed > 0.0 && (grabbed - (drawn - 1.0)).abs() < 1e-3, "{drawn} to {grabbed}");
+    }
+
+    /// Two fingers landing on the trackpad (Wayland's hold gesture begun):
+    /// a coast stops on the very next frame, where it is; a band springing
+    /// back stops where it is drawn and stays there while they rest, then
+    /// springs back when they lift — or, if they move on, is pulled on from
+    /// where it is. Their lifting does nothing else: no coast, no move.
+    /// Falsified by a coast that ran on a frame under resting fingers, or a
+    /// band that went on springing back beneath them (Gecko keeps the
+    /// overscroll and cancels the animation).
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn fingers_that_land_stop_it_at_once() {
+        let mut list = List::coasting();
+        list.rest(1, 90);
+        assert!(!list.kinetic.coasting());
+        let at = list.at;
+        assert_eq!(list.frame(96), Wake::Never, "within the frame");
+        assert_eq!(list.at, at, "where it was");
+        list.unrest(1, 300);
+        assert_eq!(list.frame(316), Wake::Never);
+        assert_eq!(list.at, at, "and their lifting starts nothing");
+
+        // Into the foot and springing back: held where it is drawn.
+        let mut list = List::new(1500.0, 2000.0);
+        for n in 0..=10u64 {
+            list.wheel(-24.0, 8 * n);
+        }
+        list.lift(80);
+        let mut t = 80;
+        while !list.kinetic.settling() || list.band(t) > -5.0 {
+            t += 8;
+            list.frame(t);
+            assert!(t < 2000);
+        }
+        let drawn = list.band(t);
+        list.rest(1, t);
+        for later in [t + 16, t + 500] {
+            assert_eq!(list.frame(later), Wake::Never);
+            assert_eq!(list.band(later), drawn, "held under the fingers");
+        }
+        list.unrest(1, t + 500);
+        assert!(list.kinetic.settling(), "lifted: back to the edge");
+        let mut n = t + 500;
+        while list.frame(n) != Wake::Never {
+            n += 8;
+        }
+        assert_eq!(list.band(n), 0.0);
+        assert_eq!(list.at, 2000.0);
+
+        // Resting, then moving on: the band is pulled from where it is.
+        let mut list = List::new(0.0, 2000.0);
+        for n in 0..10u64 {
+            list.wheel(15.0, 8 * n);
+        }
+        list.lift(80);
+        list.frame(120);
+        let drawn = list.band(120);
+        list.rest(7, 120);
+        list.wheel(-4.0, 140);
+        list.unrest(7, 141);
+        assert!((list.band(141) - (drawn - 4.0)).abs() < 1e-3, "pulled on, not let go");
+        assert!(!list.kinetic.settling());
+    }
+
+    /// A band let go moving inward, fast: Gecko flings it, and the fling
+    /// gives the band back first, then coasts on into the list. Falsified
+    /// by springing it back to the edge and stopping there (the flick in
+    /// was lost).
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_band_flicked_inward_coasts_on_into_the_list() {
+        let mut list = List::new(0.0, 100_000.0);
+        for n in 0..60u64 {
+            list.wheel(10.0, 8 * n);
+        }
+        for n in 60..72u64 {
+            list.wheel(-10.0, 8 * n);
+        }
+        assert!(list.band(570) > 5.0, "still past the top: {}", list.band(570));
+        list.lift(570);
+        assert!(list.kinetic.coasting());
+        let mut n = 1;
+        while list.frame(570 + 16 * n) != Wake::Never {
+            n += 1;
+        }
+        assert_eq!(list.band(570 + 16 * n), 0.0);
+        assert!(list.at > 100.0, "on into the list: {}", list.at);
+    }
+
+    /// A flick into the foot: the coast reaches the end, carries on into the
+    /// band, slows, springs back and stops exactly at the edge — drawn first
+    /// out and then back, each way once, never past the edge into the list.
+    /// Falsified by a coast that stopped dead at the end (no band), or by
+    /// the spring's overshoot drawn (the list dipped back past its foot).
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_coast_into_an_end_carries_into_the_band_and_springs_back() {
+        let mut list = List::new(1500.0, 2000.0);
+        for n in 0..=10u64 {
+            list.wheel(-24.0, 8 * n);
+        }
+        list.lift(80);
+        let mut drawn = Vec::new();
+        let mut n = 1;
+        loop {
+            let wake = list.frame(80 + 8 * n);
+            drawn.push(list.drawn(80 + 8 * n));
+            n += 1;
+            if wake == Wake::Never || n > 1000 {
+                break;
+            }
+        }
+        let peak = drawn.iter().cloned().fold(f32::MIN, f32::max);
+        assert!(peak > 2000.0 + 10.0, "it went on into the band: {peak}");
+        assert!(peak < 2000.0 + VIEW, "within the view: {peak}");
+        let top = drawn.iter().position(|&d| d == peak).unwrap();
+        assert!(drawn[..=top].windows(2).all(|w| w[1] >= w[0]), "out, without turning");
+        assert!(drawn[top..].windows(2).all(|w| w[1] <= w[0] + 1e-3), "back, without turning");
+        assert!(drawn[top..].iter().all(|&d| d >= 2000.0 - 1e-3), "never back into the list");
+        assert_eq!(*drawn.last().unwrap(), 2000.0, "exactly at the edge");
+        assert_eq!(list.at, 2000.0);
+        assert!(!list.kinetic.active());
     }
 
     /// Where the system coasts by itself (macOS), a lift makes no coast of
@@ -1554,13 +1950,18 @@ mod tests {
         assert_eq!(list.at, at, "no coast of its own");
         list.wheel(-18.0, 72);
         assert_eq!(list.at, at + 18.0, "the system's, followed");
+        // The fingers land: the system's coast stops, and nothing goes on.
+        list.lift(90);
+        assert!(!list.kinetic.active());
     }
 
     /// The thumb: iced's own at rest; banded, pinned at that end and
     /// shorter by the band as if it were more content, never shorter than
     /// about its width (or than it was); and as the band goes it grows back
-    /// to exactly the thumb at rest. Falsified by a thumb moved with the
-    /// band (its top left the rail's), or by one squeezed to nothing.
+    /// to exactly the thumb at rest. Pulled on and on it goes on shrinking,
+    /// as the band goes on growing, to no less than half. Falsified by a
+    /// thumb moved with the band (its top left the rail's), or by one
+    /// squeezed to nothing.
     #[test]
     fn the_thumb_stays_at_its_end_and_shrinks_with_the_band() {
         let at = |scrolled, overshoot| thumb(0.0, 600.0, 600.0, 2400.0, scrolled, overshoot).unwrap();
@@ -1583,6 +1984,10 @@ mod tests {
         assert!(lengths.windows(2).all(|w| w[1] > w[0]), "{lengths:?}");
         assert_eq!(*lengths.last().unwrap(), 150.0);
         assert_eq!(thumb(0.0, 600.0, 600.0, 500.0, 0.0, 40.0), None, "content that fits has none");
+        // Pulled on: shorter with every pull, never below half.
+        let pulled: Vec<f32> = (1..=40).map(|n| at(0.0, band(n as f32 * 500.0, 600.0)).1).collect();
+        assert!(pulled.windows(2).all(|w| w[1] < w[0]), "{pulled:?}");
+        assert!(*pulled.last().unwrap() > 75.0);
     }
 
     /// icy_ui's kinetic scroll, as its `scrollable.rs` has it, for the
@@ -1723,6 +2128,9 @@ mod tests {
         /// The time every event is taken at, in a test that drives the
         /// clock by hand ([`super::clock`]).
         pub(super) static CLOCK: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+        /// What the fingers on the trackpad have done, in a test that says
+        /// so ([`super::fingers`]).
+        pub(super) static FINGERS: std::cell::Cell<Option<crate::touchpad::Fingers>> = const { std::cell::Cell::new(None) };
         /// The draws of an [`elastic`], while a test records them.
         static TRACE: std::cell::RefCell<Option<Vec<Drawn>>> = const { std::cell::RefCell::new(None) };
     }

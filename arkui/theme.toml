@@ -273,19 +273,44 @@ paused-scale = 0.9
 # How far a thing that comes in where it stays rises as it comes (dp, pt or
 # logical px): a page's header, small, into its bar. A nudge, not a journey.
 rise = 8.0
-# A scroll past its end (a trackpad, the desktop and the browser): the
-# rubber band of the whole pull in the view is held to this share of it, so
-# however far it is pulled it is never drawn further; and a coast slower
-# than coast-stop (logical px a second) has stopped.
-band-reach = 0.33
-coast-stop = 20.0
+# A scroll past its end (a trackpad, the desktop and the browser), as
+# Firefox draws one (Gecko's Axis::ApplyResistance, MPL-2.0): each pixel
+# more of pull goes (1 - |band| / view) / band-resistance past the edge,
+# so it gets harder the further it is stretched and never stops. Gecko's
+# pull is band-gain of a trackpad's pixels (GTK's tenth of a Wayland axis
+# unit, times apz.gtk.pangesture.pixel_delta_mode_multiplier's 40), so a
+# finger draws a quarter of a pixel at the edge, as in Firefox; and one
+# move draws at most band-step more.
+band-resistance = 16.0
+band-gain = 4.0
+band-step = 8.0
+# Let go, it springs back as Firefox's overscroll animation does
+# (apz.overscroll.spring_stiffness and .damping: a unit mass, a touch over
+# critically damped), set off at band-throw of the speed it was let go at,
+# never faster than band-fling-max (logical px a second, Gecko's
+# apz.overscroll.max_velocity 10 px/ms), and is at the edge within
+# band-rest of a pixel.
+band-stiffness = 200.0
+band-damping = 1.1
+band-throw = 0.5
+band-fling-max = 10000.0
+band-rest = 1.0
+# A coast slower than coast-stop (logical px a second) has stopped (Gecko's
+# apz.fling_stopped_threshold, 0.01 px/ms); a release slower than
+# coast-min does not coast at all (apz.fling_min_velocity_threshold, 0.5
+# px/ms of Gecko's pull, band-gain of ours).
+coast-stop = 10.0
+coast-min = 125.0
 # A release's speed is read from its last velocity-ms of moves, and a pause
 # of velocity-gap-ms between two of them means the drag had stopped there
 # (UIScrollView's and Android's tracker, by way of fluid-scroll). Where the
-# system never says the fingers lifted, lift-ms of stillness is a lift.
+# system never says the fingers lifted (X11, a browser), lift-ms of
+# stillness is a lift — band-lift-ms while it is pulled past an end, so a
+# band held still is not let go under the fingers.
 velocity-ms = 100
 velocity-gap-ms = 40
 lift-ms = 50
+band-lift-ms = 800
 # A lift seen only by its stillness, at less than coast-spent of the
 # gesture's fastest, ran down by itself first: a browser's or a system's
 # own coast arriving as more of the wheel, or fingers that slowed to a

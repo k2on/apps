@@ -435,6 +435,11 @@ rec {
             target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
+            name = "raw-window-handle";
+            packageId = "raw-window-handle";
+            target = { target, features }: ("linux" == target."os" or null);
+          }
+          {
             name = "ureq";
             packageId = "ureq";
             usesDefaultFeatures = false;
@@ -450,6 +455,18 @@ rec {
             name = "wasm-bindgen-futures";
             packageId = "wasm-bindgen-futures";
             target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "system" ];
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "client" "unstable" ];
           }
           {
             name = "web-sys";
@@ -15029,6 +15046,7 @@ rec {
           "log" = [ "dep:log" ];
           "system" = [ "wayland-backend/client_system" ];
         };
+        resolvedDefaultFeatures = [ "system" ];
       };
       "wayland-csd-frame" = rec {
         crateName = "wayland-csd-frame";

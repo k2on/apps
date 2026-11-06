@@ -2498,7 +2498,13 @@ pub fn main() -> iced::Result {
     arkui::theme::install(palette::MONEY);
     // Whether to move, asked of the system now rather than in a frame.
     arkui::motion::reduced();
-    let app = iced::application(App::boot, App::update, App::view)
+    // The app's boot, and what every arkui window starts with (a trackpad's
+    // resting fingers heard, on Wayland).
+    let boot = || {
+        let (app, task) = App::boot();
+        (app, Task::batch([task, arkui::window::boot()]))
+    };
+    let app = iced::application(boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((1200.0, 760.0))

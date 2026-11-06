@@ -3543,7 +3543,13 @@ pub fn main() -> iced::Result {
     // What this device does goes to its server (docs/plan-observe.md).
     ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
 
-    let app = iced::application(App::boot, App::update, App::view)
+    // The app's boot, and what every arkui window starts with (a trackpad's
+    // resting fingers heard, on Wayland).
+    let boot = || {
+        let (app, task) = App::boot();
+        (app, Task::batch([task, arkui::window::boot()]))
+    };
+    let app = iced::application(boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
         .window_size((860.0, 600.0))

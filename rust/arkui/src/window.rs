@@ -15,11 +15,17 @@
 //!   it is heard wherever it goes, in the window's own coordinates — the
 //!   origin a [`crate::layer::pinned`] layer shares.
 //!
-//! An app's `view` ends in [`view`] (or [`tracked`]), and its
-//! `subscription` has [`wakes`], answered with any message: the update
-//! draws a frame. On the desktop both cost nothing.
+//! - **Fingers resting on a trackpad stop a scroll** ([`boot`]): on
+//!   Wayland the hold gesture is listened to on the window's own display
+//!   ([`crate::touchpad`]), and [`wakes`] rings when the fingers lift so a
+//!   band they held springs back.
+//!
+//! An app's `view` ends in [`view`] (or [`tracked`]), its boot's task has
+//! [`boot`] beside it, and its `subscription` has [`wakes`], answered with
+//! any message: the update draws a frame. Where there is nothing to do
+//! they cost nothing.
 use iced::widget::mouse_area;
-use iced::{Element, Point, Subscription};
+use iced::{Element, Point, Subscription, Task};
 
 /// The window's root: `content` with every text box in it copying,
 /// cutting and pasting in a browser as on the desktop.
@@ -34,9 +40,18 @@ pub fn tracked<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, moved: imp
 }
 
 /// Rings when something under the root needs a frame of its own — a paste
-/// arrived — for the app to answer with any message.
+/// arrived, fingers rested on the trackpad or lifted — for the app to
+/// answer with any message.
 pub fn wakes() -> Subscription<()> {
-    crate::clipboard::pastes()
+    Subscription::batch([crate::clipboard::pastes(), crate::touchpad::subscription()])
+}
+
+/// What a window starts with, beside an app's own boot task: on Wayland,
+/// listening for fingers resting on the trackpad on its display
+/// ([`crate::touchpad::listen`]). The window is open by the time an
+/// application's boot task runs.
+pub fn boot<M: Send + 'static>() -> Task<M> {
+    crate::touchpad::listen()
 }
 
 #[cfg(test)]

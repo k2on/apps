@@ -48,11 +48,20 @@ MOTION = {
     "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
     "paused-scale": "How small a cover is drawn while what it plays is paused.",
     "rise": "How far a thing that comes in where it stays rises as it comes: a nudge.",
-    "band-reach": "The most a band past a scroll's end is ever drawn, as a share of the view.",
+    "band-resistance": "How hard a scroll past its end is pulled: Gecko's resistance, 1/this of a pixel at the edge.",
+    "band-gain": "How many of Gecko's pixels of pull one trackpad pixel is.",
+    "band-step": "The most one move draws a band further, in pixels.",
+    "band-stiffness": "The stiffness a band springs back on: Firefox's overscroll spring.",
+    "band-damping": "The damping a band springs back with: a touch over critically damped.",
+    "band-throw": "The share of a release's speed a band springs back set off at.",
+    "band-fling-max": "The fastest a band springs back set off, a second.",
+    "band-rest": "Within this of the edge, in pixels, a band has sprung back.",
     "coast-stop": "A coast slower than this, a second, has stopped.",
+    "coast-min": "A release slower than this, a second, does not coast.",
     "velocity-ms": "How far back a release's speed is read from its moves, in milliseconds.",
     "velocity-gap-ms": "A pause this long between a drag's moves, in milliseconds, means it had stopped.",
     "lift-ms": "With no word from the system, a trackpad still this long has been let go, in milliseconds.",
+    "band-lift-ms": "The same, while it is pulled past an end, in milliseconds.",
     "coast-spent": "A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.",
 }
 
@@ -632,6 +641,8 @@ def swift_motion(t):
     out.append(f"    public static let response: Double = {round(response(m['stiffness']), 6)!r}")
     out.append("    /// A fade's response.")
     out.append(f"    public static let fadeResponse: Double = {round(response(m['fade-stiffness']), 6)!r}")
+    out.append("    /// A band's response as it springs back.")
+    out.append(f"    public static let bandResponse: Double = {round(response(m['band-stiffness']), 6)!r}")
     out.append("}")
     return "\n".join(out) + "\n"
 
@@ -650,6 +661,8 @@ def rust_motion(t):
     out.append(f"pub const RESPONSE: f32 = {round(response(m['stiffness']), 6)!r};")
     out.append("/// A fade's response.")
     out.append(f"pub const FADE_RESPONSE: f32 = {round(response(m['fade-stiffness']), 6)!r};")
+    out.append("/// A band's response as it springs back.")
+    out.append(f"pub const BAND_RESPONSE: f32 = {round(response(m['band-stiffness']), 6)!r};")
     return "\n".join(out) + "\n"
 
 
