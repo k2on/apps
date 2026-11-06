@@ -1,0 +1,37 @@
+    #content
+              'Home' [text]
+              [button] pressable
+                'Settings'
+                [button]
+              'Recently added' [text]
+              [button] pressable
+                'All songs' [text]
+                [button]
+                [button] pressable
+                  'Für Elise' [text]
+                  'Ludwig van Beethoven' [text]
+                [button] pressable
+                  'Gigue' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Menuet' [text]
+                  'George Frideric Handel' [text]
+              'Your playlists' [text]
+              [button] pressable
+                'New' [text]
+                [button]
+                [button] pressable
+                  'Favorites' [text]
+                  'Playlist' [text]
+              'Albums' [text]
+              [button] pressable
+                'See all' [text]
+                [button]
+                [button] pressable
+                [button] pressable
+                [button] pressable
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]
