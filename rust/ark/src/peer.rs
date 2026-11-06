@@ -565,10 +565,16 @@ impl Peer {
         Ok(changes)
     }
 
+    /// The pending intents' changes undone, newest first — put back as
+    /// they were, judging nothing, while filling: the rows they ran over
+    /// may name rows not sent yet.
     fn undo_pending(&mut self, o: &mut Out) {
         for p in self.pending.iter().rev() {
-            let undone = self.store.undo(&p.facts).expect("a pending change undoes");
-            o.tell(Some(p.entry.span()), undone);
+            let undone = match self.fill {
+                Some(_) => self.store.force_all(&p.facts.iter().rev().map(Change::inverse).collect::<Vec<_>>()),
+                None => self.store.undo(&p.facts),
+            };
+            o.tell(Some(p.entry.span()), undone.expect("a pending change undoes"));
         }
     }
 
@@ -1101,7 +1107,8 @@ impl Peer {
     /// without it. A fill under way begins again from nothing. The pending
     /// intents' changes are put back on top when the log stands where they
     /// were made and apply; from the first that does not, they run again.
-    /// An authority's journal is read beside them.
+    /// An authority's journal is read beside them. One reading its disk
+    /// stops, and asks its server.
     fn open(&mut self, records: Vec<Record>, o: &mut Out) {
         let (mut rows, mut logged, mut pending, mut kept) = (vec![], vec![], VecDeque::new(), (None, 0, 0));
         for r in records {
@@ -1125,7 +1132,7 @@ impl Peer {
         }
         self.undo_pending(o);
         self.pending.clear();
-        let filling = self.fill.take().is_some();
+        let (filling, read) = (self.fill.take().is_some(), self.upstream.take().is_some());
         let (log, rows): (Rows, Rows) = rows.into_iter().partition(|(t, _)| t == LOG);
         let log = log.into_iter().flat_map(|(_, rs)| rs);
         let opened = match filling {
@@ -1176,6 +1183,10 @@ impl Peer {
             again: !put_back,
             ..Keeping::default()
         };
+        if read {
+            // What it was reading is no more: it asks its server.
+            self.connected(o);
+        }
     }
 
     /// Its disk the upstream it fills from first ([`Source`]), standing

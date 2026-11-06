@@ -214,6 +214,8 @@ impl Net {
                     ark::log::Record::Pending(ark::log::Kept::all(pending, None, local)),
                 ];
                 c.step(Space::Durable, ark::peer::Input::Open(lost));
+                // What it told its views, taken: offline, it is not healed.
+                self.told_by_client(i);
                 self.heal(i);
             }
             Op::Reopen(i) => {
