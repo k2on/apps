@@ -1013,24 +1013,38 @@ impl App {
 
     fn boot() -> (App, Task<Message>) {
         let (mut app, task) = App::open();
-        app.link();
+        let joined = app.link();
         app.arrive();
         if !app.held {
             auth::reveal();
         }
-        (app, task)
+        (app, Task::batch([task, joined]))
     }
 
     /// The link the desktop was opened with (`harken://album/…`), put in the
     /// address bar for [`App::arrive`] to read as a browser's own link is.
-    /// A sign-in link (`harken://join?…`) is not a page: it is the
-    /// onboarding's, and is not navigated to.
-    fn link(&mut self) {
+    /// A sign-in link (`harken://join?server=…&code=…`) is not a page: it
+    /// goes to the sign-in machine as `Event::Joined`, which asks first.
+    fn link(&mut self) -> Task<Message> {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(link) = arkui::navigator::link_arg("harken") {
             use arkui::navigator::Navigator;
-            self.history.handle(&link, "harken", &mut |r| matches!(r, Route::Join { .. }));
+            let mut joined = None;
+            self.history.handle(&link, "harken", &mut |r| match r {
+                Route::Join { server, code } => {
+                    joined = Some(OnboardingEvent::Joined {
+                        server: server.clone(),
+                        code: code.clone(),
+                    });
+                    true
+                }
+                _ => false,
+            });
+            if let Some(event) = joined {
+                return self.onboard(event);
+            }
         }
+        Task::none()
     }
 
     /// A link somebody was sent, read before anything is drawn.

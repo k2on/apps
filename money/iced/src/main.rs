@@ -833,9 +833,7 @@ impl App {
             Route::Account { .. } => Page::Ledger(Ledger::Account(
                 self.peer.accounts().iter().find(|a| route.names(&a.id.hex(), &a.name))?.id,
             )),
-            Route::Filter { .. } => Page::Ledger(Ledger::Saved(
-                self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id,
-            )),
+            Route::Filter { .. } => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id)),
             Route::Filtered => Page::Ledger(Ledger::Adhoc),
             // A sign-in link is the onboarding's, not a page.
             Route::Join { .. } => return None,
@@ -2608,16 +2606,32 @@ pub fn main() -> iced::Result {
     let boot = || {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let (mut app, task) = App::boot();
-        // The link the desktop was opened with (`money://account/Checking`),
+        // The link the desktop was opened with (`money://account/<id>/checking`),
         // put in the address bar for the next update to arrive at, as a
-        // browser's own link is. A sign-in link (`money://join?…`) is the
-        // onboarding's, not a page, and is not navigated to.
+        // browser's own link is. A sign-in link (`money://join?server=…`) is
+        // not a page: it goes to the sign-in machine as `Event::Joined`, which
+        // asks first.
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let mut joined = Task::none();
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(link) = arkui::navigator::link_arg("money") {
             use arkui::navigator::Navigator;
-            app.history.handle(&link, "money", &mut |r| matches!(r, Route::Join { .. }));
+            let mut join = None;
+            app.history.handle(&link, "money", &mut |r| match r {
+                Route::Join { server, code } => {
+                    join = Some(Event::Joined {
+                        server: server.clone(),
+                        code: code.clone(),
+                    });
+                    true
+                }
+                _ => false,
+            });
+            if let Some(event) = join {
+                joined = app.onboard(event);
+            }
         }
-        (app, Task::batch([task, arkui::window::boot()]))
+        (app, Task::batch([task, joined, arkui::window::boot()]))
     };
     let app = iced::application(boot, App::update, App::view)
         .subscription(App::subscription)

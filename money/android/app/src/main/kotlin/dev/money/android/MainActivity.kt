@@ -37,7 +37,6 @@ import dev.arkdb.auth.Event
 import dev.arkdb.auth.Phase
 import dev.arkdb.auth.Said
 import dev.arkdb.auth.Step
-import dev.arkdb.auth.joinOf
 import dev.arkui.ConfirmScreen
 import dev.arkui.DeviceLinkShown
 import dev.arkui.OpeningScreen
@@ -79,13 +78,15 @@ class MainActivity : ComponentActivity() {
 
     /**
      * What a link the app was opened with means: `money://auth?code=…` a sign-in coming back,
-     * `money://join?…` a server (and a code) to join, asked about first; null for any other.
+     * `money://join?…` a server (and a code) to join, asked about first; null for any other. The
+     * join is read as the domain's route (`Route.Join`), as every shell reads it.
      */
     private fun eventOf(i: Intent?): Event? {
         val data = i?.data ?: return null
         if (data.scheme != MONEY.scheme) return null
         if (data.host == "auth") return data.getQueryParameter("code")?.takeIf { it.isNotEmpty() }?.let { Event.Code(it) }
-        return joinOf(data.toString())?.let { Event.Joined(it.server, it.code) }
+        val join = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_domain.routeFromPath(it) }) as? uniffi.money_domain.Route.Join
+        return join?.let { Event.Joined(it.server, it.code) }
     }
 }
 

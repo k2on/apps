@@ -67,7 +67,7 @@ class Navigator<R>(private val nav: NavHostController, private val destination: 
 /**
  * Every link of `scheme` the app is opened with — the intent it was started by, and each one after
  * (`onNewIntent`) — handed to [onLink] once each, for a [Navigator] to [Navigator.handle]. The
- * sign-in's own `scheme://auth?…` is the onboarding's and is left alone.
+ * sign-in's own `scheme://auth?…` and `scheme://join?…` are left to the sign-in, which reads the same intent.
  */
 @Composable
 fun Links(scheme: String, onLink: (String) -> Unit) {
@@ -76,7 +76,7 @@ fun Links(scheme: String, onLink: (String) -> Unit) {
     DisposableEffect(activity, scheme) {
         fun heard(i: Intent?) {
             val data = i?.data ?: return
-            if (data.scheme != scheme || data.host == "auth") return
+            if (data.scheme != scheme || data.host == "auth" || data.host == "join") return
             // Once: the launch intent is still the activity's when it is recreated.
             i.data = null
             latest.value(data.toString())
