@@ -345,6 +345,7 @@ pub enum Message {
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
     /// The replica [`App::boot`] read on a thread.
+    #[cfg(not(target_arch = "wasm32"))]
     Opened(arkui::later::Slot<Result<client::Replica, String>>),
     /// The account's picture, fetched.
     Picture(arkui::images::Loaded),
@@ -537,20 +538,20 @@ impl App {
     /// the link it was opened with had been read: it is opened here.
     #[cfg(not(feature = "demo"))]
     fn boot() -> (App, Task<Message>) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let (url, _) = live::config();
-            let login = live::logins().recall(&url);
-            return App::opened(live::open(&url, login.as_ref()));
-        }
-        #[allow(unreachable_code)]
-        let today = day_of_ms(ark_peer::now_ms());
-        let mut app = App::with_peer(client::open(Box::new(ark_peer::Memory::default())), &today);
-        app.note = "opening the budget\u{2026}".into();
         let (url, _) = live::config();
         let login = live::logins().recall(&url);
-        let task = arkui::later::off_thread(move || live::open(&url, login.as_ref()), Message::Opened);
-        (app, task)
+        #[cfg(target_arch = "wasm32")]
+        {
+            App::opened(live::open(&url, login.as_ref()))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let today = day_of_ms(ark_peer::now_ms());
+            let mut app = App::with_peer(client::open(Box::new(ark_peer::Memory::default())), &today);
+            app.note = "opening the budget\u{2026}".into();
+            let task = arkui::later::off_thread(move || live::open(&url, login.as_ref()), Message::Opened);
+            (app, task)
+        }
     }
 
     /// The window on its server, over `opened`, signed in as the login this
@@ -1341,6 +1342,7 @@ impl App {
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
             Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
+            #[cfg(not(target_arch = "wasm32"))]
             Message::Opened(opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {

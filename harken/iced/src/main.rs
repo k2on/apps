@@ -230,6 +230,7 @@ pub enum Message {
     Started(Option<String>),
     /// The replica [`App::opening`] read on a thread, of that server's or,
     /// with none, this device's own.
+    #[cfg(not(target_arch = "wasm32"))]
     Opened(Option<String>, arkui::later::Slot<Result<client::Replica, String>>),
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
@@ -1054,32 +1055,33 @@ impl App {
     /// the link it was opened with had been read: it is opened here.
     #[cfg(not(feature = "demo"))]
     fn opening(server: Option<String>, user: Option<String>) -> (App, Task<Message>) {
+        let login = server.as_ref().and_then(|s| auth::logins().recall(s));
         #[cfg(target_arch = "wasm32")]
         {
-            let login = server.as_ref().and_then(|s| auth::logins().recall(s));
-            return match server {
+            match server {
                 Some(s) => {
                     let opened = auth::open(&s, login.as_ref());
                     App::open_server(s, user, opened)
                 }
                 None => (App::alone(user, auth::open_alone()), Task::none()),
-            };
+            }
         }
-        #[allow(unreachable_code)]
-        let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
-        app.user = user;
-        app.note = "opening the library\u{2026}".into();
-        app.held = true;
-        let login = server.as_ref().and_then(|s| auth::logins().recall(s));
-        let at = server.clone();
-        let task = arkui::later::off_thread(
-            move || match &at {
-                Some(s) => auth::open(s, login.as_ref()),
-                None => auth::open_alone(),
-            },
-            move |opened| Message::Opened(server.clone(), opened),
-        );
-        (app, task)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
+            app.user = user;
+            app.note = "opening the library\u{2026}".into();
+            app.held = true;
+            let at = server.clone();
+            let task = arkui::later::off_thread(
+                move || match &at {
+                    Some(s) => auth::open(s, login.as_ref()),
+                    None => auth::open_alone(),
+                },
+                move |opened| Message::Opened(server.clone(), opened),
+            );
+            (app, task)
+        }
     }
 
     /// A window over `server`'s replica on this device, `opened`, signed in
@@ -2740,6 +2742,7 @@ impl App {
                 #[cfg(feature = "demo")]
                 let _ = server;
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Message::Opened(server, opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {

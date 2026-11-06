@@ -10,11 +10,13 @@
 //! What comes back is a [`Slot`]: a message is `Clone`, and what a thread
 //! makes (a replica) need not be, so the message carries a handle to it and
 //! whoever handles the message [`Slot::take`]s it, once. In a browser there
-//! is no thread to give it to, and the work is done before the task returns.
+//! is no thread to give it to (and a replica there is not `Send`): what a
+//! page opens it opens in boot, and only the desktop has [`off_thread`].
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+#[cfg(not(target_arch = "wasm32"))]
 use iced::Task;
 
 /// What a thread made, waiting for the message that carries it to be
@@ -46,23 +48,17 @@ impl<T> fmt::Debug for Slot<T> {
 
 /// `work` on a thread of its own, and `done` with what it made, as the
 /// window's next message.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn off_thread<T, M>(work: impl FnOnce() -> T + Send + 'static, done: impl Fn(Slot<T>) -> M + Send + 'static) -> Task<M>
 where
     T: Send + 'static,
     M: Send + 'static,
 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (tx, rx) = iced::futures::channel::oneshot::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(work());
-        });
-        Task::perform(async move { rx.await.ok() }, move |made| made.map(|m| done(Slot::new(m)))).and_then(Task::done)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        Task::done(done(Slot::new(work())))
-    }
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    Task::perform(async move { rx.await.ok() }, move |made| made.map(|m| done(Slot::new(m)))).and_then(Task::done)
 }
 
 #[cfg(test)]
