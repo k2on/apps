@@ -48,12 +48,15 @@ pub trait ViewKey: Clone + Ord + Debug + Send + 'static {
     fn open(&self) -> Option<Opening>;
 }
 
+/// How a view is made, once: its rows read as some type.
+type Make = Box<dyn FnOnce(&mut Peer, &str, Vec<u8>) -> Box<dyn Part>>;
+
 /// How one view is opened: its function by name, its input's bytes, and
 /// the type its rows are read as.
 pub struct Opening {
     name: String,
     input: Vec<u8>,
-    make: fn(&mut Peer, &str, Vec<u8>) -> Box<dyn Part>,
+    make: Make,
 }
 
 impl Opening {
@@ -64,7 +67,18 @@ impl Opening {
         Opening {
             name: name.into(),
             input,
-            make: |peer, name, input| Box::new(Watched::open(peer, name, input, decode::<T>)),
+            make: Box::new(|peer, name, input| Box::new(Watched::open(peer, name, input, decode::<T>))),
+        }
+    }
+
+    /// The view of `name` on `input`, its rows read by `read`: an app's own
+    /// type, or the bytes themselves (`<[u8]>::to_vec`) for a host that
+    /// reads them another way.
+    pub fn read<T: Send + 'static>(name: &str, input: Vec<u8>, read: fn(&[u8]) -> T) -> Opening {
+        Opening {
+            name: name.into(),
+            input,
+            make: Box::new(move |peer, name, input| Box::new(Watched::open(peer, name, input, read))),
         }
     }
 
@@ -88,6 +102,7 @@ trait Part: Send {
     fn settle(&mut self, peer: &mut Peer, moved: bool) -> Update;
     fn close(self: Box<Self>, peer: &mut Peer);
     fn rows(&self) -> &dyn Any;
+    fn rows_mut(&mut self) -> &mut dyn Any;
     fn name(&self) -> &str;
     fn view(&self) -> Option<usize>;
 }
@@ -103,6 +118,10 @@ impl<T: Send + 'static> Part for Watched<T> {
 
     fn rows(&self) -> &dyn Any {
         &self.rows
+    }
+
+    fn rows_mut(&mut self) -> &mut dyn Any {
+        &mut self.rows
     }
 
     fn name(&self) -> &str {
@@ -221,6 +240,14 @@ impl<K: ViewKey> Store<K> {
             .get(key)
             .and_then(|h| h.part.rows().downcast_ref::<Vec<T>>())
             .map_or(&[], |r| &r[..])
+    }
+
+    /// The rows of the view `key`, to change by hand: a test's.
+    pub fn rows_mut<T: 'static>(&mut self, key: &K) -> &mut [T] {
+        self.views
+            .get_mut(key)
+            .and_then(|h| h.part.rows_mut().downcast_mut::<Vec<T>>())
+            .map_or(&mut [], |r| &mut r[..])
     }
 
     /// The first of a view's rows: a view of one row (a month's summary).

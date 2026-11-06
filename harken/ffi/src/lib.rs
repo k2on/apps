@@ -24,7 +24,9 @@ uniffi::setup_scaffolding!();
 pub use ark_format;
 
 mod player;
+mod session;
 pub use player::{Loudness, PhoneSound, Player, SoundState};
+pub use session::{Changed, HarkenSession, HarkenView, Holding};
 
 /// harken's peer as a phone is made of it (`harken_player::config::peer`):
 /// the domain for the log and the listening session, saying `device` in its

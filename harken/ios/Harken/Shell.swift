@@ -156,7 +156,7 @@ struct Destination: View {
 /// while it is drawn — so coming back to it finds its rows; let go when it is
 /// popped. Made once per page by the page's `@StateObject`.
 @MainActor
-final class Holding: ObservableObject {
+final class PageHold: ObservableObject {
     private let release: () -> Void
 
     init(_ model: Model, _ page: Page) {

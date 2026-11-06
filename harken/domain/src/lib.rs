@@ -35,6 +35,7 @@ pub mod routes;
 pub mod schema;
 pub mod shows;
 pub mod types;
+pub mod views;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -42,6 +43,7 @@ uniffi::setup_scaffolding!();
 pub use ark::row::Id;
 pub use schema::*;
 pub use types::*;
+pub use views::HarkenView;
 
 /// The library's role: the scanner's account holds it, and nobody else
 /// unless the server's configuration grants it. Every library mutation is

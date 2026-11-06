@@ -13,7 +13,7 @@
 // performance of it; a performance, laid out as its album is, then the
 // records it is on and everybody on it. And a playlist, in the order it was
 // made. The lists are views held while the page is on its stack
-// (`Holding`), spliced as the log moves. Android's `Pages.kt`.
+// (`PageHold`), kept by the core as the log moves. Android's `Pages.kt`.
 import ArkUI
 import SwiftUI
 
@@ -87,13 +87,13 @@ private struct AlbumShelf: View {
 /// or its first track's until the albums have it.
 struct AlbumPage: View {
     let id: String
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
 
     init(model: Model, id: String) {
         self.id = id
-        _holding = StateObject(wrappedValue: Holding(model, .album(id)))
+        _holding = StateObject(wrappedValue: PageHold(model, .album(id)))
     }
 
     var body: some View {
@@ -137,7 +137,7 @@ struct AlbumPage: View {
 /// when it has something in it.
 struct ArtistPage: View {
     let name: String
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @State private var all = false
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
@@ -145,7 +145,7 @@ struct ArtistPage: View {
 
     init(model: Model, name: String) {
         self.name = name
-        _holding = StateObject(wrappedValue: Holding(model, .artist(name)))
+        _holding = StateObject(wrappedValue: PageHold(model, .artist(name)))
     }
 
     var body: some View {
@@ -260,13 +260,13 @@ struct ArtistPage: View {
 /// played it. A work of one performance has only that one, set apart.
 struct WorkPage: View {
     let id: String
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
 
     init(model: Model, id: String) {
         self.id = id
-        _holding = StateObject(wrappedValue: Holding(model, .work(id)))
+        _holding = StateObject(wrappedValue: PageHold(model, .work(id)))
     }
 
     var body: some View {
@@ -334,13 +334,13 @@ private struct TakeCover: View {
 /// records it is on, and everybody on it, the composer first.
 struct RecordingPage: View {
     let id: String
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
 
     init(model: Model, id: String) {
         self.id = id
-        _holding = StateObject(wrappedValue: Holding(model, .recording(id)))
+        _holding = StateObject(wrappedValue: PageHold(model, .recording(id)))
     }
 
     var body: some View {
@@ -407,7 +407,7 @@ private struct Face: View {
 /// `ShowPage`).
 struct ShowPage: View {
     let id: String
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @EnvironmentObject private var model: Model
     /// How tall the header is: past it, it is small in the bar.
     @State private var tall: CGFloat = .greatestFiniteMagnitude
@@ -415,7 +415,7 @@ struct ShowPage: View {
 
     init(model: Model, id: String) {
         self.id = id
-        _holding = StateObject(wrappedValue: Holding(model, .show(id)))
+        _holding = StateObject(wrappedValue: PageHold(model, .show(id)))
     }
 
     var body: some View {
@@ -526,7 +526,7 @@ struct ShowPage: View {
 
 struct PlaylistPage: View {
     let id: Id
-    @StateObject private var holding: Holding
+    @StateObject private var holding: PageHold
     @EnvironmentObject private var model: Model
     /// How tall the header is: past it, it is small in the bar.
     @State private var tall: CGFloat = .greatestFiniteMagnitude
@@ -534,7 +534,7 @@ struct PlaylistPage: View {
 
     init(model: Model, id: Id) {
         self.id = id
-        _holding = StateObject(wrappedValue: Holding(model, .playlist(id)))
+        _holding = StateObject(wrappedValue: PageHold(model, .playlist(id)))
     }
 
     var body: some View {

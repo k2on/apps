@@ -19,14 +19,14 @@
 use std::collections::HashMap;
 
 use crate::domain::Id as Key;
-use crate::domain::{browse, shows, CreatePlaylist, EpisodeInput, PlaylistInput, PlaylistsOf};
-use crate::domain::{
-    AlbumCredits, AlbumInput, Artist as ArtistInput, Credits, Library, RecordingInput, Recordings, Search, ShowInput, WorkInput, Works,
-};
-use ark::format::Encode;
-use ark_peer::{Patch, Watched};
+use crate::domain::{browse, shows, CreatePlaylist, EpisodeInput};
+#[cfg(test)]
+use crate::domain::{AlbumInput, Library, Works};
+use crate::domain::{Artist as ArtistInput, RecordingInput, Recordings, ShowInput, WorkInput};
+use ark_peer::store::{Opening, Store, ViewKey};
 
 use crate::client::{Driven, Replica, Update};
+use crate::domain::HarkenView;
 use crate::routes::Route;
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
@@ -70,48 +70,58 @@ impl Moved {
     }
 }
 
-/// The views the peer holds open, each with its rows
-/// (`ark_peer::Watched`). The first six live as long as the window; the
-/// page's are whichever its source needs, opened when the source changes
-/// and dropped with it; the picker's is the last track it was asked about.
-struct Views {
-    library: Watched<Item>,
-    playlists: Watched<Playlist>,
-    albums: Watched<Album>,
-    artists: Watched<Artist>,
-    composers: Watched<Composer>,
-    /// Every podcast and series of sermons (`shows`).
-    shows: Watched<Show>,
-    /// The feeds the library follows (`subscriptions`).
-    subscriptions: Watched<Subscription>,
-    /// The files the server has not got yet (`downloads`).
-    downloads: Watched<Download>,
-    /// How far the signed-in person has listened to each episode
-    /// (`my_progress`).
-    mine: Watched<Listened>,
-    details: Watched<TrackDetail>,
-    /// The page's list of tracks (`playlist`, `album`, `artist`,
-    /// `recording`, a show's episodes).
-    shown: Option<Watched<Item>>,
-    /// The page's works (`works`, or one `work` for a header).
-    works: Option<Watched<Work>>,
-    /// The page's performances (`recordings`).
-    recordings: Option<Watched<Recording>>,
-    /// Who is on the page's recording (`credits`) or album
-    /// (`album_credits`).
-    credits: Option<Watched<Credit>>,
-    /// Which playlists one track is on (`playlists_of`).
-    on: Option<Watched<Playlist>>,
-    /// How far everybody has listened to the page's show
-    /// (`show_progress`).
-    listened: Option<Watched<Listened>>,
-    /// What each of the page's show's episodes is about, and when it went
-    /// out (`episode_details`).
-    episodes: Option<Watched<EpisodeDetail>>,
-    /// Every episode the page's person is on, newest first
-    /// (`appearances`).
-    appearances: Option<Watched<Item>>,
+/// A view the window holds: the domain's key (`HarkenView`, which says
+/// what a page is made of), its rows read as this window's own types.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct View(pub HarkenView);
+
+impl ViewKey for View {
+    fn parts(&self) -> Vec<View> {
+        self.0.views().into_iter().map(View).collect()
+    }
+
+    fn open(&self) -> Option<Opening> {
+        use HarkenView as V;
+        let (name, input) = self.0.query()?;
+        Some(match &self.0 {
+            V::Library { .. }
+            | V::Search { .. }
+            | V::Playlist { .. }
+            | V::Album { .. }
+            | V::Artist { .. }
+            | V::Recording { .. }
+            | V::Show { .. }
+            | V::Appearances { .. } => Opening::read(name, input, Item::from_bytes),
+            V::Playlists | V::PlaylistsOf { .. } => Opening::read(name, input, Playlist::from_bytes),
+            V::Albums => Opening::read(name, input, Album::from_bytes),
+            V::Artists => Opening::read(name, input, Artist::from_bytes),
+            V::Composers => Opening::read(name, input, Composer::from_bytes),
+            V::Shows => Opening::read(name, input, Show::from_bytes),
+            V::Subscriptions => Opening::read(name, input, Subscription::from_bytes),
+            V::Downloads => Opening::read(name, input, Download::from_bytes),
+            V::MyProgress | V::ShowProgress { .. } => Opening::read(name, input, Listened::from_bytes),
+            V::TrackDetails => Opening::read(name, input, TrackDetail::from_bytes),
+            V::Works { .. } | V::Work { .. } => Opening::read(name, input, Work::from_bytes),
+            V::Recordings { .. } => Opening::read(name, input, Recording::from_bytes),
+            V::Credits { .. } | V::AlbumCredits { .. } => Opening::read(name, input, Credit::from_bytes),
+            V::EpisodeDetails { .. } => Opening::read(name, input, EpisodeDetail::from_bytes),
+            _ => Opening::read(name, input, <[u8]>::to_vec),
+        })
+    }
 }
+
+/// The views the window holds as long as it is open, beside the library.
+const ALWAYS: [HarkenView; 9] = [
+    HarkenView::Playlists,
+    HarkenView::Albums,
+    HarkenView::Artists,
+    HarkenView::Composers,
+    HarkenView::Shows,
+    HarkenView::Subscriptions,
+    HarkenView::Downloads,
+    HarkenView::MyProgress,
+    HarkenView::TrackDetails,
+];
 
 /// What the window reads beside its views, at one state of the replica:
 /// each episode's people, an episode's transcript, and what a person's
@@ -126,39 +136,19 @@ struct Kept {
     details: HashMap<String, Vec<EpisodeDetail>>,
 }
 
-/// A page slot, brought to what the source wants: kept when it is already
-/// that query with that input, opened when it is not, dropped when the page
-/// wants nothing there.
-fn want<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, wanted: Option<(&'static str, Vec<u8>)>, read: fn(&[u8]) -> T) -> bool {
-    match wanted {
-        None => slot.take().map(|o| o.close(client)).is_some(),
-        Some((name, a)) if slot.as_ref().is_some_and(|o| o.is(name, &a)) => false,
-        Some((name, a)) => {
-            if let Some(old) = slot.replace(Watched::open(client, name, a, read)) {
-                old.close(client);
-            }
-            true
-        }
-    }
-}
-
-/// A page slot's settle, when the page has one there: its name, and what
-/// it did.
-fn settle<T>(client: &mut Replica, slot: &mut Option<Watched<T>>, moved: bool) -> Option<(String, Update)> {
-    slot.as_mut().map(|w| (w.name().to_string(), w.settle(client, moved)))
-}
-
-/// A slot's rows: none while the page has nothing there.
-fn rows<T>(slot: &Option<Watched<T>>) -> &[T] {
-    slot.as_ref().map_or(&[], |w| &w.rows)
-}
-
 /// A replica, and the lists a window draws from it.
 pub struct Peer {
     /// The replica, on a thread of its own (`ark_peer::driven`): what it
     /// takes in from its server is never taken in on the window's.
     pub client: Driven,
-    views: Views,
+    /// Every view the window holds (`ark_peer::store`).
+    store: Store<View>,
+    /// The library as it is read against the playlist.
+    library: View,
+    /// The page the source wants, as the domain names it.
+    page: Option<View>,
+    /// Which playlists the last track the picker asked about is on.
+    on: Option<View>,
     /// The playlist the library is read against, which is what gives every
     /// row its `on_playlist`. The domain has no favorites of its own — a
     /// playlist named Favorites is just the first one. Zero when there is
@@ -196,13 +186,13 @@ pub struct Peer {
     kept: std::cell::RefCell<Kept>,
 }
 
-/// `()`'s bytes: a query with no input.
-fn none() -> Vec<u8> {
-    ().to_bytes()
+fn library_of(playlist: Id) -> View {
+    View(HarkenView::Library { playlist })
 }
 
-fn library_of(playlist: Id) -> Vec<u8> {
-    Library { playlist_id: key(playlist) }.to_bytes()
+/// A view of the domain's, as the window keys it.
+fn v(view: HarkenView) -> View {
+    View(view)
 }
 
 impl Peer {
@@ -210,51 +200,28 @@ impl Peer {
     /// is maintained.
     pub fn open(mut client: Replica) -> Peer {
         let c = &mut client;
-        let playlists = Watched::open(c, "playlists", none(), Playlist::from_bytes);
-        let playlist = playlists.rows.first().map_or(NONE, |p| p.id);
-        let views = Views {
-            library: Watched::open(c, "library", library_of(playlist), Item::from_bytes),
-            playlists,
-            albums: Watched::open(c, "albums", none(), Album::from_bytes),
-            artists: Watched::open(c, "artists", none(), Artist::from_bytes),
-            composers: Watched::open(c, "composers", none(), Composer::from_bytes),
-            shows: Watched::open(c, "shows", none(), Show::from_bytes),
-            subscriptions: Watched::open(c, "subscriptions", none(), Subscription::from_bytes),
-            downloads: Watched::open(c, "downloads", none(), Download::from_bytes),
-            mine: Watched::open(c, "my_progress", none(), Listened::from_bytes),
-            details: Watched::open(c, "track_details", none(), TrackDetail::from_bytes),
-            shown: None,
-            works: None,
-            recordings: None,
-            credits: None,
-            on: None,
-            listened: None,
-            episodes: None,
-            appearances: None,
-        };
-        // What the hydrate already read is not news.
-        for v in [
-            views.library.view(),
-            views.playlists.view(),
-            views.albums.view(),
-            views.artists.view(),
-            views.composers.view(),
-            views.shows.view(),
-            views.subscriptions.view(),
-            views.downloads.view(),
-            views.mine.view(),
-            views.details.view(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            client.update(v);
+        let mut store = Store::new();
+        store.hold(c, v(HarkenView::Playlists));
+        let playlist = store.rows::<Playlist>(&v(HarkenView::Playlists)).first().map_or(NONE, |p| p.id);
+        let library = library_of(playlist);
+        store.hold(c, library.clone());
+        for view in ALWAYS {
+            store.hold(c, View(view));
         }
+        // What the hydrate already read is not news.
+        store.settle(c);
         let seen = client.state();
-        let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
+        let details = store
+            .rows::<TrackDetail>(&v(HarkenView::TrackDetails))
+            .iter()
+            .map(|t| (t.media_id, t.clone()))
+            .collect();
         let mut peer = Peer {
             client: Driven::new(client),
-            views,
+            store,
+            library,
+            page: None,
+            on: None,
             playlist,
             source: Route::Library,
             search: None,
@@ -270,45 +237,58 @@ impl Peer {
         peer
     }
 
+    /// The rows of a view the window holds, as its type.
+    fn of<T: 'static>(&self, view: HarkenView) -> &[T] {
+        self.store.rows(&View(view))
+    }
+
+    /// The rows of the page's view in `role`, when the page has one there.
+    fn page_of<T: 'static>(&self, role: fn(&HarkenView) -> Option<HarkenView>) -> &[T] {
+        match self.page.as_ref().and_then(|p| role(&p.0)) {
+            Some(view) => self.store.rows(&View(view)),
+            None => &[],
+        }
+    }
+
     /// What `view` draws of the library: decoded once per change, not per
     /// frame.
     pub fn items(&self) -> &[Item] {
-        &self.views.library.rows
+        self.store.rows(&self.library)
     }
 
     /// The page's list of tracks, when it is not the library.
     pub fn shown(&self) -> &[Item] {
-        rows(&self.views.shown)
+        self.page_of(HarkenView::tracks)
     }
 
     /// The index pages' contents — and what a `#album/…` link resolves
     /// against, now that no sidebar line carries one.
     pub fn albums(&self) -> &[Album] {
-        &self.views.albums.rows
+        self.of(HarkenView::Albums)
     }
 
     pub fn artists(&self) -> &[Artist] {
-        &self.views.artists.rows
+        self.of(HarkenView::Artists)
     }
 
     /// The index pages' rows, to set by hand: a test's covers.
     #[cfg(test)]
     pub fn albums_mut(&mut self) -> &mut [Album] {
-        &mut self.views.albums.rows
+        self.store.rows_mut(&v(HarkenView::Albums))
     }
 
     #[cfg(test)]
     pub fn artists_mut(&mut self) -> &mut [Artist] {
-        &mut self.views.artists.rows
+        self.store.rows_mut(&v(HarkenView::Artists))
     }
 
     pub fn composers(&self) -> &[Composer] {
-        &self.views.composers.rows
+        self.of(HarkenView::Composers)
     }
 
     /// Every podcast and series of sermons, by title.
     pub fn shows(&self) -> &[Show] {
-        &self.views.shows.rows
+        self.of(HarkenView::Shows)
     }
 
     /// The page of the show of `kind` called `title`: an episode's, by the
@@ -323,7 +303,7 @@ impl Peer {
 
     /// The feeds the library follows, by when each was added.
     pub fn subscriptions(&self) -> &[Subscription] {
-        &self.views.subscriptions.rows
+        self.of(HarkenView::Subscriptions)
     }
 
     /// The feed a show is read from, when the library follows it.
@@ -333,7 +313,7 @@ impl Peer {
 
     /// The files the server has not got yet.
     pub fn downloads(&self) -> &[Download] {
-        &self.views.downloads.rows
+        self.of(HarkenView::Downloads)
     }
 
     /// Whether a media row's file is not on the server yet, and how it is
@@ -345,18 +325,21 @@ impl Peer {
     /// How far the signed-in person has got in an episode, when they have
     /// begun it.
     pub fn mine_of(&self, media: Id) -> Option<&Listened> {
-        self.views.mine.rows.iter().find(|l| l.media_id == media)
+        self.of::<Listened>(HarkenView::MyProgress).iter().find(|l| l.media_id == media)
     }
 
     /// What an episode of the page's show is about, and when it went out.
     pub fn episode_of(&self, media: Id) -> Option<&EpisodeDetail> {
-        rows(&self.views.episodes).iter().find(|e| e.media_id == media)
+        self.page_of::<EpisodeDetail>(HarkenView::episodes).iter().find(|e| e.media_id == media)
     }
 
     /// How far everybody has got in an episode of the page's show, the
     /// newest listening first.
     pub fn listened_to(&self, media: Id) -> Vec<&Listened> {
-        rows(&self.views.listened).iter().filter(|l| l.media_id == media).collect()
+        self.page_of::<Listened>(HarkenView::listened)
+            .iter()
+            .filter(|l| l.media_id == media)
+            .collect()
     }
 
     /// An episode's chapters, in order: read once per change of the
@@ -413,7 +396,7 @@ impl Peer {
 
     /// The episodes the page's person is on, newest first.
     pub fn appearances(&self) -> &[Item] {
-        rows(&self.views.appearances)
+        self.page_of(HarkenView::appearances)
     }
 
     /// Whether somebody is on any episode: a person's page to go to, for
@@ -476,16 +459,16 @@ impl Peer {
     /// composer's works, or one work's recordings (and that work's own row,
     /// for its header).
     pub fn works(&self) -> &[Work] {
-        rows(&self.views.works)
+        self.page_of(HarkenView::works)
     }
 
     pub fn recordings(&self) -> &[Recording] {
-        rows(&self.views.recordings)
+        self.page_of(HarkenView::recordings)
     }
 
     /// Who is on the recording or the album the page is, in billing order.
     pub fn on_recording(&self) -> &[Credit] {
-        rows(&self.views.credits)
+        self.page_of(HarkenView::credits)
     }
 
     /// Make sure there is a playlist to read the library against: make
@@ -525,50 +508,35 @@ impl Peer {
     /// or one opened for somebody else, is read whole again.
     pub fn refresh(&mut self) -> bool {
         let state = self.client.lock().state();
-        let moved = state != self.seen;
-        if moved {
-            self.seen = state;
-        }
-        let mut guard = self.client.lock();
-        let (c, v) = (&mut *guard, &mut self.views);
-        let mut changed = Vec::new();
-        let mut note = |name: &str, u: Update| match Moved::of(&u) {
-            Some(m) => {
-                changed.push((name.to_string(), m));
-                true
-            }
-            None => false,
+        self.seen = state;
+        let moved = self.store.settle(&mut self.client.lock());
+        // What each view did, by its function: a page is told by its views.
+        self.moved = moved
+            .iter()
+            .filter_map(|k| Some((self.store.name(k)?.to_string(), Moved::of(self.store.last(k)?)?)))
+            .collect();
+        let did = |view: HarkenView| moved.contains(&View(view));
+        let on_page = |role: fn(&HarkenView) -> Option<HarkenView>| {
+            let view = self.page.as_ref().and_then(|p| role(&p.0));
+            view.is_some_and(|view| moved.contains(&View(view)))
         };
-        let lists = note("playlists", v.playlists.settle(c, moved));
-        let library = note("library", v.library.settle(c, moved));
-        let albums = note("albums", v.albums.settle(c, moved));
-        let artists = note("artists", v.artists.settle(c, moved));
-        let composers = note("composers", v.composers.settle(c, moved));
-        let shows = note("shows", v.shows.settle(c, moved));
-        let subscriptions = note("subscriptions", v.subscriptions.settle(c, moved));
-        let downloads = note("downloads", v.downloads.settle(c, moved));
-        let mine = note("my_progress", v.mine.settle(c, moved));
-        let u = v.details.take(c, moved);
-        match &u {
-            Update::Unchanged => {}
-            Update::Patched(patches) => patch_details(&mut v.details.rows, &mut self.details, patches),
-            Update::Reset => {
-                v.details.apply(c, &u);
-                self.details = v.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
-            }
+        let lists = did(HarkenView::Playlists);
+        let library = moved.contains(&self.library);
+        let albums = did(HarkenView::Albums);
+        let artists = did(HarkenView::Artists);
+        let composers = did(HarkenView::Composers);
+        let shows = did(HarkenView::Shows);
+        let shown = on_page(HarkenView::tracks);
+        let works = on_page(HarkenView::works);
+        let recordings = on_page(HarkenView::recordings);
+        let appearances = on_page(HarkenView::appearances);
+        if did(HarkenView::TrackDetails) {
+            self.details = self
+                .of::<TrackDetail>(HarkenView::TrackDetails)
+                .iter()
+                .map(|t| (t.media_id, t.clone()))
+                .collect();
         }
-        let details = note("track_details", u);
-        let mut slot = |u: Option<(String, Update)>| u.is_some_and(|(name, u)| note(&name, u));
-        let shown = slot(settle(c, &mut v.shown, moved));
-        let works = slot(settle(c, &mut v.works, moved));
-        let recordings = slot(settle(c, &mut v.recordings, moved));
-        let credits = slot(settle(c, &mut v.credits, moved));
-        let on = slot(settle(c, &mut v.on, moved));
-        let listened = slot(settle(c, &mut v.listened, moved));
-        let episodes = slot(settle(c, &mut v.episodes, moved));
-        let appearances = slot(settle(c, &mut v.appearances, moved));
-        drop(guard);
-        self.moved = changed;
 
         // The playlist the library is read against can stop existing, and
         // routinely does: the default this peer made on its first run is
@@ -579,8 +547,9 @@ impl Peer {
         let repointed = !self.playlists().iter().any(|p| p.id == self.playlist) && self.playlist != first;
         if repointed {
             self.playlist = first;
-            let library = Watched::open(&mut self.client.lock(), "library", library_of(first), Item::from_bytes);
-            std::mem::replace(&mut self.views.library, library).close(&mut self.client.lock());
+            let library = library_of(first);
+            let old = std::mem::replace(&mut self.library, library.clone());
+            self.swap(Some(old), Some(library));
             self.open_page();
         }
         if lists || library || albums || artists || composers || shows || repointed {
@@ -593,25 +562,23 @@ impl Peer {
         if recordings {
             self.label_recording();
         }
-        lists
-            || library
-            || albums
-            || artists
-            || composers
-            || shows
-            || subscriptions
-            || downloads
-            || mine
-            || listened
-            || episodes
-            || appearances
-            || details
-            || shown
-            || works
-            || recordings
-            || credits
-            || on
-            || repointed
+        !moved.is_empty() || repointed
+    }
+
+    /// `new` held in place of `old`: held first, so what the two share is
+    /// not opened again.
+    fn swap(&mut self, old: Option<View>, new: Option<View>) -> bool {
+        if old == new {
+            return false;
+        }
+        let mut c = self.client.lock();
+        if let Some(n) = new {
+            self.store.hold(&mut c, n);
+        }
+        if let Some(o) = old {
+            self.store.release(&mut c, &o);
+        }
+        true
     }
 
     /// The sidebar, from the lists it counts. Grouping is the domain's, so
@@ -660,16 +627,17 @@ impl Peer {
 
     /// The caller's playlists, as the sidebar holds them.
     pub fn playlists(&self) -> &[Playlist] {
-        &self.views.playlists.rows
+        self.of(HarkenView::Playlists)
     }
 
     /// Which of the caller's playlists a track is on: a view kept open on
     /// the last track asked about, so the picker reopened on the same track —
     /// after it made a playlist — reads nothing.
     pub fn playlists_of(&mut self, media: Id) -> Vec<Playlist> {
-        let wanted = Some(("playlists_of", PlaylistsOf { media_id: key(media) }.to_bytes()));
-        want(&mut self.client.lock(), &mut self.views.on, wanted, Playlist::from_bytes);
-        rows(&self.views.on).to_vec()
+        let wanted = Some(v(HarkenView::PlaylistsOf { media }));
+        let old = std::mem::replace(&mut self.on, wanted.clone());
+        self.swap(old, wanted.clone());
+        wanted.map_or(vec![], |w| self.store.rows::<Playlist>(&w).to_vec())
     }
 
     /// A query's rows, asked once through its stub; a refusal (a guard,
@@ -763,155 +731,43 @@ impl Peer {
     /// the same query with the same input, a work's recordings from its
     /// work page to one of them — is kept rather than read again.
     pub fn open_page(&mut self) {
-        let pl = key(self.playlist);
-        type Wanted = Option<(&'static str, Vec<u8>)>;
-        let (shown, works, recordings): (Wanted, Wanted, Wanted) = match &self.source {
+        let playlist = self.playlist;
+        use HarkenView as V;
+        let page = match &self.source {
             // The library is `items` itself, unless a search narrows it: then
             // the page is the `search` view, kept like any other
             // (`docs/plan-db.md` D4).
-            Route::Library => (
-                self.search.as_deref().map(|n| {
-                    let s = Search {
-                        playlist_id: pl,
-                        needle: n.into(),
-                    };
-                    ("search", s.to_bytes())
-                }),
-                None,
-                None,
-            ),
-            Route::Albums | Route::Artists | Route::Composers | Route::Podcasts | Route::Sermons | Route::Settings | Route::Transcript => {
-                (None, None, None)
-            }
-            // A show's episodes, newest first.
-            Route::Show { key: id, .. } => (
-                Some((
-                    "show",
-                    ShowInput {
-                        playlist_id: pl,
-                        id: id.clone(),
-                    }
-                    .to_bytes(),
-                )),
-                None,
-                None,
-            ),
-            // Both halves: the work itself, for the header, and its
-            // performances. This page may have been reached without opening a
-            // composer at all — a link somebody sent — so the row is read by
-            // key rather than looked up in a composer's list.
-            Route::Work { key: id, .. } => (
-                None,
-                Some(("work", WorkInput { id: id.clone() }.to_bytes())),
-                Some(("recordings", Recordings { work_id: id.clone() }.to_bytes())),
-            ),
+            Route::Library => self.search.as_deref().map(|n| V::Search { playlist, needle: n.into() }),
+            Route::Albums
+            | Route::Artists
+            | Route::Composers
+            | Route::Podcasts
+            | Route::Sermons
+            | Route::Settings
+            | Route::Transcript
+            | Route::Diagnostics
+            | Route::Join { .. } => None,
+            Route::Show { key: id, .. } => Some(V::ShowPage { playlist, id: id.clone() }),
+            // The work itself, for the header, and its performances: this
+            // page may have been reached without opening a composer at all — a
+            // link somebody sent — so the row is read by key.
+            Route::Work { key: id, .. } => Some(V::WorkPage { id: id.clone() }),
             // By its id (an older link's by its name): one since deleted
             // opens nothing, and the router lands it on its fallback.
-            Route::Playlist { .. } => match self.playlist_of(&self.source) {
-                Some(p) => (Some(("playlist", PlaylistInput { playlist_id: key(p.id) }.to_bytes())), None, None),
-                None => (None, None, None),
-            },
-            Route::Diagnostics | Route::Join { .. } => (None, None, None),
-            Route::Album { key: id, .. } => (
-                Some((
-                    "album",
-                    AlbumInput {
-                        playlist_id: pl,
-                        id: id.clone(),
-                    }
-                    .to_bytes(),
-                )),
-                None,
-                None,
-            ),
-            // Their tracks and the works they are by: a composer's page is
-            // their works, anybody else's their songs.
-            Route::Artist { name } => (
-                Some((
-                    "artist",
-                    ArtistInput {
-                        playlist_id: pl,
-                        name: name.clone(),
-                    }
-                    .to_bytes(),
-                )),
-                Some(("works", Works { composer: name.clone() }.to_bytes())),
-                None,
-            ),
-            // The one list ordered by the *work* rather than the release, and
-            // every recording of that work, so the header can find this one —
-            // the work's key is everything before the `@`.
-            Route::Recording { key: id, .. } => {
-                let shown = Some((
-                    "recording",
-                    RecordingInput {
-                        playlist_id: pl,
-                        id: id.clone(),
-                    }
-                    .to_bytes(),
-                ));
-                match id.split_once('@') {
-                    Some((work, _)) => (
-                        shown,
-                        Some(("work", WorkInput { id: work.into() }.to_bytes())),
-                        Some(("recordings", Recordings { work_id: work.into() }.to_bytes())),
-                    ),
-                    None => (shown, None, None),
-                }
-            }
-        };
-        let mut guard = self.client.lock();
-        let (c, v) = (&mut *guard, &mut self.views);
-        let tracks = want(c, &mut v.shown, shown, Item::from_bytes);
-        let works = want(c, &mut v.works, works, Work::from_bytes);
-        let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
-        let credits = match &self.source {
-            Route::Recording { key: id, .. } => Some(("credits", Credits { recording_id: id.clone() }.to_bytes())),
-            Route::Album { key: id, .. } => Some(("album_credits", AlbumCredits { id: id.clone() }.to_bytes())),
-            _ => None,
-        };
-        want(c, &mut v.credits, credits, Credit::from_bytes);
-        // A show's page says how far everybody has got in each episode.
-        let listened = match &self.source {
-            Route::Show { key: id, .. } => Some((
-                "show_progress",
-                ShowInput {
-                    playlist_id: pl,
-                    id: id.clone(),
-                }
-                .to_bytes(),
-            )),
-            _ => None,
-        };
-        want(c, &mut v.listened, listened, Listened::from_bytes);
-        // …and what each episode is about.
-        let episodes = match &self.source {
-            Route::Show { key: id, .. } => Some((
-                "episode_details",
-                ShowInput {
-                    playlist_id: pl,
-                    id: id.clone(),
-                }
-                .to_bytes(),
-            )),
-            _ => None,
-        };
-        want(c, &mut v.episodes, episodes, EpisodeDetail::from_bytes);
-        // A person's page: every episode they are on, beside their songs.
-        let appearances = match &self.source {
-            Route::Artist { name } => Some((
-                "appearances",
-                ArtistInput {
-                    playlist_id: pl,
-                    name: name.clone(),
-                }
-                .to_bytes(),
-            )),
-            _ => None,
-        };
-        let appearances = want(c, &mut v.appearances, appearances, Item::from_bytes);
-        drop(guard);
-        if tracks || works || recordings || appearances {
+            Route::Playlist { .. } => self.playlist_of(&self.source).map(|p| V::Playlist { id: p.id }),
+            Route::Album { key: id, .. } => Some(V::AlbumPage { playlist, id: id.clone() }),
+            // Their tracks, the works they are by and the episodes they are on.
+            Route::Artist { name } => Some(V::ArtistPage {
+                playlist,
+                name: name.clone(),
+            }),
+            // Ordered by the *work* rather than the release, and every
+            // recording of that work, so the header can find this one.
+            Route::Recording { key: id, .. } => Some(V::RecordingPage { playlist, id: id.clone() }),
+        }
+        .map(View);
+        let old = std::mem::replace(&mut self.page, page.clone());
+        if self.swap(old, page) {
             self.art_gen = self.art_gen.wrapping_add(1);
         }
         self.label_recording();
@@ -922,7 +778,11 @@ impl Peer {
     fn label_recording(&mut self) {
         if let Route::Recording { key: id, title: who } = &mut self.source {
             if who.is_empty() {
-                if let Some(take) = rows(&self.views.recordings).iter().find(|r| r.id == *id) {
+                let takes = match self.page.as_ref().and_then(|p| p.0.recordings()) {
+                    Some(view) => self.store.rows::<Recording>(&View(view)),
+                    None => &[],
+                };
+                if let Some(take) = takes.iter().find(|r| r.id == *id) {
                     who.clone_from(&take.performers);
                 }
             }
@@ -1007,36 +867,6 @@ impl Peer {
     /// made its first track, the same fact an artist page selects on.
     pub fn albums_by(&self, artist: &str) -> Vec<&Album> {
         self.albums().iter().filter(|a| a.creator == artist).collect()
-    }
-}
-
-/// The patches onto `track_details` as a list and as the map the table
-/// reads: a track's detail is found by its media id while drawing, and a
-/// patch names a position — so the list is kept beside the map to say which
-/// row a position is.
-fn patch_details(rows: &mut Vec<TrackDetail>, map: &mut HashMap<Id, TrackDetail>, patches: &[Patch]) {
-    for p in patches {
-        match p {
-            Patch::Insert { at, node } => {
-                let d = TrackDetail::from_bytes(node);
-                map.insert(d.media_id, d.clone());
-                rows.insert((*at).min(rows.len()), d);
-            }
-            Patch::Remove { at } => {
-                if *at < rows.len() {
-                    let d = rows.remove(*at);
-                    map.remove(&d.media_id);
-                }
-            }
-            Patch::Update { at, node } => {
-                if *at < rows.len() {
-                    let d = TrackDetail::from_bytes(node);
-                    map.remove(&rows[*at].media_id);
-                    map.insert(d.media_id, d.clone());
-                    rows[*at] = d;
-                }
-            }
-        }
     }
 }
 
