@@ -1,6 +1,7 @@
-//! money's own looks, beside `arkui::style`'s: what an amount says about
-//! the money ([`Tone`], drawn in arkui's [`Tint`]s by `arkui::style::pill`
-//! and `progress`), and the box what is ready to assign is drawn in. The
+//! money's own looks, beside `arkui::style`'s: the tint the domain's tone
+//! of an amount is drawn in ([`Looks`]: `money_domain::words::Tone` in
+//! arkui's [`Tint`]s, for `arkui::style::pill` and `progress`), and the box
+//! what is ready to assign is drawn in. The
 //! fields, cards, chips and pills are arkui's (`arkui::style::field`,
 //! `card`, `chip`, `pill`). Every colour asks [`arkui::theme::of`].
 
@@ -32,53 +33,40 @@ pub const BUDGET: &str = "budget";
 /// header's way back to the top.
 pub const PAGE_TOP: &str = "page-top";
 
-/// What an amount says about the money: the colour of its pill.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tone {
-    /// Nothing, neither good nor bad.
-    Zero,
-    /// Money with a job.
-    Funded,
-    /// Short of what its target asks.
-    Short,
-    /// Below nothing.
-    Over,
+/// What an amount says about the money, the domain's (`words::Tone`).
+pub use money_domain::words::Tone;
+
+/// A tone as arkui draws it: money's one map, the phones each have the
+/// same one.
+pub trait Looks {
+    /// Nothing is neutral, money with a job positive, short (or on a card)
+    /// a caution, below nothing negative.
+    fn tint(self) -> Tint;
+    /// A bar in this tone: money with a job and nothing yet alike in the
+    /// positive, as either is on its way.
+    fn bar(self) -> Tint;
+    /// Text in this tone.
+    fn text(self) -> impl Fn(&Theme) -> iced::widget::text::Style;
 }
 
-impl Tone {
-    /// A category's available amount, read against what its target asks
-    /// the month to set aside.
-    pub fn of(available: i64, target: i64, assigned: i64) -> Tone {
-        match available {
-            a if a < 0 => Tone::Over,
-            _ if assigned < target => Tone::Short,
-            0 => Tone::Zero,
-            _ => Tone::Funded,
+impl Looks for Tone {
+    fn tint(self) -> Tint {
+        match self {
+            Tone::Neutral => Tint::Neutral,
+            Tone::Positive => Tint::Positive,
+            Tone::Short | Tone::OnCard => Tint::Caution,
+            Tone::Overspent => Tint::Negative,
         }
     }
 
-    /// What arkui draws it in: nothing is neutral, money with a job
-    /// positive, short a caution, below nothing negative.
-    pub fn tint(self) -> Tint {
+    fn bar(self) -> Tint {
         match self {
-            Tone::Zero => Tint::Neutral,
-            Tone::Funded => Tint::Positive,
-            Tone::Short => Tint::Caution,
-            Tone::Over => Tint::Negative,
-        }
-    }
-
-    /// A target's progress in this tone: money with a job and nothing yet
-    /// alike in the positive, as either is on its way.
-    pub fn bar(self) -> Tint {
-        match self {
-            Tone::Zero | Tone::Funded => Tint::Positive,
+            Tone::Neutral | Tone::Positive => Tint::Positive,
             t => t.tint(),
         }
     }
 
-    /// Text in this tone.
-    pub fn text(self) -> impl Fn(&Theme) -> iced::widget::text::Style {
+    fn text(self) -> impl Fn(&Theme) -> iced::widget::text::Style {
         self.tint().text()
     }
 }

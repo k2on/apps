@@ -210,7 +210,7 @@ fun TxnRow(
     val shell = LocalShell.current
     val book = shell.book
     val a = LocalAmounts.current
-    val needs = needsCategory(t)
+    val needs = t.needsCategory()
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val row: @Composable () -> Unit = {
         Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {

@@ -122,7 +122,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
     var renaming by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf(false) }
     val typed = a.parse(assigned)
-    val payment = Ledger.isPayment(l)
+    val payment = l.isPayment()
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.xl).navigationBarsPadding(),
@@ -149,9 +149,9 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         Spacer(Modifier.height(Space.l))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Available", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Pill(toneOf(l)) { AmountText(l.available, style = MaterialTheme.typography.titleLarge) }
+            Pill(l.tone().tint()) { AmountText(l.available, style = MaterialTheme.typography.titleLarge) }
         }
-        val story = storyOf(l, a)
+        val story = l.story(a.style)
         if (story.isNotEmpty()) {
             Text(story, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -174,7 +174,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         }
 
         Spacer(Modifier.height(Space.xl))
-        if (!assignable(l)) {
+        if (!l.assignable()) {
             // The month follows its rule: what it is given is the rule's, shown and not typed.
             Ruled(l)
         } else {
@@ -231,12 +231,12 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
 
         Spacer(Modifier.height(Space.xl))
         // Moving money to or from a month its rule assigns is refused: neither is offered.
-        if (l.available < 0 && assignable(l)) {
+        if (l.available < 0 && l.assignable()) {
             Button(onClick = onCover, modifier = Modifier.fillMaxWidth()) {
-                Text(if (creditOverspent(l)) "Cover ${a.format(-l.available)} spent on a card" else "Cover ${a.format(-l.available)} overspending")
+                Text(if (l.onCard()) "Cover ${a.format(-l.available)} spent on a card" else "Cover ${a.format(-l.available)} overspending")
             }
         }
-        if (l.available > 0 && assignable(l)) {
+        if (l.available > 0 && l.assignable()) {
             OutlinedButton(onClick = onMove, modifier = Modifier.fillMaxWidth()) {
                 Icon(Glyphs.Move, contentDescription = null, modifier = Modifier.padding(end = Space.s))
                 Text("Move Money")

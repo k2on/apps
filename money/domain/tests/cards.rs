@@ -75,7 +75,7 @@ fn a_card_on_the_budget_has_a_payment_category_in_the_cards_group() {
         "open_account",
         &OpenAccount {
             name: "Store Card".into(),
-            kind: "credit".into(),
+            kind: money_domain::accounts::AccountKind::Credit,
             on_budget: false,
             balance: -5_000,
             date: "2026-09-01".into(),

@@ -29,29 +29,27 @@ Three ways in, each an `ark_ffi::Peer`:
   `hall.carry()` delivers everything said. What the apps' tests sync two
   phones through (`roles: ["bank"]` is the importer).
 
-Over a peer, the domain is called through the typed Swift and Kotlin
-`arkdb gen` writes (`Money(peer:)` / `Money(peer)`), never edited:
+**Changes are typed.** Every mutation the domain has is a case of
+`MoneyChange` (`money_domain::changes`), its input UniFFI's record of the
+domain's own: `session.send(.assign(value: Assign(month:categoryId:amount:)))`
+in Swift, `session.send(MoneyChange.Assign(Assign(month, id, 25_000)))` in
+Kotlin. It crosses as its bytes, never JSON; `session.check(change)` is the
+domain's sentence for its first failed refinement, before it is sent.
 
-```
-money/ios/Money/Gen/Money.swift
-money/android/app/src/main/kotlin/dev/money/android/gen/Money.kt
-```
-
-`ARK_WRITE_GEN=1 cargo test -p money-ffi --test gen` writes them, and the
-same test fails when they are not what the domain generates. Every
-record a function takes is a struct or data class there, every function
-a method:
-
-```swift
-let m = Money(peer: peer)
-let lines = try m.month(Month(month: "2026-10"))       // LiveView<BudgetLine>
-try m.assign(Assign(month: "2026-10", categoryId: id, amount: 25_000))   // its intent's id
-```
+**Rows say what they mean.** The records carry their rules as methods
+(`money_domain::words`, exported in its `ffi` feature): a budget line's
+`tone()`, `meter()`, `story(style)`, `captions(style)`, `isPayment()`,
+`toCover()`; a transaction's `needsCategory()`, `bankSaid()`,
+`transferAccountId` and `draft()`; the form's `Draft` with `problem()` and
+`toChange()`; an ask's `said(now)`, a bank's `status(now)`, and
+`follow(asks, since)`; `accountShelves`, `netWorth`, `accountKinds()`,
+`suggestPayees`, `unmatchedReceipts`. A phone decides none of them.
 
 **Views are the core's.** `Session(peer)` holds the views the screens
 draw, each named by a `MoneyView` — `accounts`, `groups`, `budget(month)`,
 `inbox`, `register(account)`, `payees`, `banks`, `linked`, `asks`,
-`photos`, `receipts`, `paid(txn)`, `items(receipt)` — and what a page is
+`photos`, `receipts`, `paid(txn)`, `items(receipt)`, `search(account,
+text)` (the core's filter: payee or the bank's own words) — and what a page is
 made of is the domain's (`money_domain::MoneyView`): a month's budget is
 its lines, its summary, its spending and its formulas on every platform.
 `session.hold(view)` holds one while a screen shows it (a `Holding`, let
@@ -61,19 +59,17 @@ which views moved (`moved(views)`, on that thread; the app hops to its
 main thread), and `session.version(view)` grows whenever one did. A view is
 read by name: `session.budget(month)` (`Budget`: lines, summary, spending),
 `session.register(account)`, … — UniFFI's own records
-(`uniffi.money_domain` on Android; the same module on iOS), no JSON per
-row; the receipts' rows, which have no record, come as their JSON. ArkUI
+(`uniffi.money_domain` on Android; the same module on iOS), no JSON. ArkUI
 draws them: `watched.watch(view) { read }` on Android, `.holding(view)` on
 iOS; the iced window holds `ark_peer::store::Store<MoneyView>` itself.
-`session.send(name, json)` is `moneySend` with its refusal kept
+`session.send(change)` is `moneySend` with its refusal kept
 (`session.refusal()`). Nothing runs on a clock.
 
-**Refusals are values.** A form asks first: `peer.check(name, json)` is
-the domain's own sentence for the first refinement the input fails ("an
-account needs a name"), or none. `moneySend(peer, name, json)` sends a
-mutation and answers `Sent.intent(id)` or `Sent.refused(why)` rather than
-throwing (the generated methods throw `Refusal`, whose `why` is the same
-sentence). After it is sent, `peer.standing(id)` is pending, confirmed or
+**Refusals are values.** A form asks first: `session.check(change)` is
+the domain's own sentence for the first refinement the change fails ("an
+account needs a name"), or none. `moneySend(peer, change)` sends one and
+answers `Sent.intent(id)` or `Sent.refused(why)` rather than throwing.
+After it is sent, `peer.standing(id)` is pending, confirmed or
 rejected with why; `peer.takeRejections()` is what the server refused since
 the last ask; `peer.status()` is the link, what is pending, and `denied`
 when the server turned the login away.

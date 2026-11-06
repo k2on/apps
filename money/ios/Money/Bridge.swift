@@ -94,7 +94,7 @@ final class Bridge {
     private let moved: ([MoneyView]) -> Void
 
     // On `queue` only.
-    private var money: Money? = nil
+    private var peer: Peer? = nil
     private var bank: DemoBank? = nil
     private var closed = false
     private var draining = false
@@ -163,8 +163,7 @@ final class Bridge {
             main { self.failed(w) }
             return
         }
-        let m = Money(peer: peer)
-        money = m
+        self.peer = peer
         let s = Session(peer: peer)
         session = s
         peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
@@ -205,8 +204,8 @@ final class Bridge {
         if fresh(.banks) { snap.banks = s.banks() }
         if fresh(.linked) { snap.linked = s.linked() }
         if fresh(.asks) { snap.asks = s.asks() }
-        if fresh(.receipts) { snap.receipts = s.receipts().map { ReceiptLine(json: J.parse($0)) } }
-        if fresh(.photos) { snap.photos = s.photos().map { PhotoLine(json: J.parse($0)) } }
+        if fresh(.receipts) { snap.receipts = s.receipts() }
+        if fresh(.photos) { snap.photos = s.photos() }
     }
 
     private func drainSoon() {
@@ -220,17 +219,17 @@ final class Bridge {
     // On `queue`: the views spliced, a rejection said once, a denial said once, and what moved shown.
     private func drain() {
         draining = false
-        guard !closed, let m = money else { return }
+        guard !closed, let p = peer else { return }
         snap.moved += 1
         read()
         fetch()
-        let st = m.peer.status()
+        let st = p.status()
         snap.status = st
         if let d = st.denied, !deniedSaid {
             deniedSaid = true
             main { self.denied(d) }
         }
-        if let last = m.peer.takeRejections().last {
+        if let last = p.takeRejections().last {
             let w = last.why
             main { self.notice("Not saved: \(w)") }
         }
@@ -240,9 +239,9 @@ final class Bridge {
     // On `queue`: every file still wanted looked for again — one arrived rings
     // the listener, so a drain follows it.
     private func fetch() {
-        guard let m = money else { return }
+        guard let p = peer else { return }
         for (h, f) in wanted {
-            if let d = m.peer.file(hash: f.hash, size: f.size, media: f.media) {
+            if let d = p.file(hash: f.hash, size: f.size, media: f.media) {
                 snap.files[h] = d
                 wanted[h] = nil
             }
@@ -255,10 +254,10 @@ final class Bridge {
     }
 
     /// Something to do with the peer, on its queue; then a drain, so what it moved is shown.
-    private func onPeer(_ f: @escaping (Money) -> Void) {
+    private func onPeer(_ f: @escaping (Peer, Session) -> Void) {
         queue.async {
-            guard !self.closed, let m = self.money else { return }
-            f(m)
+            guard !self.closed, let p = self.peer, let s = self.session else { return }
+            f(p, s)
             self.drain()
         }
     }
@@ -292,36 +291,44 @@ final class Bridge {
     /// the server on this connection or the next, and read there, for
     /// `txn` when it was taken for one.
     func addPhoto(_ jpeg: Data, txn: Id?, done: @escaping (Bool) -> Void = { _ in }) {
-        write("keep the photo", { m in
-            let hash = try m.peer.putFile(bytes: jpeg, media: Receipts.jpeg)
-            self.snap.files[hash] = jpeg
-            try m.addPhoto(AddPhoto(file: FileRef(hash: hash, size: Int64(jpeg.count), media: Receipts.jpeg), txnId: txn))
-        }, done: done)
-    }
-
-    /// A function of the domain, `what` it does said if it is refused:
-    /// "Couldn't assign it: <the domain's sentence>". `done` is told on the
-    /// screens' queue whether it went.
-    func write(_ what: String, _ f: @escaping (Money) throws -> Void, done: @escaping (Bool) -> Void = { _ in }) {
-        onPeer { m in
+        onPeer { p, s in
             do {
-                try f(m)
-                self.main { done(true) }
+                let hash = try p.putFile(bytes: jpeg, media: Receipts.jpeg)
+                self.snap.files[hash] = jpeg
+                self.sent("keep the photo", s.send(change: .addPhoto(value: AddPhoto(file: FileRef(hash: hash, size: Int64(jpeg.count), media: Receipts.jpeg), txnId: txn))), done)
             } catch {
                 let w = why(error)
                 self.main {
-                    self.notice("Couldn't \(what): \(w)")
+                    self.notice("Couldn't keep the photo: \(w)")
                     done(false)
                 }
             }
         }
     }
 
-    /// What the form's input fails first, as the domain says it, or none:
-    /// asked before the button is pressed.
-    func check(_ name: String, _ json: String, done: @escaping (String?) -> Void) {
+    /// One of the domain's changes (`MoneyChange`), `what` it does said if
+    /// it is refused: "Couldn't assign it: <the domain's sentence>". `done`
+    /// is told on the screens' queue whether it went.
+    func write(_ what: String, _ change: MoneyChange, done: @escaping (Bool) -> Void = { _ in }) {
+        onPeer { _, s in self.sent(what, s.send(change: change), done) }
+    }
+
+    private func sent(_ what: String, _ sent: Sent, _ done: @escaping (Bool) -> Void) {
+        switch sent {
+        case .intent: main { done(true) }
+        case let .refused(w):
+            main {
+                self.notice("Couldn't \(what): \(w)")
+                done(false)
+            }
+        }
+    }
+
+    /// What a change fails first, as the domain says it, or none: asked
+    /// before the button is pressed.
+    func check(_ change: MoneyChange, done: @escaping (String?) -> Void) {
         queue.async {
-            let w = self.money?.peer.check(name: name, input: json)
+            let w = self.session?.check(change: change)
             self.main { done(w) }
         }
     }
@@ -332,20 +339,18 @@ final class Bridge {
     /// `done` is told what to say.
     func syncBank(done: @escaping (String) -> Void) {
         queue.async {
-            guard !self.closed, let m = self.money else { return self.main { done("") } }
+            guard !self.closed, let p = self.peer, let s = self.session else { return self.main { done("") } }
             var said: String
             if let bank = self.bank {
-                switch Result(catching: { try bank.sync(peer: m.peer, today: Bridge.today(self.opening)) }) {
+                switch Result(catching: { try bank.sync(peer: p, today: Bridge.today(self.opening)) }) {
                 case let .success(s): said = s.note
                 case let .failure(e): said = "The bank didn't answer: \(why(e))"
                 }
             } else {
-                m.peer.dialNow()
-                do {
-                    try m.sync()
-                    said = "Asked the bank for anything new"
-                } catch {
-                    said = "Couldn't ask the bank: \(why(error))"
+                p.dialNow()
+                switch s.send(change: .sync) {
+                case .intent: said = "Asked the bank for anything new"
+                case let .refused(w): said = "Couldn't ask the bank: \(w)"
                 }
             }
             self.drain()
@@ -359,11 +364,11 @@ final class Bridge {
     }
 
     /// Dial the server now, whatever the link's backoff says: the app came to the front.
-    func dialNow() { queue.async { self.money?.peer.dialNow() } }
+    func dialNow() { queue.async { self.peer?.dialNow() } }
 
     /// Signed out: the session revoked (pushed while linked, pending
     /// otherwise), nothing dialled after it, what is pending kept.
-    func signOut() { onPeer { $0.peer.logout() } }
+    func signOut() { onPeer { p, _ in p.logout() } }
 
     /// Wait for everything asked of the session so far: what a test does
     /// before it reads what was published.
@@ -373,13 +378,13 @@ final class Bridge {
     func close() {
         queue.async {
             self.closed = true
-            self.money?.peer.setListener(listener: nil)
+            self.peer?.setListener(listener: nil)
             self.session?.setListener(listener: nil)
             self.always = []
             self.budget = nil
             self.session = nil
             self.wanted = [:]
-            self.money = nil
+            self.peer = nil
             self.bank = nil
         }
     }

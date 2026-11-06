@@ -10,7 +10,7 @@ use money_domain::dates::month_of;
 use money_domain::*;
 
 use crate::amount::{money, money_or_blank};
-use crate::look::{self, Tone};
+use crate::look::{self, Looks, Tone};
 use crate::peer::Ledger;
 use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, SplitRow, TxnForm};
 
@@ -397,7 +397,7 @@ impl App {
             ));
         }
         if s.overspent > 0 {
-            notices = notices.push(text(format!("{} overspent", s.overspent)).size(12).style(Tone::Over.text()));
+            notices = notices.push(text(format!("{} overspent", s.overspent)).size(12).style(Tone::Overspent.text()));
         }
         if s.underfunded > 0 {
             notices = notices.push(text(format!("{} underfunded", s.underfunded)).size(12).style(Tone::Short.text()));
@@ -596,7 +596,7 @@ impl App {
     /// `style::on_row` — the pill too, which on the accent is the accent's
     /// text on a wash of it.
     fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool) -> Element<'a, Message> {
-        let tone = tone(l);
+        let tone = l.tone();
         let hidden = l.hidden;
         let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, hidden)),
@@ -647,7 +647,7 @@ impl App {
                 color: Some(style::on_row(theme, lit, false, false)),
             }),
         };
-        let goal = text(progress(l)).size(13).style(move |theme| text::Style {
+        let goal = text(l.progress(crate::amount::style())).size(13).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, true)),
         });
         let available = container(text(money(l.available)).size(14).font(arkui::hero::BOLD))
@@ -746,7 +746,7 @@ impl App {
     }
 
     fn inspect_category<'a>(&'a self, l: &'a BudgetLine) -> Column<'a, Message> {
-        let tone = tone(l);
+        let tone = l.tone();
         let spent = match l.card {
             Some(_) => "Spending covered, less payments",
             None => "Cash spending",
@@ -818,7 +818,7 @@ impl App {
                     Message::AssignTo(l.category_id, l.target),
                 ));
             } else {
-                target = target.push(text("Funded this month").size(12).style(Tone::Funded.text()));
+                target = target.push(text("Funded this month").size(12).style(Tone::Positive.text()));
             }
         } else {
             target = target.push(dim("How much does it need each month?", 11));
@@ -905,7 +905,7 @@ impl App {
                 text("Not covered").size(12).width(Length::Fill),
                 text(money(l.underfunded))
                     .size(12)
-                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Funded }.text()),
+                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Positive }.text()),
             ]
             .align_y(Alignment::Center),
         ]
@@ -916,7 +916,7 @@ impl App {
                 Message::AssignTo(l.category_id, l.assigned + l.underfunded),
             ));
         } else if l.debt > 0 {
-            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Funded.text()));
+            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Positive.text()));
         } else {
             card = card.push(dim("Nothing owed on it.", 11));
         }
@@ -1349,7 +1349,7 @@ impl App {
         let said = match left {
             0 => dim("Every cent has a category", 11),
             l if l > 0 => text(format!("{} left to split", money(l))).size(11).style(Tone::Short.text()),
-            l => text(format!("{} too much", money(-l))).size(11).style(Tone::Over.text()),
+            l => text(format!("{} too much", money(-l))).size(11).style(Tone::Overspent.text()),
         };
         lines
             .push(
@@ -1418,7 +1418,7 @@ impl App {
                     text(g.group.clone()).size(13).width(Length::Fixed(160.0)),
                     progress_bar(0.0..=1.0, g.spent as f32 / most as f32)
                         .girth(Length::Fixed(14.0))
-                        .style(arkui::style::progress(Tone::Funded.bar())),
+                        .style(arkui::style::progress(Tone::Positive.bar())),
                     text(money(g.spent)).size(13).width(Length::Fixed(110.0)),
                     text(format::percent(g.spent, total))
                         .size(12)
@@ -1439,9 +1439,9 @@ impl App {
             None,
         );
         let mut tiles = row![
-            self.tile("Income", s.income, Tone::Funded),
-            self.tile("Spent", total, Tone::Zero),
-            self.tile("Net", s.income - total, if s.income >= total { Tone::Funded } else { Tone::Over }),
+            self.tile("Income", s.income, Tone::Positive),
+            self.tile("Spent", total, Tone::Neutral),
+            self.tile("Net", s.income - total, if s.income >= total { Tone::Positive } else { Tone::Overspent }),
         ]
         .spacing(12);
         // Paying a card is not spending (what it bought was), so it is not
@@ -1449,7 +1449,7 @@ impl App {
         let cards: Vec<&BudgetLine> = self.peer.lines().iter().filter(|l| l.card.is_some()).collect();
         if !cards.is_empty() {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
-            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
+            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Positive }));
         }
         // All of it scrolls, its padding inside: a month of many categories
         // is taller than the window, and was cut off at the foot.
@@ -1490,7 +1490,7 @@ impl App {
                 let mut kinds = row![].spacing(6);
                 for k in accounts::KINDS {
                     kinds = kinds.push(
-                        button(text(k).size(12))
+                        button(text(accounts::kind_title(k)).size(12))
                             .on_press(Message::AccountKind(k))
                             .padding([4, 8])
                             .style(arkui::style::chip(*kind == k)),
@@ -1585,7 +1585,7 @@ impl App {
         let option = |label: String, trailing: Option<i64>, choice: Choice| -> Element<'a, Message> {
             let mut r = row![text(label).size(13).width(Length::Fill)].align_y(Alignment::Center);
             if let Some(cents) = trailing {
-                let tone = Tone::of(cents, 0, 0);
+                let tone = Tone::of_amount(cents);
                 r = r.push(
                     container(text(money(cents)).size(11))
                         .padding([1, 7])
@@ -1717,35 +1717,6 @@ pub fn category_glyph(name: &str) -> &'static [u8] {
     }
 }
 
-/// What a category's pill says by its colour, as YNAB's does: red for cash
-/// overspent (next month pays for it), amber for overspending that was
-/// all on a card (it is debt now) and for a card's payment that does not
-/// cover what the card owes, else as its target reads it.
-pub fn tone(l: &BudgetLine) -> Tone {
-    match () {
-        _ if l.available < 0 && l.credit_overspent >= -l.available => Tone::Short,
-        _ if l.available >= 0 && l.card.is_some() && l.underfunded > 0 => Tone::Short,
-        _ => Tone::of(l.available, l.target, l.assigned),
-    }
-}
-
-/// How far along a category is: the share of its goal given this month,
-/// as the inspector counts it; for one with no goal, the share of what it
-/// had that was spent; blank for neither.
-fn progress(l: &BudgetLine) -> String {
-    let had = l.carried + l.assigned;
-    match () {
-        // A card's: what of its debt is not covered yet.
-        _ if l.card.is_some() && l.underfunded > 0 => format!("{} short", money(l.underfunded)),
-        _ if l.card.is_some() && l.debt > 0 => "Covered".into(),
-        _ if l.card.is_some() => String::new(),
-        _ if l.credit_overspent > 0 => format!("{} on card", money(l.credit_overspent)),
-        _ if l.target > 0 => format!("{}% goal", (l.assigned.max(0) * 100 / l.target).min(999)),
-        _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
-        _ => String::new(),
-    }
-}
-
 impl App {
     /// The box a category is typed into: the cell itself, what it says now
     /// greyed under what is typed, `<Enter>` choosing the row with the keys.
@@ -1759,24 +1730,5 @@ impl App {
             .padding([4, 6])
             .style(arkui::style::field)
             .into()
-    }
-}
-
-/// A store as the receipts page names it.
-pub(crate) fn store_name(store: &str) -> String {
-    match store {
-        "amazon" => "Amazon".into(),
-        "target" => "Target".into(),
-        "costco" => "Costco".into(),
-        s => s.to_string(),
-    }
-}
-
-/// How many, in thousandths, as a line says it: `2`, `11.482 gal`.
-pub(crate) fn quantity(thousandths: i64, unit: &str) -> String {
-    let n = format::quantity(thousandths);
-    match unit {
-        "" | "ea" => format!("\u{00d7}{n}"),
-        u => format!("{n} {u}"),
     }
 }

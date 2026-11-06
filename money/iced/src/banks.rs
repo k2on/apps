@@ -17,7 +17,6 @@
 //! account), every account here, and nothing — the account another login
 //! to the same bank feeds with the same last digits already on the cursor.
 
-use arkui::format::ago;
 use arkui::{glyphs, icon, menu, style};
 use iced::widget::{button, column, container, row, text, Column};
 use iced::{Alignment, Element, Length, Padding};
@@ -47,9 +46,6 @@ pub enum Msg {
     OpenPage(String),
     Dismiss,
 }
-
-/// How long an answered ask stays on the page.
-const SHOWN_MS: i64 = 15 * 60 * 1000;
 
 impl App {
     /// Settings' Banks section's messages.
@@ -168,7 +164,7 @@ impl App {
             return;
         };
         let (entries, at) = self.choices(l);
-        let title = account_name(l);
+        let title = l.title();
         let mut m = menu::Menu::open(title, entries, self.pointer, self.window, menu::Anchor::Pointer);
         m.at = at;
         self.ctx.open_menu(m);
@@ -182,9 +178,9 @@ impl App {
             return;
         }
         browser::reserve();
-        let now = ark_peer::now_ms();
+        let since = self.peer.asks().first().map(|a| a.id);
         if self.author(what, name, input) {
-            (self.awaiting, self.dismissed) = (Some(now), None);
+            (self.awaiting, self.dismissed) = (Some(since), None);
             self.note = "asked the server for Plaid's page".into();
         } else {
             browser::release();
@@ -195,17 +191,13 @@ impl App {
     /// it; nothing more to wait for once the ask is otherwise answered.
     pub fn follow_ask(&mut self) {
         let Some(since) = self.awaiting else { return };
-        let Some(a) = self.peer.asks().first().filter(|a| a.asked_ms >= since - 1_000) else {
-            return;
-        };
-        match a.state {
-            AskState::Asked => {}
-            AskState::Waiting if !a.url.is_empty() => {
-                let url = a.url.clone();
+        match money_domain::banks::follow(self.peer.asks(), since) {
+            money_domain::banks::Follow::Wait => {}
+            money_domain::banks::Follow::Page { url } => {
                 self.awaiting = None;
                 self.open_page(url);
             }
-            _ => {
+            money_domain::banks::Follow::Over => {
                 self.awaiting = None;
                 browser::release();
             }
@@ -223,42 +215,23 @@ impl App {
     /// What wants somebody on Settings: a login run out, or an
     /// account waiting for a choice.
     pub fn banks_wanting(&self) -> usize {
-        self.peer.banks().iter().map(|b| b.waiting as usize + b.needs_login as usize).sum()
+        money_domain::words::banks_wanting(self.peer.banks()) as usize
     }
 
     /// The ask on show: the newest of this person's, while it is open or
     /// lately answered, unless it was put away.
-    fn ask_shown(&self, now: i64) -> Option<&AskLine> {
-        let a = self.peer.asks().first()?;
-        let open = matches!(a.state, AskState::Asked | AskState::Waiting);
-        (Some(a.id) != self.dismissed && (open || now - a.answered_ms < SHOWN_MS)).then_some(a)
+    fn ask_shown(&self, now: i64) -> Option<AskLine> {
+        money_domain::words::ask_shown(self.peer.asks(), self.dismissed, now)
     }
 
-    fn view_ask<'a>(&'a self, a: &'a AskLine, now: i64) -> Element<'a, Message> {
-        let name = match (a.institution.as_str(), a.bank.as_str()) {
-            ("", "") => "the bank".to_string(),
-            ("", b) => b.to_string(),
-            (i, _) => i.to_string(),
-        };
+    fn view_ask<'a>(&'a self, a: AskLine, now: i64) -> Element<'a, Message> {
         let mut c = column![].spacing(8);
-        let said = match (a.state, a.what.as_str()) {
-            (AskState::Asked, _) if now - a.asked_ms > 30_000 => "The server has not answered yet. Does it have Plaid's keys?".to_string(),
-            (AskState::Asked, "disconnect") => format!("Asking the server to disconnect {name}\u{2026}"),
-            (AskState::Asked, _) => "Asking the server for Plaid's page\u{2026}".into(),
-            (AskState::Waiting, _) => "Plaid's page is open in your browser. Log in to your bank there; this page follows.".into(),
-            (AskState::Done, "connect") => format!("Connected {name}. Say below what each of its accounts feeds."),
-            (AskState::Done, "reconnect") => format!("Logged in to {name} again."),
-            (AskState::Done, "add_accounts") => format!("Shared {name}'s accounts again: one shared for the first time opens with its next import."),
-            (AskState::Done, _) => format!("Disconnected {name}. Its accounts here stay, kept by hand from now on."),
-            (AskState::Failed, _) => format!("Could not {} {name}: {}", a.what, a.message),
-            (AskState::Expired, _) => a.message.clone(),
-        };
-        c = c.push(text(said).size(13));
+        c = c.push(text(a.said(now)).size(13));
         if a.state == AskState::Waiting {
             c = c.push(
                 row![
                     link("Open Plaid's page", Message::Banks(Msg::OpenPage(a.url.clone()))),
-                    dim(ago_or_in(a.expires_ms, now), 11)
+                    dim(a.closes(now).unwrap_or_default(), 11)
                 ]
                 .spacing(10)
                 .align_y(Alignment::Center),
@@ -312,35 +285,16 @@ impl App {
     }
 
     fn view_bank<'a>(&'a self, b: &'a BankLine, now: i64) -> Element<'a, Message> {
-        let title = match b.institution.is_empty() {
-            true => b.name.clone(),
-            false => b.institution.clone(),
-        };
-        let status: Element<'a, Message> = if b.needs_login {
-            text("The bank wants its login again: Reconnect.")
+        let title = b.title();
+        let s = b.status(now);
+        let status: Element<'a, Message> = match s.alarm {
+            true => text(s.words)
                 .size(12)
                 .style(|theme| text::Style {
                     color: Some(arkui::theme::of(theme).danger.base.color),
                 })
-                .into()
-        } else if !b.error.is_empty() {
-            text(format!("The last import failed {}: {}", ago(b.failed_ms, now), b.error))
-                .size(12)
-                .style(|theme| text::Style {
-                    color: Some(arkui::theme::of(theme).danger.base.color),
-                })
-                .into()
-        } else {
-            let mut said = match b.synced_ms {
-                0 => "Waiting for its first import".to_string(),
-                _ => format!("Synced {} \u{2014} {} new, {} updated", ago(b.synced_ms, now), b.added, b.updated),
-            };
-            match b.waiting {
-                0 => {}
-                1 => said.push_str(" \u{2014} 1 account to choose for"),
-                n => said.push_str(&format!(" \u{2014} {n} accounts to choose for")),
-            }
-            dim(said, 12).into()
+                .into(),
+            false => dim(s.words, 12).into(),
         };
         let mut head = row![
             icon::plain(glyphs::BANK, false),
@@ -374,7 +328,7 @@ impl App {
             false => l.subtype.clone(),
         };
         let about = column![
-            text(account_name(l)).size(13),
+            text(l.title()).size(13),
             dim(
                 match l.balance {
                     Some(b) => format!("{what} \u{2014} the bank says {}", money(b)),
@@ -441,22 +395,5 @@ impl App {
         ]
         .spacing(10)
         .into()
-    }
-}
-
-/// A bank's account as the bank names it, with its last digits.
-fn account_name(l: &LinkedLine) -> String {
-    match l.mask.is_empty() {
-        true => l.name.clone(),
-        false => format!("{} \u{2022}\u{2022}{}", l.name, l.mask),
-    }
-}
-
-/// When a page closes: in so many minutes.
-fn ago_or_in(then_ms: i64, now_ms: i64) -> String {
-    let m = (then_ms - now_ms).max(0) / 60_000;
-    match m {
-        0 => "it closes in under a minute".into(),
-        _ => format!("it closes in {m} min"),
     }
 }

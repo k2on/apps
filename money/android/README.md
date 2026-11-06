@@ -5,11 +5,11 @@ kernel with money's domain linked in, `libmoney_ffi.so`, the same code the
 server, the desktop and the browser run. The phone is a **client** of it:
 the kernel keeps the household's replica on the phone's disk, dials the
 server, rebases, and keeps the views; the app's own code is its screens,
-its model and its way in. It calls the domain through the Kotlin `arkdb
-gen` writes from the registered domain (`app/src/main/kotlin/dev/money/
-android/gen/Money.kt`, never edited: `ARK_WRITE_GEN=1 cargo test -p
-money-ffi --test gen` writes it), and every view a budget is drawn from
-hands over UniFFI's own records (`uniffi.money_domain`), no JSON per row.
+its model and its way in. Every change it makes is one of the domain's
+(`MoneyChange`, sent with `session.send`), every view hands over UniFFI's
+own records (`uniffi.money_domain`), and what a row says — a line's tone,
+story and captions, an ask's sentence, the form's rules (`Draft`) — is the
+records' own methods: nothing crosses as JSON, and no rule is the app's.
 The look it shares with harken is `kotlin/arkui` (package `dev.arkui`),
 compiled in from its sources.
 

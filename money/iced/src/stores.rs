@@ -156,7 +156,7 @@ impl App {
 
     fn refused_in(&self, section: &str) -> Option<Element<'_, Message>> {
         let (s, why) = self.settings.refused.as_ref()?;
-        (*s == section || s.is_empty()).then(|| text(why.as_str()).size(12).style(look::Tone::Over.text()).into())
+        (*s == section || s.is_empty()).then(|| text(why.as_str()).size(12).style(look::Looks::text(look::Tone::Overspent)).into())
     }
 
     /// What `store`'s last import did, when there was one.
@@ -164,7 +164,7 @@ impl App {
         let (_, how) = self.settings.stores.as_ref()?.last.iter().find(|(s, _)| s == store)?;
         let line = text(format!("Last sync: {how}")).size(12);
         Some(match how.starts_with("failed") {
-            true => line.style(look::Tone::Over.text()).into(),
+            true => line.style(look::Looks::text(look::Tone::Overspent)).into(),
             false => line.into(),
         })
     }

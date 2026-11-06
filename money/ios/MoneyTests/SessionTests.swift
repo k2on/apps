@@ -10,16 +10,16 @@ final class SessionTests: XCTestCase {
     /// Falsified by tracking accounts listed on budget: the mortgage was budgeted.
     func testTheAccountsAreShelved() {
         let s = Seen()
-        let shelves = Accounts.shelves(s.snap.accounts)
-        XCTAssertEqual(shelves.map { $0.kind }, [.budget, .tracking])
-        let budget = shelves[0].rows.map { $0.name }
-        let tracking = shelves[1].rows.map { $0.name }
+        let shelves = accountShelves(accounts: s.snap.accounts)
+        XCTAssertEqual(shelves.map { $0.shelving }, [.budget, .tracking])
+        let budget = shelves[0].accounts.map { $0.name }
+        let tracking = shelves[1].accounts.map { $0.name }
         for n in ["Checking", "Savings", "Cash", "Chase Sapphire"] { XCTAssertTrue(budget.contains(n), n) }
         for n in ["Mortgage", "Retirement"] { XCTAssertTrue(tracking.contains(n), n) }
-        XCTAssertEqual(Accounts.netWorth(s.snap.accounts), s.snap.accounts.reduce(0) { $0 + $1.balance })
-        XCTAssertEqual(Accounts.usual(s.snap.accounts)?.onBudget, true)
+        XCTAssertEqual(netWorth(accounts: s.snap.accounts), s.snap.accounts.reduce(0) { $0 + $1.balance })
+        XCTAssertEqual(s.snap.account(usualAccount(accounts: s.snap.accounts))?.onBudget, true)
         let card = s.account("Chase Sapphire")
-        XCTAssertEqual(card.map(Accounts.subtitle)?.hasPrefix("Chase"), true)
+        XCTAssertEqual(card?.subtitle().hasPrefix("Chase"), true)
     }
 
     /// A register is read when held and kept spliced while it is.
@@ -36,13 +36,13 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(days.map { $0.day }, days.map { $0.day }.sorted(by: >))
         XCTAssertEqual(days.reduce(0) { $0 + $1.rows.count }, rows.count)
 
-        var d = Draft(account: checking.id, date: Fx.today)
+        var d = TxnForm(account: checking.id, accounts: s.snap.accounts, date: Fx.today)
         d.payee = "Corner Bakery"
         d.cents = 1_250
         d.choose(category: s.line("Dining Out")?.categoryId)
-        guard let add = d.adding else { return XCTFail("a new transaction's input") }
-        XCTAssertEqual(add.amount, -1_250)
-        s.write { try $0.addTransaction(add) }
+        guard let add = d.sent.toChange() else { return XCTFail("a new transaction's change") }
+        XCTAssertEqual(d.sent.amount, -1_250)
+        s.write(add)
         let after = s.register(checking.id) ?? []
         XCTAssertEqual(after.count, rows.count + 1)
         XCTAssertEqual(after.first?.payee, "Corner Bakery")
@@ -58,11 +58,11 @@ final class SessionTests: XCTestCase {
         let s = Seen()
         let waiting = s.snap.inbox
         XCTAssertFalse(waiting.isEmpty)
-        let ready = waiting.filter { !Registers.needsCategory($0) }.map { $0.id }
-        let needs = waiting.filter(Registers.needsCategory).map { $0.id }
-        if !ready.isEmpty { s.write { try $0.approve(Txns(ids: ready)) } }
+        let ready = waiting.filter { !$0.needsCategory() }.map { $0.id }
+        let needs = waiting.filter { $0.needsCategory() }.map { $0.id }
+        if !ready.isEmpty { s.write(.approve(value: Txns(ids: ready))) }
         if !needs.isEmpty, let c = s.line("Household")?.categoryId {
-            s.write { try $0.categorize(Categorize(ids: needs, categoryId: c)) }
+            s.write(.categorize(value: Categorize(ids: needs, categoryId: c)))
         }
         XCTAssertEqual(s.snap.inbox.count, 0)
         XCTAssertTrue(s.snap.accounts.allSatisfy { $0.unapproved == 0 })
@@ -85,18 +85,18 @@ final class SessionTests: XCTestCase {
         // What the bank brought is opened with what the bank called it.
         guard let t = s.snap.inbox.first(where: { $0.imported }) else { return XCTFail("an imported line") }
         XCTAssertFalse(t.importedPayee.isEmpty)
-        XCTAssertEqual(Draft(t).bank, Registers.bankDescription(t))
-        XCTAssertNotNil(Draft(t).bank, "\(t.payee) / \(t.importedPayee)")
+        XCTAssertEqual(TxnForm(t).bank, t.bankSaid())
+        XCTAssertNotNil(TxnForm(t).bank, "\(t.payee) / \(t.importedPayee)")
     }
 
     /// A refusal is the domain's sentence, said once.
     func testARefusalIsSaidInTheDomainsWords() {
         let s = Seen()
-        s.write { try $0.openAccount(OpenAccount(name: "  ", kind: "checking", onBudget: true, balance: 0, date: Fx.today)) }
+        s.write(.openAccount(value: OpenAccount(name: "  ", kind: "checking", onBudget: true, balance: 0, date: Fx.today)))
         XCTAssertEqual(s.notices.count, 1)
         XCTAssertEqual(s.notices.first.map { $0.hasPrefix("Couldn't do it: ") }, true)
         XCTAssertTrue(s.notices.first?.contains("an account needs a name") ?? false)
-        s.write { try $0.openAccount(OpenAccount(name: "Travel Fund", kind: "savings", onBudget: true, balance: 50_000, date: Fx.today)) }
+        s.write(.openAccount(value: OpenAccount(name: "Travel Fund", kind: "savings", onBudget: true, balance: 50_000, date: Fx.today)))
         XCTAssertEqual(s.account("Travel Fund")?.balance, 50_000)
         XCTAssertEqual(s.notices.count, 1)
         XCTAssertEqual(s.failures, [])

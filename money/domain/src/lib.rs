@@ -30,7 +30,10 @@ pub mod banks;
 pub mod budget;
 pub mod cards;
 pub mod categories;
+pub mod changes;
 pub mod dates;
+#[cfg(feature = "ffi")]
+mod ffi;
 pub mod filters;
 pub mod formulas;
 pub mod migrations;
@@ -44,11 +47,13 @@ pub mod transactions;
 pub mod transfers;
 pub mod types;
 pub mod views;
+pub mod words;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
 pub use ark::row::Id;
+pub use changes::MoneyChange;
 pub use schema::*;
 pub use types::*;
 pub use views::MoneyView;

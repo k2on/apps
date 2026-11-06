@@ -10,6 +10,11 @@ use arkui::format::{self, NumberStyle};
 /// How this window writes money.
 static STYLE: LazyLock<NumberStyle> = LazyLock::new(NumberStyle::us);
 
+/// The number style itself, for the domain's words (`BudgetLine::story`).
+pub fn style() -> &'static NumberStyle {
+    &STYLE
+}
+
 /// `$1,234.56`, `-$12.00`.
 pub fn money(cents: i64) -> String {
     format::amount(cents, &STYLE)

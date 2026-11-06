@@ -8,33 +8,40 @@ import ArkUI
 import SwiftUI
 
 extension Tone {
-    /// The figure's tint, as ArkUI's pill and hero draw it.
+    /// The core's tone in ArkUI's tint, as its pill and hero draw it:
+    /// money's one map, Android's and the desktop's the same.
     var tint: Tint {
         switch self {
-        case .zero: return .neutral
-        case .funded: return .positive
-        case .short: return .caution
-        case .over: return .negative
-        case .onCard: return .caution
-        }
-    }
-
-    /// What the colour means, for VoiceOver.
-    var words: String {
-        switch self {
-        case .zero: return "nothing available"
-        case .funded: return "funded"
-        case .short: return "underfunded"
-        case .over: return "overspent"
-        case .onCard: return "overspent on a card"
+        case .neutral: return .neutral
+        case .positive: return .positive
+        case .short, .onCard: return .caution
+        case .overspent: return .negative
         }
     }
 }
 
+/// The SF Symbol an account of a kind is drawn with.
+enum Accounts {
+    static func symbol(_ kind: String) -> String {
+        switch kind {
+        case "checking": return "building.columns.fill"
+        case "savings": return "dollarsign.circle.fill"
+        case "cash": return "banknote.fill"
+        case "credit": return "creditcard.fill"
+        case "loan": return "house.fill"
+        case "investment": return "chart.line.uptrend.xyaxis"
+        default: return "building.columns.fill"
+        }
+    }
+}
+
+/// Now, as the domain counts time: milliseconds since 1970.
+func nowMs(_ date: Date = Date()) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
+
 extension Summary {
     /// Ready to Assign's tint: green while there is money to give a job,
     /// red when more was assigned than there is, quiet at nothing.
-    var tint: Tint { readyToAssign > 0 ? .positive : readyToAssign < 0 ? .negative : .neutral }
+    var tint: Tint { tone().tint }
 }
 
 /// An account's mark: its kind's symbol in its colour on a faint wash of

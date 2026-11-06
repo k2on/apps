@@ -787,24 +787,6 @@ fn the_register_categorizes_a_selection_from_the_keys() {
     }
 }
 
-/// What the bank called an imported transaction is said where it says
-/// more than its payee; not for one typed in, nor one named alike.
-#[test]
-fn the_bank_says_what_the_payee_does_not() {
-    let mut t = TxnLine {
-        payee: "Chipotle".into(),
-        imported: true,
-        imported_payee: "CHIPOTLE 1234 SAN FRANCISCO CA".into(),
-        ..TxnLine::default()
-    };
-    assert_eq!(crate::bank_said(&t), "CHIPOTLE 1234 SAN FRANCISCO CA");
-    t.imported_payee = "CHIPOTLE".into();
-    assert_eq!(crate::bank_said(&t), "", "named alike");
-    t.imported_payee = "CHIPOTLE 1234".into();
-    t.imported = false;
-    assert_eq!(crate::bank_said(&t), "", "typed in");
-}
-
 /// The demo's Target and Costco receipts are matched to the charges that
 /// paid for them, and those are marked in the register; one opened shows
 /// its receipt under its form, whose items wait to be filed, and filing
@@ -898,7 +880,9 @@ fn a_receipt_is_typed_put_right_and_attached() {
     assert!(app.peer.txn_receipts().is_empty());
     let line = app.peer.register().iter().find(|x| x.id == t.id).unwrap().clone();
     assert!(
-        crate::receipt::unmatched(app.peer.receipts(), &line).iter().any(|x| x.id == r.id),
+        money_domain::words::unmatched_for(app.peer.receipts(), line.amount, &line.date)
+            .iter()
+            .any(|x| x.id == r.id),
         "offered again"
     );
     let _ = app.update(Message::Receipt(Msg::Attach(r.id.clone())));
@@ -1263,7 +1247,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     settle(&mut app, &mut importer, &|a| a.peer.client.status().link == "online");
     let open = OpenAccount {
         name: "Checking".into(),
-        kind: "checking".into(),
+        kind: money_domain::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 50_000,
         date: TODAY.into(),

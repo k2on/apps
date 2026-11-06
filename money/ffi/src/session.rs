@@ -5,14 +5,17 @@
 //! and tells the app which moved ([`Changed`]). A screen holds its view
 //! while it shows ([`Session::hold`], a [`Holding`] let go when dropped)
 //! and reads it by name: `budget(month)`, `register(account)`, … — the
-//! domain's records, no JSON, except the receipts' rows, which have no
-//! record of their own and come as their JSON.
+//! domain's records. A change is sent as one too ([`Session::send`], a
+//! `MoneyChange`): nothing crosses as JSON.
 
 use std::sync::Arc;
 
 use ark::format::Encode;
 use ark_ffi::{Peer, Refusal, RowId, Twin};
-use money_domain::{self as domain, AccountLine, AskLine, BankLine, BudgetLine, GroupLine, LinkedLine, PayeeLine, SpendingLine, Summary, TxnLine};
+use money_domain::{
+    self as domain, AccountLine, AskLine, BankLine, BudgetLine, Filter, Filtered, GroupLine, ItemLine, LinkedLine, MoneyChange, PayeeLine, PhotoLine,
+    ReceiptLine, SpendingLine, Summary, TxnLine,
+};
 
 use crate::Sent;
 
@@ -56,6 +59,37 @@ pub enum MoneyView {
     Items {
         receipt: String,
     },
+    /// The transactions a search finds — in one account's register, or
+    /// (none) every account's: those whose payee or whose bank's own words
+    /// hold `text`, the core's one matcher (`Filter`).
+    Search {
+        account: Option<RowId>,
+        text: String,
+    },
+}
+
+impl MoneyView {
+    /// The domain's filter a search is.
+    fn search(account: Option<RowId>, text: String) -> Filtered {
+        Filtered {
+            filter: Filter {
+                accounts: account.map(|a| domain::Id::new(a.0)).into_iter().collect(),
+                text,
+                ..Filter::default()
+            },
+            ..Filtered::default()
+        }
+    }
+
+    /// The search a domain's filter is, when it is one.
+    fn searched(filtered: &[u8]) -> Option<MoneyView> {
+        let f = Filtered::from_bytes(filtered).ok()?;
+        let search = MoneyView::search(f.filter.accounts.first().map(|a| RowId(a.0)), f.filter.text.clone());
+        (f == search).then_some(MoneyView::Search {
+            account: f.filter.accounts.first().map(|a| RowId(a.0)),
+            text: f.filter.text,
+        })
+    }
 }
 
 impl From<MoneyView> for domain::MoneyView {
@@ -77,6 +111,7 @@ impl From<MoneyView> for domain::MoneyView {
             MoneyView::Receipts => D::Receipts,
             MoneyView::Paid { txn } => D::Paid { txn: domain::Id::new(txn.0) },
             MoneyView::Items { receipt } => D::Items { receipt },
+            MoneyView::Search { account, text } => D::filtered(&MoneyView::search(account, text)),
         }
     }
 }
@@ -102,6 +137,7 @@ impl MoneyView {
             D::Receipts => MoneyView::Receipts,
             D::Paid { txn } => MoneyView::Paid { txn: RowId(txn.0) },
             D::Items { receipt } => MoneyView::Items { receipt: receipt.clone() },
+            D::Filtered { filtered } => return MoneyView::searched(filtered),
             _ => return None,
         })
     }
@@ -150,15 +186,6 @@ impl Session {
     fn rows<T: Twin<Tag> + Clone + 'static>(&self, key: domain::MoneyView) -> Vec<T::Ffi> {
         self.inner.read(|st, _| st.rows::<T>(&key).iter().cloned().map(T::ffi).collect())
     }
-
-    /// A view's rows as their JSON: the receipts', which have no record.
-    fn json<T: Encode + 'static>(&self, key: domain::MoneyView) -> Vec<String> {
-        self.inner.read(|st, peer| {
-            let Some(name) = st.name(&key) else { return vec![] };
-            let row = |r: &T| peer.element_json(name, &r.to_bytes()).unwrap_or_default();
-            st.rows::<T>(&key).iter().map(row).collect()
-        })
-    }
 }
 
 #[uniffi::export]
@@ -203,14 +230,20 @@ impl Session {
         }));
     }
 
-    /// The function `name` on its input's JSON: its intent, or the
-    /// domain's sentence for why not — kept as [`Session::refusal`] until
-    /// the next change is taken.
-    pub fn send(&self, name: String, input: String) -> Sent {
-        match self.inner.send(|p| p.mutate(name, input)) {
+    /// A change: its intent, or the domain's sentence for why not — kept
+    /// as [`Session::refusal`] until the next change is taken.
+    pub fn send(&self, change: Ffi<MoneyChange>) -> Sent {
+        let c = MoneyChange::from_ffi(change);
+        match self.inner.send(|p| p.mutate_encoded(c.name(), c.input())) {
             Ok(id) => Sent::Intent { id },
             Err(Refusal::Refused { why }) => Sent::Refused { why },
         }
+    }
+
+    /// The domain's sentence for the first thing wrong with a change, or
+    /// none: what a form says under its field before anything is sent.
+    pub fn check(&self, change: Ffi<MoneyChange>) -> Option<String> {
+        MoneyChange::from_ffi(change).problem()
     }
 
     /// Why the last change sent was refused, while it is the last.
@@ -266,23 +299,28 @@ impl Session {
         self.rows::<AskLine>(domain::MoneyView::Asks)
     }
 
-    /// Every receipt photo, each its JSON (`PhotoLine`).
-    pub fn photos(&self) -> Vec<String> {
-        self.json::<domain::PhotoLine>(domain::MoneyView::Photos)
+    /// Every receipt photo, and where reading it stands.
+    pub fn photos(&self) -> Vec<Ffi<PhotoLine>> {
+        self.rows::<PhotoLine>(domain::MoneyView::Photos)
     }
 
-    /// Every receipt, each its JSON (`ReceiptLine`).
-    pub fn receipts(&self) -> Vec<String> {
-        self.json::<domain::ReceiptLine>(domain::MoneyView::Receipts)
+    /// Every receipt.
+    pub fn receipts(&self) -> Vec<Ffi<ReceiptLine>> {
+        self.rows::<ReceiptLine>(domain::MoneyView::Receipts)
     }
 
-    /// The receipts that paid for `txn`, each its JSON (`ReceiptLine`).
-    pub fn paid(&self, txn: RowId) -> Vec<String> {
-        self.json::<domain::ReceiptLine>(MoneyView::Paid { txn }.into())
+    /// The receipts that paid for `txn`.
+    pub fn paid(&self, txn: RowId) -> Vec<Ffi<ReceiptLine>> {
+        self.rows::<ReceiptLine>(MoneyView::Paid { txn }.into())
     }
 
-    /// A receipt's items, each its JSON (`ItemLine`).
-    pub fn items(&self, receipt: String) -> Vec<String> {
-        self.json::<domain::ItemLine>(domain::MoneyView::Items { receipt })
+    /// A receipt's items.
+    pub fn items(&self, receipt: String) -> Vec<Ffi<ItemLine>> {
+        self.rows::<ItemLine>(domain::MoneyView::Items { receipt })
+    }
+
+    /// What a search finds, the newest first, as far as it is held.
+    pub fn search(&self, account: Option<RowId>, text: String) -> Vec<Ffi<TxnLine>> {
+        self.rows::<TxnLine>(MoneyView::Search { account, text }.into())
     }
 }

@@ -26,7 +26,7 @@ struct AccountsView: View {
             // With the net worth under it, the title's own gap all there is
             // between them (`TitleSection`).
             TitleSection("Accounts", fold: $fold) { AccountButton() } below: {
-                HeroFigure("Net Worth", cents: Accounts.netWorth(rows), tint: .neutral, note: "Every open account, less what's owed")
+                HeroFigure("Net Worth", cents: netWorth(accounts: rows), tint: .neutral, note: "Every open account, less what's owed")
             }
             Section {
                 NavigationLink(value: Route.accounts) {
@@ -39,9 +39,9 @@ struct AccountsView: View {
                     }
                 }
             }
-            ForEach(Accounts.shelves(rows)) { shelf in
+            ForEach(accountShelves(accounts: rows)) { shelf in
                 Section {
-                    ForEach(shelf.rows) { a in
+                    ForEach(shelf.accounts) { a in
                         NavigationLink(value: Route.account(id: a.id.hex, name: a.name)) { AccountRow(account: a) }
                             .contextMenu {
                                 Button { typed = a.name; renaming = a } label: { Label("Rename", systemImage: "pencil") }
@@ -55,10 +55,10 @@ struct AccountsView: View {
                     }
                 } header: {
                     HStack {
-                        Text(shelf.kind.rawValue)
+                        Text(shelf.title)
                         Spacer()
                         // Below nothing in the error's red, as a group's total in the budget is.
-                        if shelf.kind != .closed {
+                        if shelf.shelving != .closed {
                             CentsText(shelf.total).foregroundStyle(shelf.total < 0 ? Color.error : Color.quiet)
                         }
                     }
@@ -98,7 +98,7 @@ struct AccountRow: View {
             AccountMark(kind: account.kind)
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name).lineLimit(1)
-                Text(Accounts.subtitle(account)).font(.caption).foregroundStyle(.quiet).lineLimit(1)
+                Text(account.subtitle()).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             if account.unapproved > 0 {

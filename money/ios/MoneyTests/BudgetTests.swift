@@ -18,13 +18,13 @@ final class BudgetTests: XCTestCase {
         let groups = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
         XCTAssertEqual(groups.map { $0.group.name }, ["Credit Card Payments", "Bills", "Everyday", "Quality of Life", "Savings Goals"])
         XCTAssertEqual(groups.map(\.isCards), [true, false, false, false, false])
-        XCTAssertEqual(groups.first?.id, Fixed.cardGroup)
+        XCTAssertEqual(groups.first?.id, cardGroupId())
         XCTAssertEqual(groups.first?.lines.map { $0.name }, ["Chase Sapphire"])
         let everyday = groups.first { $0.group.name == "Everyday" }
         XCTAssertEqual(everyday?.lines.map { $0.name }, ["Groceries", "Dining Out", "Gas & Transit", "Household"])
         XCTAssertEqual(everyday?.available, everyday?.lines.reduce(0) { $0 + $1.available })
         // Ready to Assign is the budget's own, never a line of it.
-        XCTAssertFalse(s.snap.lines.contains { $0.categoryId == Fixed.readyToAssign })
+        XCTAssertFalse(s.snap.lines.contains { $0.categoryId == readyToAssignId() })
     }
 
     /// The seed overspends Dining Out, all of it on the card: its tone is
@@ -35,14 +35,13 @@ final class BudgetTests: XCTestCase {
         guard let dining = s.line("Dining Out"), let groceries = s.line("Groceries") else { return XCTFail("the seed's categories") }
         XCTAssertTrue(dining.available < 0)
         XCTAssertEqual(dining.creditOverspent, -dining.available, "the seed's dining out goes on the card")
-        XCTAssertEqual(Tone.of(dining), .onCard)
+        XCTAssertEqual(dining.tone(), .onCard)
         let short = Int64(dining.available.magnitude)
-        XCTAssertEqual(Cards.word(dining), .onCard(short))
         XCTAssertEqual(Moves.suggested(dining), short)
         let m = Moves.of(month: Fx.month, line: dining, other: groceries.categoryId, cents: short)
         XCTAssertEqual(m.from, groceries.categoryId)
         XCTAssertEqual(m.to, dining.categoryId)
-        s.write { try $0.moveMoney(m) }
+        s.write(.moveMoney(value: m))
         XCTAssertEqual(s.line("Dining Out")?.available, 0)
         XCTAssertEqual(s.line("Groceries")?.available, groceries.available - short)
         XCTAssertEqual(s.notices, [])
@@ -65,21 +64,18 @@ final class BudgetTests: XCTestCase {
     func testAssigningTakesFromReadyToAssign() {
         let s = Seen()
         guard let before = s.snap.summary, let gifts = s.line("Gifts") else { return XCTFail("the summary and Gifts") }
-        s.write { try $0.assign(Assign(month: Fx.month, categoryId: gifts.categoryId, amount: gifts.assigned + 12_345)) }
+        s.write(.assign(value: Assign(month: Fx.month, categoryId: gifts.categoryId, amount: gifts.assigned + 12_345)))
         XCTAssertEqual(s.line("Gifts")?.assigned, gifts.assigned + 12_345)
         XCTAssertEqual(s.snap.summary?.readyToAssign, before.readyToAssign - 12_345)
-        XCTAssertEqual(Tone.of(available: 1, target: 0, assigned: 0), .funded)
-        XCTAssertEqual(Tone.of(available: 0, target: 100, assigned: 50), .short)
-        XCTAssertEqual(Tone.of(available: 0, target: 0, assigned: 0), .zero)
     }
 
     /// Auto-Assign's Underfunded meets every target: none is short after it.
     func testAutoAssignMeetsEveryTarget() {
         let s = Seen()
-        s.write { try $0.autoAssign(AutoAssign(month: Fx.month, how: .underfunded, only: [])) }
+        s.write(.autoAssign(value: AutoAssign(month: Fx.month, how: .underfunded, only: [])))
         XCTAssertEqual(s.snap.summary?.underfunded, 0)
         XCTAssertFalse(s.snap.lines.contains { $0.assigned < $0.target })
-        for l in s.snap.lines where l.target > 0 { XCTAssertEqual(funded(l), 1) }
+        for l in s.snap.lines where l.target > 0 { XCTAssertEqual(l.meter()?.fraction(), 1) }
     }
 
     /// The pager: the month on screen moves, and its lines and summary with it.

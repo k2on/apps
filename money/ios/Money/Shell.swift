@@ -13,7 +13,7 @@ import SwiftUI
 /// The sheets a screen can raise.
 enum Sheet: Identifiable {
     /// The transaction form: a new one or one corrected.
-    case transaction(Draft)
+    case transaction(TxnForm)
     /// A category's assigned amount, typed.
     case assign(Id)
     /// Money moved out of a category, or into an overspent one; none is from Ready to Assign.
@@ -178,7 +178,7 @@ struct AccountButton: View {
     private enum Then { case page(Route), signOut }
 
     var body: some View {
-        let wanting = Banks.wanting(model.snapshot.banks)
+        let wanting = Int(banksWanting(banks: model.snapshot.banks))
         AccountFace(name: model.who, picture: model.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {
                 AccountSheet(name: model.who, picture: model.picture,
@@ -235,8 +235,8 @@ struct AddTransactionButton: View {
 
     var body: some View {
         Button {
-            let a = account ?? Accounts.usual(model.snapshot.accounts)?.id
-            present(.transaction(Draft(account: a, date: model.today)))
+            let a = account ?? usualAccount(accounts: model.snapshot.accounts)
+            present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
         } label: {
             Image(systemName: "plus")
         }

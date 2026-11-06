@@ -5,8 +5,8 @@
 // read (the demo has no server to read it), its bytes there to show.
 package dev.money.android
 
-import dev.money.android.gen.WriteReceipt
-import dev.money.android.gen.StoreItem
+import uniffi.money_domain.WriteReceipt
+import uniffi.money_domain.StoreItem
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

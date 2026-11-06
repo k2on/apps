@@ -400,7 +400,7 @@ pub struct App {
     pub note: String,
     /// A Plaid page asked for here, and when: opened as soon as the
     /// server answers with its address.
-    pub awaiting: Option<i64>,
+    pub awaiting: Option<Option<Id<BankAsk>>>,
     /// Every page this window opened, in order.
     pub opened: Vec<String>,
     /// The ask whose answer was put away.
@@ -715,7 +715,17 @@ impl App {
     /// Author a change by the function's name: whether it was taken. A
     /// refusal is the domain's sentence, said as it is.
     pub fn author(&mut self, what: &str, name: &str, input: &impl ark::format::Encode) -> bool {
-        let taken = match self.peer.client.mutate(name, input) {
+        self.taken(what, |c| c.mutate(name, input))
+    }
+
+    /// Author one of money's changes ([`MoneyChange`]): whether it was
+    /// taken, as [`App::author`].
+    pub fn change(&mut self, what: &str, change: &money_domain::MoneyChange) -> bool {
+        self.taken(what, |c| c.mutate_bytes(change.name(), change.input()))
+    }
+
+    fn taken(&mut self, what: &str, f: impl FnOnce(&mut ark_peer::Peer) -> Result<ark::log::EntryId, String>) -> bool {
+        let taken = match f(&mut self.peer.client) {
             Ok(_) => true,
             Err(e) => {
                 self.note = format!("could not {what}: {e}");
@@ -1018,23 +1028,19 @@ impl App {
                     return Task::none();
                 }
                 if let Some(t) = self.peer.register().iter().find(|t| t.id == id) {
-                    let transfer_to = match t.transfer {
-                        true => self.transfer_of(t.id),
-                        false => None,
-                    };
                     self.form = Some(TxnForm {
                         editing: Some(id),
                         account: Some(t.account_id),
                         date: t.date.clone(),
                         payee: if t.transfer { String::new() } else { t.payee.clone() },
                         category: t.category_id,
-                        transfer_to,
+                        transfer_to: t.transfer_account_id,
                         memo: t.memo.clone(),
                         outflow: if t.amount < 0 { amount::editable(-t.amount) } else { String::new() },
                         inflow: if t.amount > 0 { amount::editable(t.amount) } else { String::new() },
                         cleared: t.cleared != Cleared::Uncleared,
                         by: t.user_id.clone(),
-                        bank: bank_said(t),
+                        bank: t.bank_said().unwrap_or_default(),
                         split: None,
                     });
                     // A split one opens on its lines.
@@ -1209,10 +1215,11 @@ impl App {
                         self.note = format!("{balance:?} is not an amount");
                         return Task::none();
                     };
-                    let owed = matches!(kind, "credit" | "loan");
+                    let kind = money_domain::accounts::AccountKind::of(kind).unwrap_or_default();
+                    let owed = kind.owes();
                     let open = OpenAccount {
                         name,
-                        kind: kind.into(),
+                        kind,
                         on_budget,
                         balance: if owed { -cents.abs() } else { cents },
                         date: self.today.clone(),
@@ -2296,13 +2303,6 @@ impl App {
         ruled
     }
 
-    /// The other account of a transfer.
-    fn transfer_of(&self, id: Id<Txn>) -> Option<Id<Account>> {
-        let t = self.peer.register().iter().find(|t| t.id == id)?;
-        let name = t.payee.strip_prefix("Transfer : ")?;
-        self.peer.accounts().iter().find(|a| a.name == name).map(|a| a.id)
-    }
-
     fn reconcile(&mut self, account: Id<Account>, balance: i64) {
         let r = Reconcile {
             account_id: account,
@@ -2425,46 +2425,42 @@ impl App {
             return self.save_split(id, &f, splits, amount);
         }
         let taken = match f.editing {
-            Some(id) => {
-                let e = EditTransaction {
-                    id,
-                    date: f.date,
-                    payee: f.payee,
-                    category_id: f.category,
-                    memo: f.memo,
-                    amount,
-                    transfer_to: f.transfer_to,
-                };
-                self.author("save the transaction", "edit_transaction", &e)
-            }
-            None => {
+            None if f.split.is_some() && splits.len() > 1 => {
                 let Some(account) = f.account else {
-                    self.note = "which account?".into();
+                    self.note = "Choose an account.".into();
                     return;
                 };
-                if f.split.is_some() && splits.len() > 1 {
-                    let t = AddSplit {
-                        account_id: account,
-                        date: f.date,
-                        payee: f.payee,
-                        memo: f.memo,
-                        amount,
-                        cleared: f.cleared,
-                        lines: splits,
-                    };
-                    self.author("add the transaction", "add_split", &t)
-                } else {
-                    let t = AddTransaction {
-                        account_id: account,
-                        date: f.date,
-                        payee: f.payee,
-                        category_id: splits.first().map_or(f.category, |l| l.category_id),
-                        memo: f.memo,
-                        amount,
-                        cleared: f.cleared,
-                        transfer_to: f.transfer_to,
-                    };
-                    self.author("add the transaction", "add_transaction", &t)
+                let t = AddSplit {
+                    account_id: account,
+                    date: f.date,
+                    payee: f.payee,
+                    memo: f.memo,
+                    amount,
+                    cleared: f.cleared,
+                    lines: splits,
+                };
+                self.author("add the transaction", "add_split", &t)
+            }
+            _ => {
+                // The one form every client has (`transactions::Draft`):
+                // its rules, and the change it is.
+                let d = money_domain::transactions::Draft {
+                    editing: f.editing,
+                    account: f.account,
+                    date: f.date,
+                    payee: f.payee,
+                    category: splits.first().map_or(f.category, |l| l.category_id),
+                    transfer_to: f.transfer_to,
+                    memo: f.memo,
+                    amount,
+                    cleared: f.cleared,
+                };
+                match d.to_change() {
+                    Some(c) => self.change("save the transaction", &c),
+                    None => {
+                        self.note = d.problem().unwrap_or_default();
+                        return;
+                    }
                 }
             }
         };
@@ -2732,13 +2728,5 @@ pub const DROP_WIDTH: f32 = 340.0;
 /// What the bank called an imported transaction, where it says something the
 /// payee does not: `CHIPOTLE 1234 SAN FRANCISCO CA` beside `Chipotle`. Blank
 /// for one typed in, or one the bank and the payee name alike.
-pub fn bank_said(t: &TxnLine) -> String {
-    let said = t.imported_payee.trim();
-    match t.imported && !said.is_empty() && !said.eq_ignore_ascii_case(t.payee.trim()) {
-        true => said.to_string(),
-        false => String::new(),
-    }
-}
-
 /// How far down the register's form its category box ends.
 const FORM_LINE: f32 = 40.0;

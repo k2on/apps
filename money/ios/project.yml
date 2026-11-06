@@ -6,7 +6,7 @@
 # `MoneyFFI.xcframework` (the Rust kernel with money's domain linked in, a
 # static library for a phone and the simulator) and `swift/`, the Swift
 # UniFFI writes for it with the bridge's typed half — and the app's own
-# sources, the generated types in `Money/Gen/` among them; and its tests,
+# sources; and its tests,
 # the model's rules and the session over the demo's household.
 #
 # Swift 5 language mode, not 6, for harken's reasons (harken/ios/project.yml):

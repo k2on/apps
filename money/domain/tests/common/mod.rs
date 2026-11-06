@@ -148,7 +148,7 @@ impl Book {
     pub fn account(&mut self, name: &str, kind: &str, balance: i64) -> Id<Account> {
         let open = OpenAccount {
             name: name.into(),
-            kind: kind.into(),
+            kind: money_domain::accounts::AccountKind::of(kind).expect("a kind"),
             on_budget: money_domain::accounts::on_budget_by_default(kind),
             balance,
             date: "2026-09-01".into(),

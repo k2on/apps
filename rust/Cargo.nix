@@ -11142,6 +11142,10 @@ rec {
             optional = true;
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -11168,7 +11172,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
+          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "ark-format/ffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -11224,10 +11228,6 @@ rec {
           }
         ];
         devDependencies = [
-          {
-            name = "arkdb";
-            packageId = "arkdb";
-          }
           {
             name = "image";
             packageId = "image";

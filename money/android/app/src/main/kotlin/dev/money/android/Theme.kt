@@ -21,6 +21,7 @@ import dev.arkui.ArkTheme
 import dev.arkui.LocalAmounts
 import dev.arkui.LocalArkTheme
 import dev.arkui.MaterialYou
+import dev.arkui.Tint
 import dev.arkui.arkuiScheme
 import dev.arkui.expressiveTypography
 import dev.arkui.tracked
@@ -29,7 +30,9 @@ import java.util.Locale
 import uniffi.ark_format.NumberStyle
 import uniffi.ark_format.formatAmount
 import uniffi.ark_format.formatAmountEditable
+import uniffi.ark_format.numberStyleUs
 import uniffi.ark_format.parseAmount
+import uniffi.money_domain.Tone
 
 /** money's type scale: arkui's expressive one, tracked for each size. */
 private val MoneyType = expressiveTypography().tracked()
@@ -60,7 +63,7 @@ fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, 
  * of the phone's locale, read once ([LocaleNumbers.of]).
  */
 class LibraryAmounts(numbers: LocaleNumbers = LocaleNumbers.of()) : Amounts {
-    private val style =
+    val style =
         NumberStyle(
             numbers.currency, numbers.symbol, numbers.symbolFirst, numbers.symbolSpaced,
             numbers.decimal, numbers.grouping, numbers.minus, numbers.minusFirst)
@@ -75,6 +78,19 @@ class LibraryAmounts(numbers: LocaleNumbers = LocaleNumbers.of()) : Amounts {
 
     override fun parse(typed: String): Long? = parseAmount(typed, style)
 }
+
+/** The number style the core writes this phone's amounts in (`BudgetLine.story`, `captions`). */
+val Amounts.style: NumberStyle
+    get() = (this as? LibraryAmounts)?.style ?: numberStyleUs()
+
+/** What arkui draws one of the core's tones in: money's one map, as the iPhone's and the desktop's. */
+fun Tone.tint(): Tint =
+    when (this) {
+        Tone.NEUTRAL -> Tint.Neutral
+        Tone.POSITIVE -> Tint.Positive
+        Tone.SHORT, Tone.ON_CARD -> Tint.Caution
+        Tone.OVERSPENT -> Tint.Negative
+    }
 
 /** A day as the date picker holds it: UTC midnight, in ms. The words for a day are ark_format's. */
 object Dates {

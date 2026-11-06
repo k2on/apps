@@ -69,8 +69,11 @@ import dev.arkui.Space
 import dev.arkui.Tint
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.style.TextOverflow
-import org.json.JSONObject
+import uniffi.money_domain.AccountKind
 import uniffi.money_domain.AccountLine
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.OpenAccount
+import uniffi.money_domain.accountKinds
 import dev.arkui.pressable
 import dev.arkui.Press
 
@@ -151,15 +154,7 @@ fun AccountsScreen(ledger: Ledger) {
     if (adding) AddAccountSheet(onDismiss = { adding = false })
 }
 
-/** What an account says under its name: the bank and its last digits when one feeds it, else its kind. */
-fun subtitleOf(acc: AccountLine): String {
-    val bank = acc.bank.replaceFirstChar { it.titlecase() }
-    return when {
-        acc.bank.isEmpty() -> kindName(acc.kind)
-        acc.mask.isEmpty() -> bank
-        else -> "$bank ••${acc.mask}"
-    }
-}
+>>>
 
 /** An account in its section's card: its mark, its name and what feeds it, its count to review, its balance. */
 @Composable
@@ -171,7 +166,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
             .padding(horizontal = Space.l, vertical = Space.m)
             .semantics(mergeDescendants = true) {
                 contentDescription =
-                    "${acc.name}, ${subtitleOf(acc)}, ${a.format(acc.balance)}" + if (acc.unapproved > 0) ", ${acc.unapproved} to review" else ""
+                    "${acc.name}, ${acc.subtitle()}, ${a.format(acc.balance)}" + if (acc.unapproved > 0) ", ${acc.unapproved} to review" else ""
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -179,7 +174,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Text(acc.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitleOf(acc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(acc.subtitle(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         Spacer(Modifier.width(Space.s))
         if (acc.unapproved > 0) {
@@ -195,11 +190,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
     }
 }
 
-/** The kinds an account can be, in the order a sheet offers them. */
-val KINDS: List<String> = listOf("checking", "savings", "cash", "credit", "loan", "investment")
-
-/** Whether an account of `kind` is in the budget unless somebody says otherwise (the domain's rule). */
-fun onBudgetByDefault(kind: String): Boolean = kind in setOf("checking", "savings", "cash", "credit")
+>>>
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -208,16 +199,15 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
     val a = LocalAmounts.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("checking") }
+    var kind by remember { mutableStateOf(AccountKind.CHECKING) }
     var onBudget by remember { mutableStateOf(true) }
     var typed by remember { mutableStateOf("") }
     val cents = a.parse(typed)
-    val owed = kind == "credit" || kind == "loan"
-    val balance = cents?.let { if (owed) -kotlin.math.abs(it) else it }
+    val balance = cents?.let { if (kind.owes()) -kotlin.math.abs(it) else it }
     // The domain's own sentence for the name, asked as it is typed.
     val why =
         if (name.isEmpty()) null
-        else book.check("accounts.open_account", JSONObject().put("name", name).put("kind", kind).put("on_budget", onBudget).put("balance", balance ?: 0L).put("date", "2000-01-01").toString())
+        else book.check(MoneyChange.OpenAccount(OpenAccount(name, kind, onBudget, balance ?: 0L, "2000-01-01")))
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding().imePadding()) {
             Text("Add Account", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
@@ -232,15 +222,15 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(Space.s))
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                for (k in KINDS) {
+                for (k in accountKinds()) {
                     FilterChip(
                         selected = kind == k,
                         onClick = {
                             kind = k
-                            onBudget = onBudgetByDefault(k)
+                            onBudget = k.onBudgetByDefault()
                         },
-                        label = { Text(kindName(k)) },
-                        leadingIcon = if (kind == k) { { Icon(Glyphs.account(k), contentDescription = null, modifier = Modifier.size(18.dp)) } } else null,
+                        label = { Text(k.title()) },
+                        leadingIcon = if (kind == k) { { Icon(Glyphs.account(k.key()), contentDescription = null, modifier = Modifier.size(18.dp)) } } else null,
                     )
                 }
             }

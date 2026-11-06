@@ -131,7 +131,7 @@ struct BudgetView: View {
         Menu {
             Section {
                 Button {
-                    present(.transaction(Draft(account: Accounts.usual(model.snapshot.accounts)?.id, date: model.today)))
+                    present(.transaction(TxnForm(account: nil, accounts: model.snapshot.accounts, date: model.today)))
                 } label: { Label("Add Transaction", systemImage: "plus") }
             }
             Section("Auto-Assign") {
@@ -166,12 +166,12 @@ struct BudgetView: View {
             .accessibilityLabel("\(g.name) group")
         case let .category(l):
             HStack {
-                if Cards.isPayment(l) { AccountMark(kind: "credit", side: 22) }
+                if l.isPayment() { AccountMark(kind: "credit", side: 22) }
                 Text(l.name)
                     .foregroundStyle(l.hidden ? Color.quiet : Color.ink)
                     .lineLimit(1)
                 Spacer(minLength: Space.s)
-                Pill(cents: l.available, tint: Tone.of(l).tint).rolls(on: model.snapshot.month)
+                Pill(cents: l.available, tint: l.tone().tint).rolls(on: model.snapshot.month)
             }
             .padding(.leading, Space.xl + Space.s)
             .accessibilityElement(children: .ignore)
@@ -198,7 +198,7 @@ struct BudgetView: View {
 
     @ViewBuilder private func ready(_ summary: Summary?) -> some View {
         let s = summary ?? Summary(month: model.month, readyToAssign: 0, income: 0, assigned: 0, activity: 0, available: 0, overspentLastMonth: 0, overspent: 0, underfunded: 0)
-        HeroFigure("Ready to Assign", cents: s.readyToAssign, tint: s.tint, note: readyWords(s),
+        HeroFigure("Ready to Assign", cents: s.readyToAssign, tint: s.tint, note: s.readyWords(),
                    action: s.readyToAssign > 0 ? { present(.move(nil)) } : nil) {
             HStack(spacing: Space.s) {
                 if s.overspent > 0 {
@@ -232,17 +232,17 @@ struct BudgetView: View {
                     // refuses assigning it and moving money to or from it.
                     NavigationLink(value: Route.category(id: l.categoryId.hex, name: l.name)) { CategoryRow(line: l, month: model.snapshot.month) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            if Ruled.editable(l) {
+                            if l.assignable() {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
                                     .tint(Color.accent)
                             }
                         }
                         .swipeActions(edge: .trailing) {
-                            if Ruled.editable(l) {
+                            if l.assignable() {
                                 Button { present(.move(l.categoryId)) } label: {
                                     Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
                                 }
-                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.chart[1])
+                                .tint(l.available < 0 ? l.tone().tint.color : Color.chart[1])
                             }
                         }
                         .contextMenu { menu(l) }
@@ -303,11 +303,11 @@ struct BudgetView: View {
         // A card's payment: covering its debt first; no target, and no
         // deleting a category that goes when its card does.
         // A month its rule assigns: the rule said, and nothing to assign or move.
-        let card = Cards.isPayment(l)
-        if let words = Ruled.words(l) {
+        let card = l.isPayment()
+        if let words = l.ruleWords() {
             Label(words, systemImage: Ruled.symbol)
         } else {
-            if let cover = Cards.toCover(l) {
+            if let cover = l.toCover() {
                 Button { model.assign(l.categoryId, cover) } label: {
                     Label("Assign \(CentsText.string(l.underfunded)) to Cover the Card", systemImage: "creditcard")
                 }
@@ -315,7 +315,7 @@ struct BudgetView: View {
             Button { present(.assign(l.categoryId)) } label: { Label("Assign…", systemImage: "plus.circle") }
             if !card && l.target > l.assigned {
                 Button { model.assign(l.categoryId, l.target) } label: {
-                    Label("Assign \(CentsText.string(Moves.toTarget(l))) to Meet Target", systemImage: "target")
+                    Label("Assign \(CentsText.string(l.toTarget())) to Meet Target", systemImage: "target")
                 }
             }
             Button { present(.move(l.categoryId)) } label: {
@@ -345,8 +345,8 @@ struct CategoryRow: View {
     let month: String
 
     var body: some View {
-        let tone = Tone.of(line)
-        let card = Cards.isPayment(line)
+        let tone = line.tone()
+        let card = line.isPayment()
         HStack(spacing: Space.m) {
             if card { AccountMark(kind: "credit", side: 28) }
             VStack(alignment: .leading, spacing: Space.xs + 2) {
@@ -359,9 +359,9 @@ struct CategoryRow: View {
                 }
                 if card {
                     payment
-                } else if let f = funded(line) {
+                } else if let f = line.meter()?.fraction() {
                     ProgressView(value: f)
-                        .tint(tone == .over ? Color.error : tone == .onCard || f < 1 ? Color.caution : Color.positive)
+                        .tint(tone == .overspent ? Color.error : tone == .onCard || f < 1 ? Color.caution : Color.positive)
                         .scaleEffect(y: 0.8, anchor: .center)
                     HStack {
                         if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
@@ -395,24 +395,22 @@ struct CategoryRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(line.name)
         .accessibilityValue(card ? paymentWords : words(tone))
-        .accessibilityHint(Ruled.editable(line) ? "Swipe right to assign, left to move money" : "Its rule assigns it")
+        .accessibilityHint(line.assignable() ? "Swipe right to assign, left to move money" : "Its rule assigns it")
     }
 
     /// A card's payment under its name: how much of the debt is set aside,
     /// as a bar, and whether that covers it.
     @ViewBuilder private var payment: some View {
-        if let c = Cards.covered(line) {
+        if let c = line.meter()?.fraction() {
             ProgressView(value: c)
                 .tint(c >= 1 ? Color.positive : Color.caution)
                 .scaleEffect(y: 0.8, anchor: .center)
+            // The core's two ends of the line: covered or short, and what the card owes.
+            let words = line.captions(style: Numbers.style)
             HStack {
-                switch Cards.word(line) {
-                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.caution)
-                case .covered?: Text("Covered").foregroundStyle(Color.positive)
-                default: EmptyView()
-                }
+                Text(words.left).foregroundStyle(line.underfunded > 0 ? Color.caution : Color.positive)
                 Spacer()
-                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.quiet)
+                Text(words.right).foregroundStyle(.quiet)
             }
             .font(.caption)
             .monospacedDigit()
@@ -422,7 +420,7 @@ struct CategoryRow: View {
     }
 
     private func words(_ tone: Tone) -> String {
-        var w = "\(CentsText.string(line.available)) available, \(tone.words). Assigned \(CentsText.string(line.assigned))"
+        var w = "\(CentsText.string(line.available)) available, \(tone.words()). Assigned \(CentsText.string(line.assigned))"
         if line.target > 0 { w += " of a \(CentsText.string(line.target)) target" }
         if line.ruled { w += ", by its rule" }
         if line.creditOverspent > 0 { w += ". \(CentsText.string(line.creditOverspent)) spent on a card beyond what it had" }
