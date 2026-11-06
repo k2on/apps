@@ -2,7 +2,9 @@
 // bold, tracked tight as large text is (`Typeset`, −2% of its size) on its
 // 41 sp leading, so a page reads the same on both phones. [LargeTitle] is the style;
 // [LargeTitles] hands it to Material's large top app bar, which draws its
-// expanded title in `headlineMedium`, and leaves the collapsed one as it is.
+// expanded title in `headlineMedium`, and leaves the collapsed one as it is:
+// a page pushed over a tab. A tab's own root has [TabTitle] instead, the one
+// large title row of every tab, with the account's face at its line's end.
 package dev.arkui
 
 import androidx.compose.material3.MaterialTheme
