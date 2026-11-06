@@ -140,6 +140,8 @@ which nix builds at the commit (see below).
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
 - **`apps-android.sh`**, **`apps-ios.sh`**, **`apps-desktop.sh`**: each app
   in turn, so one that fails does not stop the others.
+- **`ios-inputs.sh`**: the hash of what an iPhone app's shots are taken
+  from, said on Linux ([when it runs](#when-it-runs)).
 - **`published.sh`**: each APK as the F-Droid repository offers it, for a
   run that builds nothing; **`await-apk.sh`**: an APK from a `build` run
   still going, as soon as it is uploaded.
@@ -166,17 +168,38 @@ which nix builds at the commit (see below).
 
 ## When it runs
 
-Each app is a job of its own on each phone, so the apps are taken at once.
-Each job starts its app's server first, in the background (its
-`server.sh`, nix's build of the server: the cache's, or built while the
-rest goes on), under whatever is slow anyway: the app's build on the
-iPhone and the desktop, the system image and the emulator's boot on
-Android.
+On Android and the desktop each app is a job of its own, so the apps are
+taken at once. The iPhone's are one job, on one Mac, the scarce runner:
+one Xcode selected, one nix installed, one simulator booted, every app
+built and every server started under the boot, then each app taken on it
+in turn, the driver built once (`apps-ios.sh`). One that fails is said,
+the others still taken and kept, and the job fails at its end. Each job
+starts its apps' servers first, in the background (each `server.sh`,
+nix's build of the server: the cache's, or built while the rest goes on),
+under whatever is slow anyway: the apps' build on the iPhone and the
+desktop, the system image and the emulator's boot on Android.
+
+**An iPhone app whose shots would be the same is not taken.** What they
+are taken from is hashed on Linux, before any Mac is asked for
+(`ios-inputs.sh`, in `which`): the app's `<app>-ios-simulator` store path,
+evaluated at the commit and not built (it moves only with what it is built
+from), the packages its `server.sh` builds, its `screens/`, its sign-in's
+picture, and the iPhone's scripts here. Each app taken whole keeps the hash
+beside its shots, `<app>/ios/inputs`; the next run with the same one, on
+main against what is published, on a PR against its own last shots or
+else main's (shown as "not rebuilt"), passes it over, and when it passes
+over every app no Mac starts. Android has the same from `build`, which
+builds an APK only when its inputs moved.
+
+**A PR merged or closed** is taken nothing of: `which` asks whether it is
+still open, and the iPhone's job asks again as it starts (it may have
+waited an hour for a Mac), then does nothing, and nothing is compared.
 
 - **On main**: Android once `build` has ended and its deploy has
   succeeded, from that run's APKs: an APK is there only when its inputs
   moved and it went to F-Droid. The iPhone as soon as `ios` has started,
-  every app built by nix at that commit, an unchanged one the cache's. The
+  each app whose hash moved built by nix at that commit, the cache's if
+  its build has not. The
   desktop as soon as `build` has started, the same way: every window built
   by nix at that commit (build.yaml's own build of it fills the cache).
   Each phone taken whole replaces what the `screens` branch had at
@@ -199,9 +222,13 @@ Android.
 - **When only the screenshots' scripts change** (`.github/screens/`, an
   app's `screens/`, the workflow) on main, every app is taken again: each
   APK as the F-Droid repository's index offers it (`published.sh`), and
-  each iPhone app and desktop window as nix builds main, which, as its
-  inputs have not moved, is the cache's. Running the workflow by hand does
-  the same.
+  each desktop window as nix builds main, which, as its inputs have not
+  moved, is the cache's; each iPhone app whose hash moved (a change to
+  Android's scripts moves none). Running the workflow by hand does the
+  same, every iPhone app included. Run by hand with a PR's number (`pr`),
+  it takes that PR's iPhone shots at its head, of each app whose hash
+  moved, and updates its comment: after a Mac's run failed, or to try the
+  workflow as a branch has it.
 
 ## The desktop
 

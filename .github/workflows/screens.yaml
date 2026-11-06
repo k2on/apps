@@ -62,7 +62,58 @@ env:
   SLOW: "8"
 
 jobs:
+  # Which phone what moved is for: a Mac is the scarce runner, and a change
+  # only to the Kotlin needs none, as one only to the Swift needs no
+  # emulator. The `paths` above say whether either does; this, of the files
+  # that moved (a PR's against its base, a push's since the commit before
+  # it), which: each phone's own showcase, components and scripts are its
+  # own, and what both are taken from (components.rs, the encoder, the
+  # tools, the manifest, this file, the rest of showcase/) is both's. By
+  # hand, or when what moved cannot be said, both. Plain git, no action.
+  paths:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.paths.outputs.android }}
+      ios: ${{ steps.paths.outputs.ios }}
+    steps:
+      # A PR's merge commit and its base (the first parent); a push's own.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: paths
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          android=false ios=false
+          both() { android=true ios=true; }
+          base=
+          case $GITHUB_EVENT_NAME in
+            pull_request) base=HEAD^1 ;;
+            push) if [ -n "$BEFORE" ] && [ "${BEFORE//0/}" != "" ] && git fetch -q --depth 1 origin "$BEFORE"; then base=$BEFORE; fi ;;
+          esac
+          if [ -z "$base" ] || ! changed=$(git diff --name-only "$base" HEAD); then
+            echo "$GITHUB_EVENT_NAME: both phones"
+            both
+          else
+            while read -r f; do
+              case $f in
+                showcase/android/* | kotlin/arkui/* | .github/screens/android.sh)
+                  echo "android: $f"; android=true ;;
+                showcase/ios/* | swift/ArkUI/* | .github/screens/ios.sh | .github/screens/ios-tools.sh | \
+                  .github/screens/record.swift | .github/screens/timewarp.c | .github/screens/bundle.sh)
+                  echo "ios: $f"; ios=true ;;
+                showcase/* | docs/site/src/components.rs | .github/screens/encode.sh | .github/screens/tools.sh | \
+                  .github/screens/manifest.py | .github/workflows/screens.yaml)
+                  echo "both: $f"; both ;;
+              esac
+            done <<< "$changed"
+          fi
+          { echo "android=$android"; echo "ios=$ios"; } | tee -a "$GITHUB_OUTPUT"
+
   android:
+    needs: paths
+    if: needs.paths.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -162,6 +213,8 @@ jobs:
   # little and failed more often; dark is taken on the simulator light has
   # warmed.
   ios:
+    needs: paths
+    if: needs.paths.outputs.ios == 'true'
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -266,10 +319,11 @@ jobs:
         run: bash .github/screens/tools.sh push
 
   # The branch, one commit: what it had, each phone's theme that captured
-  # this run replaced, and the manifest written over all of it.
+  # this run replaced, and the manifest written over all of it. Only when a
+  # phone was taken: one passed over (`paths`) keeps what it had.
   publish:
     needs: [android, ios]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && contains(needs.*.result, 'success') }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with app-screens.yaml's publish,
     # whose apps/ this keeps.
