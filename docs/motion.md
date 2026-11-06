@@ -351,29 +351,6 @@ stays at that end and shortens as if the band were more content
 (`scroll::thumb`). None of it touches the scroll offset the keys, the
 scroll edge and the small header read.
 
-**In a browser, the browser can scroll the main list** (`?scroll=native`;
-`?scroll=arkui` or no parameter is everything above, unchanged, and the
-desktop never changes). A `wheel` event has no phase, so above, a lift in a
-browser is a guess from stillness; the browser knows, so this hands it the
-page's main list (`arkui::native`). The canvas sits `position: sticky` in a
-window-sized `overflow: auto` scroller over a spacer as tall as the list
-scrolls, its native scrollbar hidden (arkui still draws its own thumb), and
-a wheel over the list is let through to the scroller rather than cancelled,
-so the browser scrolls and coasts it as its platform does. Each frame,
-before drawing, the list is put where the scroller is, and a list iced
-moved (a key, `scroll::follow`, `reveal`, `centre`, its scrollbar) moves the
-scroller with it. The main list is the largest `elastic` drawn; every other
-one, a scrollable inside it, and the wheel over anything else stay arkui's
-as above. The band stays too, on the same tokens: a browser coast that
-reaches an end still moving (its speed read from the scroller's moves with
-`velocity::Velocity`, at least `COAST_MIN`) carries on into the band and
-springs back on `scroll::BACK`; a pull past an end with the fingers down, or
-any wheel while a band shows, is kept from the browser and fed to the band
-as before, its lift still guessed by stillness. A drag that reaches an end
-under the fingers bands only as they pull on, not by its speed, and a wheel
-that turns in lines never bands. No token of its own: it reads the ones
-above.
-
 **Cap the settle.** However slow and far the release, the settle is done
 within `CAP_MS`: Compose's `Capped` cuts a spring's tail that the tuning did
 not see. The cap is long enough that a critically damped settle lands by
