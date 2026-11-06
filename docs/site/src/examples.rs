@@ -251,9 +251,9 @@ pub fn answers(component: &str) -> Vec<Answers> {
         "text" => vec![Answers {
             caption: "arkui::format",
             rows: vec![
-                ("clock(261.0)".into(), format::clock(261.0)),
-                ("clock(3725.0)".into(), format::clock(3725.0)),
-                ("spell(3_725_000)".into(), format::spell(3_725_000)),
+                ("clock_secs(261.0)".into(), format::clock_secs(261.0)),
+                ("clock_secs(3725.0)".into(), format::clock_secs(3725.0)),
+                ("length(3_725_000)".into(), format::length(3_725_000)),
                 ("plural(1, \"place\")".into(), format::plural(1, "place")),
                 ("plural(12, \"place\")".into(), format::plural(12, "place")),
                 ("span(1685, 1750)".into(), format::span(1685, 1750)),

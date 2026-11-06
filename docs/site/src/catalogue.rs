@@ -95,8 +95,8 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "format",
         name: "Format",
-        summary: "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
-        api: &["clock(secs)", "spell(ms)", "plural(n, word)", "span(born, died)", "day(ms, now)"],
+        summary: "Words for numbers: a clock, a length, a plural, a span of time, a day.",
+        api: &["clock(ms)", "clock_secs(secs)", "length(ms)", "plural(n, word)", "span(born, died)", "published(ms, now, offset)"],
         rules: &["A length past an hour is h:mm:ss."],
     },
     Entry {
