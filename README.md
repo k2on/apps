@@ -120,3 +120,39 @@ been opened, the browser build has not been drawn on v5, the APK has not
 been installed on a phone, and the iOS app has not been built (it needs a
 Mac; its Swift is type-checked only). Each app's `README.md` says where
 the seen part ends.
+
+## The desktop window and the GPU
+
+`nix run .#money-iced` (and `harken-iced`) says on stderr, first thing,
+what it will draw with: `renderer: wgpu (Vulkan, Apple M2 (G14G), integrated
+GPU)`, or `renderer: tiny-skia (CPU) — no GPU adapter: <why>`, the why being
+what refused iced's device or which driver library would not load and what
+the dynamic loader said. Settings says the same under "Display". iced
+otherwise falls back to the CPU without a word (`rust/arkui/src/renderer.rs`).
+`ARK_RENDERER=cpu` draws on the CPU; `ARK_RENDERER=gpu` refuses to, and the
+window does not open without a device.
+
+What is automatic and what is not:
+
+- **NixOS, any GPU Mesa or NVIDIA drives, Asahi's on Apple silicon
+  included: automatic.** The launcher (`nix/gpu-env.sh`, run at each start,
+  and sourced by the dev shells) puts the host's own libwayland and X
+  libraries — the ones `/run/opengl-driver`'s driver was linked against,
+  asked of the driver with `ldd` — and then `/run/opengl-driver/lib` ahead
+  of the flake's libraries. The flake's loaders find the drivers in
+  `/run/opengl-driver/share` themselves. Before, the flake's older wayland
+  shadowed the host's, every Mesa driver failed to load (`undefined symbol:
+  wl_fixes_interface`), and the window drew on the CPU. On Asahi wgpu tries
+  Vulkan (Honeykrisp, `asahi_icd`) and, if that will not give iced its
+  device, GL through EGL on the same GPU, before the CPU.
+- **Another distribution: not automatic.** The flake's loaders find the
+  host's driver manifests (`/usr/share/vulkan/icd.d`, `/etc/vulkan/icd.d`,
+  glvnd's `egl_vendor.d`), but the drivers they name are built against the
+  host's C library and libraries, which a program from nixpkgs generally
+  cannot load, so expect `tiny-skia` and the loader's reason. Run it under
+  [nixGL](https://github.com/nix-community/nixGL), which supplies a Mesa (or
+  NVIDIA) userspace from nixpkgs:
+
+      nix run --impure github:nix-community/nixGL -- nix run .#money-iced
+      # Vulkan only, Intel or AMD:
+      nix run --impure github:nix-community/nixGL#nixVulkanIntel -- nix run .#money-iced

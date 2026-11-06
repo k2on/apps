@@ -190,6 +190,9 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Field<'_, M> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        // The root is drawn every frame by whichever renderer iced settled
+        // on, so this is where that is known for certain (`crate::renderer`).
+        crate::renderer::drawn_with(renderer);
         self.content.as_widget().draw(tree, renderer, theme, style, layout, cursor, viewport);
     }
 

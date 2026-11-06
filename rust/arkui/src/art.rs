@@ -77,13 +77,20 @@ pub fn square<'a, M: 'a>(seed: &str, size: f32, corner: f32) -> Element<'a, M> {
 /// rather than letterboxed — a photograph of a person is not square, and a
 /// grid with grey bars down the sides of half its cards looks broken.
 pub fn picture<'a, M: 'a>(seed: &str, handle: Option<&image::Handle>, side: f32, corner: f32) -> Element<'a, M> {
+    // A person — half the side a corner — is made round in the picture's
+    // pixels (`images::round`), so it is a circle on every renderer; a
+    // record keeps the renderer's rounded corner.
+    let person = corner * 2.0 >= side - 0.5;
     let drawn: Element<'a, M> = match handle {
-        Some(handle) => image(handle.clone())
-            .width(Length::Fixed(side))
-            .height(Length::Fixed(side))
-            .content_fit(ContentFit::Cover)
-            .border_radius(corner)
-            .into(),
+        Some(handle) => image(match person {
+            true => crate::images::round(handle, side),
+            false => handle.clone(),
+        })
+        .width(Length::Fixed(side))
+        .height(Length::Fixed(side))
+        .content_fit(ContentFit::Cover)
+        .border_radius(corner)
+        .into(),
         None => square(seed, side, corner),
     };
     // A hairline over its edge (`style::outline`), the same round.

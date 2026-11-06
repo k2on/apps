@@ -507,6 +507,8 @@ impl App {
             }),
             hero::heading("Library"),
             container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
+            hero::heading("Display"),
+            container(arkui::renderer::about()).padding(Padding { top: 8.0, ..Padding::ZERO }),
         ]
         .width(Length::Fill);
         self.scrolled(None, page)

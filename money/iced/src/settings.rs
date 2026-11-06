@@ -97,6 +97,8 @@ impl App {
             self.costco_section(),
             hero::heading("Account"),
             account,
+            hero::heading("Display"),
+            arkui::renderer::about(),
         ]
         .width(Length::Fill);
         arkui::scroll::elastic(

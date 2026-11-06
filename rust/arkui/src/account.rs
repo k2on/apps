@@ -142,7 +142,9 @@ pub fn origin(right: f32, bottom: f32, window: Size, width: f32, rows: usize) ->
 /// whichever reads on it; else (nobody) a figure on the bar's own grey.
 pub fn face<'a, M: 'a>(who: Option<&Who>, picture: Option<&image::Handle>, side: f32) -> Element<'a, M> {
     if let Some(p) = picture {
-        return image(p.clone())
+        // Round in its pixels (`images::round`), so on tiny-skia too, which
+        // draws an image's `border_radius` square.
+        return image(crate::images::round(p, side))
             .width(Length::Fixed(side))
             .height(Length::Fixed(side))
             .content_fit(ContentFit::Cover)

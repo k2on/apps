@@ -120,6 +120,129 @@ impl Images {
     }
 }
 
+/// How many pixels a face ([`round`]) is kept at for each point it is
+/// drawn across: a HiDPI screen's two, which a 1× screen draws by
+/// averaging and a 1.5× one by filtering down. Sharper than that is past
+/// what a 28-point button shows.
+pub const DENSITY: f32 = 2.0;
+
+/// The most faces [`round`] remembers before it starts again: a page of
+/// people, at the few sizes they are drawn, many times over.
+const ROUND_KEPT: usize = 1024;
+
+/// Every face [`round`] has made, by picture and pixel size.
+static ROUNDED: std::sync::Mutex<Option<HashMap<(iced::advanced::image::Id, u32), image::Handle>>> = std::sync::Mutex::new(None);
+
+/// `picture` as a face `side` points across, made round in its pixels: the
+/// middle square cut out (what `ContentFit::Cover` shows), resampled to
+/// `side` × [`DENSITY`] pixels, and everything outside the circle in it
+/// made transparent, the edge anti-aliased.
+///
+/// **In the pixels, because the renderer cannot be trusted with it.** An
+/// image's `border_radius` is wgpu's alone: tiny-skia, which iced draws with
+/// when wgpu opens no device (`crate::renderer`), draws the picture whole,
+/// so a face was a square on exactly the machines that also had no GPU. A
+/// circle that is in the picture is a circle on every renderer; the
+/// widget's `border_radius` stays, and on wgpu agrees with it.
+///
+/// Made once for each picture and size and remembered, so the frames after
+/// the first hand over the same handle: the atlas keeps one texture and a
+/// page of faces costs its resampling once. A handle that is not decoded
+/// pixels — encoded bytes, a path — comes back as it is.
+pub fn round(picture: &image::Handle, side: f32) -> image::Handle {
+    let image::Handle::Rgba { width, height, pixels, .. } = picture else {
+        return picture.clone();
+    };
+    let out = ((side * DENSITY).round() as u32).max(1);
+    let key = (picture.id(), out);
+    let mut kept = ROUNDED.lock().unwrap_or_else(|e| e.into_inner());
+    let kept = kept.get_or_insert_with(HashMap::new);
+    if let Some(done) = kept.get(&key) {
+        return done.clone();
+    }
+    if kept.len() >= ROUND_KEPT {
+        kept.clear();
+    }
+    let done = image::Handle::from_rgba(out, out, circle(pixels, *width, *height, out));
+    kept.insert(key, done.clone());
+    done
+}
+
+/// The middle square of an RGBA picture `width` × `height`, resampled to
+/// `out` × `out` and masked to the circle inscribed in it: four bytes a
+/// pixel, unpremultiplied, as `Handle::from_rgba` takes them.
+///
+/// Each pixel out is the average of up to 8 × 8 bilinear samples across
+/// the part of the picture it covers — a box filter, so a 384-pixel
+/// portrait shrunk to a 56-pixel button keeps its face rather than every
+/// seventh pixel of it. Averaged premultiplied, so a transparent pixel's
+/// colour does not bleed in. The mask is the circle's coverage of each
+/// pixel, from the distance of its centre to the rim: 1 inside, 0 outside,
+/// and the pixel the rim crosses in between.
+pub fn circle(pixels: &[u8], width: u32, height: u32, out: u32) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let mut rgba = vec![0u8; out as usize * out as usize * 4];
+    if w == 0 || h == 0 || pixels.len() < w * h * 4 {
+        return rgba;
+    }
+    let side = w.min(h) as f32;
+    let (x0, y0) = ((w as f32 - side) / 2.0, (h as f32 - side) / 2.0);
+    let step = side / out as f32;
+    let taps = (step.ceil() as usize).clamp(1, 8);
+    // One sample, premultiplied, at a point in the picture's pixels.
+    let at = |x: f32, y: f32| -> [f32; 4] {
+        let x = (x - 0.5).clamp(0.0, (w - 1) as f32);
+        let y = (y - 0.5).clamp(0.0, (h - 1) as f32);
+        let (xi, yi) = (x.floor() as usize, y.floor() as usize);
+        let (xj, yj) = ((xi + 1).min(w - 1), (yi + 1).min(h - 1));
+        let (fx, fy) = (x - xi as f32, y - yi as f32);
+        let px = |x: usize, y: usize| {
+            let i = (y * w + x) * 4;
+            let a = pixels[i + 3] as f32 / 255.0;
+            [pixels[i] as f32 * a, pixels[i + 1] as f32 * a, pixels[i + 2] as f32 * a, a]
+        };
+        let (p00, p10, p01, p11) = (px(xi, yi), px(xj, yi), px(xi, yj), px(xj, yj));
+        let mut s = [0.0; 4];
+        for c in 0..4 {
+            let top = p00[c] + (p10[c] - p00[c]) * fx;
+            let bottom = p01[c] + (p11[c] - p01[c]) * fx;
+            s[c] = top + (bottom - top) * fy;
+        }
+        s
+    };
+    let r = out as f32 / 2.0;
+    for j in 0..out as usize {
+        for i in 0..out as usize {
+            let d = ((i as f32 + 0.5 - r).powi(2) + (j as f32 + 0.5 - r).powi(2)).sqrt();
+            let cover = (r - d + 0.5).clamp(0.0, 1.0);
+            if cover == 0.0 {
+                continue;
+            }
+            let mut sum = [0.0f32; 4];
+            for ty in 0..taps {
+                for tx in 0..taps {
+                    let x = x0 + (i as f32 + (tx as f32 + 0.5) / taps as f32) * step;
+                    let y = y0 + (j as f32 + (ty as f32 + 0.5) / taps as f32) * step;
+                    let s = at(x, y);
+                    for c in 0..4 {
+                        sum[c] += s[c];
+                    }
+                }
+            }
+            let n = (taps * taps) as f32;
+            let a = sum[3] / n;
+            let o = (j * out as usize + i) * 4;
+            if a > 0.0 {
+                for c in 0..3 {
+                    rgba[o + c] = (sum[c] / n / a).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+            rgba[o + 3] = (a * cover * 255.0).round() as u8;
+        }
+    }
+    rgba
+}
+
 /// A decoded picture, at most the bound on its longest side.
 #[derive(Clone)]
 pub struct Rgba {
@@ -359,6 +482,57 @@ mod tests {
         // Aspect kept: 960/1262 at a 384 bound is 292×384.
         assert_eq!((out.width, out.height), (292, 384));
         assert_eq!(out.pixels.len(), 292 * 384 * 4);
+    }
+
+    /// A face's corners are transparent and its middle is the picture,
+    /// opaque, with the rim between anti-aliased — on any renderer, because
+    /// it is in the pixels. Falsified by a hard mask (no pixel between 0
+    /// and 255 on the rim) or by none (opaque corners).
+    #[test]
+    fn a_face_is_a_circle_in_its_pixels() {
+        // Not square, so the crop is exercised: 120 × 80, red, opaque.
+        let (w, h) = (120u32, 80u32);
+        let pixels: Vec<u8> = (0..w * h).flat_map(|_| [200u8, 30, 30, 255]).collect();
+        let out = 56u32;
+        let face = super::circle(&pixels, w, h, out);
+        assert_eq!(face.len(), (out * out * 4) as usize);
+        let alpha = |x: u32, y: u32| face[((y * out + x) * 4 + 3) as usize];
+        for (x, y) in [(0, 0), (out - 1, 0), (0, out - 1), (out - 1, out - 1), (4, 4)] {
+            assert_eq!(alpha(x, y), 0, "corner ({x}, {y}) is drawn");
+        }
+        assert_eq!(alpha(out / 2, out / 2), 255, "the middle is not opaque");
+        let middle = ((out / 2 * out + out / 2) * 4) as usize;
+        assert_eq!(&face[middle..middle + 3], &[200, 30, 30], "the middle is not the picture");
+        // The middle row reaches the edge: the circle is inscribed.
+        assert!(alpha(0, out / 2) > 200, "the circle does not reach the edge");
+        // Along the diagonal, from the corner in: transparent, then
+        // something between, then opaque, never back.
+        let diagonal: Vec<u8> = (0..out / 2).map(|k| alpha(k, k)).collect();
+        assert_eq!(diagonal[0], 0, "{diagonal:?}");
+        assert!(diagonal.iter().any(|a| *a > 0 && *a < 255), "the rim is not anti-aliased: {diagonal:?}");
+        assert!(diagonal.windows(2).all(|p| p[0] <= p[1]), "the rim is not monotone: {diagonal:?}");
+        // And round: half covered where a circle's rim crosses the
+        // diagonal, r(1 - 1/sqrt 2) in from the corner, to a pixel.
+        let half = diagonal.iter().position(|a| *a >= 128).unwrap() as f32;
+        let r = out as f32 / 2.0;
+        let rim = r - r / std::f32::consts::SQRT_2;
+        assert!((half - rim).abs() <= 1.0, "half covered at {half}, the rim is at {rim}");
+    }
+
+    /// The same picture at the same size is the same handle, so the atlas
+    /// keeps one texture; another size is another. Falsified by dropping
+    /// the cache.
+    #[test]
+    fn a_face_is_made_once() {
+        let picture = iced::widget::image::Handle::from_rgba(4, 4, vec![255u8; 64]);
+        let a = super::round(&picture, 28.0);
+        let b = super::round(&picture, 28.0);
+        assert_eq!(a.id(), b.id());
+        assert_ne!(a.id(), super::round(&picture, 116.0).id());
+        let iced::widget::image::Handle::Rgba { width, height, .. } = a else {
+            panic!("not pixels")
+        };
+        assert_eq!((width, height), (56, 56));
     }
 
     /// Anything already inside the bound is left exactly as it is — a
