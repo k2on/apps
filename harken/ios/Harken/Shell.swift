@@ -63,7 +63,8 @@ struct Shell: View {
         }
     }
 
-    /// A tab's stack: its root, every page it can open, and the account at the top right.
+    /// A tab's stack: its root, and every page it can open. The account is
+    /// the root's own, at the end of its large title (`largeTitleBar`).
     private func stack<Root: View>(_ t: Pane, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: path(t)) {
             root()
@@ -71,10 +72,6 @@ struct Shell: View {
                 // with the mini player, fades into them softly, the system's
                 // own edge, on every scroll view of the tab.
                 .scrollEdges()
-                .toolbar {
-                    // The face where money's is: on the bar's glass at the top left.
-                    ToolbarItem(placement: .topBarLeading) { AccountButton() }
-                }
                 .navigationDestination(for: Route.self) { r in
                     Destination(route: r).zoomed(r, zoom).scrollEdges()
                 }

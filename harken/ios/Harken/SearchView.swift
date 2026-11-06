@@ -14,10 +14,14 @@ let searchSongs = 50
 struct SearchView: View {
     @EnvironmentObject private var model: Model
     @Environment(\.open) private var open
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
 
     var body: some View {
         let needle = Binding(get: { model.needle }, set: { model.searchFor($0) })
         List {
+            // The large title, the account's face at the end of its line.
+            LargeTitleRow("Search", fold: $fold) { AccountButton() }
             if let host = model.unreachable { Offline(host: host).listRowInsets(EdgeInsets()).listRowSeparator(.hidden) }
             if model.needle.trimmingCharacters(in: .whitespaces).isEmpty {
                 recent
@@ -27,7 +31,7 @@ struct SearchView: View {
         }
         .listStyle(.plain)
         .scrollEdges()
-        .navigationTitle("Search")
+        .largeTitleBar("Search", fold: fold)
         .searchable(text: needle, prompt: "Songs, albums, artists")
         .onSubmit(of: .search) { model.searched(model.needle) }
         // The covers of an answer that just arrived decoded before its rows ask.

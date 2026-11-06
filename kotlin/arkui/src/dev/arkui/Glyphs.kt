@@ -1,5 +1,6 @@
 // The few drawings this library's own pieces draw — a row's menu, the
-// chevron at a row's end, a page's way back, a volume's mute — as `rust/arkui`'s Lucide
+// chevron at a row's end, a page's way back, a volume's mute, the account
+// sheet's rows — as `rust/arkui`'s Lucide
 // glyphs (ISC; the licence is `rust/arkui/src/LICENSE.lucide`): the same
 // paths, stroked two units wide with butt caps and miter joins, so one
 // menu button is one shape on every client. Every other glyph is the
@@ -66,4 +67,30 @@ public object ArkGlyphs {
 
     /** A volume muted: the loudspeaker struck through (`volume-x`). */
     public val Muted: ImageVector = glyph("volume-x", CONE, "M22 9l-6 6", "M16 9l6 6")
+
+    /** Settings: a cog (`settings`). */
+    public val Settings: ImageVector =
+        glyph(
+            "settings",
+            "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+            circle(12f, 12f, 3f),
+        )
+
+    /** Signing out: out of a door (`log-out`). */
+    public val SignOut: ImageVector = glyph("log-out", "m16 17 5-5-5-5", "M21 12H9", "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4")
+
+    /** The server answers: a cloud (`cloud`). */
+    public val Linked: ImageVector = glyph("cloud", "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z")
+
+    /** The server does not answer: the cloud struck through (`cloud-off`). */
+    public val Unlinked: ImageVector =
+        glyph(
+            "cloud-off",
+            "m2 2 20 20",
+            "M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193",
+            "M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07",
+        )
+
+    /** Something wants a look: a circle with a mark (`circle-alert`). */
+    public val Attention: ImageVector = glyph("circle-alert", circle(12f, 12f, 10f), "M12 8v4", "M12 16h.01")
 }

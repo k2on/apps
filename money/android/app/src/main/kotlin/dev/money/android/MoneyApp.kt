@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Badge
@@ -55,6 +57,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +74,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
+import dev.arkui.AccountFace
+import dev.arkui.AccountGroup
+import dev.arkui.AccountRow
+import dev.arkui.AccountSheet
+import dev.arkui.ArkGlyphs
+import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
@@ -93,6 +105,8 @@ class Shell(
     val onSettings: () -> Unit,
     val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
+    /** The account sheet: what the face at the end of a tab's title raises. */
+    val onAccountSheet: () -> Unit = {},
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
@@ -104,6 +118,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var form by remember { mutableStateOf<TxnForm?>(null) }
+    var account by remember { mutableStateOf(false) }
     LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
     // What the hand feels of a change the book has taken, on the frame it shows: the iPhone's
     // `.sensoryFeedback` on the same events (`Book.felt`).
@@ -129,6 +144,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
+                onAccountSheet = { account = true },
             )
         }
 
@@ -187,6 +203,41 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
             }
         }
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }
+        if (account) AccountOf(ledger, shell, onDismiss = { account = false })
+    }
+}
+
+/**
+ * The account sheet: who is using the budget, the server and whether it answers, the banks that
+ * want somebody in Settings, Settings, and the way out — arkui's, as harken's is.
+ */
+@Composable
+private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
+    AccountSheet(
+        name = ledger.who,
+        picture = ledger.picture,
+        detail = if (ledger.demo) "The demo household, on this phone only" else "",
+        server = if (ledger.demo) null else ledger.server.substringAfter("://"),
+        linked = ledger.link.linked,
+        onSettings = shell.onSettings,
+        onSignOut = shell.onSignOut,
+        onDismiss = onDismiss,
+        signOut = if (ledger.demo) "Leave the Demo" else "Sign Out",
+    ) { leave ->
+        val wanting = ledger.banksWanting
+        if (wanting > 0) {
+            AccountGroup {
+                val red = MaterialTheme.colorScheme.error
+                AccountRow(
+                    ArkGlyphs.Attention,
+                    if (wanting == 1) "A Bank Needs a Look" else "$wanting Banks Need a Look",
+                    onClick = { leave(shell.onSettings) },
+                    under = "In Settings, under Banks",
+                    tint = red,
+                    chevron = true,
+                )
+            }
+        }
     }
 }
 
@@ -261,6 +312,12 @@ fun bankSaid(t: TxnLine): String {
  * A page as every screen here is laid out: a large top app bar that collapses as the content
  * scrolls, its `actions`, a back arrow when `onBack` is given, the FAB, the snackbar, and pull to
  * refresh asking the bank for anything new. `content` gets the padding to keep clear of the bar.
+ * A tab's root (no `onBack`) has arkui's [TabTitle] instead of the app bar — the one large title row
+ * harken's tabs have too, from the status bar's foot, with no padding of money's own — its
+ * `actions` (Budget's menu) and the account's face at the end of its line, raising the account
+ * sheet. It goes up with the page as the content scrolls, as harken's and the iPhone's do, and
+ * comes back once the content is back at its top; a page pushed over a tab has the large top app
+ * bar, and no face.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -284,21 +341,47 @@ fun Page(
             if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
-            // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
-            LargeTitles {
-                LargeTopAppBar(
-                    title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    navigationIcon = {
-                        if (onBack != null) {
+            if (onBack == null) {
+                // The tab's large title row, from the status bar's foot, going up under it as the
+                // page scrolls: the scroll behaviour's offset, read as it is laid out, not composed.
+                Box(
+                    Modifier.windowInsetsPadding(WindowInsets.statusBars).clipToBounds().layout { m, c ->
+                        val p = m.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                        val limit = -p.height.toFloat()
+                        if (bar.state.heightOffsetLimit != limit) bar.state.heightOffsetLimit = limit
+                        val off = bar.state.heightOffset.roundToInt().coerceIn(-p.height, 0)
+                        layout(p.width, p.height + off) { p.place(0, off) }
+                    }
+                ) {
+                    TabTitle(
+                        title,
+                        account = {
+                            val wanting = ledger.banksWanting
+                            AccountFace(
+                                ledger.who,
+                                ledger.picture,
+                                onClick = shell.onAccountSheet,
+                                attention = if (wanting > 0) "Banks need a look" else null,
+                            )
+                        },
+                        actions = actions,
+                    )
+                }
+            } else {
+                // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
+                LargeTitles {
+                    LargeTopAppBar(
+                        title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = {
                             IconButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                             }
-                        }
-                    },
-                    actions = actions,
-                    scrollBehavior = bar,
-                    colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
-                )
+                        },
+                        actions = actions,
+                        scrollBehavior = bar,
+                        colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    )
+                }
             }
         },
         floatingActionButton = fab,

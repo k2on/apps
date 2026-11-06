@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import dev.arkui.AccountFace
 import dev.arkui.Cover
 import dev.arkui.CoverCard
 import dev.arkui.Empty
@@ -74,12 +75,14 @@ fun SearchScreen(
     playing: String?,
     offline: String?,
     act: Do,
+    /** Who is signed in: the face at the end of the title, which raises the account sheet. */
+    who: Who = Who(""),
 ) {
     Recompositions.hit("SearchScreen")
     val list = rememberDestinationListState("search")
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
-        item { TabTitle("Search") }
+        item { TabTitle("Search", account = { AccountFace(who.name, who.picture, onClick = act::account) }) }
         item {
             OutlinedTextField(
                 value = needle,

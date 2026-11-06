@@ -1,13 +1,13 @@
 // Who is signed in, as a face: their initials on the accent, and their
 // picture over them once it has arrived. One face for every app — money's
-// account button and harken's draw this, the same size in the same place —
+// account face and harken's draw this, the same size in the same place —
 // so a person looks the same whichever app they opened. `AsyncImage` fetches
 // the picture (`Pictures.url`, the server's `/auth/picture`) through the
 // shared URL cache, which keeps it the day the server says; it answers
 // anybody, so no login goes with it.
 import SwiftUI
 
-/// How large an account button's face is: the toolbar's, in every app.
+/// How large the account's face is, at the end of a tab's title, in every app.
 public let faceSide: CGFloat = 32
 
 /// Who is signed in, round, `side` across: their picture (`picture`, a

@@ -531,20 +531,49 @@ struct Fetching: View {
     }
 }
 
-/// The account at the top left of every tab, as money has it: who is
-/// listening, as their face, opening Settings — who they are, whether the
-/// link is up, and the way out. Nobody goes offline by hand: the phone does
-/// by itself when the server cannot be reached, and says so.
+/// The account at the end of every tab's large title (ArkUI's `AccountFace`,
+/// on the title's own line by `largeTitleBar`): who is listening, as their
+/// face, raising the account sheet — who they are, whether the link is up,
+/// Settings and the way out. Settings is the page it always was, pushed on
+/// the tab once the sheet has gone. Nobody goes offline by hand: the phone
+/// does by itself when the server cannot be reached, and says so.
 struct AccountButton: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.open) private var open
+    @State private var showing = false
+    /// What the sheet's row asked for, done once the sheet has gone.
+    @State private var then: Then? = nil
+
+    private enum Then { case settings, signOut }
 
     var body: some View {
-        let who = model.login.map(Logins.name) ?? "?"
-        NavigationLink(value: Route.settings) {
-            Face(name: who, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "")
+        let who = model.login.map(Logins.name) ?? ""
+        let picture = model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? ""
+        AccountFace(name: who, picture: picture) { showing = true }
+            .sheet(isPresented: $showing, onDismiss: after) {
+                AccountSheet(name: who, picture: picture,
+                             detail: model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "",
+                             server: Probe.display(model.server),
+                             linked: model.snapshot.status.map { $0.linked },
+                             onSettings: { leave(.settings) },
+                             onSignOut: { leave(.signOut) })
+                    .presentationDetents([.medium, .large])
+            }
+    }
+
+    private func leave(_ t: Then) {
+        then = t
+        showing = false
+    }
+
+    private func after() {
+        let t = then
+        then = nil
+        switch t {
+        case .settings?: open(.settings)
+        case .signOut?: model.signOut()
+        case nil: break
         }
-        .accessibilityLabel("Signed in as \(who)")
-        .accessibilityHint("Account and settings")
     }
 }
 

@@ -250,16 +250,18 @@ jobs:
         run: bash .github/screens/meanwhile.sh start recorder bash .github/screens/ios-tools.sh "$RUNNER_TEMP/recorder"
 
       # The tools as one folder needing no Nix (bundle.sh), from GitHub's
-      # cache while the flake is unchanged: Nix's install on macOS (its
-      # volume, then the store) takes three minutes or more. Only when the
-      # flake has moved is Nix installed, the tools taken from it, and the
-      # folder made and kept again.
+      # cache while what they are built from is unchanged: Nix's install on
+      # macOS (its volume, then the store) takes three minutes or more. Only
+      # when that has moved is Nix installed, the tools taken from it, and
+      # the folder made and kept again. Keyed on the tools' own file
+      # (nix/screens-tools.nix) and the lock, not all of flake.nix, which
+      # moves for every app's reason (it missed two runs in three).
       - name: Tools, from GitHub's cache
         id: tools
         uses: actions/cache@v4
         with:
           path: ~/screens-tools
-          key: screens-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', '.github/screens/bundle.sh') }}
+          key: screens-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('nix/screens-tools.nix', 'flake.lock', '.github/screens/bundle.sh') }}
 
       - if: steps.tools.outputs.cache-hit != 'true'
         uses: cachix/install-nix-action@v31

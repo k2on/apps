@@ -61,11 +61,21 @@ private struct PresentKey: EnvironmentKey {
     static let defaultValue: (Sheet) -> Void = { _ in }
 }
 
+private struct OpenKey: EnvironmentKey {
+    static let defaultValue: (Route) -> Void = { _ in }
+}
+
 extension EnvironmentValues {
     /// Raise a sheet over the app.
     var present: (Sheet) -> Void {
         get { self[PresentKey.self] }
         set { self[PresentKey.self] = newValue }
+    }
+
+    /// Push a page onto the tab's own stack: what the account sheet's rows open, once it has gone.
+    var open: (Route) -> Void {
+        get { self[OpenKey.self] }
+        set { self[OpenKey.self] = newValue }
     }
 }
 
@@ -131,6 +141,7 @@ struct Shell: View {
                     }
                 }
         }
+        .environment(\.open) { r in paths[t, default: NavigationPath()].append(r) }
     }
 
     @ViewBuilder private func sheetView(_ s: Sheet) -> some View {
@@ -147,26 +158,67 @@ struct Shell: View {
     }
 }
 
-/// The toolbar's account button: who is using the budget, as their face,
-/// opening Settings — where they are, and the way out — marked when a bank
-/// wants somebody there.
+/// The account at the end of every tab's large title (ArkUI's `AccountFace`,
+/// on the title's own line by `largeTitleBar`): who is using the budget, as
+/// their face, marked while a bank wants somebody there, raising the account
+/// sheet — who and where they are, the banks that want a look, Settings, and
+/// the way out. What its rows open is pushed on the tab once it has gone.
 struct AccountButton: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.open) private var open
+    @State private var showing = false
+    /// What the sheet's row asked for, done once the sheet has gone.
+    @State private var then: Then? = nil
+
+    private enum Then { case page(Route), signOut }
 
     var body: some View {
         let wanting = Banks.wanting(model.snapshot.banks)
-        let who = model.who.isEmpty ? "?" : model.who
-        NavigationLink(value: Route.settings) {
-            Face(name: who, picture: model.picture)
-                .overlay(alignment: .topTrailing) {
+        AccountFace(name: model.who, picture: model.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
+            .sheet(isPresented: $showing, onDismiss: after) {
+                AccountSheet(name: model.who, picture: model.picture,
+                             detail: model.isDemo ? "The demo's household, on this phone alone" : model.login.map { $0.email.isEmpty ? $0.user : $0.email } ?? "",
+                             server: model.isDemo ? nil : Probe.display(model.server),
+                             linked: model.snapshot.status.map { $0.linked },
+                             signOut: model.isDemo ? "Leave the Demo" : "Sign Out",
+                             confirm: model.isDemo ? "Leave the demo?" : "Sign out?",
+                             onSettings: { leave(.page(.settings)) },
+                             onSignOut: { leave(.signOut) }) {
                     if wanting > 0 {
-                        Circle().fill(Color.error).frame(width: 9, height: 9).offset(x: 2, y: -2)
+                        Section {
+                            Button { leave(.page(.banks)) } label: {
+                                HStack {
+                                    Label {
+                                        Text(wanting == 1 ? "A Bank Needs a Look" : "\(wanting) Banks Need a Look")
+                                    } icon: {
+                                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.error)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.quiet)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .foregroundStyle(.ink)
+                        }
                     }
                 }
+                .presentationDetents([.medium, .large])
+            }
+    }
+
+    private func leave(_ t: Then) {
+        then = t
+        showing = false
+    }
+
+    private func after() {
+        let t = then
+        then = nil
+        switch t {
+        case let .page(r)?: open(r)
+        case .signOut?: model.signOut()
+        case nil: break
         }
-        .accessibilityLabel("Signed in as \(who)")
-        .accessibilityHint("Account and settings")
-        .accessibilityValue(wanting > 0 ? "Banks need a look" : "")
     }
 }
 

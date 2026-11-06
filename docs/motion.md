@@ -396,9 +396,9 @@ must anyway.
 
 ## Materials and Scroll Edges
 
-**Chrome floats; content scrolls under it.** Bars, the player's transport
-and the account's face are a layer over the content, not a strip that
-takes room from it. On the iPhone that is Liquid Glass
+**Chrome floats; content scrolls under it.** Bars and the player's
+transport are a layer over the content, not a strip that takes room from
+it. On the iPhone that is Liquid Glass
 (`GlassEffectContainer`, `.buttonStyle(.glass)`); on Android it is
 `Glass.kt`'s solid capsule in the brightest surface with a soft shadow,
 which borrows only how glass moves (pieces glide on `Springs.move`, bud out
@@ -420,6 +420,25 @@ rising 4 px and unveiling on `SMOOTH`, the art and the name as one; it
 goes back the same way when the header returns, turning mid-way. Pressed,
 it scrolls the page to its top. A scroll the keys made, or reduced motion,
 puts it there or takes it away at once.
+
+**The account is on the title's line.** A tab's root has the person's
+face at the trailing end of its large title's own line, centred on it, and
+at most a menu of the tab's (Budget's •••) just before it, as Apple's iOS 26
+apps have it: no glass and no button chrome, only the round picture or the
+initials on the accent. What a tab makes is a row of its own page (New
+Playlist, Follow a Podcast, Add Account), not a + on the line. The line is
+one row for every tab of both apps — one top inset, one height, one font —
+so the title's baseline and the face are in the same place on each, and an
+app adds no padding of its own. On the iPhone the line is the page's own first row
+(`LargeTitleRow`, Account.swift, which takes away an inset grouped list's
+top margin), which scrolls with the page; once it has
+gone under the bar the inline title rises into the bar's middle on
+`Springs.move` (`MotionTokens.rise`, transform and opacity only, a fade
+under Reduce Motion), and goes back the same way (`largeTitleBar`). On
+Android it is `TabTitle` (`TabTitle.TOP`, `LINE`, `BOTTOM`) with its
+`account`, in harken's list and over money's page alike, and goes up with
+the page as it scrolls, scroll-linked, not animated. Tapped, either raises the
+account sheet (`AccountSheet`), the system's own sheet motion.
 
 **Materials follow the person's settings.** Reduce Transparency makes glass
 the solid container; Increase Contrast gives it a defined edge and stronger

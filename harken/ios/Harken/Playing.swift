@@ -18,9 +18,29 @@ struct Playing: Equatable, Identifiable {
     let art: String
     /// Its place in the session's queue.
     var index: Int = 0
+    /// Its file, as the queue carries it: what queueing it again plays.
+    var file: String = ""
 
     /// What its derived square is made from.
     var seed: String { album.isEmpty ? title : album }
+
+    /// The show it is an episode of: it has no album, and its name is a show's.
+    func show(in shows: [ShowsEntry]) -> ShowsEntry? {
+        guard album.isEmpty else { return nil }
+        return shows.first { $0.title == artist }
+    }
+
+    /// What plays as a row, for the full player's More: a song as the songs
+    /// list it; anything else — an episode, a sermon, a song the list has not
+    /// caught up with — made of what the player says of it, of its show's
+    /// kind when it is an episode, so that its menu goes to its show and marks
+    /// it played as its row's does. Never nothing: More always has a menu.
+    /// Android's `Menu.playing`.
+    func entry(durationMs: Int64, songs: [LibraryEntry], shows: [ShowsEntry]) -> LibraryEntry {
+        if let t = songs.first(where: { $0.id.hex == id }) { return t }
+        return LibraryEntry(addedMs: 0, creator: artist, durationMs: durationMs, file: file, id: Id(id), kind: show(in: shows)?.kind ?? "song",
+                            playlistPos: nil, pos: 0, title: title, userId: "")
+    }
 }
 
 enum Repeat: Equatable {
@@ -135,7 +155,7 @@ struct PlayerState: Equatable {
                    shuffle: Bool, repeatMode: Repeat, buffering: Bool, now: Int64) -> PlayerState {
         func playing(_ t: Track, _ i: Int) -> Playing {
             let a = art(t.album, t.creator)
-            return Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: a.isEmpty ? "" : Files.url(server, a), index: i)
+            return Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: a.isEmpty ? "" : Files.url(server, a), index: i, file: t.file)
         }
         let volume = h.joined ? h.listening?.volume(h.me) : local
         let on = h.joined ? place(h, name: name) : nil

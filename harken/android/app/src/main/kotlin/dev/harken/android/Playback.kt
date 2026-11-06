@@ -1011,8 +1011,11 @@ object Forward {
     }
 }
 
-/** What is playing, as a screen draws it. */
-data class Playing(val id: String, val title: String, val artist: String, val album: String, val art: String)
+/**
+ * What is playing, as a screen draws it; and its file, as the queue carries it, so
+ * that the full player's More can make a menu of it whatever it is.
+ */
+data class Playing(val id: String, val title: String, val artist: String, val album: String, val art: String, val file: String = "")
 
 enum class Repeat {
     Off,
@@ -1259,7 +1262,7 @@ class Playback(
     }
 
     private fun playing(t: Queued, l: Listen): Playing =
-        Playing(t.id.hex, t.title, t.creator, t.album, l.art(t.album, t.creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: "")
+        Playing(t.id.hex, t.title, t.creator, t.album, l.art(t.album, t.creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) } ?: "", t.file)
 
     // The device button: the output, or — with the sound nowhere — this phone, lit.
     private fun where(h: Heard): Where {

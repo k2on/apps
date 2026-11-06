@@ -98,6 +98,9 @@ interface Do {
 
     fun settings() {}
 
+    /** The account sheet, which the face at the end of a tab's title raises. */
+    fun account() {}
+
     fun back() {}
 }
 

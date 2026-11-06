@@ -240,10 +240,9 @@ struct FullPlayer: View {
     }
 
     /// The library's row for what plays, for its menu.
-    private var track: LibraryEntry? {
-        guard let id = model.player.now?.id else { return nil }
-        return model.tracks.first { $0.id.hex == id }
-    }
+    // What plays, as its row: a song's, an episode's or a sermon's, or one
+    // made of what plays — so More is there whatever plays.
+    private var track: LibraryEntry? { model.playingEntry }
 }
 
 /// The full player pulled down to close it. It follows the finger one to
