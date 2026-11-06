@@ -73,6 +73,7 @@ import kotlinx.coroutines.delay
 import uniffi.harken_domain.Playlist
 import dev.arkui.Feedback
 import dev.arkui.SensoryFeedback
+import uniffi.ark_format.formatClock
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -129,7 +130,7 @@ fun TrackMenu(
         if (track.kind != "song") {
             val played = listened?.finished == true
             SheetRow(Glyphs.Show, if (played) "Mark as Unplayed" else "Mark as Played", { actions.markPlayed(!played) })
-            for (c in chapters) SheetRow(Glyphs.Play, "${Media.clock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
+            for (c in chapters) SheetRow(Glyphs.Play, "${formatClock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
         }
     }
 }

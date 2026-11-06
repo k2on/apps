@@ -124,7 +124,7 @@ struct DiagnosticsView: View {
             ("came back playing", "\(h.stats.cameBackPlaying)"), ("last refusal", h.refused ?? h.stats.lastRefusal ?? "—"),
         ]
         if s == nil { out.append(("session", "—")) }
-        else if let a = a { out.append(("session", "\(a.index + 1) of \(a.queue.count), \(a.clock.playing ? "playing" : "paused") at \(Spell.clock(a.position(nowMs())))")) }
+        else if let a = a { out.append(("session", "\(a.index + 1) of \(a.queue.count), \(a.clock.playing ? "playing" : "paused") at \(formatClock(ms: a.position(nowMs())))")) }
         else { out.append(("session", "idle")) }
         switch a?.output {
         case nil: out.append(("output", "—"))
@@ -144,7 +144,7 @@ struct DiagnosticsView: View {
                 out.append(("group", "none"))
             }
             if s.scrub.isEmpty { out.append(("scrub", "none")) }
-            for (id, at) in s.scrub { out.append(("scrub \(id == h.me ? "(this phone)" : id)", Spell.clock(at))) }
+            for (id, at) in s.scrub { out.append(("scrub \(id == h.me ? "(this phone)" : id)", formatClock(ms: at))) }
         }
         return out
     }

@@ -124,16 +124,10 @@ struct RegisterView: View {
 /// A day's heading, as Wallet and Mail head one: Today, Yesterday, or the weekday and date.
 struct DayHeader: View {
     let day: String
+    @EnvironmentObject private var model: Model
 
     var body: some View {
-        if let d = Days.date(day) {
-            let cal = Calendar.current
-            if cal.isDateInToday(d) { Text("Today") }
-            else if cal.isDateInYesterday(d) { Text("Yesterday") }
-            else { Text(d, format: .dateTime.weekday(.wide).month(.abbreviated).day()) }
-        } else {
-            Text(day)
-        }
+        Text(formatDayHeading(day: day, today: model.today))
     }
 }
 

@@ -316,9 +316,9 @@ struct Scrubber: View {
                 })
                 .accessibilityLabel("Position")
                 HStack {
-                    Text(Spell.clock(Int64(at * total)))
+                    Text(formatClock(ms: Int64(at * total)))
                     Spacer()
-                    Text("-" + Spell.clock(max(s.durationMs - Int64(at * total), 0)))
+                    Text("-" + formatClock(ms: max(s.durationMs - Int64(at * total), 0)))
                 }
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.quiet)

@@ -229,7 +229,7 @@ private struct ShowsGrid: View {
                                         .zoomSource(r, zoom)
                                         .padding(.bottom, Space.s - 2)
                                     Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
+                                    Text(s.author.isEmpty ? formatCount(n: s.episodes, word: "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                                 }
                             }
                             .buttonStyle(.press)
@@ -282,8 +282,8 @@ private struct ArtistsList: View {
                 if !composers.isEmpty {
                     Section("Composers") {
                         ForEach(composers) { c in
-                            let life = Catalogue.life(born: c.born, died: c.died)
-                            PersonRow(name: c.name, art: c.art, under: life.isEmpty ? Spell.count(Int(c.works), "work") : life, to: .page(.artist(c.name)))
+                            let life = formatSpan(born: c.born, died: c.died)
+                            PersonRow(name: c.name, art: c.art, under: life.isEmpty ? formatCount(n: c.works, word: "work") : life, to: .page(.artist(c.name)))
                         }
                     }
                 }
@@ -300,7 +300,7 @@ private struct ArtistsList: View {
 
     private func artists(_ list: [ArtistsEntry]) -> some View {
         ForEach(list) { a in
-            PersonRow(name: a.name, art: a.art, under: Spell.count(Int(a.tracks), "song"), to: .page(.artist(a.name)))
+            PersonRow(name: a.name, art: a.art, under: formatCount(n: a.tracks, word: "song"), to: .page(.artist(a.name)))
         }
     }
 }

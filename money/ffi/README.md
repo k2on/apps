@@ -73,7 +73,10 @@ when the server turned the login away.
 
 Also: `moneyDomain()` (`"<schema hash> <version>"`, what a server's
 `/healthz` says on its `domain` line), `moneyToday()`, `moneyAddMonths`,
-`moneyMonthName` ("October 2026").
+and every number, day and length
+as the apps write them: `ark_format`'s, linked into the library, as
+`formatAmount`, `formatMonth` ("October 2026"), `formatDayHeading` …
+(`uniffi.ark_format` in Kotlin).
 
 ## Signing in
 

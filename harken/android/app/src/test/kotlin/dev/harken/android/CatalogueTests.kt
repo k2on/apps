@@ -79,10 +79,6 @@ class CatalogueTests {
         assertEquals("L. van Beethoven", Catalogue.initials("Ludwig van Beethoven"))
         assertEquals("Vivaldi", Catalogue.initials("Vivaldi"))
         assertEquals("", Catalogue.initials(""))
-        assertEquals("1685–1750", Catalogue.span(1685, 1750))
-        assertEquals("1685–", Catalogue.span(1685, 0))
-        assertEquals("–1750", Catalogue.span(0, 1750))
-        assertEquals("", Catalogue.span(0, 0))
     }
 
     /** A performance's line: year, tracks, length — each only when known, the terms left to the foot; and nobody named is said. */

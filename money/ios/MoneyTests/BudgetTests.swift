@@ -91,7 +91,7 @@ final class BudgetTests: XCTestCase {
         XCTAssertEqual(s.snap.month, last)
         XCTAssertEqual(s.snap.summary?.month, last)
         XCTAssertFalse(s.snap.lines.isEmpty)
-        XCTAssertEqual(moneyMonthName(month: last), "September 2026")
+        XCTAssertEqual(formatMonth(month: last), "September 2026")
     }
 
     // MARK: Edit

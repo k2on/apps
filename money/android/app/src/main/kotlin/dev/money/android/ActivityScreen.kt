@@ -61,6 +61,8 @@ import dev.arkdb.ffi.Id
 import dev.arkui.Space
 import dev.arkui.reflowing
 import uniffi.money_domain.TxnLine
+import uniffi.ark_format.formatAmount
+import uniffi.ark_format.numberStyleUs
 
 /**
  * The rows `needle` finds: its payee, category, memo or account holds it, or its amount written
@@ -71,7 +73,7 @@ fun search(rows: List<TxnLine>, needle: String): List<TxnLine> {
     if (n.isEmpty()) return rows
     return rows.filter { r ->
         r.payee.lowercase().contains(n) || r.category.lowercase().contains(n) || r.memo.lowercase().contains(n) ||
-            r.account.lowercase().contains(n) || plain(r.amount).contains(n)
+            r.account.lowercase().contains(n) || formatAmount(r.amount, false, numberStyleUs()).contains(n)
     }
 }
 
@@ -80,13 +82,6 @@ fun search(rows: List<TxnLine>, needle: String): List<TxnLine> {
  * category's place (a split with a line that has none says it too), as the iPhone reads it.
  */
 fun needsCategory(t: TxnLine): Boolean = t.category == "Needs a category"
-
-/** Cents as a person types them: `-1,850.00`. */
-fun plain(cents: Long): String {
-    val sign = if (cents < 0) "-" else ""
-    val c = kotlin.math.abs(cents)
-    return sign + "%,d.%02d".format(java.util.Locale.US, c / 100, c % 100)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -1,4 +1,5 @@
-// Where a track's bytes are, and how a length is said.
+// Where a track's bytes are. How a length is said is ark_format's
+// (`formatClock`, `formatLength`), every client's.
 //
 // A track's `file` is a path under the server's media root, and `/media/`
 // serves that same path back, with range requests and no token — so every
@@ -26,31 +27,4 @@ object Media {
         return out.toString()
     }
 
-    /**
-     * A track's length as a row shows it: `m:ss`, or `h:mm:ss` past an hour. Spelt by hand rather
-     * than by `String.format`, which parses its pattern on every call: every row entering a list
-     * asks for one.
-     */
-    fun clock(ms: Long): String {
-        val s = ms.coerceAtLeast(0) / 1000
-        val out = StringBuilder(8)
-        if (s >= 3600) two(out.append(s / 3600).append(':'), s / 60 % 60) else out.append(s / 60)
-        return two(out.append(':'), s % 60).toString()
-    }
-
-    private fun two(out: StringBuilder, n: Long): StringBuilder = out.append(if (n < 10) "0" else "").append(n)
-
-    /** A record's length, as a header says it: `48 min`, `2 hr 30 min`. */
-    fun spell(ms: Long): String {
-        val min = (ms + 30_000) / 60_000
-        return when {
-            min < 1 -> "under a minute"
-            min < 60 -> "$min min"
-            min % 60 == 0L -> "${min / 60} hr"
-            else -> "${min / 60} hr ${min % 60} min"
-        }
-    }
-
-    /** `1 track`, `12 tracks`. */
-    fun count(n: Int, one: String, many: String = one + "s"): String = "$n ${if (n == 1) one else many}"
 }

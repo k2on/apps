@@ -13,6 +13,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-ffi = { path = "../../rust/ark-ffi" }
+# Every number, day and length as the apps write them, for the phones too
+# (re-exported in lib.rs, so its functions are in this library).
+ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 harken-domain = { path = "../domain", features = ["ffi"] }
 harken-player = { path = "../player" }

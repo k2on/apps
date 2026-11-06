@@ -1,9 +1,12 @@
 // Money as people read it where they are: an amount kept in minor units
-// (cents) written in the phone's locale — its symbol, its grouping, its
-// decimal mark, where the minus goes — and read back from what somebody
-// typed. The currency is the locale's when it counts in hundredths, and
-// the dollar otherwise, because the amounts are hundredths whatever the
-// symbol: a budget in yen would need amounts that are not.
+// (cents), written by the Rust every client formats with (ark_format, in the
+// app's library) in the phone's locale — its symbol, its grouping, its
+// decimal mark, where the minus goes. What the locale says is read once,
+// here, from java.text ([LocaleNumbers]); the app hands it to its library's
+// formatter and provides the result as [LocalAmounts]. The currency is the
+// locale's when it counts in hundredths, and the dollar otherwise, because
+// the amounts are hundredths whatever the symbol: a budget in yen would
+// need amounts that are not.
 //
 // Figures are drawn in tabular numerals ([AmountText]), so a column of
 // them lines up digit under digit, as a bank statement's do.
@@ -33,78 +36,60 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
-import java.math.BigDecimal
-import java.text.DecimalFormatSymbols
+import java.text.DecimalFormat
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
 
-/** Amounts in minor units, written and read in `locale`, in `currency`. */
-public class Amounts(
-    public val locale: Locale = Locale.getDefault(),
-    currency: Currency? = null,
+/**
+ * How a place writes money, as java.text says it for `locale`: the fields of ark_format's
+ * `NumberStyle`, which the app's library formats with. Read once, when the locale is known.
+ */
+public data class LocaleNumbers(
+    /** The currency's ISO code: `USD`. */
+    val currency: String,
+    /** What is written beside the figure: `$`, `€`. */
+    val symbol: String,
+    /** The symbol before the figure (`$1.00`) or after it (`1,00 €`). */
+    val symbolFirst: Boolean,
+    /** A space between the symbol and the figure. */
+    val symbolSpaced: Boolean,
+    /** The decimal mark. */
+    val decimal: String,
+    /** What groups thousands; nothing for none. */
+    val grouping: String,
+    /** The minus sign. */
+    val minus: String,
+    /** With the symbol first, the minus before it (`-$12.00`) rather than after it (`$-12.00`). */
+    val minusFirst: Boolean,
 ) {
-    public val currency: Currency = currency ?: localCurrency(locale)
-
-    private val money: NumberFormat =
-        NumberFormat.getCurrencyInstance(locale).apply {
-            this.currency = this@Amounts.currency
-            minimumFractionDigits = 2
-            maximumFractionDigits = 2
-        }
-
-    private val plain: NumberFormat =
-        NumberFormat.getNumberInstance(locale).apply {
-            minimumFractionDigits = 2
-            maximumFractionDigits = 2
-            isGroupingUsed = false
-        }
-
-    private val decimal: Char = DecimalFormatSymbols.getInstance(locale).decimalSeparator
-
-    /** `$1,234.56`, `-$12.00` — or `1.234,56 $` where that is how it is written. */
-    public fun format(minor: Long): String =
-        synchronized(money) { money.format(BigDecimal.valueOf(minor, 2)) }
-
-    /** [format] with a plus on what came in: `+$25.00`. */
-    public fun signed(minor: Long): String = if (minor > 0) "+" + format(minor) else format(minor)
-
-    /** The symbol alone, for a field's prefix: `$`, `€`. */
-    public val symbol: String
-        get() = currency.getSymbol(locale)
-
-    /** An amount as a field shows it for editing: `1234.50` in the locale's decimal mark; nothing for nothing. */
-    public fun editable(minor: Long): String =
-        if (minor == 0L) "" else synchronized(plain) { plain.format(BigDecimal.valueOf(minor, 2)) }
-
-    /**
-     * What somebody typed, in minor units: `12`, `12.5`, `$1,200.00`, `-3.10`, or `12,50` where the
-     * comma is the decimal mark. Nothing typed is nothing; anything else that is not an amount is
-     * null.
-     */
-    public fun parse(typed: String): Long? {
-        val other = if (decimal == ',') '.' else ','
-        val t =
-            typed.filterNot { it.isWhitespace() || it == other || it == ' ' }
-                .replace(symbol, "")
-                .replace(currency.currencyCode, "")
-                .filterNot { it == '$' || it == '€' || it == '£' }
-                .replace(decimal, '.')
-        if (t.isEmpty()) return 0
-        val negative = t.startsWith('-')
-        val body = t.removePrefix("-").removePrefix("+")
-        val whole = body.substringBefore('.')
-        val frac = body.substringAfter('.', "")
-        if (whole.isEmpty() && frac.isEmpty()) return null
-        if (body.count { it == '.' } > 1 || frac.length > 2) return null
-        if (!(whole + frac).all { it in '0'..'9' }) return null
-        val w = if (whole.isEmpty()) 0L else whole.toLongOrNull() ?: return null
-        val f = frac.padEnd(2, '0').toLong()
-        val minor = Math.addExact(Math.multiplyExact(w, 100L), f)
-        return if (negative) -minor else minor
-    }
-
     public companion object {
+        /** What java.text says of money in `locale`, in `currency` (the locale's own by [localCurrency]). */
+        public fun of(locale: Locale = Locale.getDefault(), currency: Currency? = null): LocaleNumbers {
+            val cur = currency ?: localCurrency(locale)
+            val f = NumberFormat.getCurrencyInstance(locale).apply { this.currency = cur }
+            val marks = (f as? DecimalFormat)?.decimalFormatSymbols
+            val symbol = cur.getSymbol(locale)
+            val one = f.format(1)
+            val at = one.indexOf(symbol)
+            val digit = one.indexOfFirst { it.isDigit() }
+            val first = at in 0 until digit
+            val gap = if (at < 0) null else if (first) one.getOrNull(at + symbol.length) else one.getOrNull(at - 1)
+            val minus = (marks?.minusSign ?: '-').toString()
+            val less = f.format(-1)
+            val minusFirst = less.indexOf(minus).let { m -> m < 0 || less.indexOf(symbol) < 0 || m < less.indexOf(symbol) }
+            return LocaleNumbers(
+                currency = cur.currencyCode,
+                symbol = symbol,
+                symbolFirst = first,
+                symbolSpaced = gap?.isWhitespace() == true,
+                decimal = (marks?.monetaryDecimalSeparator ?: '.').toString(),
+                grouping = if (f.isGroupingUsed) (marks?.groupingSeparator ?: ',').toString() else "",
+                minus = minus,
+                minusFirst = minusFirst,
+            )
+        }
+
         /** The locale's currency when it counts in hundredths; the dollar otherwise. */
         public fun localCurrency(locale: Locale): Currency =
             runCatching { Currency.getInstance(locale) }
@@ -114,8 +99,30 @@ public class Amounts(
     }
 }
 
-/** How the screens under it write money; the phone's locale where nobody says. */
-public val LocalAmounts: ProvidableCompositionLocal<Amounts> = staticCompositionLocalOf { Amounts() }
+/**
+ * Amounts in minor units, written and read as the app's library writes them (ark_format) in a
+ * [LocaleNumbers]: what [AmountText], [MarkedAmount] and [AmountField] draw with.
+ */
+public interface Amounts {
+    /** `$1,234.56`, `-$12.00` — or `1.234,56 €` where that is how it is written. */
+    public fun format(minor: Long): String
+
+    /** [format] with a plus on what came in: `+$25.00`. */
+    public fun signed(minor: Long): String
+
+    /** The symbol alone, for a field's prefix: `$`, `€`. */
+    public val symbol: String
+
+    /** An amount as a field shows it for editing: `1234.50` in the locale's decimal mark; nothing for nothing. */
+    public fun editable(minor: Long): String
+
+    /** What somebody typed, in minor units: nothing typed is 0, what is not an amount null. */
+    public fun parse(typed: String): Long?
+}
+
+/** How the screens under it write money: the app provides its library's. */
+public val LocalAmounts: ProvidableCompositionLocal<Amounts> =
+    staticCompositionLocalOf { error("No Amounts here: the app provides its library's (ark_format) in its theme") }
 
 /**
  * An amount in tabular figures, so a column of them lines up. `signed` writes a plus on money that

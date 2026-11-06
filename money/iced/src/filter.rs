@@ -10,10 +10,10 @@
 //! (`money_domain::filters`): this file only edits a `Filter` and opens
 //! the register for it.
 
-use arkui::{glyphs, icon, menu, style};
+use arkui::{format, glyphs, icon, menu, style};
 use iced::widget::{button, column, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
-use money_domain::dates::{add_months, first_day, last_day, month_name, month_of};
+use money_domain::dates::{add_months, first_day, last_day, month_of};
 use money_domain::*;
 
 use crate::look;
@@ -250,10 +250,10 @@ impl App {
                 let month = |m: &str| (Some(first_day(m)), Some(last_day(m)));
                 let year = &self.today[..4];
                 let mut presets = vec![("Any time".to_string(), (None, None))];
-                presets.push((month_name(&this), month(&this)));
-                presets.push((month_name(&add_months(&this, -1)), month(&add_months(&this, -1))));
+                presets.push((format::month(&this), month(&this)));
+                presets.push((format::month(&add_months(&this, -1)), month(&add_months(&this, -1))));
                 if self.peer.month != this && self.peer.month != add_months(&this, -1) {
-                    presets.push((month_name(&self.peer.month), month(&self.peer.month)));
+                    presets.push((format::month(&self.peer.month), month(&self.peer.month)));
                 }
                 presets.push((
                     "The last three months".into(),
@@ -339,7 +339,7 @@ impl App {
         };
         let dates = match (&f.from, &f.through) {
             (None, None) => "Any time".to_string(),
-            (Some(a), Some(b)) if a.len() == 10 && a.ends_with("-01") && *b == last_day(&a[..7]) => month_name(&a[..7]),
+            (Some(a), Some(b)) if a.len() == 10 && a.ends_with("-01") && *b == last_day(&a[..7]) => format::month(&a[..7]),
             (Some(a), Some(b)) => format!("{a} to {b}"),
             (Some(a), None) => format!("From {a}"),
             (None, Some(b)) => format!("Through {b}"),

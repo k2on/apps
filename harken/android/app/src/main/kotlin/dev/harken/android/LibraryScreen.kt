@@ -59,6 +59,8 @@ import dev.arkui.rememberDestinationScrollState
 import dev.arkui.rememberHero
 import dev.arkui.Press
 import dev.arkui.pressable
+import uniffi.ark_format.formatCount
+import uniffi.ark_format.formatSpan
 
 /** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
 enum class LibraryTab(val title: String, val kind: String? = null) {
@@ -206,7 +208,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
                 Cover(s.title, s.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(s.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(s.author.ifEmpty { Media.count(s.episodes.toInt(), "episode") }, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(s.author.ifEmpty { formatCount(s.episodes, "episode") }, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
@@ -303,7 +305,7 @@ private fun Artists(artists: List<Artist>, act: Do) {
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
             val hero = rememberHero(Space.corner, round = true)
-            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
+            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = formatCount(a.tracks, "song")) {
                 Cover(a.name, a.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }
         }
@@ -322,7 +324,7 @@ private fun Composers(composers: List<Composer>, act: Do) {
         items(composers, key = { it.name }) { c ->
             val hero = rememberHero(Space.corner, round = true)
             // When they lived; nobody's years known, and it is how many works of theirs there are.
-            val under = Catalogue.span(c.born, c.died).ifEmpty { Media.count(c.works.toInt(), "work") }
+            val under = formatSpan(c.born, c.died).ifEmpty { formatCount(c.works, "work") }
             ListRow(onClick = hero.lifting { act.open(Page.ForArtist(c.name)) }, title = c.name, under = under) {
                 Cover(c.name, c.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }

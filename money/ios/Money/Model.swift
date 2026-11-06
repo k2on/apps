@@ -184,7 +184,7 @@ final class Model: ObservableObject {
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }
     func showThisMonth() { showMonth(thisMonth) }
-    var monthName: String { moneyMonthName(month: month) }
+    var monthName: String { formatMonth(month: month) }
 
     // MARK: registers
 

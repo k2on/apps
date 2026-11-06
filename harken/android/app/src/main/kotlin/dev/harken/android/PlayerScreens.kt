@@ -119,6 +119,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatClock
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -556,8 +557,8 @@ private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: S
     )
     val gone = (at * total).toLong()
     Row(Modifier.fillMaxWidth()) {
-        Text(Media.clock(gone), style = quiet(MaterialTheme.typography.labelMedium), modifier = Modifier.weight(1f))
-        Text("-" + Media.clock((state.durationMs - gone).coerceAtLeast(0)), style = quiet(MaterialTheme.typography.labelMedium))
+        Text(formatClock(gone), style = quiet(MaterialTheme.typography.labelMedium), modifier = Modifier.weight(1f))
+        Text("-" + formatClock((state.durationMs - gone).coerceAtLeast(0)), style = quiet(MaterialTheme.typography.labelMedium))
     }
 }
 

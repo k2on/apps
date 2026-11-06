@@ -71,7 +71,7 @@ struct AccountsView: View {
                 Button { present(.addAccount) } label: { Label("Add Account", systemImage: "plus.circle.fill") }
             } footer: {
                 if let b = model.snapshot.banks.first, b.syncedMs > 0 {
-                    Text("Last synced with \(b.institution) \(Date(timeIntervalSince1970: Double(b.syncedMs) / 1000), format: .relative(presentation: .named)).")
+                    Text("Last synced with \(b.institution) \(formatAgo(ms: b.syncedMs, nowMs: nowMs())).")
                 }
             }
         }

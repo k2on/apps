@@ -98,6 +98,8 @@ import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.ark_format.formatQuantity
+import uniffi.ark_format.formatDayLong
 
 /** The paper's colours: a receipt is white whatever the phone's theme, so the light side's. */
 private val Paper = Tokens.Light.surface
@@ -222,7 +224,7 @@ fun ReceiptPaper(ledger: Ledger, r: ReceiptLine, photo: PhotoLine?) {
                     for (i in items) {
                         PaperLine(i.name, money(a, -i.amount))
                         if (i.quantity != 1000L && i.quantity > 0) {
-                            Text("  ${quantity(i.quantity)} ${i.unit} @ ${money(a, i.unitPrice)}", style = Mono.copy(color = Faded))
+                            Text("  ${formatQuantity(i.quantity)} ${i.unit} @ ${money(a, i.unitPrice)}", style = Mono.copy(color = Faded))
                         }
                     }
                     Rule()
@@ -260,9 +262,6 @@ private fun Rule() {
 
 /** Money as a receipt prints it: no sign for what was paid, a minus for what was taken off. */
 private fun money(a: dev.arkui.Amounts, paid: Long): String = if (paid < 0) "-" + a.format(-paid) else a.format(paid)
-
-private fun quantity(thousandths: Long): String =
-    if (thousandths % 1000 == 0L) "${thousandths / 1000}" else "%.3f".format(thousandths / 1000.0).trimEnd('0')
 
 private fun storeName(store: String): String =
     when (store) {
@@ -342,7 +341,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
                 for (r in near) {
                     ListItem(
                         headlineContent = { Text(r.place.ifEmpty { storeName(r.store) }) },
-                        supportingContent = { Text("${Dates.long(r.date)} · ${r.items} items") },
+                        supportingContent = { Text("${formatDayLong(r.date)} · ${r.items} items") },
                         trailingContent = { Text(a.format(abs(r.total))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.pressable(onClickLabel = "Attach", onClick = { onPick(r) }, press = Press.Highlight),
@@ -385,7 +384,7 @@ data class ReceiptDraft(
         fun blank(txn: Id, date: String, amount: Long) = ReceiptDraft("", txn, "", date, listOf(DraftItem()), amount)
 
         fun of(r: ReceiptLine, items: List<ItemLine>, txn: Id): ReceiptDraft {
-            val a = dev.arkui.Amounts()
+            val a = LibraryAmounts()
             return ReceiptDraft(
                 r.id,
                 r.txnId ?: txn,

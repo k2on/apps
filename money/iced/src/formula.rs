@@ -6,10 +6,9 @@
 //! as a register limited to the month. Saved, it holds from the month on
 //! screen on (`money_domain::formulas`).
 
-use arkui::{glyphs, icon, menu};
+use arkui::{format, glyphs, icon, menu};
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, Task};
-use money_domain::dates::month_name;
 use money_domain::formulas::{parse_share, percent};
 use money_domain::*;
 
@@ -123,7 +122,7 @@ impl App {
                         from: Some(self.peer.month.clone()),
                     };
                     if self.author("remove the formula", "clear_formula", &r) {
-                        self.note = format!("assigned by hand from {}", month_name(&self.peer.month));
+                        self.note = format!("assigned by hand from {}", format::month(&self.peer.month));
                         self.load_formula();
                     }
                 }
@@ -207,7 +206,7 @@ impl App {
             terms,
         };
         if self.author("save the formula", "set_formula", &f) {
-            self.note = format!("assigned by formula from {}", month_name(&self.peer.month));
+            self.note = format!("assigned by formula from {}", format::month(&self.peer.month));
             self.load_formula();
         }
     }
@@ -216,7 +215,7 @@ impl App {
     /// factor, what it summed this month, Open — then what the formula
     /// would give the month on screen, Save and Remove.
     pub fn inspect_formula<'a>(&'a self, l: &'a BudgetLine) -> Element<'a, Message> {
-        let month = month_name(&self.peer.month);
+        let month = format::month(&self.peer.month);
         let mut c = column![row![
             bold("Assign by formula", 14),
             fill(),
@@ -225,7 +224,7 @@ impl App {
         .align_y(Alignment::Center)]
         .spacing(8);
         c = c.push(match self.peer.formula(l.category_id) {
-            Some(f) => dim(format!("{} \u{2014} since {}.", f.text, month_name(&f.from)), 11),
+            Some(f) => dim(format!("{} \u{2014} since {}.", f.text, format::month(&f.from)), 11),
             None => dim("Each month, what saved filters add up to, times a factor: like a spreadsheet's cell.", 11),
         });
         let preview = self.peer.preview.as_ref().and_then(|p| p.rows.first());

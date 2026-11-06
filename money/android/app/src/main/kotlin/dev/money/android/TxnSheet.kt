@@ -69,6 +69,7 @@ import dev.arkui.Transitions
 import dev.arkui.AmountField
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
+import uniffi.ark_format.formatDayLong
 
 private enum class Choosing {
     None,
@@ -222,7 +223,7 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                             Field("Account", account?.name ?: "Choose an account", onClick = {
                                 if (f.editing == null) choosing = Choosing.Account
                             })
-                            Field("Date", Dates.long(f.date), icon = { Icon(Icons.Default.DateRange, contentDescription = null) }, onClick = { picking = true })
+                            Field("Date", formatDayLong(f.date), icon = { Icon(Icons.Default.DateRange, contentDescription = null) }, onClick = { picking = true })
                             OutlinedTextField(
                                 value = f.memo,
                                 onValueChange = { f = f.copy(memo = it) },

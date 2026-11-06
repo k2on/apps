@@ -125,28 +125,6 @@ pub fn last_day(month: &str) -> String {
     day(y, m, days_in_month(y, m))
 }
 
-/// `October 2026`.
-pub fn month_name(month: &str) -> String {
-    const NAMES: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
-    match parse_month(month) {
-        Some((y, m)) => format!("{} {y}", NAMES[(m - 1) as usize]),
-        None => month.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,7 +141,6 @@ mod tests {
         assert!(parse_day("2026-02-30").is_none());
         assert!(parse_day("2026-1-01").is_none());
         assert!(parse_month("2026-13").is_none());
-        assert_eq!(month_name("2026-10"), "October 2026");
         assert!(month_start("2026-10").as_str() < "2026-10-01" && "2026-10-31" < month_end("2026-10").as_str());
     }
 }

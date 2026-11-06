@@ -75,6 +75,7 @@ import uniffi.money_domain.Cleared
 import uniffi.money_domain.TxnLine
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatDayHeading
 
 @Composable
 fun RegisterScreen(ledger: Ledger, account: Id?, onBack: () -> Unit) {
@@ -162,7 +163,7 @@ fun LazyListScope.days(rows: List<TxnLine>, today: String, showAccount: Boolean,
     for ((day, ts) in byDay) {
         stickyHeader(key = "d$day") {
             Text(
-                Dates.heading(day, today),
+                formatDayHeading(day, today),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier =

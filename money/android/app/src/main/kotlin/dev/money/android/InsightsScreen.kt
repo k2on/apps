@@ -44,6 +44,9 @@ import dev.arkui.Meter
 import dev.arkui.Part
 import dev.arkui.Space
 import dev.arkui.chartPalette
+import uniffi.ark_format.formatMonth
+import uniffi.ark_format.formatMonthAlone
+import uniffi.ark_format.formatPercent
 
 @Composable
 fun InsightsScreen(ledger: Ledger) {
@@ -55,7 +58,7 @@ fun InsightsScreen(ledger: Ledger) {
             .sortedByDescending { it.spent }
             .mapIndexed { i, s -> Part(s.group, s.spent, palette[i % palette.size]) }
     val total = parts.sumOf { it.value }
-    val month = Dates.monthAlone(ledger.month)
+    val month = formatMonthAlone(ledger.month)
     val said =
         if (parts.isEmpty()) "Nothing spent in $month yet."
         else "Spent ${a.format(total)} in $month: " + parts.joinToString(", ") { "${it.label} ${a.format(it.value)}" }
@@ -72,7 +75,7 @@ fun InsightsScreen(ledger: Ledger) {
                         Column(Modifier.fillMaxWidth().padding(Space.xl), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Nothing Spent Yet", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "What ${Dates.month(ledger.month)} spends shows here.",
+                                "What ${formatMonth(ledger.month)} spends shows here.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center)
@@ -89,7 +92,7 @@ fun InsightsScreen(ledger: Ledger) {
                         RowDivider()
                         parts.forEachIndexed { i, p ->
                             if (i > 0) RowDivider(inset = Space.l + 10.dp + Space.m)
-                            LegendRow(p, share(p.value, total))
+                            LegendRow(p, formatPercent(p.value, total))
                         }
                     }
                 }
@@ -138,9 +141,6 @@ fun InsightsScreen(ledger: Ledger) {
         }
     }
 }
-
-/** A part's share of the whole, as a whole percent; empty for a whole of nothing. */
-fun share(part: Long, whole: Long): String = if (whole <= 0) "" else "${Math.round(part * 100.0 / whole)}%"
 
 /** One line of the ring's legend: its colour, its group, its share and its amount. */
 @Composable

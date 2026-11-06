@@ -2154,7 +2154,7 @@ impl App {
         let album = Source::Album(detail.album_id, detail.album);
         let mine = self.peer.mine_of(id);
         let play = match mine.filter(|l| !l.finished && l.position_ms > 0) {
-            Some(l) => format!("Resume from {}", arkui::format::clock(l.resume_ms() as f64 / 1000.0)),
+            Some(l) => format!("Resume from {}", arkui::format::clock(l.resume_ms())),
             None => "Play".into(),
         };
         let mut entries = vec![
@@ -2188,7 +2188,7 @@ impl App {
                 false => Entry::run(glyphs::SHOW, "Mark as played", Message::MarkPlayed(id, true)),
             });
             for c in self.peer.chapters_of(id) {
-                let label = format!("{}  {}", arkui::format::clock(c.start_ms as f64 / 1000.0), c.title);
+                let label = format!("{}  {}", arkui::format::clock(c.start_ms), c.title);
                 entries.push(Entry::run(glyphs::PLAY, label, Message::PlayFrom(id, c.start_ms)));
             }
         }

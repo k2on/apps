@@ -521,7 +521,7 @@ enum Registers {
         if n.isEmpty { return rows }
         return rows.filter { r in
             r.payee.lowercased().contains(n) || r.category.lowercased().contains(n) || r.memo.lowercased().contains(n)
-                || Cents.plain(r.amount).contains(n) || r.account.lowercased().contains(n)
+                || formatAmount(cents: r.amount, signed: false, style: numberStyleUs()).contains(n) || r.account.lowercased().contains(n)
         }
     }
 
@@ -558,6 +558,21 @@ enum Registers {
 /// Days as the domain writes them (`2026-10-26`), and as a `Date` a picker
 /// and a heading take: noon of that day in the phone's own calendar, which
 /// a picker shows and gives back as the same day.
+/// Money as the library writes it (ark_format, every client's), in what the
+/// phone's locale says of money, read once from NumberFormatter.
+enum Numbers {
+    static let style: NumberStyle = {
+        let n = LocaleNumbers.of()
+        return NumberStyle(currency: n.currency, symbol: n.symbol, symbolFirst: n.symbolFirst, symbolSpaced: n.symbolSpaced,
+                           decimal: n.decimal, grouping: n.grouping, minus: n.minus, minusFirst: n.minusFirst)
+    }()
+
+    /// Says how ArkUI's figures write cents: once, before the first view draws.
+    static func install() {
+        Cents.write = { cents, signed in formatAmount(cents: cents, signed: signed, style: style) }
+    }
+}
+
 enum Days {
     static func date(_ day: String, calendar cal: Calendar = .current) -> Date? {
         let p = day.split(separator: "-").map { Int($0) }
