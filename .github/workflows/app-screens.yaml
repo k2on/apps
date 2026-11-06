@@ -556,12 +556,15 @@ jobs:
             fi
           done
           start=$(date +%s)
-          if [ ${#refs[@]} -gt 0 ]; then nix path-info --derivation "${refs[@]}" > /dev/null; fi
+          # A dry run: a package may be a source path, not a derivation
+          # (harken-covers), which `path-info --derivation` refuses. Only a
+          # warm-up: what fails here is said again by the build after.
+          if [ ${#refs[@]} -gt 0 ]; then nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::the servers' packages did not all evaluate"; fi
           echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
           # An app the commit has none of is said by ios-build.sh.
           start=$(date +%s)
           for a in $APPS; do
-            nix path-info --derivation "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" || true
+            nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
           done
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 

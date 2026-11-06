@@ -196,7 +196,7 @@ jobs:
           refs=()
           for a in $attrs; do refs+=("git+file://$PWD#packages.aarch64-darwin.$a"); done
           start=$(date +%s)
-          nix path-info --derivation "${refs[@]}"
+          nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::not all evaluated; the build says why"
           echo "evaluated in $(( $(date +%s) - start ))s"
 
       # The tests' simulator, booting under the nix build (meanwhile.sh), as
