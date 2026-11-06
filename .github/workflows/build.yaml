@@ -503,9 +503,19 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # Named for the attempt: a deploy re-run uploads its site beside the
+      # first attempt's in the same run, and deploy-pages refuses a name it
+      # finds twice ("Multiple artifacts named github-pages").
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+          name: github-pages-${{ github.run_attempt }}
 
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+          # Pages can take longer than the default ten minutes to report a
+          # deployment done when it is busy; waiting longer beats a failed
+          # deploy of a site that would have gone up.
+          timeout: 1800000
