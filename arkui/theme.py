@@ -48,6 +48,11 @@ MOTION = {
     "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
     "paused-scale": "How small a cover is drawn while what it plays is paused.",
     "rise": "How far a thing that comes in where it stays rises as it comes: a nudge.",
+    "band-reach": "The most a band past a scroll's end is ever drawn, as a share of the view.",
+    "coast-stop": "A coast slower than this, a second, has stopped.",
+    "velocity-ms": "How far back a release's speed is read from its moves, in milliseconds.",
+    "velocity-gap-ms": "A pause this long between a drag's moves, in milliseconds, means it had stopped.",
+    "lift-ms": "With no word from the system, a trackpad still this long has been let go, in milliseconds.",
 }
 
 # The roles of one side, in the order they are written, and each one's

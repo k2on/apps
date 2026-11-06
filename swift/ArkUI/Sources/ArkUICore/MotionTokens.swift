@@ -43,6 +43,16 @@ public enum MotionTokens {
     public static let pausedScale: Double = 0.9
     /// How far a thing that comes in where it stays rises as it comes: a nudge.
     public static let rise: Double = 8.0
+    /// The most a band past a scroll's end is ever drawn, as a share of the view.
+    public static let bandReach: Double = 0.33
+    /// A coast slower than this, a second, has stopped.
+    public static let coastStop: Double = 20.0
+    /// How far back a release's speed is read from its moves, in milliseconds.
+    public static let velocityMs: Int = 100
+    /// A pause this long between a drag's moves, in milliseconds, means it had stopped.
+    public static let velocityGapMs: Int = 40
+    /// With no word from the system, a trackpad still this long has been let go, in milliseconds.
+    public static let liftMs: Int = 50
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.

@@ -107,6 +107,41 @@ pub fn rubberband(overshoot: f32, dimension: f32) -> f32 {
     }
 }
 
+/// How many pixels [`rubberband`] draws for each pixel more of pull, at
+/// `overshoot` past the edge: its slope, `c · d² / (d + c · |x|)²`. What a
+/// speed in pull becomes as drawn, so a band let go springs back as fast
+/// as it was seen going.
+pub fn rubberband_slope(overshoot: f32, dimension: f32) -> f32 {
+    let c = tokens::RUBBER_BAND;
+    match dimension > 0.0 {
+        true => c * dimension * dimension / (dimension + c * overshoot.abs()).powi(2),
+        false => 0.0,
+    }
+}
+
+/// Where a release at `speed` (pixels a second) comes to rest if it keeps
+/// slowing as a scroll does, [`tokens::DECELERATION`] of its speed kept each
+/// millisecond: Apple's `project`, `(v / 1000) · d / (1 − d)`. The phones'
+/// `Springs.project` and `Momentum.project`.
+pub fn project(speed: f32) -> f32 {
+    let d = tokens::DECELERATION;
+    speed / 1000.0 * d / (1.0 - d)
+}
+
+/// A scroll let go at `speed` (pixels a second), `ms` milliseconds on: how
+/// far it has gone, and how fast it is going — its speed kept
+/// [`tokens::DECELERATION`] a millisecond, `v · dᵗ`, and the distance that
+/// speed covers, `v · (dᵗ − 1) / (1000 · ln d)`, which comes to
+/// [`project`] (to a tenth of a percent: this is the decay without the
+/// millisecond steps). A closed form, so nothing is stepped and a late
+/// frame lands where it would have.
+pub fn coast(speed: f32, ms: f32) -> (f32, f32) {
+    let d = tokens::DECELERATION as f64;
+    let kept = d.powf(ms.max(0.0) as f64);
+    let gone = speed as f64 * (kept - 1.0) / (1000.0 * d.ln());
+    (gone as f32, (speed as f64 * kept) as f32)
+}
+
 /// How far past the edge a band drawn `drawn` past it was pulled: the
 /// inverse of [`rubberband`], so a band grabbed again as it springs back
 /// carries on from where it is drawn.
@@ -714,6 +749,38 @@ mod tests {
         assert_eq!(rubberband(100.0, 0.0), 0.0, "no room, no band");
         for x in [-900.0, -40.0, 3.0, 250.0, 2000.0] {
             assert!((unband(rubberband(x, d), d) - x).abs() < 0.05 * x.abs().max(1.0), "{x}");
+        }
+    }
+
+    /// A coast slows by the token a millisecond and goes, all told, as far
+    /// as Apple's projection says; its speed is the slope of where it is.
+    /// Falsified by a decay per frame rather than per millisecond (it went
+    /// sixteen times as far), or by the sign lost (a coast up went down).
+    #[test]
+    fn a_coast_goes_as_far_as_the_projection() {
+        for v in [-3000.0, -400.0, 250.0, 1800.0] {
+            let (all, left) = coast(v, 60_000.0);
+            assert!(left.abs() < 1e-3, "{v}: stopped in a minute");
+            assert!((all - project(v)).abs() <= 0.002 * project(v).abs(), "{v}: {all} against {}", project(v));
+            let (gone, speed) = coast(v, 200.0);
+            assert!((speed - v * 0.998f32.powf(200.0)).abs() < 0.01 * v.abs(), "{v}: {speed}");
+            let (on, _) = coast(v, 201.0);
+            assert!(((on - gone) * 1000.0 - speed).abs() < 0.01 * v.abs(), "{v}: the slope is the speed");
+        }
+        assert!((project(1000.0) - 499.0).abs() < 0.5, "{}", project(1000.0));
+        assert_eq!(coast(1000.0, 0.0), (0.0, 1000.0));
+    }
+
+    /// The band's slope is the rate of [`rubberband`]: `c` at the edge,
+    /// less and less after. Falsified by a slope without the square (it
+    /// fell off half as fast as the band does).
+    #[test]
+    fn the_band_slope_is_its_rate() {
+        let d = 200.0;
+        assert!((rubberband_slope(0.0, d) - tokens::RUBBER_BAND).abs() < 1e-6);
+        for x in [-300.0f32, -10.0, 5.0, 80.0, 900.0] {
+            let rate = (rubberband(x + 0.01, d) - rubberband(x - 0.01, d)) / 0.02;
+            assert!((rubberband_slope(x, d) - rate).abs() < 1e-3, "{x}: {} against {rate}", rubberband_slope(x, d));
         }
     }
 

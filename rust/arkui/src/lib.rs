@@ -58,6 +58,7 @@ pub mod theme;
 pub mod toast;
 pub mod tokens;
 pub mod url;
+pub mod velocity;
 pub mod vim;
 pub mod wake;
 pub mod which;

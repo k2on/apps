@@ -42,6 +42,16 @@ pub const SHIFT: f32 = 0.2;
 pub const PAUSED_SCALE: f32 = 0.9;
 /// How far a thing that comes in where it stays rises as it comes: a nudge.
 pub const RISE: f32 = 8.0;
+/// The most a band past a scroll's end is ever drawn, as a share of the view.
+pub const BAND_REACH: f32 = 0.33;
+/// A coast slower than this, a second, has stopped.
+pub const COAST_STOP: f32 = 20.0;
+/// How far back a release's speed is read from its moves, in milliseconds.
+pub const VELOCITY_MS: u64 = 100;
+/// A pause this long between a drag's moves, in milliseconds, means it had stopped.
+pub const VELOCITY_GAP_MS: u64 = 40;
+/// With no word from the system, a trackpad still this long has been let go, in milliseconds.
+pub const LIFT_MS: u64 = 50;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.
