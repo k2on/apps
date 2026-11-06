@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -53,7 +52,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.arkui.ArkGlyphs
 import dev.arkui.Chevron
 import dev.arkui.Cover
 import dev.arkui.Glyph
@@ -291,13 +289,14 @@ fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).co
  * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
  * fill, run up under the status bar (its page says [dev.arkui.UnderStatusBar]) and that
  * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
- * type and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
- * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the
+ * type and `name` in bold on its lower edge over a shade that keeps them legible, and a lighter
+ * one under the bar's icons and the page's back (its [dev.arkui.PinnedBar], over the banner's
+ * top, below the status bar). Until the picture arrives the
  * derived square is drawn instead, so the name is already where it will be. A page grows out of a
  * portrait into it, the part under the bar included.
  */
 @Composable
-fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> Unit) {
+fun Banner(seed: String, art: String, kind: String, name: String) {
     val bar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val w = maxWidth
@@ -311,9 +310,6 @@ fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> 
                 Text(kind, style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
                 Spacer(Modifier.height(Space.xs))
                 Text(name, style = MaterialTheme.typography.headlineLarge, color = Palette.OnShade)
-            }
-            Box(Modifier.padding(top = bar).padding(Space.xs).size(48.dp).pressable(onClick = onBack).clip(CircleShape).background(Palette.Shade), contentAlignment = Alignment.Center) {
-                Icon(ArkGlyphs.Back, contentDescription = "Back", tint = Palette.OnShade, modifier = Modifier.size(24.dp))
             }
         }
     }

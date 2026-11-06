@@ -100,6 +100,7 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 | What counts as a flick | `Springs.FLICK` 500 dp/s, `Springs.isFlick` | `Springs.thrown` 500 pt/s | `motion_tokens::FLICK` 500 px/s (`motion::released`); `reorder` hands on speed unless held still for 60 ms |
 | A size, clip or dim | `Springs.SIZE` 1.0, `Springs.size()` | `Springs.size` | `motion::SIZE` (damping `SIZE`) |
 | Something going, quickly | `Springs.fade()`, `FADE_STIFFNESS` 2500 (≈150 ms) | `Springs.fade` (≈150 ms) | `motion::FADE` (`FADE_RESPONSE`, ≈150 ms) |
+| How far a thing that comes in where it stays rises | `MotionTokens.RISE` 8 dp, `PinnedBar.RISE` | `MotionTokens.rise` 8 pt (`InlineHeader`) | `motion_tokens::RISE` |
 | The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | `motion::CAP` (`CAP_MS`) on `reorder`'s settle; closed form otherwise, `LAST_FRAME` 50 ms past rest |
 | Where a flick lands | `Springs.project`, `Springs.nearest`, `DECELERATION` 0.998, `SNAPPY` 0.99 | `Momentum.project`, `Momentum.target`, `Momentum.normal`/`snappy` | — |
 | Velocity as the spring wants it | `Animatable.animateTo(…, initialVelocity)` in px/s | `Momentum.relative(_:from:to:)` (share of the gap per second) | `Slide::moving_at(speed)` in px/s |

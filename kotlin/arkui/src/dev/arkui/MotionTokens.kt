@@ -41,4 +41,6 @@ public object MotionTokens {
     public const val SHIFT: Float = 0.2f
     /** How small a cover is drawn while what it plays is paused. */
     public const val PAUSED_SCALE: Float = 0.9f
+    /** How far a thing that comes in where it stays rises as it comes: a nudge. */
+    public const val RISE: Float = 8.0f
 }

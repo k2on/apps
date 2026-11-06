@@ -40,6 +40,8 @@ pub const LIFT: f32 = 1.02;
 pub const SHIFT: f32 = 0.2;
 /// How small a cover is drawn while what it plays is paused.
 pub const PAUSED_SCALE: f32 = 0.9;
+/// How far a thing that comes in where it stays rises as it comes: a nudge.
+pub const RISE: f32 = 8.0;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

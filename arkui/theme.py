@@ -47,6 +47,7 @@ MOTION = {
     "lift": "How large a row held to be dragged grows.",
     "shift": "How far a page or a step slides as it comes or goes, as a share of its width.",
     "paused-scale": "How small a cover is drawn while what it plays is paused.",
+    "rise": "How far a thing that comes in where it stays rises as it comes: a nudge.",
 }
 
 # The roles of one side, in the order they are written, and each one's

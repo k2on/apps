@@ -69,6 +69,15 @@ the finger and a row's highlight, from touch-down (`pressable`, `Press`);
 the iPhone's `.sensoryFeedback` on the same events (`SensoryFeedback`);
 and tracking and leading by size (`Typeset`, `tracked`).
 
+**A page's pinned bar** (`PinnedBar.kt`): `PinnedPage`, a page that is a
+list under its `PinnedBar`; `PinnedBar`, back and a page's
+actions over its list, with a soft edge rather than a hairline once the
+list is under it; when the page's header has scrolled up out of view, a
+small copy of it (its art and its title) rises into the bar on a
+critically damped spring, and goes back down when the header returns.
+Tapped, it takes the list to its top. Under reduced motion it only fades.
+SwiftUI's twin is ArkUI's `.inlineHeader` (`InlineHeader.swift`).
+
 ## Verified
 
 The pieces harken uses are its tests' and screenshots' (`harken/android`).

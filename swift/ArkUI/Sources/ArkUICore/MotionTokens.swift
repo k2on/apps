@@ -41,6 +41,8 @@ public enum MotionTokens {
     public static let shift: Double = 0.2
     /// How small a cover is drawn while what it plays is paused.
     public static let pausedScale: Double = 0.9
+    /// How far a thing that comes in where it stays rises as it comes: a nudge.
+    public static let rise: Double = 8.0
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.

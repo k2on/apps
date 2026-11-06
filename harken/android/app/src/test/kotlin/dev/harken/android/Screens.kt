@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -222,6 +223,11 @@ class Screens {
         val name = "Water Music"
         shot("water-music") {
             tab(Tab.Library) { AlbumPage(Demo.key(name), Demo.albums.first { it.id == Demo.key(name) }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle) }
+        }
+        // Scrolled past its header: the cover and the title small in the bar, over a soft edge.
+        shot("water-music-scrolled") {
+            val list = remember { LazyListState(firstVisibleItemIndex = 4, firstVisibleItemScrollOffset = 24) }
+            tab(Tab.Library) { AlbumPage(Demo.key(name), Demo.albums.first { it.id == Demo.key(name) }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle, list) }
         }
         val seasons = "The Four Seasons"
         shot("four-seasons") { tab(Tab.Library) { AlbumPage(Demo.key(seasons), Demo.albums.first { it.id == Demo.key(seasons) }, Demo.album(seasons), Demo.details, null, Idle) } }

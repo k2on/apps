@@ -270,3 +270,6 @@ lift = 1.02
 shift = 0.2
 # A cover while what it plays is paused: a step back, still plainly itself.
 paused-scale = 0.9
+# How far a thing that comes in where it stays rises as it comes (dp, pt or
+# logical px): a page's header, small, into its bar. A nudge, not a journey.
+rise = 8.0
