@@ -70,11 +70,15 @@ class MoreTests {
     /** A row of the menu, pressed. */
     private fun choose(view: ComposeView, label: String) = press(view) { label in texts(it) }
 
+
     /** What a menu offered, and where it went: read by `menu` once `script` has run. */
     private class Seen {
         var opened: Track? = null
         var went: Page? = null
         var said: Set<String> = emptySet()
+
+        /** What went wrong in the script, if anything: a throw on the frame clock is otherwise lost. */
+        var failed: Throwable? = null
 
         fun offered(label: String): Boolean = label in said
     }
@@ -112,18 +116,23 @@ class MoreTests {
                     open?.let { TrackMenu(it, null, null, actions, Shows.of(it, shows)) }
                 }
                 LaunchedEffect(Unit) {
-                    repeat(30) { withFrameNanos {} }
-                    more(view)
-                    repeat(30) { withFrameNanos {} }
-                    seen.opened = open
-                    seen.said = all(root(view)).flatMap { texts(it).asSequence() }.toSet()
-                    script(view)
-                    repeat(10) { withFrameNanos {} }
+                    try {
+                        repeat(30) { withFrameNanos {} }
+                        more(view)
+                        repeat(30) { withFrameNanos {} }
+                        seen.opened = open
+                        seen.said = all(root(view)).flatMap { texts(it).asSequence() }.toSet()
+                        script(view)
+                        repeat(10) { withFrameNanos {} }
+                    } catch (e: Throwable) {
+                        seen.failed = e
+                    }
                     done = true
                 }
             }
         }
         paparazzi.gif(view, "more", 0L, 2_000L, 60)
+        seen.failed?.let { throw AssertionError("the script failed; the menu said ${seen.said}", it) }
         assertTrue("the script ran to its end", done)
         return seen
     }
@@ -135,7 +144,12 @@ class MoreTests {
      * Falsified by More as it was, finding what plays among the songs alone: nothing opened.
      */
     @Test
-    fun moreOnAnEpisodeOpensItsMenuWithGoToShow() {
+    fun moreOnAnEpisodeOpensItsMenuWithGoToShow() = episodeMenu("podcast/full-time-nix", "podcast")
+
+    @Test
+    fun moreOnASermonOpensItsMenuWithGoToShow() = episodeMenu("sermon/gospel-in-life", "sermon")
+
+    private fun episodeMenu(key: String, kind: String) {
         val h = alone()
         try {
             h.addSong(song(1))
@@ -145,7 +159,7 @@ class MoreTests {
             h.addEpisode(episode("sermon/gospel-in-life", "Living Grace", 2))
             val shows = Phone.once({ h.shows() }, Show::of)
             val songs = Phone.once({ Phone.library(h, null) }, Track::of)
-            for ((key, kind) in listOf("podcast/full-time-nix" to "podcast", "sermon/gospel-in-life" to "sermon")) {
+            run {
                 val ep = Phone.once({ Phone.show(h, key) }, Track::of).single()
                 assertTrue("an episode is not among the songs", songs.none { it.id == ep.id })
                 // As the player has it: the queue's, with no album, and its show's name for its maker.
