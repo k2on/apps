@@ -228,6 +228,9 @@ pub enum Message {
     /// Whether the page's own origin is a harken server, answered: the
     /// window it opens on — that server's, or alone.
     Started(Option<String>),
+    /// The replica [`App::opening`] read on a thread, of that server's or,
+    /// with none, this device's own.
+    Opened(Option<String>, arkui::later::Slot<Result<client::Replica, String>>),
     /// The sign-in came back, one way or the other.
     SignedIn(Result<Login, String>),
     SignOut,
@@ -924,8 +927,8 @@ impl App {
     /// authority, for real (`docs/plan-alone.md` §4). What is done is kept
     /// here as local history until "connect" hands it to a server.
     #[cfg(not(feature = "demo"))]
-    fn alone(user: Option<String>) -> App {
-        let (client, note) = match auth::open_alone() {
+    fn alone(user: Option<String>, opened: Result<Replica, String>) -> App {
+        let (client, note) = match opened {
             Ok(c) => (c, String::new()),
             Err(e) => (
                 App::alone_in_memory(),
@@ -1021,8 +1024,8 @@ impl App {
         {
             let (named, user) = auth::config();
             match auth::start(named, auth::joined(), auth::origin()) {
-                auth::Start::Server(server) => App::open_server(server, user),
-                auth::Start::Alone => (App::alone(user), Task::none()),
+                auth::Start::Server(server) => App::opening(Some(server), user),
+                auth::Start::Alone => App::opening(None, user),
                 // A page with no `?server=`: whether whoever served it is a
                 // harken server is one fetch of its `/healthz` away. Until it
                 // answers the window is alone in memory, writing nothing.
@@ -1039,13 +1042,53 @@ impl App {
         }
     }
 
-    /// A window over `server`'s replica on this device, signed in as the
-    /// login it remembers there, or signed out.
+    /// A window on nothing yet, in memory and saying so, while `server`'s
+    /// replica on this device — or, with none, this device's own — is read
+    /// on a thread (`arkui::later`): a library's log is a second of reading
+    /// and replaying, and iced draws no window until boot returns.
+    /// [`Message::Opened`] brings it back, and the window becomes
+    /// [`App::open_server`]'s or [`App::alone`]'s.
+    ///
+    /// In a browser the replica is in memory, opened at once, and a window
+    /// on nothing first would put its own place in the address bar before
+    /// the link it was opened with had been read: it is opened here.
     #[cfg(not(feature = "demo"))]
-    fn open_server(server: String, user: Option<String>) -> (App, Task<Message>) {
+    fn opening(server: Option<String>, user: Option<String>) -> (App, Task<Message>) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let login = server.as_ref().and_then(|s| auth::logins().recall(s));
+            return match server {
+                Some(s) => {
+                    let opened = auth::open(&s, login.as_ref());
+                    App::open_server(s, user, opened)
+                }
+                None => (App::alone(user, auth::open_alone()), Task::none()),
+            };
+        }
+        #[allow(unreachable_code)]
+        let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
+        app.user = user;
+        app.note = "opening the library\u{2026}".into();
+        app.held = true;
+        let login = server.as_ref().and_then(|s| auth::logins().recall(s));
+        let at = server.clone();
+        let task = arkui::later::off_thread(
+            move || match &at {
+                Some(s) => auth::open(s, login.as_ref()),
+                None => auth::open_alone(),
+            },
+            move |opened| Message::Opened(server.clone(), opened),
+        );
+        (app, task)
+    }
+
+    /// A window over `server`'s replica on this device, `opened`, signed in
+    /// as the login it remembers there, or signed out.
+    #[cfg(not(feature = "demo"))]
+    fn open_server(server: String, user: Option<String>, opened: Result<Replica, String>) -> (App, Task<Message>) {
         {
             let login = auth::logins().recall(&server);
-            let (client, note) = match auth::open(&server, login.as_ref()) {
+            let (client, note) = match opened {
                 Ok(c) => (c, String::new()),
                 // A replica that will not open is not a reason to show
                 // nothing. This window works in memory and says so.
@@ -2688,10 +2731,7 @@ impl App {
             Message::Started(server) => {
                 #[cfg(not(feature = "demo"))]
                 {
-                    let (mut app, task) = match server {
-                        Some(server) => App::open_server(server, self.user.clone()),
-                        None => (App::alone(self.user.clone()), Task::none()),
-                    };
+                    let (mut app, task) = App::opening(server, self.user.clone());
                     app.window = self.window;
                     *self = app;
                     self.arrive();
@@ -2699,6 +2739,21 @@ impl App {
                 }
                 #[cfg(feature = "demo")]
                 let _ = server;
+            }
+            Message::Opened(server, opened) => {
+                #[cfg(not(feature = "demo"))]
+                if let Some(opened) = opened.take() {
+                    let (mut app, task) = match server {
+                        Some(server) => App::open_server(server, self.user.clone(), opened),
+                        None => (App::alone(self.user.clone(), opened), Task::none()),
+                    };
+                    app.window = self.window;
+                    *self = app;
+                    self.arrive();
+                    return task;
+                }
+                #[cfg(feature = "demo")]
+                let _ = (server, opened);
             }
             Message::Connect => return self.connect(),
             Message::SignedIn(outcome) => match outcome {

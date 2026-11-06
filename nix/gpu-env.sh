@@ -38,7 +38,7 @@
 # dependencies, which a program from nixpkgs generally cannot load. That is
 # nixGL's job (README.md, "The desktop window and the GPU").
 ark_gpu_env() {
-  local front="" driver dir lib manifest seen=":"
+  local front="" driver dir lib manifest seen=":" asked=":" home
   local -a drivers=()
   if [ -d /run/opengl-driver/lib ]; then
     drivers+=(/run/opengl-driver/lib/libvulkan_*.so /run/opengl-driver/lib/libEGL_mesa.so.0)
@@ -52,8 +52,16 @@ ark_gpu_env() {
     case "$lib" in /*) drivers+=("$lib") ;; esac
   done
   unset IFS
+  # One driver asked for each directory the drivers really are in: a
+  # Mesa's drivers (fourteen of them on an Asahi machine) are one build,
+  # linked against the same libraries, and an ldd is a twelfth of a second
+  # of every launch's.
   for driver in "${drivers[@]}"; do
     [ -e "$driver" ] || continue
+    home=$(readlink -f "$driver" 2>/dev/null) || home=$driver
+    home=${home%/*}
+    case "$asked" in *":$home:"*) continue ;; esac
+    asked="$asked$home:"
     while read -r lib dir; do
       case "$lib" in
         libwayland-*|libxkbcommon*|libX11*|libXcursor*|libXi.*|libXrandr*|libXext*|libXrender*|libxcb*) ;;
