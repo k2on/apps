@@ -115,7 +115,7 @@ fun ActivityScreen(ledger: Ledger) {
                 text = { Text("Transaction") })
         },
     ) { pad, _ ->
-        LazyColumn(state = list, contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 96.dp)) {
+        LazyColumn(state = list, contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
             item(key = "search") { SearchField(needle, onType = { needle = it }) }
             item(key = "segments") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {
@@ -190,7 +190,10 @@ private fun GroupHeadingText(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
 }
 
-/** The search field over the list, a filled capsule as the iPhone's is. */
+/**
+ * The search field over the list, a filled capsule as the iPhone's is (ArkUI's `SearchRow`): the
+ * page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+ */
 @Composable
 private fun SearchField(needle: String, onType: (String) -> Unit) {
     TextField(
@@ -212,7 +215,7 @@ private fun SearchField(needle: String, onType: (String) -> Unit) {
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
             ),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.xs),
+        modifier = Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs),
     )
 }
 

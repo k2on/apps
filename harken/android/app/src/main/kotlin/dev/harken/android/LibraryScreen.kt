@@ -98,8 +98,13 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
     Column(Modifier.fillMaxSize()) {
         // The face alone at the end of the line: what the list makes is its own first row.
         TabTitle("Library", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) })
+        // The title's gap over the chips (`TabTitle.BELOW`), less the Space.s of touch Material
+        // keeps over a chip (its 32 dp in a 48 dp target): the iPhone's capsules are as far down.
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
+            Modifier.fillMaxWidth()
+                .padding(top = TabTitle.BELOW - Space.s)
+                .horizontalScroll(rememberDestinationScrollState("chips"))
+                .padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             // A library of pop has no works, so no Composers — unless it is the list already shown.

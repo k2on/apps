@@ -137,11 +137,23 @@ public object TabTitle {
     /** The title's line, which the face and the actions are centred on. */
     public val LINE: Dp = 52.dp
 
-    /** Under the line, before the page's first row. */
+    /**
+     * Under the line, the row's own foot: with the taller line it puts the title's baseline as far
+     * above the row's end as the iPhone's (`AccountSizes.titleBottom` under its 44 pt line).
+     */
     public val BOTTOM: Dp = Space.xs
 
     /** The whole row. */
     public val HEIGHT: Dp = TOP + LINE + BOTTOM
+
+    /**
+     * From the row's end to the page's first content, on every tab of every app, the iPhone's too
+     * (`AccountSizes.titleBelow`): a section's own top margin, the one a [Heading] keeps above
+     * itself, so a card, a field, a pager or a row of chips under the title sits where harken
+     * Home's "Recently Added" does. A [Heading] that comes first has it already; anything else
+     * that comes first is padded by it (money's `Page` hands it on as its content's top padding).
+     */
+    public val BELOW: Dp = Space.xl
 }
 
 /** A page's own bar: back, its title, and what else the page offers. */

@@ -179,11 +179,14 @@ fun Tile(icon: ImageVector, color: Color, side: Dp = 32.dp) {
 @Composable
 fun KindTile(kind: String, side: Dp = 32.dp) = Tile(Glyphs.account(kind), kindColor(kind), side)
 
-/** The month under a page's title, paged back and forth, the budget's and the insights' alike. */
+/**
+ * The month under a page's title, paged back and forth, the budget's and the insights' alike: the
+ * page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+ */
 @Composable
 fun MonthPager(ledger: Ledger, modifier: Modifier = Modifier) {
     val book = LocalShell.current.book
-    Row(modifier.fillMaxWidth().padding(vertical = Space.s), horizontalArrangement = Arrangement.Center) {
+    Row(modifier.fillMaxWidth().padding(bottom = Space.s), horizontalArrangement = Arrangement.Center) {
         Stepper(
             label = Dates.month(ledger.month),
             onPrevious = { book.stepMonth(-1) },

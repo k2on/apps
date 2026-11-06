@@ -102,7 +102,8 @@ fun SearchScreen(
                     ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearched(needle) }),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page),
+                // The page's first content: the title's gap over it, as every tab has.
+                modifier = Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = TabTitle.BELOW),
             )
         }
         if (offline != null) item { Offline(offline) }

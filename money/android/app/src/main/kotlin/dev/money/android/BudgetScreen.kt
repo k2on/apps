@@ -278,7 +278,7 @@ fun BudgetScreen(ledger: Ledger) {
     ) { pad, _ ->
         LazyColumn(
             state = list,
-            contentPadding = PaddingValues(start = Space.page, end = Space.page, bottom = pad.calculateBottomPadding() + 96.dp),
+            contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp),
         ) {
             item(key = "month") { MonthPager(ledger) }
             item(key = "ready") { ReadyCard(ledger, Modifier.padding(top = Space.s)) }

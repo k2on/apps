@@ -66,16 +66,18 @@ struct BudgetView: View {
         let shown = ahead ?? groups
         List {
             // The large title, and at the end of its line the ••• menu and the account's face.
-            LargeTitleRow("Budget", fold: $fold, padded: false) {
-                if editing {
-                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
-                        .fontWeight(.semibold)
-                } else {
-                    options
-                }
-                AccountButton()
-            }
+            // In the first content's section, so the title's own gap is all
+            // there is between them (`AccountSizes.titleBelow`).
             Section {
+                LargeTitleRow("Budget", fold: $fold, padded: false) {
+                    if editing {
+                        Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
+                            .fontWeight(.semibold)
+                    } else {
+                        options
+                    }
+                    AccountButton()
+                }
                 VStack(spacing: Space.l) {
                     // A step changes the month at once; only its figures roll, as its
                     // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
@@ -85,8 +87,10 @@ struct BudgetView: View {
                           forward: { model.stepMonth(1) })
                     ready(s.summary)
                 }
+                .padding(.top, AccountSizes.titleBelow)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             if !s.loaded {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }

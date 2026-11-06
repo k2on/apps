@@ -92,7 +92,9 @@ private struct LibraryChips: View {
                 }
             }
             .padding(.horizontal, Space.page)
-            .padding(.vertical, Space.s)
+            // The page's first content: the title's gap over it, as every tab has.
+            .padding(.top, AccountSizes.titleBelow)
+            .padding(.bottom, Space.s)
         }
         .scrollClipDisabled()
         .animation(Springs.fade, value: tab)

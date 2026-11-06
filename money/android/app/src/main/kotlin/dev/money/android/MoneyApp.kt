@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -317,7 +318,9 @@ fun bankSaid(t: TxnLine): String {
  * `actions` (Budget's menu) and the account's face at the end of its line, raising the account
  * sheet. It goes up with the page as the content scrolls, as harken's and the iPhone's do, and
  * comes back once the content is back at its top; a page pushed over a tab has the large top app
- * bar, and no face.
+ * bar, and no face. Under a tab's title the padding `content` gets starts with arkui's
+ * [TabTitle.BELOW], the one gap every tab keeps between its title and its first content: a list
+ * puts it in its `contentPadding`, so it scrolls away with the list rather than cutting it off.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -387,17 +390,18 @@ fun Page(
         floatingActionButton = fab,
         snackbarHost = { SnackbarHost(shell.snackbar) },
     ) { pad ->
+        val under = if (onBack == null) TabTitle.BELOW else 0.dp
         if (refresh) {
             PullToRefreshBox(
                 isRefreshing = ledger.syncing,
                 onRefresh = { shell.book.sync() },
                 modifier = Modifier.fillMaxSize().padding(top = pad.calculateTopPadding()),
             ) {
-                content(PaddingValues(bottom = pad.calculateBottomPadding()), bar)
+                content(PaddingValues(top = under, bottom = pad.calculateBottomPadding()), bar)
             }
         } else {
             Box(Modifier.fillMaxSize().padding(top = pad.calculateTopPadding())) {
-                content(PaddingValues(bottom = pad.calculateBottomPadding()), bar)
+                content(PaddingValues(top = under, bottom = pad.calculateBottomPadding()), bar)
             }
         }
     }

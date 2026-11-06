@@ -94,7 +94,9 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   right to approve (a full swipe, a success tap), left to categorize, and
   one that needs a category asks for one and is approved with it; Approve
   All takes what already has one. Nothing waiting is "All Caught Up", the
-  system's empty state. All is every account's register, searchable.
+  system's empty state. All is every account's register, searchable: the
+  search field is the page's first row under the large title (ArkUI's
+  `SearchRow`, the system's field as a row), not the bar's drawer.
 - **Insights** — the desktop's Reflect in Swift Charts: the month's spending
   as a donut of its groups that a finger selects (the middle then names the
   group and its share), its legend of amounts, the month's income, spent
