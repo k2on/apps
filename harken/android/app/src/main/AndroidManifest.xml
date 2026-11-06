@@ -40,6 +40,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="harken" android:host="auth" />
+                <data android:scheme="harken" android:host="join" />
             </intent-filter>
         </activity>
         <!-- The player and the media library (Playback.kt, Car.kt): what the

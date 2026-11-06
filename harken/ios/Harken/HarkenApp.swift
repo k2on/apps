@@ -64,6 +64,8 @@ struct Root: View {
             case let .signIn(server, phase, error): SignInScreen(server: server, phase: phase, error: error)
             case let .opening(server, _): OpeningScreen(server: server)
             case .running: Shell()
+            case let .confirm(_, _, error): ConfirmScreen(error: error)
+            case .demo: Shell()
             }
         }
         .animation(Springs.fade, value: stepKind)
@@ -71,12 +73,12 @@ struct Root: View {
         .task(id: model.browse) {
             guard let url = model.browse else { return }
             do {
-                let back = try await web.authenticate(using: url, callbackURLScheme: Onboarding.scheme)
+                let back = try await web.authenticate(using: url, callbackURLScheme: AppInfo.harken.scheme)
                 model.signInReturned(back, error: nil)
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
-                model.signInReturned(nil, error: "The sign-in was closed before it finished.")
+                model.signInReturned(nil, error: nil)
             } catch {
-                model.signInReturned(nil, error: "Signing in didn't finish: \(error.localizedDescription)")
+                model.signInReturned(nil, error: error.localizedDescription)
             }
         }
     }
@@ -86,7 +88,8 @@ struct Root: View {
         case .server: return 0
         case .signIn: return 1
         case .opening: return 2
-        case .running: return 3
+        case .running, .demo: return 3
+        case .confirm: return 4
         }
     }
 }

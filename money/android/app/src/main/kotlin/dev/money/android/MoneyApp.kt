@@ -108,13 +108,15 @@ class Shell(
     val onSignOut: () -> Unit,
     /** The account sheet: what the face at the end of a tab's title raises. */
     val onAccountSheet: () -> Unit = {},
+    /** "Add a Device": the join link another phone signs in with, made as this login. */
+    val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
 
 /** The budget, its tabs and its pages; `onSignOut` leaves it. */
 @Composable
-fun MoneyApp(book: Book, onSignOut: () -> Unit) {
+fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") }) {
     val nav = rememberNavController()
     val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -146,6 +148,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
                 onAccountSheet = { account = true },
+                addDevice = addDevice,
             )
         }
 

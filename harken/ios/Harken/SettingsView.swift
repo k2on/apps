@@ -18,7 +18,7 @@ struct SettingsView: View {
         Form {
             Section("Account") {
                 HStack(spacing: Space.l) {
-                    let name = model.login.map(Logins.name) ?? ""
+                    let name = model.login.map { loginName(login: $0) } ?? ""
                     Face(name: name, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "", side: 48)
                     VStack(alignment: .leading) {
                         Text(name).font(.headline)
@@ -30,6 +30,8 @@ struct SettingsView: View {
                 LabeledContent(Probe.display(model.server)) {
                     Text(model.snapshot.status?.linked == true ? "Connected" : "Can't reach it right now")
                 }
+                let (server, login) = (model.server, model.login)
+                NavigationLink("Add a Device") { AddDeviceView { await addDevice(server: server, login: login) } }
             }
             Section {
                 Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }

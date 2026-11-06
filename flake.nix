@@ -429,16 +429,17 @@
           # for the host (`uniffi-bindgen generate <library>`), and beside
           # them goes the bridge's typed half (rust/ark-ffi/{kotlin,swift}).
           # The bindgen reads each crate's uniffi.toml from the directory
-          # `[crate-roots]` names for it: those three files and nothing else of
+          # `[crate-roots]` names for it: those four files and nothing else of
           # the workspace, so the bindings (and an APK over them) move only
           # when the library or one of them does. A crate with none takes
           # UniFFI's defaults.
           ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }:
             let
-              roots = only [ "rust/ark-ffi/uniffi.toml" "money/ffi/uniffi.toml" "harken/ffi/uniffi.toml" ];
+              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" "money/ffi/uniffi.toml" "harken/ffi/uniffi.toml" ];
               config = pkgs.writeText "uniffi-roots.toml" ''
                 [crate-roots]
                 ark_ffi = "${roots}/rust/ark-ffi"
+                ark_auth = "${roots}/rust/ark-auth"
                 money_ffi = "${roots}/money/ffi"
                 harken_ffi = "${roots}/harken/ffi"
               '';

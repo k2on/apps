@@ -644,6 +644,17 @@ class Library(private val session: ArkSession) {
 
     fun signOut() = session.signOut()
 
+    /** "Add a Device": the join link another phone signs in with, made as this login; or why not. */
+    suspend fun deviceLink(): dev.arkui.DeviceLinkShown =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val d = dev.arkdb.ffi.deviceLink("harken", session.server, session.login.token)
+                dev.arkui.DeviceLinkShown(d.link, d.qr.size.toInt(), d.qr.dark, null)
+            } catch (x: Exception) {
+                dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Couldn't make a code: ${x.message ?: "no answer"}.")
+            }
+        }
+
     /** Stop listening to the session; closing it is the onboarding's. */
     fun close() {
         session.post {

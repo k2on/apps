@@ -79,6 +79,19 @@ pub fn login(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Resul
 
 /// [`login`], waiting on the server for `patience` at most.
 pub fn login_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), patience: Patience) -> Result<Login, String> {
+    let code = code_with(server, user, open, patience)?;
+    exchange_with(server, &code, patience)
+}
+
+/// The code a sign-in at `server` comes back with, the browser opened with
+/// `open` if a person is needed: the half of [`login`] before the exchange,
+/// what the sign-in machine's `Effect::Browse` is on a desktop. Blocking.
+pub fn code(server: &str, user: Option<&str>, open: impl FnOnce(&str)) -> Result<String, String> {
+    code_with(server, user, open, Patience::DEFAULT)
+}
+
+/// [`code`], waiting on the server for `patience` at most.
+pub fn code_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), patience: Patience) -> Result<String, String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/");
@@ -108,7 +121,7 @@ pub fn login_with(server: &str, user: Option<&str>, open: impl FnOnce(&str), pat
         }
         Err(e) => return Err(format!("cannot reach {server}: {e}")),
     };
-    exchange_with(server, &code, patience)
+    Ok(code)
 }
 
 /// The code, for the login it stands for.
@@ -130,6 +143,39 @@ pub fn exchange_with(server: &str, code: &str, patience: Patience) -> Result<Log
         })?;
     let body = resp.into_string().map_err(|e| e.to_string())?;
     serde_json::from_str(&body).map_err(|e| format!("the login did not parse: {e}"))
+}
+
+/// A device code redeemed at `server` (`/auth/redeem`): a login of this
+/// device's own, for the account that made the code. The error is the
+/// server's sentence ("This code has expired. …").
+pub fn redeem(server: &str, code: &str) -> Result<Login, String> {
+    post(server, "redeem", &serde_json::json!({ "code": code }).to_string(), None)
+}
+
+/// A one-time code that signs another device in as `token`'s account, and
+/// when it expires (`/auth/device-code`): what "Add a Device" shows.
+pub fn device_code(server: &str, token: &str) -> Result<(String, i64), String> {
+    #[derive(serde::Deserialize)]
+    struct Made {
+        code: String,
+        expires_ms: i64,
+    }
+    let made: Made = post(server, "device-code", "{}", Some(token))?;
+    Ok((made.code, made.expires_ms))
+}
+
+fn post<T: serde::de::DeserializeOwned>(server: &str, route: &str, body: &str, token: Option<&str>) -> Result<T, String> {
+    let url = format!("{}/auth/{route}", server.trim_end_matches('/'));
+    let mut req = Patience::DEFAULT.agent(5).post(&url).set("Content-Type", "application/json");
+    if let Some(t) = token {
+        req = req.set("Authorization", &format!("Bearer {t}"));
+    }
+    let resp = req.send_string(body).map_err(|e| match e {
+        ureq::Error::Status(_, r) => r.into_string().unwrap_or_default(),
+        other => format!("cannot reach {server}: {other}"),
+    })?;
+    let body = resp.into_string().map_err(|e| e.to_string())?;
+    serde_json::from_str(&body).map_err(|e| format!("the answer did not parse: {e}"))
 }
 
 /// One request on the loopback listener, which the server's redirect makes

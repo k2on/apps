@@ -48,6 +48,7 @@ pub mod outline;
 pub mod panel;
 pub mod parts;
 pub mod picker;
+pub mod qr;
 pub mod renderer;
 pub mod reorder;
 pub mod route;

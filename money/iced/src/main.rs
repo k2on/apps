@@ -42,6 +42,7 @@ mod view;
 #[cfg(test)]
 mod tests;
 
+use ark_auth::onboarding::{Effect, Event, Onboarding};
 use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
 use iced::keyboard::{key::Named, Key, Modifiers};
@@ -283,6 +284,12 @@ pub enum Message {
     /// Settings and sign out.
     AccountMenu,
     SignOut,
+    /// "Add a Device": a one-time code for another device, asked of the
+    /// server as this login; and what it answered.
+    AddDevice,
+    DeviceCode(Result<String, String>),
+    /// The join link shown, copied.
+    CopyLink(String),
     AddAccount,
     AccountName(String),
     AccountKind(&'static str),
@@ -342,6 +349,8 @@ pub enum Message {
     Swallow,
     /// The socket said something, or the peer's deadline came: pump it.
     Wake,
+    /// A sign-in's code came back from the browser, or why not.
+    Coded(Result<String, String>),
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
     /// The replica [`App::boot`] read on a thread.
@@ -579,17 +588,24 @@ impl App {
         if let Some(s) = &mut app.server {
             (s.logins, s.user) = (Some(logins), user);
         }
-        // Who is signed in is the account button's to show, all the time;
-        // a note says only what is news.
-        app.note = match (&app.server.as_ref().and_then(|s| s.login.as_ref()), note.is_empty()) {
-            (_, false) => note,
-            (Some(_), true) => String::new(),
-            (None, true) => "signing in\u{2026}".into(),
+        // The sign-in machine, told where this launch starts: signed in
+        // already, or on its way to sign in (once a load), or — a page that
+        // came back from signing in — trading the code it came with. Who is
+        // signed in is the account button's to show, all the time; a note
+        // says only what is news.
+        #[cfg(target_arch = "wasm32")]
+        let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
+        #[cfg(not(target_arch = "wasm32"))]
+        let (code, returned) = (None, false);
+        let remembered = ark_auth::onboarding::Remembered {
+            server: app.server.as_ref().map(|s| s.url.clone()),
+            login: app.server.as_ref().and_then(|s| s.login.clone()).map(Into::into),
+            demo: false,
         };
-        let task = match app.server.as_ref().is_some_and(|s| s.login.is_none()) {
-            true => app.sign_in(),
-            false => Task::none(),
-        };
+        let task = app.onboard(Event::Launched { remembered, code, returned });
+        if !note.is_empty() {
+            app.note = note;
+        }
         (app, task)
     }
 
@@ -604,37 +620,90 @@ impl App {
             login,
             logins: None,
             user: None,
-            tried: false,
+            onboarding: Onboarding::new(live::app()),
             bell,
+            device: None,
         });
         app
     }
 
-    /// Go to sign in, once a load: in a browser the page goes to the
-    /// server's sign-in and comes back with a code (traded here when it
-    /// has one); the desktop hands the browser the same page and listens on
-    /// loopback for the code.
-    pub fn sign_in(&mut self) -> Task<Message> {
+    /// An event for the sign-in machine (`ark_auth::onboarding`), and its
+    /// effects carried out: what it says said in the note.
+    pub fn onboard(&mut self, event: Event) -> Task<Message> {
+        let Some(s) = &self.server else { return Task::none() };
+        let effects = s.onboarding.next(event);
+        let said = s.onboarding.said();
+        if let Some(t) = said.error.or(said.status) {
+            self.note = t;
+        }
+        Task::batch(effects.into_iter().map(|e| self.effect(e)).collect::<Vec<_>>())
+    }
+
+    /// One of the machine's effects: the browser opened (the page goes to
+    /// the server's sign-in and comes back with a code; the desktop hands
+    /// the browser the same page and listens on loopback for it), the code
+    /// traded, the login remembered or forgotten, the replica signed in.
+    fn effect(&mut self, effect: Effect) -> Task<Message> {
         let Some(s) = &mut self.server else { return Task::none() };
-        #[cfg(target_arch = "wasm32")]
-        if let Some(code) = ark_auth::web::take_code() {
-            s.tried = true;
-            let url = s.url.clone();
-            return Task::perform(async move { ark_auth::web::exchange(&url, &code).await }, Message::SignedIn);
-        }
-        if std::mem::replace(&mut s.tried, true) {
-            return Task::none();
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            ark_auth::web::go_sign_in(&s.url, s.user.as_deref());
-            Task::none()
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.note = "signing in \u{2014} look for a browser tab if one opened".into();
-            let (url, user) = (s.url.clone(), s.user.clone());
-            off_thread(move || ark_auth::client::login(&url, user.as_deref(), ark_auth::client::open_browser))
+        match effect {
+            Effect::Remember { remembered } => {
+                if let Some(logins) = &s.logins {
+                    match remembered.login {
+                        Some(l) => logins.remember(&s.url, &l.into()),
+                        None => logins.forget(&s.url),
+                    }
+                }
+                Task::none()
+            }
+            Effect::Browse { server, .. } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ark_auth::web::go_sign_in(&server, s.user.as_deref());
+                    Task::none()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let user = s.user.clone();
+                    off_thread(
+                        move || ark_auth::client::code(&server, user.as_deref(), ark_auth::client::open_browser),
+                        Message::Coded,
+                    )
+                }
+            }
+            Effect::Exchange { server, code } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Task::perform(async move { ark_auth::web::exchange(&server, &code).await }, Message::SignedIn)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    off_thread(move || ark_auth::client::exchange(&server, &code), Message::SignedIn)
+                }
+            }
+            Effect::Redeem { server, code } => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Task::perform(async move { ark_auth::web::redeem(&server, &code).await }, Message::SignedIn)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    off_thread(move || ark_auth::client::redeem(&server, &code), Message::SignedIn)
+                }
+            }
+            Effect::OpenSession { login, .. } => {
+                let login: ark_auth::Login = login.into();
+                if s.login.as_ref() != Some(&login) {
+                    self.signed_in(login);
+                }
+                self.note.clear();
+                // The replica is the window's from the start: nothing to wait for.
+                self.onboard(Event::Synced)
+            }
+            Effect::CloseSession => {
+                s.login = None;
+                Task::none()
+            }
+            Effect::FindServer { .. } | Effect::OpenDemo => Task::none(),
         }
     }
 
@@ -642,9 +711,6 @@ impl App {
     /// signed out becomes theirs and is pushed — and the link dials.
     pub fn signed_in(&mut self, login: ark_auth::Login) {
         let Some(s) = &mut self.server else { return };
-        if let Some(logins) = &s.logins {
-            logins.remember(&s.url, &login);
-        }
         self.peer.client.login(ark_peer::who(&login), login.token.clone());
         // The account button now shows who; the "signing in" said while
         // it was on its way is over.
@@ -664,15 +730,8 @@ impl App {
         self.peer.refresh();
         self.follow_ask();
         self.stores_answered();
-        let Some(why) = p.denied else { return Task::none() };
-        if let Some(s) = &mut self.server {
-            if let Some(logins) = &s.logins {
-                logins.forget(&s.url);
-            }
-            s.login = None;
-        }
-        self.note = format!("the server turned the sign-in away ({why})");
-        self.sign_in()
+        let Some(reason) = p.denied else { return Task::none() };
+        self.onboard(Event::Denied { reason })
     }
 
     fn title(&self) -> String {
@@ -1104,6 +1163,9 @@ impl App {
                 }
             }
             Message::SignOut => self.sign_out(),
+            Message::AddDevice => return self.add_device(),
+            Message::DeviceCode(made) => self.device_coded(made),
+            Message::CopyLink(link) => return iced::clipboard::write(link),
             Message::AddAccount => {
                 self.modal = Some(Modal::AddAccount {
                     name: String::new(),
@@ -1338,10 +1400,12 @@ impl App {
             }
             Message::Swallow => {}
             Message::Wake => return self.wake(),
-            Message::SignedIn(Ok(login)) => self.signed_in(login),
+            Message::Coded(Ok(code)) => return self.onboard(Event::Code { code }),
+            Message::Coded(Err(why)) => return self.onboard(Event::CameBack { why: Some(why) }),
+            Message::SignedIn(Ok(login)) => return self.onboard(Event::SignedIn { login: login.into() }),
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
-            Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
+            Message::SignedIn(Err(why)) => return self.onboard(Event::SignInFailed { why }),
             #[cfg(not(target_arch = "wasm32"))]
             Message::Opened(opened) => {
                 #[cfg(not(feature = "demo"))]
@@ -2512,17 +2576,17 @@ pub fn split_lines(rows: &[SplitRow], whole: i64) -> Result<Vec<SplitPart>, Stri
     Ok(lines)
 }
 
-/// A desktop sign-in, which waits on a loopback listener for the browser,
-/// on a thread of its own.
+/// A desktop sign-in's step, which waits on a loopback listener for the
+/// browser or on the server, on a thread of its own.
 #[cfg(not(target_arch = "wasm32"))]
-fn off_thread(work: impl FnOnce() -> Result<ark_auth::Login, String> + Send + 'static) -> Task<Message> {
+fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: fn(Result<T, String>) -> Message) -> Task<Message> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
         let _ = tx.send(work());
     });
     Task::perform(
         async move { rx.await.unwrap_or_else(|_| Err("the sign-in thread went away".into())) },
-        Message::SignedIn,
+        done,
     )
 }
 

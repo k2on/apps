@@ -110,6 +110,42 @@ const CODE_TTL_MS: i64 = 60 * 1000;
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
 const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
 
+/// How long a device code ([`Auth::device_code`]) lasts: the time to scan
+/// it, or to send the link and open it, on the new device.
+pub const DEVICE_CODE_TTL_MS: i64 = 10 * 60 * 1000;
+
+/// How many device codes one account may have waiting at once: enough for
+/// a household setting up its phones, and no more to guess among.
+pub const DEVICE_CODES_PER_ACCOUNT: usize = 5;
+
+/// What a device code is refused with, as the new device says it.
+pub const CODE_EXPIRED: &str = "This code has expired. Make a new one on a device that's signed in.";
+pub const CODE_USED: &str = "This code has been used already. Make a new one on a device that's signed in.";
+pub const CODE_UNKNOWN: &str = "This code isn't one this server made. Make a new one on a device that's signed in.";
+
+/// A device code waiting, kept by its hash: who it signs in, and when it
+/// was made; or, once redeemed, when.
+#[derive(Debug)]
+enum DeviceCode {
+    Waiting { account: Account, issued_ms: i64 },
+    Used { issued_ms: i64 },
+}
+
+impl DeviceCode {
+    fn issued_ms(&self) -> i64 {
+        match self {
+            DeviceCode::Waiting { issued_ms, .. } | DeviceCode::Used { issued_ms } => *issued_ms,
+        }
+    }
+}
+
+/// A code as it is kept: its SHA-256, so a copy of the server's memory
+/// signs nobody in.
+fn code_hash(code: &str) -> String {
+    use sha2::Digest;
+    ark::hash::hex(&sha2::Sha256::digest(code.as_bytes()))
+}
+
 /// The schema's reads, its type erased: a session live at `ctx.now` with
 /// its granted roles, a sign-in by id, and a person's sign-ins.
 struct Reads {
@@ -151,6 +187,9 @@ pub struct Auth {
     #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pending: Mutex<HashMap<String, Pending>>,
     codes: Mutex<HashMap<String, Issued>>,
+    /// Device codes by hash ([`Auth::device_code`]), and those redeemed
+    /// until they would have expired, so a second try is told so.
+    device_codes: Mutex<HashMap<String, DeviceCode>>,
     hub: OnceLock<Box<dyn Hub>>,
     reads: Reads,
     /// `docs/plan-auth.md` The roles the configuration grants, by account
@@ -177,6 +216,7 @@ impl Auth {
             ttl_ms: DEFAULT_TTL_MS,
             pending: Mutex::new(HashMap::new()),
             codes: Mutex::new(HashMap::new()),
+            device_codes: Mutex::new(HashMap::new()),
             hub: OnceLock::new(),
             reads: reads::<S>(),
             roles: BTreeMap::new(),
@@ -448,6 +488,61 @@ impl Auth {
         let mut codes = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         let issued = codes.remove(code)?;
         (now_ms() - issued.issued_ms < CODE_TTL_MS).then_some(issued.login)
+    }
+
+    /// A one-time code that signs another device in as whoever `token`'s
+    /// session is — what "Add a Device" shows, in a join link
+    /// (`crate::onboarding::join_link`) — and when it expires. It lasts
+    /// [`DEVICE_CODE_TTL_MS`], is kept only as its hash, and an account has
+    /// at most [`DEVICE_CODES_PER_ACCOUNT`] waiting. Refused for a token
+    /// that is not a live session's.
+    pub fn device_code(&self, token: &str) -> Result<(String, i64), String> {
+        let id = self.verify(token).ok_or("that isn't a session of this server's")?.to_string();
+        let (get, now) = (self.reads.get, now_ms());
+        let row = self.ask(move |store| get(store, &id)).flatten();
+        let row = row.filter(|s| live(s, now)).ok_or("that session has ended; sign in again")?;
+        let account = Account {
+            id: row.user,
+            name: row.name,
+            email: row.email,
+            picture: row.picture,
+            roles: row.roles,
+        };
+        let mut codes = self.device_codes.lock().unwrap_or_else(|e| e.into_inner());
+        codes.retain(|_, c| now - c.issued_ms() < DEVICE_CODE_TTL_MS);
+        let waiting = codes
+            .values()
+            .filter(|c| matches!(c, DeviceCode::Waiting { account: a, .. } if a.id == account.id))
+            .count();
+        if waiting >= DEVICE_CODES_PER_ACCOUNT {
+            return Err("there are already enough codes waiting; use one, or wait ten minutes".into());
+        }
+        let code = random_token();
+        codes.insert(code_hash(&code), DeviceCode::Waiting { account, issued_ms: now });
+        Ok((code, now + DEVICE_CODE_TTL_MS))
+    }
+
+    /// A device code redeemed on `device`, once: a session of its own for
+    /// the account that made it, and its login — the same a browser's
+    /// sign-in gives. The sentence why not, as the new device says it.
+    pub fn redeem_device_code(&self, code: &str, device: &str) -> Result<Login, String> {
+        let now = now_ms();
+        let account = {
+            let mut codes = self.device_codes.lock().unwrap_or_else(|e| e.into_inner());
+            let key = code_hash(code.trim());
+            let issued_ms = codes.get(&key).ok_or(CODE_UNKNOWN)?.issued_ms();
+            if now - issued_ms >= DEVICE_CODE_TTL_MS {
+                codes.remove(&key);
+                return Err(CODE_EXPIRED.into());
+            }
+            // Taken and marked under one lock: two devices racing with the
+            // same code get it once.
+            match codes.insert(key, DeviceCode::Used { issued_ms }) {
+                Some(DeviceCode::Waiting { account, .. }) => account,
+                _ => return Err(CODE_USED.into()),
+            }
+        };
+        self.issue(&account, device)
     }
 }
 

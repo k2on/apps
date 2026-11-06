@@ -51,7 +51,7 @@ struct ServerScreen: View {
     var body: some View {
         OnboardingPage(title: "Welcome to Harken", sentence: "Harken plays from your own server. Where is it?") {
             VStack(alignment: .leading, spacing: Space.s) {
-                TextField("music.example.com", text: Binding(get: { typed }, set: { model.send(.typed($0)) }))
+                TextField("music.example.com", text: Binding(get: { typed }, set: { model.send(.typed(text: $0)) }))
                     .textContentType(.URL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -78,6 +78,7 @@ struct ServerScreen: View {
             .controlSize(.large)
             .disabled(checking || typed.trimmingCharacters(in: .whitespaces).isEmpty)
             .padding(.top, Space.l)
+            ScanButton(disabled: checking)
         }
     }
 }
@@ -85,7 +86,7 @@ struct ServerScreen: View {
 /// Signing in on the server's own page: what it is waiting for, and the error the last attempt or the server said.
 struct SignInScreen: View {
     let server: String
-    let phase: SignInPhase
+    let phase: Phase
     let error: String?
     @EnvironmentObject private var model: Model
 
@@ -96,9 +97,9 @@ struct SignInScreen: View {
             }
             switch phase {
             case .browser:
-                Label("Waiting for the sign-in…", systemImage: "safari").foregroundStyle(.quiet)
+                Label(model.said.status ?? "", systemImage: "safari").foregroundStyle(.quiet)
             case .exchanging:
-                HStack(spacing: Space.m) { ProgressView(); Text("Signing in…") }.foregroundStyle(.quiet)
+                HStack(spacing: Space.m) { ProgressView(); Text(model.said.status ?? "") }.foregroundStyle(.quiet)
             case .idle:
                 EmptyView()
             }
@@ -110,15 +111,62 @@ struct SignInScreen: View {
     }
 }
 
+/// "Scan a Code": the camera, for another device's "Add a Device" code,
+/// which joins its server signed in (asked about first).
+struct ScanButton: View {
+    let disabled: Bool
+    @State private var scanning = false
+    @EnvironmentObject private var model: Model
+
+    var body: some View {
+        if QrScanner.available {
+            Button { scanning = true } label: { Text("Scan a Code").frame(maxWidth: .infinity) }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                .disabled(disabled)
+                .sheet(isPresented: $scanning) {
+                    QrScanner { text in
+                        scanning = false
+                        if let u = URL(string: text) { model.open(url: u) }
+                    }
+                    .ignoresSafeArea()
+                }
+        }
+    }
+}
+
+/// A server from outside — a join link opened, a code scanned — asked about
+/// before it is used: whose it is, and Join or Cancel. A link that cannot be
+/// used says why, and can only be cancelled.
+struct ConfirmScreen: View {
+    let error: String?
+    @EnvironmentObject private var model: Model
+
+    var body: some View {
+        OnboardingPage(title: model.said.question ?? "Join", sentence: error ?? model.said.status ?? "") {
+            if error == nil {
+                Button { model.send(.accept) } label: { Text("Join").frame(maxWidth: .infinity) }
+                    .buttonStyle(.glassProminent)
+                    .tint(Color.accent)
+                    .controlSize(.large)
+            }
+            Button { model.send(.decline) } label: { Text("Cancel").frame(maxWidth: .infinity) }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+        }
+    }
+}
+
 /// Signed in just now, and the library on its way: said quietly, and only after a beat.
 struct OpeningScreen: View {
     let server: String
     @State private var shown = false
+    @EnvironmentObject private var model: Model
 
     var body: some View {
         Group {
             if shown {
-                OnboardingPage(title: "Harken", sentence: "Getting your library from \(Probe.display(server))…") { ProgressView().tint(Color.accent) }
+                OnboardingPage(title: "Harken", sentence: model.said.status ?? "") { ProgressView().tint(Color.accent) }
                     .transition(.opacity)
             } else {
                 Color.clear

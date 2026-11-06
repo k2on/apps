@@ -749,6 +749,11 @@ rec {
             packageId = "percent-encoding";
           }
           {
+            name = "qrcode";
+            packageId = "qrcode";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -778,6 +783,12 @@ rec {
             optional = true;
             target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "cors" ];
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "ureq";
@@ -835,9 +846,10 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
+          "ffi" = [ "dep:uniffi" ];
           "server" = [ "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
-        resolvedDefaultFeatures = [ "default" "server" ];
+        resolvedDefaultFeatures = [ "default" "ffi" "server" ];
       };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
@@ -861,6 +873,7 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
@@ -17049,6 +17062,20 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "qrcode" = rec {
+        crateName = "qrcode";
+        version = "0.14.1";
+        edition = "2021";
+        crateBin = [];
+        sha256 = "1v693x68yg90wfpas5v4bf6cfmnq9dq54qfgd3kb33j07r3851yn";
+        authors = [
+          "kennytm <kennytm@gmail.com>"
+        ];
+        features = {
+          "default" = [ "image" "svg" "pic" ];
+          "image" = [ "dep:image" ];
+        };
       };
       "quick-error" = rec {
         crateName = "quick-error";

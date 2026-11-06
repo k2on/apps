@@ -53,10 +53,14 @@
 mod login;
 mod util;
 
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
+pub mod onboarding;
 pub mod remember;
 pub mod rows;
 #[cfg(not(target_arch = "wasm32"))]
