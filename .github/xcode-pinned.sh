@@ -40,4 +40,6 @@ if [ "$have" != "$build" ]; then
   exit 1
 fi
 echo "XCODE=$xcode" >> "$GITHUB_ENV"
-echo "XCODE_NIX_CONF=extra-allowed-impure-host-deps = $xcode" >> "$GITHUB_ENV"
+# Not `extra-`: nix cannot append to this setting, so its macOS defaults
+# are named again before the Xcode.
+echo "XCODE_NIX_CONF=allowed-impure-host-deps = /System/Library /usr/lib /dev /bin/sh $xcode" >> "$GITHUB_ENV"
