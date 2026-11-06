@@ -234,7 +234,7 @@ fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
     let l = login(&server, "alice");
     let mut alice = open(ark_peer::who(&l));
     let jpeg = [&b"\xff\xd8\xff\xe0 a food lion receipt "[..], &[7u8; 3 << 20][..]].concat();
-    let file = alice.client.put_file(&jpeg, "image/jpeg").unwrap();
+    let file = alice.client.put_file(&jpeg[..], "image/jpeg").unwrap();
     alice.mutate(
         "receipts.add_photo",
         &AddPhoto {
@@ -268,7 +268,9 @@ fn a_receipt_photo_taken_offline_is_read_by_the_server_once_it_arrives() {
         let ps: Vec<PhotoLine> = ps[0].query("receipts.photos", &()).unwrap();
         !ps.is_empty()
     });
-    assert_eq!(bob.client.file(&file), Ok(None), "fetched when opened");
+    assert!(matches!(bob.client.file(&file), Ok(None)), "fetched when opened");
     pump_until(&mut [&mut bob], 10, |ps| ps[0].client.file(&file).is_ok_and(|f| f.is_some()));
-    assert_eq!(bob.client.file(&file).unwrap().unwrap(), jpeg);
+    let mut got = vec![];
+    std::io::Read::read_to_end(&mut bob.client.file(&file).unwrap().unwrap(), &mut got).unwrap();
+    assert_eq!(got, jpeg);
 }

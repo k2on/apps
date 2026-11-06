@@ -388,14 +388,27 @@ impl Peer {
     /// name (the hex sha256 of `bytes`), for the `FileRef` a mutation
     /// names it by.
     pub fn put_file(&self, bytes: Vec<u8>, media: String) -> Result<String, Refusal> {
-        Ok(self.shared.act(|s| s.peer.put_file(&bytes, &media))?.hash)
+        Ok(self.shared.act(|s| s.peer.put_file(&bytes[..], &media))?.hash)
     }
 
-    /// A file's bytes when this device holds them; when not, fetched from
-    /// the server, and the listener rings when they arrive.
-    pub fn file(&self, hash: String, size: i64, media: String) -> Option<Vec<u8>> {
+    /// `put_file` of the file at `path`, streamed from it: a large one is
+    /// never held whole.
+    pub fn put_file_at(&self, path: String, media: String) -> Result<String, Refusal> {
+        let from = std::fs::File::open(&path).map_err(|e| format!("{path}: {e}"))?;
+        Ok(self.shared.act(|s| s.peer.put_file(from, &media))?.hash)
+    }
+
+    /// At most `n` of a file's bytes from `at` when this device holds it
+    /// whole; when not, fetched from the server, and the listener rings
+    /// when they arrive.
+    pub fn file(&self, hash: String, size: i64, media: String, at: i64, n: i64) -> Option<Vec<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
         let f = ark_peer::FileRef { hash, size, media };
-        self.shared.act(|s| s.peer.file(&f)).ok().flatten()
+        let mut b = self.shared.act(|s| s.peer.file(&f)).ok().flatten()?;
+        let mut bytes = vec![];
+        b.seek(SeekFrom::Start(at.max(0) as u64)).ok()?;
+        b.take(n.max(0) as u64).read_to_end(&mut bytes).ok()?;
+        Some(bytes)
     }
 
     /// The first of an input's refinements that fails, as a form says it.

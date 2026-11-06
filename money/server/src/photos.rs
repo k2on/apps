@@ -8,6 +8,7 @@
 //! A photo whose file has not arrived yet (made offline, its upload still
 //! going) fails, and is tried again after the job's retry.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use ark_peer::Peer;
@@ -40,7 +41,9 @@ pub fn receipt(photo: &Photo, r: &PaperReceipt) -> StoreReceipt {
 
 /// Reads one photo: what the importer's handler does with a job.
 pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<PhotoRead, String> {
-    let bytes = p.file(&photo.file)?.ok_or("the photo has not reached the server yet")?;
+    let mut photo_file = p.file(&photo.file)?.ok_or("the photo has not reached the server yet")?;
+    let mut bytes = vec![];
+    photo_file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let readings = paper::ocr(program, data, &bytes).map_err(|e| format!("{e:#}"))?;
     let told = paper::read(&readings).told();
     let got = receipt(photo, &told);
@@ -67,7 +70,7 @@ pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<
 /// The importer's peer reading photos: from the server's store, with
 /// `program`.
 pub fn handle(peer: &mut Peer, program: PathBuf, data: PathBuf) -> std::io::Result<()> {
-    peer.keep_files(Box::new(ark_peer::Files::new(data.join("log").join("files"))?));
+    peer.keep_files(ark_peer::files::Store::dir(data.join("log").join("files"))?);
     peer.handle::<Photo>(move |p, photo| read(p, &program, &data, photo));
     Ok(())
 }

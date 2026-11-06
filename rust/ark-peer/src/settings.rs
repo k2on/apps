@@ -68,6 +68,9 @@ pub struct Serve {
     /// (`_RETAIN_ENTRIES`, 10,000: `Config::keep`); a device further behind
     /// is sent the snapshot and rebases onto it.
     pub retain: usize,
+    /// The largest file a device may put, in bytes (`_MAX_FILE_MB`, 16 GiB:
+    /// `Config::max_file`).
+    pub max_file: u64,
     /// Who holds which role: role → account ids (`_ROLES`). Asked at every
     /// connection, so a restart with another configuration grants or
     /// revokes at once.
@@ -89,6 +92,7 @@ impl Serve {
             web_module: None,
             keepalive: KEEPALIVE,
             retain: RETAIN,
+            max_file: crate::files::MAX_FILE,
             roles: BTreeMap::new(),
         }
     }
@@ -142,6 +146,11 @@ impl Serve {
         if let Some(n) = env("RETAIN_ENTRIES") {
             retain = (n.trim().parse()).map_err(|_| anyhow!("{} is a count of entries: {n}", name("RETAIN_ENTRIES")))?;
         }
+        let mut max_file = crate::files::MAX_FILE;
+        if let Some(n) = env("MAX_FILE_MB") {
+            let mb: u64 = n.trim().parse().map_err(|_| anyhow!("{} is megabytes: {n}", name("MAX_FILE_MB")))?;
+            max_file = mb << 20;
+        }
         let list = |k: &str| -> Vec<String> {
             let v = env(k).unwrap_or_default();
             v.split(',').map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect()
@@ -158,6 +167,7 @@ impl Serve {
             web_module: env("WEB_MODULE"),
             keepalive,
             retain,
+            max_file,
             roles: roles_of(&name("ROLES"), &env("ROLES").unwrap_or_default())?,
         })
     }

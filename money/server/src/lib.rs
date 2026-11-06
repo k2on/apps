@@ -280,6 +280,7 @@ pub async fn start(config: Config) -> Result<Server> {
     let importer_slot = Arc::new(std::sync::Mutex::new(None));
     let mut hub = ark_peer::Config {
         keep: Some(config.retain),
+        max_file: config.max_file,
         // Settings' stores, called over the socket and kept off the log.
         calls: setup::calls(setup::Setup {
             data: config.data.clone(),

@@ -23,17 +23,6 @@ pub struct FileRef {
     pub media: String,
 }
 
-impl FileRef {
-    /// The reference to `bytes`.
-    pub fn of(bytes: &[u8], media: &str) -> FileRef {
-        FileRef {
-            hash: hash(bytes),
-            size: bytes.len() as i64,
-            media: media.into(),
-        }
-    }
-}
-
 /// A file's name: the hex sha256 of its bytes.
 pub fn hash(bytes: &[u8]) -> String {
     crate::hash::hex(&crate::hash::sha256(&[bytes]))

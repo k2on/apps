@@ -42,17 +42,36 @@ is right by its name, and a transfer resumes by offset.
 
 ## Where bytes live: `ark_peer::files::Store`
 
-A store of whole files by hash and of files part-sent: `len`, `read(at,
-n)`, `partial`, `append(at, bytes)`, `finish` (the sha256 checked, then
-the file is whole), and the list of files **made here and not yet sent**.
+Whole files by hash, files part-sent, and the files **made here and not
+yet sent**: `<hash>` whole, `<hash>.part` arriving, `<hash>.unsent`
+marking one this device made. A whole one is renamed from a part once its
+sha256 is checked, so it is whole or not there.
 
-- `Dir`: a directory, `<hash>` whole, `<hash>.part` arriving,
-  `<hash>.unsent` marking one this device made. A device's is `files/`
-  beside its disk (`Disk::files`), so a phone's is under its app
-  directory and iced's under its data directory; a server's is
-  `data/log/files`.
-- `Memory`: a simulated device's and, for now, the web build's (a browser
-  keeps a page's files until it closes; IndexedDB is later).
+- `Store::Dir`: a directory. A device's is `files/` beside its disk
+  (`Disk::files`), so a phone's is under its app directory and iced's
+  under its data directory; a server's is `data/log/files`.
+- `Store::Memory`: a simulated device's and, for now, the web build's (a
+  browser keeps a page's files until it closes; IndexedDB is later).
+
+A part nothing was written to for `files::STALE` (three days) is dropped
+as the store is opened, and on a server once an hour as uploads begin: an
+upload given up, a download let go, a put cut off.
+
+## The API
+
+```rust
+peer.put_file(reader, "video/mp4")?          // -> FileRef
+peer.file(&file_ref)?                        // -> Option<Box<dyn Bytes>>
+```
+
+`put_file` takes any `Read` — a `File`, a `&[u8]` — streams it into the
+store and hashes it as it goes, once. `file` gives a reader of the bytes
+(`Read + Seek`: read it in order, seek to a range, `io::copy` it to a path
+or a writer) when they are here whole; `Ok(None)` when they are not, and
+they are wanted; `Err(why)` when the server said why not. Natively neither
+ever holds a file whole; in a browser the store is memory, behind the same
+calls. Over UniFFI, `put_file(bytes)` and `put_file_at(path)`, and
+`file(hash, size, media, at, n)`: at most `n` bytes from `at`.
 
 ## The frames
 
@@ -67,25 +86,32 @@ Absent { hash, why }                  server: not for you, or not here yet
 ```
 
 Each chunk is at most `files::CHUNK` (1 MiB, well under a socket's frame
-limit), and each is asked for by a `Want` — pull, like a fill's parts — so
-neither end holds more than a chunk of a file in its outbox.
+limit), and each is asked for by a `Want` — pull, like a fill's parts.
+Whoever takes a file keeps `files::WINDOW` (8) chunks asked ahead of what
+it holds, so a transfer goes at the link's speed rather than a chunk a
+round trip, and neither end holds more than a window of a file in its
+outbox. The frames are as they were: an older peer answers each `Want` it
+is sent, and asks one at a time itself.
 
-**Up** (a file this device made). `Peer::put_file(bytes, media)` writes the
-file to the store, marks it unsent and returns its `FileRef` for the
+**Up** (a file this device made). `Peer::put_file(reader, media)` writes
+the file to the store, marks it unsent and returns its `FileRef` for the
 app's mutation, which is pending as any intent is. On every connection,
 and at once when linked, each unsent file is `Offer`ed; the server answers
-`Want{at}` from what it holds of it already (a cut-off upload goes on, a
-file it has whole is `Have` at once); each `Chunk` is written and the next
-`Want`ed; the last is checked against its hash and the file is `Have`.
+with a window of `Want{at}` from what it holds of it already (a cut-off
+upload goes on, a file it has whole is `Have` at once); each `Chunk` is
+written and the window moved on; the last is checked against its hash and
+the file is `Have`. A file larger than the server's `Config::max_file`
+(16 GiB unless `<APP>_MAX_FILE_MB` says) is `Absent`, and none of it kept.
 `Have` takes the mark off. The rows go as they always do, beside the
 upload, not behind it: a large file never holds back a device's sync.
 
 **Down** (a file a row names). `Peer::file(&FileRef)` gives the bytes when
 the store holds them; when it does not, it sends `Want{at: partial}` (once)
-and gives none, and the app draws a placeholder. Each `Chunk` is appended
-and the next wanted; the last is checked and the views are rung
-(`Update::Files`), so the app asks again and draws it. A file asked for
-while the link is down is asked for on the next connection.
+and gives none, and the app draws a placeholder. The first `Chunk` says
+how big the file is, and the rest are asked a window at a time; the last
+is checked and the views are rung (`Pumped::shown`), so the app asks again
+and draws it. A file asked for while the link is down is asked for on the
+next connection.
 
 **Not here yet.** A row can reach the server before its file does (it was
 made offline and the upload is still going). A `Want` for a file the

@@ -103,7 +103,7 @@ impl App {
                     self.note = format!("{} is not a photo", p.name);
                     return Task::none();
                 };
-                match self.peer.client.put_file(&p.bytes, &media) {
+                match self.peer.client.put_file(&p.bytes[..], &media) {
                     Ok(file) => {
                         self.author("add the photo", "add_photo", &AddPhoto { file, txn_id: Some(txn_id) });
                     }
@@ -203,8 +203,11 @@ impl App {
             return;
         }
         let f = f.clone();
-        if let Ok(Some(bytes)) = self.peer.client.file(&f) {
-            self.photo = Some((f.hash, image::Handle::from_bytes(bytes)));
+        let mut bytes = vec![];
+        if let Ok(Some(mut b)) = self.peer.client.file(&f) {
+            if std::io::Read::read_to_end(&mut b, &mut bytes).is_ok() {
+                self.photo = Some((f.hash, image::Handle::from_bytes(bytes)));
+            }
         }
     }
 

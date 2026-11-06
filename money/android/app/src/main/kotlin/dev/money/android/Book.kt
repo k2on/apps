@@ -671,7 +671,7 @@ private constructor(
      * A photo's bytes when this phone holds them; when not, fetched from the server, and the state moves
      * when they arrive. Safe from any thread: the peer guards itself.
      */
-    fun photo(f: FileRef): ByteArray? = if (closed) null else peer.file(f.hash, f.size, f.media)
+    fun photo(f: FileRef): ByteArray? = if (closed) null else peer.file(f.hash, f.size, f.media, 0, f.size)
 
     /** Dial the server now: the app came to the front. */
     fun dialNow() {

@@ -55,7 +55,8 @@
 //! the bytes of the files rows name (`crate::file`, docs/plan-files.md),
 //! which never enter the log. A device offers a file it made; a `Want`
 //! asks for a file's bytes from `at`, answered by one `Chunk` of them (or
-//! `Absent`: not for this connection, or not on the server yet); `Have`
+//! `Absent`: not for this connection, or not on the server yet), and a
+//! taker keeps several asked ahead of what it holds; `Have`
 //! says the server holds a file whole — an upload done, or one wanted
 //! arrived.
 //!

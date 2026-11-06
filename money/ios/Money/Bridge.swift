@@ -294,7 +294,7 @@ final class Bridge {
     private func fetch() {
         guard let m = money else { return }
         for (h, f) in wanted {
-            if let d = m.peer.file(hash: f.hash, size: f.size, media: f.media) {
+            if let d = m.peer.file(hash: f.hash, size: f.size, media: f.media, at: 0, n: f.size) {
                 snap.files[h] = d
                 wanted[h] = nil
             }

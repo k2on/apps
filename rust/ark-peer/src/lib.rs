@@ -141,6 +141,8 @@ pub struct Config {
     /// both machines ([`Frame::Call`](ark::frames::Frame)): never logged,
     /// journaled, recorded or told to another connection.
     pub calls: BTreeMap<String, Call>,
+    /// The largest file a server takes from a device, in bytes.
+    pub max_file: u64,
 }
 
 /// One of a server's [`Config::calls`]: given the caller, verified as its
@@ -161,6 +163,7 @@ impl Config {
             ephemeral: BTreeSet::new(),
             every_ms: 0,
             calls: BTreeMap::new(),
+            max_file: files::MAX_FILE,
         }
     }
 

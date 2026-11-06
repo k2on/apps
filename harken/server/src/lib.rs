@@ -385,6 +385,7 @@ pub async fn start(config: Config) -> Result<Server> {
     let auth = Arc::new(auth);
 
     let mut hub = hub_config(&hosted, config.retain);
+    hub.max_file = config.max_file;
     if config.scoped {
         hub.feed = Arc::new(|_| Some("session.feed".into()));
     }
