@@ -44,7 +44,6 @@ pub mod line;
 pub mod menu;
 pub mod motion;
 pub mod motion_tokens;
-pub mod native;
 pub mod outline;
 pub mod panel;
 pub mod picker;

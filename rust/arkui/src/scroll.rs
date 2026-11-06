@@ -29,17 +29,6 @@
 //! drawn, and the scroll is never moved past its end: [`follow`], the
 //! scroll edge and the small header read the offset they always did.
 //!
-//! **In a browser asked for `?scroll=native`, the browser scrolls the
-//! page's main list** ([`crate::native`]): the largest [`elastic`] drawn
-//! follows a real scroller the browser scrolls and coasts, put where it is
-//! each frame before drawing, and moves it when iced moves the list
-//! ([`follow`], [`reveal`], [`reveal_to`], [`centre`], a scrollbar). Only
-//! an end stays this module's: a browser coast that reaches one still
-//! moving carries into the band ([`Kinetic::seen`]), and a pull past one,
-//! or any wheel while a band shows, is the band's as above. Every other
-//! scrollable, and every one with `?scroll=arkui`, no parameter or on the
-//! desktop, is as above.
-//!
 //! The band, the spring and the fling re-implement Gecko's (Mozilla's
 //! `gfx/layers/apz`, MPL-2.0: `Axis::ApplyResistance`,
 //! `Axis::StartOverscrollAnimation`, `AxisPhysicsMSDModel`,
@@ -428,34 +417,7 @@ pub struct Kinetic {
     /// Where its scrollable and its scrollbar were last seen, from its own
     /// top left: what the thumb is drawn from while it bands.
     seen: Option<Seen>,
-    /// The browser scrolls it and coasts it ([`crate::native`]): only an
-    /// end is this one's, as where the system coasts ([`system_coasts`]).
-    browser: bool,
-    /// The browser's scroller, as it was last followed.
-    native: Followed,
 }
-
-/// The browser's scroller as the main list follows it ([`crate::native`]):
-/// whether this list is the main one, and since which change of it; where
-/// the scroller and the list were left; how fast the scroller was going,
-/// over its last moves and over the last frame alone; whether it was at an
-/// end; and whether the wheel last came in lines.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct Followed {
-    main: bool,
-    generation: Option<u64>,
-    top: Option<f32>,
-    scrolled: f32,
-    moves: Velocity,
-    when: Option<Instant>,
-    step: f32,
-    edge: bool,
-    lines: bool,
-}
-
-/// iced says where a scrollable is to the pixel, rounded, so what it was
-/// seen at and where it was put are each up to half a pixel out.
-const ROUNDED: f32 = 1.0;
 
 /// A scrollable as last seen: its bounds, from the [`elastic`]'s top
 /// left, how tall what it scrolls is, and how far it is scrolled.
@@ -497,16 +459,10 @@ impl Kinetic {
         matches!(self.phase, Phase::Settling { .. })
     }
 
-    /// Whether the system coasts it, never this ([`system_coasts`]), or the
-    /// browser scrolls it ([`crate::native`]).
-    fn system(&self) -> bool {
-        system_coasts() || self.browser
-    }
-
     /// Whether what comes now, `y`, is the system's coast going on
     /// ([`system_coasts`]): after a lift, the same way, unbroken.
     fn system_coast(&self, y: f32, now: Instant) -> bool {
-        self.system()
+        system_coasts()
             && y.signum() == self.going
             && self.heard.is_some_and(|t| now.saturating_duration_since(t) <= LIFT)
             && match self.phase {
@@ -665,7 +621,7 @@ impl Kinetic {
                     let inward = speed * self.over < 0.0;
                     let fast = speed.abs() >= START && !spent;
                     match () {
-                        _ if inward && fast && !self.system() => {
+                        _ if inward && fast && !system_coasts() => {
                             self.phase = Phase::Coasting {
                                 since: now,
                                 speed: coasting,
@@ -676,11 +632,11 @@ impl Kinetic {
                         _ if fast && !inward => self.settle(thrown(speed), now),
                         _ => self.settle(0.0, now),
                     }
-                    self.spending = self.system();
+                    self.spending = system_coasts();
                     return;
                 }
                 self.phase = match () {
-                    _ if self.system() => Phase::Following,
+                    _ if system_coasts() => Phase::Following,
                     _ if spent => Phase::Idle,
                     _ if speed.abs() >= START && coasting.abs() >= STOP => Phase::Coasting {
                         since: now,
@@ -771,64 +727,8 @@ impl Kinetic {
             heard: self.heard,
             seen: self.seen,
             holds: self.holds,
-            browser: self.browser,
-            native: self.native,
             ..Kinetic::default()
         };
-    }
-
-    /// The browser's scroller seen at `top` of the `room` it scrolls, at
-    /// `now` ([`crate::native`]): whether it moved since last seen. Its
-    /// moves say how fast it goes; one that reaches an end by itself — the
-    /// browser's coast, no fingers on the wheel for [`LIFT`], or the
-    /// fingers taken to have lifted — going at least [`START`] the way of
-    /// that end carries on into the band and springs back, as a coast of
-    /// arkui's own does ([`Kinetic::overshoot`]). Not a wheel that turned
-    /// in lines, and not where it was put there or with less motion
-    /// (`still`: iced moved the list and the scroller with it, or nothing
-    /// bands).
-    pub fn seen(&mut self, top: f32, room: f32, now: Instant, still: bool) -> bool {
-        self.now = Some(now);
-        let followed = &mut self.native;
-        let moved = followed.top.is_some_and(|t| (t - top).abs() >= tokens::REST_PX);
-        if moved {
-            // In the wheel's sense: the content going down is positive.
-            followed.moves.add(now, -top);
-            let gone = followed.top.unwrap_or(top) - top;
-            followed.step = followed
-                .when
-                .map_or(0.0, |t| gone / now.saturating_duration_since(t).as_secs_f32().max(f32::EPSILON));
-        }
-        if moved || followed.top.is_none() {
-            followed.when = Some(now);
-        }
-        followed.top = Some(top);
-        let at = tokens::REST_PX;
-        let edge = room > 0.0 && (top <= at || top >= room - at);
-        let arrived = edge && moved && !followed.edge;
-        followed.edge = edge;
-        let lines = followed.lines;
-        if !arrived || still || lines || self.over != 0.0 || self.settling() {
-            return moved;
-        }
-        // Frames further apart than a drag's pause (a slow page) leave the
-        // moves no line to fit: the last frame's alone says how fast.
-        let speed = match self.native.moves.speed() {
-            0.0 => self.native.step,
-            fitted => fitted,
-        };
-        let toward = match top <= at {
-            true => speed > 0.0,
-            false => speed < 0.0,
-        };
-        let by_itself = self.heard.is_none_or(|t| now.saturating_duration_since(t) > LIFT) || self.phase == Phase::Following;
-        if toward && by_itself && speed.abs() >= START {
-            self.hit(speed, now);
-            // The rest of the browser's coast, if it comes as the wheel, is
-            // spent rather than pulling the band out again.
-            self.spending = true;
-        }
-        moved
     }
 
     /// A frame at `now`, `told` whether only the system's word lets the
@@ -1038,13 +938,6 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         viewport: &Rectangle,
     ) {
         let inner = layout.children().next().expect("the content's layout");
-        if let Event::Mouse(_) = event {
-            if tree.state.downcast_ref::<Kinetic>().native.main {
-                // A menu, a sheet or a dialog over the list hides the
-                // pointer from it: the wheel there is not the browser's.
-                crate::native::pointer(cursor.position().is_some());
-            }
-        }
         match event {
             Event::Window(window::Event::RedrawRequested(now)) => self.frame(tree, clock(*now), inner, renderer, clipboard, shell, viewport),
             Event::Keyboard(keyboard::Event::KeyPressed { .. }) => {
@@ -1055,7 +948,6 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(_)) | Event::Touch(_) => tree.state.downcast_mut::<Kinetic>().stop(),
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if self.browser_wheel(tree, *delta, inner, cursor, shell) => return,
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => match pulls(*delta, motion::reduced()) {
                 Some((x, y)) => {
                     if self.wheel(tree, x, y, inner, cursor, renderer, clipboard, shell, viewport) {
@@ -1202,24 +1094,6 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
     }
 }
 
-/// Put the outermost scrollable at `y`: where the browser's scroller is.
-struct Put {
-    y: f32,
-    done: bool,
-}
-
-impl Operation for Put {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-        operate(self);
-    }
-    fn scrollable(&mut self, _id: Option<&Id>, _bounds: Rectangle, _content: Rectangle, _translation: Vector, state: &mut dyn Scrollable) {
-        if !self.done {
-            self.done = true;
-            state.scroll_to(AbsoluteOffset { x: None, y: Some(self.y) });
-        }
-    }
-}
-
 /// What became of the wheel handed to the scrollable.
 enum Scrolled {
     /// It scrolled, and this much of it was past its end.
@@ -1244,15 +1118,13 @@ impl<M> Elastic<'_, M> {
         viewport: &Rectangle,
     ) {
         let view = inner.bounds().height;
-        let browser = self.follow_browser(tree, now, inner, renderer, shell);
         let kinetic = tree.state.downcast_mut::<Kinetic>();
         // Fingers that came to rest since the last frame stop it first.
         kinetic.feel(fingers(), now);
         let (step, wake) = kinetic.tick(now, view, told());
         let aim = kinetic.aim.unwrap_or(inner.bounds().center());
         ask(shell, wake);
-        // The browser scrolls it: nothing of arkui's coasts.
-        if step == 0.0 || browser {
+        if step == 0.0 {
             return;
         }
         let cursor = mouse::Cursor::Available(aim);
@@ -1263,135 +1135,6 @@ impl<M> Elastic<'_, M> {
             Scrolled::Elsewhere => tree.state.downcast_mut::<Kinetic>().stop(),
         }
         shell.request_redraw();
-    }
-
-    /// The browser's scroller followed, if this is the page's main list
-    /// ([`crate::native`]), at the frame at `now`, before anything is drawn:
-    /// whether it is. The scroller is made to scroll as far as the list
-    /// can; the list is put where the scroller is, or, where iced moved the
-    /// list since the last frame (a key, [`follow`], its scrollbar), the
-    /// scroller is put where the list is; and what the wheel will need —
-    /// where the list is, what inside it scrolls itself, whether a band
-    /// shows — is left for it. A list that has just become the main one
-    /// puts the scroller where it is.
-    fn follow_browser(&mut self, tree: &mut Tree, now: Instant, inner: Layout<'_>, renderer: &iced::Renderer, shell: &mut Shell<'_, M>) -> bool {
-        if !crate::native::on() {
-            return false;
-        }
-        let look = self.look(tree, inner, renderer);
-        let Some((bounds, content, scrolled)) = look.outer else {
-            tree.state.downcast_mut::<Kinetic>().native.main = false;
-            return false;
-        };
-        let key = tree.state.downcast_ref::<Kinetic>() as *const Kinetic as usize;
-        let generation = match crate::native::claim(key, bounds.width * bounds.height, now) {
-            Some(crate::native::Claim::Main { generation }) => generation,
-            claim => {
-                let kinetic = tree.state.downcast_mut::<Kinetic>();
-                kinetic.native.main = false;
-                kinetic.browser = false;
-                // The main list from the next frame: ask for it.
-                if claim == Some(crate::native::Claim::Other { soon: true }) {
-                    shell.request_redraw();
-                }
-                return false;
-            }
-        };
-        let room = (content.height - bounds.height).max(0.0);
-        crate::native::fit(room);
-        let reduced = motion::reduced();
-        let kinetic = tree.state.downcast_mut::<Kinetic>();
-        kinetic.browser = true;
-        kinetic.native.main = true;
-        let inside = look
-            .inner
-            .iter()
-            .filter_map(|b| (*b - Vector::new(0.0, scrolled)).intersection(&bounds))
-            .collect();
-        crate::native::publish(bounds, inside, kinetic.offset(now) != 0.0, reduced);
-        let (top, jumped) = match kinetic.native.generation == Some(generation) {
-            // iced moved it: the scroller follows.
-            true if (scrolled - kinetic.native.scrolled).abs() > ROUNDED => (crate::native::set_top(scrolled), true),
-            true => (crate::native::top(), false),
-            // Just become the main list: the scroller is put where it is.
-            false => {
-                kinetic.native = Followed {
-                    main: true,
-                    generation: Some(generation),
-                    ..Followed::default()
-                };
-                (crate::native::set_top(scrolled), true)
-            }
-        };
-        kinetic.native.scrolled = top;
-        let moved = kinetic.seen(top, room, now, reduced || jumped);
-        if jumped {
-            // Put there, not coasting: none of it is a speed.
-            kinetic.native.moves.clear();
-            kinetic.native.step = 0.0;
-        }
-        crate::native::watching(moved);
-        if moved {
-            shell.request_redraw();
-        }
-        if (top - scrolled).abs() >= tokens::REST_PX {
-            self.content
-                .as_widget_mut()
-                .operate(&mut tree.children[0], inner, renderer, &mut Put { y: top, done: false });
-        }
-        true
-    }
-
-    /// The wheel over the page's main list, when the browser scrolls it
-    /// ([`crate::native`]): whether it was handled here, and so is never
-    /// the scrollable's. The browser scrolls the list with it; or, pulled
-    /// past an end or with a band showing, the band has it as ever
-    /// ([`Kinetic::wheel`], [`Kinetic::overshoot`]), and what the band
-    /// leaves is scrolled by moving the scroller. Either way its moves are
-    /// kept, so its stillness lets the fingers go. A wheel that turns in
-    /// lines is the browser's alone.
-    fn browser_wheel(&mut self, tree: &mut Tree, delta: ScrollDelta, inner: Layout<'_>, cursor: mouse::Cursor, shell: &mut Shell<'_, M>) -> bool {
-        use crate::native::Wheel;
-        let decided = crate::native::wheel();
-        let kinetic = tree.state.downcast_mut::<Kinetic>();
-        if !kinetic.native.main || decided == Wheel::Elsewhere {
-            return false;
-        }
-        let now = clock(Instant::now());
-        let view = inner.bounds().height;
-        shell.capture_event();
-        shell.request_redraw();
-        let Some((_, y)) = pulls(delta, motion::reduced()) else {
-            kinetic.native.lines = matches!(delta, ScrollDelta::Lines { .. });
-            kinetic.stop();
-            return true;
-        };
-        kinetic.native.lines = false;
-        if y == 0.0 {
-            if kinetic.active() {
-                kinetic.lift(now, true);
-            }
-            return true;
-        }
-        kinetic.aim = cursor.position_over(inner.bounds());
-        let top = crate::native::top();
-        let room = kinetic.seen.map_or(0.0, |s| (s.content - s.bounds.height).max(0.0));
-        let band = crate::native::pulls_past(y, top, room) || kinetic.offset(now) != 0.0;
-        let left = kinetic.wheel(y, now, view);
-        if !band {
-            return true;
-        }
-        let wanted = top - left;
-        let reached = wanted.clamp(0.0, room);
-        let reached = match decided == Wheel::Owned && (reached - top).abs() >= tokens::REST_PX {
-            true => crate::native::set_top(reached),
-            false => reached,
-        };
-        let past = reached - wanted;
-        if past != 0.0 {
-            kinetic.overshoot(past, now, view);
-        }
-        true
     }
 
     /// The wheel, `x` and `y` pixels, handed to the scrollable as it was
@@ -2188,58 +1931,6 @@ mod tests {
         assert_eq!(*drawn.last().unwrap(), 2000.0, "exactly at the edge");
         assert_eq!(list.at, 2000.0);
         assert!(!list.kinetic.active());
-    }
-
-    /// The browser's scroller ([`crate::native`]), followed a frame at a
-    /// time from `from` toward the top at `per` pixels a frame, 8 ms apart
-    /// — the fingers' wheel heard just before it set off if `wheel`, the
-    /// last wheel one that turned in lines if `lines`, with less motion if
-    /// `reduced` — and what is drawn past the top each frame once it gets
-    /// there.
-    fn browser_coast(from: f32, per: f32, wheel: bool, lines: bool, reduced: bool) -> Vec<f32> {
-        let t = Instant::now();
-        let mut kinetic = Kinetic {
-            browser: true,
-            ..Kinetic::default()
-        };
-        if wheel {
-            kinetic.wheel(per, t, VIEW);
-        }
-        kinetic.native.lines = lines;
-        let mut top = from;
-        let mut drawn = Vec::new();
-        for n in 1..400u64 {
-            let now = t + ms(8 * n);
-            top = (top - per).max(0.0);
-            kinetic.seen(top, 2000.0, now, reduced);
-            kinetic.tick(now, VIEW, false);
-            if top == 0.0 {
-                drawn.push(kinetic.offset(now));
-            }
-        }
-        drawn
-    }
-
-    /// The browser's own coast — no fingers on the wheel — reaching the top
-    /// still moving carries on into the band and springs back to the edge,
-    /// as arkui's own coast does; reaching it under the fingers (a wheel a
-    /// moment before) leaves the band to the wheel, and a wheel that turned
-    /// in lines, or with less motion, never bands. Falsified by banding
-    /// whatever reached the top (the fingers' drag bounced), or by reading
-    /// the speed from the fingers' moves (none came: no band).
-    #[test]
-    fn the_browsers_coast_into_an_end_carries_into_the_band() {
-        let drawn = browser_coast(400.0, 20.0, false, false, false);
-        let peak = drawn.iter().cloned().fold(f32::MIN, f32::max);
-        assert!(peak > 10.0, "on into the band: {peak}");
-        assert!(peak < VIEW, "within the view: {peak}");
-        assert_eq!(*drawn.last().unwrap(), 0.0, "back at the edge");
-        let held = browser_coast(40.0, 20.0, true, false, false);
-        assert!(held.iter().all(|&d| d == 0.0), "the fingers' drag is the wheel's: {held:?}");
-        let lines = browser_coast(400.0, 20.0, false, true, false);
-        assert!(lines.iter().all(|&d| d == 0.0), "a mouse's wheel: {lines:?}");
-        let reduced = browser_coast(400.0, 20.0, false, false, true);
-        assert!(reduced.iter().all(|&d| d == 0.0), "with less motion: {reduced:?}");
     }
 
     /// Where the system coasts by itself (macOS), a lift makes no coast of
