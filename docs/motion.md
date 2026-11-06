@@ -445,7 +445,9 @@ one row for every tab of both apps — one top inset, one height, one font —
 so the title's baseline and the face are in the same place on each, and an
 app adds no padding of its own. On the iPhone the line is the page's own first row
 (`LargeTitleRow`, Account.swift, which takes away an inset grouped list's
-top margin), which scrolls with the page; once it has
+top margin; in a `List` it is the first section's header, `TitleSection`,
+never a row, as an inset grouped list clips its rows to their rounded cards
+and those corners would cut the title and the face), which scrolls with the page; once it has
 gone under the bar the inline title rises into the bar's middle on
 `Springs.move` (`MotionTokens.rise`, transform and opacity only, a fade
 under Reduce Motion), and goes back the same way (`largeTitleBar`). On
@@ -455,8 +457,8 @@ the page as it scrolls, scroll-linked, not animated. Under the row, one gap to
 the page's first content on every tab of both apps (`TabTitle.BELOW`,
 `AccountSizes.titleBelow`, a section's `Space.xl`): a heading that comes
 first keeps it as its own top margin, and anything else that comes first (a
-card, a search field, a pager, the chips) is padded by it, in the title row's
-own section in an iPhone `List` so the list's section spacing does not add to
+card, a search field, a pager, the chips) is padded by it, in the title's
+own header in an iPhone `List` (`HeaderRows`) so the list's section spacing does not add to
 it. Tapped, the face raises the account sheet (`AccountSheet`), the system's
 own sheet motion.
 

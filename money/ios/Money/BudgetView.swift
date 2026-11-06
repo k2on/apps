@@ -66,31 +66,24 @@ struct BudgetView: View {
         let shown = ahead ?? groups
         List {
             // The large title, and at the end of its line the ••• menu and the account's face.
-            // In the first content's section, so the title's own gap is all
-            // there is between them (`AccountSizes.titleBelow`).
-            Section {
-                LargeTitleRow("Budget", fold: $fold, padded: false) {
-                    if editing {
-                        Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
-                            .fontWeight(.semibold)
-                    } else {
-                        options
-                    }
-                    AccountButton()
+            // With the month's pager and Ready to Assign under it, the title's
+            // own gap all there is between them (`TitleSection`).
+            TitleSection("Budget", fold: $fold, spacing: Space.l) {
+                if editing {
+                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
+                        .fontWeight(.semibold)
+                } else {
+                    options
                 }
-                VStack(spacing: Space.l) {
-                    // A step changes the month at once; only its figures roll, as its
-                    // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
-                    Pager(model.monthName,
-                          home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
-                          back: { model.stepMonth(-1) },
-                          forward: { model.stepMonth(1) })
-                    ready(s.summary)
-                }
-                .padding(.top, AccountSizes.titleBelow)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                AccountButton()
+            } below: {
+                // A step changes the month at once; only its figures roll, as its
+                // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
+                Pager(model.monthName,
+                      home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
+                      back: { model.stepMonth(-1) },
+                      forward: { model.stepMonth(1) })
+                ready(s.summary)
             }
             if !s.loaded {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }
