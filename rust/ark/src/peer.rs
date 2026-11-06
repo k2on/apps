@@ -1167,7 +1167,11 @@ impl Peer {
             self.ask(o);
         }
         let Some((cursor, Some(fill))) = self.asked.clone() else { return };
-        let answer = self.upstream.as_ref().map(|s| s.answer(cursor, fill, self.most())).unwrap_or_default();
+        let answer = self
+            .upstream
+            .as_ref()
+            .map(|s| s.answer(self.space, cursor, fill, self.most()))
+            .unwrap_or_default();
         for f in answer {
             self.frame(None, f, o);
         }
@@ -1309,7 +1313,6 @@ impl Peer {
 /// upstream inside a table, but begins again from nothing.
 #[derive(Clone)]
 pub struct Source {
-    space: Space,
     at: (Seq, EntryHash),
     rows: BTreeMap<String, Vec<Vec<u8>>>,
     tail: Vec<Logged>,
@@ -1323,7 +1326,7 @@ impl Source {
     /// then the entries after — taken out of them as a source, unless they
     /// hold no row but the log's: the records left stand where those rows
     /// did.
-    pub fn of(space: Space, records: &mut Vec<Record>) -> Option<Source> {
+    pub fn of(records: &mut Vec<Record>) -> Option<Source> {
         let Some(Record::Rows(rows)) = records.first_mut() else { return None };
         let at = Logged::from_bytes(rows.iter().find(|(t, _)| t == LOG)?.1.last()?).ok()?;
         if rows.iter().all(|(t, rs)| t == LOG || rs.is_empty()) {
@@ -1333,7 +1336,6 @@ impl Source {
         let rows = rows.into_iter().filter(|(t, _)| t != LOG).collect();
         let tail = records.drain(1..).filter_map(|r| if let Record::Logged(l) = r { Some(l) } else { None });
         Some(Source {
-            space,
             at: (at.seq, at.hash),
             rows,
             tail: tail.collect(),
@@ -1343,18 +1345,14 @@ impl Source {
 
     /// Its answer to a `Hello` at `cursor` of its replica, its fill at
     /// `from`: the entries after where that stands, and the part from there.
-    fn answer(&self, cursor: Seq, from: Cursor, most: u64) -> Vec<Frame> {
+    fn answer(&self, space: Space, cursor: Seq, from: Cursor, most: u64) -> Vec<Frame> {
         let logged: Vec<Logged> = self.tail.iter().filter(|l| l.seq > cursor).cloned().collect();
-        let page = (!logged.is_empty()).then_some(Frame::Page {
-            space: self.space,
-            from: cursor,
-            logged,
-        });
+        let page = (!logged.is_empty()).then_some(Frame::Page { space, from: cursor, logged });
         let n = from.key.as_slice().try_into().map_or(0, u64::from_be_bytes) as usize;
         let rows = self.rows.get(&from.table).into_iter().flatten().enumerate().skip(n);
         let rows = rows.map(|(i, r)| ((i as u64).to_be_bytes(), &r[..]));
         page.into_iter()
-            .chain([part(self.space, self.at, Some(from), rows, (most as usize).clamp(1, PART))])
+            .chain([part(space, self.at, Some(from), rows, (most as usize).clamp(1, PART))])
             .collect()
     }
 }

@@ -93,7 +93,7 @@ fn a_linked_round_trip_waits_on_nothing() {
                 for e in wire.events() {
                     match e {
                         Event::Open => d.connected(),
-                        Event::Frame(b) => d.receive(b),
+                        Event::Frame(b) => drop(d.receive(b)),
                         Event::Closed(_) => {}
                     }
                 }

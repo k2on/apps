@@ -369,16 +369,6 @@ pub enum Record {
     Journal(Journal),
 }
 
-impl Record {
-    pub fn enc(&self) -> Vec<u8> {
-        self.to_bytes()
-    }
-
-    pub fn dec(b: &[u8]) -> Result<Record, String> {
-        Record::from_bytes(b)
-    }
-}
-
 /// One record of a device's pending intents (§1.7), as its machine says
 /// them after a step that moved them: so many taken off the front
 /// (confirmed or refused), these put on the back, each with its preview's

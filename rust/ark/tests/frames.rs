@@ -174,11 +174,11 @@ fn every_frame_reads_back() {
     };
     let r = Record::Logged(l.clone());
     assert_eq!(
-        r.enc(),
+        r.to_bytes(),
         [&[0u8][..], &l.to_bytes()].concat(),
         "a logged record is the variant, then the row"
     );
-    assert_eq!(Record::dec(&r.enc()), Ok(r));
+    assert_eq!(Record::from_bytes(&r.to_bytes()), Ok(r));
 }
 
 /// A push is a build's intents as they are, in order, beside the schema

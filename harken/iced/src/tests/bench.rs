@@ -472,7 +472,7 @@ fn bench_fold() {
     let rows = replica.log.confirmed_rows();
     eprintln!("  its rows: {:.1?}", t.elapsed());
     let t = Instant::now();
-    let bytes = ark::log::Record::Rows(rows).enc();
+    let bytes = ark::format::Encode::to_bytes(&ark::log::Record::Rows(rows));
     eprintln!("  encoded, {} bytes: {:.1?}", bytes.len(), t.elapsed());
     let _ = std::fs::remove_dir_all(&tmp);
 }

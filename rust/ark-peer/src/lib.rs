@@ -374,7 +374,7 @@ impl Peer {
         let mut p = Peer::with(config, log, live, local);
         p.link = link;
         let mut stored = p.log.stored();
-        let source = ark::peer::Source::of(Space::Durable, &mut stored);
+        let source = ark::peer::Source::of(&mut stored);
         stored.extend(pending.into_iter().map(Record::Pending));
         p.step(Space::Durable, Input::Open(stored));
         if let Some(source) = source {
@@ -707,18 +707,14 @@ impl Peer {
         Ok(id)
     }
 
-    /// A frame from its server, as its bytes, read once ([`Peer::told_frame`]).
-    pub fn receive(&mut self, bytes: Vec<u8>) {
-        if let Ok(f) = Frame::dec(&bytes) {
-            self.told_frame(f);
-        }
-    }
-
-    /// A frame from its server, to the machine of its space; a call's
-    /// reply, to what it was asked; a file's, to its files.
-    /// Told it cannot be served (§1.2), it closes its link until the app
-    /// is updated.
-    pub(crate) fn told_frame(&mut self, f: Frame) {
+    /// A frame from its server, read once, here: to the machine of its
+    /// space; a call's reply, to what it was asked; a file's, to its files.
+    /// Its space and whether it was a fill's part; none, for bytes that are
+    /// no frame. Told it cannot be served (§1.2), it closes its link until
+    /// the app is updated.
+    pub fn receive(&mut self, bytes: Vec<u8>) -> Option<(Space, bool)> {
+        let f = Frame::dec(&bytes).ok()?;
+        let said = (f.space(), matches!(f, Frame::Part { .. }));
         match f {
             Frame::Reply { id, reply } => self.told.replied(id, reply),
             f if f.is_file() => self.file_told(f),
@@ -728,6 +724,7 @@ impl Peer {
             tracing::warn!(target: "ark", peer = %self.label(), why = self.update_needed(), "update needed");
             self.disconnect();
         }
+        Some(said)
     }
 
     /// Another login: every pending intent the signer's, its id kept — or,

@@ -21,7 +21,6 @@
 //! Each rings the peer's [`Wake`] whenever it has something to say, and
 //! [`Peer::pump`] takes it in.
 
-use ark::frames::Frame;
 use ark::schema::Space;
 
 use crate::Peer;
@@ -279,15 +278,8 @@ impl Peer {
                     self.connected();
                 }
                 Some(Event::Frame(b)) => {
-                    // Read once, here: the machine takes the frame as it is.
-                    let f = Frame::dec(&b).ok();
-                    let (space, part) = f
-                        .as_ref()
-                        .map_or((Space::Durable, false), |f| (f.space(), matches!(f, Frame::Part { .. })));
+                    let (space, part) = self.receive(b).unwrap_or((Space::Durable, false));
                     p.frames[space as usize] += 1;
-                    if let Some(f) = f {
-                        self.told_frame(f);
-                    }
                     p.shown |= !(part && self.machine(space).is_some_and(|m| m.filling()));
                 }
                 Some(Event::Closed(why)) => {

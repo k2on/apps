@@ -202,7 +202,7 @@ impl Peer {
         let (seq, hash) = live.log().head();
         let rows = Record::Rows(ark::log::standing(live.store.snapshot_rows(), seq, hash));
         let j = journal_bytes(live.journal().expect("the live authority's"), true);
-        self.put_beside(VOLATILE, &rows.enc());
+        self.put_beside(VOLATILE, &rows.to_bytes());
         self.put_beside(LIVE, &j);
     }
 

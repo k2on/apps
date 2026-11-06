@@ -128,7 +128,7 @@ pub trait Disk: Send {
     fn load(&mut self) -> io::Result<Vec<Record>> {
         let kv = self.get("kv")?;
         let (log, had) = self.get("log")?.map_or((vec![], false), |l| (l, true));
-        let rows = match kv.map(|b| Record::dec(&b)) {
+        let rows = match kv.map(|b| Record::from_bytes(&b)) {
             Some(Ok(Record::Rows(r))) => r,
             _ => ark::log::standing(vec![], 0, Default::default()),
         };
