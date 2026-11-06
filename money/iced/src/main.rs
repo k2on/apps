@@ -344,6 +344,9 @@ pub enum Message {
     Wake,
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
+    /// The replica [`App::boot`] read on a thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    Opened(arkui::later::Slot<Result<client::Replica, String>>),
     /// The account's picture, fetched.
     Picture(arkui::images::Loaded),
     /// The which-key panel's delay went by for the prefix it was armed for.
@@ -525,15 +528,41 @@ impl App {
         (App::with_peer(seed::seeded(), &today), Task::none())
     }
 
-    /// The window on its server, signed in as the login this device
-    /// remembers there, or on its way to sign in.
+    /// The window, open on nothing and saying so while its server's replica
+    /// on this device is read on a thread (`arkui::later`): iced draws no
+    /// window until boot returns, and a budget's log is reading and
+    /// replaying. [`Message::Opened`] brings it back, to [`App::opened`].
+    ///
+    /// In a browser the replica is in memory, opened at once, and a window
+    /// on nothing first would put its own page in the address bar before
+    /// the link it was opened with had been read: it is opened here.
     #[cfg(not(feature = "demo"))]
     fn boot() -> (App, Task<Message>) {
+        let (url, _) = live::config();
+        let login = live::logins().recall(&url);
+        #[cfg(target_arch = "wasm32")]
+        {
+            App::opened(live::open(&url, login.as_ref()))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let today = day_of_ms(ark_peer::now_ms());
+            let mut app = App::with_peer(client::open(Box::new(ark_peer::Memory::default())), &today);
+            app.note = "opening the budget\u{2026}".into();
+            let task = arkui::later::off_thread(move || live::open(&url, login.as_ref()), Message::Opened);
+            (app, task)
+        }
+    }
+
+    /// The window on its server, over `opened`, signed in as the login this
+    /// device remembers there, or on its way to sign in.
+    #[cfg(not(feature = "demo"))]
+    fn opened(opened: Result<client::Replica, String>) -> (App, Task<Message>) {
         let today = day_of_ms(ark_peer::now_ms());
         let (url, user) = live::config();
         let logins = live::logins();
         let login = logins.recall(&url);
-        let (client, note) = match live::open(&url, login.as_ref()) {
+        let (client, note) = match opened {
             Ok(c) => (c, String::new()),
             // A replica that will not open is no reason to show nothing:
             // this window works in memory, and says so.
@@ -1313,6 +1342,18 @@ impl App {
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
             Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::Opened(opened) => {
+                #[cfg(not(feature = "demo"))]
+                if let Some(opened) = opened.take() {
+                    let (mut app, task) = App::opened(opened);
+                    app.window = self.window;
+                    *self = app;
+                    return task;
+                }
+                #[cfg(feature = "demo")]
+                let _ = opened;
+            }
             Message::Picture(done) => self.pictures.loaded(done),
             Message::WhichDue(key) => self.which.due(key),
             Message::ToastDue(key) => self.toast.due(key),
