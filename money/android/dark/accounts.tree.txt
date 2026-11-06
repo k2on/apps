@@ -1,0 +1,50 @@
+    #content
+                    "Net Worth, -$227,249.38, Every open account, less what's owed"
+                    'Net Worth' [text]
+                    '-$227,249.38' [text]
+                    "Every open account, less what's owed" [text]
+                    [button] pressable
+                      'All Accounts' [text]
+                      '$20,900.62' [text]
+                  'Budget' [text]
+                  '$20,900.62' [text]
+                    [button] pressable
+                      'Checking, Checking, $14,236.90'
+                      'Checking' [text]
+                      'Checking' [text]
+                      '$14,236.90' [text]
+                    [button] pressable
+                      'Savings, Savings, $6,900.00'
+                      'Savings' [text]
+                      'Savings' [text]
+                      '$6,900.00' [text]
+                    [button] pressable
+                      'Cash, Cash, $74.16'
+                      'Cash' [text]
+                      'Cash' [text]
+                      '$74.16' [text]
+                    [button] pressable
+                      'Chase Sapphire, Chase ••4417, -$310.44, 4 to review'
+                      'Chase Sapphire' [text]
+                      'Chase ••4417' [text]
+                      '4 to review'
+                        '4' [text]
+                      '-$310.44' [text]
+                  'Tracking' [text]
+                  '-$248,150.00' [text]
+                    [button] pressable
+                      'Mortgage, Loan, -$312,450.00'
+                  [button] pressable
+                    'Signed in as Alex'
+                    [button]
+                  'Accounts' [text]
+                [button] pressable
+                  'Add a transaction'
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
