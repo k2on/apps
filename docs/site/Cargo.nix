@@ -472,7 +472,7 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "History" "Location" "EventTarget" "Navigator" "Clipboard" "Document" "Element" "HtmlElement" "HtmlInputElement" "Event" "DragEvent" "DataTransfer" "FileList" "File" "Blob" ];
+            features = [ "Window" "History" "Location" "EventTarget" "Navigator" "Clipboard" "Document" "Element" "HtmlElement" "HtmlInputElement" "Event" "DragEvent" "DataTransfer" "FileList" "File" "Blob" "Node" "CssStyleDeclaration" "DomRect" "MouseEvent" "WheelEvent" ];
           }
           {
             name = "zbus";

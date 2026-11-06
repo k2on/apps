@@ -20,6 +20,10 @@
 //!   ([`crate::touchpad`]), and [`wakes`] rings when the fingers lift so a
 //!   band they held springs back.
 //!
+//! - **The browser scrolls the main list, when asked** (`?scroll=native`,
+//!   [`crate::native`]): [`wakes`] rings when the browser moves it with
+//!   nothing else drawing, so the window draws where it went.
+//!
 //! An app's `view` ends in [`view`] (or [`tracked`]), its boot's task has
 //! [`boot`] beside it, and its `subscription` has [`wakes`], answered with
 //! any message: the update draws a frame. Where there is nothing to do
@@ -40,10 +44,11 @@ pub fn tracked<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, moved: imp
 }
 
 /// Rings when something under the root needs a frame of its own — a paste
-/// arrived, fingers rested on the trackpad or lifted — for the app to
+/// arrived, fingers rested on the trackpad or lifted, the browser scrolled
+/// the main list — for the app to
 /// answer with any message.
 pub fn wakes() -> Subscription<()> {
-    Subscription::batch([crate::clipboard::pastes(), crate::touchpad::subscription()])
+    Subscription::batch([crate::clipboard::pastes(), crate::touchpad::subscription(), crate::native::wakes()])
 }
 
 /// What a window starts with, beside an app's own boot task: on Wayland,

@@ -18,7 +18,8 @@
            pull on to the browser's back gesture. */
         overscroll-behavior: none;
       }
-      /* iced appends its canvas to <body> and sizes it to 100%. */
+      /* iced appends its canvas to <body> and sizes it to 100%; with
+         `?scroll=native` arkui puts it in a scroller of its own (arkui::native). */
       canvas { display: block; }
     </style>
   </head>
@@ -30,8 +31,9 @@
       import init from "./pkg/money-iced.js?v=dev";
       await init({ module_or_path: new URL("pkg/money-iced_bg.wasm?v=dev", document.baseURI) });
 
-      // The keyboard reaches the app only while its canvas has the focus.
-      const grab = () => document.querySelector("canvas")?.focus();
+      // The keyboard reaches the app only while its canvas has the focus;
+      // focused without scrolling, so a scroller around it stays put.
+      const grab = () => document.querySelector("canvas")?.focus({ preventScroll: true });
       addEventListener("focus", grab);
       grab();
     </script>
