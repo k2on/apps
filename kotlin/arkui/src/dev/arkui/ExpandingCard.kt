@@ -28,6 +28,16 @@
 // split from the vertical one by each detector's axis, and leaves `p` alone;
 // whether it skips is projected too, at the snappier rate. `p` is read in layout and drawing only: the card moving composes
 // nothing, and what is behind it is not composed again at all.
+//
+// `p` stops at its ends, but the finger does not: dragged on past either —
+// the full player up past the screen's top, the bar down past where it rests —
+// the card goes on with resistance, Apple's rubber band of how far past the
+// end the finger went (`Springs.band`, in the screen's height), drawn as a
+// translation and never laid out. Let go, the band springs back to the edge
+// from the release's speed on `Springs.settle`, and is not drawn past it; a
+// release headed for the other end carries the card there and lets the band
+// go from rest. Grabbed again on its way back, the finger takes it from where
+// it is drawn. With motion reduced, the card stops at its ends as before.
 @file:OptIn(ExperimentalFoundationApi::class)
 
 package dev.arkui
@@ -80,7 +90,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 /** The two ends an [ExpandingCard] rests at. */
@@ -124,9 +136,27 @@ public class ExpandingCardState(
     internal var veil by mutableFloatStateOf(1f)
 
     /**
+     * How far the finger has gone past an end, in pixels of the drag (down positive): past the
+     * bar's rest below it, past the screen's top above. Drawn as [band], never laid out; 0 with
+     * motion reduced.
+     */
+    internal var stretch by mutableFloatStateOf(0f)
+
+    /** The room a drag past an end is banded in: the screen's height, as last laid out. */
+    internal var room: Float = 0f
+
+    /**
+     * How far the card is drawn past the end it is at, in pixels (down positive): Apple's rubber
+     * band of [stretch] in [room] ([Springs.band]). Read as it is drawn.
+     */
+    public val band: Float
+        get() = if (held != null) 0f else Springs.band(stretch, room)
+
+    /**
      * The finger's hold on [drag]: each move takes the drag's own lock, at the user's priority, so
      * grabbing the card mid-settle stops the settle where it is drawn and the finger carries on
-     * from there; and each move is clamped to the ends, so the card never leaves them.
+     * from there; and each move is clamped to the ends, so the drag never leaves them — what goes
+     * past an end is [stretch], drawn banded.
      */
     internal val finger: DraggableState =
         object : DraggableState {
@@ -138,7 +168,12 @@ public class ExpandingCardState(
                     val scope = this
                     object : DragScope {
                             override fun dragBy(pixels: Float) {
-                                scope.dragTo(clamped(here() + pixels))
+                                // From where it is drawn: the end it is at and the stretch
+                                // past it, which comes back first on the way in.
+                                val raw = here() + stretch + pixels
+                                val to = clamped(raw)
+                                stretch = if (reduced) 0f else raw - to
+                                scope.dragTo(to)
                             }
                         }
                         .block()
@@ -166,7 +201,7 @@ public class ExpandingCardState(
      */
     internal suspend fun release(velocity: Float) {
         if (held != null || travel <= 0f) return
-        val to = Springs.nearest(here(), velocity, listOf(0f, travel))
+        val to = Springs.nearest(here() + stretch, velocity, listOf(0f, travel))
         glide(if (to == 0f) CardFace.Expanded else CardFace.Collapsed, velocity)
     }
 
@@ -174,15 +209,38 @@ public class ExpandingCardState(
      * To `face` along the drag's path, from wherever it is drawn and as fast as it was going: a
      * flick's release on the momentum spring, anything else critically damped. Overshoot past an
      * end is not drawn — the card does not go above the screen or below the bar — so a flick's
-     * settle reads as arriving at speed, not as a wobble.
+     * settle reads as arriving at speed, not as a wobble. Stretched past the end it is going to,
+     * only the band has anywhere to go, and it takes the speed back to the edge ([relax]);
+     * stretched past the other, the card takes the speed and the band lets go from rest.
      */
     internal suspend fun glide(face: CardFace, velocity: Float = 0f) {
         drag.anchoredDrag(face) { anchors, target ->
             val to = anchors.positionOf(target)
-            animate(here(), to, velocity, Springs.settle(velocity, density, reduced)) { v, s ->
-                dragTo(v, s)
+            val from = here()
+            val banded = stretch != 0f && abs(from - to) < 0.5f
+            coroutineScope {
+                if (stretch != 0f) launch { relax(if (banded) velocity else 0f) }
+                if (!banded) {
+                    animate(from, to, velocity, Springs.settle(velocity, density, reduced)) { v, s ->
+                        dragTo(v, s)
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * The band back to its edge from `velocity` (pixels a second, down positive), on the settle that
+     * speed picks, and not drawn past the edge: a flick's overshoot would put the card the other
+     * side of its end.
+     */
+    private suspend fun relax(velocity: Float) {
+        val from = stretch
+        if (from == 0f) return
+        animate(from, 0f, velocity, Springs.settle(velocity, density, reduced)) { x, _ ->
+            stretch = if (x * from > 0f) x else 0f
+        }
+        stretch = 0f
     }
 
     // Reduced motion's way between the ends: out, there, in — the card never travels.
@@ -499,6 +557,7 @@ public fun ExpandingCard(
                                 val h = c.maxHeight.toFloat()
                                 g.w = w
                                 g.h = h
+                                sheet.room = h
                                 sheet.reach(g.bar(w, h, tabsPx).top)
                                 val r = g.card(w, h, tabsPx, sheet.p)
                                 val pl =
@@ -513,6 +572,8 @@ public fun ExpandingCard(
                             }
                             .graphicsLayer {
                                 val p = sheet.p
+                                // Past an end, banded: drawn there, laid out at the end.
+                                translationY = sheet.band
                                 shape = RoundedCornerShape(lerp(g.corner, 0f, p))
                                 clip = true
                                 alpha = sheet.veil

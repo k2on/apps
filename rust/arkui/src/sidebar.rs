@@ -96,7 +96,7 @@ pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: 
             .on_press(item.press),
         );
     }
-    container(scrollable(side).id(id).style(style::bars))
+    container(crate::scroll::elastic(scrollable(side).id(id).style(style::bars)))
         // Its edge, a pixel, is part of its width (drawn by the window beside
         // it, `style::edge`), so the page is as wide as the window less this.
         .width(Length::Fixed(width - 1.0))
