@@ -352,11 +352,12 @@ fn found<'a, M: Clone + 'a>(
             list = list.push(group);
         }
 
-        scrollable(list)
-            .id(list_id)
-            .height(Length::Fixed(height))
-            .on_scroll(move |v| scrolled(v.absolute_offset().y))
-            .into()
+        crate::scroll::elastic(
+            scrollable(list)
+                .id(list_id)
+                .height(Length::Fixed(height))
+                .on_scroll(move |v| scrolled(v.absolute_offset().y)),
+        )
     }
 }
 

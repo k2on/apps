@@ -141,10 +141,12 @@ pub fn view<'a, M: Clone + 'a>(
         Some(band) => crate::edge::faded(page, band, style::page_color),
         None => page,
     };
-    container(scrollable(page).id(scroll).on_scroll(on_scroll).style(style::bars))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    container(crate::scroll::elastic(
+        scrollable(page).id(scroll).on_scroll(on_scroll).style(style::bars),
+    ))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// How far the focus's ground reaches past a card's picture on each side.

@@ -626,13 +626,15 @@ impl App {
                 .style(move |t| style::entry(t, on, true));
             found = found.push(mouse_area(line).on_enter(Message::AddingAt(i)));
         }
-        let found = scrollable(container(found).padding(Padding {
-            right: SCROLLBAR,
-            ..Padding::ZERO
-        }))
-        .id(crate::FOUND)
-        .style(style::bars)
-        .height(Length::Shrink);
+        let found = arkui::scroll::elastic(
+            scrollable(container(found).padding(Padding {
+                right: SCROLLBAR,
+                ..Padding::ZERO
+            }))
+            .id(crate::FOUND)
+            .style(style::bars)
+            .height(Length::Shrink),
+        );
         body.push(found).into()
     }
 
@@ -719,12 +721,13 @@ impl App {
         // scrolled, it goes soft under the face's band rather than being
         // drawn through it (`arkui::edge`), and at rest it is as it was.
         let band = account::band(PAGE_PADDING);
-        scrollable(arkui::edge::faded(page.width(Length::Fill), band, style::page_color))
-            .id(TRACKS)
-            .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-            .style(style::bars)
-            .height(Length::Fill)
-            .into()
+        arkui::scroll::elastic(
+            scrollable(arkui::edge::faded(page.width(Length::Fill), band, style::page_color))
+                .id(TRACKS)
+                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                .style(style::bars)
+                .height(Length::Fill),
+        )
     }
 
     /// Where the page's cursor is, while the page has the keyboard.
@@ -1465,15 +1468,17 @@ impl App {
                     .interaction(iced::mouse::Interaction::Pointer),
             );
         }
-        let lines = scrollable(container(lines).padding(Padding {
-            top: 8.0,
-            right: GUTTER + SCROLLBAR,
-            bottom: GUTTER * 2.0,
-            left: GUTTER,
-        }))
-        .id(TRACKS)
-        .style(style::bars)
-        .height(Length::Fill);
+        let lines = arkui::scroll::elastic(
+            scrollable(container(lines).padding(Padding {
+                top: 8.0,
+                right: GUTTER + SCROLLBAR,
+                bottom: GUTTER * 2.0,
+                left: GUTTER,
+            }))
+            .id(TRACKS)
+            .style(style::bars)
+            .height(Length::Fill),
+        );
         column![head, rule::horizontal(1).style(style::hairline), lines]
             .width(Length::Fill)
             .into()
@@ -1979,13 +1984,13 @@ impl App {
         });
         main.push(head)
             .push(rule::horizontal(1))
-            .push(
+            .push(arkui::scroll::elastic(
                 scrollable(rows)
                     .id(TRACKS)
                     .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
                     .style(style::bars)
                     .height(Length::Fill),
-            )
+            ))
             .into()
     }
 
@@ -2262,10 +2267,11 @@ impl App {
             col.push(row![text(k).size(13).style(style::dim).width(Length::Fixed(260.0)), text(v).size(13)].spacing(12))
         });
         // The padding inside what scrolls, so its last line scrolls clear.
-        scrollable(column![text("the session, in numbers").size(16), table].spacing(12).padding(12))
-            .style(style::bars)
-            .height(Length::Fill)
-            .into()
+        arkui::scroll::elastic(
+            scrollable(column![text("the session, in numbers").size(16), table].spacing(12).padding(12))
+                .style(style::bars)
+                .height(Length::Fill),
+        )
     }
 
     /// The row the list lights, and whether it sounds: [`App::now`]'s
@@ -2382,7 +2388,7 @@ impl App {
             bottom: arkui::sheet::PADDING,
             ..Padding::ZERO
         });
-        body = body.push(scrollable(list).id(QUEUE).style(style::bars).height(Length::Fill));
+        body = body.push(arkui::scroll::elastic(scrollable(list).id(QUEUE).style(style::bars).height(Length::Fill)));
         let close = button(icon::tinted(glyphs::CLOSE, 14.0, |p| p.background.base.text))
             .style(style::quiet)
             .padding(6)

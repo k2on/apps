@@ -208,6 +208,18 @@ public object Springs {
      */
     public fun preview(r: Float, limit: Float = PREVIEW, give: Float = GIVE): Float =
         limit * (1f - exp(-r.coerceAtLeast(0f) / give))
+
+    /** How hard a drag past its edge pulls back: Apple's rubber band's `c`. */
+    public const val RUBBER_BAND: Float = MotionTokens.RUBBER_BAND
+
+    /**
+     * How far a thing dragged `x` pixels past its edge is drawn past it: Apple's rubber band,
+     * `x · d · c / (d + c · |x|)`, `d` the room it is dragged in ([limit]) and `c` [RUBBER_BAND] —
+     * the iPhone's `Momentum.band` and the desktop's `motion::rubberband`. [RUBBER_BAND] of a pixel
+     * for each at first, ever less after, never as far as [limit]; the sign is the drag's.
+     */
+    public fun band(x: Float, limit: Float): Float =
+        if (limit <= 0f) 0f else x * limit * RUBBER_BAND / (limit + RUBBER_BAND * abs(x))
 }
 
 /**

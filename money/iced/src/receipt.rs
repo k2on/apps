@@ -231,14 +231,14 @@ impl App {
             top: crate::view::PAD + arkui::account::HEIGHT + 6.0,
             ..iced::Padding::new(crate::view::PAD)
         };
-        container(
+        container(arkui::scroll::elastic(
             scrollable(crate::view::under_face(
                 column![head.spacing(2), body].spacing(12).padding(pad),
                 style::surface_color,
             ))
             .height(Length::Fill)
             .style(style::bars),
-        )
+        ))
         .width(Length::Fixed(SIDE))
         .height(Length::Fill)
         .style(style::surface)
