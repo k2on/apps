@@ -29,26 +29,19 @@ struct TransactionsView: View {
         let all = Registers.search(model.register(nil) ?? [], needle)
         List {
             // The large title, and at the end of its line what the tab offers and the account's face.
-            // In the first content's section, so the title's own gap is all
-            // there is between them (`AccountSizes.titleBelow`).
-            Section {
-                LargeTitleRow("Transactions", fold: $fold, padded: false) {
-                    AddTransactionButton()
-                    AccountButton()
-                }
-                VStack(spacing: Space.m) {
-                    SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
-                    Picker("Showing", selection: $showing) {
-                        ForEach(Showing.allCases, id: \.self) { s in
-                            Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
-                        }
+            // With the search field and To Review / All under it, the title's
+            // own gap all there is between them (`TitleSection`).
+            TitleSection("Transactions", fold: $fold) {
+                AddTransactionButton()
+                AccountButton()
+            } below: {
+                SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
+                Picker("Showing", selection: $showing) {
+                    ForEach(Showing.allCases, id: \.self) { s in
+                        Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
                     }
-                    .pickerStyle(.segmented)
                 }
-                .padding(.top, AccountSizes.titleBelow)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .pickerStyle(.segmented)
             }
             switch showing {
             case .review: review(inbox)

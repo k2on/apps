@@ -23,23 +23,15 @@ struct InsightsView: View {
         let total = spending.reduce(0) { $0 + $1.spent }
         List {
             // The large title, and at the end of its line what the tab offers and the account's face.
-            // In the first content's section, so the title's own gap is all
-            // there is between them (`AccountSizes.titleBelow`).
-            Section {
-                LargeTitleRow("Insights", fold: $fold, padded: false) {
-                    AccountButton()
-                }
+            // With the month's pager under it, the title's own gap all there
+            // is between them (`TitleSection`).
+            TitleSection("Insights", fold: $fold) { AccountButton() } below: {
                 // A step changes the month at once; only its figures roll, as its
                 // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                 Pager(model.monthName,
                       home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
                       back: { model.stepMonth(-1) },
                       forward: { model.stepMonth(1) })
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, AccountSizes.titleBelow)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
             }
             Section("Spending") {
                 if spending.isEmpty {

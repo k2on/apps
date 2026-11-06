@@ -9,8 +9,10 @@
 // app adds (money's banks that want a look), Settings, Sign Out, and Done.
 // Only a tab's root has it: a page pushed over a tab has its own bar.
 //
-// The line is the page's own first row (`LargeTitleRow`), which scrolls
-// with it, as the system's large title does: the title full size and bold
+// The line is the top of the page (`LargeTitleRow`; in a `List`, the header
+// of its first section, `TitleSection`, so an inset grouped list's rounded
+// cards never clip it), which scrolls with it, as the system's large title
+// does: the title full size and bold
 // at the leading edge, the face at the trailing edge. It is one row for
 // every tab of every app — one top inset, one height, one font
 // (`AccountSizes.titleTop`, `titleLine`, `titleBottom`, `.largeTitle.bold()`),
@@ -50,10 +52,13 @@ public enum AccountSizes {
     /// margin, the one a heading keeps above itself, so a card, a field, a
     /// pager or a row of chips under the title sits where harken Home's
     /// "Recently Added" does. A heading that comes first has it already;
-    /// anything else that comes first is padded by it, in the same section
-    /// as the title's row in a `List`, so the list's section spacing does not
-    /// add to it.
+    /// anything else that comes first is padded by it, in the title's own
+    /// header in a `List` (`TitleSection`, `HeaderRows`), so the list's
+    /// section spacing does not add to it.
     public static let titleBelow: CGFloat = Space.xl
+    /// Between the rows under the title in a `TitleSection` (a search field
+    /// over a segmented control), unless the tab says otherwise.
+    public static let belowGap: CGFloat = Space.m
     /// What a screen reader hears of the face, and of what its tap does.
     public static func label(_ name: String) -> String { "Signed in as \(name.isEmpty ? "?" : name)" }
     public static let hint = "Account and settings"
@@ -107,10 +112,12 @@ public struct AccountFace: View {
 /// so it is drawn alike wherever it is. It scrolls with the page, as the
 /// system's large title does; `fold` is told how tall it is, for
 /// `largeTitleBar` to bring the inline title in once it has gone under the
-/// bar (none, for a row that stays put). In a `List` it is a row of its own
-/// with no background, no separator and no insets of its own (`padded` false
-/// where the list's sections already inset their rows from the edges, which
-/// puts the title at the same 16 pt).
+/// bar (none, for a row that stays put). In a `List` it is not a row but the
+/// header of the page's first section (`TitleSection` puts it there, with
+/// `padded` false, as the list already insets its headers from the edges by
+/// the same 16 pt): an inset grouped list clips each section's rows to its
+/// rounded card, and those corners would cut the title's first letter and
+/// the face's edge.
 @available(iOS 26.0, *)
 public struct LargeTitleRow<Trailing: View>: View {
     let title: String
@@ -149,6 +156,87 @@ public struct LargeTitleRow<Trailing: View>: View {
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+}
+
+/// A tab's large title at the top of a `List`, whatever its style: the
+/// title's line (`LargeTitleRow`) and `below` — what comes first under it:
+/// a pager, a card, a search field (`SearchRow`) over a segmented control —
+/// as the header of the page's first section, with `rows` its rows (most
+/// often none). Not rows: an inset grouped list clips each section's rows
+/// to its rounded card, and those corners cut the title's first letter, the
+/// face's edge and a control's ends; a header is not clipped so. The header
+/// keeps none of a header's own look (no capitals, no insets, no quiet small
+/// type), so the title is drawn as it is over a `ScrollView` (harken's): its
+/// baseline and the face where every tab has them, 16 pt from the edge, and
+/// `below` one `AccountSizes.titleBelow` under it (`HeaderRows`).
+@available(iOS 26.0, *)
+public struct TitleSection<Trailing: View, Below: View, Rows: View>: View {
+    let title: String
+    let fold: Binding<CGFloat>?
+    let spacing: CGFloat
+    let trailing: () -> Trailing
+    let below: () -> Below
+    let rows: () -> Rows
+
+    public init(_ title: String, fold: Binding<CGFloat>? = nil, spacing: CGFloat = AccountSizes.belowGap,
+                @ViewBuilder trailing: @escaping () -> Trailing,
+                @ViewBuilder below: @escaping () -> Below,
+                @ViewBuilder rows: @escaping () -> Rows) {
+        self.title = title
+        self.fold = fold
+        self.spacing = spacing
+        self.trailing = trailing
+        self.below = below
+        self.rows = rows
+    }
+
+    public var body: some View {
+        Section {
+            rows()
+        } header: {
+            VStack(spacing: 0) {
+                LargeTitleRow(title, fold: fold, padded: false, trailing: trailing)
+                HeaderRows(spacing: spacing, content: below)
+            }
+            // None of a header's own look: what is under the title is drawn as a row is.
+            .textCase(nil)
+            .font(.body)
+            .foregroundStyle(.ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets())
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+extension TitleSection where Rows == EmptyView {
+    /// The title and what is under it, with no rows of the section's own.
+    public init(_ title: String, fold: Binding<CGFloat>? = nil, spacing: CGFloat = AccountSizes.belowGap,
+                @ViewBuilder trailing: @escaping () -> Trailing,
+                @ViewBuilder below: @escaping () -> Below) {
+        self.init(title, fold: fold, spacing: spacing, trailing: trailing, below: below) { EmptyView() }
+    }
+}
+
+/// What a tab has first under its large title, in a `TitleSection`'s
+/// header: its rows `spacing` apart (`AccountSizes.belowGap`), the whole one
+/// `AccountSizes.titleBelow` under the title, across the list's width (16 pt
+/// in from the edges, as a row is), and never clipped to a row's card.
+@available(iOS 26.0, *)
+public struct HeaderRows<Content: View>: View {
+    let spacing: CGFloat
+    let content: () -> Content
+
+    public init(spacing: CGFloat = AccountSizes.belowGap, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing
+        self.content = content
+    }
+
+    public var body: some View {
+        VStack(spacing: spacing) { content() }
+            .frame(maxWidth: .infinity)
+            .padding(.top, AccountSizes.titleBelow)
     }
 }
 

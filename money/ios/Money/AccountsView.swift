@@ -23,15 +23,10 @@ struct AccountsView: View {
         let rows = model.snapshot.accounts
         List {
             // The large title, the account's face at the end of its line.
-            // In the first content's section, so the title's own gap is all
-            // there is between them (`AccountSizes.titleBelow`).
-            Section {
-                LargeTitleRow("Accounts", fold: $fold, padded: false) { AccountButton() }
+            // With the net worth under it, the title's own gap all there is
+            // between them (`TitleSection`).
+            TitleSection("Accounts", fold: $fold) { AccountButton() } below: {
                 HeroFigure("Net Worth", cents: Accounts.netWorth(rows), tint: .neutral, note: "Every open account, less what's owed")
-                    .padding(.top, AccountSizes.titleBelow)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
             }
             Section {
                 NavigationLink(value: Route.register(nil)) {
