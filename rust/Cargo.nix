@@ -97,6 +97,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-router" = rec {
+      packageId = "ark-router";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-router";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "arkdb" = rec {
       packageId = "arkdb";
       build = internal.buildRustCrateWithFeatures {
@@ -1073,6 +1083,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "server" ];
       };
+      "ark-router" = rec {
+        crateName = "ark-router";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-router; };
+        libName = "ark_router";
+        dependencies = [
+          {
+            name = "ark-macros";
+            packageId = "ark-macros";
+          }
+        ];
+
+      };
       "arkdb" = rec {
         crateName = "arkdb";
         version = "0.1.0";
@@ -1116,6 +1140,10 @@ rec {
           {
             name = "ark-format";
             packageId = "ark-format";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
           }
           {
             name = "chrono";
@@ -7062,6 +7090,10 @@ rec {
             optional = true;
           }
           {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -11113,6 +11145,10 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
           }
           {
             name = "serde";

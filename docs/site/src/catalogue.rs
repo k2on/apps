@@ -282,11 +282,11 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."],
     },
     Entry {
-        module: "route",
-        name: "Route",
-        summary: "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
-        api: &["trait Route { fragment(), parse() }", "join(kind, name), split(fragment)", "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
-        rules: &["`parse` never fails: an unknown fragment is home.", "Call `sync` after every update."],
+        module: "router",
+        name: "Router",
+        summary: "An app's routes as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+        api: &["trait Routable { path(), from_path(), home() } (ark-router; #[derive(Routes)] writes it)", "fragment(&route), parse(fragment)", "join(kind, name), split(path)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
+        rules: &["`parse` never fails: a fragment that names nothing is home.", "Call `sync` after every update."],
     },
     Entry {
         module: "scroll",

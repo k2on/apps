@@ -2,7 +2,7 @@
 //! buttons, `^O` and `^I` ([`crate::vim::Action::Jump`]), and two fingers
 //! sideways across a trackpad.
 //!
-//! The pieces are [`crate::route`]'s router (the address bar, or one kept in
+//! The pieces are [`crate::router`]'s router (the address bar, or one kept in
 //! memory on the desktop) and [`crate::swipe`]'s gesture; what this adds is
 //! the wiring every app did the same way, held once:
 //!
@@ -27,7 +27,8 @@ use iced::mouse::ScrollDelta;
 use iced::time::Instant;
 use iced::{Element, Subscription};
 
-use crate::route::{Route, Router};
+use crate::navigator::Navigator;
+use crate::router::{Routable, Router};
 use crate::swipe::{self, Swipe};
 
 /// Where an app has been, and the gesture that goes back there.
@@ -40,7 +41,7 @@ pub struct History<R> {
     travelling: bool,
 }
 
-impl<R: Route> Default for History<R> {
+impl<R: Routable> Default for History<R> {
     fn default() -> Self {
         History {
             router: Router::new(),
@@ -51,7 +52,7 @@ impl<R: Route> Default for History<R> {
     }
 }
 
-impl<R: Route> History<R> {
+impl<R: Routable> History<R> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -106,7 +107,7 @@ impl<R: Route> History<R> {
 
     /// The page at `at` was scrolled `y` down.
     pub fn scrolled(&mut self, at: &R, y: f32) {
-        self.scrolls.insert(at.fragment(), y);
+        self.scrolls.insert(at.path(), y);
     }
 
     /// The app opened `at`: how far down to scroll it once it is drawn:
@@ -114,7 +115,7 @@ impl<R: Route> History<R> {
     /// [`History::poll`]), and the top of a new visit.
     pub fn arrive(&mut self, at: &R) -> f32 {
         match std::mem::take(&mut self.travelling) {
-            true => self.scrolls.get(&at.fragment()).copied().unwrap_or(0.0),
+            true => self.scrolls.get(&at.path()).copied().unwrap_or(0.0),
             false => 0.0,
         }
     }
@@ -126,6 +127,26 @@ impl<R: Route> History<R> {
     /// The page, with a swipe's arrow over it while one is under way.
     pub fn view<'a, M: 'a>(&self, page: Element<'a, M>, now: Instant) -> Element<'a, M> {
         swipe::view(page, &self.swipe, now)
+    }
+}
+
+/// Navigating, as on every platform: through the bar, and arrived at by
+/// [`History::poll`] (`crate::navigator`).
+impl<R: Routable> Navigator<R> for History<R> {
+    fn push(&mut self, route: &R) {
+        self.router.push(route);
+    }
+    fn replace(&mut self, route: &R) {
+        self.router.replace(route);
+    }
+    fn back(&mut self) {
+        self.router.back();
+    }
+    fn reset(&mut self, route: &R) {
+        self.router.reset(route);
+    }
+    fn handle(&mut self, link: &str, scheme: &str, take: &mut dyn FnMut(&R) -> bool) -> bool {
+        self.router.handle(link, scheme, take)
     }
 }
 
@@ -151,12 +172,15 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     struct Here(String);
 
-    impl Route for Here {
-        fn fragment(&self) -> String {
-            crate::route::join(&self.0, None)
+    impl Routable for Here {
+        fn path(&self) -> String {
+            crate::router::join(&self.0, None)
         }
-        fn parse(fragment: &str) -> Self {
-            Here(crate::route::split(fragment).0.to_string())
+        fn from_path(path: &str) -> Option<Self> {
+            Some(Here(crate::router::split(path).0.to_string()))
+        }
+        fn home() -> Self {
+            Here(String::new())
         }
     }
 

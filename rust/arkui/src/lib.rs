@@ -3,7 +3,7 @@
 //!
 //! **Knows nothing about any domain.** No song, album or playlist appears in a
 //! type here: an app hands over its palette ([`theme::install`]), its places
-//! ([`route::Route`]), its messages (every view is generic over `M`) and its
+//! ([`router::Routable`]), its messages (every view is generic over `M`) and its
 //! screens, and gets the parts of a window that are the same in every app —
 //! the keyboard grammar, the table, the menus and pickers and the rules for who
 //! has the keyboard, the card grid, the derived square, a picture cache, the
@@ -44,6 +44,7 @@ pub mod line;
 pub mod menu;
 pub mod motion;
 pub mod motion_tokens;
+pub mod navigator;
 pub mod outline;
 pub mod panel;
 pub mod parts;
@@ -51,7 +52,7 @@ pub mod picker;
 pub mod qr;
 pub mod renderer;
 pub mod reorder;
-pub mod route;
+pub mod router;
 pub mod scroll;
 pub mod sheet;
 pub mod sidebar;
@@ -62,7 +63,8 @@ pub mod theme;
 pub mod toast;
 pub mod tokens;
 pub mod touchpad;
-pub mod url;
+/// Percent-encoding, which is `ark-router`'s: a domain spells its routes with it.
+pub use ark_router::url;
 pub mod velocity;
 pub mod vim;
 pub mod wake;

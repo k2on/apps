@@ -170,7 +170,7 @@ fn sleep(d: Duration) -> impl std::future::Future<Output = ()> {
 /// button (`popstate`), a fragment typed or followed (`hashchange`) — for
 /// the life of the page. Nothing on the desktop, which has no bar. Writing
 /// the bar through the history fires neither, which is why
-/// [`crate::route::Router::sync`] does.
+/// [`crate::router::Router::sync`] does.
 pub fn page_changes(f: impl Fn() + 'static) {
     #[cfg(target_arch = "wasm32")]
     {

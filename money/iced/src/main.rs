@@ -61,48 +61,9 @@ pub enum Pane {
     Page,
 }
 
-/// A page as the address bar spells it: names, not ids (`arkui::route`).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Place {
-    Budget,
-    Reflect,
-    Accounts,
-    Settings,
-    Inbox,
-    Account(String),
-    /// A saved filter's register, by its name.
-    Filter(String),
-    /// A register for conditions not saved.
-    Filtered,
-}
-
-impl arkui::route::Route for Place {
-    fn fragment(&self) -> String {
-        match self {
-            Place::Budget => arkui::route::join("budget", None),
-            Place::Reflect => arkui::route::join("reflect", None),
-            Place::Accounts => arkui::route::join("accounts", None),
-            Place::Settings => arkui::route::join("settings", None),
-            Place::Inbox => arkui::route::join("inbox", None),
-            Place::Account(name) => arkui::route::join("account", Some(name)),
-            Place::Filter(name) => arkui::route::join("filter", Some(name)),
-            Place::Filtered => arkui::route::join("filtered", None),
-        }
-    }
-
-    fn parse(fragment: &str) -> Self {
-        match arkui::route::split(fragment) {
-            ("reflect", _) => Place::Reflect,
-            ("accounts", _) => Place::Accounts,
-            ("settings", _) => Place::Settings,
-            ("inbox", _) => Place::Inbox,
-            ("account", Some(name)) => Place::Account(name),
-            ("filter", Some(name)) => Place::Filter(name),
-            ("filtered", _) => Place::Filtered,
-            _ => Place::Budget,
-        }
-    }
-}
+/// Where the window is: money's routes (`money_domain::routes`), which the
+/// address bar spells by their paths (`arkui::router`).
+pub use money_domain::routes::Route;
 
 /// What fills the page beside the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -422,7 +383,7 @@ pub struct App {
     pub pane: Pane,
     /// Where the window has been: the address bar, and back and forward by
     /// `^O`/`^I` and a swipe (`arkui::history`).
-    pub history: arkui::history::History<Place>,
+    pub history: arkui::history::History<Route>,
     /// The register's cursor, and the other end of its visual selection.
     pub txn_at: Option<Id<Txn>>,
     pub txn_anchor: Option<Id<Txn>>,
@@ -524,11 +485,24 @@ impl App {
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
-        if let Some(page) = app.history.poll(true).and_then(|p| app.page_of(&p)) {
-            let _ = app.step(Message::Go(page));
+        if let Some(linked) = app.history.poll(true) {
+            if let Some(page) = app.page_of(&linked) {
+                let _ = app.step(Message::Go(page));
+            }
+            app.landed(&linked);
         }
-        app.history.sync(&app.place());
+        app.history.sync(&app.route());
         app
+    }
+
+    /// The bar said `linked` and the app landed somewhere it spells
+    /// otherwise — an older link's name, now the account's id; a stale one's
+    /// fallback — so where it is is written over the link, not after it: the
+    /// back button would go to the link, land here again, and never get past.
+    fn landed(&mut self, linked: &Route) {
+        if self.route() != *linked {
+            self.history.replace_next();
+        }
     }
 
     #[cfg(feature = "demo")]
@@ -775,12 +749,15 @@ impl App {
         // An account is named in the bar, so a link to one waits for the
         // accounts to have arrived.
         let ready = !self.peer.accounts().is_empty();
-        if let Some(page) = self.history.poll(ready).and_then(|p| self.page_of(&p)) {
-            if page != self.page {
-                let _ = self.step(Message::Go(page));
+        if let Some(linked) = self.history.poll(ready) {
+            if let Some(page) = self.page_of(&linked) {
+                if page != self.page {
+                    let _ = self.step(Message::Go(page));
+                }
             }
+            self.landed(&linked);
         }
-        self.history.sync(&self.place());
+        self.history.sync(&self.route());
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
@@ -808,32 +785,58 @@ impl App {
         }
     }
 
-    /// Where the window is, as the bar spells it.
-    pub fn place(&self) -> Place {
+    /// Where the window is, as the bar spells it. An account or a saved
+    /// filter that is gone is its route's fallback, All Accounts.
+    pub fn route(&self) -> Route {
+        let named = |route: Option<Route>, of: Route| route.unwrap_or_else(|| of.fallback());
         match self.page {
-            Page::Budget => Place::Budget,
-            Page::Reflect => Place::Reflect,
-            Page::Ledger(Ledger::All) => Place::Accounts,
-            Page::Settings => Place::Settings,
-            Page::Ledger(Ledger::Inbox) => Place::Inbox,
-            Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map_or(Place::Accounts, |a| Place::Account(a.name.clone())),
-            Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map_or(Place::Accounts, |f| Place::Filter(f.name.clone())),
-            Page::Ledger(Ledger::Adhoc) => Place::Filtered,
+            Page::Budget => Route::Budget,
+            Page::Reflect => Route::Reflect,
+            Page::Ledger(Ledger::All) => Route::Accounts,
+            Page::Settings => Route::Settings,
+            Page::Ledger(Ledger::Inbox) => Route::Inbox,
+            Page::Ledger(Ledger::Account(id)) => named(
+                self.peer.account(id).map(|a| Route::Account {
+                    id: id.hex(),
+                    name: a.name.clone(),
+                }),
+                Route::Account {
+                    id: id.hex(),
+                    name: String::new(),
+                },
+            ),
+            Page::Ledger(Ledger::Saved(id)) => named(
+                self.peer.saved(id).map(|f| Route::Filter {
+                    id: id.hex(),
+                    name: f.name.clone(),
+                }),
+                Route::Filter {
+                    id: id.hex(),
+                    name: String::new(),
+                },
+            ),
+            Page::Ledger(Ledger::Adhoc) => Route::Filtered,
         }
     }
 
-    /// The page a place is, if it is one here: an account or a saved filter
-    /// by its name; conditions not saved, the last ones this window had.
-    fn page_of(&self, place: &Place) -> Option<Page> {
-        Some(match place {
-            Place::Budget => Page::Budget,
-            Place::Reflect => Page::Reflect,
-            Place::Accounts => Page::Ledger(Ledger::All),
-            Place::Settings => Page::Settings,
-            Place::Inbox => Page::Ledger(Ledger::Inbox),
-            Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts().iter().find(|a| &a.name == name)?.id)),
-            Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| &f.name == name)?.id)),
-            Place::Filtered => Page::Ledger(Ledger::Adhoc),
+    /// The page a route is, if it is one here: an account or a saved filter
+    /// by its id (an older link's by its name, `Route::names`); conditions
+    /// not saved, the last ones this window had. The banks are Settings'
+    /// here, and a category is the budget's.
+    fn page_of(&self, route: &Route) -> Option<Page> {
+        Some(match route {
+            Route::Budget | Route::Category { .. } => Page::Budget,
+            Route::Reflect => Page::Reflect,
+            Route::Accounts => Page::Ledger(Ledger::All),
+            Route::Settings | Route::Banks | Route::Bank { .. } => Page::Settings,
+            Route::Inbox => Page::Ledger(Ledger::Inbox),
+            Route::Account { .. } => Page::Ledger(Ledger::Account(
+                self.peer.accounts().iter().find(|a| route.names(&a.id.hex(), &a.name))?.id,
+            )),
+            Route::Filter { .. } => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id)),
+            Route::Filtered => Page::Ledger(Ledger::Adhoc),
+            // A sign-in link is the onboarding's, not a page.
+            Route::Join { .. } => return None,
         })
     }
 
@@ -856,9 +859,9 @@ impl App {
                     self.txn_anchor = None;
                 }
                 // A new visit opens at the top; back and forward where it was.
-                self.scroll_due = Some(self.history.arrive(&self.place()));
+                self.scroll_due = Some(self.history.arrive(&self.route()));
             }
-            Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::PageScrolled(y) => self.history.scrolled(&self.route(), y),
             Message::TopScrolled(y) => self.top_y = y,
             Message::PageTop => {
                 self.top_y = 0.0;
@@ -1123,7 +1126,7 @@ impl App {
             }
             Message::RegisterScrolled(y) => {
                 self.register_scroll = y;
-                self.history.scrolled(&self.place(), y);
+                self.history.scrolled(&self.route(), y);
             }
             Message::DropTyped(q) => {
                 if let Some(d) = &mut self.dropdown {
@@ -1994,7 +1997,7 @@ impl App {
             return Task::none();
         };
         self.register_scroll = y;
-        self.history.scrolled(&self.place(), y);
+        self.history.scrolled(&self.route(), y);
         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
     }
 
@@ -2258,7 +2261,7 @@ impl App {
                 match arkui::scroll::offset_for(i + above, rows, self.register_view(), content, self.register_scroll, place) {
                     Some(y) => {
                         self.register_scroll = y;
-                        self.history.scrolled(&self.place(), y);
+                        self.history.scrolled(&self.route(), y);
                         iced::widget::operation::scroll_to(look::REGISTER, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y })
                     }
                     None => Task::none(),
@@ -2601,8 +2604,34 @@ pub fn main() -> iced::Result {
     // The app's boot, and what every arkui window starts with (a trackpad's
     // resting fingers heard, on Wayland).
     let boot = || {
-        let (app, task) = App::boot();
-        (app, Task::batch([task, arkui::window::boot()]))
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let (mut app, task) = App::boot();
+        // The link the desktop was opened with (`money://account/<id>/checking`),
+        // put in the address bar for the next update to arrive at, as a
+        // browser's own link is. A sign-in link (`money://join?server=…`) is
+        // not a page: it goes to the sign-in machine as `Event::Joined`, which
+        // asks first.
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+        let mut joined = Task::none();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(link) = arkui::navigator::link_arg("money") {
+            use arkui::navigator::Navigator;
+            let mut join = None;
+            app.history.handle(&link, "money", &mut |r| match r {
+                Route::Join { server, code } => {
+                    join = Some(Event::Joined {
+                        server: server.clone(),
+                        code: code.clone(),
+                    });
+                    true
+                }
+                _ => false,
+            });
+            if let Some(event) = join {
+                joined = app.onboard(event);
+            }
+        }
+        (app, Task::batch([task, joined, arkui::window::boot()]))
     };
     let app = iced::application(boot, App::update, App::view)
         .subscription(App::subscription)

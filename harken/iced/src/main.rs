@@ -34,8 +34,8 @@ mod listening;
 mod nav;
 mod palette;
 mod peer;
-mod places;
 mod player;
+mod routes;
 mod rows;
 /// The demo's library. Compiled only into the demo, so the client that talks
 /// to a real server carries none of it.
@@ -66,8 +66,8 @@ use crate::domain::{AddToPlaylist, CreatePlaylist, NameVoice, RemoveFromPlaylist
 #[cfg(not(feature = "demo"))]
 use client::Replica;
 use peer::{key, Peer};
-use places::{Focus, Pane, Place, Source};
 use player::{Player, Track};
+use routes::{Focus, Glyph, Pane, Route};
 use rows::Id;
 // The tab's title and the platform's media controller are the browser's, the
 // way the `<audio>` element is; the desktop build has neither.
@@ -201,7 +201,7 @@ pub fn known(works: &[rows::Work]) -> Vec<&rows::Work> {
 #[derive(Debug, Clone)]
 pub enum Message {
     /// Show a playlist, an album, an artist, a page — or everything.
-    Select(Source),
+    Select(Route),
     /// Start this one, and make what is on screen the queue it plays through.
     PlayItem(Id),
     /// Start one performance (its key) from its first movement, the queue
@@ -782,7 +782,7 @@ pub struct App {
     /// Where the window has been: the address bar, reconciled after every
     /// update, and back and forward by `^O`/`^I` and a swipe
     /// ([`arkui::history`]).
-    pub history: arkui::history::History<Place>,
+    pub history: arkui::history::History<Route>,
     /// Where the page just opened is to be scrolled, once it is drawn: where
     /// it was left, for back and forward (`history`), or its top.
     pub scroll_due: Option<f32>,
@@ -859,7 +859,7 @@ pub struct App {
     /// The page's small header, in the band once its own has scrolled away
     /// (`arkui::compact`), and the page it is for.
     pub compact: arkui::compact::Compact,
-    pub compact_for: Option<Source>,
+    pub compact_for: Option<Route>,
 }
 
 impl App {
@@ -1013,11 +1013,38 @@ impl App {
 
     fn boot() -> (App, Task<Message>) {
         let (mut app, task) = App::open();
+        let joined = app.link();
         app.arrive();
         if !app.held {
             auth::reveal();
         }
-        (app, task)
+        (app, Task::batch([task, joined]))
+    }
+
+    /// The link the desktop was opened with (`harken://album/…`), put in the
+    /// address bar for [`App::arrive`] to read as a browser's own link is.
+    /// A sign-in link (`harken://join?server=…&code=…`) is not a page: it
+    /// goes to the sign-in machine as `Event::Joined`, which asks first.
+    fn link(&mut self) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(link) = arkui::navigator::link_arg("harken") {
+            use arkui::navigator::Navigator;
+            let mut joined = None;
+            self.history.handle(&link, "harken", &mut |r| match r {
+                Route::Join { server, code } => {
+                    joined = Some(OnboardingEvent::Joined {
+                        server: server.clone(),
+                        code: code.clone(),
+                    });
+                    true
+                }
+                _ => false,
+            });
+            if let Some(event) = joined {
+                return self.onboard(event);
+            }
+        }
+        Task::none()
     }
 
     /// A link somebody was sent, read before anything is drawn.
@@ -1030,7 +1057,12 @@ impl App {
     /// shows.
     pub fn arrive(&mut self) {
         if let Some(place) = self.history.poll(!self.peer.choices.is_empty()) {
-            let wanted = self.peer.source_of(&place);
+            let wanted = self.peer.resolve(&place);
+            // Landed elsewhere for it (an older link's name, a stale link's
+            // fallback): written over the link, so back gets past it.
+            if wanted != place {
+                self.history.replace_next();
+            }
             if let Some(at) = self.peer.choices.iter().position(|c| c.source == wanted) {
                 self.cursors[Pane::Sidebar as usize] = at;
             }
@@ -1407,14 +1439,14 @@ impl App {
         match pane {
             Pane::Sidebar => p.choices.iter().map(|c| c.label.clone()).collect(),
             Pane::Tracks => match &p.source {
-                Source::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
-                Source::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
-                Source::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
-                Source::Podcasts => p.shows_of("podcast").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
-                Source::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
-                Source::Artist(_) if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
-                Source::Work(..) => p.recordings().iter().map(|r| r.performers.clone()).collect(),
-                Source::Transcript => self.cues().into_iter().map(|c| c.text).collect(),
+                Route::Albums => p.albums().iter().map(|a| format!("{} {}", a.name, a.creator)).collect(),
+                Route::Artists => p.artists().iter().map(|a| a.name.clone()).collect(),
+                Route::Composers => p.composers().iter().map(|c| c.name.clone()).collect(),
+                Route::Podcasts => p.shows_of("podcast").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
+                Route::Sermons => p.shows_of("sermon").iter().map(|s| format!("{} {}", s.title, s.author)).collect(),
+                Route::Artist { .. } if !p.works().is_empty() => self.listed_works().iter().map(|w| format!("{} {}", w.title, w.catalogue)).collect(),
+                Route::Work { .. } => p.recordings().iter().map(|r| r.performers.clone()).collect(),
+                Route::Transcript => self.cues().into_iter().map(|c| c.text).collect(),
                 _ => p.rows().iter().map(|i| format!("{} {}", i.title, i.creator)).collect(),
             },
         }
@@ -1545,8 +1577,8 @@ impl App {
                     }
                     task
                 }
-                't' => self.update(Message::Select(Source::Transcript)),
-                'f' if self.peer.source == Source::Transcript => self.update(Message::Follow(true)),
+                't' => self.update(Message::Select(Route::Transcript)),
+                'f' if self.peer.source == Route::Transcript => self.update(Message::Follow(true)),
                 '}' => self.update(self.forward()),
                 '{' => self.update(self.back()),
                 other => match volume_key(other, Level::Output) {
@@ -1622,7 +1654,7 @@ impl App {
         }
         // A transcript's cursor moved by hand is not on the line being
         // said: it stops following it.
-        if pane == Pane::Tracks && self.peer.source == Source::Transcript {
+        if pane == Pane::Tracks && self.peer.source == Route::Transcript {
             self.following = false;
         }
         self.reveal()
@@ -1675,7 +1707,7 @@ impl App {
         let at = self.at(self.pane);
         let id = match self.pane {
             Pane::Sidebar => SIDEBAR,
-            Pane::Tracks if self.peer.source == Source::Transcript && at < self.cues().len() => return self.centre(at),
+            Pane::Tracks if self.peer.source == Route::Transcript && at < self.cues().len() => return self.centre(at),
             Pane::Tracks => TRACKS,
         };
         let (row, rows) = self.shape(self.pane).line(at);
@@ -1705,7 +1737,7 @@ impl App {
     /// changes — and follow again once the line being said is the one the
     /// cursor was left on.
     fn follow(&mut self) -> Task<Message> {
-        if self.peer.source != Source::Transcript {
+        if self.peer.source != Route::Transcript {
             return Task::none();
         }
         let now = self.cue_now();
@@ -1957,7 +1989,10 @@ impl App {
                         glyph: arkui::glyphs::ALBUM,
                         label: a.name.clone(),
                         detail: Some(a.creator.clone()),
-                        choose: chosen(Message::Select(Source::Album(a.id.clone(), a.name.clone()))),
+                        choose: chosen(Message::Select(Route::Album {
+                            key: a.id.clone(),
+                            title: a.name.clone(),
+                        })),
                     })
                     .collect(),
             },
@@ -1970,7 +2005,7 @@ impl App {
                         glyph: arkui::glyphs::ARTIST,
                         label: a.name.clone(),
                         detail: None,
-                        choose: chosen(Message::Select(Source::Artist(a.name.clone()))),
+                        choose: chosen(Message::Select(Route::Artist { name: a.name.clone() })),
                     })
                     .collect(),
             },
@@ -1983,7 +2018,7 @@ impl App {
                         glyph: arkui::glyphs::COMPOSER,
                         label: c.name.clone(),
                         detail: None,
-                        choose: chosen(Message::Select(Source::Artist(c.name.clone()))),
+                        choose: chosen(Message::Select(Route::Artist { name: c.name.clone() })),
                     })
                     .collect(),
             },
@@ -2250,7 +2285,10 @@ impl App {
     pub fn row_entries(&self, id: Id) -> Option<(String, Vec<Entry<Message>>)> {
         let item = self.peer.row(id)?;
         let detail = self.peer.detail_of(id);
-        let album = Source::Album(detail.album_id, detail.album);
+        let album = Route::Album {
+            key: detail.album_id,
+            title: detail.album,
+        };
         let mine = self.peer.mine_of(id);
         let play = match mine.filter(|l| !l.finished && l.position_ms > 0) {
             Some(l) => format!("Resume from {}", arkui::format::clock(l.resume_ms())),
@@ -2268,9 +2306,9 @@ impl App {
         // An episode goes to its show, whose title is its creator, and to
         // everybody on it.
         let places = match item.kind.as_str() {
-            "song" => vec![album, Source::Artist(item.creator.clone())],
+            "song" => vec![album, Route::Artist { name: item.creator.clone() }],
             kind => {
-                let people = self.peer.people_of(id).into_iter().map(|p| Source::Artist(p.name));
+                let people = self.peer.people_of(id).into_iter().map(|p| Route::Artist { name: p.name });
                 self.peer.show_named(kind, &item.creator).into_iter().chain(people).collect()
             }
         };
@@ -2314,7 +2352,7 @@ impl App {
             true => Account::turned_away(&who, Message::SignOut),
             false => {
                 let mut a = Account::signed_in(&who, Message::SignOut);
-                let settings = arkui::menu::Entry::run(arkui::glyphs::LIBRARY, "Settings", Message::Select(Source::Settings));
+                let settings = arkui::menu::Entry::run(arkui::glyphs::LIBRARY, "Settings", Message::Select(Route::Settings));
                 a.entries.insert(0, settings);
                 a
             }
@@ -2470,7 +2508,7 @@ impl App {
                     return self.update(Message::Select(source));
                 }
                 // A transcript's line: the episode from there.
-                if self.peer.source == Source::Transcript {
+                if self.peer.source == Route::Transcript {
                     return match self.cues().get(at) {
                         Some(c) => self.update(Message::Cue(c.start_ms)),
                         None => Task::none(),
@@ -2567,16 +2605,31 @@ impl App {
 
     /// What the cursor opens on this page, if the page has things to open:
     /// `None` is a page where `<Enter>` plays.
-    pub fn card_under_cursor(&self, at: usize) -> Option<Source> {
+    pub fn card_under_cursor(&self, at: usize) -> Option<Route> {
         let p = &self.peer;
         match &p.source {
-            Source::Albums => p.albums().get(at).map(|a| Source::Album(a.id.clone(), a.name.clone())),
-            Source::Artists => p.artists().get(at).map(|a| Source::Artist(a.name.clone())),
-            Source::Composers => p.composers().get(at).map(|c| Source::Artist(c.name.clone())),
-            Source::Podcasts => p.shows_of("podcast").get(at).map(|s| Source::Show(s.id.clone(), s.title.clone())),
-            Source::Sermons => p.shows_of("sermon").get(at).map(|s| Source::Show(s.id.clone(), s.title.clone())),
-            Source::Artist(_) if !p.works().is_empty() => self.listed_works().get(at).map(|w| Source::Work(w.id.clone(), w.title.clone())),
-            Source::Work(..) => p.recordings().get(at).map(|r| Source::Recording(r.id.clone(), r.performers.clone())),
+            Route::Albums => p.albums().get(at).map(|a| Route::Album {
+                key: a.id.clone(),
+                title: a.name.clone(),
+            }),
+            Route::Artists => p.artists().get(at).map(|a| Route::Artist { name: a.name.clone() }),
+            Route::Composers => p.composers().get(at).map(|c| Route::Artist { name: c.name.clone() }),
+            Route::Podcasts => p.shows_of("podcast").get(at).map(|s| Route::Show {
+                key: s.id.clone(),
+                title: s.title.clone(),
+            }),
+            Route::Sermons => p.shows_of("sermon").get(at).map(|s| Route::Show {
+                key: s.id.clone(),
+                title: s.title.clone(),
+            }),
+            Route::Artist { .. } if !p.works().is_empty() => self.listed_works().get(at).map(|w| Route::Work {
+                key: w.id.clone(),
+                title: w.title.clone(),
+            }),
+            Route::Work { .. } => p.recordings().get(at).map(|r| Route::Recording {
+                key: r.id.clone(),
+                title: r.performers.clone(),
+            }),
             _ => None,
         }
     }
@@ -2723,8 +2776,7 @@ impl App {
     /// Where a queue was pressed from: the page it was on, as the address
     /// bar names it.
     fn from(&self) -> String {
-        use arkui::route::Route;
-        self.peer.source.place().fragment()
+        arkui::router::fragment(&self.peer.source)
     }
 
     /// Start `rows` at `at` (the first when it is not among them), the queue
@@ -2784,7 +2836,7 @@ impl App {
             auth::reveal();
         }
         let reacted = self.react();
-        self.history.sync(&self.peer.source.place());
+        self.history.sync(&self.peer.source);
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
@@ -3066,7 +3118,7 @@ impl App {
                 // (`docs/plan-db.md` D4): the domain's `search`, a view over
                 // the needle so far. `<Enter>` keeps it and lands on the first
                 // row; `<Esc>` widens the page back to the library.
-                if let (vim::Mode::Search(q), Pane::Tracks, Source::Library) = (self.keys.mode(), self.pane, &self.peer.source) {
+                if let (vim::Mode::Search(q), Pane::Tracks, Route::Library) = (self.keys.mode(), self.pane, &self.peer.source) {
                     let q = q.clone();
                     self.narrow(Some(&q));
                 }
@@ -3284,7 +3336,10 @@ impl App {
             // it is pressed on lists performances, not tracks.
             Message::PlayRecording(take) => {
                 let rows = self.peer.recording_rows(&take);
-                let from = arkui::route::Route::fragment(&Place::Recording(take));
+                let from = arkui::router::fragment(&Route::Recording {
+                    key: take,
+                    title: String::new(),
+                });
                 return self.play_rows(&rows, None, from);
             }
             Message::PlayWork(work) => {
@@ -3402,11 +3457,11 @@ impl App {
                 // is a cursor that remembers the wrong list.
                 self.cursors[Pane::Tracks as usize] = 0;
                 // A new visit opens at the top; back and forward where it was.
-                self.scroll_due = Some(self.history.arrive(&self.peer.source.place()));
+                self.scroll_due = Some(self.history.arrive(&self.peer.source));
                 // A transcript opens following the line being said, its
                 // cursor on it — put in the middle once the page is drawn,
                 // as any page's scroll is.
-                if self.peer.source == Source::Transcript {
+                if self.peer.source == Route::Transcript {
                     self.following = true;
                     self.said = self.cue_now();
                     self.cursors[Pane::Tracks as usize] = self.said.unwrap_or(0);
@@ -3416,11 +3471,11 @@ impl App {
             }
             Message::PageScrolled(y) => {
                 self.page_y = y;
-                self.history.scrolled(&self.peer.source.place(), y);
+                self.history.scrolled(&self.peer.source, y);
             }
             Message::PageTop => {
                 self.page_y = 0.0;
-                self.history.scrolled(&self.peer.source.place(), 0.0);
+                self.history.scrolled(&self.peer.source, 0.0);
                 return iced::widget::operation::scroll_to(TRACKS, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 });
             }
             Message::ScrollPage(y) => {
@@ -3507,7 +3562,13 @@ impl App {
         // asked after every update and not only when the bar moved.
         let ready = !self.peer.choices.is_empty();
         if let Some(place) = self.history.poll(ready) {
-            let wanted = self.peer.source_of(&place);
+            let wanted = self.peer.resolve(&place);
+            // Landed elsewhere for it (an older link's name, now the
+            // playlist's id; a stale link's fallback): written over the link,
+            // so the back button gets past it.
+            if wanted != place {
+                self.history.replace_next();
+            }
             if wanted != self.peer.source {
                 tasks.push(self.update(Message::Select(wanted)));
             }
@@ -3635,7 +3696,7 @@ impl App {
         }
         // A transcript following the line being said stops when the wheel
         // scrolls it by hand.
-        if self.peer.source == Source::Transcript && self.following {
+        if self.peer.source == Route::Transcript && self.following {
             subs.push(iced::event::listen_with(|event, _, _| match event {
                 iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
                     let (x, y) = match delta {

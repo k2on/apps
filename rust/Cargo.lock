@@ -249,6 +249,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-router"
+version = "0.1.0"
+dependencies = [
+ "ark-macros",
+]
+
+[[package]]
 name = "arkdb"
 version = "0.1.0"
 dependencies = [
@@ -263,6 +270,7 @@ name = "arkui"
 version = "0.1.0"
 dependencies = [
  "ark-format",
+ "ark-router",
  "chrono",
  "iced",
  "iced_test",
@@ -2227,6 +2235,7 @@ dependencies = [
  "ark-auth",
  "ark-ffi",
  "ark-peer",
+ "ark-router",
  "arkdb",
  "serde",
  "serde_json",
@@ -3544,6 +3553,7 @@ dependencies = [
  "ark-auth",
  "ark-ffi",
  "ark-peer",
+ "ark-router",
  "serde",
  "serde_json",
  "uniffi",

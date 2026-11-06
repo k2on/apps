@@ -31,6 +31,7 @@ pub mod playlists;
 pub mod plays;
 pub mod progress;
 pub mod queue;
+pub mod routes;
 pub mod schema;
 pub mod shows;
 pub mod types;

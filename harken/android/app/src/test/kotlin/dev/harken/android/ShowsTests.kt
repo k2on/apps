@@ -54,11 +54,11 @@ class ShowsTests {
     }
 
     @Test
-    fun aShowsPageIsARouteAndAPlace() {
+    fun aShowsPageIsARoute() {
         val page = Page.ForShow("podcast/full-time-nix")
-        assertEquals(page, Page.parse(page.route))
-        assertEquals("#show/podcast%2Ffull-time-nix", page.place(emptyList()))
-        assertEquals(page, Page.ofPlace(page.place(emptyList()), emptyList()))
+        assertEquals(page, Page.of(routeOf(page.route(emptyList())!!.destination().substringAfter('/')), emptyList()))
+        assertEquals("#show/podcast%2Ffull-time-nix", page.from(emptyList()))
+        assertEquals(page, Page.of(page.from(emptyList()), emptyList()))
     }
 
     /**

@@ -66,6 +66,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
 import uniffi.harken_domain.Playlist
+import uniffi.harken_domain.Route
+import uniffi.harken_domain.routeFromPath
 import dev.harken.android.onboarding.ArkSession
 import dev.arkui.AccountSheet
 import dev.arkui.LifecycleCapped
@@ -75,7 +77,10 @@ import dev.arkui.Origin
 import dev.arkui.PageBack
 import dev.arkui.PageMotion
 import dev.arkui.Recompositions
+import dev.arkui.Links
+import dev.arkui.Navigator
 import dev.arkui.Reselect
+import dev.arkui.RouteArg
 import dev.arkui.TabStack
 import dev.arkui.Space
 import dev.arkui.Tapped
@@ -327,17 +332,17 @@ fun HarkenApp(
         object : Do {
             override fun open(page: Page) {
                 // Every song is a tab of the Library, not a page of its own.
-                if (page is Page.Songs) library(LibraryTab.Songs) else nav().navigate(page.route)
+                if (page is Page.Songs) library(LibraryTab.Songs) else page.route(playlists)?.let { nav().navigate(it.destination()) }
             }
 
             override fun play(queue: List<Track>, at: Int, from: Page?) {
                 // An episode begun picks up where its listener left it.
                 val resume = queue.getOrNull(at)?.let { library.mine.value[it.id] }?.resumeMs ?: 0
-                playback.play(queue, at, albumOf, from = from?.place(playlists) ?: "", positionMs = resume)
+                playback.play(queue, at, albumOf, from = from?.from(playlists) ?: "", positionMs = resume)
             }
 
             override fun shuffle(queue: List<Track>, from: Page?) {
-                playback.play(queue, queue.indices.random(), albumOf, shuffled = true, from = from?.place(playlists) ?: "")
+                playback.play(queue, queue.indices.random(), albumOf, shuffled = true, from = from?.from(playlists) ?: "")
             }
 
             // The performance's movements, read when it is pressed: the page it is pressed on lists
@@ -390,7 +395,7 @@ fun HarkenApp(
                 show(Tab.Library)
             }
 
-            override fun settings() = nav().navigate(Route.Settings.pattern)
+            override fun settings() = nav().navigate(Destination.Settings.pattern)
 
             override fun account() {
                 account = true
@@ -418,7 +423,7 @@ fun HarkenApp(
                 scope.launch { sheet.close() }
                 // An episode's name is its show's, and the show is its page: nobody is called that.
                 val show = (page as? Page.ForArtist)?.let { p -> shows.firstOrNull { it.title == p.name }?.takeIf { artists.none { a -> a.name == p.name } } }
-                nav().navigate(show?.let { Page.ForShow(it.id) }?.route ?: page.route)
+                (show?.let { Page.ForShow(it.id) } ?: page).route(playlists)?.let { nav().navigate(it.destination()) }
             }
 
             override fun albumOf(now: Playing): Page? = details[Id(now.id)]?.albumId?.takeIf { it.isNotEmpty() }?.let { Page.ForAlbum(it) }
@@ -546,11 +551,11 @@ fun HarkenApp(
                         ) {
                             // Every route this tab's stack can show, each a destination keeping
                             // its own places (`ark-ui`'s `destinations`); what each draws is below.
-                            destinations(Route.entries.filter { it.on(t) }, motion, Route::pattern) { r, back ->
+                            destinations(Destination.entries.filter { it.on(t) }, motion, Destination::pattern) { r, back ->
                                 when (r) {
-                                    Route.Home ->
+                                    Destination.Home ->
                                         HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching, who), albumOf, act)
-                                    Route.Search -> {
+                                    Destination.Search -> {
                                         var needle by rememberSaveable { mutableStateOf("") }
                                         var recent by remember { mutableStateOf(device.searches) }
                                         // Asked again only when the needle or the library moved: coming back to
@@ -585,17 +590,17 @@ fun HarkenApp(
                                             who,
                                         )
                                     }
-                                    Route.Library ->
+                                    Destination.Library ->
                                         LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows, subscriptions, who), albumOf, playing, act)
-                                    Route.Album -> {
-                                        val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
+                                    Destination.Album -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForAlbum
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             Ready(rows) { AlbumPage(page.id, albumsById[page.id], it.orEmpty(), details, playing, act) }
                                         }
                                     }
-                                    Route.Artist -> {
-                                        val page = Page.parse("artist/" + back.arguments?.getString("arg")) as? Page.ForArtist
+                                    Destination.Artist -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForArtist
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             // The works they wrote, if any: a composer's page is their artist page.
@@ -629,15 +634,15 @@ fun HarkenApp(
                                             }
                                         }
                                     }
-                                    Route.Playlist -> {
-                                        val page = Page.parse("playlist/" + back.arguments?.getString("arg")) as? Page.ForPlaylist
+                                    Destination.Playlist -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForPlaylist
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             Ready(rows) { r -> PlaylistPage(page.id, playlists.firstOrNull { it.id == page.id }, r.orEmpty(), albumOf, playing, act) }
                                         }
                                     }
-                                    Route.Show -> {
-                                        val page = Page.parse("show/" + back.arguments?.getString("arg")) as? Page.ForShow
+                                    Destination.Show -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForShow
                                         if (page != null) {
                                             val rows by held(library, page, back)
                                             val listened by heldBy(library, progressKey(page.id), back) { it.showProgress(page.id) }
@@ -676,16 +681,16 @@ fun HarkenApp(
                                             }
                                         }
                                     }
-                                    Route.Work -> {
-                                        val page = Page.parse("work/" + back.arguments?.getString("arg")) as? Page.ForWork
+                                    Destination.Work -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForWork
                                         if (page != null) {
                                             val work by heldBy(library, workKey(page.id), back) { it.work(page.id) }
                                             val takes by heldBy(library, recordingsKey(page.id), back) { it.recordings(page.id) }
                                             Ready(if (work == null) null else takes) { r -> WorkPage(page.id, work?.firstOrNull(), r.orEmpty(), act) }
                                         }
                                     }
-                                    Route.Recording -> {
-                                        val page = Page.parse("recording/" + back.arguments?.getString("arg")) as? Page.ForRecording
+                                    Destination.Recording -> {
+                                        val page = Page.of(routeOf(back), playlists) as? Page.ForRecording
                                         if (page != null) {
                                             // The work's own row and every performance of it, so the header can find this one.
                                             val of = Catalogue.workOf(page.id) ?: ""
@@ -717,7 +722,7 @@ fun HarkenApp(
                                             }
                                         }
                                     }
-                                    Route.Settings -> {
+                                    Destination.Settings -> {
                                         var taps by remember { mutableIntStateOf(0) }
                                         var unlocked by remember { mutableStateOf(device.diagnostics) }
                                         SettingsScreen(
@@ -732,15 +737,15 @@ fun HarkenApp(
                                                         taps = 0
                                                         unlocked = true
                                                         device.diagnostics = true
-                                                        nav().navigate(Route.Diagnostics.pattern)
+                                                        nav().navigate(Destination.Diagnostics.pattern)
                                                     }
                                                     taps >= 4 && !unlocked -> scope.launch { snackbar.showSnackbar("${7 - taps} more taps for diagnostics") }
                                                 }
                                             },
-                                            onDiagnostics = { nav().navigate(Route.Diagnostics.pattern) },
+                                            onDiagnostics = { nav().navigate(Destination.Diagnostics.pattern) },
                                         )
                                     }
-                                    Route.Diagnostics -> {
+                                    Destination.Diagnostics -> {
                                         // Held by the entry, as a page's rows are, and read again when the
                                         // session reports a change, not on a clock: come back to, it has its
                                         // numbers on its first frame.
@@ -754,6 +759,26 @@ fun HarkenApp(
                             }
                         }
                     }
+                }
+            }
+
+            // A link the app was opened with (`harken://album/…`): its route, navigated to on the tab
+            // shown. The library's own lists are its tab's; a sign-in link (`harken://join?…`) is the
+            // onboarding's.
+            Links("harken") { link ->
+                Navigator(nav(), Route::destination).handle(link, "harken", ::routeFromPath) { r ->
+                    val list =
+                        when (r) {
+                            is Route.Library -> LibraryTab.Songs
+                            is Route.Albums -> LibraryTab.Albums
+                            is Route.Artists -> LibraryTab.Artists
+                            is Route.Composers -> LibraryTab.Composers
+                            is Route.Podcasts -> LibraryTab.Podcasts
+                            is Route.Sermons -> LibraryTab.Sermons
+                            else -> null
+                        }
+                    list?.let(act::library)
+                    list != null || r is Route.Join || r is Route.Transcript
                 }
             }
 
@@ -783,7 +808,7 @@ fun HarkenApp(
                                 motion.from(m.origin(page))
                                 menu = null
                                 scope.launch { sheet.close() }
-                                nav().navigate(page.route)
+                                page.route(playlists)?.let { nav().navigate(it.destination()) }
                             }
 
                             override fun remove() {
@@ -802,7 +827,7 @@ fun HarkenApp(
                                 scope.launch {
                                     val list = page?.let { library.read(it) }?.takeIf { l -> l.any { it.id == track.id } } ?: listOf(track)
                                     val at = list.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
-                                    playback.play(list, at, albumOf, from = page?.place(playlists) ?: "", positionMs = ms)
+                                    playback.play(list, at, albumOf, from = page?.from(playlists) ?: "", positionMs = ms)
                                 }
                             }
                         }
@@ -900,7 +925,7 @@ fun HarkenApp(
  * places, seeing its own lifecycle — and the restoration tests walk the same list, so a new route
  * is covered the day it is added.
  */
-enum class Route(val pattern: String, val tab: Tab?) {
+enum class Destination(val pattern: String, val tab: Tab?) {
     Home("home", Tab.Home),
     Search("search", Tab.Search),
     Library("library", Tab.Library),
@@ -916,6 +941,23 @@ enum class Route(val pattern: String, val tab: Tab?) {
     /** Whether `t`'s stack can show it: that tab's own root, or any page. */
     fun on(t: Tab): Boolean = tab == null || tab == t
 }
+
+/**
+ * What the back stack navigates to for this route: its kind, the destination its pattern names,
+ * then its path as an argument (`ark-ui`'s [RouteArg]). A route with no name is its kind alone
+ * (`settings`).
+ */
+fun Route.destination(): String {
+    val path = path()
+    val kind = path.substringBefore('/')
+    return if (kind == path) path else kind + "/" + RouteArg.of(path)
+}
+
+/** The route a destination's argument names ([destination]); null for one that names nothing. */
+fun routeOf(arg: String?): Route? = RouteArg.path(arg)?.let(::routeFromPath)
+
+/** The route a back stack entry was navigated to. */
+fun routeOf(entry: NavBackStackEntry): Route? = routeOf(entry.arguments?.getString("arg"))
 
 /**
  * `content`, once what it draws is there — or at once, with nothing, when the destination has no
@@ -955,7 +997,7 @@ private fun held(library: Library, page: Page, entry: NavBackStackEntry): androi
 /** A catalogue's list — a composer's works, a work's performances — held as a page's tracks are, by its key. */
 @Composable
 private fun <T> heldBy(library: Library, key: Any, entry: NavBackStackEntry, hold: (Library) -> StateFlow<List<T>?>): androidx.compose.runtime.State<List<T>?> {
-    val name = if (key is Page) key.route else key.toString()
+    val name = key.toString()
     val holding = remember(entry, key) { kept(entry, "held:$name") { Holding(library, key, hold) } }
     return holding.rows.collectAsStateWithLifecycle()
 }

@@ -59,7 +59,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.arkdb.auth.Event
 import dev.arkdb.auth.Step
-import dev.arkdb.auth.joinOf
 import dev.harken.android.gen.Device
 
 /**
@@ -199,13 +198,15 @@ public fun ArkApp(
 
 /**
  * What a link the app was opened with means: `<scheme>://auth?code=…` a sign-in coming back,
- * `<scheme>://join?…` a server (and a code) to join, asked about first; null for any other.
+ * `<scheme>://join?…` a server (and a code) to join, asked about first; null for any other. The
+ * join is read as the domain's route (`Route.Join`), as every shell reads it.
  */
 internal fun eventOf(intent: Intent, scheme: String): Event? {
     val data = intent.data ?: return null
     if (data.scheme != scheme) return null
     if (data.host == "auth") return codeOf(intent, scheme)?.let { Event.Code(it) }
-    return joinOf(data.toString())?.let { Event.Joined(it.server, it.code) }
+    val join = dev.arkui.Navigator.routeOf(data.toString(), scheme, { uniffi.harken_domain.routeFromPath(it) }) as? uniffi.harken_domain.Route.Join
+    return join?.let { Event.Joined(it.server, it.code) }
 }
 
 /** The code in `<scheme>://auth?code=…`, or null for any other intent. */

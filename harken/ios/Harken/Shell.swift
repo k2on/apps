@@ -17,11 +17,12 @@ struct Shell: View {
     @EnvironmentObject private var model: Model
     @State private var tab: Pane = .home
     @State private var libraryTab: LibraryTab = .playlists
-    @State private var paths: [Pane: [Route]] = [.home: [], .library: [], .search: []]
+    /// Each tab's back stack (ArkUI's `Navigator`), of harken's routes.
+    @State private var navs: [Pane: Navigator<Route>] = [.home: Navigator(), .library: Navigator(), .search: Navigator()]
     @Namespace private var zoom
 
     private func path(_ t: Pane) -> Binding<[Route]> {
-        Binding(get: { paths[t] ?? [] }, set: { paths[t] = $0 })
+        Binding(get: { navs[t]?.path ?? [] }, set: { navs[t, default: Navigator()].path = $0 })
     }
 
     var body: some View {
@@ -58,6 +59,12 @@ struct Shell: View {
             if let l = lib { libraryTab = l }
             tab = t
         }
+        // A link the app was opened with: its route, navigated to on the tab shown.
+        .onChange(of: model.link) {
+            guard let url = model.link else { return }
+            model.link = nil
+            navs[tab, default: Navigator()].handle(url, scheme: AppInfo.harken.scheme, parse: { routeFromPath(path: $0) }, take: model.takes)
+        }
         .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
             Button("OK", role: .cancel) { model.notice = nil }
         }
@@ -76,10 +83,10 @@ struct Shell: View {
                     Destination(route: r).zoomed(r, zoom).scrollEdges()
                 }
         }
-        .environment(\.open) { r in paths[t, default: []].append(r) }
+        .environment(\.open) { r in navs[t, default: Navigator()].push(r) }
     }
 
-    private func open(_ r: Route) { paths[tab, default: []].append(r) }
+    private func open(_ r: Route) { navs[tab, default: Navigator()].push(r) }
 
 }
 
@@ -121,22 +128,26 @@ struct SheetHost: ViewModifier {
     }
 }
 
-/// One page of a tab's stack.
+/// One route of a tab's back stack, drawn.
 struct Destination: View {
     let route: Route
     @EnvironmentObject private var model: Model
 
     var body: some View {
         switch route {
-        case .page(.album(let id)): AlbumPage(model: model, id: id)
-        case .page(.artist(let n)): ArtistPage(model: model, name: n)
-        case .page(.playlist(let id)): PlaylistPage(model: model, id: id)
-        case .page(.work(let id)): WorkPage(model: model, id: id)
-        case .page(.recording(let id)): RecordingPage(model: model, id: id)
-        case .page(.show(let id)): ShowPage(model: model, id: id)
-        case .page(.songs): SongsList().navigationTitle("Songs")
+        case let .album(key, _): AlbumPage(model: model, id: key)
+        case let .artist(n): ArtistPage(model: model, name: n)
+        case .playlist:
+            // By its id (an older link's by its name), so a renamed one keeps
+            // its page; one that is gone is the page's own "gone".
+            PlaylistPage(model: model, id: model.playlists.first { route.names(id: $0.id.hex, name: $0.name) }?.id ?? Id(String(repeating: "0", count: 32)))
+        case let .work(key, _): WorkPage(model: model, id: key)
+        case let .recording(key, _): RecordingPage(model: model, id: key)
+        case let .show(key, _): ShowPage(model: model, id: key)
+        case .library: SongsList().navigationTitle(route.title())
         case .settings: SettingsView()
         case .diagnostics: DiagnosticsView()
+        default: EmptyView()
         }
     }
 }

@@ -27,7 +27,7 @@ use ark::format::Encode;
 use ark_peer::{Patch, Watched};
 
 use crate::client::{Driven, Replica, Update};
-use crate::places::{Place, Source};
+use crate::routes::Route;
 use crate::rows::{
     Album, Artist, Chapter, Composer, Credit, Cue, Download, EpisodeDetail, Id, Item, Listened, Person, Playlist, Recording, Show, Subscription,
     TrackDetail, Work,
@@ -37,7 +37,7 @@ use crate::rows::{
 /// open.
 #[derive(Debug, Clone)]
 pub struct Choice {
-    pub source: Source,
+    pub source: Route,
     pub label: String,
     /// The tally drawn on the right, where there is one to draw.
     pub count: Option<i64>,
@@ -166,9 +166,9 @@ pub struct Peer {
     pub playlist: Id,
     /// What the sidebar picked, and the list that answers it.
     ///
-    /// `Source::Library` is `items` itself. Every other list of tracks is the
+    /// `Route::Library` is `items` itself. Every other list of tracks is the
     /// page's own view, opened when the source changes.
-    pub source: Source,
+    pub source: Route,
     /// What the Songs page is narrowed to, as the search box has it typed:
     /// `None` is the whole library. While there is one, the page's list is
     /// the `search` view (`docs/plan-db.md` D4) rather than `items`.
@@ -256,7 +256,7 @@ impl Peer {
             client: Driven::new(client),
             views,
             playlist,
-            source: Source::Library,
+            source: Route::Library,
             search: None,
             details,
             choices: Vec::new(),
@@ -313,9 +313,12 @@ impl Peer {
 
     /// The page of the show of `kind` called `title`: an episode's, by the
     /// creator it carries.
-    pub fn show_named(&self, kind: &str, title: &str) -> Option<Source> {
+    pub fn show_named(&self, kind: &str, title: &str) -> Option<Route> {
         let show = self.shows().iter().find(|s| s.kind == kind && s.title == title)?;
-        Some(Source::Show(show.id.clone(), show.title.clone()))
+        Some(Route::Show {
+            key: show.id.clone(),
+            title: show.title.clone(),
+        })
     }
 
     /// The feeds the library follows, by when each was added.
@@ -619,14 +622,14 @@ impl Peer {
         // genre: a pop library has no works, so no Composers line. Songs is
         // unconditional because it is the library.
         let mut choices = vec![Choice {
-            source: Source::Library,
+            source: Route::Library,
             label: "Songs".into(),
             count: Some(self.items().len() as i64),
         }];
         for (source, label, count) in [
-            (Source::Albums, "Albums", self.albums().len()),
-            (Source::Artists, "Artists", self.artists().len()),
-            (Source::Composers, "Composers", self.composers().len()),
+            (Route::Albums, "Albums", self.albums().len()),
+            (Route::Artists, "Artists", self.artists().len()),
+            (Route::Composers, "Composers", self.composers().len()),
         ] {
             if count > 0 {
                 choices.push(Choice {
@@ -639,7 +642,7 @@ impl Peer {
         // Then what is listened to rather than played: the podcasts and the
         // sermons, each a line even with no show of its kind yet — its page
         // is where the first one is followed from.
-        for (source, label, kind) in [(Source::Podcasts, "Podcasts", "podcast"), (Source::Sermons, "Sermons", "sermon")] {
+        for (source, label, kind) in [(Route::Podcasts, "Podcasts", "podcast"), (Route::Sermons, "Sermons", "sermon")] {
             let count = self.shows_of(kind).len();
             choices.push(Choice {
                 source,
@@ -648,7 +651,7 @@ impl Peer {
             });
         }
         choices.extend(self.playlists().iter().map(|p| Choice {
-            source: Source::Playlist(p.id, p.name.clone()),
+            source: p.route(),
             label: p.name.clone(),
             count: None,
         }));
@@ -766,7 +769,7 @@ impl Peer {
             // The library is `items` itself, unless a search narrows it: then
             // the page is the `search` view, kept like any other
             // (`docs/plan-db.md` D4).
-            Source::Library => (
+            Route::Library => (
                 self.search.as_deref().map(|n| {
                     let s = Search {
                         playlist_id: pl,
@@ -777,11 +780,11 @@ impl Peer {
                 None,
                 None,
             ),
-            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings | Source::Transcript => {
+            Route::Albums | Route::Artists | Route::Composers | Route::Podcasts | Route::Sermons | Route::Settings | Route::Transcript => {
                 (None, None, None)
             }
             // A show's episodes, newest first.
-            Source::Show(id, _) => (
+            Route::Show { key: id, .. } => (
                 Some((
                     "show",
                     ShowInput {
@@ -797,13 +800,19 @@ impl Peer {
             // performances. This page may have been reached without opening a
             // composer at all — a link somebody sent — so the row is read by
             // key rather than looked up in a composer's list.
-            Source::Work(id, _) => (
+            Route::Work { key: id, .. } => (
                 None,
                 Some(("work", WorkInput { id: id.clone() }.to_bytes())),
                 Some(("recordings", Recordings { work_id: id.clone() }.to_bytes())),
             ),
-            Source::Playlist(id, _) => (Some(("playlist", PlaylistInput { playlist_id: key(*id) }.to_bytes())), None, None),
-            Source::Album(id, _) => (
+            // By its id (an older link's by its name): one since deleted
+            // opens nothing, and the router lands it on its fallback.
+            Route::Playlist { .. } => match self.playlist_of(&self.source) {
+                Some(p) => (Some(("playlist", PlaylistInput { playlist_id: key(p.id) }.to_bytes())), None, None),
+                None => (None, None, None),
+            },
+            Route::Diagnostics | Route::Join { .. } => (None, None, None),
+            Route::Album { key: id, .. } => (
                 Some((
                     "album",
                     AlbumInput {
@@ -817,7 +826,7 @@ impl Peer {
             ),
             // Their tracks and the works they are by: a composer's page is
             // their works, anybody else's their songs.
-            Source::Artist(name) => (
+            Route::Artist { name } => (
                 Some((
                     "artist",
                     ArtistInput {
@@ -832,7 +841,7 @@ impl Peer {
             // The one list ordered by the *work* rather than the release, and
             // every recording of that work, so the header can find this one —
             // the work's key is everything before the `@`.
-            Source::Recording(id, _) => {
+            Route::Recording { key: id, .. } => {
                 let shown = Some((
                     "recording",
                     RecordingInput {
@@ -857,14 +866,14 @@ impl Peer {
         let works = want(c, &mut v.works, works, Work::from_bytes);
         let recordings = want(c, &mut v.recordings, recordings, Recording::from_bytes);
         let credits = match &self.source {
-            Source::Recording(id, _) => Some(("credits", Credits { recording_id: id.clone() }.to_bytes())),
-            Source::Album(id, _) => Some(("album_credits", AlbumCredits { id: id.clone() }.to_bytes())),
+            Route::Recording { key: id, .. } => Some(("credits", Credits { recording_id: id.clone() }.to_bytes())),
+            Route::Album { key: id, .. } => Some(("album_credits", AlbumCredits { id: id.clone() }.to_bytes())),
             _ => None,
         };
         want(c, &mut v.credits, credits, Credit::from_bytes);
         // A show's page says how far everybody has got in each episode.
         let listened = match &self.source {
-            Source::Show(id, _) => Some((
+            Route::Show { key: id, .. } => Some((
                 "show_progress",
                 ShowInput {
                     playlist_id: pl,
@@ -877,7 +886,7 @@ impl Peer {
         want(c, &mut v.listened, listened, Listened::from_bytes);
         // …and what each episode is about.
         let episodes = match &self.source {
-            Source::Show(id, _) => Some((
+            Route::Show { key: id, .. } => Some((
                 "episode_details",
                 ShowInput {
                     playlist_id: pl,
@@ -890,7 +899,7 @@ impl Peer {
         want(c, &mut v.episodes, episodes, EpisodeDetail::from_bytes);
         // A person's page: every episode they are on, beside their songs.
         let appearances = match &self.source {
-            Source::Artist(name) => Some((
+            Route::Artist { name } => Some((
                 "appearances",
                 ArtistInput {
                     playlist_id: pl,
@@ -911,7 +920,7 @@ impl Peer {
     /// A link arriving cold carries a recording's key and no label: the row
     /// knows who played it, and this is where the two meet.
     fn label_recording(&mut self) {
-        if let Source::Recording(id, who) = &mut self.source {
+        if let Route::Recording { key: id, title: who } = &mut self.source {
             if who.is_empty() {
                 if let Some(take) = rows(&self.views.recordings).iter().find(|r| r.id == *id) {
                     who.clone_from(&take.performers);
@@ -927,46 +936,46 @@ impl Peer {
         self.work(id).into_iter().next().map(|w| w.title)
     }
 
-    /// The source a place names, against what this peer actually has. A link
-    /// to a playlist since renamed, or to an album not received yet, lands on
-    /// the library — a page, rather than a heading with nothing under it.
-    pub fn source_of(&self, place: &Place) -> Source {
-        match place {
-            Place::Album(id) => match self.albums().iter().find(|a| a.id == *id) {
-                Some(a) => Source::Album(a.id.clone(), a.name.clone()),
-                None => Source::Library,
-            },
-            // A person, whichever list they are on, or on an episode; an old
-            // `#composer/…` link is their page too.
-            Place::Artist(name) | Place::Composer(name) => {
+    /// The route as this peer has it — a route read from the address bar
+    /// carries no title, and this finds it — or its fallback, the library,
+    /// when this peer has not got what it names: a link to a playlist since
+    /// deleted, or to an album not received yet, lands on a page rather than
+    /// a heading with nothing under it.
+    pub fn resolve(&self, route: &Route) -> Route {
+        let found = match route {
+            Route::Album { key, .. } => self.albums().iter().find(|a| a.id == *key).map(|a| Route::Album {
+                key: a.id.clone(),
+                title: a.name.clone(),
+            }),
+            // A person, whichever list they are on, or on an episode.
+            Route::Artist { name } => {
                 let known = self.artists().iter().any(|a| a.name == *name) || self.composers().iter().any(|c| c.name == *name);
-                match known || self.appears(name) {
-                    true => Source::Artist(name.clone()),
-                    false => Source::Library,
-                }
+                (known || self.appears(name)).then(|| route.clone())
             }
-            Place::Transcript => Source::Transcript,
+            Route::Transcript => Some(Route::Transcript),
+            // By its id, so a renamed one is found under its new name; an
+            // older link's, by the name it carries.
+            Route::Playlist { .. } => self.playlist_of(route).map(Playlist::route),
             // By *querying*, not against a list this peer holds: a link
             // arriving cold has no page yet, and the key is enough to ask with.
-            Place::Work(id) => match self.work_named(id) {
-                Some(title) => Source::Work(id.clone(), title),
-                None => Source::Library,
+            Route::Work { key, .. } => self.work_named(key).map(|title| Route::Work { key: key.clone(), title }),
+            Route::Show { key, .. } => self.shows().iter().find(|s| s.id == *key).map(|s| Route::Show {
+                key: key.clone(),
+                title: s.title.clone(),
+            }),
+            Route::Recording { .. } => match route.work() {
+                Some(Route::Work { key, .. }) => self.work_named(&key).map(|_| route.clone()),
+                _ => None,
             },
-            Place::Show(id) => match self.shows().iter().find(|s| s.id == *id) {
-                Some(s) => Source::Show(id.clone(), s.title.clone()),
-                None => Source::Library,
-            },
-            Place::Recording(id) => match id.split_once('@').and_then(|(work, _)| self.work_named(work)) {
-                Some(_) => Source::Recording(id.clone(), String::new()),
-                None => Source::Library,
-            },
-            _ => self
-                .choices
-                .iter()
-                .find(|c| c.source.place() == *place)
-                .map(|c| c.source.clone())
-                .unwrap_or(Source::Library),
-        }
+            _ => self.choices.iter().find(|c| c.source == *route).map(|c| c.source.clone()),
+        };
+        found.unwrap_or_else(|| route.fallback())
+    }
+
+    /// The playlist of the caller's a route names: by its id, and only for
+    /// an older link's, which has none, by its name (`Route::names`).
+    pub fn playlist_of(&self, route: &Route) -> Option<&Playlist> {
+        self.playlists().iter().find(|p| route.names(&p.hex(), &p.name))
     }
 
     /// Narrow the Songs page to what holds `needle` in its title or its
@@ -989,7 +998,7 @@ impl Peer {
     /// What the table is showing, whichever side it came from.
     pub fn rows(&self) -> &[Item] {
         match self.source {
-            Source::Library if self.search.is_none() => self.items(),
+            Route::Library if self.search.is_none() => self.items(),
             _ => self.shown(),
         }
     }
@@ -1191,7 +1200,10 @@ mod tests {
         peer.client.lock().mutate("add_to_playlist", &on(other, air)).unwrap();
         peer.refresh();
         assert!(!peer.items()[0].on_playlist(), "on Other, not on Mine");
-        peer.source = Source::Album(peer.album_id("Suites"), "Suites".into());
+        peer.source = Route::Album {
+            key: peer.album_id("Suites"),
+            title: "Suites".into(),
+        };
         peer.open_page();
 
         let reject = Frame::Verdict {

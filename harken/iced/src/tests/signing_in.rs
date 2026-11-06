@@ -6,7 +6,7 @@ use ark_auth::{Account, Login};
 
 use super::{signed_in, signed_out, song};
 use crate::client::Standing;
-use crate::places::Pane;
+use crate::routes::Pane;
 use crate::{App, Message};
 
 /// A login holding the library's role, as the scanner's account does: the

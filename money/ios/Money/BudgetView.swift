@@ -230,7 +230,7 @@ struct BudgetView: View {
                 ForEach(g.lines) { l in
                     // A month its rule assigns offers neither: the domain
                     // refuses assigning it and moving money to or from it.
-                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l, month: model.snapshot.month) }
+                    NavigationLink(value: Route.category(id: l.categoryId.hex, name: l.name)) { CategoryRow(line: l, month: model.snapshot.month) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if Ruled.editable(l) {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }

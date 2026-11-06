@@ -290,10 +290,10 @@ impl App {
     /// a filter's. What the keys walk is what is drawn.
     pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
         let pages = [
-            (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
-            (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
-            (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
-            (glyphs::WRENCH, "Settings".to_string(), None, Page::Settings),
+            (glyphs::HOME, crate::Route::Budget.title(), None, Page::Budget),
+            (glyphs::LIBRARY, crate::Route::Reflect.title(), None, Page::Reflect),
+            (glyphs::PLAYLIST, crate::Route::Accounts.title(), None, Page::Ledger(Ledger::All)),
+            (glyphs::WRENCH, crate::Route::Settings.title(), None, Page::Settings),
         ];
         let sections: [Section; 3] = [
             ("On Budget", |a| a.on_budget && !a.closed),

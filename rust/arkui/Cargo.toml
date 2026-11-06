@@ -13,6 +13,9 @@ license.workspace = true
 # Numbers, days and lengths as every client writes them (`format.rs`
 # re-exports it).
 ark-format = { path = "../ark-format" }
+# How an app's routes are spelled: UI-free, so a domain spells its `Route`
+# enum with it too; `router` is the address bar over it.
+ark-router = { path = "../ark-router" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced a timer and an executor on the desktop; a browser already

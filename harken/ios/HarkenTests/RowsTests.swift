@@ -46,24 +46,29 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Art.pick(6, "a"), Int(0xe40c292c as UInt32 % 6))
     }
 
-    func testAPlaceIsTheDesktopsSpelling() {
+    func testAPagesRouteIsTheDesktopsSpelling() {
         let p = Playlist(id: Fx.id(7), name: "Road trip", pos: 0, createdMs: 0, userId: "ana")
-        // An album's place is its key, as a work's is: two records of one title are two albums.
-        XCTAssertEqual(Page.album("music/Handel/Water Music/water-music").place([]), "#album/music%2FHandel%2FWater%20Music%2Fwater-music")
-        XCTAssertEqual(Page.playlist(p.id).place([p]), "#playlist/Road%20trip")
-        XCTAssertEqual(Page.playlist(Fx.id(8)).place([p]), "")
-        XCTAssertEqual(Page.songs.place([]), "#library")
-        XCTAssertEqual(Page.of(place: "#album/.catalogue%2Fbourr%C3%A9e", playlists: []), .album(".catalogue/bourrée"))
-        XCTAssertEqual(Page.of(place: "#playlist/Road%20trip", playlists: [p]), .playlist(p.id))
-        XCTAssertEqual(Page.of(place: "#artist/", playlists: []), nil)
-        XCTAssertEqual(Page.of(place: "", playlists: []), nil)
-        // A work's and a performance's places are their keys, `/` and `@` and all.
-        XCTAssertEqual(Page.work("johann-sebastian-bach/bwv-988").place([]), "#work/johann-sebastian-bach%2Fbwv-988")
-        XCTAssertEqual(Page.of(place: Page.recording("bach/bwv-988@kimiko").place([]), playlists: []), .recording("bach/bwv-988@kimiko"))
-        XCTAssertEqual(Page.of(place: "#composer/Antonio%20Vivaldi", playlists: []), .artist("Antonio Vivaldi"), "a composer's page is their artist page")
-        // A show's place is its key, as a work's is.
-        XCTAssertEqual(Page.show("podcast/full-time-nix").place([]), "#show/podcast%2Ffull-time-nix")
-        XCTAssertEqual(Page.of(place: "#show/podcast%2Ffull-time-nix", playlists: []), .show("podcast/full-time-nix"))
+        // The spelling itself is the domain's (`harken_domain::routes`, tested there); a page
+        // finds its route, and a "played from" its page, a playlist by its id; an older
+        // "played from", by its name.
+        XCTAssertEqual(Page.album("music/Handel/Water Music/water-music").from([]), "#album/music%2FHandel%2FWater%20Music%2Fwater-music")
+        XCTAssertEqual(Page.playlist(p.id).from([p]), "#playlist/\(p.id.hex)/road-trip")
+        XCTAssertEqual(Page.playlist(Fx.id(8)).from([p]), "")
+        XCTAssertEqual(Page.songs.from([]), "#library")
+        XCTAssertEqual(Page.of(from: "#album/.catalogue%2Fbourr%C3%A9e", playlists: []), .album(".catalogue/bourrée"))
+        XCTAssertEqual(Page.of(from: "#playlist/Road%20trip", playlists: [p]), .playlist(p.id))
+        XCTAssertEqual(Page.of(from: Page.playlist(p.id).from([p]), playlists: [p]), .playlist(p.id))
+        // Renamed, the same page; and of two of one name, only the one the route names.
+        let renamed = Playlist(id: p.id, name: "Summer", pos: 0, createdMs: 0, userId: "ana")
+        let twin = Playlist(id: Fx.id(9), name: "Road trip", pos: 1, createdMs: 0, userId: "bo")
+        XCTAssertEqual(Page.of(from: Page.playlist(p.id).from([p]), playlists: [twin, renamed]), .playlist(p.id))
+        XCTAssertEqual(Page.of(from: "#artist/", playlists: []), nil)
+        XCTAssertEqual(Page.of(from: "", playlists: []), nil)
+        XCTAssertEqual(Page.of(from: Page.recording("bach/bwv-988@kimiko").from([]), playlists: []), .recording("bach/bwv-988@kimiko"))
+        XCTAssertEqual(Page.of(from: "#composer/Antonio%20Vivaldi", playlists: []), .artist("Antonio Vivaldi"), "a composer's page is their artist page")
+        XCTAssertEqual(Page.of(from: "#show/podcast%2Ffull-time-nix", playlists: []), .show("podcast/full-time-nix"))
+        // A route is which page, not what it is called.
+        XCTAssertEqual(Route.album(key: "k", title: "A"), Route.album(key: "k", title: ""))
     }
 
     /// A page reads its tracks, the catalogue's views beside them, or both,

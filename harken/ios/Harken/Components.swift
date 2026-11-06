@@ -242,14 +242,14 @@ struct PeopleLine: View {
         }
         .contentShape(Rectangle())
         if people.count == 1, let p = people.first {
-            Button { open(.page(.artist(p.name))) } label: { line }
+            Button { open(.artist(name: p.name)) } label: { line }
                 .buttonStyle(.plain)
                 .accessibilityLabel(words)
                 .accessibilityHint("Opens \(p.name)'s page")
         } else {
             Menu {
                 ForEach(people) { p in
-                    Button { open(.page(.artist(p.name))) } label: { Label(p.name, systemImage: "person") }
+                    Button { open(.artist(name: p.name)) } label: { Label(p.name, systemImage: "person") }
                 }
             } label: { line }
             .accessibilityLabel(words)
@@ -273,17 +273,17 @@ struct TrackActions: View {
         Button { model.addToQueue(track) } label: { Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") }
         Button { present(.addTo(track)) } label: { Label("Add to Playlist…", systemImage: "text.badge.plus") }
         if let a = model.album(of: track), from != .album(a.id) {
-            Button { open(.page(.album(a.id))) } label: { Label("Go to Album", systemImage: "square.stack") }
+            Button { open(.album(key: a.id, title: a.name)) } label: { Label("Go to Album", systemImage: "square.stack") }
         }
         // An episode goes to its show, whose title is its creator, and to nobody's page.
         if let s = model.show(of: track), from != .show(s.id) {
-            Button { open(.page(.show(s.id))) } label: { Label("Go to Show", systemImage: "mic") }
+            Button { open(.show(key: s.id, title: s.title)) } label: { Label("Go to Show", systemImage: "mic") }
         }
         if track.kind == "song", !track.creator.isEmpty, from != .artist(track.creator) {
-            Button { open(.page(.artist(track.creator))) } label: { Label("Go to Artist", systemImage: "music.microphone") }
+            Button { open(.artist(name: track.creator)) } label: { Label("Go to Artist", systemImage: "music.microphone") }
         }
         if let c = model.detail(track)?.composer, !c.isEmpty, c != track.creator, from != .artist(c) {
-            Button { open(.page(.artist(c))) } label: { Label("Go to Composer", systemImage: "music.quarternote.3") }
+            Button { open(.artist(name: c)) } label: { Label("Go to Composer", systemImage: "music.quarternote.3") }
         }
         if case let .playlist(id)? = from {
             Button(role: .destructive) { model.remove(track, from: id) } label: { Label("Remove from This Playlist", systemImage: "minus.circle") }

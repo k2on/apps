@@ -9,7 +9,7 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 
 use super::{alone, signed_in, signed_out, Queues};
-use crate::places::Focus;
+use crate::routes::Focus;
 use crate::{App, Message, ACCOUNT_BOTTOM, PAGE_PADDING};
 
 fn login(who: &str) -> Login {
@@ -186,13 +186,16 @@ fn the_demo_is_alone() {
 #[test]
 #[cfg(not(feature = "demo"))]
 fn settings_resyncs_the_library_for_the_library_alone() {
-    use crate::places::{Place, Source};
-    use arkui::route::Route;
-    assert_eq!(Place::parse(&Place::Settings.fragment()), Place::Settings, "#settings is a page");
+    use crate::routes::Route;
+    assert_eq!(
+        arkui::router::parse::<Route>(&arkui::router::fragment(&Route::Settings)),
+        Route::Settings,
+        "#settings is a page"
+    );
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let entry = app.account().unwrap().entries.remove(0);
     let _ = app.update(entry.message().clone());
-    assert_eq!(app.peer.source, Source::Settings, "the menu's first entry opens Settings");
+    assert_eq!(app.peer.source, Route::Settings, "the menu's first entry opens Settings");
     let _ = app.update(Message::Resync);
     assert_eq!(app.edits.last().map(|e| e.what.as_str()), Some("resync the library"));
     assert!(app.resync.as_deref().unwrap_or("").starts_with("Asked"), "{:?}", app.resync);
@@ -200,7 +203,7 @@ fn settings_resyncs_the_library_for_the_library_alone() {
     // Somebody without the library's role.
     let plain = super::hand(crate::peer::Peer::open(crate::client::memory(super::who("bob"), Some("dev"))));
     let mut app = App::with_peer(plain, "http://127.0.0.1:9".into(), Some(login("bob")));
-    let _ = app.update(Message::Select(Source::Settings));
+    let _ = app.update(Message::Select(Route::Settings));
     let _ = app.update(Message::Resync);
     assert!(app.edits.is_empty(), "nothing asked");
     assert!(

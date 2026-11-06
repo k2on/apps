@@ -49,9 +49,49 @@ pub fn decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// A name as a readable segment beside an id — `Joint / Savings #2` is
+/// `joint-savings-2`: lowercase ASCII letters and digits, anything else one
+/// `-`, none at either end. Only for reading; a route is never found by its
+/// slug, so a name with no letters in it has an empty one, and is left out.
+pub fn slug(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+/// A row's id as a path carries it (ark's `Id::hex`): 32 hex digits, in
+/// lowercase whatever case they came in; `None` for anything else, a name
+/// among them.
+pub fn id(segment: &str) -> Option<String> {
+    (segment.len() == 32 && segment.bytes().all(|b| b.is_ascii_hexdigit())).then(|| segment.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A slug is readable and has nothing a path would escape; an id is only
+    /// ever 32 hex digits. Falsified by accepting 31: a name like
+    /// `deadbeef…` one short would read as an id.
+    #[test]
+    fn a_slug_reads_and_an_id_is_hex() {
+        assert_eq!(slug("Joint / Savings #2"), "joint-savings-2");
+        assert_eq!(slug("  Café—au lait "), "caf-au-lait");
+        assert_eq!(slug("%%%"), "");
+        let hex = "0123456789ABCDEF0123456789abcdef";
+        assert_eq!(id(hex).as_deref(), Some("0123456789abcdef0123456789abcdef"));
+        assert_eq!(id(&hex[1..]), None);
+        assert_eq!(id("Checking"), None);
+    }
 
     /// Real libraries are full of these, and `#` is the destructive one.
     /// Falsified by adding `b'#'` to the unreserved set: the `%23` goes.

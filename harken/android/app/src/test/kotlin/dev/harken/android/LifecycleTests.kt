@@ -52,12 +52,12 @@ class LifecycleTests {
         var listBefore: Any? = null
         var listAfter: Any? = null
         Driver(paparazzi).run(6_000L) {
-            val home = state(Route.Home.pattern)!!
+            val home = state(Destination.Home.pattern)!!
             (home.drawn("home") as LazyListState).scrollToItem(3, 20)
             frames(200)
             click("Library")
             frames(300)
-            val library = state(Route.Library.pattern)!!
+            val library = state(Destination.Library.pattern)!!
             fun note(when_: String) = seen.add("$when_: Home ${home.lifecycle?.currentState} (composed ${home.composed}), Library ${library.lifecycle?.currentState}")
 
             // Previewed, and cancelled.
@@ -121,10 +121,10 @@ class LifecycleTests {
         var cancelledTop: Lifecycle.State? = null
         var landed: Lifecycle.State? = null
         Driver(paparazzi).run(5_000L) {
-            val home = state(Route.Home.pattern)!!
-            navs.getValue(Tab.Home).navigate(Page.ForAlbum(Demo.key("Water Music")).route)
+            val home = state(Destination.Home.pattern)!!
+            navs.getValue(Tab.Home).navigate(uniffi.harken_domain.Route.Album(Demo.key("Water Music"), "Water Music").destination())
             frames(700)
-            val album = state(Route.Album.pattern)!!
+            val album = state(Destination.Album.pattern)!!
             back.dispatchOnBackStarted(start)
             back.dispatchOnBackProgressed(at(0.5f))
             frames(200)
@@ -152,14 +152,14 @@ class LifecycleTests {
     @Test
     fun withThePlayerDownHomeIsInFront() {
         var down: Lifecycle.State? = null
-        Driver(paparazzi).run(2_000L) { down = state(Route.Home.pattern)!!.lifecycle?.currentState }
+        Driver(paparazzi).run(2_000L) { down = state(Destination.Home.pattern)!!.lifecycle?.currentState }
         assertEquals("with the player down, Home is in front", Lifecycle.State.RESUMED, down)
     }
 
     @Test
     fun withThePlayerHalfUpHomeIsBehindIt() {
         var up: Lifecycle.State? = null
-        Driver(paparazzi).run(2_000L, sheet = { d -> PlayerSheet.held(0.5f, d) }) { up = state(Route.Home.pattern)!!.lifecycle?.currentState }
+        Driver(paparazzi).run(2_000L, sheet = { d -> PlayerSheet.held(0.5f, d) }) { up = state(Destination.Home.pattern)!!.lifecycle?.currentState }
         assertEquals("with it half up, Home is behind it", Lifecycle.State.STARTED, up)
     }
 
@@ -175,9 +175,9 @@ class LifecycleTests {
             for ((t, n) in navs) graphs[t] = n.graph.routes()
         }
         for (t in Tab.entries) {
-            assertEquals("$t's graph is the routes `Route` lists for it", Route.entries.filter { it.on(t) }.map { it.pattern }.toSet(), graphs[t])
+            assertEquals("$t's graph is the routes `Destination` lists for it", Destination.entries.filter { it.on(t) }.map { it.pattern }.toSet(), graphs[t])
         }
         // And every route is a restoration case.
-        assertEquals(Route.entries.toSet(), Case.all.map { it.route }.toSet())
+        assertEquals(Destination.entries.toSet(), Case.all.map { it.route }.toSet())
     }
 }

@@ -414,6 +414,45 @@ rec {
           "ffi" = [ "dep:uniffi" ];
         };
       };
+      "ark-macros" = rec {
+        crateName = "ark-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-macros; };
+        procMacro = true;
+        libName = "ark_macros";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
+          }
+        ];
+
+      };
+      "ark-router" = rec {
+        crateName = "ark-router";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router; };
+        libName = "ark_router";
+        dependencies = [
+          {
+            name = "ark-macros";
+            packageId = "ark-macros";
+          }
+        ];
+
+      };
       "arkui" = rec {
         crateName = "arkui";
         version = "0.1.0";
@@ -423,6 +462,10 @@ rec {
           {
             name = "ark-format";
             packageId = "ark-format";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
           }
           {
             name = "chrono";

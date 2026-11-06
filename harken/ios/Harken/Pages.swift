@@ -75,8 +75,8 @@ private struct AlbumShelf: View {
 
     var body: some View {
         CoverShelf(items: albums) { a in
-            CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 136, opens: .page(.album(a.id))) {
-                open(.page(.album(a.id)))
+            CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: a.playedBy, side: 136, opens: .album(key: a.id, title: a.name)) {
+                open(.album(key: a.id, title: a.name))
             }
         }
         .padding(.top, Space.xs)
@@ -110,7 +110,7 @@ struct AlbumPage: View {
         let performer: String? = credited.isEmpty || credited == creator ? nil : credited
         let year = album?.released ?? 0
         let small = Spell.facts([performer == nil ? nil : creator, year > 0 ? String(year) : nil])
-        let toCreator: (() -> Void)? = creator.isEmpty ? nil : { open(.page(.artist(creator))) }
+        let toCreator: (() -> Void)? = creator.isEmpty ? nil : { open(.artist(name: creator)) }
         let art = RowCover.url(model, album?.art ?? "")
         CataloguePage(title: name) {
             CoverView(seed: name, url: art, side: InlineArt.side, corner: InlineArt.corner)
@@ -212,14 +212,14 @@ struct ArtistPage: View {
             }
             if let best = Catalogue.featured(works) {
                 Featured(label: "Most Recorded", seed: best.id, url: RowCover.url(model, best.art), title: best.title,
-                         facts: Catalogue.featuredFacts(best), opens: .page(.work(best.id))) { model.playWork(best.id) }
+                         facts: Catalogue.featuredFacts(best), opens: .work(key: best.id, title: best.title)) { model.playWork(best.id) }
             }
             if !works.isEmpty {
                 HeroHeading(Catalogue.heading(works, all: all))
                 // Each under who it is by, its catalogue number under it, and
                 // how many performances of it there are at its right.
                 ForEach(listed) { w in
-                    HeroEntry(over: by, title: w.title, under: w.catalogue, count: String(w.recordings), onOpen: { open(.page(.work(w.id))) }) {
+                    HeroEntry(over: by, title: w.title, under: w.catalogue, count: String(w.recordings), onOpen: { open(.work(key: w.id, title: w.title)) }) {
                         EmptyView()
                     }
                 }
@@ -280,7 +280,7 @@ struct WorkPage: View {
         } head: {
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !composer.isEmpty {
-                    Button { open(.page(.artist(composer))) } label: {
+                    Button { open(.artist(name: composer)) } label: {
                         Text(composer + "  \u{203A}").font(.footnote.weight(.semibold)).foregroundStyle(.quiet)
                     }
                     .buttonStyle(.plain)
@@ -298,7 +298,7 @@ struct WorkPage: View {
             }
             if let first = takes.first {
                 Featured(label: takes.count > 1 ? "Most Complete" : "The Recording", seed: first.id, url: RowCover.url(model, first.art),
-                         title: Catalogue.who(first), facts: Catalogue.facts(first), opens: .page(.recording(first.id))) {
+                         title: Catalogue.who(first), facts: Catalogue.facts(first), opens: .recording(key: first.id, title: "")) {
                     model.playRecording(first.id)
                 }
             }
@@ -306,9 +306,9 @@ struct WorkPage: View {
             if !takes.isEmpty {
                 HeroHeading("Recordings")
                 ForEach(Array(takes.enumerated()), id: \.element.id) { i, r in
-                    HeroEntry(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.page(.recording(r.id))) }) {
+                    HeroEntry(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.recording(key: r.id, title: "")) }) {
                         // The first is set apart above and zooms from there.
-                        TakeCover(take: r, opens: i == 0 ? nil : .page(.recording(r.id)))
+                        TakeCover(take: r, opens: i == 0 ? nil : .recording(key: r.id, title: ""))
                     }
                 }
             }
@@ -359,7 +359,7 @@ struct RecordingPage: View {
         CataloguePage(title: title) {
             CoverView(seed: id, url: art, side: InlineArt.side, corner: InlineArt.corner)
         } head: {
-            RecordHeader(over: composer, onOver: composer.isEmpty ? nil : { open(.page(.artist(composer))) },
+            RecordHeader(over: composer, onOver: composer.isEmpty ? nil : { open(.artist(name: composer)) },
                          title: title, by: work == nil ? "" : who,
                          small: year > 0 ? String(year) : "", canPlay: !tracks.isEmpty, onPlay: { model.play(tracks, at: 0, from: page) }) {
                 CoverView(seed: id, url: art, side: Space.record)
@@ -391,7 +391,7 @@ private struct Face: View {
         let composer = model.composer(named: billed.name)
         let artist = model.artist(named: billed.name)
         let art = [artist?.art, composer?.art].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
-        let to: Route? = composer != nil || artist != nil ? .page(.artist(billed.name)) : nil
+        let to: Route? = composer != nil || artist != nil ? .artist(name: billed.name) : nil
         CoverCard(seed: billed.name, url: RowCover.url(model, art), title: billed.name, under: billed.role, side: 104, round: true, opens: to) {
             if let r = to { open(r) }
         }
