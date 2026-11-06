@@ -238,7 +238,7 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
             rows.push((name, held));
         }
         let union = Store::from_rows(a.store.schema_arc().clone(), space, &rows)?;
-        if p.store != union || !p.pending.is_empty() {
+        if p.store != union || !p.pending().is_empty() {
             return Err(format!("the partial client is not exactly its union in {space:?}"));
         }
     }

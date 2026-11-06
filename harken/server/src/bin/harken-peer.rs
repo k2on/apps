@@ -504,7 +504,7 @@ impl Headless {
         if login.is_some()
             && client
                 .log
-                .pending
+                .pending()
                 .iter()
                 .any(|p| p.entry.session != who.session)
         {
@@ -598,9 +598,7 @@ impl Headless {
         let st = self.peer.status();
         let alone = self.server.is_none();
         let signed_out = self.token.is_none() && !alone;
-        let (dialling, diverged) = self
-            .peer
-            .with(|p| (!p.is_signed_out(), p.log.diverged.len()));
+        let (dialling, diverged) = self.peer.with(|p| (!p.is_signed_out(), p.log.diverged()));
         let link = match (alone, dialling, st.linked) {
             (true, _, _) => "alone",
             (_, false, _) if signed_out => "signed out",
@@ -870,7 +868,7 @@ impl Headless {
                         Some(l) => (
                             Some(Listening::of(&l.store, &me.actor)),
                             l.log().head().0,
-                            l.pending.len(),
+                            l.pending().len(),
                         ),
                         None => (None, 0, 0),
                     };
@@ -949,7 +947,7 @@ fn with_roles(who: &mut Ctx, roles: &[String]) {
 /// server has answered.
 fn reauthor(client: &mut Peer, who: Ctx) {
     let log = &client.log;
-    let mut theirs = log.pending.iter().map(|p| &p.entry.session);
+    let mut theirs = log.pending().iter().map(|p| &p.entry.session);
     if who.session == log.me.session && theirs.all(|s| *s == who.session) {
         return;
     }
@@ -1005,7 +1003,7 @@ fn main() {
 /// intents' changes undone.
 fn confirmed(m: &ark::peer::Peer) -> ark::hash::StateHash {
     let mut s = m.store.clone();
-    let _ = s.undo(m.pending.iter().flat_map(|p| &p.facts));
+    let _ = s.undo(m.pending().iter().flat_map(|p| &p.facts));
     s.state_hash()
 }
 

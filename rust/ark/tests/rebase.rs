@@ -12,7 +12,6 @@ mod support {
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
 use ark::log::{EntryId, Logged, Origin, Record};
@@ -58,7 +57,7 @@ fn scenario() -> Scenario {
         Some(demo::playlist_row(&pid(), "Favorites", "alice")),
         "the name was trimmed"
     );
-    assert!(alice.pending.is_empty() && alice.log().head() == bob.log().head());
+    assert!(alice.pending().is_empty() && alice.log().head() == bob.log().head());
     // step 2: alice goes dark; bob adds two tracks, alice one alone
     for t in ["t1", "t2"] {
         let o = bob.step(mutate(ADD, pair_input(&pid(), t), 2));
@@ -93,7 +92,7 @@ fn scenario() -> Scenario {
     assert!(alice.step(down(&s[0])).is_empty(), "the ack of what landed is nothing more");
     bob.step(down(&f[0]));
     batches.extend(f);
-    assert!(alice.pending.is_empty() && alice.store == bob.store && bob.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == bob.store && bob.store == server.store);
     let rows = vec![
         ("playlist".into(), vec![demo::playlist_row(&pid(), "Favorites", "alice")]),
         (
@@ -153,7 +152,7 @@ fn step_4_the_scenario() {
     let (_, f) = deliver_up(&mut server, &who("dave"), &o);
     dave.step(down(&f[0]));
     assert_eq!(pos_of(&dave.store, &pid(), "t3"), Some(4));
-    assert!(dave.store == server.store && dave.diverged.is_empty() && dave.pending.is_empty());
+    assert!(dave.store == server.store && dave.diverged() == 0 && dave.pending().is_empty());
 }
 
 /// Step 1: an authority given the transcript's entries sequences each at its
@@ -168,10 +167,7 @@ fn step_1_an_authority_sequences_the_transcript() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
-            &[Output::Send(
-                To::Back,
-                Frame::push(ark::schema::Space::Durable, 0, [l.entry.clone()]).enc(),
-            )],
+            &[Output::Send(To::Back, Frame::push(ark::schema::Space::Durable, 0, [l.entry.clone()]))],
         );
         assert!(matches!(verdicts(&acks)[..], [Some(Verdict::At { seq, .. })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
@@ -203,7 +199,7 @@ fn step_2_a_replica_given_the_entries_backwards() {
         r.step(down(&f));
     }
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (s.server.log().head(), FINAL.into()));
-    assert!(r.diverged.is_empty());
+    assert!(r.diverged() == 0);
 }
 
 /// Step 3: a replica with no functions at all reaches the state by facts.
@@ -241,7 +237,7 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
         from: 1,
         logged: vec![l2],
     }));
-    assert_eq!(carol.diverged, vec![2]);
+    assert_eq!(carol.diverged(), 1);
     let hello = sends(&o);
     // The fill begun again: its first table asked for from its start.
     assert!(matches!(&hello[..], [Frame::Hello { cursor: 2, fill: Some(from), .. }] if from.key.is_empty()));
@@ -265,7 +261,7 @@ fn compaction_and_the_horizon() {
     let mut server = scenario().server;
     let h2 = server.log().at(2).unwrap().hash;
     let o = server.compact(2);
-    assert!(o.iter().all(|x| matches!(x, Output::Send(To::Disk, _))));
+    assert!(o.iter().all(|x| matches!(x, Output::Persist(_))));
     assert_eq!(server.log().base_seq(), 2);
     let hello = |cursor, hash| Frame::Hello {
         space: ark::schema::Space::Durable,
@@ -315,7 +311,7 @@ fn edits_and_removes_rebase_too() {
         bob.step(down(&f[0]));
         alice.step(down(&f[0]));
     }
-    assert!(alice.pending.is_empty() && alice.store == server.store && bob.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == server.store && bob.store == server.store);
     assert_eq!(pos_of(&alice.store, &pid(), "t4"), Some(4));
 }
 
@@ -335,7 +331,7 @@ fn held_until_the_authority_has_it() {
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { last: 1, .. })]) && f.is_empty(), "{s:?}");
     assert!(sends(&alice.step(down(&s[0]))).is_empty(), "a held intent sends nothing");
-    assert_eq!(alice.pending.len(), 2, "…and stays pending");
+    assert_eq!(alice.pending().len(), 2, "…and stays pending");
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(
         matches!(
@@ -366,23 +362,20 @@ fn held_until_the_authority_has_it() {
 #[test]
 fn a_peer_opens_from_what_it_persisted() {
     let s = scenario();
-    let mut records: Vec<Vec<u8>> = vec![];
+    let mut records: Vec<Record> = vec![];
     let mut r = replica("bob", demo::cas());
     for f in &s.batches {
         for o in r.step(down(f)) {
-            if let Output::Send(To::Disk, b) = o {
-                records.push(b);
+            if let Output::Persist(r @ (Record::Logged(_) | Record::Rows(_))) = o {
+                records.push(r);
             }
         }
     }
     let mut stray = logged(&s.batches[3]);
     (stray.seq, stray.facts) = (9, vec![]);
-    records.push(Record::Logged(stray).enc());
-    let rows = records.iter().map(|b| match Record::dec(b) {
-        Ok(Record::Logged(l)) => {
-            assert_eq!(*b, Record::logged(&l.to_bytes()), "a record is its row of the log's table wrapped");
-            l
-        }
+    records.push(Record::Logged(stray));
+    let rows = records.into_iter().map(|r| match r {
+        Record::Logged(l) => l,
         other => panic!("{other:?}"),
     });
     let mut d = vec![Record::Rows(replica("alice", demo::cas()).confirmed_rows())];
@@ -395,13 +388,13 @@ fn a_peer_opens_from_what_it_persisted() {
             _ => unreachable!(),
         })
         .collect();
-    d.push(Record::Pending { pending, at: None, local: 0 });
+    d.push(Record::Pending(ark::log::Kept::all(pending, None, 0)));
     let mut opened = replica("alice", demo::cas());
     let out = opened.step(Input::Open(d));
     let folded: Vec<Record> = out
         .iter()
         .filter_map(|o| match o {
-            Output::Send(To::Disk, b) => Some(Record::dec(b).unwrap()),
+            Output::Persist(r @ (Record::Logged(_) | Record::Rows(_))) => Some(r.clone()),
             _ => None,
         })
         .collect();
@@ -440,7 +433,7 @@ fn a_sessions_pushes_are_judged_in_order() {
     let (s, f) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 2, .. })]), "{s:?}");
     alice.step(down(&f[0]));
-    assert!(alice.pending.is_empty() && alice.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == server.store);
 }
 
 /// A page is one rebase: bob's N = 4 entries land on alice in one `Batch`
@@ -489,7 +482,7 @@ fn a_page_rebases_once() {
     let o = alice.step(down(&batch(page)));
     assert_eq!(runs.load(Ordering::Relaxed), 3, "the pending intents ran once for the page");
     assert_eq!(changes(&o).len(), 3 + 4 + 3);
-    assert_eq!((alice.pending.len(), alice.log().head()), (3, bob.log().head()));
+    assert_eq!((alice.pending().len(), alice.log().head()), (3, bob.log().head()));
     assert_eq!(pos_of(&alice.store, &pid(), "a1"), Some(5), "hers after bob's four");
 }
 
@@ -517,9 +510,9 @@ fn what_comes_behind_a_held_intent_is_a_gap() {
         "a gap: {s:?}"
     );
     assert_eq!(server.log().head().0, 1);
-    let ids: Vec<_> = alice.pending.iter().map(|p| p.entry.id).collect();
+    let ids: Vec<_> = alice.pending().iter().map(|p| p.entry.id).collect();
     assert!(sends(&alice.step(down(&s[0]))).is_empty(), "behind its own held one, the device waits");
-    assert_eq!(alice.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
+    assert_eq!(alice.pending().iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     demo::give(&mut server, ADD);
     let (s, _) = deliver_up(&mut server, &who("alice"), &alice.step(Input::Connected));
     assert!(

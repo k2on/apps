@@ -8,8 +8,9 @@
 mod demo;
 
 use ark::format::Encode;
+use ark::frames::Frame;
 use ark::log::{EntryId, Origin};
-use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
+use ark::peer::{Ctx, Input, Output, Peer, Role, To};
 use ark::plan::{splice, Maintained};
 use ark::prelude::{scan, Db, Desc, Id, Plan};
 use ark::store::{Change, Store};
@@ -79,7 +80,7 @@ fn holds(d: &Domain, name: &str, input: &[u8], v: &dyn Maintained, store: &Store
 /// `top_two`, which then held one of bob's where it should hold hers.
 #[test]
 fn a_view_follows_a_replica_through_a_rebase() {
-    let mut server = Peer::new(demo::cas(), Role::Authority { journal: Journal::default() }, who_of("server"));
+    let mut server = Peer::new(demo::cas(), Role::authority(), who_of("server"));
     let (mut alice, mut bob) = (replica_of("alice"), replica_of("bob"));
     let pid = EntryId::of(Origin::named("alice-session"), 1).draw(0);
     let d = views();
@@ -115,7 +116,7 @@ fn a_view_follows_a_replica_through_a_rebase() {
         }
         o
     };
-    let up = |server: &mut Peer, w: &str, o: &[Output]| -> Vec<Vec<u8>> {
+    let up = |server: &mut Peer, w: &str, o: &[Output]| -> Vec<Frame> {
         let mut down = vec![];
         for b in o
             .iter()
@@ -123,7 +124,7 @@ fn a_view_follows_a_replica_through_a_rebase() {
         {
             for r in server.step(Input::Frame {
                 from: Some(who_of(w)),
-                bytes: b,
+                frame: b,
             }) {
                 if let Output::Send(To::All, b) = r {
                     down.push(b);
@@ -138,10 +139,10 @@ fn a_view_follows_a_replica_through_a_rebase() {
             &mut alice,
             Input::Frame {
                 from: None,
-                bytes: b.clone(),
+                frame: b.clone(),
             },
         );
-        bob.step(Input::Frame { from: None, bytes: b });
+        bob.step(Input::Frame { from: None, frame: b });
     }
     tell(&mut alice, mutate_input(ADD, pair_input(&pid, "a1")));
     tell(&mut alice, mutate_input(ADD, pair_input(&pid, "a2")));
@@ -151,15 +152,15 @@ fn a_view_follows_a_replica_through_a_rebase() {
         landed.extend(up(&mut server, "bob", &o));
     }
     for b in landed {
-        tell(&mut alice, Input::Frame { from: None, bytes: b });
+        tell(&mut alice, Input::Frame { from: None, frame: b });
     }
-    assert_eq!(alice.pending.len(), 2, "alice's two tracks still pending");
+    assert_eq!(alice.pending().len(), 2, "alice's two tracks still pending");
     assert!(told.get() > 12, "the rebases were told as changes: {}", told.get());
     let o = tell(&mut alice, Input::Connected);
     for b in up(&mut server, "alice", &o) {
-        tell(&mut alice, Input::Frame { from: None, bytes: b });
+        tell(&mut alice, Input::Frame { from: None, frame: b });
     }
-    assert!(alice.pending.is_empty() && alice.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == server.store);
 }
 
 fn who_of(name: &str) -> Ctx {
@@ -200,7 +201,7 @@ fn union_of(store: &Store, actor: &str) -> Store {
 /// A peer's confirmed state: its store with its pending changes undone.
 fn confirmed(p: &Peer) -> Store {
     let mut s = p.store.clone();
-    for c in p.pending.iter().rev().flat_map(|x| x.facts.iter().rev()) {
+    for c in p.pending().iter().rev().flat_map(|x| x.facts.iter().rev()) {
         s.apply(&c.inverse()).unwrap();
     }
     s
@@ -231,25 +232,25 @@ struct Fleet {
     server: Peer,
     clients: Vec<Peer>,
     linked: Vec<bool>,
-    up: Vec<Vec<Vec<u8>>>,
-    down: Vec<Vec<Vec<u8>>>,
+    up: Vec<Vec<Frame>>,
+    down: Vec<Vec<Frame>>,
     seed: u64,
 }
 
 /// Whether `server` feeds `c` the log whole: its feed names no scope.
 fn whole(server: &Peer, c: &Peer) -> bool {
-    server.feed.as_ref().is_none_or(|f| f(&c.me).is_none())
+    server.feed_of(&c.me).is_none()
 }
 
 impl Fleet {
     fn new(seed: u64) -> Fleet {
         let cas = demo::cas();
         let h = "demo.mine";
-        let auth = Role::Authority { journal: Journal::default() };
+        let auth = Role::authority();
         let mut server = Peer::new(cas.clone(), auth, who_of("server"));
         // Every client but the first is fed by the scope.
         let first = who_of("peer-0").session;
-        server.feed = Some(std::sync::Arc::new(move |w: &Ctx| (w.session != first).then(|| h.into())));
+        server.feed(std::sync::Arc::new(move |w: &Ctx| (w.session != first).then(|| h.into())));
         let mut clients = vec![];
         for i in 0..3 {
             clients.push(Peer::new(cas.clone(), Role::Replica, who_of(&format!("peer-{i}"))));
@@ -274,10 +275,10 @@ impl Fleet {
         }
     }
 
-    fn deliver_up(&mut self, i: usize, b: Vec<u8>) {
+    fn deliver_up(&mut self, i: usize, b: Frame) {
         let o = self.server.step(Input::Frame {
             from: Some(self.clients[i].me.clone()),
-            bytes: b,
+            frame: b,
         });
         for x in o {
             match x {
@@ -285,7 +286,8 @@ impl Fleet {
                 Output::Send(To::All, b) => {
                     for j in (0..3).filter(|j| self.linked[*j]) {
                         // Each through its feed.
-                        self.down[j].extend(self.server.fed(&self.clients[j].me, b.clone()));
+                        let feed = self.server.feed_of(&self.clients[j].me);
+                        self.down[j].extend(feed.map_or(Some(b.clone()), |f| f.fed(&b)));
                     }
                 }
                 _ => {}
@@ -293,8 +295,8 @@ impl Fleet {
         }
     }
 
-    fn deliver_down(&mut self, i: usize, b: Vec<u8>) {
-        let o = self.clients[i].step(Input::Frame { from: None, bytes: b });
+    fn deliver_down(&mut self, i: usize, b: Frame) {
+        let o = self.clients[i].step(Input::Frame { from: None, frame: b });
         self.heard(i, o);
     }
 
@@ -412,7 +414,7 @@ fn a_scoped_replica_holds_its_union() {
         f.settle();
         f.unions_hold().unwrap();
         for c in &f.clients {
-            assert!(c.pending.is_empty(), "{} settled", c.me.actor);
+            assert!(c.pending().is_empty(), "{} settled", c.me.actor);
             let want = if whole(&f.server, c) {
                 f.server.store.clone()
             } else {

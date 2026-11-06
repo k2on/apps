@@ -32,7 +32,7 @@ fn two_clients(url: &str, a: impl Dial + 'static, b: impl Dial + 'static) {
     until(&mut bob, "bob linked", |c, _| c.linked);
     create(&mut alice.0, "Road");
     until(&mut bob, "bob has alice's playlist", |c, _| c.log.log().head().0 == 1);
-    until(&mut alice, "alice confirmed", |c, _| c.log.pending.is_empty());
+    until(&mut alice, "alice confirmed", |c, _| c.log.pending().is_empty());
     assert_eq!(alice.0.log.store, bob.0.log.store);
     assert_eq!(bob.0.log.log().entries()[0].entry.actor, "alice");
 }
@@ -69,7 +69,7 @@ fn a_linked_round_trip_waits_on_nothing() {
         .map(|i| {
             let t = std::time::Instant::now();
             create(&mut c.0, &format!("L{i}"));
-            while !c.0.log.pending.is_empty() {
+            while !c.0.log.pending().is_empty() {
                 wait(&c.0, &c.1, Duration::from_millis(1));
                 c.0.pump();
             }
@@ -86,7 +86,7 @@ fn a_linked_round_trip_waits_on_nothing() {
                 for f in d.take_frames() {
                     wire.send(f);
                 }
-                if d.log.pending.is_empty() {
+                if d.log.pending().is_empty() {
                     break;
                 }
                 for e in wire.events() {
@@ -323,10 +323,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         vec![1, 1],
         "here, and a pointer"
     );
-    let journal = |h: &Peer| match &h.live.as_ref().unwrap().role {
-        ark::peer::Role::Authority { journal } => journal.last.clone(),
-        ark::peer::Role::Replica => unreachable!(),
-    };
+    let journal = |h: &Peer| h.live.as_ref().unwrap().journal().expect("an authority").last.clone();
     let judged = journal(&hub);
     assert!(!judged.is_empty());
     hub.close();

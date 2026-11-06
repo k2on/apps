@@ -44,9 +44,9 @@ fn a_reopened_client_keeps_its_pending_intents() {
     let mut n = net(2);
     n.run(&Op::Partition(0));
     n.run(&create("Road"));
-    let id = n.clients[&0].log.pending[0].entry.id;
+    let id = n.clients[&0].log.pending()[0].entry.id;
     n.run(&Op::Reopen(0));
-    assert_eq!(n.clients[&0].log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), vec![id]);
+    assert_eq!(n.clients[&0].log.pending().iter().map(|p| p.entry.id).collect::<Vec<_>>(), vec![id]);
     n.settle().unwrap();
     n.converged().unwrap();
     assert_eq!(n.hub.log.log().entries().last().map(|l| l.entry.id), Some(id));
@@ -190,17 +190,17 @@ fn a_mutate_writes_one_pending_record() {
         let _ = c.mutate_at(create, named(&format!("List {i}")), i);
         last = written.load(Ordering::Relaxed) - before;
     }
-    assert_eq!(c.log.pending.len(), 8001);
+    assert_eq!(c.log.pending().len(), 8001);
     assert!(last < 512, "the 8,001st mutate wrote {last} bytes");
-    let ids: Vec<EntryId> = c.log.pending.iter().map(|p| p.entry.id).collect();
+    let ids: Vec<EntryId> = c.log.pending().iter().map(|p| p.entry.id).collect();
     let mut c = c.reopen();
-    assert_eq!(c.log.pending.iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
+    assert_eq!(c.log.pending().iter().map(|p| p.entry.id).collect::<Vec<_>>(), ids);
     let before = written.load(Ordering::Relaxed);
     let _ = c.mutate_at(create, named("One more"), 9000);
     assert!(written.load(Ordering::Relaxed) - before < 512);
     let mut c = c.reopen();
-    assert_eq!(c.log.pending.len(), 8002);
-    assert_eq!(c.log.pending[8001].entry.local, 8002);
+    assert_eq!(c.log.pending().len(), 8002);
+    assert_eq!(c.log.pending()[8001].entry.local, 8002);
     let _ = c.mutate_at(create, named("And one"), 9001);
-    assert_eq!(c.log.pending.back().unwrap().entry.local, 8003, "the session's local read back");
+    assert_eq!(c.log.pending().back().unwrap().entry.local, 8003, "the session's local read back");
 }

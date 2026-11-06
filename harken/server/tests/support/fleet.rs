@@ -912,7 +912,7 @@ impl Seeder {
             .run(&Op::Mutate(i, hosted().func(name), input.to_bytes()));
         self.net.deliver();
         let c = &self.net.clients[&i];
-        assert!(c.log.pending.is_empty(), "seeding {name}: still pending");
+        assert!(c.log.pending().is_empty(), "seeding {name}: still pending");
         let last = c.log.log().entries().pop().expect("sequenced");
         self.ids.insert(last.entry.id.0);
         last.facts

@@ -256,7 +256,7 @@ pub fn seeded_disk(copies: usize) -> Memory {
     // empty chain, which its own authority stands on.
     let rows = ark::log::standing(seed.store.snapshot_rows(), 0, Default::default());
     let mut disk = Memory::default();
-    disk.record(&Record::Rows(rows).enc()).expect("memory takes it");
+    disk.record(&Record::Rows(rows)).expect("memory takes it");
     ark_peer::disk::put_schema(&mut disk, seed.store.schema_arc()).expect("memory takes it");
     ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(DEMO.into()), LOCAL.into())).expect("memory takes it");
     disk

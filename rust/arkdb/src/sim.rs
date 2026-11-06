@@ -211,7 +211,7 @@ impl Net {
                 let (pending, local) = (vec![], c.log.local);
                 let lost = vec![
                     ark::log::Record::Rows(c.log.confirmed_rows()),
-                    ark::log::Record::Pending { pending, at: None, local },
+                    ark::log::Record::Pending(ark::log::Kept::all(pending, None, local)),
                 ];
                 c.step(Space::Durable, ark::peer::Input::Open(lost));
                 self.heal(i);
@@ -373,7 +373,7 @@ impl Net {
 
     /// Nothing in flight and nothing pending, in either space.
     pub fn quiet(&self) -> bool {
-        let pending = |c: &Peer| c.log.pending.is_empty() && c.live.as_ref().is_none_or(|l| l.pending.is_empty()) && c.log.fill.is_none();
+        let pending = |c: &Peer| c.log.pending().is_empty() && c.live.as_ref().is_none_or(|l| l.pending().is_empty()) && !c.log.filling();
         self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty()) && self.clients.values().all(pending)
     }
 
@@ -435,11 +435,11 @@ impl Net {
                 }
                 let from = p.log().base_seq().max(a.log().base_seq());
                 let chain = p.log().head().0 < from || p.log().after(from).eq(a.log().after(from));
-                if p.log().head() != a.log().head() || !chain || p.store != a.store || !p.pending.is_empty() {
+                if p.log().head() != a.log().head() || !chain || p.store != a.store || !p.pending().is_empty() {
                     return Err(format!(
                         "client {i} {space:?} at {:?} with {} pending; the server at {:?}",
                         p.log().head(),
-                        p.pending.len(),
+                        p.pending().len(),
                         a.log().head()
                     ));
                 }

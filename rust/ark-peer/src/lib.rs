@@ -220,39 +220,11 @@ pub struct Peer {
     /// refusal, while it lasts.
     pub local: Box<dyn Disk>,
     local_failure: Option<String>,
-    /// What it keeps of the log's pending intents, as last written.
-    saved: Saved,
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
     /// The files rows name, and where each transfer is (`files`).
     pub(crate) files: files::Files,
-    /// Its disk, while it is the upstream its replica fills from first.
-    pub(crate) reading: Option<Reading>,
-}
-
-/// A device's disk read as the upstream its replica fills from first
-/// ([`ark::peer::Source`]): whether it was asked yet — at the first pump,
-/// once the app's views are watched — its answers not taken yet, and how
-/// many times the replica had diverged when it began. Once filled — or
-/// diverged — the replica asks its server.
-pub(crate) struct Reading {
-    source: ark::peer::Source,
-    pub(crate) asked: bool,
-    pub(crate) said: std::collections::VecDeque<Vec<u8>>,
-    diverged: usize,
-}
-
-/// What a device last wrote of its pending intents ([`local::Kept`]): its
-/// last `local`, how many times they had been run again, the `local` of
-/// the last and how many, and how many records the blob holds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Saved {
-    local: i64,
-    reruns: u64,
-    back: Option<i64>,
-    len: usize,
-    records: usize,
 }
 
 /// A view a peer keeps (§1.10): what it is made of — its space, the
@@ -354,11 +326,9 @@ impl Peer {
             told: app::Told::default(),
             local,
             local_failure: None,
-            saved: Saved::default(),
             runners: vec![],
             missed: None,
             files: files::Files::default(),
-            reading: None,
         }
     }
 
@@ -377,7 +347,7 @@ impl Peer {
         // from: a disk whose replica does not read (none yet, or an older
         // build's) starts afresh.
         let blob = local.get(local::PENDING).ok().flatten().filter(|_| r.origin != Origin::default());
-        let (pending, kept, records) = local::Kept::read(&blob.unwrap_or_default());
+        let pending = disk::framed::<local::Kept>(&blob.unwrap_or_default()).0;
         let origin = match r.origin {
             o if o != Origin::default() => o,
             _ => draw_origin(),
@@ -386,11 +356,12 @@ impl Peer {
         let _ = local.put(local::REPLICA, &local::Replica { origin, opens, ..r.clone() }.to_bytes());
         let live = live_of(&config, &me, origin, opens);
         let mut log = machine(&config.log, Role::Replica, &me, Some(origin), Space::Durable);
+        log.local = r.local;
         let mut disk = disk;
         // Rows of a schema this one does not grow from (a build older than
         // a schema that only grows) are sent again from empty (`disk::own`).
         let schema = &config.log.schema;
-        let empty = |disk: &mut dyn Disk| disk.record(&Record::Rows(log.confirmed_rows()).to_bytes());
+        let empty = |disk: &mut dyn Disk| disk.record(&Record::Rows(log.confirmed_rows()));
         let read = match disk::own(&mut *disk, schema) {
             Ok(false) => empty(&mut *disk).and_then(|_| disk::put_schema(&mut *disk, schema)),
             Ok(true) => disk::put_schema(&mut *disk, schema),
@@ -402,27 +373,12 @@ impl Peer {
         log.disk = Some(disk);
         let mut p = Peer::with(config, log, live, local);
         p.link = link;
-        let local = r.local.max(kept.local);
-        p.saved = Saved {
-            local,
-            back: pending.last().map(|p| p.entry.local),
-            len: pending.len(),
-            records,
-            ..Saved::default()
-        };
         let mut stored = p.log.stored();
         let source = ark::peer::Source::of(Space::Durable, &mut stored);
-        stored.push(Record::Pending { pending, at: kept.at, local });
+        stored.extend(pending.into_iter().map(Record::Pending));
         p.step(Space::Durable, Input::Open(stored));
         if let Some(source) = source {
-            p.log.begin_fill();
-            let (asked, said, diverged) = (false, Default::default(), p.log.diverged.len());
-            p.reading = Some(Reading {
-                source,
-                asked,
-                said,
-                diverged,
-            });
+            p.log.read_from(source);
         }
         p
     }
@@ -466,26 +422,31 @@ impl Peer {
 
     /// One input to one machine, from a connection or from this peer, and
     /// what it says routed: a frame back to that connection (or to its
-    /// server), to every connection it fans out to, or to a session's; a
-    /// record to the disk; changes to the views; verdicts kept.
-    fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
+    /// server), to every connection it fans out to, each encoded there; a
+    /// record kept beside its log (its instance writes its log's); changes
+    /// to the views; verdicts kept. Filling, the machine is told first the
+    /// tables its views read, which its fill takes first. The verdict it
+    /// gave an intent of its own, if it gave one.
+    fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Option<Result<(), String>> {
         let label = self.label();
-        let wants = matches!(input, Input::Frame { .. }).then(|| self.reads(space));
-        let Some(m) = self.instance(space) else { return vec![] };
+        let filling = self.machine(space).is_some_and(|m| m.filling()) && matches!(input, Input::Frame { .. } | Input::Read);
+        let wants = filling.then(|| self.reads(space));
+        let m = self.instance(space)?;
         m.wants = wants.unwrap_or(std::mem::take(&mut m.wants));
         let space_name = ["durable", "volatile"][space as usize];
         let out = tracing::debug_span!(target: "ark", "step", peer = %label, space = space_name, conn = from).in_scope(|| m.step(input));
-        for o in &out {
+        let mut verdict = None;
+        for o in out {
             match o {
-                Output::Send(To::Back, b) => match (from, &mut self.reading) {
-                    (Some(c), _) => self.hub.held.push((c, b.clone())),
-                    (None, Some(r)) if space == Space::Durable && matches!(Frame::dec(b), Ok(Frame::Hello { .. })) => {
-                        r.said.extend(r.source.answer(b))
-                    }
-                    (None, _) if self.linked => self.frames.push(b.clone()),
-                    _ => {}
+                Output::Send(To::Back, f) => match from {
+                    Some(c) => self.hub.held.push((c, f.enc())),
+                    None if self.linked => self.frames.push(f.enc()),
+                    None => {}
                 },
-                Output::Send(To::All, b) => self.fanout(space, b),
+                Output::Send(To::All, f) => self.fanout(space, &f),
+                Output::Persist(Record::Pending(k)) => self.keep_pending(&k),
+                Output::Persist(Record::Journal(j)) => self.put_beside(hub::JOURNAL, &hub::journal_bytes(&j)),
+                Output::Persist(_) => {}
                 Output::Changes(told) => {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {
                         self.woke[space as usize] = Some(by);
@@ -493,7 +454,7 @@ impl Peer {
                     let cs: &Vec<Change> = &told.iter().map(|t| t.change.clone()).collect();
                     self.changed(space, cs);
                     if space == Space::Durable {
-                        self.runners.iter_mut().for_each(|r| r.changed(told));
+                        self.runners.iter_mut().for_each(|r| r.changed(&told));
                         self.missed.iter_mut().for_each(|m| m.extend(told.iter().cloned()));
                         self.signs(cs);
                         if self.hub.watched {
@@ -501,24 +462,17 @@ impl Peer {
                         }
                     }
                 }
-                Output::Settled(id, Err(why)) if !self.hub.serving => self.told.refused(space, *id, why),
-                Output::Settled(id, Ok(())) if !self.hub.serving => self.told.confirmed(space, *id),
-                _ => {}
+                Output::Settled(id, r) => {
+                    match &r {
+                        _ if self.hub.serving => {}
+                        Err(why) => self.told.refused(space, id, why),
+                        Ok(()) => self.told.confirmed(space, id),
+                    }
+                    verdict.get_or_insert(r);
+                }
             }
         }
-        match (self.hub.serving, space) {
-            (true, Space::Durable) => self.kept(),
-            (false, Space::Durable) => self.keep_pending(),
-            _ => {}
-        }
-        let read = self.reading.as_ref().filter(|_| space == Space::Durable).map(|r| r.diverged);
-        if read.is_some_and(|d| self.log.diverged.len() > d || self.log.fill.is_none()) {
-            self.reading = None;
-            if self.linked {
-                self.step(Space::Durable, Input::Connected);
-            }
-        }
-        out
+        verdict
     }
 
     /// The tables its views of `space` read: what its fill takes first.
@@ -527,23 +481,15 @@ impl Peer {
         views.filter_map(|w| w.view.as_ref()).flat_map(|v| v.reads()).collect()
     }
 
-    /// One of its disk's answers taken, if one is waiting: what a driver
-    /// carrying frames by hand takes between them.
+    /// One of its disk's answers taken, while its disk is the upstream it
+    /// fills from first: what a driver carrying frames by hand takes
+    /// between them. Whether there was one.
     pub fn read_one(&mut self) -> bool {
-        let b = self.said();
-        b.map(|b| self.receive(b)).is_some()
-    }
-
-    /// Its disk's next answer — its first `Hello` said to it, the fill
-    /// begun again at the tables its views read now, the first time.
-    pub(crate) fn said(&mut self) -> Option<Vec<u8>> {
-        if let Some(r) = self.reading.as_mut().filter(|r| !r.asked) {
-            r.asked = true;
-            self.log.wants = self.reads(Space::Durable);
-            self.log.begin_fill();
-            self.step(Space::Durable, Input::Connected);
+        let reading = self.log.reading();
+        if reading {
+            self.step(Space::Durable, Input::Read);
         }
-        self.reading.as_mut()?.said.pop_front()
+        reading
     }
 
     /// Its disk read to the end now: what a driver reading its store at
@@ -567,39 +513,12 @@ impl Peer {
         }
     }
 
-    /// A device's pending intents, their changes and its last `local` kept
-    /// as they change, one record appended ([`local::Kept`]): the intents
-    /// confirmed or refused off the front, those new at the back — so a
-    /// mutate writes its one, whatever is pending — or, when they were run
-    /// again (a rebase, a renumbering, an open), or the records outnumber
-    /// them, all of them, written afresh; and the head they stand on.
-    fn keep_pending(&mut self) {
-        let (m, s) = (&self.log, &mut self.saved);
-        let back = m.pending.back().map(|p| p.entry.local);
-        if (m.local, m.reruns, back, m.pending.len()) == (s.local, s.reruns, s.back, s.len) {
-            return;
-        }
-        let whole = m.reruns != s.reruns || s.records > m.pending.len() + 64;
-        let new = match whole {
-            true => m.pending.len(),
-            false => m.pending.iter().rev().take_while(|p| s.back.is_none_or(|b| p.entry.local > b)).count(),
-        };
-        let kept = local::Kept {
-            whole,
-            gone: if whole { 0 } else { (s.len + new - m.pending.len()) as u64 },
-            put: m.pending.iter().skip(m.pending.len() - new).cloned().collect(),
-            local: m.local,
-            at: Some(m.log().head()),
-        };
-        *s = Saved {
-            local: m.local,
-            reruns: m.reruns,
-            back,
-            len: m.pending.len(),
-            records: if whole { 1 } else { s.records + 1 },
-        };
+    /// A device's pending intents as its machine said they moved, kept
+    /// ([`local::Kept`]): one record appended, or, whole, the blob written
+    /// afresh.
+    fn keep_pending(&mut self, kept: &local::Kept) {
         let bytes = disk::frame(&kept.to_bytes());
-        let wrote = match whole {
+        let wrote = match kept.whole {
             true => self.local.put(local::PENDING, &bytes),
             false => self.local.append(local::PENDING, &bytes),
         };
@@ -682,7 +601,7 @@ impl Peer {
     /// An intent of its own just authored on the log: pending, or — an
     /// authority's, decided as it was made — at the head.
     pub fn authored(&self, id: &EntryId) -> Option<Ctx> {
-        let pending = self.log.pending.iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
+        let pending = self.log.pending().iter().map(|p| &p.entry).find(|e| e.id == *id).cloned();
         let head = self.log.log().head().0;
         pending.or_else(|| {
             (head.saturating_sub(8)..=head)
@@ -732,11 +651,7 @@ impl Peer {
         if self.machine(space).is_none() {
             return Err(format!("no {space:?} machine here"));
         }
-        let said = self.route(space, None, input);
-        let verdict = said.into_iter().find_map(|o| match o {
-            Output::Settled(_, r) => Some(r),
-            _ => None,
-        });
+        let verdict = self.route(space, None, input);
         verdict.unwrap_or(if self.hub.serving { Err("no verdict".into()) } else { Ok(()) })
     }
 
@@ -760,8 +675,8 @@ impl Peer {
         // Where this device's own intents stand, beside where the server
         // has them (`arkdb origins`): a first pending past the server's
         // last + 1 is a gap, which its pushes say and the server passes.
-        let first = self.log.pending.front().map(|p| p.entry.local);
-        tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending.len(), first, "replica");
+        let first = self.log.pending().front().map(|p| p.entry.local);
+        tracing::info!(target: "ark", peer = %self.label(), local = self.log.local, pending = self.log.pending().len(), first, "replica");
         // What it is, before its `Hello`s, to a call nobody answers.
         if let Some(input) = self.config.live.as_ref().and(self.config.device.clone()) {
             self.call(0, ark::frames::DEVICE, input);
@@ -792,15 +707,21 @@ impl Peer {
         Ok(id)
     }
 
-    /// A frame from its server, to the machine of its space; a call's
-    /// reply, to what it was asked.
+    /// A frame from its server, as its bytes, read once ([`Peer::told_frame`]).
     pub fn receive(&mut self, bytes: Vec<u8>) {
-        let space = match Frame::dec(&bytes) {
-            Ok(Frame::Reply { id, reply }) => return self.told.replied(id, reply),
-            Ok(f) if f.is_file() => return self.file_told(f),
-            f => f.map_or(Space::Durable, |f| f.space()),
-        };
-        self.step(space, Input::Frame { from: None, bytes });
+        if let Ok(f) = Frame::dec(&bytes) {
+            self.told_frame(f);
+        }
+    }
+
+    /// A frame from its server, to the machine of its space; a call's
+    /// reply, to what it was asked; a file's, to its files.
+    pub(crate) fn told_frame(&mut self, f: Frame) {
+        match f {
+            Frame::Reply { id, reply } => self.told.replied(id, reply),
+            f if f.is_file() => self.file_told(f),
+            f => self.step(f.space(), Input::Frame { from: None, frame: f }),
+        }
     }
 
     /// Another login: every pending intent the signer's, its id kept — or,
@@ -818,7 +739,7 @@ impl Peer {
             self.replica(|r| r.origin = o);
         }
         let origin = self.log.origin;
-        let mut pending: Vec<Ctx> = self.log.pending.iter().map(|p| p.entry.clone()).collect();
+        let mut pending: Vec<Ctx> = self.log.pending().iter().map(|p| p.entry.clone()).collect();
         for (n, e) in pending.iter_mut().enumerate() {
             if other {
                 (e.origin, e.local) = (origin, n as i64 + 1);
@@ -837,7 +758,10 @@ impl Peer {
         }
         let local = if other { pending.len() as i64 } else { self.log.local };
         let pending = pending.into_iter().map(|e| Logged::intent(e, vec![])).collect();
-        let records = vec![Record::Rows(self.log.confirmed_rows()), Record::Pending { pending, at: None, local }];
+        let records = vec![
+            Record::Rows(self.log.confirmed_rows()),
+            Record::Pending(local::Kept::all(pending, None, local)),
+        ];
         self.step(Space::Durable, Input::Open(records));
         if self.linked {
             self.connected();

@@ -21,6 +21,7 @@
 //! Each rings the peer's [`Wake`] whenever it has something to say, and
 //! [`Peer::pump`] takes it in.
 
+use ark::frames::Frame;
 use ark::schema::Space;
 
 use crate::Peer;
@@ -209,8 +210,7 @@ impl Peer {
             let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
             crate::monotonic_ms() + wait as u64
         });
-        let read = self.reading.as_ref().is_some_and(|r| !r.asked || !r.said.is_empty());
-        let backlog = (!self.link.backlog.is_empty() || read).then(crate::monotonic_ms);
+        let backlog = (!self.link.backlog.is_empty() || self.log.reading()).then(crate::monotonic_ms);
         self.link.due.into_iter().chain(self.due()).chain(relay).chain(backlog).min()
     }
 
@@ -264,28 +264,31 @@ impl Peer {
             // Its disk's answers once its connection's are in: past the
             // tables its views read, one a pump, so the app draws between.
             let disk = self.link.backlog.is_empty();
-            let Some(e) = self.link.backlog.pop_front().or_else(|| self.said().map(Event::Frame)) else {
+            let e = self.link.backlog.pop_front();
+            if e.is_none() && !self.read_one() {
                 break;
-            };
+            }
             left -= 1;
             p.moved = true;
             match e {
-                Event::Open => {
+                // Its disk's answer: seen as a part of a fill is, once it ends.
+                None => (p.frames[0], p.shown) = (p.frames[0] + 1, p.shown || !self.log.filling()),
+                Some(Event::Open) => {
                     (p.opened, p.shown) = (true, true);
                     crate::observe::link(&self.label(), "up", None);
                     self.connected();
                 }
-                Event::Frame(b) => {
-                    let (space, part) = match ark::frames::Frame::dec(&b) {
-                        Ok(f) => (f.space(), matches!(f, ark::frames::Frame::Part { .. })),
-                        Err(_) => (Space::Durable, false),
-                    };
+                Some(Event::Frame(b)) => {
+                    // Read once, here: the machine takes the frame as it is.
+                    let f = Frame::dec(&b).ok();
+                    let (space, part) = f.as_ref().map_or((Space::Durable, false), |f| (f.space(), matches!(f, Frame::Part { .. })));
                     p.frames[space as usize] += 1;
-                    self.receive(b);
-                    let filling = self.machine(space).is_some_and(|m| m.fill.is_some());
-                    p.shown |= !(part && filling);
+                    if let Some(f) = f {
+                        self.told_frame(f);
+                    }
+                    p.shown |= !(part && self.machine(space).is_some_and(|m| m.filling()));
                 }
-                Event::Closed(why) => {
+                Some(Event::Closed(why)) => {
                     crate::observe::link(&self.label(), "down", Some(&why));
                     self.disconnected();
                     self.link.wire = None;

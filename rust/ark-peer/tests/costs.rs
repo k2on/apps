@@ -126,7 +126,7 @@ fn offline(n: u64) -> usize {
     (0..n).for_each(|i| add(&mut c, i));
     let before = disk.written();
     (n..n + 256).for_each(|i| add(&mut c, i));
-    assert_eq!(c.log.pending.len() as u64, n + 266, "all pending");
+    assert_eq!(c.log.pending().len() as u64, n + 266, "all pending");
     disk.written() - before
 }
 
@@ -253,7 +253,7 @@ fn timings() {
     for j in 0..n {
         c.0.mutate_at("demo.create_playlist", named(&format!("P{j}")), now_ms()).unwrap();
         c.0.pump();
-        while !c.0.log.pending.is_empty() {
+        while !c.0.log.pending().is_empty() {
             wait(&c.0, &c.1, Duration::from_millis(1));
             c.0.pump();
         }
@@ -310,7 +310,7 @@ fn offline_then_joined() {
     let mut c = (d, rx);
     let held = ark_peer::link::until(Duration::from_secs(120), Duration::ZERO, || {
         c.0.pump();
-        c.0.linked && c.0.log.pending.is_empty() || {
+        c.0.linked && c.0.log.pending().is_empty() || {
             wait(&c.0, &c.1, Duration::from_millis(1));
             false
         }

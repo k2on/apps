@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ark::frames::Frame;
 use ark::log::{EntryId, Origin, Record};
-use ark::peer::{Ctx, Input, Journal, Peer, Role};
+use ark::peer::{Ctx, Input, Peer, Role};
 use ark::row::Type;
 use ark::schema::{Column, Schema, Table};
 use ark::store::{Change, Store};
@@ -55,7 +55,7 @@ fn wide_authority(d: Vec<Record>) -> Peer {
         schema: wider(),
         ..demo::demo().run(TAG, Arc::new(tag_it))
     };
-    let mut p = Peer::new(Arc::new(cas), Role::Authority { journal: Journal::default() }, who("server"));
+    let mut p = Peer::new(Arc::new(cas), Role::authority(), who("server"));
     p.step(Input::Open(d));
     p
 }

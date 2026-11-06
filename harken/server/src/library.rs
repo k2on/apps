@@ -820,7 +820,7 @@ fn catch_up(peer: &mut ark_peer::Peer, hub: &Handle, stop: &AtomicBool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
         pump(peer);
-        if peer.linked && peer.log.log().head().0 >= head && peer.log.pending.is_empty() {
+        if peer.linked && peer.log.log().head().0 >= head && peer.log.pending().is_empty() {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));

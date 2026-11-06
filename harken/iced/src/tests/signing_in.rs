@@ -51,7 +51,7 @@ fn signing_in_moves_the_same_replica_on() {
             .client
             .lock()
             .log
-            .pending
+            .pending()
             .iter()
             .map(|p| p.entry.actor.clone())
             .collect::<Vec<_>>()
@@ -64,7 +64,7 @@ fn signing_in_moves_the_same_replica_on() {
     assert_eq!(app.peer.items().len(), 1, "the same replica, not a new one");
     assert_eq!(app.peer.client.lock().pending_len(), 1);
     assert_eq!(pending(&app), ["alice"], "…and the work is hers now");
-    let now = app.peer.client.lock().log.pending[0].entry.id;
+    let now = app.peer.client.lock().log.pending()[0].entry.id;
     assert_eq!(now, id, "its id kept");
     assert_eq!(app.peer.client.lock().outcome(&id), Some(Outcome::Pending));
     assert!(app.note.contains("1 change from before"), "{}", app.note);
@@ -75,7 +75,7 @@ fn signing_in_moves_the_same_replica_on() {
     let _ = app.update(Message::SignOut);
     assert!(app.login.is_none());
     assert!(app.peer.client.lock().is_signed_out());
-    let funcs: Vec<String> = app.peer.client.lock().log.pending.iter().map(|p| p.entry.func.clone()).collect();
+    let funcs: Vec<String> = app.peer.client.lock().log.pending().iter().map(|p| p.entry.func.clone()).collect();
     assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
     assert_eq!(app.peer.items().len(), 1);
 }

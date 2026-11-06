@@ -306,7 +306,7 @@ impl Peer {
     /// What became of the intent `id` on the log: none for one this run
     /// did not author, or of a run before.
     pub fn outcome(&self, id: &EntryId) -> Option<Outcome> {
-        if self.log.pending.iter().any(|p| p.entry.id == *id) {
+        if self.log.pending().iter().any(|p| p.entry.id == *id) {
             return Some(Outcome::Pending);
         }
         self.told.outcomes.get(id).cloned()
@@ -325,7 +325,7 @@ impl Peer {
     }
 
     pub fn pending_len(&self) -> usize {
-        self.log.pending.len()
+        self.log.pending().len()
     }
 
     /// The head of the confirmed chain.

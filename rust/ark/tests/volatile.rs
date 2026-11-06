@@ -15,7 +15,7 @@ mod support {
 use std::sync::Arc;
 
 use ark::frames::{Frame, Verdict};
-use ark::peer::{Input, Journal, Output, Peer, Role, To};
+use ark::peer::{Input, Output, Peer, Role, To};
 use ark::prelude::*;
 use ark::schema::{Schema, Space};
 use ark::store::Read;
@@ -78,7 +78,7 @@ fn peer(role: Role, name: &str, space: Space) -> Peer {
 }
 
 fn authority() -> Peer {
-    peer(Role::Authority { journal: Journal::default() }, "server", Space::Volatile)
+    peer(Role::authority(), "server", Space::Volatile)
 }
 
 fn waving(name: &str) -> Input {
@@ -103,7 +103,7 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
         peer(Role::Replica, "alice", Space::Volatile),
         peer(Role::Replica, "alice", Space::Durable),
     );
-    let mut durable = peer(Role::Authority { journal: Journal::default() }, "server", Space::Durable);
+    let mut durable = peer(Role::authority(), "server", Space::Durable);
     for n in ["a", "b", "c"] {
         let o = durable.step(mutate(demo::CREATE, demo::create_input(n), 1));
         log.step(down(&fanouts(&o)[0]));
@@ -112,7 +112,7 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
     assert!(sends(&o).iter().all(|f| matches!(f, Frame::Page { space: Space::Durable, .. })));
     let o = live.step(waving("phone"));
     assert!(
-        matches!(&sends(&o)[..], [Frame::Page { space: Space::Volatile, logged, .. }] if logged[0].entry.id == log.pending[0].entry.id),
+        matches!(&sends(&o)[..], [Frame::Page { space: Space::Volatile, logged, .. }] if logged[0].entry.id == log.pending()[0].entry.id),
         "one id, two spaces"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
@@ -128,12 +128,9 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
     for frame in s.iter().chain(&f) {
         assert!(log.step(down(frame)).is_empty(), "the durable machine takes nothing of {frame:?}");
         let out = live.step(down(frame));
-        assert!(
-            !out.iter().any(|x| matches!(x, Output::Send(ark::peer::To::Disk, _))),
-            "nothing volatile is made durable"
-        );
+        assert!(!out.iter().any(|x| matches!(x, Output::Persist(_))), "nothing volatile is made durable");
     }
-    assert_eq!((log.pending.len(), live.pending.len()), (1, 0));
+    assert_eq!((log.pending().len(), live.pending().len()), (1, 0));
     assert_eq!(log.store.state_hash(), durable_hash);
     assert_ne!(
         live.store.state_hash(),
@@ -198,7 +195,7 @@ fn a_restarted_authority_fills_and_holds_the_gap() {
     let (s, f) = deliver_up(&mut fresh, &who("alice"), &o);
     assert!(matches!(&verdicts(&s)[..], [Some(Verdict::At { seq: 1, last: 2 })]), "{s:?}");
     live.step(down(&f[0]));
-    assert!(live.pending.is_empty() && live.store == fresh.store);
+    assert!(live.pending().is_empty() && live.store == fresh.store);
 }
 
 /// A replica moves its own horizon (`compact`, at most its head): the
@@ -232,11 +229,11 @@ fn a_replica_folds_its_own_log() {
     let (_, f) = deliver_up(&mut server, &who("bob"), &o);
     alice.step(down(&f[0]));
     assert_eq!(alice.log().head(), server.log().head());
-    assert_eq!(alice.pending.len(), 1, "still pending, rebased");
+    assert_eq!(alice.pending().len(), 1, "still pending, rebased");
     carry(&mut server, "alice", &pending, &mut [&mut alice]);
-    assert!(alice.pending.is_empty() && alice.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == server.store);
     let hello = sends(&alice.step(Input::Connected));
-    let (s, _) = deliver_up(&mut server, &who("alice"), &[Output::Send(To::Back, hello[0].enc())]);
+    let (s, _) = deliver_up(&mut server, &who("alice"), &[Output::Send(To::Back, hello[0].clone())]);
     assert!(s.is_empty(), "nothing to send from its head: {s:?}");
 }
 
@@ -245,23 +242,20 @@ fn a_replica_folds_its_own_log() {
 /// store's rows as they stand: the pending playlist was in them.
 #[test]
 fn a_replica_folds_its_confirmed_rows() {
-    let mut durable = peer(Role::Authority { journal: Journal::default() }, "server", Space::Durable);
+    let mut durable = peer(Role::authority(), "server", Space::Durable);
     let mut log = peer(Role::Replica, "alice", Space::Durable);
     let o = durable.step(mutate(demo::CREATE, demo::create_input("a"), 1));
     log.step(down(&fanouts(&o)[0]));
     log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
     let o = log.compact(i64::MAX);
     let rows = o.iter().find_map(|x| match x {
-        Output::Send(ark::peer::To::Disk, b) => match ark::log::Record::dec(b) {
-            Ok(ark::log::Record::Rows(r)) => Some(r),
-            _ => None,
-        },
+        Output::Persist(ark::log::Record::Rows(r)) => Some(r.clone()),
         _ => None,
     });
     let rows = rows.expect("the rows made durable whole");
     let playlists = rows.iter().find(|(t, _)| t == "playlist").map_or(0, |(_, rs)| rs.len());
     assert_eq!(playlists, 1, "the confirmed playlist only");
-    assert_eq!(log.pending.len(), 1);
+    assert_eq!(log.pending().len(), 1);
 }
 
 /// A volatile authority keeps nothing of an intent it took, and the
@@ -280,7 +274,7 @@ fn volatile_verdicts_are_not_kept() {
         }
         pushes.push(o);
     }
-    let Role::Authority { journal } = &server.role else { unreachable!() };
+    let journal = server.journal().expect("an authority");
     assert!(journal.refused.is_empty() && journal.last.len() == 1, "{journal:?}");
     for p in [&pushes[69], &pushes[5]] {
         let (s, _) = deliver_up(&mut server, &who("alice"), p);
@@ -324,7 +318,7 @@ fn live_state_syncs_across_a_schema_that_grew() {
         ..cas().run("waves.wave", Arc::new(moody_wave))
     });
     let wider = |role: Role, name: &str| Peer::new(fns.clone(), role, who(name)).in_space(Space::Volatile);
-    let authority_role = || Role::Authority { journal: Journal::default() };
+    let authority_role = || Role::authority();
     for (mut server, mut replica) in [
         (wider(authority_role(), "server"), peer(Role::Replica, "alice", Space::Volatile)),
         (authority(), wider(Role::Replica, "alice")),
@@ -334,7 +328,7 @@ fn live_state_syncs_across_a_schema_that_grew() {
         for frame in s.iter().chain(&f) {
             replica.step(down(frame));
         }
-        assert!(replica.pending.is_empty() && replica.diverged.is_empty(), "synced");
+        assert!(replica.pending().is_empty() && replica.diverged() == 0, "synced");
         let (_, t) = replica.store.schema_arc().table("here").unwrap();
         let row = replica.store.get("here", &here_key("alice-session")).expect("the wave");
         assert_eq!(ark::dynamic::row(t, &row).unwrap()["name"], "phone");

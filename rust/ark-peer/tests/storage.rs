@@ -28,7 +28,7 @@ fn logged(records: Vec<Record>) -> Vec<Logged> {
 
 fn persist(d: &mut dyn Disk, ks: std::ops::Range<i64>) {
     for k in ks {
-        d.record(&Record::Logged(row(k)).enc()).unwrap();
+        d.record(&Record::Logged(row(k))).unwrap();
     }
 }
 
@@ -70,7 +70,7 @@ fn the_rows_fold_every_write_before() {
     ] {
         persist(d, 1..3);
         let rows = vec![("t".to_string(), vec![br#"{"k":1}"#.to_vec()])];
-        d.record(&Record::Rows(rows.clone()).enc()).unwrap();
+        d.record(&Record::Rows(rows.clone())).unwrap();
         persist(d, 3..5);
         let mut want = vec![Record::Rows(rows)];
         want.extend((3..5).map(row).map(Record::Logged));

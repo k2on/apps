@@ -121,7 +121,7 @@ fn the_menu_signs_out() {
     key(&mut app, Key::Named(Named::Enter));
     assert!(app.login.is_none(), "still signed in");
     assert!(app.peer.client.lock().is_signed_out());
-    let funcs: Vec<String> = app.peer.client.lock().log.pending.iter().map(|p| p.entry.func.clone()).collect();
+    let funcs: Vec<String> = app.peer.client.lock().log.pending().iter().map(|p| p.entry.func.clone()).collect();
     assert_eq!(funcs.last().map(String::as_str), Some("session.revoke"), "{funcs:?}");
     assert!(app.ctx.menu.is_none());
     let _ = app.update(Message::AccountMenu);

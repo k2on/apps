@@ -3244,7 +3244,7 @@ pub mod ha {
             self.standing.keys().filter(|(u, _)| u == user).all(|k| {
                 self.machines
                     .get(k)
-                    .is_some_and(|m| m.pending.is_empty() && m.log().head().0 == head)
+                    .is_some_and(|m| m.pending().is_empty() && m.log().head().0 == head)
             })
         }
 
@@ -3279,7 +3279,7 @@ pub mod ha {
             let (id, name, input) = (0, ark::frames::DEVICE.into(), said.to_bytes());
             let mut out = vec![Output::Send(
                 To::Back,
-                ark::frames::Frame::Call { id, name, input }.enc(),
+                ark::frames::Frame::Call { id, name, input },
             )];
             out.extend(peer.step(Input::Connected));
             self.standing.insert(k, c);
@@ -3299,7 +3299,7 @@ pub mod ha {
         fn send(&self, c: ConnId, out: Vec<Output>) {
             for o in out {
                 match o {
-                    Output::Send(To::Back, b) => self.hub.frame(c, b),
+                    Output::Send(To::Back, f) => self.hub.frame(c, f.enc()),
                     Output::Settled(_, Err(why)) => {
                         eprintln!("harken-server: house: a speaker's transition was refused: {why}")
                     }
@@ -3317,7 +3317,10 @@ pub mod ha {
                 else {
                     continue;
                 };
-                let input = Input::Frame { from: None, bytes };
+                let Ok(frame) = ark::frames::Frame::dec(&bytes) else {
+                    continue;
+                };
+                let input = Input::Frame { from: None, frame };
                 let out = stepped(&k, || peer.step(input));
                 for o in &out {
                     if let Output::Changes(told) = o {

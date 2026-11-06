@@ -200,7 +200,7 @@ fn a_scoped_server_holds_nobody_else_s_sign_ins() {
             && ps[0].rows::<Playlist>("playlist").len() == 3
             && ps[0].client.current().is_some()
             // Each filled: its rows come a table at a time.
-            && ps.iter().all(|p| p.client.log.fill.is_none())
+            && ps.iter().all(|p| !p.client.log.filling())
     });
     assert_eq!(hub_rows::<SignIn>(&server, "sign_in").len(), 2);
     let users = |p: &Peer| {

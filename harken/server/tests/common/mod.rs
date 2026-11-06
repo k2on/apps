@@ -183,7 +183,7 @@ impl Peer {
     }
 
     pub fn pending(&self) -> usize {
-        self.client.log.pending.len()
+        self.client.log.pending().len()
     }
 
     /// How far into the log the client has confirmed.
@@ -248,7 +248,7 @@ impl Peer {
                 .client
                 .live
                 .as_ref()
-                .is_some_and(|l| l.pending.is_empty())
+                .is_some_and(|l| l.pending().is_empty())
     }
 }
 

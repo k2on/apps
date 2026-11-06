@@ -385,7 +385,7 @@ fn fill(driven: bool) {
     };
     let m = crate::client::domain();
     let mut server = ark_peer::Instance::open_under(m.schema.clone(), Box::new(ark_peer::Files::new(&dir).unwrap()));
-    server.machine.role = Role::Authority { journal: Default::default() };
+    server.machine.role = Role::authority();
     server.machine.domain = m.clone();
     let me = super::who("max");
     let peer = match driven {
@@ -408,7 +408,7 @@ fn fill(driven: bool) {
             let head = server.log().head();
             let done = || {
                 let c = app.peer.client.lock();
-                c.log.fill.is_none() && c.log.log().head() == head
+                !c.log.filling() && c.log.log().head() == head
             };
             let _ = ark_peer::link::until(Duration::from_secs(5), Duration::from_millis(1), || {
                 !q.sent.lock().unwrap().is_empty() || done()
@@ -432,17 +432,17 @@ fn fill(driven: bool) {
             }
             for o in server.machine.step(Input::Frame {
                 from: Some(me.clone()),
-                bytes: b,
+                frame: f,
             }) {
-                if let Output::Send(To::Back | To::All, b) = o {
-                    q.push(ark_peer::Event::Frame(b));
+                if let Output::Send(To::Back | To::All, f) = o {
+                    q.push(ark_peer::Event::Frame(f.enc()));
                 }
             }
         }
     }
     let filled = {
         let c = app.peer.client.lock();
-        c.log.fill.is_none() && c.log.log().head() == server.log().head()
+        !c.log.filling() && c.log.log().head() == server.log().head()
     };
     eprintln!(
         "{wakes} wakes in {:.1?}: worst {worst:.1?}, busy {total:.1?}; filled {filled}, {} songs",

@@ -41,6 +41,8 @@
 //! ([`Logged::base`]): where it began, a fill's head, or the horizon, which
 //! is a delete of the rows below it.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
@@ -349,46 +351,90 @@ pub struct Cursor {
     pub key: Vec<u8>,
 }
 
-/// What a peer makes durable, one record per `Send(To::Disk)` (§1.7): a logged
-/// entry, appended, as its row of the log's table — its facts are in it —
-/// or the store's rows whole, which every entry before them is folded
-/// into. A peer opens from its records in order (`Input::Open`): the
-/// store's rows as last written whole, the rows appended to the log's
-/// table since, whose facts write the rest again, and what a device's
-/// driver keeps of it beside them (`Pending`, never a `Send(To::Disk)`): its own
-/// intents still pending, each with its preview's changes as its facts,
-/// the head of the log those were made at (none: they are run again), and
-/// the last `local` it drew.
+/// What a peer makes durable, one record per `Output::Persist` (§1.7), in
+/// order: a logged entry, appended, as its row of the log's table — its
+/// facts are in it — or the store's rows whole, which every entry before
+/// them is folded into: the log's own records, on its disk. And what a
+/// driver keeps beside them, each in a blob of its own: a device's pending
+/// intents as they move ([`Kept`]), and an authority's journal whole. A peer
+/// opens from its records (`Input::Open`): the store's rows as last written
+/// whole, the rows appended to the log's table since, whose facts write the
+/// rest again, and those kept beside them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Record {
     Logged(Logged),
     Rows(#[serde(with = "crate::format::raw_tables")] Rows),
-    Pending {
-        pending: Vec<Logged>,
-        at: Option<(Seq, EntryHash)>,
-        local: i64,
-    },
+    Pending(Kept),
+    Journal(Journal),
 }
 
 impl Record {
-    /// A logged entry's record from its row of the log's table, which is
-    /// the entry's encoding: the variant's index, 0, before the row as it is.
-    pub fn logged(row: &[u8]) -> Vec<u8> {
-        [&[0u8][..], row].concat()
-    }
-
     pub fn enc(&self) -> Vec<u8> {
         self.to_bytes()
     }
 
-    /// Whether these bytes are a record of the store's rows whole, told by
-    /// their variant alone.
-    pub fn is_rows(b: &[u8]) -> bool {
-        b.first() == Some(&1)
-    }
-
     pub fn dec(b: &[u8]) -> Result<Record, String> {
         Record::from_bytes(b)
+    }
+}
+
+/// One record of a device's pending intents (§1.7), as its machine says
+/// them after a step that moved them: so many taken off the front
+/// (confirmed or refused), these put on the back, each with its preview's
+/// changes — or, `whole`, these all of them, written afresh; with the last
+/// `local` drawn and the head of the log the changes stand on (none: they
+/// are run again). A mutate puts one, so what it writes is the same however
+/// many are pending; an open puts the changes back rather than running the
+/// intents again. A driver appends each, length-framed, and opens from them
+/// all, in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Kept {
+    pub whole: bool,
+    pub gone: u64,
+    pub put: Vec<Logged>,
+    pub local: i64,
+    pub at: Option<(Seq, EntryHash)>,
+}
+
+impl Kept {
+    /// These intents pending, all of them, standing on `at`.
+    pub fn all(put: Vec<Logged>, at: Option<(Seq, EntryHash)>, local: i64) -> Kept {
+        Kept {
+            whole: true,
+            put,
+            local,
+            at,
+            ..Kept::default()
+        }
+    }
+}
+
+/// What an authority keeps beside its log: each origin's last `local` and
+/// the actor it is bound to; the intents it refused, and why — an intent
+/// at or below its origin's last and not refused is in the log, or folded
+/// below its horizon.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Journal {
+    pub refused: BTreeMap<EntryId, String>,
+    pub last: BTreeMap<Origin, (String, i64)>,
+}
+
+impl Journal {
+    /// The last `local` judged from `origin`.
+    pub fn last_of(&self, origin: &Origin) -> i64 {
+        self.last.get(origin).map_or(0, |l| l.1)
+    }
+
+    /// `origin`'s last `local` moved up to `local`; bound to `actor` when it
+    /// was bound to nobody.
+    pub fn pass(&mut self, origin: Origin, actor: &str, local: i64) {
+        let l = self.last.entry(origin).or_insert_with(|| (actor.into(), 0));
+        l.1 = l.1.max(local);
+    }
+
+    /// Whether `origin` is bound to an actor other than `actor`.
+    pub(crate) fn others(&self, origin: &Origin, actor: &str) -> bool {
+        self.last.get(origin).is_some_and(|l| l.0 != actor)
     }
 }

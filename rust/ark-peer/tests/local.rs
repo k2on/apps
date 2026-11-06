@@ -148,9 +148,9 @@ fn the_last_of_each_origin_survives_a_restart() {
 
 /// A device's replica row is what it opens as: its origin, who last signed
 /// in, its last `local`; and its pending intents, with their changes, put
-/// back without running them. Falsified by `keep_pending` not putting the
-/// head the intents stand on (`at`): the reopen ran them again, and its
-/// reruns moved.
+/// back without running them — what it keeps of them is not written again.
+/// Falsified by the machine not saying the head the intents stand on
+/// (`at`): the reopen ran them again, and wrote them afresh.
 #[test]
 fn a_device_reopens_as_its_replica_row() {
     let config = Config::of(Arc::new(arkdb::demo::demo()));
@@ -160,9 +160,11 @@ fn a_device_reopens_as_its_replica_row() {
         d.mutate_at(CREATE, input, 1).unwrap();
     }
     let (origin, me, local, store) = (d.log.origin, d.log.me.clone(), d.log.local, d.log.store.clone());
+    let kept = d.local.get(ark_peer::local::PENDING).unwrap();
     let mut d = d.reopen();
     assert_eq!((d.log.origin, d.log.me.session.clone(), d.log.local), (origin, me.session.clone(), local));
-    assert_eq!((d.cursor(), d.pending_len(), d.log.reruns), (0, 2, 0), "put back, none run");
+    assert_eq!((d.cursor(), d.pending_len()), (0, 2));
+    assert_eq!(d.local.get(ark_peer::local::PENDING).unwrap(), kept, "put back, none run");
     assert_eq!(d.log.store, store);
     let disk = d.log.disk.take().unwrap();
     let d = Peer::open_as(config, disk, None);

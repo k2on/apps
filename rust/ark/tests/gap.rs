@@ -30,10 +30,10 @@ fn a_device_past_a_gap_goes_on_from_where_the_authority_stands() {
     let (mut server, mut alice) = (authority(demo::cas()), replica("alice", demo::cas()));
     let (_, f) = deliver_up(&mut server, &who("alice"), &alice.step(mutate(CREATE, create_input("Road"), 1)));
     alice.step(down(&f[0]));
-    assert!(alice.pending.is_empty());
+    assert!(alice.pending().is_empty());
     alice.local = 17;
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
-    let id = alice.pending[0].entry.id;
+    let id = alice.pending()[0].entry.id;
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 2, last: 18 })]), "{s:?}");
     alice.step(down(&f[0]));
@@ -43,6 +43,6 @@ fn a_device_past_a_gap_goes_on_from_where_the_authority_stands() {
         (2, id),
         "sequenced as it was numbered"
     );
-    assert!(alice.pending.is_empty() && alice.store == server.store);
+    assert!(alice.pending().is_empty() && alice.store == server.store);
     assert_eq!(pos_of(&alice.store, &pid(), "t1"), Some(1));
 }

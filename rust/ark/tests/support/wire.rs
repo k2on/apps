@@ -7,7 +7,7 @@ use ark::frames::{Frame, Verdict};
 use ark::log::Logged;
 use std::sync::Arc;
 
-use ark::peer::{Ctx, Input, Journal, Output, Peer, Role, To};
+use ark::peer::{Ctx, Input, Output, Peer, Role, To};
 use ark::store::Change;
 use ark::Domain;
 
@@ -20,15 +20,15 @@ pub fn replica(name: &str, cas: Arc<Domain>) -> Peer {
 }
 
 pub fn authority(cas: Arc<Domain>) -> Peer {
-    let role = Role::Authority { journal: Journal::default() };
+    let role = Role::authority();
     Peer::new(cas, role, who("server"))
 }
 
 fn frames(outs: &[Output], fanout: bool) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(To::Back, b) if !fanout => Some(Frame::dec(b).unwrap()),
-            Output::Send(To::All, b) if fanout => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back, f) if !fanout => Some(f.clone()),
+            Output::Send(To::All, f) if fanout => Some(f.clone()),
             _ => None,
         })
         .collect()
@@ -62,14 +62,17 @@ pub fn changes(outs: &[Output]) -> Vec<Change> {
 
 /// A frame from upstream, to a replica.
 pub fn down(f: &Frame) -> Input {
-    Input::Frame { from: None, bytes: f.enc() }
+    Input::Frame {
+        from: None,
+        frame: f.clone(),
+    }
 }
 
 /// A frame from a connection verified as `w`, to an authority.
 pub fn up(w: &Ctx, f: &Frame) -> Input {
     Input::Frame {
         from: Some(w.clone()),
-        bytes: f.enc(),
+        frame: f.clone(),
     }
 }
 

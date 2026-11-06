@@ -77,7 +77,7 @@ fn every_device_syncs_with_a_server_whose_schema_grew() {
     let (data, old, new) = (dir.path().join("server"), dir.path().join("old"), dir.path().join("new"));
     let hub = server(support::config(), &data).unwrap();
     drop(synced(support::config(), &old, "alice@laptop", &hub, &["Hymns"], |p| {
-        p.log.pending.is_empty() && playlists(p) == 1
+        p.log.pending().is_empty() && playlists(p) == 1
     }));
     hub.stop();
     let hub = server(grown(), &data).unwrap();
@@ -86,13 +86,13 @@ fn every_device_syncs_with_a_server_whose_schema_grew() {
     let row = ark::dynamic::row_bytes(tag, &serde_json::json!({"name": "loud"})).unwrap();
     hub.write(vec![Change::Add { table: "tag".into(), row }]).unwrap().unwrap();
     let a = synced(support::config(), &old, "alice@laptop", &hub, &["Psalms"], |p| {
-        p.log.pending.is_empty() && playlists(p) == 2
+        p.log.pending().is_empty() && playlists(p) == 2
     });
     let b = synced(grown(), &new, "bob@phone", &hub, &["Carols"], |p| {
-        p.log.pending.is_empty() && playlists(p) == 3
+        p.log.pending().is_empty() && playlists(p) == 3
     });
     assert!(
-        a.log.diverged.is_empty() && a.log.store.schema_arc().table("tag").is_none(),
+        a.log.diverged() == 0 && a.log.store.schema_arc().table("tag").is_none(),
         "the old device has no tags"
     );
     assert_eq!(b.log.store.rows("tag").count(), 1, "the new one holds it");
@@ -125,7 +125,7 @@ fn a_replica_of_a_schema_not_grown_from_starts_empty_its_pending_kept() {
     let (data, phone) = (dir.path().join("server"), dir.path().join("phone"));
     let hub = server(support::config(), &data).unwrap();
     let mut p = synced(support::config(), &phone, "alice@laptop", &hub, &["Hymns"], |p| {
-        p.log.pending.is_empty() && p.log.log().head().0 >= 1
+        p.log.pending().is_empty() && p.log.log().head().0 >= 1
     });
     hub.stop();
     p.mutate_at("demo.create_playlist", named("Psalms"), 1).unwrap();
@@ -133,7 +133,7 @@ fn a_replica_of_a_schema_not_grown_from_starts_empty_its_pending_kept() {
     for _ in 0..2 {
         let p = Peer::open(retitled(), dev("alice@laptop").unwrap(), Box::new(Files::new(&phone).unwrap()));
         assert_eq!(p.log.log().head().0, 0, "no entry it was sent");
-        assert_eq!(p.log.pending.len(), 1, "its intent, pending");
+        assert_eq!(p.log.pending().len(), 1, "its intent, pending");
         assert_eq!(playlists(&p), 1, "and run on top");
     }
 }

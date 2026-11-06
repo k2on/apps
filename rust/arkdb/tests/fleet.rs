@@ -41,7 +41,7 @@ fn fleets_of_other_seeds_converge() {
         net.converged().unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         assert_eq!((net.hub.log.log().head().0, net.refused.len()), (HEAD, 0), "seed {seed}");
         for (i, c) in &net.clients {
-            assert!(c.log.pending.is_empty(), "seed {seed} client {i}: pending");
+            assert!(c.log.pending().is_empty(), "seed {seed} client {i}: pending");
             clients += 1;
         }
     }

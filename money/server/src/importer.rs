@@ -388,7 +388,7 @@ impl Job {
             }
             self.pump();
             // Linked and filled: the asks it holds are the hub's.
-            if !self.peer.linked || self.peer.log.fill.is_some() {
+            if !self.peer.linked || self.peer.log.filling() {
                 continue;
             }
             if self.banks.is_some() {

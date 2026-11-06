@@ -12,7 +12,7 @@ mod support {
 }
 
 use ark::frames::Verdict;
-use ark::log::{EntryId, Origin, Record};
+use ark::log::{EntryId, Journal, Kept, Origin, Record};
 use ark::peer::Input;
 use demo::{create_input, pair_input, ADD, CREATE};
 use support::wire::*;
@@ -33,11 +33,11 @@ fn a_replica_opens_its_pending_without_running_them() {
     eve.step(mutate(CREATE, create_input("Road"), 1));
     let mut other = replica("eve", demo::cas());
     other.step(mutate(CREATE, create_input("Trip"), 1));
-    let mut p = eve.pending[0].clone();
-    p.facts.clone_from(&other.pending[0].facts);
+    let mut p = eve.pending()[0].clone();
+    p.facts.clone_from(&other.pending()[0].facts);
     let durable = |at| {
         let pending = vec![p.clone()];
-        vec![Record::Rows(eve.confirmed_rows()), Record::Pending { pending, at, local: 1 }]
+        vec![Record::Rows(eve.confirmed_rows()), Record::Pending(Kept::all(pending, at, 1))]
     };
     let mut kept = replica("eve", demo::cas());
     kept.step(Input::Open(durable(Some(eve.log().head()))));
@@ -49,7 +49,7 @@ fn a_replica_opens_its_pending_without_running_them() {
 
 /// A replica offline for long — a playlist and 300 adds pending, more than
 /// a page — connects to a server that has nothing: each intent is
-/// confirmed as it previewed it, nothing undone, run again or told.
+/// confirmed as it previewed it, nothing undone or run again: nothing told.
 /// Falsified by `confirm` taking the oldest pending intent's own entry
 /// for a rebase (`previewed` false): it ran the pending intents again for
 /// every page.
@@ -60,7 +60,6 @@ fn a_replica_long_offline_is_confirmed_as_it_previewed() {
     for i in 0..300 {
         eve.step(mutate(ADD, pair_input(&road(), &format!("t{i}")), 2 + i));
     }
-    let reruns = eve.reruns;
     let o = eve.step(Input::Connected);
     let mut server = authority(demo::cas());
     let (back, fan) = deliver_up(&mut server, &who("eve"), &o);
@@ -68,8 +67,8 @@ fn a_replica_long_offline_is_confirmed_as_it_previewed() {
     for b in fan.iter().chain(&back) {
         told += changes(&eve.step(down(b))).len();
     }
-    assert!(eve.pending.is_empty() && eve.store == server.store && server.log().head().0 == 301);
-    assert_eq!((eve.reruns, told), (reruns, 0));
+    assert!(eve.pending().is_empty() && eve.store == server.store && server.log().head().0 == 301);
+    assert_eq!(told, 0);
 }
 
 /// A log reopened from a snapshot above an intent's sequence has no verdict
@@ -85,10 +84,9 @@ fn a_push_below_a_reopened_horizon_is_acknowledged_there() {
     deliver_up(&mut server, &who("bob"), &o2);
     server.compact(2);
     let mut reopened = authority(demo::cas());
-    reopened.step(Input::Open(vec![Record::Rows(server.confirmed_rows())]));
-    if let ark::peer::Role::Authority { journal } = &mut reopened.role {
-        journal.pass(Origin::named("bob-session"), "bob", 2);
-    }
+    let mut journal = Journal::default();
+    journal.pass(Origin::named("bob-session"), "bob", 2);
+    reopened.step(Input::Open(vec![Record::Rows(server.confirmed_rows()), Record::Journal(journal)]));
     let (back, _) = deliver_up(&mut reopened, &who("bob"), &o);
     assert!(matches!(&verdicts(&back)[..], [Some(Verdict::At { seq: 2, .. })]), "{back:?}");
 }

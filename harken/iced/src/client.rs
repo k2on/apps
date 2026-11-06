@@ -94,7 +94,7 @@ pub fn live_status(r: &Replica) -> Option<LiveStatus> {
     let l = r.live.as_ref()?;
     Some(LiveStatus {
         seq: l.log().head().0,
-        pending: l.pending.len(),
+        pending: l.pending().len(),
         synced: present(r),
     })
 }

@@ -12,9 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use ark::db::Durable as Run;
 use ark::format::Encode;
-use ark::hash::EntryHash;
-use ark::log::Logged;
-use ark::log::{Origin, Seq};
+use ark::log::Origin;
 use ark::prelude::{Deserialize, Serialize};
 use ark_auth::remember::Remembered;
 
@@ -52,40 +50,10 @@ impl Replica {
 /// The blob a device's pending intents are kept in, under [`LOCAL`].
 pub const PENDING: &str = "pending";
 
-/// One record of a device's pending intents (§1.7), length-framed in
-/// [`PENDING`]: so many taken off the front (confirmed or refused), these
-/// put on the back, each with its preview's changes — or, `whole`, these
-/// all of them, the blob written afresh; with the last `local` drawn and
-/// the head of the log the changes stand on. A mutate appends one put, so
-/// what it writes is the same however many are pending; an open puts the
-/// changes back rather than running the intents again.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Kept {
-    pub whole: bool,
-    pub gone: u64,
-    pub put: Vec<Logged>,
-    pub local: i64,
-    pub at: Option<(Seq, EntryHash)>,
-}
-
-impl Kept {
-    /// The pending intents the records in `blob` keep, read up to the first
-    /// that does not read; the last of them, and how many there are.
-    pub fn read(blob: &[u8]) -> (Vec<Logged>, Kept, usize) {
-        let (mut pending, mut last) = (std::collections::VecDeque::new(), Kept::default());
-        let records = crate::disk::framed::<Kept>(blob).0;
-        let n = records.len();
-        for k in records {
-            if k.whole {
-                pending.clear();
-            }
-            pending.drain(..(k.gone as usize).min(pending.len()));
-            pending.extend(k.put.iter().cloned());
-            last = Kept { put: vec![], ..k };
-        }
-        (pending.into(), last, n)
-    }
-}
+/// One record of a device's pending intents (§1.7), as its machine says
+/// it, length-framed in [`PENDING`]: appended, or the blob written afresh
+/// when it is whole.
+pub use ark::log::Kept;
 
 /// The names a peer keeps its records beside its log under, on its disk.
 pub const LOCAL: &str = "local.";

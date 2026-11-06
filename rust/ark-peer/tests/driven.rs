@@ -48,7 +48,7 @@ fn a_driven_peer_takes_in_and_sends_with_nobody_pumping() {
     until(&alice, "alice has bob's playlist", |p| p.log.log().head().0 >= 1);
     assert!(rang.try_iter().count() > 0, "and her app was told");
     alice.lock().mutate_at("demo.create_playlist", named("Hymns"), 2).unwrap();
-    until(&alice, "hers confirmed", |p| p.log.pending.is_empty() && p.log.log().head().0 >= 2);
+    until(&alice, "hers confirmed", |p| p.log.pending().is_empty() && p.log.log().head().0 >= 2);
     let at = hub.with(|p| p.log.log().head().0).unwrap();
     assert_eq!(at, 2, "the server has both");
 }
@@ -90,7 +90,7 @@ fn a_fill_is_taken_in_without_telling_the_app_of_every_part() {
     let (told, rang) = bell();
     alice.set_waker(told);
     until(&alice, "alice filled", |p| {
-        p.linked && p.log.machine.fill.is_none() && p.log.log().head().0 >= 80
+        p.linked && !p.log.machine.filling() && p.log.log().head().0 >= 80
     });
     let told = rang.try_iter().count();
     assert!(told >= 1, "told the fill was in");

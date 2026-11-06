@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ark::format::Encode;
-use ark::peer::Role;
 use ark::schema::Space;
 use ark_peer::{dev, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
@@ -115,12 +114,10 @@ fn run(c: usize, n: u64) -> Held {
     for (d, _) in &ds {
         assert_eq!(live(d).log().head(), live(&hub).log().head());
         assert_eq!(live(d).store, live(&hub).store);
-        assert!(live(d).pending.is_empty());
+        assert!(live(d).pending().is_empty());
     }
-    let verdicts = match &live(&hub).role {
-        Role::Authority { journal } => journal.refused.len() + journal.last.len(),
-        Role::Replica => unreachable!("a server's live machine is an authority"),
-    };
+    let journal = live(&hub).journal().expect("a server's live machine is an authority");
+    let verdicts = journal.refused.len() + journal.last.len();
     Held {
         device: ds.iter().map(|(d, _)| live(d).log().entries().len()).max().unwrap_or(0),
         server: live(&hub).log().entries().len(),
@@ -195,5 +192,5 @@ fn a_scoped_connection_holds_only_its_live_rows() {
     assert_eq!(pointers(&hub), ["u0@d0", "u1@d1"]);
     assert_eq!(pointers(&ds[0].0), ["u0@d0", "u1@d1"], "fed whole");
     assert_eq!(pointers(&ds[1].0), ["u0@d0"], "fed by its scope");
-    assert!(live(&ds[1].0).pending.is_empty());
+    assert!(live(&ds[1].0).pending().is_empty());
 }

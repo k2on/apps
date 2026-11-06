@@ -31,15 +31,16 @@ use ark::schema::{Schema, Space};
 use crate::{draw_origin, now_ms, Disk};
 
 /// One machine and what keeps it (§1.7): its disk, when it has one —
-/// opened from what the disk holds, every `Send(To::Disk)` written in order (and,
-/// while a write fails, kept to write again, the failure said). A [`Peer`](crate::Peer) is two of these
+/// opened from what the disk holds, every record of its log it says to
+/// keep written in order (and, while a write fails, kept to write again,
+/// the failure said); what it keeps beside its log is its driver's. A [`Peer`](crate::Peer) is two of these
 /// wired together; one alone is a schema's tables on a machine never
 /// linked, read and written through a `Db<S>` of its schema's struct.
 pub struct Instance {
     pub machine: Machine,
     pub disk: Option<Box<dyn Disk>>,
     /// Records not yet written.
-    pub(crate) unwritten: Vec<Vec<u8>>,
+    pub(crate) unwritten: Vec<Record>,
     /// The disk's last refusal, while it lasts.
     pub failure: Option<String>,
 }
@@ -93,7 +94,7 @@ impl Instance {
     }
 
     fn unwired(schema: Arc<Schema>, space: Space, disk: Option<Box<dyn Disk>>) -> Instance {
-        let role = Role::Authority { journal: Default::default() };
+        let role = Role::authority();
         let domain = Arc::new(ark::Domain {
             schema,
             ..Default::default()
@@ -115,21 +116,20 @@ impl Instance {
         s.unwrap_or_else(|| vec![Record::Rows(self.machine.confirmed_rows())])
     }
 
-    /// One input to its machine, what it made durable written; what the
-    /// machine said.
+    /// One input to its machine, the records of its log it made durable
+    /// written; what else the machine said.
     pub fn step(&mut self, input: Input) -> Vec<Output> {
-        let out = self.machine.step(input);
-        self.took(&out);
+        let mut out = self.machine.step(input);
+        out.retain_mut(|o| match o {
+            Output::Persist(r @ (Record::Logged(_) | Record::Rows(_))) => {
+                let r = std::mem::replace(r, Record::Rows(vec![]));
+                self.unwritten.push(r);
+                false
+            }
+            _ => true,
+        });
         self.flush();
         out
-    }
-
-    fn took(&mut self, out: &[Output]) {
-        for o in out {
-            if let Output::Send(ark::peer::To::Disk, b) = o {
-                self.unwritten.push(b.clone());
-            }
-        }
     }
 
     /// What is unwritten, written in order up to the first write that

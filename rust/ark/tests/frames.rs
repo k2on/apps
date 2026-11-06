@@ -163,7 +163,11 @@ fn every_frame_reads_back() {
         _ => unreachable!(),
     };
     let r = Record::Logged(l.clone());
-    assert_eq!(Record::logged(&l.to_bytes()), r.enc(), "a logged record is the variant, then the row");
+    assert_eq!(
+        r.enc(),
+        [&[0u8][..], &l.to_bytes()].concat(),
+        "a logged record is the variant, then the row"
+    );
     assert_eq!(Record::dec(&r.enc()), Ok(r));
 }
 

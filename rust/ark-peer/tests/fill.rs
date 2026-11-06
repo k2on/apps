@@ -10,7 +10,7 @@ use std::sync::Arc;
 use ark::domain::Domain;
 use ark::format::Encode;
 use ark::frames::Frame;
-use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, To};
+use ark::peer::{Ctx, Input, Output, Peer as Machine, Role, To};
 use ark_peer::{Instance, Memory};
 use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
@@ -24,7 +24,7 @@ fn who(name: &str) -> Ctx {
 
 fn server() -> Machine {
     let m = module();
-    Machine::new(Arc::new(m), Role::Authority { journal: Journal::default() }, who("server"))
+    Machine::new(Arc::new(m), Role::authority(), who("server"))
 }
 
 fn replica() -> Machine {
@@ -81,7 +81,7 @@ fn items(p: &Machine) -> usize {
 fn frames(outs: &[Output]) -> Vec<Frame> {
     outs.iter()
         .filter_map(|o| match o {
-            Output::Send(To::Back | To::All, b) => Some(Frame::dec(b).unwrap()),
+            Output::Send(To::Back | To::All, f) => Some(f.clone()),
             _ => None,
         })
         .collect()
@@ -104,7 +104,7 @@ impl Wire {
             if let Some(f) = self.down.pop_front() {
                 let part = matches!(f, Frame::Part { .. });
                 self.parts += part as usize;
-                let o = alice.step(Input::Frame { from: None, bytes: f.enc() });
+                let o = alice.step(Input::Frame { from: None, frame: f });
                 self.up.extend(frames(&o));
                 if part && Some(self.parts) == stop {
                     return;
@@ -112,7 +112,7 @@ impl Wire {
             } else if let Some(f) = self.up.pop_front() {
                 let o = server.step(Input::Frame {
                     from: Some(who("alice")),
-                    bytes: f.enc(),
+                    frame: f,
                 });
                 self.down.extend(frames(&o));
             } else {
@@ -135,11 +135,11 @@ fn connect(alice: &mut Instance) -> Wire {
 }
 
 fn same(alice: &Machine, server: &Machine) {
-    assert!(alice.fill.is_none(), "the fill is done");
+    assert!(!alice.filling(), "the fill is done");
     assert_eq!(alice.log().head(), server.log().head());
     assert_eq!(alice.store.state_hash(), server.store.state_hash());
     assert_eq!(alice.store.snapshot_rows(), server.store.snapshot_rows());
-    assert!(alice.diverged.is_empty(), "and never diverged");
+    assert!(alice.diverged() == 0, "and never diverged");
 }
 
 /// A replica the authority cannot page is filled in parts: the first says
@@ -157,7 +157,7 @@ fn a_fill_takes_first_the_tables_its_views_read() {
     wire.run(&mut server, &mut alice, Some(2));
     assert_eq!(items(&alice), 5, "every item, in the first part");
     assert!(playlists(&alice).len() < 80, "and not every playlist");
-    assert!(alice.fill.is_some());
+    assert!(alice.filling());
     wire.run(&mut server, &mut alice, None);
     assert!(wire.parts >= 3, "{} parts", wire.parts);
     same(&alice, &server);
@@ -187,11 +187,11 @@ fn a_replica_is_sent_parts_as_small_as_it_asks() {
                     biggest = biggest.max(sizes - last);
                     wire.parts += 1;
                 }
-                wire.up.extend(frames(&alice.step(Input::Frame { from: None, bytes: f.enc() })));
+                wire.up.extend(frames(&alice.step(Input::Frame { from: None, frame: f })));
             } else if let Some(f) = wire.up.pop_front() {
                 let o = server.step(Input::Frame {
                     from: Some(who("alice")),
-                    bytes: f.enc(),
+                    frame: f,
                 });
                 wire.down.extend(frames(&o));
             } else {
@@ -272,11 +272,11 @@ fn a_fill_reopened_begins_again() {
     let mut alice = alice();
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, Some(2));
-    assert!(alice.fill.is_some() && !playlists(&alice).is_empty(), "part way");
+    assert!(alice.filling() && !playlists(&alice).is_empty(), "part way");
     let mut alice = Instance::new(replica(), Some(alice.into_disk()));
     let stored = alice.stored();
     alice.step(Input::Open(stored));
-    assert!(playlists(&alice).is_empty() && alice.fill.is_none(), "nothing of it held");
+    assert!(playlists(&alice).is_empty() && !alice.filling(), "nothing of it held");
     let mut wire = connect(&mut alice);
     wire.run(&mut server, &mut alice, None);
     same(&alice, &server);
@@ -323,7 +323,7 @@ fn an_intent_during_a_fill_is_the_authoritys_to_judge() {
         wire.up.extend(frames(&o));
     }
     wire.run(&mut server, &mut alice, None);
-    assert!(alice.pending.is_empty(), "every intent confirmed");
+    assert!(alice.pending().is_empty(), "every intent confirmed");
     same(&alice, &server);
     assert_eq!(items(&alice), 6);
 }
@@ -345,10 +345,10 @@ fn a_device_opens_as_it_fills_from_its_disk() {
         for f in up.drain(..) {
             for o in server.step(Input::Frame {
                 from: Some(who("alice")),
-                bytes: f,
+                frame: Frame::dec(&f).unwrap(),
             }) {
-                if let Output::Send(To::Back | To::All, b) = o {
-                    d.receive(b);
+                if let Output::Send(To::Back | To::All, f) = o {
+                    d.receive(f.enc());
                 }
             }
         }
@@ -364,7 +364,7 @@ fn a_device_opens_as_it_fills_from_its_disk() {
     assert_eq!(items(&d.log), 5, "the table its view reads, in its first pump");
     assert!(playlists(&d.log).len() < 80, "and not every playlist");
     let mut pumps = 1;
-    while d.log.fill.is_some() {
+    while d.log.filling() {
         d.pump();
         pumps += 1;
     }

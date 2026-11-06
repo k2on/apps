@@ -127,12 +127,12 @@ fn write() {
     }
     for _ in 0..400 {
         device.pump();
-        if device.linked && device.log.pending.is_empty() && device.log.log().head().0 > N as i64 {
+        if device.linked && device.log.pending().is_empty() && device.log.log().head().0 > N as i64 {
             break;
         }
         wait(&device, &rx, std::time::Duration::from_millis(5));
     }
-    assert!(device.log.pending.is_empty(), "confirmed");
+    assert!(device.log.pending().is_empty(), "confirmed");
     // One entry after the last fold, in `log/log`: bob's sign-in.
     auth.issue(&ark_auth::server::dev_account("bob"), "phone").unwrap();
     let (head, state) = hub.with(|p| (p.log.log().head().0, p.log.store.state_hash())).unwrap();
@@ -173,7 +173,7 @@ fn an_old_data_directory_opens() {
     let device = Peer::open(config(), who, Box::new(Files::new(data.path().join("replica")).unwrap()));
     assert_eq!(device.log.log().head().0, HEAD - 1, "the replica's chain, before bob's sign-in");
     assert_eq!(held(&device.log.store), names(), "and its rows");
-    assert!(device.log.pending.is_empty(), "nothing pending");
+    assert!(device.log.pending().is_empty(), "nothing pending");
     assert!(!origins.is_empty(), "alice's entries, from the device");
 }
 

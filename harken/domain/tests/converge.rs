@@ -115,7 +115,7 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     // Somebody else's playlist is refused by their own view, and never sent.
     f.mutate(1, "add_all_to_playlist", &AddAllToPlaylist { playlist_id: favs });
     assert_eq!(f.net.refused, [(1, "not your playlist".to_string())]);
-    assert!(f.net.clients[&1].log.pending.is_empty());
+    assert!(f.net.clients[&1].log.pending().is_empty());
     f.net.refused.clear();
     f.net.settle().unwrap();
 
@@ -283,7 +283,7 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     // Somebody without the role: refused on the device, never sent…
     f.mutate(1, "remove_media", &RemoveMedia { id: attempted });
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
-    assert!(f.net.clients[&1].log.pending.is_empty(), "nothing pending");
+    assert!(f.net.clients[&1].log.pending().is_empty(), "nothing pending");
     f.net.refused.clear();
     // …and by the server, from a device that believes a role it was never given.
     f.net.clients.get_mut(&1).unwrap().log.me.roles = vec![LIBRARY.into()];

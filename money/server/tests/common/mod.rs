@@ -77,7 +77,7 @@ impl Peer {
     }
 
     pub fn pending(&self) -> usize {
-        self.client.log.pending.len()
+        self.client.log.pending().len()
     }
 
     pub fn cursor(&self) -> i64 {
