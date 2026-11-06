@@ -5,7 +5,10 @@
 // Review, swiping right approves (a full swipe, a success tap under the
 // finger), swiping left categorizes, a row that needs a category asks for
 // one and is approved with it, and Approve All clears what has a category.
-// When nothing waits, it says so the way the system does.
+// When nothing waits, it says so the way the system does. The search field
+// is the page's own row under the large title, as Android's is, not the
+// bar's drawer: a drawer would stand over the large title and push it down
+// from where every other tab has it.
 import ArkUI
 import SwiftUI
 
@@ -31,12 +34,15 @@ struct TransactionsView: View {
                 AccountButton()
             }
             Section {
-                Picker("Showing", selection: $showing) {
-                    ForEach(Showing.allCases, id: \.self) { s in
-                        Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
+                VStack(spacing: Space.m) {
+                    SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
+                    Picker("Showing", selection: $showing) {
+                        ForEach(Showing.allCases, id: \.self) { s in
+                            Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }
@@ -47,7 +53,6 @@ struct TransactionsView: View {
         }
         .listStyle(.insetGrouped)
         .largeTitleBar("Transactions", fold: fold)
-        .searchable(text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)
         .onAppear { model.hold(register: nil) }
@@ -134,5 +139,33 @@ struct TransactionsView: View {
                 DayHeader(day: day.day)
             }
         }
+    }
+}
+
+/// The search field as a row of the page: the glass, what it searches, and a
+/// way to empty it; the keyboard's key is Search.
+private struct SearchRow: View {
+    @Binding var text: String
+    let prompt: String
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.quiet)
+                .accessibilityHidden(true)
+            TextField(prompt, text: $text)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet) }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear")
+            }
+        }
+        .padding(.horizontal, Space.m)
+        .frame(minHeight: 44)
+        .background(Color.containerHigh, in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Search")
     }
 }

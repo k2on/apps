@@ -4,7 +4,8 @@
 // with its kind's mark, its bank and last digits when Plaid feeds it, its
 // balance, and how many of its transactions wait for a look. A row opens
 // its register; holding it renames, closes or reopens it. Adding an account
-// is the + (a sheet). The banks Plaid feeds are their own page, Bank
+// is the list's last row, Add Account (a sheet); the large title's line has
+// the account's face alone. The banks Plaid feeds are their own page, Bank
 // Connections. Pull to refresh asks the bank for anything new.
 import ArkUI
 import SwiftUI
@@ -21,12 +22,8 @@ struct AccountsView: View {
     var body: some View {
         let rows = model.snapshot.accounts
         List {
-            // The large title, and at the end of its line what the tab offers and the account's face.
-            LargeTitleRow("Accounts", fold: $fold, padded: false) {
-                Button { present(.addAccount) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("Add Account")
-                AccountButton()
-            }
+            // The large title, the account's face at the end of its line.
+            LargeTitleRow("Accounts", fold: $fold, padded: false) { AccountButton() }
             Section {
                 HeroFigure("Net Worth", cents: Accounts.netWorth(rows), tint: .neutral, note: "Every open account, less what's owed")
                     .listRowInsets(EdgeInsets())

@@ -182,7 +182,7 @@ exactly what the app draws):
   the last few searches when nothing is typed, on the phone only.
 - **Library** — Playlists, Albums, Artists, Composers (where there are
   works), Songs; a new playlist from
-  the `+`, checked as it is typed by `create_playlist`'s own validator,
+  the playlists' first row, New Playlist, checked as it is typed by `create_playlist`'s own validator,
   whose sentence is shown under the field.
 - **The catalogue's pages**, laid out as the desktop's are
   (`harken/iced/src/view.rs`), in the app's own type: names, titles and

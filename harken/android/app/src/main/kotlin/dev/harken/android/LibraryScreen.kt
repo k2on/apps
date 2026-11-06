@@ -1,8 +1,10 @@
 // Library: everything, five ways — the person's playlists, the albums, the
 // artists, the composers (where there are works), and every song in the
-// order it arrived — each opening the page it stands for. The playlists tab is where a new one is made; the
-// module's own checks decide whether a name will do, and say why not. And the podcasts and the
-// sermons, always there, whose + finds a show to follow (`FindShow`, Sheets.kt).
+// order it arrived — each opening the page it stands for. The playlists list's first row, New
+// Playlist, is where a new one is made; the module's own checks decide whether a name will do, and
+// say why not. And the podcasts and the sermons, always there, whose first row (or, with none yet,
+// the empty page's button) finds a show to follow (`FindShow`, Sheets.kt). The large title's line
+// has the account's face alone: no +.
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -30,7 +33,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import dev.arkui.AccountFace
 import dev.arkui.Cover
 import dev.arkui.Empty
-import dev.arkui.Glyph
 import dev.arkui.ListRow
 import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
@@ -56,6 +57,7 @@ import dev.arkui.rememberDestinationGridState
 import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
 import dev.arkui.rememberHero
+import dev.arkui.Press
 import dev.arkui.pressable
 
 /** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
@@ -94,16 +96,8 @@ data class LibraryData(
 fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryData, albumOf: (Track) -> Album?, playing: String?, act: Do) {
     Recompositions.hit("LibraryScreen")
     Column(Modifier.fillMaxSize()) {
-        // The + makes what the list shown is of: a playlist, or — over the podcasts or the sermons —
-        // a show found to follow.
-        val kind = tab.kind
-        TabTitle("Library", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) }) {
-            if (kind != null) {
-                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Follow sermons" else "Follow a podcast") }
-            } else {
-                IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") }
-            }
-        }
+        // The face alone at the end of the line: what the list makes is its own first row.
+        TabTitle("Library", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) })
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberDestinationScrollState("chips")).padding(horizontal = Space.page),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -147,7 +141,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
 
 /**
  * Whether the Library offers `tab` over `data`: a list only where there is something on it — but
- * Podcasts and Sermons always, since their + is where the first show is followed.
+ * Podcasts and Sermons always, since their page is where the first show is followed.
  */
 fun offers(tab: LibraryTab, data: LibraryData): Boolean =
     when (tab) {
@@ -165,7 +159,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         Empty(
             if (kind == "sermon") Glyphs.Pulpit else Glyphs.Show,
             if (kind == "sermon") "No sermons yet" else "No podcasts yet",
-            "Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under ${kind}s/ on the server appears here too.",
+            "Follow one: search Apple Podcasts, or paste its feed's address. A folder of it under ${kind}s/ on the server appears here too.",
             action = if (kind == "sermon") "Follow Sermons" else "Follow a Podcast",
             onAction = { act.findShow(kind) },
         )
@@ -181,6 +175,10 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         verticalArrangement = Arrangement.spacedBy(Space.xl),
         modifier = Modifier.fillMaxSize(),
     ) {
+        // Following another, first, as New Playlist is the playlists' first row.
+        item(key = "follow", span = { GridItemSpan(maxLineSpan) }) {
+            FollowRow(kind, act)
+        }
         // A feed followed that is no show yet, over the shows: that it is waiting to be read, or why
         // it could not be, and its Unfollow — the one place it can be let go before it is a show.
         items(waiting, key = { "feed:" + it.url }, span = { GridItemSpan(maxLineSpan) }) { f ->
@@ -207,6 +205,27 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
+    }
+}
+
+/**
+ * The shows' first row, as New Playlist is the playlists': a + tile and "Follow a Podcast" or
+ * "Follow Sermons", finding a show to follow (`FindShow`). In the grid's own padding, so it has none
+ * of its own at the sides.
+ */
+@Composable
+private fun FollowRow(kind: String, act: Do) {
+    Row(
+        Modifier.fillMaxWidth().pressable(onClick = { act.findShow(kind) }, press = Press.Highlight).padding(vertical = Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.size(56.dp)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Glyphs.Plus, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.width(Space.l))
+        Text(if (kind == "sermon") "Follow Sermons" else "Follow a Podcast", style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }
 

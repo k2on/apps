@@ -146,8 +146,11 @@ system's browser sheet (`ASWebAuthenticationSession`) to
 signs out, or leaves the demo.
 
 The **account**: the person's face at the end of each tab's large title,
-on its own line with the tab's + (ArkUI's `LargeTitleRow` and
-`AccountFace`), marked when a bank wants somebody, raises the account
+on its own line (ArkUI's `LargeTitleRow`, the one title row every tab of
+both apps has, and `AccountFace`) — beside Budget's ••• menu and
+Transactions' + for a new transaction, with no other + there: Add Account
+is the Accounts list's last row, and Budget's new transaction is its •••
+menu's first item — marked when a bank wants somebody, raises the account
 sheet (ArkUI's `AccountSheet`): who and where, the banks that want a look,
 Settings, and Sign Out or Leave the Demo.
 

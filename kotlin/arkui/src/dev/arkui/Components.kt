@@ -96,10 +96,14 @@ public fun Heading(
 }
 
 /**
- * A tab's own title, with what it offers at the end: the theme's largest headline, bold, so it reads
- * as the iPhone's large title does. [actions] (a +) sit at the line's end, and [account] — the
- * account's face ([AccountFace]) — after them, at the very end of the title's own line, centred on
- * it, as the iPhone's apps put it: not in a row above the title.
+ * A tab's own title, the one large title row every tab of every app has: the iPhone's large title
+ * ([LargeTitle], 34 sp bold) at the leading edge, [actions] (a menu, never a +) at the line's end,
+ * and [account] — the account's face ([AccountFace]) — after them, at the very end of the title's
+ * own line, centred on it, as the iPhone's apps put it: not in a row above the title. One top
+ * inset, one height, one font ([TabTitle.TOP], [TabTitle.LINE], [TabTitle.BOTTOM]), laid out from
+ * the status bar's foot wherever it is used, so the title's baseline and the face are in the same
+ * place on every tab: harken's in its list, money's over its page (`Page`). An app adds no padding
+ * of its own around it.
  */
 @Composable
 public fun TabTitle(
@@ -109,14 +113,13 @@ public fun TabTitle(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs)
-            .height(52.dp),
+            .padding(start = Space.page, end = Space.xs, top = TabTitle.TOP, bottom = TabTitle.BOTTOM)
+            .height(TabTitle.LINE),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             title,
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineLarge.merge(LargeTitle),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).semantics { heading() },
@@ -124,6 +127,21 @@ public fun TabTitle(
         actions()
         account?.invoke()
     }
+}
+
+/** The large title row's measures, written once: [TabTitle] is laid out by nothing else. */
+public object TabTitle {
+    /** From the status bar's foot to the title's line. */
+    public val TOP: Dp = Space.l
+
+    /** The title's line, which the face and the actions are centred on. */
+    public val LINE: Dp = 52.dp
+
+    /** Under the line, before the page's first row. */
+    public val BOTTOM: Dp = Space.xs
+
+    /** The whole row. */
+    public val HEIGHT: Dp = TOP + LINE + BOTTOM
 }
 
 /** A page's own bar: back, its title, and what else the page offers. */

@@ -74,7 +74,7 @@ public object Account {
 }
 
 /**
- * Who is signed in, for the end of a tab's large title ([TabTitle]'s `account`, [LargeTitleLine]):
+ * Who is signed in, for the end of a tab's large title ([TabTitle]'s `account`):
  * their [Face] at [FaceSide], badged in the error colour while [attention] says what wants a look
  * (money's banks), raising the account sheet on a tap ([onClick]). A screen reader hears "Signed in
  * as …", then [attention], and that the tap is for the account and settings.

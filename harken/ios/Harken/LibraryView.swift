@@ -4,9 +4,11 @@
 // it stands for, zooming out of its cover (Android's `LibraryScreen.kt`) —
 // and the podcasts and the sermons, always there, so the first can be
 // followed. They are a row of capsules under the large title that scrolls
-// sideways, as Android's chips are; the playlists list is where a new one is made, and the
-// domain's own checks decide whether a name will do; the + on Podcasts and
-// Sermons finds a show to follow (`FollowSheet`).
+// sideways, as Android's chips are; the playlists list's first row, New
+// Playlist, is where a new one is made, and the domain's own checks decide
+// whether a name will do; on Podcasts and Sermons the first row (or, with
+// none yet, the empty page's button) finds a show to follow (`FollowSheet`).
+// The large title's line has the account's face alone: no +.
 import ArkUI
 import SwiftUI
 
@@ -27,7 +29,6 @@ enum LibraryTab: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @Binding var tab: LibraryTab
     @EnvironmentObject private var model: Model
-    @Environment(\.present) private var present
 
     var body: some View {
         let s = model.snapshot
@@ -51,20 +52,10 @@ struct LibraryView: View {
         // under it rather than through the capsules.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                // The large title, and at the end of its line the + and the
-                // account's face. On Podcasts and Sermons the + finds a show to
-                // follow; on the rest it makes a playlist.
-                LargeTitleRow("Library") {
-                    if let kind = tab.kind {
-                        Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
-                            .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
-                    } else {
-                        Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
-                            .accessibilityLabel("New playlist")
-                    }
-                    AccountButton()
-                }
-                // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
+                // The large title, the account's face at the end of its line:
+                // what a list makes is its own first row.
+                LargeTitleRow("Library") { AccountButton() }
+                // Podcasts and Sermons always, with none of the kind yet too: their page is where the first is followed.
                 LibraryChips(tab: $tab)
                 if let host = model.unreachable { Offline(host: host) }
             }
@@ -200,7 +191,7 @@ private struct ShowsGrid: View {
                     Image.show(sermon: kind == "sermon")
                 }
             } description: {
-                Text("Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under \(kind)s/ on the server appears here too.")
+                Text("Follow one: search Apple Podcasts, or paste its feed's address. A folder of it under \(kind)s/ on the server appears here too.")
             } actions: {
                 Button(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast") { present(.follow(kind: kind)) }
                     .buttonStyle(.glassProminent)
@@ -208,6 +199,18 @@ private struct ShowsGrid: View {
         } else {
             ScrollView {
                 VStack(spacing: Space.xl) {
+                    // Following another, first, as New Playlist is the playlists' first row.
+                    Button { present(.follow(kind: kind)) } label: {
+                        HStack(spacing: Space.l) {
+                            Image(systemName: "plus").font(.title2).foregroundStyle(Color.accentText).frame(width: 56, height: 56)
+                                .surface(in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
+                            Text(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast").font(.headline)
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.pressRow)
+                    .foregroundStyle(.ink)
                     // Followed and not a show yet: the server has not read its feed, or could not.
                     if !unread.isEmpty {
                         VStack(spacing: Space.s) {

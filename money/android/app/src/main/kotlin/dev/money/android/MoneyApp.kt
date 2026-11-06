@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Badge
@@ -48,7 +50,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -74,7 +79,7 @@ import dev.arkui.AccountGroup
 import dev.arkui.AccountRow
 import dev.arkui.AccountSheet
 import dev.arkui.ArkGlyphs
-import dev.arkui.LargeTitleLine
+import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
@@ -307,8 +312,12 @@ fun bankSaid(t: TxnLine): String {
  * A page as every screen here is laid out: a large top app bar that collapses as the content
  * scrolls, its `actions`, a back arrow when `onBack` is given, the FAB, the snackbar, and pull to
  * refresh asking the bank for anything new. `content` gets the padding to keep clear of the bar.
- * A tab's root (no `onBack`) has the account's face at the end of its large title's line
- * (arkui's `LargeTitleLine`), raising the account sheet; a page pushed over it has none.
+ * A tab's root (no `onBack`) has arkui's [TabTitle] instead of the app bar — the one large title row
+ * harken's tabs have too, from the status bar's foot, with no padding of money's own — its
+ * `actions` (Budget's menu) and the account's face at the end of its line, raising the account
+ * sheet. It goes up with the page as the content scrolls, as harken's and the iPhone's do, and
+ * comes back once the content is back at its top; a page pushed over a tab has the large top app
+ * bar, and no face.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -325,8 +334,6 @@ fun Page(
     val shell = LocalShell.current
     val ledger by shell.book.state.collectAsStateWithLifecycle()
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    // A tab's root has the account at the end of its large title, while the title is out.
-    val open by remember(bar) { derivedStateOf { bar.state.collapsedFraction < 0.5f } }
     Scaffold(
         modifier = modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
@@ -334,40 +341,47 @@ fun Page(
             if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
-            // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
-            LargeTitles {
-                LargeTopAppBar(
-                    title = {
-                        val text: @Composable () -> Unit = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                        if (onBack != null) {
-                            text()
-                        } else {
-                            LargeTitleLine(
-                                shown = open,
-                                account = {
-                                    val wanting = ledger.banksWanting
-                                    AccountFace(
-                                        ledger.who,
-                                        ledger.picture,
-                                        onClick = shell.onAccountSheet,
-                                        attention = if (wanting > 0) "Banks need a look" else null,
-                                    )
-                                },
-                                title = text,
+            if (onBack == null) {
+                // The tab's large title row, from the status bar's foot, going up under it as the
+                // page scrolls: the scroll behaviour's offset, read as it is laid out, not composed.
+                Box(
+                    Modifier.windowInsetsPadding(WindowInsets.statusBars).clipToBounds().layout { m, c ->
+                        val p = m.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                        val limit = -p.height.toFloat()
+                        if (bar.state.heightOffsetLimit != limit) bar.state.heightOffsetLimit = limit
+                        val off = bar.state.heightOffset.roundToInt().coerceIn(-p.height, 0)
+                        layout(p.width, p.height + off) { p.place(0, off) }
+                    }
+                ) {
+                    TabTitle(
+                        title,
+                        account = {
+                            val wanting = ledger.banksWanting
+                            AccountFace(
+                                ledger.who,
+                                ledger.picture,
+                                onClick = shell.onAccountSheet,
+                                attention = if (wanting > 0) "Banks need a look" else null,
                             )
-                        }
-                    },
-                    navigationIcon = {
-                        if (onBack != null) {
+                        },
+                        actions = actions,
+                    )
+                }
+            } else {
+                // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
+                LargeTitles {
+                    LargeTopAppBar(
+                        title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = {
                             IconButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                             }
-                        }
-                    },
-                    actions = actions,
-                    scrollBehavior = bar,
-                    colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
-                )
+                        },
+                        actions = actions,
+                        scrollBehavior = bar,
+                        colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    )
+                }
             }
         },
         floatingActionButton = fab,

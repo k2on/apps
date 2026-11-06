@@ -22,6 +22,10 @@
 // rule's mark by what it was assigned, and offers no assigning or moving:
 // its swipes are gone and holding it says the rule.
 //
+// The large title's line has the ••• menu and the account's face, no +: a
+// new transaction is the menu's first item (and the Transactions tab's +),
+// a new category or group the menu's and each group's own Add a Category.
+//
 // Reorder Categories (the ••• menu) is the list's Edit mode, as Reminders
 // has its lists and their groups: the budget becomes one list, each group a
 // row over its categories, every row with the system's grabber. A category
@@ -61,14 +65,13 @@ struct BudgetView: View {
         let groups = Months.groups(s.groups, s.lines, hidden: showHidden)
         let shown = ahead ?? groups
         List {
-            // The large title, and at the end of its line what the tab offers and the account's face.
+            // The large title, and at the end of its line the ••• menu and the account's face.
             LargeTitleRow("Budget", fold: $fold, padded: false) {
                 if editing {
                     Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
                         .fontWeight(.semibold)
                 } else {
                     options
-                    AddTransactionButton()
                 }
                 AccountButton()
             }
@@ -129,6 +132,11 @@ struct BudgetView: View {
 
     private var options: some View {
         Menu {
+            Section {
+                Button {
+                    present(.transaction(Draft(account: Accounts.usual(model.snapshot.accounts)?.id, date: model.today)))
+                } label: { Label("Add Transaction", systemImage: "plus") }
+            }
             Section("Auto-Assign") {
                 Button { model.autoAssign(.underfunded) } label: { Label("Underfunded", systemImage: "target") }
                 Button { model.autoAssign(.lastMonth) } label: { Label("Assigned Last Month", systemImage: "arrow.uturn.backward") }

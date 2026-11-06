@@ -2,24 +2,30 @@
 // the large title's own line, centred on it, as Apple's own apps have it in
 // iOS 26 (the Games app's Home, on the right) — not in a bar row above the
 // title, and with no glass and no button chrome: the round picture, or the
-// initials on the accent, alone. What else the tab offers (a +) sits just
-// before it on the same line. Tapped, it raises the account sheet rather than
+// initials on the accent, alone. A menu the tab offers (Budget's •••) may sit
+// just before it on the same line; a + does not — what a tab makes is a row
+// of its own page. Tapped, it raises the account sheet rather than
 // pushing Settings: who they are, the server and whether it answers, what the
 // app adds (money's banks that want a look), Settings, Sign Out, and Done.
 // Only a tab's root has it: a page pushed over a tab has its own bar.
 //
 // The line is the page's own first row (`LargeTitleRow`), which scrolls
 // with it, as the system's large title does: the title full size and bold
-// at the leading edge, the +s and the face at the trailing edge. The bar is
+// at the leading edge, the face at the trailing edge. It is one row for
+// every tab of every app — one top inset, one height, one font
+// (`AccountSizes.titleTop`, `titleLine`, `titleBottom`, `.largeTitle.bold()`)
+// — and `largeTitleBar` takes away whatever top margin the scroll view
+// under it would add (an inset grouped list's), so the title's baseline and
+// the face are in the same place on every tab; an app adds none. The bar is
 // inline and empty at rest (`largeTitleBar`); once the row has scrolled
 // under it, the title comes into the bar's middle, rising in on
 // `Springs.move` (`MotionTokens.rise`, transform and opacity only, as
 // `inlineHeader` does) and going back the same way; under Reduce Motion it
 // only fades. Not a toolbar item: a bar's items are cut short.
 //
-// Android's twins are arkui's `AccountFace`, `TabTitle`'s and
-// `LargeTitleLine`'s `account`, and `AccountSheet` (kotlin/arkui, Account.kt),
-// with the same words.
+// Android's twins are arkui's `AccountFace`, `TabTitle`'s `account` (the
+// same one row there), and `AccountSheet` (kotlin/arkui, Account.kt), with
+// the same words.
 import SwiftUI
 
 #if os(iOS)
@@ -32,6 +38,12 @@ public enum AccountSizes {
     public static let badgeOut: CGFloat = 2
     /// How small a long large title may shrink to fit its line beside the face.
     public static let shrink: CGFloat = 0.7
+    /// The large title row (`LargeTitleRow`), written once for every tab: from
+    /// the bar's foot to its line, the line the title and the face are centred
+    /// on, and under it before the page's first row.
+    public static let titleTop: CGFloat = 0
+    public static let titleLine: CGFloat = 44
+    public static let titleBottom: CGFloat = Space.s
     /// What a screen reader hears of the face, and of what its tap does.
     public static func label(_ name: String) -> String { "Signed in as \(name.isEmpty ? "?" : name)" }
     public static let hint = "Account and settings"
@@ -78,14 +90,17 @@ public struct AccountFace: View {
 }
 
 /// A tab's large title as the first row of its page: the title, full size
-/// and bold, at the leading edge, and `trailing` — the tab's +s, then its
-/// `AccountFace` — at the trailing edge of the same line, centred on it, none
-/// of them on glass. It scrolls with the page, as the system's large title
-/// does; `fold` is told how tall it is, for `largeTitleBar` to bring the
-/// inline title in once it has gone under the bar (none, for a row that
-/// stays put). In a `List` it is a row of its own with no background, no
-/// separator and no insets of its own (`padded` false where the list's
-/// sections already inset their rows from the edges).
+/// and bold, at the leading edge, and `trailing` — a menu where the tab has
+/// one, then its `AccountFace`; never a + — at the trailing edge of the same
+/// line, centred on it, none of them on glass. One inset, one height and one
+/// font for every tab (`AccountSizes.titleTop`, `titleLine`, `titleBottom`),
+/// so it is drawn alike wherever it is. It scrolls with the page, as the
+/// system's large title does; `fold` is told how tall it is, for
+/// `largeTitleBar` to bring the inline title in once it has gone under the
+/// bar (none, for a row that stays put). In a `List` it is a row of its own
+/// with no background, no separator and no insets of its own (`padded` false
+/// where the list's sections already inset their rows from the edges, which
+/// puts the title at the same 16 pt).
 @available(iOS 26.0, *)
 public struct LargeTitleRow<Trailing: View>: View {
     let title: String
@@ -116,8 +131,10 @@ public struct LargeTitleRow<Trailing: View>: View {
                 // A row's buttons, each its own: a list row otherwise fires every one of them.
                 .buttonStyle(.borderless)
         }
+        .frame(height: AccountSizes.titleLine)
         .padding(.horizontal, padded ? Space.page : 0)
-        .padding(.bottom, Space.s)
+        .padding(.top, AccountSizes.titleTop)
+        .padding(.bottom, AccountSizes.titleBottom)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in fold?.wrappedValue = h }
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
@@ -133,7 +150,9 @@ extension View {
     /// `fold` (the row's height) under the bar, the title small in the bar's
     /// middle, rising in on `Springs.move` (a fade under Reduce Motion) and
     /// going back the same way. With no `fold` the row stays put, and so
-    /// does the empty bar.
+    /// does the empty bar. With a `fold` the row is the scroll view's first,
+    /// so the scroll view's own top margin goes (an inset grouped list's
+    /// 35 pt): the row is at the bar's foot in a `List` as in a `ScrollView`.
     public func largeTitleBar(_ title: String, fold: CGFloat? = nil) -> some View {
         modifier(LargeTitleBar(title: title, fold: fold))
     }
@@ -148,6 +167,7 @@ private struct LargeTitleBar: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .contentMargins(.top, fold == nil ? nil : CGFloat(0), for: .scrollContent)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onScrollGeometryChange(for: Bool.self) { g in
