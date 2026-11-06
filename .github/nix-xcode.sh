@@ -22,26 +22,34 @@ if [ ! -d "$xcode/Contents/Developer" ]; then
 fi
 for attr in "$@"; do
   ref="$flake#packages.aarch64-darwin.$attr"
-  # Taken whole, then searched: `nix … | grep -q` under pipefail reads a
-  # match as a failure when grep leaves before nix has said everything.
-  if ! plan=$(nix build --dry-run "$ref" 2>&1); then
-    if grep -q "does not provide attribute" <<< "$plan"; then
+  # Evaluated once: its derivation, which the plan and the build then take
+  # as it is, with nothing evaluated again (each had evaluated the flake,
+  # which under a busy runner was minutes). Its time said, so that it shows.
+  start=$(date +%s)
+  if ! drv=$(nix eval --raw "$ref.drvPath" 2> "${TMPDIR:-/tmp}/nix-xcode.err"); then
+    if grep -q "does not provide attribute" "${TMPDIR:-/tmp}/nix-xcode.err"; then
       echo "$attr: the checkout has no such package" >&2
       status=2
     else
-      echo "$plan" >&2
+      cat "${TMPDIR:-/tmp}/nix-xcode.err" >&2
       echo "::error::$attr did not evaluate" >&2
       status=1
     fi
     continue
   fi
+  echo "$attr: evaluated in $(( $(date +%s) - start ))s, $drv" >&2
+  # Taken whole, then searched: `nix … | grep -q` under pipefail reads a
+  # match as a failure when grep leaves before nix has said everything.
+  plan=$(nix build --dry-run "$drv^*" 2>&1)
   echo "$plan" >&2
   if grep -q -- '-Xcode[^/]*\.app' <<< "$plan"; then
     echo "::error::$attr's plan has an Xcode store path in it: Xcode must stay out of the store (flake.nix, xcode)" >&2
     exit 1
   fi
   echo "$attr: building (or fetching)" >&2
-  if path=$(nix build --no-link --print-out-paths --print-build-logs "$ref" 2> >(cat >&2)); then
+  start=$(date +%s)
+  if path=$(nix build --no-link --print-out-paths --print-build-logs "$drv^out" 2> >(cat >&2)); then
+    echo "$attr: built or fetched in $(( $(date +%s) - start ))s" >&2
     echo "$attr $path"
   else
     echo "::error::$attr did not build" >&2

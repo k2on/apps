@@ -245,9 +245,9 @@ pub fn view<'a, M: Clone + 'a, T: Clone>(picker: &'a Picker<T>, focused: bool, m
         (None, None) => rows,
     };
 
-    let body = scrollable(rows).style(style::bars).height(Length::Shrink);
+    let body = crate::scroll::elastic(scrollable(rows).style(style::bars).height(Length::Shrink));
     let inside: Element<'a, M> = match picker.origin {
-        Some(_) => body.into(),
+        Some(_) => body,
         None => column![
             container(text(middle(&picker.title, 38)).size(13)).padding(Padding::from([4.0, 10.0])),
             container(

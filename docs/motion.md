@@ -104,7 +104,7 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 | The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | `motion::CAP` (`CAP_MS`) on `reorder`'s settle; closed form otherwise, `LAST_FRAME` 50 ms past rest |
 | Where a flick lands | `Springs.project`, `Springs.nearest`, `DECELERATION` 0.998, `SNAPPY` 0.99 | `Momentum.project`, `Momentum.target`, `Momentum.normal`/`snappy` | — |
 | Velocity as the spring wants it | `Animatable.animateTo(…, initialVelocity)` in px/s | `Momentum.relative(_:from:to:)` (share of the gap per second) | `Slide::moving_at(speed)` in px/s |
-| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12 | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `swipe::band(x)`, `STRETCH` 180 px |
+| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12; Apple's rubber band `Springs.band(x, limit)` (`RUBBER_BAND` 0.55), the player card past its ends | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `motion::rubberband(x, d)` (`RUBBER_BAND` 0.55), a list past its ends (`scroll::elastic`); `swipe::band(x)`, `STRETCH` 180 px |
 | No coasting after a fling | `Springs.noDecay()` | — | — |
 | Reduced motion | `reducedMotion()`, `LocalReducedMotion`, `ReducedMotion.ALWAYS_ANIMATE`, `unlessReduced(spec)`, `keepMotion()` | `\.reducesMotion`, `Motion.alwaysAnimate`, `.motion(_:value:)`, `.motionTransition(_:)`, `.motionScale(_:)`, `Animation.reduced(_:)`, `Springs.calm` | `motion::reduced()`, `ALWAYS_ANIMATE`, `ARK_REDUCE_MOTION`, `Spring::or_instant`, `Shown::new` (becomes `FADE`) |
 | Press | `Modifier.pressable(press = Press.Give \| Press.Highlight)`, `Press.SCALE` 0.97, `Press.HIGHLIGHT` 0.1 | `.buttonStyle(.press)`, `.buttonStyle(.pressRow)` | the widget's pressed colour; no scale |
@@ -311,9 +311,17 @@ motion it is always critically damped.
 follows less and less, then springs back. `Springs.preview(r)` is
 `limit · (1 − e^(−r / give))`, the curve Android's own back preview uses;
 `swipe::band(x)` is the same shape for a trackpad's two-finger pull; Apple's
-rubber band is `(x · d · c) / (d + c · |x|)` with `c` 0.55, and a new
-gesture uses one of these rather than a fourth. A hard wall reads as
-frozen; resistance reads as "responsive, but there's nothing more here".
+rubber band is `(x · d · c) / (d + c · |x|)` with `c` 0.55
+(`Springs.band`, `Momentum.band`, `motion::rubberband`, all on the
+`rubber-band` token), and a new gesture uses one of these rather than a
+fourth. A hard wall reads as frozen; resistance reads as "responsive, but
+there's nothing more here". The expanding card (the player) bands past
+both its ends on Android, as the iPhone's full player bands past its top;
+on the desktop every page and list is `arkui::scroll::elastic`, which bands
+a trackpad's pull past either end of a scrollable — never a mouse wheel's
+lines, never under reduced motion — and springs back on `SMOOTH` from the
+speed it was drawn going, never past the edge, without touching the scroll
+offset the keys, the scroll edge and the small header read.
 
 **Cap the settle.** However slow and far the release, the settle is done
 within `CAP_MS`: Compose's `Capped` cuts a spring's tail that the tuning did
@@ -577,7 +585,8 @@ them are where each lives here.
 - **Settle** — the spring after a release, capped. `Springs.settle`,
   `CAP_MS`.
 - **Rubber-banding** — resistance past a boundary, then snap-back.
-  `Springs.preview`, `swipe::band`.
+  `Springs.band`, `Momentum.band`, `motion::rubberband`,
+  `scroll::elastic`; `Springs.preview`, `swipe::band`.
 - **Preview** — a gesture's visible progress before it commits, bounded,
   as Android's predictive back. `Springs.PREVIEW`, `GIVE`.
 - **Interruptible** — can be grabbed or retargeted mid-flight from its

@@ -55,7 +55,11 @@ for theme in light dark; do
   appearance "$theme"
   # The test's own lines, and why it failed if it did; its whole log beside its results.
   status=0
-  TEST_RUNNER_APP_BUNDLE="$bundle" TEST_RUNNER_APP_SERVER="$server" TEST_RUNNER_APP_USER="$user" \
+  # Signed in once, in light: dark opens signed in already, and with no
+  # server given does not wait for the server's page to be there.
+  signin=$server
+  [ "$theme" = light ] || signin=
+  TEST_RUNNER_APP_BUNDLE="$bundle" TEST_RUNNER_APP_SERVER="$signin" TEST_RUNNER_APP_USER="$user" \
   TEST_RUNNER_APP_SHOTS="$shots" TEST_RUNNER_APP_OUT="$out/$theme" \
     xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
       -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$app-ios-$theme.xcresult" \

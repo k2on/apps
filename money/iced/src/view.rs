@@ -536,14 +536,16 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(container(body).padding(Padding {
-                    bottom: PAD,
-                    ..Padding::ZERO
-                }))
-                .id(look::BUDGET)
-                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                .height(Length::Fill)
-                .style(style::bars)
+                arkui::scroll::elastic(
+                    scrollable(container(body).padding(Padding {
+                        bottom: PAD,
+                        ..Padding::ZERO
+                    }))
+                    .id(look::BUDGET)
+                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                    .height(Length::Fill)
+                    .style(style::bars)
+                )
             ],
         ]
         .spacing(12)
@@ -707,11 +709,11 @@ impl App {
             top: PAD + arkui::account::HEIGHT + 6.0,
             ..Padding::new(PAD)
         };
-        container(
+        container(arkui::scroll::elastic(
             scrollable(under_face(body.spacing(12).padding(pad), style::surface_color))
                 .height(Length::Fill)
                 .style(style::bars),
-        )
+        ))
         .width(Length::Fixed(INSPECTOR))
         .height(Length::Fill)
         .style(style::surface)
@@ -1101,14 +1103,16 @@ impl App {
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body.padding(Padding {
-                    bottom: PAD,
-                    ..Padding::ZERO
-                }))
-                .id(look::REGISTER)
-                .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
-                .height(Length::Fill)
-                .style(style::bars),
+                arkui::scroll::elastic(
+                    scrollable(body.padding(Padding {
+                        bottom: PAD,
+                        ..Padding::ZERO
+                    }))
+                    .id(look::REGISTER)
+                    .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
+                    .height(Length::Fill)
+                    .style(style::bars),
+                ),
             ],
         ]
         .spacing(LEDGER_GAP)
@@ -1480,12 +1484,13 @@ impl App {
             .spacing(16)
             .padding(PAD)
             .width(Length::Fill);
-        scrollable(under_face(page, page_ground))
-            .id(look::PAGE_TOP)
-            .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
-            .height(Length::Fill)
-            .style(style::bars)
-            .into()
+        arkui::scroll::elastic(
+            scrollable(under_face(page, page_ground))
+                .id(look::PAGE_TOP)
+                .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars),
+        )
     }
 
     fn tile<'a>(&self, label: &str, cents: i64, tone: Tone) -> Element<'a, Message> {
@@ -1668,7 +1673,7 @@ impl App {
         if matches!(choosing, Choosing::Txns(_)) {
             list = list.push(option("No category".into(), None, Choice::Category(None)));
         }
-        c.push(scrollable(list).height(Length::Fixed(380.0)).style(style::bars))
+        c.push(arkui::scroll::elastic(scrollable(list).height(Length::Fixed(380.0)).style(style::bars)))
             .push(row![fill(), quiet("Cancel", Message::CloseModal)])
             .into()
     }

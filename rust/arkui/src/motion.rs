@@ -92,6 +92,34 @@ pub fn released(speed: f32) -> Spring {
     }
 }
 
+/// Apple's rubber band: `overshoot` pixels past an edge, in room
+/// `dimension` tall (the view it is pulled in), drawn
+/// `overshoot · dimension · c / (dimension + c · |overshoot|)` past it, `c`
+/// [`tokens::RUBBER_BAND`] — the iPhone's `Momentum.band` and the same
+/// token. It gives `c` of a pixel for each pixel at first and ever less
+/// after, and never reaches `dimension`: "there is nothing more here",
+/// not a wall.
+pub fn rubberband(overshoot: f32, dimension: f32) -> f32 {
+    let c = tokens::RUBBER_BAND;
+    match dimension > 0.0 {
+        true => overshoot * dimension * c / (dimension + c * overshoot.abs()),
+        false => 0.0,
+    }
+}
+
+/// How far past the edge a band drawn `drawn` past it was pulled: the
+/// inverse of [`rubberband`], so a band grabbed again as it springs back
+/// carries on from where it is drawn.
+pub fn unband(drawn: f32, dimension: f32) -> f32 {
+    let c = tokens::RUBBER_BAND;
+    if dimension <= 0.0 {
+        return 0.0;
+    }
+    // Never quite the whole room, which no pull reaches.
+    let at = drawn.abs().min(dimension * 0.999);
+    drawn.signum() * at * dimension / (c * (dimension - at))
+}
+
 /// The longest a settle may run, whatever a release handed it
 /// ([`tokens::CAP_MS`]): a critically damped one is at rest first, so this
 /// bounds only a release the tuning did not see.
@@ -661,6 +689,32 @@ mod tests {
         assert!(!part.gone(open + ms(80)));
         assert!(part.gone(open + Duration::from_secs(2)));
         assert!(!part.moving(open + Duration::from_secs(2)));
+    }
+
+    /// Apple's rubber band: `c` of a pixel per pixel at first, ever less
+    /// after, `x·d·c / (d + c·|x|)` exactly, the same either way, never as
+    /// far as the room it is pulled in — and [`unband`] undoes it.
+    /// Falsified by a band that follows one to one (no `c` on top), or by
+    /// `c` read as anything but the token: the pull of a whole room drew
+    /// it 0.55/1.55 of the way.
+    #[test]
+    fn a_pull_past_the_edge_follows_ever_less() {
+        let d = 600.0;
+        assert_eq!(rubberband(0.0, d), 0.0);
+        assert!((rubberband(1.0, d) - tokens::RUBBER_BAND).abs() < 1e-3, "c at first");
+        assert!((rubberband(d, d) - d * 0.55 / 1.55).abs() < 1e-3, "{}", rubberband(d, d));
+        assert_eq!(rubberband(-120.0, d), -rubberband(120.0, d), "either way alike");
+        let mut last = 0.0;
+        for n in 1..200 {
+            let x = rubberband(n as f32 * 50.0, d);
+            assert!(x > last && x < d, "{n}: {x}");
+            assert!(x - last < 50.0 * tokens::RUBBER_BAND, "ever less per pixel");
+            last = x;
+        }
+        assert_eq!(rubberband(100.0, 0.0), 0.0, "no room, no band");
+        for x in [-900.0, -40.0, 3.0, 250.0, 2000.0] {
+            assert!((unband(rubberband(x, d), d) - x).abs() < 0.05 * x.abs().max(1.0), "{x}");
+        }
     }
 
     /// `ARK_REDUCE_MOTION` says first; then the system, only when listened

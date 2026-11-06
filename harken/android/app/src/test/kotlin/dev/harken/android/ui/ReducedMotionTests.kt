@@ -2,10 +2,12 @@
 // motion reduced the expanding card never travels — it fades out, is at its
 // other end, and fades in — where without it the card passes through every
 // place between; a flick's settle bounces and a reduced one does not; a
-// release goes to the rest nearest where it was going; and tracking is
+// release goes to the rest nearest where it was going; a drag past either
+// end bands and springs back, and with motion reduced stops; and tracking is
 // tight on big text, nothing on body, a little open on captions.
 package dev.arkui
 
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.ui.unit.Density
 import kotlinx.coroutines.runBlocking
@@ -51,6 +53,69 @@ class ReducedMotionTests {
         assertTrue("and never fades", moved.all { it.second == 1f })
         assertTrue("with it, the card is never between its ends", faded.all { it.first == 1f })
         assertTrue("it fades in instead", faded.any { it.second > 0.05f && it.second < 0.95f })
+    }
+
+    /** A card at `face`, 1000 px of travel on a screen 2000 tall, dragged by each of `by` in turn. */
+    private fun dragged(face: CardFace, reduced: Boolean, vararg by: Float): ExpandingCardState {
+        val card = ExpandingCardState(face, Density(1f))
+        card.reach(1_000f)
+        card.room = 2_000f
+        card.reduced = reduced
+        for (d in by) runBlocking { card.finger.drag(MutatePriority.UserInput) { dragBy(d) } }
+        return card
+    }
+
+    /**
+     * The full player dragged on up past the screen's top goes on, banded — Apple's rubber band of
+     * how far past, less than the finger and ever less — while `p` stays at its end; back down,
+     * the band gives way first. Let go still going up, it carries on out a moment, from the
+     * release's speed, then springs back to the edge and is never drawn past it. Falsified by the
+     * old clamp (no band at all), by a band one to one with the finger, or by the flick's
+     * momentum drawn past the edge.
+     */
+    @Test
+    fun aDragPastTheTopBandsAndSpringsBackToTheEdge() {
+        val card = dragged(CardFace.Expanded, false, -300f)
+        val pulled = card.band
+        assertEquals("still open", 1f, card.p, 0f)
+        assertTrue("drawn above the top: $pulled", pulled < 0f)
+        assertTrue("by less than the finger: $pulled", -pulled < 300f * Springs.RUBBER_BAND)
+        assertEquals("Apple's band", Springs.band(-300f, 2_000f), pulled, 1e-3f)
+        assertEquals("x·d·c / (d + c·|x|)", -300f * 2_000f * 0.55f / (2_000f + 0.55f * 300f), pulled, 1e-3f)
+        runBlocking { card.finger.drag(MutatePriority.UserInput) { dragBy(100f) } }
+        assertEquals("back down, the band first", -200f, card.stretch, 1e-3f)
+        assertEquals("and the card still open", 1f, card.p, 0f)
+        val drawn = card.band
+        val seen = mutableListOf<Float>()
+        runBlocking { withContext(Frames({ _, _ -> seen += card.band }, card)) { card.release(-1_500f) } }
+        println("band let go from $drawn: $seen")
+        assertTrue("on out a moment, from the release's speed: $seen", seen.min() < drawn)
+        assertTrue("never past the edge: $seen", seen.all { it <= 0f })
+        assertEquals("back at the edge", 0f, card.band, 0f)
+        assertEquals("and open", 1f, card.p, 0f)
+    }
+
+    /**
+     * The bar dragged down past where it rests bands too, and settles back; dragged up from the bar
+     * past the screen's top, the card is open and the rest is band. With motion reduced, neither:
+     * the card stops at its ends, as it always did. Falsified by a band under reduced motion.
+     */
+    @Test
+    fun theBarBandsBelowItsRestAndNothingBandsWithMotionReduced() {
+        val low = dragged(CardFace.Collapsed, false, 250f)
+        assertEquals("still at the bar", 0f, low.p, 0f)
+        assertTrue("drawn below its rest: ${low.band}", low.band > 0f && low.band < 250f * Springs.RUBBER_BAND)
+        runBlocking { withContext(Frames({ _, _ -> assertTrue(low.band >= 0f) }, low)) { low.release(0f) } }
+        assertEquals("back", 0f, low.band, 0f)
+        assertEquals("at the bar", 0f, low.p, 0f)
+        val through = dragged(CardFace.Collapsed, false, -600f, -700f)
+        assertEquals("open", 1f, through.p, 0f)
+        assertEquals("and the rest past the top", -300f, through.stretch, 1e-3f)
+        val still = dragged(CardFace.Collapsed, true, 250f)
+        assertEquals("reduced: no band below", 0f, still.band, 0f)
+        val stillUp = dragged(CardFace.Collapsed, true, -600f, -700f)
+        assertEquals("reduced: open", 1f, stillUp.p, 0f)
+        assertEquals("and no band above", 0f, stillUp.band, 0f)
     }
 
     @Test
