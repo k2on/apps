@@ -419,7 +419,7 @@ fun HarkenApp(
             override fun previous() = playback.previous()
 
             // An episode: no album, and its name a show's.
-            override fun jogs(): Boolean = player.now?.let { n -> n.album.isEmpty() && shows.any { it.title == n.artist } } ?: false
+            override fun jogs(): Boolean = player.now?.let { Menu.showOf(it, shows) } != null
 
             override fun jog(seconds: Int) = playback.jog(seconds * 1000L)
 
@@ -453,9 +453,10 @@ fun HarkenApp(
 
             override fun mute() = playback.mute()
 
+            // What plays, whatever it is — a song, an episode, a sermon — as its row's menu has it.
             override fun more() {
                 val now = player.now ?: return
-                tracks.firstOrNull { it.id.hex == now.id }?.let { menu = Menu(it, null, null) }
+                menu = Menu(Menu.playing(now, player.durationMs, tracks, shows), null, null)
             }
         }
     }
@@ -980,6 +981,21 @@ class Menu(val track: Track, val from: Page?, val tapped: Tapped?) {
      * came from no row (the full player's), so that page rises.
      */
     fun origin(to: Page): Origin? = if (to is Page.ForAlbum) tapped?.art ?: tapped?.row else tapped?.row
+
+    companion object {
+        /** The show what plays is an episode of: it has no album, and its name is a show's. */
+        fun showOf(now: Playing, shows: List<Show>): Show? = if (now.album.isEmpty()) shows.firstOrNull { it.title == now.artist } else null
+
+        /**
+         * What plays as a row, for the full player's More: a song as the songs list it; anything
+         * else — an episode, a sermon, a song the list has not caught up with — made of what the
+         * player says of it, of its show's kind when it is an episode, so that its menu goes to
+         * its show and marks it played as its row's does. Never nothing: More always opens a menu.
+         */
+        fun playing(now: Playing, durationMs: Long, songs: List<Track>, shows: List<Show>): Track =
+            songs.firstOrNull { it.id.hex == now.id }
+                ?: Track(Id(now.id), now.title, now.artist, showOf(now, shows)?.kind ?: "song", durationMs, now.file, null)
+    }
 }
 
 /** "0.1 (1)", from the package. */

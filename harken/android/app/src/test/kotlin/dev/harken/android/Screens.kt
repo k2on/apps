@@ -348,6 +348,20 @@ class Screens {
                 }
             }
         }
+        // And as the app draws it: the card all the way up, which carries the cover over its face —
+        // a song's, and a sermon's — and the picker and its dim over the cover, not under it.
+        val sermon = Demo.sermons[0]
+        val episode = on.copy(now = Playing(sermon.id.hex, sermon.title, sermon.creator, "", "", sermon.file), durationMs = sermon.durationMs, upNext = emptyList())
+        for ((name, state) in listOf("card" to on, "card-episode" to episode)) {
+            shot(name) {
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDeviceMenu provides DeviceMenu(true, rows, Picker.cursor(rows), object : PickerActions {})) {
+                    Chrome(Tab.Home, state, Still, onTab = {}, position = at, sheet = remember { PlayerSheet.held(1f, density) }) {
+                        HomeScreen(HomeData(true, last, Demo.tracks, Demo.playlists, Demo.albums, null), Demo::albumOf, Idle)
+                    }
+                }
+            }
+        }
     }
 
     // What rises over a page -------------------------------------------------

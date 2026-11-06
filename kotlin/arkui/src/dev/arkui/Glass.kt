@@ -22,6 +22,13 @@
 // layout has it — and a morph does not grow: the menu fades in where it
 // opens, over the button, and fades out back into it, on `Springs.fade`.
 //
+// A menu is drawn over everything its container holds, and over anything
+// drawn after the container too, when there is a `GlassLayer` above it: the
+// nearest one draws the menus of every container under it, last, at the
+// container's place, so a sibling painted over the container (a cover the
+// expanding card carries over its face, ExpandingCard.kt) cannot paint over
+// the menu. With none, the container draws them over itself, as before.
+//
 // Everything is drawn with what every Android version has: a path, a
 // clip and a paint's shadow layer (drawn on hardware from Android 9; below
 // it the glass has no shadow), so a screenshot on the JVM draws what a
@@ -39,6 +46,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalContext
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
@@ -55,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.currentCompositionLocalContext
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -175,7 +184,10 @@ private fun Modifier.glass(shape: GlassShape, id: Any?, hidden: (() -> Boolean)?
  * A space glass shares: every [glass] and [GlassMorph] in `content` is drawn by this, as one
  * surface. Two pieces closer than `spacing` are joined, the nearer the thicker; a piece appearing
  * buds from its nearest neighbour, and one going shrinks into it. A [GlassMorph]'s menu opens over
- * this container's whole area, so a container is best as large as the screen it is on.
+ * this container's whole area, so a container is best as large as the screen it is on. Under a
+ * [ProvideGlassLayer], the menus are drawn by that layer's [GlassLayerHost], over anything drawn
+ * after this container as well as over what it holds; with none, by the container, over what it
+ * holds alone.
  */
 @Composable
 public fun GlassContainer(
@@ -197,9 +209,76 @@ public fun GlassContainer(
         withFrameNanos {}
         space.settled = true
     }
+    // Its menus drawn by the layer above it, if there is one, over whatever is drawn after this.
+    val layer = LocalGlassLayer.current
+    DisposableEffect(layer, space) {
+        val hoist = layer?.let { l -> Hoist { Hoisted(l, space) }.also { l.hoists += it } }
+        onDispose { if (hoist != null) layer?.hoists?.remove(hoist) }
+    }
     Box(modifier.onPlaced { space.coords = it }.drawBehind { space.draw(this) }) {
         CompositionLocalProvider(LocalGlass provides space) { content() }
-        for (m in space.morphs) key(m) { MorphLayer(space, m) }
+        if (layer == null) for (m in space.morphs) key(m) { MorphLayer(space, m) }
+    }
+}
+
+/**
+ * Where the menus of the [GlassContainer]s under a [ProvideGlassLayer] open: drawn by its
+ * [GlassLayerHost], which is laid out over everything those containers should open over.
+ */
+@Stable
+public class GlassLayer internal constructor() {
+    internal val hoists = mutableStateListOf<Hoist>()
+
+    /** Where the host is laid out: state, so that a menu is placed again once it has been. */
+    internal var coords: LayoutCoordinates? by mutableStateOf(null)
+}
+
+/** A [GlassLayer], as long as the composition it is made in. */
+@Composable
+public fun rememberGlassLayer(): GlassLayer = remember { GlassLayer() }
+
+/**
+ * Every [GlassMorph]'s menu in `content` opens in `layer` rather than in its own [GlassContainer]:
+ * over what the container is drawn under, as well as over what it holds.
+ */
+@Composable
+public fun ProvideGlassLayer(layer: GlassLayer, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalGlassLayer provides layer, content = content)
+}
+
+/**
+ * Where `layer`'s menus are drawn: each at its container's place, with the dim over the
+ * container's area and the tap outside it that closes it. Laid out last, over what it covers —
+ * as large as the space the containers are in, and after everything drawn there — so that nothing
+ * in it is drawn over an open menu. While no menu is out it is empty, and takes no touch.
+ */
+@Composable
+public fun GlassLayerHost(layer: GlassLayer, modifier: Modifier = Modifier) {
+    Box(modifier.onPlaced { layer.coords = it }) { for (h in layer.hoists) key(h) { h.draw() } }
+}
+
+/** One container's menus, as a [GlassLayer] draws them. */
+internal class Hoist(val draw: @Composable () -> Unit)
+
+/** The layer the menus open in, if one is above. */
+private val LocalGlassLayer: ProvidableCompositionLocal<GlassLayer?> = staticCompositionLocalOf {
+    null
+}
+
+// A container's menus in its layer: laid out at the container's size, placed where the container
+// is, so that they are where they would have been, drawn after everything the layer covers.
+@Composable
+private fun Hoisted(layer: GlassLayer, space: GlassSpace) {
+    Layout(content = { Box { for (m in space.morphs) key(m) { MorphLayer(space, m) } } }) { ms, c ->
+        val home = space.coords?.takeIf { it.isAttached }
+        val size = home?.size
+        if (size == null || space.morphs.isEmpty()) return@Layout layout(0, 0) {}
+        val p = ms.first().measure(Constraints.fixed(size.width, size.height))
+        layout(c.maxWidth, c.maxHeight) {
+            val here = layer.coords?.takeIf { it.isAttached } ?: return@layout
+            val at = here.localPositionOf(home, Offset.Zero)
+            p.place(at.x.roundToInt(), at.y.roundToInt())
+        }
     }
 }
 
@@ -261,6 +340,8 @@ public fun GlassMorph(
     m.onDismiss = onDismiss
     m.collapsed = collapsed
     m.content = content
+    // What its face and its menu read, wherever its layer draws them.
+    m.locals = currentCompositionLocalContext
     BackHandler(enabled = m.expanded, onBack = onDismiss)
     // In its place, the button keeps its room; while it is out as the morph, the morph draws it.
     Box(
@@ -320,6 +401,9 @@ private class Morph(val p: Animatable<Float, *>) {
     var collapsed: @Composable () -> Unit by mutableStateOf({})
     var content: @Composable () -> Unit by mutableStateOf({})
 
+    /** The composition locals where the morph is, which its face and its menu are drawn with. */
+    var locals: CompositionLocalContext? by mutableStateOf(null)
+
     /**
      * Where the button is laid out: state, so that the surface is laid out again once the button
      * has been placed, on the first frame as on any other.
@@ -340,7 +424,8 @@ private class GlassSpace(val scope: CoroutineScope) {
     var blur = 0f
     var scrim = Color.Black
     var settled = false
-    var coords: LayoutCoordinates? = null
+    /** Where the container is laid out: state, so that a menu its layer draws follows it. */
+    var coords: LayoutCoordinates? by mutableStateOf(null)
     val pieces = mutableStateListOf<Piece>()
     val ghosts = mutableStateListOf<Ghost>()
     val morphs = mutableStateListOf<Morph>()
@@ -633,10 +718,10 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
                         }
                     }
                 }) {
-                    m.collapsed()
+                    WithLocals(m) { m.collapsed() }
                 }
             Box(Modifier.layoutId(MENU)) {
-                CompositionLocalProvider(LocalGlass provides null) { m.content() }
+                WithLocals(m) { CompositionLocalProvider(LocalGlass provides null) { m.content() } }
             }
         },
         modifier =
@@ -740,6 +825,13 @@ private fun BoxScope.MorphLayer(space: GlassSpace, m: Morph) {
             }
         }
     }
+}
+
+// With the composition locals where the morph is: a layer draws it far from there.
+@Composable
+private fun WithLocals(m: Morph, content: @Composable () -> Unit) {
+    val locals = m.locals
+    if (locals == null) content() else CompositionLocalProvider(locals, content)
 }
 
 private const val FACE = "face"

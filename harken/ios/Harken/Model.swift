@@ -515,9 +515,12 @@ final class Model: ObservableObject {
 
     /// Whether what plays is an episode of a show — no album, and its name a
     /// show's — whose transport skips seconds rather than a track.
-    var jogs: Bool {
-        guard let n = player.now, n.album.isEmpty else { return false }
-        return snapshot.shows.contains { $0.title == n.artist }
+    var jogs: Bool { player.now?.show(in: snapshot.shows) != nil }
+
+    /// What plays as a row, whatever it is, for the full player's More
+    /// (`Playing.entry`); none while nothing plays.
+    var playingEntry: LibraryEntry? {
+        player.now.map { $0.entry(durationMs: player.durationMs, songs: tracks, shows: snapshot.shows) }
     }
 
     /// Back or on `seconds` in what plays, within it.
