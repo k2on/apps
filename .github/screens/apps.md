@@ -146,8 +146,8 @@ which nix builds at the commit (see below).
   run that builds nothing; **`await-apk.sh`**: an APK from a `build` run
   still going, as soon as it is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
-  the cache's when its inputs have not moved, with the runner's Xcode put
-  in the store only when something must be built. **`desktop-build.sh`**:
+  the cache's when its inputs have not moved, or built with the runner's
+  own Xcode where it is installed. **`desktop-build.sh`**:
   each desktop window as nix builds it at the commit, the cache's when its
   inputs have not moved.
 - **`apps-lay.sh`**: lays a run's captures over a tree. A phone taken only
@@ -275,19 +275,22 @@ takes one shot.
 ## The iPhone builds, in nix
 
 `nix build .#money-ios-simulator` (and `harken-ios-simulator`) is the app
-in Release for the simulator, the build TestFlight is sent. Xcode is one of
-its inputs, pinned in `flake.nix` by its hash: the Xcode.app of GitHub's
-macos-15 image, put in the store as it is installed (`nix-store
---add-fixed --recursive sha256 /Applications/Xcode_26.3.app`; nothing is
-downloaded). Apple's licence keeps Xcode off any cache, so the job's
-Cachix push filters it out; the apps themselves are cached. A different
-Xcode is a different hash and so a different build. When GitHub's image
-moves to another Xcode, `ios-build.sh` says so and builds nothing: the
-pin is moved to the new Xcode's hash (the same `nix-store --add-fixed`
-prints its path, `nix hash path` its hash).
+in Release for the simulator, the build TestFlight is sent. Xcode is pinned
+in `flake.nix` (`xcode`) by its version and build number, 26.3 (17C529),
+and used where GitHub's macos-15 image installs it,
+`/Applications/Xcode_26.3.app`. It is never put in the store: Apple's
+licence keeps it off any cache, and a store path would be pushed to and
+fetched from Cachix (the jobs' push filter drops anything named for Xcode
+too). The apps themselves are cached. A different Xcode is a different pin
+and so a different build. When GitHub's image moves to another Xcode,
+`xcode-pinned.sh` (and every build, from the Xcode's `version.plist`) says
+so and nothing is built: the pin's `version` and `build` are moved to the
+new one's (`xcodebuild -version`).
 
-The kernel is built under nix's strict sandbox, from the stored Xcode's
-toolchain alone. The app's own `xcodebuild` cannot be: Xcode's file
+The kernel is built under nix's strict sandbox, from the pinned Xcode's
+toolchain alone: its directory is the one path outside the store the
+sandbox lets in (`__impureHostDeps`, allowed by the runner's nix.conf,
+`allowed-impure-host-deps`). The app's own `xcodebuild` cannot be: Xcode's file
 watcher asks DiskArbitration and other system services about what it
 watches, which nix's macOS sandbox lets no build reach (its list of
 services is nix's own; sandbox paths only add paths; a derivation's

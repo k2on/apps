@@ -3,15 +3,16 @@
 # derivations as the apps' iPhone screenshots (`<app>-ios-simulator`): one
 # kernel (`<app>-ios-kernel`), one pinned Xcode.
 #
-# **Built by nix, Xcode pinned by its hash.** flake.nix pins the Xcode of
-# GitHub's macos-15 image by its hash (`xcode`); ../xcode-pinned.sh selects
-# it, and ../nix-xcode.sh builds each app with it, or takes it from the cache
-# when nothing it is built from moved, putting the runner's Xcode in the
-# store only when something must be built. The kernel is built under nix's
-# strict sandbox; the app's own xcodebuild is the one step that cannot be
-# (flake.nix says why), so the runner's nix is relaxed, where every other
-# build is still sandboxed. Main's builds go to Cachix, Xcode never (Apple's
-# licence).
+# **Built by nix, Xcode pinned by its version.** flake.nix pins the Xcode of
+# GitHub's macos-15 image by its version and build number (`xcode`);
+# ../xcode-pinned.sh selects and checks it, and ../nix-xcode.sh builds each
+# app with it where the image installs it, or takes it from the cache when
+# nothing it is built from moved. Xcode itself is never put in the store, so
+# it is never fetched from or pushed to Cachix (Apple's licence). The kernel
+# is built under nix's strict sandbox, with only the Xcode directory let in;
+# the app's own xcodebuild is the one step that cannot be (flake.nix says
+# why), so the runner's nix is relaxed, where every other build is still
+# sandboxed. Main's builds go to Cachix.
 #
 # **The archive is unsigned on purpose**, and given its build number after it
 # is built (../ios-archive.sh): the commit's time, always rising and never
@@ -163,16 +164,22 @@ jobs:
       - name: The pinned Xcode
         run: bash .github/xcode-pinned.sh .
 
+      # And the pinned Xcode's directory let into the kernel's sandbox
+      # (XCODE_NIX_CONF, from xcode-pinned.sh).
       - uses: cachix/install-nix-action@v31
         with:
-          extra_nix_config: ${{ env.NIX_CONFIG }}
+          extra_nix_config: |
+            ${{ env.NIX_CONFIG }}
+            ${{ env.XCODE_NIX_CONF }}
 
       - if: github.ref == 'refs/heads/main' && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          pushFilter: "Xcode_"
+          # Anything named for Xcode (not XcodeGen), though none is in the
+          # store any more: Apple's licence keeps it off any cache.
+          pushFilter: "[Xx]code([^Gg]|$)"
 
       # nix's archive (flake.nix, `<app>-ios-archive`), the cache's when
       # nothing it is built from moved, and its kernel for the tests; the

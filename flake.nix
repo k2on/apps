@@ -754,9 +754,10 @@
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name. With `xcode`, an Xcode.app in the store
-          # (`xcode` below), it is built from that and nothing outside the
-          # store, under the strict sandbox; without, from the builder's.
+          # framework's name. With `xcode`, the pinned Xcode (`xcode` below),
+          # it is built from the runner's installed copy of it, under the
+          # strict sandbox with that one directory let in; without, from
+          # whatever Xcode the builder has selected, unsandboxed.
           iosPhone = { name, crate, so, framework, xcode ? null }: pkgs.stdenv.mkDerivation {
             pname = "${name}-ios-xcframework";
             version = "0.1.0";
@@ -765,8 +766,11 @@
             cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
             nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
             # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store — unless one in the store is given.
+            # Xcode, outside the store. Pinned, only its directory is read,
+            # from inside the sandbox (`__impureHostDeps`, which the builder's
+            # nix.conf must allow: `allowed-impure-host-deps`).
             __noChroot = xcode == null;
+            __impureHostDeps = lib.optional (xcode != null) xcode.app;
             # The iOS targets compile and link with the builder's Xcode: its
             # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
             # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
@@ -783,7 +787,8 @@
                 export PATH=/usr/bin:$PATH
                 export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
               '' else ''
-                export DEVELOPER_DIR=${xcode}/Contents/Developer
+                export DEVELOPER_DIR=${xcode.developer}
+                ${xcode.check}
                 export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
                 export HOME=$TMPDIR/home
                 mkdir -p "$HOME"
@@ -845,16 +850,19 @@
           # **The iPhone apps, built by nix** (what app-screens.yaml takes
           # their iOS screenshots from: .github/screens/apps.md).
           #
-          # Xcode is an input like any other, pinned by its hash: the
-          # Xcode.app of a runner image, put in the store as it is
-          # (`nix-store --add-fixed --recursive sha256 <Xcode.app>`; nothing
-          # is downloaded, and Apple's licence keeps it off any cache, so
-          # Cachix's push filters it out). A different Xcode is a different
-          # hash, and so a different build; an unchanged app with the same
-          # Xcode is the cache's, and Xcode need not even be on the machine.
+          # Xcode is never in the store: Apple's licence keeps it off any
+          # cache, and a store path would be pushed to (and fetched from)
+          # Cachix like any other. The builds use the runner's own, installed
+          # at `xcode.app`, and are pinned to it by `xcode` below: a small
+          # derivation of its version and build number, an input of each
+          # build, so a different Xcode is a different build, and the same
+          # one the same hash on every runner. Each build checks the Xcode it
+          # finds is that one (its version.plist) and stops if it is not; an
+          # unchanged app with the same Xcode is the cache's, and Xcode need
+          # not even be on the machine.
           #
           # Most of it is built under nix's strict sandbox: the kernel, its
-          # C and Rust compiled by the stored Xcode's toolchain for the
+          # C and Rust compiled by the pinned Xcode's toolchain for the
           # simulator and the phone. The app's own `xcodebuild` cannot be:
           # Xcode's file watcher (DVTFilePathEventWatcher) asks
           # DiskArbitration and other system services for what it watches,
@@ -869,13 +877,34 @@
           # Every app's id, Android's (its applicationId) and the iPhone's (its
           # bundle id), is this and its name.
           bundlePrefix = "us.koon";
-          xcode = pkgs.requireFile {
-            name = "Xcode_26.3.app";
-            hashMode = "recursive";
-            hash = "sha256-qrPSc036x3tW1TWWfX10+IS2c08dRCa6KFc+++35ueM=";
-            message = ''
-              Xcode 26.3 (17C529), as GitHub's macos-15 image installs it. Put it in the store:
-                nix-store --add-fixed --recursive sha256 /Applications/Xcode_26.3.app
+          # The pin: Xcode 26.3 (17C529), where GitHub's macos-15 image
+          # installs it. Only these strings are in the store (`pin`, a few
+          # bytes of text, named so that no push filter takes it for Xcode);
+          # `check` is the shell each build runs first, with DEVELOPER_DIR
+          # set, and ../.github/xcode-pinned.sh checks the runner the same way
+          # before anything is built. To move it, change `version` and
+          # `build` (`xcodebuild -version` prints both).
+          xcode = let
+            version = "26.3";
+            build = "17C529";
+            app = "/Applications/Xcode_${version}.app";
+            pin = pkgs.writeText "xcode-pin-${version}-${build}" ''
+              app=${app}
+              version=${version}
+              build=${build}
+            '';
+          in {
+            inherit version build app pin;
+            developer = "${app}/Contents/Developer";
+            # The build number of the Xcode at DEVELOPER_DIR, from its
+            # version.plist, held to the pin's.
+            check = ''
+              . ${pin}
+              have=$(grep -A1 '<key>ProductBuildVersion</key>' "$DEVELOPER_DIR/../version.plist" 2>/dev/null | sed -n 's|.*<string>\(.*\)</string>.*|\1|p' || true)
+              if [ "$have" != "$build" ]; then
+                echo "error: $DEVELOPER_DIR is Xcode build '$have', not $version ($build), which flake.nix pins (xcode)" >&2
+                exit 1
+              fi
             '';
           };
           # One app's kernel, from the pinned Xcode, under the strict sandbox.
@@ -891,7 +920,7 @@
             let
               bundle = "${bundlePrefix}.${name}";
               kernel = iosKernel { inherit ffi framework; };
-              dev = "${xcode}/Contents/Developer";
+              dev = xcode.developer;
               common = ''
                 -project ${App}.xcodeproj -scheme ${App} -configuration Release \
                 -derivedDataPath $TMPDIR/derived \
@@ -927,10 +956,11 @@
               __noChroot = true;
               buildPhase = ''
                 runHook preBuild
-                # The stored Xcode, a home of its own, a name for the build
+                # The pinned Xcode, a home of its own, a name for the build
                 # user (XcodeGen stops without one), and none of nixpkgs'
                 # compiler settings, which Xcode's tools would take for theirs.
                 export DEVELOPER_DIR=${dev}
+                ${xcode.check}
                 export PATH=${dev}/usr/bin:$PATH
                 export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home USER=nixbld LOGNAME=nixbld
                 mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
