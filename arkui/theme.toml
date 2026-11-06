@@ -273,10 +273,10 @@ paused-scale = 0.9
 # How far a thing that comes in where it stays rises as it comes (dp, pt or
 # logical px): a page's header, small, into its bar. A nudge, not a journey.
 rise = 8.0
-# A scroll past its end (a trackpad, the desktop): the band's room is this
-# share of the view, so the rubber band is never drawn further than it,
-# however far it is pulled; and a coast slower than coast-stop (logical px
-# a second) has stopped.
+# A scroll past its end (a trackpad, the desktop and the browser): the
+# rubber band of the whole pull in the view is held to this share of it, so
+# however far it is pulled it is never drawn further; and a coast slower
+# than coast-stop (logical px a second) has stopped.
 band-reach = 0.33
 coast-stop = 20.0
 # A release's speed is read from its last velocity-ms of moves, and a pause
@@ -286,3 +286,8 @@ coast-stop = 20.0
 velocity-ms = 100
 velocity-gap-ms = 40
 lift-ms = 50
+# A lift seen only by its stillness, at less than coast-spent of the
+# gesture's fastest, ran down by itself first: a browser's or a system's
+# own coast arriving as more of the wheel, or fingers that slowed to a
+# stop. It coasts no further, so a coast already made is never doubled.
+coast-spent = 0.25

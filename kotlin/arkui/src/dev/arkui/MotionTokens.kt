@@ -53,4 +53,6 @@ public object MotionTokens {
     public const val VELOCITY_GAP_MS: Int = 40
     /** With no word from the system, a trackpad still this long has been let go, in milliseconds. */
     public const val LIFT_MS: Int = 50
+    /** A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it. */
+    public const val COAST_SPENT: Float = 0.25f
 }

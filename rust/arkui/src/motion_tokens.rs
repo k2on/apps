@@ -52,6 +52,8 @@ pub const VELOCITY_MS: u64 = 100;
 pub const VELOCITY_GAP_MS: u64 = 40;
 /// With no word from the system, a trackpad still this long has been let go, in milliseconds.
 pub const LIFT_MS: u64 = 50;
+/// A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.
+pub const COAST_SPENT: f32 = 0.25;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.

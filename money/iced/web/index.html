@@ -13,6 +13,10 @@
         height: 100%;
         color-scheme: light dark;
         overflow: hidden;
+        /* The app bands and coasts its own lists (arkui::scroll::elastic);
+           the page itself, behind the canvas, never bounces or hands a
+           pull on to the browser's back gesture. */
+        overscroll-behavior: none;
       }
       /* iced appends its canvas to <body> and sizes it to 100%. */
       canvas { display: block; }

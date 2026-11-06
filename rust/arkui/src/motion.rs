@@ -780,7 +780,11 @@ mod tests {
         assert!((rubberband_slope(0.0, d) - tokens::RUBBER_BAND).abs() < 1e-6);
         for x in [-300.0f32, -10.0, 5.0, 80.0, 900.0] {
             let rate = (rubberband(x + 0.01, d) - rubberband(x - 0.01, d)) / 0.02;
-            assert!((rubberband_slope(x, d) - rate).abs() < 1e-3, "{x}: {} against {rate}", rubberband_slope(x, d));
+            assert!(
+                (rubberband_slope(x, d) - rate).abs() < 1e-3,
+                "{x}: {} against {rate}",
+                rubberband_slope(x, d)
+            );
         }
     }
 

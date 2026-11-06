@@ -53,6 +53,8 @@ public enum MotionTokens {
     public static let velocityGapMs: Int = 40
     /// With no word from the system, a trackpad still this long has been let go, in milliseconds.
     public static let liftMs: Int = 50
+    /// A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.
+    public static let coastSpent: Double = 0.25
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.

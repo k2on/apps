@@ -53,6 +53,7 @@ MOTION = {
     "velocity-ms": "How far back a release's speed is read from its moves, in milliseconds.",
     "velocity-gap-ms": "A pause this long between a drag's moves, in milliseconds, means it had stopped.",
     "lift-ms": "With no word from the system, a trackpad still this long has been let go, in milliseconds.",
+    "coast-spent": "A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.",
 }
 
 # The roles of one side, in the order they are written, and each one's

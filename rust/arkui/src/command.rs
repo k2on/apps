@@ -356,6 +356,7 @@ fn found<'a, M: Clone + 'a>(
             scrollable(list)
                 .id(list_id)
                 .height(Length::Fixed(height))
+                .style(crate::style::bars)
                 .on_scroll(move |v| scrolled(v.absolute_offset().y)),
         )
     }
