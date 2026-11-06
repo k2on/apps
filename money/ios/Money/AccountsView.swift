@@ -35,7 +35,7 @@ struct AccountsView: View {
                             CentsText(rows.filter { !$0.closed && $0.onBudget }.reduce(0) { $0 + $1.balance })
                         }
                     } icon: {
-                        AccountMark.Tile(symbol: "tray.full.fill", color: .quiet)
+                        Tile(symbol: "tray.full.fill", color: .quiet)
                     }
                 }
             }

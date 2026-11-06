@@ -102,6 +102,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import androidx.compose.ui.graphics.graphicsLayer
+import dev.arkui.CardCorner
+import dev.arkui.RowDivider
 import dev.arkui.unlessReduced
 import dev.arkui.Springs
 import dev.arkui.AmountText
@@ -109,16 +111,16 @@ import dev.arkui.Amounts
 import dev.arkui.Landing
 import dev.arkui.LocalAmounts
 import dev.arkui.MarkedAmount
-import dev.arkui.Meter
+import dev.arkui.ProgressBar
 import dev.arkui.Pill
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
 import dev.arkui.Stat
-import dev.arkui.Tone
+import dev.arkui.Tint
 import dev.arkui.makingWay
 import dev.arkui.rememberReorder
 import dev.arkui.sections
-import dev.arkui.toneColors
+import dev.arkui.tintColors
 import dev.money.android.gen.Auto
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
@@ -147,15 +149,15 @@ fun creditOverspent(l: BudgetLine): Boolean = l.available < 0 && l.creditOverspe
  * for it), amber for overspending that was all on a card (it is debt now) and for a card's payment
  * that does not cover what the card owes, else as its target reads it.
  */
-fun toneOf(l: BudgetLine): Tone =
+fun toneOf(l: BudgetLine): Tint =
     when {
-        creditOverspent(l) -> Tone.Caution
-        l.available < 0 -> Tone.Negative
-        Ledger.isPayment(l) && l.underfunded > 0 -> Tone.Caution
-        Ledger.isPayment(l) -> if (l.available > 0) Tone.Positive else Tone.Neutral
-        l.target > 0 && l.assigned < l.target -> Tone.Caution
-        l.available > 0 -> Tone.Positive
-        else -> Tone.Neutral
+        creditOverspent(l) -> Tint.Caution
+        l.available < 0 -> Tint.Negative
+        Ledger.isPayment(l) && l.underfunded > 0 -> Tint.Caution
+        Ledger.isPayment(l) -> if (l.available > 0) Tint.Positive else Tint.Neutral
+        l.target > 0 && l.assigned < l.target -> Tint.Caution
+        l.available > 0 -> Tint.Positive
+        else -> Tint.Neutral
     }
 
 /**
@@ -377,9 +379,9 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
     val s = ledger.summary
     val ready = s?.readyToAssign ?: 0L
     val tone = when {
-        ready > 0 -> Tone.Positive
-        ready < 0 -> Tone.Negative
-        else -> Tone.Neutral
+        ready > 0 -> Tint.Positive
+        ready < 0 -> Tint.Negative
+        else -> Tint.Neutral
     }
     val over = s?.overspent ?: 0L
     val fund = fundable(ledger)
@@ -387,17 +389,17 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
         if (over > 0 || fund > 0 || (s != null && s.assigned > 0)) {
             FlowRow(Modifier.padding(top = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 if (over > 0) {
-                    Pill(Tone.Negative) { PillLabel(Icons.Default.Warning, "$over overspent") }
+                    Pill(Tint.Negative) { PillLabel(Icons.Default.Warning, "$over overspent") }
                 }
                 if (fund > 0) {
                     Pill(
-                        Tone.Caution,
+                        Tint.Caution,
                         Modifier.clip(CircleShape).pressable(onClickLabel = "Assign every underfunded category its target", onClick = {
                             book.autoAssign(Auto.Underfunded)
                         })) { PillLabel(Glyphs.Auto, "$fund underfunded") }
                 }
                 if (over == 0L && fund == 0L) {
-                    Pill(Tone.Positive) { PillLabel(Glyphs.Done, "On track") }
+                    Pill(Tint.Positive) { PillLabel(Glyphs.Done, "On track") }
                 }
             }
         }
@@ -591,7 +593,7 @@ private fun CategoryRow(l: BudgetLine, first: Boolean, lifted: Boolean, actions:
                 }
                 if (barred) {
                     Spacer(Modifier.height(Space.s))
-                    Meter(fraction, color = color, height = 4.dp)
+                    ProgressBar(fraction, color = color, height = 4.dp)
                 }
                 if (left.isNotEmpty() || right.isNotEmpty()) {
                     Spacer(Modifier.height(Space.xs))

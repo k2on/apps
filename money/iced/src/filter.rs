@@ -315,7 +315,7 @@ impl App {
             button(text(label).size(12).wrapping(text::Wrapping::None))
                 .on_press(m)
                 .padding([4, 10])
-                .style(look::choice(set))
+                .style(arkui::style::chip(set))
                 .into()
         };
         let open = |c: Chip| Message::Filter(Msg::Chip(c));
@@ -350,7 +350,7 @@ impl App {
             .size(12)
             .padding([4, 8])
             .width(Length::Fixed(160.0))
-            .style(look::input);
+            .style(arkui::style::field);
         let mut chips = row![icon::faint(glyphs::SEARCH, false).width(14.0).height(14.0)]
             .spacing(6)
             .align_y(Alignment::Center);
@@ -428,7 +428,7 @@ impl App {
                 .on_submit(Message::Filter(Msg::SaveDone))
                 .size(13)
                 .padding([6, 8])
-                .style(look::input),
+                .style(arkui::style::field),
         ]
         .spacing(10);
         if f == Filter::all() {

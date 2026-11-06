@@ -91,7 +91,7 @@ class BookTests {
         // Not a card's payment category, the budget's first: what it lacks is the card's debt, not a target.
         val c = l.lines.first { !Ledger.isPayment(it) && it.available >= 0 }
         book.setTarget(c.categoryId, c.assigned + 10_000)
-        assertEquals(toneOf(l.line(c.categoryId)!!), dev.arkui.Tone.Caution)
+        assertEquals(toneOf(l.line(c.categoryId)!!), dev.arkui.Tint.Caution)
         book.autoAssign(Auto.Underfunded, listOf(c.categoryId))
         assertEquals(c.assigned + 10_000, l.line(c.categoryId)!!.assigned)
     }

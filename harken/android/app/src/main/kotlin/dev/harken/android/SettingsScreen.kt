@@ -58,21 +58,6 @@ data class SettingsData(
 @Immutable
 data class Who(val name: String, val picture: String = "") {
     companion object {
-        /**
-         * What a face says without a picture: the first letters of the name's first and last words
-         * (`Ada Lovelace` is `AL`, `Ada` is `A`), upper case — the desktop's `Who::initials`.
-         */
-        fun initials(name: String): String {
-            fun first(w: String): Char? = w.firstOrNull { it.isLetterOrDigit() }
-            val words = name.split(Regex("\\s+")).filter { first(it) != null }
-            val letters = when (words.size) {
-                0 -> emptyList()
-                1 -> listOfNotNull(first(words[0]))
-                else -> listOfNotNull(first(words.first()), first(words.last()))
-            }
-            return letters.joinToString("") { it.uppercase() }
-        }
-
         /** Black or white, whichever reads on `fill`: the desktop's rule, on the same colours. */
         fun inkOn(fill: Color): Color = if (0.2126f * fill.red + 0.7152f * fill.green + 0.0722f * fill.blue > 0.55f) Color.Black else Color.White
     }

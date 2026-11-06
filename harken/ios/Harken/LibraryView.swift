@@ -77,18 +77,7 @@ private struct LibraryChips: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Space.s) {
                 ForEach(LibraryTab.allCases) { t in
-                    let on = t == tab
-                    Button { tab = t } label: {
-                        Text(t.rawValue)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(on ? Color.onAccent : Color.ink)
-                            .padding(.horizontal, Space.l)
-                            .frame(minHeight: 36)
-                            .background(Capsule().fill(on ? Color.accent : Color.containerHigh))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.press)
-                    .accessibilityAddTraits(on ? .isSelected : [])
+                    Chip(t.rawValue, selected: t == tab) { tab = t }
                 }
             }
             .padding(.horizontal, Space.page)

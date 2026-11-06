@@ -37,10 +37,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arkui.GroupCard
+import dev.arkui.RowDivider
+import dev.arkui.SectionHeader
 import dev.arkui.AmountText
 import dev.arkui.Donut
 import dev.arkui.LocalAmounts
-import dev.arkui.Meter
+import dev.arkui.ProgressBar
 import dev.arkui.Part
 import dev.arkui.Space
 import dev.arkui.chartPalette
@@ -68,7 +71,7 @@ fun InsightsScreen(ledger: Ledger) {
     Page(title = "Insights") { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xl)) {
             item(key = "month") { MonthPager(ledger) }
-            item(key = "h-spending") { GroupHeading("Spending") }
+            item(key = "h-spending") { SectionHeader("Spending") }
             item(key = "spending") {
                 GroupCard {
                     if (parts.isEmpty()) {
@@ -98,7 +101,7 @@ fun InsightsScreen(ledger: Ledger) {
                 }
             }
             ledger.summary?.let { s ->
-                item(key = "h-month") { GroupHeading("The Month") }
+                item(key = "h-month") { SectionHeader("The Month") }
                 item(key = "month-figures") {
                     GroupCard {
                         Figure("Income") { AmountText(s.income, style = MaterialTheme.typography.bodyLarge, color = positiveColor()) }
@@ -128,7 +131,7 @@ fun InsightsScreen(ledger: Ledger) {
                 }
             }
             if (groups.isNotEmpty()) {
-                item(key = "h-bars") { GroupHeading("Assigned and Spent") }
+                item(key = "h-bars") { SectionHeader("Assigned and Spent") }
                 item(key = "bars") {
                     GroupCard { PairedBars(groups.map { (g, ls) -> Triple(g.name, ls.sumOf { it.assigned }, ls.sumOf { -it.activity }.coerceAtLeast(0)) }) }
                     Text(
@@ -215,7 +218,7 @@ private fun Key(color: Color, label: String) {
 @Composable
 private fun Bar(fraction: Float, color: Color, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Meter(fraction, color = color, track = Color.Transparent, height = 10.dp, modifier = Modifier.weight(1f))
+        ProgressBar(fraction, color = color, track = Color.Transparent, height = 10.dp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.s))
         Text(
             value,

@@ -12,9 +12,9 @@ extension Tone {
     var tint: Tint {
         switch self {
         case .zero: return .neutral
-        case .funded: return .good
+        case .funded: return .positive
         case .short: return .caution
-        case .over: return .bad
+        case .over: return .negative
         case .onCard: return .caution
         }
     }
@@ -34,11 +34,12 @@ extension Tone {
 extension Summary {
     /// Ready to Assign's tint: green while there is money to give a job,
     /// red when more was assigned than there is, quiet at nothing.
-    var tint: Tint { readyToAssign > 0 ? .good : readyToAssign < 0 ? .bad : .neutral }
+    var tint: Tint { readyToAssign > 0 ? .positive : readyToAssign < 0 ? .negative : .neutral }
 }
 
 /// An account's mark: its kind's symbol in its colour on a faint wash of
-/// that colour, a rounded square as Settings' tinted rows draw one. The
+/// that colour, a rounded square as Settings' tinted rows draw one (ArkUI's
+/// `Tile`). The
 /// colours are the theme's chart palette (arkui/theme.toml), which the
 /// Android app draws its marks in too.
 struct AccountMark: View {
@@ -60,26 +61,6 @@ struct AccountMark: View {
         case "loan": return c[2]
         case "investment": return c[4]
         default: return .quiet
-        }
-    }
-
-    /// A symbol in `color` on a wash of it: an account's mark, or All
-    /// Accounts'. It grows with the person's text size, as the row's words
-    /// beside it do, up to half as large again.
-    struct Tile: View {
-        let symbol: String
-        let color: Color
-        var side: CGFloat = 32
-        @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
-
-        var body: some View {
-            let side = self.side * min(grows, 1.5)
-            Image(systemName: symbol)
-                .font(.system(size: side * 0.5, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: side, height: side)
-                .background(color.opacity(0.16), in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
-                .accessibilityHidden(true)
         }
     }
 }

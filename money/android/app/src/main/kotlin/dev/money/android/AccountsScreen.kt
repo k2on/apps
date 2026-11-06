@@ -55,12 +55,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.arkui.GroupCard
+import dev.arkui.RowDivider
+import dev.arkui.SectionHeader
+import dev.arkui.Badge
+import dev.arkui.Tile
+import dev.arkui.ListRow
 import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
 import dev.arkui.Chevron
 import dev.arkui.Space
-import dev.arkui.Tone
+import dev.arkui.Tint
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.style.TextOverflow
 import org.json.JSONObject
@@ -89,22 +95,26 @@ fun AccountsScreen(ledger: Ledger) {
     ) { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
             item(key = "worth") {
-                HeroCard("Net Worth", open.sumOf { it.balance }, Tone.Neutral, note = "Every open account, less what's owed")
+                HeroCard("Net Worth", open.sumOf { it.balance }, Tint.Neutral, note = "Every open account, less what's owed")
             }
             item(key = "all") {
                 GroupCard(Modifier.padding(top = Space.xl)) {
-                    LinkRow(
+                    ListRow(
                         title = "All Accounts",
                         onClick = { shell.onAccount(null) },
-                        leading = { Tile(Glyphs.Activity, MaterialTheme.colorScheme.onSurfaceVariant) },
-                        trailing = { AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        picture = { Tile(Glyphs.Activity, MaterialTheme.colorScheme.onSurfaceVariant) },
+                        trailing = {
+                            AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(Space.xs))
+                            Chevron()
+                        },
                     )
                 }
             }
             for ((name, rows) in listOf("Budget" to budget, "Tracking" to tracking, "Closed" to closed)) {
                 if (rows.isEmpty()) continue
                 item(key = "h-$name") {
-                    GroupHeading(name) { if (name != "Closed") HeadingTotal(rows.sumOf { it.balance }) }
+                    SectionHeader(name) { if (name != "Closed") HeadingTotal(rows.sumOf { it.balance }) }
                 }
                 item(key = "s-$name") {
                     GroupCard {
@@ -117,17 +127,21 @@ fun AccountsScreen(ledger: Ledger) {
             }
             item(key = "actions") {
                 GroupCard(Modifier.padding(top = Space.xl)) {
-                    LinkRow(
+                    ListRow(
                         title = if (ledger.banks.isEmpty()) "Connect a Bank" else "Bank Connections",
                         onClick = shell.onSettings,
-                        leading = { Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailing = {
+                            Spacer(Modifier.width(Space.xs))
+                            Chevron()
+                        },
+                        picture = { Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     )
                     RowDivider(inset = Space.l + 32.dp + Space.m)
-                    LinkRow(
+                    ListRow(
                         title = "Add Account",
                         onClick = { adding = true },
-                        leading = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        chevron = false,
+                        picture = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailing = {},
                         accent = true,
                     )
                 }
@@ -169,7 +183,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(Space.s))
         if (acc.unapproved > 0) {
-            CountBadge(acc.unapproved.toInt(), "${acc.unapproved} to review")
+            Badge(acc.unapproved.toInt(), "${acc.unapproved} to review")
             Spacer(Modifier.width(Space.s))
         }
         AmountText(
@@ -178,35 +192,6 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
             color = if (acc.balance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.width(Space.xs))
         Chevron()
-    }
-}
-
-/** A row of a card that opens something: what leads it, its name, what trails it, and a chevron. */
-@Composable
-private fun LinkRow(
-    title: String,
-    onClick: () -> Unit,
-    leading: @Composable () -> Unit,
-    trailing: @Composable () -> Unit = {},
-    chevron: Boolean = true,
-    accent: Boolean = false,
-) {
-    Row(
-        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.m).height(32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
-        Spacer(Modifier.width(Space.m))
-        Text(
-            title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f))
-        trailing()
-        if (chevron) {
-            Spacer(Modifier.width(Space.xs))
-            Chevron()
-        }
     }
 }
 

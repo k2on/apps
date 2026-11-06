@@ -518,18 +518,6 @@ enum Files {
 
 /// How a length and a count are said.
 enum Spell {
-    /// A face's letters when it has no picture (`Avatar`): the first letters
-    /// of the name's first and last words, upper case — `Ada Lovelace` is
-    /// `AL`, `Ada` is `A` — the desktop's `Who::initials`. Here rather than
-    /// beside `Avatar`, a SwiftUI view, so Linux's type-check runs its test.
-    static func initials(_ name: String) -> String {
-        func first(_ w: Substring) -> Character? { w.first { $0.isLetter || $0.isNumber } }
-        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { first($0) != nil }
-        guard let a = words.first.flatMap(first) else { return "" }
-        guard words.count > 1, let z = words.last.flatMap(first) else { return String(a).uppercased() }
-        return (String(a) + String(z)).uppercased()
-    }
-
     /// How much of an episode is left to hear, as its row says it: its
     /// length (`47 min`) until the signed-in person begins it, then what is
     /// left (`12 min left`), then `Played`. Nothing for a length not known.

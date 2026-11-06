@@ -202,7 +202,7 @@ struct BudgetView: View {
                    action: s.readyToAssign > 0 ? { present(.move(nil)) } : nil) {
             HStack(spacing: Space.s) {
                 if s.overspent > 0 {
-                    Pill(.bad) { Label("\(s.overspent) overspent", systemImage: "exclamationmark.circle.fill") }
+                    Pill(.negative) { Label("\(s.overspent) overspent", systemImage: "exclamationmark.circle.fill") }
                 }
                 if s.underfunded > 0 {
                     Button { model.autoAssign(.underfunded) } label: {
@@ -212,7 +212,7 @@ struct BudgetView: View {
                     .accessibilityHint("Assigns every underfunded category its target")
                 }
                 if s.overspent == 0 && s.underfunded == 0 && s.assigned > 0 {
-                    Pill(.good) { Label("On track", systemImage: "checkmark.circle.fill") }
+                    Pill(.positive) { Label("On track", systemImage: "checkmark.circle.fill") }
                 }
                 Spacer(minLength: 0)
             }

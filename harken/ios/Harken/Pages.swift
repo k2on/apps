@@ -41,7 +41,7 @@ private struct CataloguePage<Art: View, Head: View, Content: View>: View {
     var body: some View {
         let under: Edge.Set = hero ? .top : []
         // How far the column scrolls before the banner's foot passes the bar.
-        let fold = Banner.height - Banner.statusBar
+        let fold = HeroBanner.height - HeroBanner.statusBar
         let over = hero && pictured
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -188,7 +188,7 @@ struct ArtistPage: View {
             CoverView(seed: name, url: RowCover.url(model, portrait.isEmpty ? banner : portrait), side: InlineArt.side, round: true)
         } head: {
             if !banner.isEmpty {
-                Banner(url: RowCover.url(model, banner), kind: kicker, name: name)
+                PersonBanner(url: RowCover.url(model, banner), kind: kicker, name: name)
             } else {
                 RecordHeader(over: kicker, title: name, small: life.isEmpty ? "" : counts, onPlay: play, onShuffle: shuffle) {
                     CoverView(seed: name, url: RowCover.url(model, portrait), side: Space.record, round: true)
@@ -215,30 +215,30 @@ struct ArtistPage: View {
                          facts: Catalogue.featuredFacts(best), opens: .page(.work(best.id))) { model.playWork(best.id) }
             }
             if !works.isEmpty {
-                SectionHeading(title: Catalogue.heading(works, all: all))
+                HeroHeading(Catalogue.heading(works, all: all))
                 // Each under who it is by, its catalogue number under it, and
                 // how many performances of it there are at its right.
                 ForEach(listed) { w in
-                    EntryRow(over: by, title: w.title, under: w.catalogue, count: String(w.recordings), onOpen: { open(.page(.work(w.id))) }) {
+                    HeroEntry(over: by, title: w.title, under: w.catalogue, count: String(w.recordings), onOpen: { open(.page(.work(w.id))) }) {
                         EmptyView()
                     }
                 }
                 if short {
-                    MoreRow(title: "See All \(works.count) Works") { all = true }
+                    HeroMore("See All \(works.count) Works") { all = true }
                 }
             }
             if !albums.isEmpty {
-                SectionHeading(title: "Albums")
+                HeroHeading("Albums")
                 AlbumShelf(albums: albums)
             }
             if songs {
-                SectionHeading(title: "Songs")
+                HeroHeading("Songs")
                 CatalogueTracks(tracks: tracks, page: page, creator: name)
             }
             // Every episode they are on, newest first, each under its show
             // and with whoever else is on it, playing as a show's do.
             if !episodes.isEmpty {
-                SectionHeading(title: "Episodes")
+                HeroHeading("Episodes")
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { i, t in
                     let others = PeopleEntry.guests(model.people[t.id] ?? []).filter { $0.name != name }
                     EpisodeRow(track: t, detail: nil, others: "", people: others, show: model.show(of: t)?.title ?? t.creator, from: page,
@@ -304,9 +304,9 @@ struct WorkPage: View {
             }
             // Every performance, under the one set apart — the only one too.
             if !takes.isEmpty {
-                SectionHeading(title: "Recordings")
+                HeroHeading("Recordings")
                 ForEach(Array(takes.enumerated()), id: \.element.id) { i, r in
-                    EntryRow(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.page(.recording(r.id))) }) {
+                    HeroEntry(title: Catalogue.who(r), under: Catalogue.facts(r), onOpen: { open(.page(.recording(r.id))) }) {
                         // The first is set apart above and zooms from there.
                         TakeCover(take: r, opens: i == 0 ? nil : .page(.recording(r.id)))
                     }
@@ -368,11 +368,11 @@ struct RecordingPage: View {
             CatalogueTracks(tracks: tracks, page: page, creator: "", headings: false)
             RecordFoot(year: year, tracks: tracks, label: take?.label ?? "")
             if !albums.isEmpty {
-                SectionHeading(title: albums.count == 1 ? "From the Album" : "From the Albums")
+                HeroHeading(albums.count == 1 ? "From the Album" : "From the Albums")
                 AlbumShelf(albums: albums)
             }
             if !people.isEmpty {
-                SectionHeading(title: "On This Recording")
+                HeroHeading("On This Recording")
                 CoverShelf(items: people) { p in Face(billed: p) }
                     .padding(.top, Space.xs)
             }
@@ -428,7 +428,7 @@ struct ShowPage: View {
         let feed = model.subscription(of: id)
         ScrollViewReader { proxy in
             List {
-                PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
+                PlayHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
                            facts: Spell.facts([formatCount(n: Int64(episodes.count), word: "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
                            onPlay: { model.play(episodes, at: 0, from: page) }, onShuffle: { model.shuffle(episodes, from: page) }) {
                     CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
@@ -545,7 +545,7 @@ struct PlaylistPage: View {
         let name = playlist?.name ?? "Playlist"
         ScrollViewReader { proxy in
             List {
-                PageHeader(kind: "Playlist", title: name, facts: Spell.facts([formatCount(n: Int64(tracks.count), word: "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
+                PlayHeader(kind: "Playlist", title: name, facts: Spell.facts([formatCount(n: Int64(tracks.count), word: "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
                            onPlay: { model.play(tracks, at: 0, from: page) }, onShuffle: { model.shuffle(tracks, from: page) }) {
                     CoverView(seed: name, url: "", side: Space.header).frame(width: Space.header, height: Space.header)
                 }

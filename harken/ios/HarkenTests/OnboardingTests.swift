@@ -1,6 +1,7 @@
 // The onboarding's machine with no network and no browser: where a launch
 // starts, the server step, and the sign-in that goes by itself — once a
 // launch, so a refused or empty sign-in is said and never looped.
+import ArkUICore
 @testable import Harken
 import Foundation
 import XCTest
@@ -189,12 +190,12 @@ final class OnboardingTests: XCTestCase {
     /// A face without a picture says the first and last words' initials, as
     /// the desktop's and Android's do. Falsified by taking the second word's: `JS`.
     func testAFaceSaysWhoByItsInitials() {
-        XCTAssertEqual(Spell.initials("Ada"), "A")
-        XCTAssertEqual(Spell.initials("Johann Sebastian Bach"), "JB")
-        XCTAssertEqual(Spell.initials("  ada   lovelace "), "AL")
-        XCTAssertEqual(Spell.initials("user-0123"), "U")
-        XCTAssertEqual(Spell.initials(""), "")
-        XCTAssertEqual(Spell.initials("\u{e9}mile (\u{2014})"), "\u{c9}")
+        XCTAssertEqual(Pictures.initials("Ada"), "A")
+        XCTAssertEqual(Pictures.initials("Johann Sebastian Bach"), "JB")
+        XCTAssertEqual(Pictures.initials("  ada   lovelace "), "AL")
+        XCTAssertEqual(Pictures.initials("user-0123"), "U")
+        XCTAssertEqual(Pictures.initials(""), "")
+        XCTAssertEqual(Pictures.initials("\u{e9}mile (\u{2014})"), "\u{c9}")
     }
 }
 

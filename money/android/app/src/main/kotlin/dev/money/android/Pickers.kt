@@ -36,7 +36,7 @@ import dev.arkui.Press
 import dev.arkui.AmountText
 import dev.arkui.Pill
 import dev.arkui.Space
-import dev.arkui.Tone
+import dev.arkui.Tint
 import uniffi.money_domain.AccountLine
 
 /** What a picker answered. */
@@ -146,7 +146,7 @@ private fun Option(name: String, available: Long?, onClick: () -> Unit) {
         trailingContent =
             if (available != null) {
                 {
-                    val tone = if (available < 0) Tone.Negative else if (available > 0) Tone.Positive else Tone.Neutral
+                    val tone = if (available < 0) Tint.Negative else if (available > 0) Tint.Positive else Tint.Neutral
                     Pill(tone) { AmountText(available, style = MaterialTheme.typography.labelLarge) }
                 }
             } else null,

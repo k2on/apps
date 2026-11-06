@@ -13,7 +13,6 @@ use money_domain::formulas::{parse_share, percent};
 use money_domain::*;
 
 use crate::amount::money;
-use crate::look;
 use crate::peer::Ledger;
 use crate::view::{action, bold, dim, fill, link, quiet};
 use crate::{App, Message};
@@ -243,14 +242,14 @@ impl App {
             .on_press(Message::Formula(Msg::Pick(i)))
             .padding([4, 6])
             .width(Length::Fill)
-            .style(look::choice(t.filter.is_some()));
+            .style(arkui::style::chip(t.filter.is_some()));
             let factor = text_input("10%", &t.factor)
                 .on_input(move |s| Message::Formula(Msg::Factor(i, s)))
                 .on_submit(Message::Formula(Msg::Save))
                 .size(12)
                 .padding([4, 6])
                 .width(Length::Fixed(58.0))
-                .style(look::input);
+                .style(arkui::style::field);
             let remove = button(icon::faint(glyphs::CLOSE, false).width(12.0).height(12.0))
                 .on_press(Message::Formula(Msg::Remove(i)))
                 .padding(3)
@@ -280,6 +279,6 @@ impl App {
         }
         c = c.push(dim(format!("Saved, it assigns from {month} on; months before keep theirs."), 11));
         c = c.push(buttons);
-        container(c).padding(14).style(look::card).into()
+        container(c).padding(14).style(arkui::style::card).into()
     }
 }

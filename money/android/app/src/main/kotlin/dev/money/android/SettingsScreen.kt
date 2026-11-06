@@ -82,8 +82,8 @@ import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.SectionHeader
 import dev.arkui.Space
-import dev.arkui.Tone
-import dev.arkui.toneColors
+import dev.arkui.Tint
+import dev.arkui.tintColors
 import kotlinx.coroutines.delay
 import uniffi.money_domain.AskLine
 import uniffi.money_domain.AskState
@@ -214,11 +214,11 @@ private fun rememberNow(ticking: Boolean): Long {
 private fun AskCard(a: AskLine, now: Long, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val tone =
         when (a.state) {
-            AskState.FAILED, AskState.EXPIRED -> Tone.Negative
-            AskState.DONE -> Tone.Positive
-            else -> Tone.Neutral
+            AskState.FAILED, AskState.EXPIRED -> Tint.Negative
+            AskState.DONE -> Tint.Positive
+            else -> Tint.Neutral
         }
-    val (container, on) = toneColors(tone)
+    val (container, on) = tintColors(tone)
     Card(
         colors = CardDefaults.cardColors(containerColor = container, contentColor = on),
         shape = MaterialTheme.shapes.large,

@@ -1,4 +1,5 @@
-// A search field as a row of the page, where a tab searches what it lists
+// A search field as a row of the page (`SearchField`, the name Android's
+// and the desktop's have too), where a tab searches what it lists
 // in place — money's Transactions, under its large title — rather than in
 // the bar's drawer, which would stand over the large title and push it down
 // from where every other tab has it. Drawn as the system's own field is in
@@ -30,7 +31,7 @@ public enum SearchSizes {
 /// is typed into `text`, and a way to empty it. `onSearch` is told when the
 /// keyboard's Search key is pressed. VoiceOver hears it as Search, with the
 /// field and its Clear button inside.
-public struct SearchRow: View {
+public struct SearchField: View {
     @Binding var text: String
     let prompt: String
     let onSearch: () -> Void

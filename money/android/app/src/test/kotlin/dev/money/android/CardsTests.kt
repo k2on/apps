@@ -6,7 +6,7 @@
 // offered a payment category.
 package dev.money.android
 
-import dev.arkui.Tone
+import dev.arkui.Tint
 import java.util.Locale
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -47,7 +47,7 @@ class CardsTests {
         assertTrue(Ledger.isPayment(pay))
         assertTrue(l.cards.any { it.card == card.id })
         assertEquals("Nothing owed on the card", storyOf(pay, a))
-        assertEquals(Tone.Neutral, toneOf(pay))
+        assertEquals(Tint.Neutral, toneOf(pay))
         // A card only tracked has none.
         book.openAccount("Store card", "credit", onBudget = false, balance = -1_000)
         val store = l.accounts.first { it.name == "Store card" }
@@ -59,7 +59,7 @@ class CardsTests {
         val (_, pay) = visa(owed = 50_000)
         assertEquals(50_000L, pay.debt)
         assertEquals(50_000L, pay.underfunded)
-        assertEquals(Tone.Caution, toneOf(pay))
+        assertEquals(Tint.Caution, toneOf(pay))
         assertEquals("$500.00 short of the $500.00 owed", storyOf(pay, a))
         assertTrue(l.cardsShort >= 50_000)
         // The debt it came with is nobody's money: Ready to Assign did not move.
@@ -71,7 +71,7 @@ class CardsTests {
         assertEquals(50_000L, now.assigned)
         assertEquals(ready - 50_000, l.summary!!.readyToAssign)
         assertEquals("Covered: $500.00 owed", storyOf(now, a))
-        assertEquals(Tone.Positive, toneOf(now))
+        assertEquals(Tint.Positive, toneOf(now))
         // Nothing left to cover: pressed again, nothing moves.
         book.coverCard(pay.categoryId)
         assertEquals(50_000L, l.line(pay.categoryId)!!.assigned)
@@ -88,13 +88,13 @@ class CardsTests {
         assertEquals(3_000L, spent.creditOverspent)
         assertTrue(creditOverspent(spent))
         // Amber, as the card's debt, not red as next month's.
-        assertEquals(Tone.Caution, toneOf(spent))
+        assertEquals(Tint.Caution, toneOf(spent))
         assertEquals("$30.00 on a card, not covered", storyOf(spent, a))
         // What the category had went to the card's payment; what it lacked is not covered there.
         val p = l.line(pay.categoryId)!!
         assertEquals(c.available + 3_000, p.debt)
         assertEquals(3_000L, p.underfunded)
-        assertEquals(Tone.Caution, toneOf(p))
+        assertEquals(Tint.Caution, toneOf(p))
         assertEquals(ready, l.summary!!.readyToAssign)
     }
 
@@ -105,7 +105,7 @@ class CardsTests {
         val spent = l.line(c.categoryId)!!
         assertEquals(0L, spent.creditOverspent)
         assertFalse(creditOverspent(spent))
-        assertEquals(Tone.Negative, toneOf(spent))
+        assertEquals(Tint.Negative, toneOf(spent))
         assertEquals("Overspent by $30.00", storyOf(spent, a))
     }
 

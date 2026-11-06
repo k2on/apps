@@ -403,10 +403,11 @@ struct CoverCard: View {
     }
 }
 
-/// The header of a page that is about something: its cover, what it is, its
-/// name, who it is by (a link, when it goes somewhere), the numbers true of
-/// the whole of it, and Play and Shuffle — Liquid Glass buttons.
-struct PageHeader<Cover: View>: View {
+/// The header of a page that is about something that plays: ArkUI's
+/// `PageHeader` — its cover, what it is, its name, who it is by, the
+/// numbers true of the whole of it — with Play and Shuffle, Liquid Glass
+/// buttons.
+struct PlayHeader<Cover: View>: View {
     let kind: String
     let title: String
     var by: String? = nil
@@ -418,14 +419,7 @@ struct PageHeader<Cover: View>: View {
     @ViewBuilder let cover: () -> Cover
 
     var body: some View {
-        VStack(spacing: Space.xs) {
-            cover().padding(.top, Space.s).padding(.bottom, Space.l)
-            Text(kind).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
-            Text(title).font(.title2.bold()).multilineTextAlignment(.center)
-            if let by = by {
-                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.accentText).disabled(onBy == nil)
-            }
-            Text(facts).font(.footnote).foregroundStyle(.quiet)
+        PageHeader(kind: kind, title: title, facts: facts, by: by, onBy: onBy, cover: cover) {
             GlassEffectContainer(spacing: Space.m) {
                 HStack(spacing: Space.m) {
                     Button(action: onPlay) { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -437,11 +431,7 @@ struct PageHeader<Cover: View>: View {
                 .frame(maxWidth: 320)
             }
             .disabled(!canPlay)
-            .padding(.top, Space.l)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, Space.page)
-        .padding(.bottom, Space.m)
     }
 }
 
@@ -451,16 +441,7 @@ struct Offline: View {
     let host: String
 
     var body: some View {
-        HStack(spacing: Space.m) {
-            Image(systemName: "icloud.slash").foregroundStyle(.quiet)
-            Text("Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
-                .font(.footnote).foregroundStyle(.quiet)
-        }
-        .padding(Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, Space.page)
-        .padding(.vertical, Space.s)
+        Banner(symbol: "icloud.slash", text: "Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
     }
 }
 
@@ -485,7 +466,7 @@ struct Avatar: View {
         let rgb = set[Art.pick(set.count, name)]
         ZStack {
             Circle().fill(Color(uiColor: UIColor(rgb: rgb)))
-            Text(Spell.initials(name))
+            Text(Pictures.initials(name))
                 .font(.system(size: side * 0.4, weight: .semibold))
                 .foregroundStyle(Avatar.ink(on: rgb))
             if let i = image ?? (picture.isEmpty ? nil : Covers.shared.cached(picture, side: side)) {

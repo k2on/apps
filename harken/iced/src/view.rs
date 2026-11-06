@@ -10,7 +10,7 @@ use arkui::fit::{drawable, Cut};
 use arkui::format::{clock, clock_secs, count, length, names, plural, span};
 use arkui::line::Line;
 use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
-use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row, Space};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, stack, text, text_input, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::listening::{self, Clock, Output};
@@ -58,7 +58,7 @@ const FEATURED_ART: f32 = 160.0;
 const BAR_ART: f32 = 44.0;
 const NOW_WIDTH: f32 = 280.0;
 /// A clock beside the seek bar: room for `1:23:45` at 11px.
-const CLOCK_WIDTH: f32 = 48.0;
+const CLOCK_WIDTH: f32 = arkui::parts::CLOCK;
 /// Between the bar's groups: the transport, what plays, the seek bar, and
 /// each control after it.
 const BAR_SPACING: f32 = 16.0;
@@ -87,9 +87,8 @@ fn mute_button<'a>(level: Level, muted: bool, lit: bool) -> Element<'a, Message>
 /// it is let go.
 fn volume_slider<'a>(level: Level, at: f32) -> Element<'a, Message> {
     let dragged = level.clone();
-    slider(0.0..=100.0, at, move |v| Message::Volume(dragged.clone(), v))
+    arkui::parts::bar(0.0..=100.0, at, move |v| Message::Volume(dragged.clone(), v))
         .on_release(Message::VolumeDone)
-        .style(style::seek)
         .width(Length::Fixed(VOLUME_WIDTH))
         .into()
 }
@@ -2523,21 +2522,14 @@ impl App {
         .width(Length::Fixed(NOW_WIDTH));
         // Each clock as wide as the longest it can say, so the bar between
         // them does not shift as the seconds go by.
-        let seek = row![
-            text(clock_secs(position))
-                .size(11)
-                .style(style::dim)
-                .width(Length::Fixed(CLOCK_WIDTH))
-                .align_x(Alignment::End),
-            slider(0.0..=duration as f32, position as f32, Message::Seek)
-                .on_release(Message::SeekDone)
-                .style(style::seek)
-                .width(Length::Fill),
-            text(clock_secs(duration)).size(11).style(style::dim).width(Length::Fixed(CLOCK_WIDTH)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
+        let seek = arkui::parts::scrubber(
+            clock_secs(position),
+            clock_secs(duration),
+            duration as f32,
+            position as f32,
+            Message::Seek,
+            Message::SeekDone,
+        );
         let mut line = row![transport, playing, seek].spacing(BAR_SPACING).align_y(Alignment::Center);
         if let Some(volume) = self.view_volume() {
             line = line.push(volume);

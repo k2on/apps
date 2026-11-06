@@ -146,7 +146,7 @@ public fun Bars(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.padding(top = Space.xs))
-                    Meter(
+                    ProgressBar(
                         fraction = drawn * p.value / most.toFloat(),
                         color = p.color,
                         height = height,

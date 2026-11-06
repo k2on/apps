@@ -36,10 +36,18 @@ whether a `/healthz` is an Ark server running this app's domain
 **Material You** (`MaterialYou.kt`, added for money): `MaterialYou`, the
 wallpaper's scheme on Android 12 and later or the app's own; the
 expressive shapes (`ExpressiveShapes`) and an emphasised type scale
-(`expressiveTypography`); `Pill` and `Tone`, a value in a tinted capsule
-(positive, neutral, caution, negative, from the scheme's containers);
-`Meter`, a bar that springs toward a goal; `Stat`, a figure under its
-label; `SectionHeader`; and `Stepper`, a title stepped back and forth.
+(`expressiveTypography`); `Pill` and `Tint`, a value in a tinted capsule
+(positive, neutral, caution, negative, accent, from the scheme's
+containers); `ProgressBar`, a bar that springs toward a goal; and `Stat`, a
+figure under its label.
+
+**The generic parts** (`Parts.kt`, `HeroParts.kt`; `docs/arkui-parts.md`
+lists them with their SwiftUI and iced twins): `PageHeader`,
+`SectionHeader`, `GroupCard` and `RowDivider` (a `ListRow` in a card is a
+grouped row), `Banner`, `Chip`, `Badge`, `Tile`, `SearchField`,
+`NameField`, `Pager`, `Scrubber`, the glyphs by their shared names
+(`ArkGlyphs.named`), and a page about somebody (`HeroBanner`,
+`HeroHeading`, `HeroEntry`, `HeroMore`).
 
 **Money as a locale writes it** (`Amounts.kt`, `AmountField.kt`): minor
 units formatted and parsed in the phone's locale and currency — what

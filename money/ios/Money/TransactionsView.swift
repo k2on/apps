@@ -35,7 +35,7 @@ struct TransactionsView: View {
                 AddTransactionButton()
                 AccountButton()
             } below: {
-                SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
+                SearchField(text: $needle, prompt: "Payee, category, memo or amount")
                 Picker("Showing", selection: $showing) {
                     ForEach(Showing.allCases, id: \.self) { s in
                         Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)

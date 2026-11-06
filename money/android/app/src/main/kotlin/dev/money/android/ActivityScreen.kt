@@ -58,6 +58,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.Empty
+import dev.arkui.SearchField
+import dev.arkui.ArkGlyphs
 import dev.arkui.Space
 import dev.arkui.reflowing
 import uniffi.money_domain.TxnLine
@@ -111,7 +114,10 @@ fun ActivityScreen(ledger: Ledger) {
         },
     ) { pad, _ ->
         LazyColumn(state = list, contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
-            item(key = "search") { SearchField(needle, onType = { needle = it }) }
+            item(key = "search") {
+                // The page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+                SearchField(needle, { needle = it }, "Payee, category, memo or amount", Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs))
+            }
             item(key = "segments") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {
                     SegmentedButton(selected = !all, onClick = { all = false }, shape = SegmentedButtonDefaults.itemShape(0, 2), icon = {}) {
@@ -185,49 +191,12 @@ private fun GroupHeadingText(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
 }
 
-/**
- * The search field over the list, a filled capsule as the iPhone's is (ArkUI's `SearchRow`): the
- * page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
- */
-@Composable
-private fun SearchField(needle: String, onType: (String) -> Unit) {
-    TextField(
-        value = needle,
-        onValueChange = onType,
-        placeholder = { Text("Payee, category, memo or amount", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        trailingIcon = {
-            if (needle.isNotEmpty()) {
-                IconButton(onClick = { onType("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear the search") }
-            }
-        },
-        singleLine = true,
-        shape = CircleShape,
-        colors =
-            TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
-        modifier = Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs),
-    )
-}
-
+/** What the list says with nothing left to look at, or nothing matching the search: ArkUI's [Empty]. */
 @Composable
 private fun CaughtUp(needle: String) {
-    Column(
-        Modifier.fillMaxWidth().padding(top = 96.dp, start = Space.xxl, end = Space.xxl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center) {
-            Icon(if (needle.isEmpty()) Glyphs.Done else Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
-            Spacer(Modifier.height(Space.l))
-            Text(if (needle.isEmpty()) "All Caught Up" else "No Results", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Text(
-                if (needle.isEmpty()) "Everything from the bank has been looked at, and everything has a category. Pull down to ask the bank for anything new."
-                else "Nothing waiting matches “$needle”.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center)
-        }
+    if (needle.isEmpty()) {
+        Empty(Glyphs.Done, "All Caught Up", "Everything from the bank has been looked at, and everything has a category. Pull down to ask the bank for anything new.")
+    } else {
+        Empty(ArkGlyphs.Search, "No Results", "Nothing waiting matches “$needle”.")
+    }
 }

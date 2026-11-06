@@ -1,6 +1,6 @@
 // The pieces harken's screens are made of that are harken's: a track's row
-// and its number, a page's header with Play and Shuffle, the banner a
-// server that cannot be reached puts over everything, and a catalogue's
+// and its number, a page's header with Play and Shuffle, what the banner a
+// server that cannot be reached puts over everything says, and a catalogue's
 // pieces (below). The rest — headings,
 // shelves, cards, rows that open something, a row's menu button, what an
 // empty list says — is `ark-ui`'s (`dev.arkdb.ui`). Drawn from plain values
@@ -52,7 +52,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.arkui.Chevron
+import dev.arkui.Banner
+import dev.arkui.PageHeader
 import dev.arkui.Cover
 import dev.arkui.Glyph
 import dev.arkui.LocalPageFrame
@@ -198,11 +199,11 @@ fun TrackNumber(n: Long, playing: Boolean) {
 }
 
 /**
- * The header of a page that is about something: its cover, what it is, its name, who it is by (a
- * link, when it goes somewhere), the numbers true of the whole of it, and Play and Shuffle.
+ * The header of a page that is about something that plays: ArkUI's [PageHeader] — its cover, what
+ * it is, its name, who it is by, the numbers true of the whole of it — with Play and Shuffle.
  */
 @Composable
-fun PageHeader(
+fun PlayHeader(
     cover: @Composable () -> Unit,
     kind: String,
     title: String,
@@ -213,38 +214,17 @@ fun PageHeader(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.page), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(Space.s))
-        // Where the art a page grew from lands.
-        Box(LocalPageFrame.current?.art?.modifier ?: Modifier) { cover() }
-        Spacer(Modifier.height(Space.l))
-        Text(kind, style = quiet(MaterialTheme.typography.labelMedium))
-        Spacer(Modifier.height(Space.xs))
-        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        if (by != null) {
-            Text(
-                by,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center,
-                modifier = if (onBy != null) Modifier.pressable(onClick = onBy).padding(Space.xs) else Modifier.padding(Space.xs),
-            )
+    PageHeader(kind = kind, title = title, facts = facts, by = by, onBy = onBy, cover = cover) {
+        Button(onClick = onPlay, enabled = canPlay, modifier = Modifier.width(148.dp)) {
+            Glyph(Glyphs.Play, null, size = 16.dp)
+            Spacer(Modifier.width(Space.s))
+            Text("Play")
         }
-        Text(facts, style = quiet(MaterialTheme.typography.bodySmall), textAlign = TextAlign.Center)
-        Spacer(Modifier.height(Space.l))
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-            Button(onClick = onPlay, enabled = canPlay, modifier = Modifier.width(148.dp)) {
-                Glyph(Glyphs.Play, null, size = 16.dp)
-                Spacer(Modifier.width(Space.s))
-                Text("Play")
-            }
-            OutlinedButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.width(148.dp)) {
-                Glyph(Glyphs.Shuffle, null, size = 16.dp)
-                Spacer(Modifier.width(Space.s))
-                Text("Shuffle")
-            }
+        OutlinedButton(onClick = onShuffle, enabled = canPlay, modifier = Modifier.width(148.dp)) {
+            Glyph(Glyphs.Shuffle, null, size = 16.dp)
+            Spacer(Modifier.width(Space.s))
+            Text("Shuffle")
         }
-        Spacer(Modifier.height(Space.m))
     }
 }
 
@@ -254,78 +234,17 @@ fun PageHeader(
  */
 @Composable
 fun Offline(host: String) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {
-        Row(Modifier.padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Glyphs.Offline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(Space.m))
-            Text(
-                "Can't reach $host. What's on this phone still plays, and your changes sync when it's back.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    Banner(Glyphs.Offline, "Can't reach $host. What's on this phone still plays, and your changes sync when it's back.")
 }
 
 // A catalogue's pieces ---------------------------------------------------------------------------
 //
 // What the pages about a composer, a work, a performance and a record are made of, as the
-// desktop's are (`rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a banner with the name on
-// it, a header with the cover beside the words, a section's heading, the one thing
-// set apart with a Play, a listing's entry over its hairline, a work's heading over its
-// movements, and a record's small print.
-
-/** The tallest a banner is drawn, the desktop's: its whole shape on a page about 1250 wide. */
-val BANNER_TALLEST = 486.dp
-
-/** How far below the status bar the shade at a banner's top runs: past its back. */
-val BANNER_TOP_SHADE = 72.dp
-
-/** A banner's shape, width over height: a painting cut for one (2400×933). */
-const val BANNER_ASPECT = 2400f / 933f
-
-/**
- * How tall a banner `width` wide is drawn on a phone. Its own shape would be a strip there (about
- * 150 dp), so a phone crops it to a taller frame, as a catalogue's phone app does, the name on its
- * lower edge; never past [BANNER_TALLEST].
- */
-fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).coerceIn(200.dp, BANNER_TALLEST)
-
-/**
- * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
- * fill, run up under the status bar (its page says [dev.arkui.UnderStatusBar]) and that
- * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
- * type and `name` in bold on its lower edge over a shade that keeps them legible, and a lighter
- * one under the bar's icons and the page's back (its [dev.arkui.PinnedBar], over the banner's
- * top, below the status bar). Until the picture arrives the
- * derived square is drawn instead, so the name is already where it will be. A page grows out of a
- * portrait into it, the part under the bar included.
- */
-@Composable
-fun Banner(seed: String, art: String, kind: String, name: String) {
-    val bar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val w = maxWidth
-        Box(Modifier.fillMaxWidth().height(bar + bannerHeight(w)).then(LocalPageFrame.current?.art?.modifier ?: Modifier)) {
-            Cover(seed, art, w, Modifier.fillMaxSize(), corner = 0.dp)
-            // Clear at the top, darkest at the foot, where the name is.
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.Clear, 0.45f to Palette.Clear, 1f to Palette.Shade)))
-            // And a little shade at the very top, under the bar's icons and back.
-            Box(Modifier.fillMaxWidth().height(bar + BANNER_TOP_SHADE).background(Brush.verticalGradient(0f to Palette.Shade.copy(alpha = 0.35f), 1f to Palette.Clear)))
-            Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
-                Text(kind, style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
-                Spacer(Modifier.height(Space.xs))
-                Text(name, style = MaterialTheme.typography.headlineLarge, color = Palette.OnShade)
-            }
-        }
-    }
-}
-
-/** A section's heading, bold, with what opens the rest of it at its end. */
-@Composable
-fun SectionHeading(title: String, modifier: Modifier = Modifier) {
-    Text(title, style = MaterialTheme.typography.headlineSmall, modifier = modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl, bottom = Space.s))
-}
+// desktop's are (`rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a header with the cover
+// beside the words, the one thing set apart with a Play, a work's heading over its movements,
+// and a record's small print. The banner with the name on it, a section's heading, a listing's
+// entry over its hairline and the line that opens the rest are ArkUI's (`HeroBanner`,
+// `HeroHeading`, `HeroEntry`, `HeroMore`).
 
 /** A Play, small and in the accent's tone: what a header and a featured performance start with. */
 @Composable
@@ -408,41 +327,6 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
 }
 
 /**
- * One entry of a catalogue's listing over its hairline: a picture at its left when it has one,
- * a line of small type over its title (who it is by), a line under, a count at its right, and
- * the chevron. The whole entry opens it.
- */
-@Composable
-fun Entry(title: String, over: String, under: String, count: String, onOpen: () -> Unit, picture: (@Composable (Modifier) -> Unit)? = null) {
-    val hero = if (picture != null) rememberHero(4.dp) else null
-    Column(Modifier.fillMaxWidth().pressable(onClick = hero?.lifting(onOpen) ?: onOpen, press = Press.Highlight).padding(start = Space.page)) {
-        Row(Modifier.fillMaxWidth().padding(end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
-            if (picture != null && hero != null) {
-                picture(hero.modifier)
-                Spacer(Modifier.width(Space.m))
-            }
-            Column(Modifier.weight(1f)) {
-                if (over.isNotEmpty()) Text(over, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
-                Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (under.isNotEmpty()) Text(under, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (count.isNotEmpty()) Text(count, style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(horizontal = Space.s))
-            Chevron()
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    }
-}
-
-/** The line under a section that opens the rest of it — "See All 40 Works" — in the accent. */
-@Composable
-fun MoreLine(label: String, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().pressable(onClick = onOpen, press = Press.Highlight).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-        Chevron()
-    }
-}
-
-/**
  * A work's heading on a record: its composer in small type over its title, and
  * how long the run of it under the heading lasts, where the tracks' lengths are.
  */
@@ -473,9 +357,13 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
     }
 }
 
-/** A person on a recording, as a face: their portrait, their name, what they did. Opens their page where they have one. */
+/**
+ * A person on a recording: their portrait (ArkUI's round [Cover]), their name, what they did. Opens
+ * their page where they have one. Not the account's [dev.arkui.Face]: a performer has a portrait or
+ * their derived square, never initials on the accent.
+ */
 @Composable
-fun Face(name: String, art: String, role: String, onOpen: (() -> Unit)?) {
+fun Credit(name: String, art: String, role: String, onOpen: (() -> Unit)?) {
     val hero = if (onOpen != null) rememberHero(Space.corner, round = true) else null
     Column(
         Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.pressable(onClick = hero.lifting(onOpen)) else Modifier),
