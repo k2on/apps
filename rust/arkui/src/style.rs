@@ -222,6 +222,18 @@ pub fn bars(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
         } => (rail(is_vertical_scrollbar_dragged), rail(is_horizontal_scrollbar_dragged)),
         _ => (rail(false), rail(false)),
     };
+    // An `elastic` banding draws this bar itself, unmoved and shorter.
+    let v = match crate::scroll::bar_hidden() {
+        true => scrollable::Rail {
+            background: None,
+            border: Border::default(),
+            scroller: scrollable::Scroller {
+                background: Background::Color(Color::TRANSPARENT),
+                border: Border::default(),
+            },
+        },
+        false => v,
+    };
     scrollable::Style {
         vertical_rail: v,
         horizontal_rail: h,

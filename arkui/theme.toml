@@ -273,3 +273,21 @@ paused-scale = 0.9
 # How far a thing that comes in where it stays rises as it comes (dp, pt or
 # logical px): a page's header, small, into its bar. A nudge, not a journey.
 rise = 8.0
+# A scroll past its end (a trackpad, the desktop and the browser): the
+# rubber band of the whole pull in the view is held to this share of it, so
+# however far it is pulled it is never drawn further; and a coast slower
+# than coast-stop (logical px a second) has stopped.
+band-reach = 0.33
+coast-stop = 20.0
+# A release's speed is read from its last velocity-ms of moves, and a pause
+# of velocity-gap-ms between two of them means the drag had stopped there
+# (UIScrollView's and Android's tracker, by way of fluid-scroll). Where the
+# system never says the fingers lifted, lift-ms of stillness is a lift.
+velocity-ms = 100
+velocity-gap-ms = 40
+lift-ms = 50
+# A lift seen only by its stillness, at less than coast-spent of the
+# gesture's fastest, ran down by itself first: a browser's or a system's
+# own coast arriving as more of the wheel, or fingers that slowed to a
+# stop. It coasts no further, so a coast already made is never doubled.
+coast-spent = 0.25

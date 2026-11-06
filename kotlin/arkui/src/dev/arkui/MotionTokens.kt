@@ -43,4 +43,16 @@ public object MotionTokens {
     public const val PAUSED_SCALE: Float = 0.9f
     /** How far a thing that comes in where it stays rises as it comes: a nudge. */
     public const val RISE: Float = 8.0f
+    /** The most a band past a scroll's end is ever drawn, as a share of the view. */
+    public const val BAND_REACH: Float = 0.33f
+    /** A coast slower than this, a second, has stopped. */
+    public const val COAST_STOP: Float = 20.0f
+    /** How far back a release's speed is read from its moves, in milliseconds. */
+    public const val VELOCITY_MS: Int = 100
+    /** A pause this long between a drag's moves, in milliseconds, means it had stopped. */
+    public const val VELOCITY_GAP_MS: Int = 40
+    /** With no word from the system, a trackpad still this long has been let go, in milliseconds. */
+    public const val LIFT_MS: Int = 50
+    /** A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it. */
+    public const val COAST_SPENT: Float = 0.25f
 }
