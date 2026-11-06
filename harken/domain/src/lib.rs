@@ -78,15 +78,21 @@ pub fn domain() -> Domain {
     .with(<Look as ark::effect::Effect>::register::<Harken>)
 }
 
-/// What a connection fed by scope holds (§1.8): every durable table whole
-/// and, of the sign-ins and the roles, its person's.
+/// What a connection fed by scope holds (§1.8): every durable table whole;
+/// of the sign-ins and the roles, its person's; and of the live space
+/// (§1.9), which is fed by the same scope, its person's listening session,
+/// devices and scrubbers.
 #[scope("session.feed")]
 pub fn feed() -> Scope<Harken> {
     fn all<R>(_: &Ctx, _: &R) -> bool {
         true
     }
+    let theirs = Scope::new()
+        .on::<Listening>(|ctx, l| l.user == ctx.user())
+        .on::<ListeningDevice>(|ctx, d| d.user == ctx.user())
+        .on::<ListeningScrub>(|ctx, s| s.user == ctx.user());
     ark_auth::feed(
-        Scope::new()
+        theirs
             .on::<Media>(all)
             .on::<Album>(all)
             .on::<Person>(all)

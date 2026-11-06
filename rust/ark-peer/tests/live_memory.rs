@@ -12,6 +12,10 @@
 //! the server 1,203 verdicts (C = 3).
 //! `live_held_measured` (ignored; `--ignored --nocapture`) prints the same
 //! counts and the per-call time at 10,000 calls for C = 2 and C = 10.
+//!
+//! And the live space follows the log's rules (§1.8, §1.9): a connection
+//! fed by a scope holds, of the live rows, only what the scope gives it
+//! (`a_scoped_connection_holds_only_its_live_rows`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,9 +31,14 @@ use arkdb::demo::{Arrival, Point};
 const KEEP: usize = 256;
 
 fn hub() -> Peer {
+    scoped_hub(Arc::new(|_| None))
+}
+
+fn scoped_hub(feed: ark_peer::Scoping) -> Peer {
     let c = Config {
         live_keep: Some(KEEP),
         live: Some(Arc::new(arkdb::demo::room())),
+        feed,
         ..Config::of(Arc::new(domain()))
     };
     Peer::serve(c, Box::new(Memory::default()), 0)
@@ -149,4 +158,42 @@ fn live_held_measured() {
             h.per_call.as_secs_f64() * 1e6
         );
     }
+}
+
+/// Of the room's pointers, a connection fed by the demo's scope holds only
+/// its own (`arkdb::demo::room_top_two`), as it is filled and as the
+/// pointers move; one fed whole holds every one. Falsified by the hub
+/// before the live machine was given the feed: `u0`'s device held `u1`'s
+/// pointer.
+#[test]
+fn a_scoped_connection_holds_only_its_live_rows() {
+    let mut hub = scoped_hub(Arc::new(|w: &ark::peer::Ctx| (w.actor == "u0").then(|| "demo.top_two".to_string())));
+    // `u1` points before `u0` comes, so `u0` is filled; then each points.
+    let mut ds = vec![];
+    for k in [1, 0] {
+        let mut d = device(k);
+        let conn = hub.accept(d.me().clone());
+        d.connected();
+        ds.push((d, conn));
+        carry(&mut hub, &mut ds);
+        ds.last_mut()
+            .unwrap()
+            .0
+            .mutate_at("room.point", Point { x: k as i64 }.to_bytes(), 1)
+            .unwrap();
+        carry(&mut hub, &mut ds);
+    }
+    ds[0].0.mutate_at("room.point", Point { x: 7 }.to_bytes(), 2).unwrap();
+    carry(&mut hub, &mut ds);
+    let pointers = |p: &Peer| -> Vec<String> {
+        let rows = live(p)
+            .store
+            .rows("pointer")
+            .map(|r| arkdb::demo::Pointer::from_bytes(r).unwrap().session);
+        rows.collect()
+    };
+    assert_eq!(pointers(&hub), ["u0@d0", "u1@d1"]);
+    assert_eq!(pointers(&ds[0].0), ["u0@d0", "u1@d1"], "fed whole");
+    assert_eq!(pointers(&ds[1].0), ["u0@d0"], "fed by its scope");
+    assert!(live(&ds[1].0).pending.is_empty());
 }

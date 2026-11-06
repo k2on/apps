@@ -221,9 +221,17 @@ pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, String>
     Ok(scan::<Room, Here>().filter(|h| h.since >= 0))
 }
 
+/// The room as a connection the demo's scope feeds holds it (§1.8, §1.9:
+/// the live space is fed by the log's rules, its scope of the same name):
+/// who is here, and of the pointers its own.
+#[scope("demo.top_two")]
+pub fn room_top_two() -> Scope<Room> {
+    Scope::new().on::<Here>(|_, _| true).on::<Pointer>(|ctx, p| p.session == ctx.device())
+}
+
 /// The room, every function registered.
 pub fn room() -> Domain {
-    ark::register!(Domain::new::<Room>("room", "1"); on_join, on_leave, on_restore, point, rename, present)
+    ark::register!(Domain::new::<Room>("room", "1"); on_join, on_leave, on_restore, point, rename, present, room_top_two)
 }
 
 /// The room as a client of it is configured: the device it says it is,

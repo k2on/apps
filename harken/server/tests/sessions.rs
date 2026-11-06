@@ -2,7 +2,7 @@
 //! session row the hub writes and its token is judged by its signature and
 //! that row; a session revoked or expired is closed and turned away; a
 //! role granted judges its person again; a server fed by scope holds
-//! nobody else's sign-ins.
+//! nobody else's sign-ins, nor anybody else's listening devices.
 
 mod common;
 
@@ -212,5 +212,44 @@ fn a_scoped_server_holds_nobody_else_s_sign_ins() {
     assert_eq!(users(&alice), ["alice"]);
     assert_eq!(users(&bob), ["bob"]);
     std::thread::sleep(Duration::from_millis(50));
+    rt.block_on(server.stop());
+}
+
+/// Fed `session.feed`, a device's live space holds its own person's
+/// listening devices, each as it comes, and nobody else's (§1.9: the live
+/// space follows the log's rules). Falsified by the hub before its live
+/// machine was given the feed: alice's replica held bob's phone.
+#[test]
+fn a_scoped_server_holds_nobody_else_s_listening_devices() {
+    use ark::format::Encode;
+    use harken_server::domain::host::Kind;
+    use harken_server::domain::ListeningDevice;
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |c| c.scoped = true);
+    let mut alice = device(&server, "alice", Kind::Phone, "Alice's phone", true);
+    let mut bob = device(&server, "bob", Kind::Phone, "Bob's phone", true);
+    let mut alice_too = device(&server, "alice", Kind::Computer, "Alice's laptop", true);
+    let users = |p: &Peer| -> Vec<String> {
+        let live = p.client.live.as_ref().expect("a live space");
+        let rows = live
+            .store
+            .rows("listening_device")
+            .map(|r| ListeningDevice::from_bytes(r).unwrap().user);
+        rows.collect()
+    };
+    pump_until(&mut [&mut alice, &mut bob, &mut alice_too], 10, |ps| {
+        ps.iter().all(|p| p.live_settled())
+            && users(&*ps[0]).len() == 2
+            && users(&*ps[2]).len() == 2
+            && users(&*ps[1]).len() == 1
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    for p in [&mut alice, &mut bob, &mut alice_too] {
+        p.pump();
+    }
+    assert_eq!(users(&alice), ["alice", "alice"]);
+    assert_eq!(users(&alice_too), ["alice", "alice"]);
+    assert_eq!(users(&bob), ["bob"]);
     rt.block_on(server.stop());
 }

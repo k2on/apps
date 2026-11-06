@@ -202,7 +202,6 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     }
     net.views_hold()?;
     let hub = &net.hub.log;
-    let schema = hub.store.schema_arc().clone();
     let entries = hub.log().entries();
     let mut s = hub.store.clone();
     s.undo(entries.iter().flat_map(|l| &l.facts))
@@ -225,17 +224,22 @@ pub fn check(net: &Net, g: &Gen, partial: bool) -> Result<(), String> {
     if s != hub.store {
         return Err("the log replayed from its facts is not the store".into());
     }
-    if let Some(c) = net.clients.get(&0).filter(|_| partial) {
-        let holds = g.functions.get(&g.scope).and_then(|f| f.scope.clone()).expect("the scope");
-        let ctx = c.log.me.clone();
+    // The partial client holds exactly its union, in each space (§1.8, §1.9).
+    let Some(c) = net.clients.get(&0).filter(|_| partial) else {
+        return Ok(());
+    };
+    let spaces = [(Some(&c.log), Some(hub)), (c.live.as_ref(), net.hub.live.as_ref())];
+    for (space, (p, a)) in [Space::Durable, Space::Volatile].into_iter().zip(spaces) {
+        let (Some(p), Some(a)) = (p, a) else { continue };
+        let holds = a.domain.fns.get(&g.scope).and_then(|f| f.scope.clone()).expect("the scope");
         let mut rows = vec![];
-        for (name, rs) in hub.store.snapshot_rows() {
-            let held = rs.into_iter().filter(|row| holds(&ctx, &name, row) == Ok(true)).collect();
+        for (name, rs) in a.store.snapshot_rows() {
+            let held = rs.into_iter().filter(|row| holds(&p.me, &name, row) == Ok(true)).collect();
             rows.push((name, held));
         }
-        let union = Store::from_rows(schema, Space::Durable, &rows)?;
-        if c.log.store != union || !c.log.pending.is_empty() {
-            return Err("the partial client is not exactly its union".into());
+        let union = Store::from_rows(a.store.schema_arc().clone(), space, &rows)?;
+        if p.store != union || !p.pending.is_empty() {
+            return Err(format!("the partial client is not exactly its union in {space:?}"));
         }
     }
     Ok(())

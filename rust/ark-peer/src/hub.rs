@@ -12,10 +12,11 @@
 //! order, for a write that succeeds ([`Peer::failure`]).
 //!
 //! **Feeds.** Each connection is fed as the app says of its login
-//! (`Config::feed`): whole, or by a scope (§1.8) — the authority asks the
-//! same function (`Peer::feed`) at the connection's `Hello`, and every
-//! page sent to all goes to it through its scope (`ark::peer::Peer::fed`),
-//! once it has said `Hello`.
+//! (`Config::feed`): whole, or by a scope (§1.8) — the authority of each
+//! space asks the same function (`Peer::feed`) at the connection's
+//! `Hello`, and every page sent to all goes to it through its scope
+//! (`ark::peer::Peer::fed`), once it has said `Hello`: the live space is
+//! fed by the log's rules, its scope named in the live domain.
 //!
 //! **Devices** (§1.9). A connection may say what its device is, in a call
 //! before its `Hello`s (`ark::frames::DEVICE`); the server authors the live domain's `on_join` on what it
@@ -138,7 +139,7 @@ impl Peer {
         let _ = local.put(crate::local::REPLICA, &r.to_bytes());
         let live = config.live.as_ref().map(|l| {
             let mut m = machine(l, auth(), &me, Some(crate::live_origin(origin, opens)), Space::Volatile);
-            m.fold = Fold::keep(config.live_keep);
+            (m.fold, m.machine.feed) = (Fold::keep(config.live_keep), Some(config.feed.clone()));
             m
         });
         let mut p = Peer::with(config, log, live, local);
@@ -323,15 +324,17 @@ impl Peer {
         }
     }
 
-    /// A frame sent to all, for every connection of its space: the
-    /// volatile one's that said `Hello` in it; the log's fed whole, and
-    /// those fed by a scope that said `Hello`, each through it (§1.8).
+    /// A frame sent to all, for every connection of its space: the log's
+    /// fed whole; and those that said `Hello` in it, each through its scope
+    /// (§1.8) — the live space follows the log's rules.
     pub(crate) fn fanout(&mut self, space: Space, b: &[u8]) {
-        let m = &self.log.machine;
+        let Some(m) = self.machine(space) else { return };
         let to = self.hub.conns.iter().filter_map(|(c, conn)| match space {
             Space::Durable if conn.whole => Some((*c, b.to_vec())),
-            Space::Durable => conn.hello[0].then(|| m.fed(&conn.who, b.to_vec())).flatten().map(|b| (*c, b)),
-            Space::Volatile => conn.hello[1].then(|| (*c, b.to_vec())),
+            _ => conn.hello[space as usize]
+                .then(|| m.fed(&conn.who, b.to_vec()))
+                .flatten()
+                .map(|b| (*c, b)),
         });
         let to: Vec<Deliver> = to.collect();
         self.hub.held.extend(to);

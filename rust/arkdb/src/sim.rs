@@ -424,13 +424,13 @@ impl Net {
 
     /// One head, one state, nothing pending, and one chain where both hold
     /// it (a horizon moves a log's base), on every whole client, in each
-    /// space.
+    /// space (a client fed by a scope is fed so in both, §1.9).
     pub fn converged(&self) -> Result<(), String> {
         for (i, c) in &self.clients {
             let pairs = [(Some(&c.log), Some(&self.hub.log)), (c.live.as_ref(), self.hub.live.as_ref())];
             for (space, (p, a)) in [Space::Durable, Space::Volatile].into_iter().zip(pairs) {
                 let (Some(p), Some(a)) = (p, a) else { continue };
-                if space == Space::Durable && (self.hub.config.feed)(&c.log.me).is_some() {
+                if (self.hub.config.feed)(&c.log.me).is_some() {
                     continue;
                 }
                 let from = p.log().base_seq().max(a.log().base_seq());
