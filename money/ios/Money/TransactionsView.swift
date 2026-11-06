@@ -18,10 +18,18 @@ struct TransactionsView: View {
     @State private var needle = ""
     @State private var approved = 0
 
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
+
     var body: some View {
         let inbox = Registers.search(model.snapshot.inbox, needle)
         let all = Registers.search(model.register(nil) ?? [], needle)
         List {
+            // The large title, and at the end of its line what the tab offers and the account's face.
+            LargeTitleRow("Transactions", fold: $fold, padded: false) {
+                AddTransactionButton()
+                AccountButton()
+            }
             Section {
                 Picker("Showing", selection: $showing) {
                     ForEach(Showing.allCases, id: \.self) { s in
@@ -38,11 +46,7 @@ struct TransactionsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        // The large title on the bar's own line, and at its end the + and the account's face.
-        .largeTitleBar("Transactions") {
-            AddTransactionButton()
-            AccountButton()
-        }
+        .largeTitleBar("Transactions", fold: fold)
         .searchable(text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)

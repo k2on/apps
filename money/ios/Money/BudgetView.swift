@@ -53,11 +53,25 @@ struct BudgetView: View {
         var verb: String { if case .newGroup = self { return "Add" } else { return "Rename" } }
     }
 
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
+
     var body: some View {
         let s = model.snapshot
         let groups = Months.groups(s.groups, s.lines, hidden: showHidden)
         let shown = ahead ?? groups
         List {
+            // The large title, and at the end of its line what the tab offers and the account's face.
+            LargeTitleRow("Budget", fold: $fold, padded: false) {
+                if editing {
+                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
+                        .fontWeight(.semibold)
+                } else {
+                    options
+                    AddTransactionButton()
+                }
+                AccountButton()
+            }
             Section {
                 VStack(spacing: Space.l) {
                     // A step changes the month at once; only its figures roll, as its
@@ -95,18 +109,7 @@ struct BudgetView: View {
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
         .refreshable { await model.refresh() }
-        // The large title on the bar's own line, and at its end what the budget
-        // offers — its options and the + — and the account's face.
-        .largeTitleBar("Budget") {
-            if editing {
-                Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
-                    .fontWeight(.semibold)
-            } else {
-                options
-                AddTransactionButton()
-            }
-            AccountButton()
-        }
+        .largeTitleBar("Budget", fold: fold)
         .alert(naming?.title ?? "",
                isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $typed)

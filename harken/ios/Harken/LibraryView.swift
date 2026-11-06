@@ -51,25 +51,27 @@ struct LibraryView: View {
         // under it rather than through the capsules.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
+                // The large title, and at the end of its line the + and the
+                // account's face. On Podcasts and Sermons the + finds a show to
+                // follow; on the rest it makes a playlist.
+                LargeTitleRow("Library") {
+                    if let kind = tab.kind {
+                        Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
+                            .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
+                    } else {
+                        Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("New playlist")
+                    }
+                    AccountButton()
+                }
                 // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
                 LibraryChips(tab: $tab)
                 if let host = model.unreachable { Offline(host: host) }
             }
             .background(Color.page)
         }
-        // The large title on the bar's own line, and at its end the + and the
-        // account's face. On Podcasts and Sermons the + finds a show to follow;
-        // on the rest it makes a playlist.
-        .largeTitleBar("Library") {
-            if let kind = tab.kind {
-                Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
-            } else {
-                Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New playlist")
-            }
-            AccountButton()
-        }
+        // Its title stays put over the chips, so the bar stays empty.
+        .largeTitleBar("Library")
     }
 }
 

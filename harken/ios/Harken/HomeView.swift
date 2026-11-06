@@ -16,11 +16,15 @@ struct HomeView: View {
     @Environment(\.open) private var open
     @Environment(\.showTab) private var showTab
     @Environment(\.present) private var present
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
 
     var body: some View {
         let s = model.snapshot
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // The large title, the account's face at the end of its line.
+                LargeTitleRow("Home", fold: $fold) { AccountButton() }
                 if let host = model.unreachable { Offline(host: host) }
                 if !s.loaded {
                     EmptyView()
@@ -39,8 +43,7 @@ struct HomeView: View {
         // On the scroll view itself, so the fade under the tab bar and the
         // mini player is this one's, not only an environment value above it.
         .scrollEdges()
-        // The large title on the bar's own line, the account's face at its end.
-        .largeTitleBar("Home") { AccountButton() }
+        .largeTitleBar("Home", fold: fold)
         .animation(Springs.fade, value: s.loaded)
     }
 

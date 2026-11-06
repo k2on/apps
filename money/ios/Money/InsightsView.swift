@@ -14,11 +14,18 @@ struct InsightsView: View {
     @EnvironmentObject private var model: Model
     @State private var picked: Int64? = nil
 
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
+
     var body: some View {
         let s = model.snapshot
         let spending = s.spending.filter { $0.spent > 0 }.sorted { $0.spent > $1.spent }
         let total = spending.reduce(0) { $0 + $1.spent }
         List {
+            // The large title, and at the end of its line what the tab offers and the account's face.
+            LargeTitleRow("Insights", fold: $fold, padded: false) {
+                AccountButton()
+            }
             Section {
                 // A step changes the month at once; only its figures roll, as its
                 // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
@@ -82,8 +89,7 @@ struct InsightsView: View {
         }
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh() }
-        // The large title on the bar's own line, the account's face at its end.
-        .largeTitleBar("Insights") { AccountButton() }
+        .largeTitleBar("Insights", fold: fold)
     }
 
     /// The groups' colours, in the order the most spent takes them: the

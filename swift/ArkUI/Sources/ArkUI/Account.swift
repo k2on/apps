@@ -8,14 +8,14 @@
 // app adds (money's banks that want a look), Settings, Sign Out, and Done.
 // Only a tab's root has it: a page pushed over a tab has its own bar.
 //
-// The line is the navigation bar's own, in its inline mode: the title, large
-// and bold, at its leading end, and the face and the +s at its trailing end,
-// none of them on the bar's glass (`sharedBackgroundVisibility(.hidden)`).
-// As the page scrolls under the bar, the large title hands over to the inline
-// one in the bar's middle — it rises away and the small one rises in, on
-// `Springs.move`, transform and opacity only, as `inlineHeader` does — and
-// back over the top it comes back. Under Reduce Motion they only fade. The
-// face and the +s stay where they are, as a bar's items do.
+// The line is the page's own first row (`LargeTitleRow`), which scrolls
+// with it, as the system's large title does: the title full size and bold
+// at the leading edge, the +s and the face at the trailing edge. The bar is
+// inline and empty at rest (`largeTitleBar`); once the row has scrolled
+// under it, the title comes into the bar's middle, rising in on
+// `Springs.move` (`MotionTokens.rise`, transform and opacity only, as
+// `inlineHeader` does) and going back the same way; under Reduce Motion it
+// only fades. Not a toolbar item: a bar's items are cut short.
 //
 // Android's twins are arkui's `AccountFace`, `TabTitle`'s and
 // `LargeTitleLine`'s `account`, and `AccountSheet` (kotlin/arkui, Account.kt),
@@ -30,8 +30,6 @@ public enum AccountSizes {
     /// The dot on the face while something wants a look, and how far it sits out over the face's edge.
     public static let badge: CGFloat = 9
     public static let badgeOut: CGFloat = 2
-    /// How far a page scrolls under the bar before its large title hands over to the inline one.
-    public static let fold: CGFloat = 12
     /// How small a long large title may shrink to fit its line beside the face.
     public static let shrink: CGFloat = 0.7
     /// What a screen reader hears of the face, and of what its tap does.
@@ -39,7 +37,7 @@ public enum AccountSizes {
     public static let hint = "Account and settings"
 }
 
-/// Who is signed in, for the end of a tab's large title (`largeTitleBar`):
+/// Who is signed in, for the end of a tab's large title (`LargeTitleRow`):
 /// their `Face`, badged in the error colour while `attention` says what
 /// wants a look (money's banks), raising the account sheet on a tap
 /// (`action`). VoiceOver hears "Signed in as …", `attention`, and that it
@@ -79,23 +77,72 @@ public struct AccountFace: View {
     }
 }
 
+/// A tab's large title as the first row of its page: the title, full size
+/// and bold, at the leading edge, and `trailing` — the tab's +s, then its
+/// `AccountFace` — at the trailing edge of the same line, centred on it, none
+/// of them on glass. It scrolls with the page, as the system's large title
+/// does; `fold` is told how tall it is, for `largeTitleBar` to bring the
+/// inline title in once it has gone under the bar (none, for a row that
+/// stays put). In a `List` it is a row of its own with no background, no
+/// separator and no insets of its own (`padded` false where the list's
+/// sections already inset their rows from the edges).
 @available(iOS 26.0, *)
-extension View {
-    /// On a tab's root (its scroll view, or what holds it): `title` as the
-    /// large title, on the navigation bar's own line, with `trailing` — the
-    /// tab's +s, then its `AccountFace` — at that line's other end, none of
-    /// them on glass; and, once the page has scrolled under the bar, the
-    /// title small in the bar's middle instead. Sets the page's navigation
-    /// title, so a page pushed over it says where back goes.
-    public func largeTitleBar<Trailing: View>(_ title: String, @ViewBuilder trailing: @escaping () -> Trailing) -> some View {
-        modifier(LargeTitleBar(title: title, trailing: trailing))
+public struct LargeTitleRow<Trailing: View>: View {
+    let title: String
+    let fold: Binding<CGFloat>?
+    let padded: Bool
+    let trailing: () -> Trailing
+
+    public init(_ title: String, fold: Binding<CGFloat>? = nil, padded: Bool = true,
+                @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.title = title
+        self.fold = fold
+        self.padded = padded
+        self.trailing = trailing
+    }
+
+    public var body: some View {
+        HStack(alignment: .center, spacing: Space.l) {
+            Text(title)
+                .font(.largeTitle.bold())
+                .foregroundStyle(.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(AccountSizes.shrink)
+                .accessibilityAddTraits(.isHeader)
+                .layoutPriority(1)
+            Spacer(minLength: Space.s)
+            HStack(spacing: Space.l) { trailing() }
+                .imageScale(.large)
+                // A row's buttons, each its own: a list row otherwise fires every one of them.
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, padded ? Space.page : 0)
+        .padding(.bottom, Space.s)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in fold?.wrappedValue = h }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 }
 
 @available(iOS 26.0, *)
-private struct LargeTitleBar<Trailing: View>: ViewModifier {
+extension View {
+    /// On a tab's root (its scroll view): `title` as its navigation title,
+    /// the bar inline and, at rest, empty — the large title is the page's
+    /// own first row (`LargeTitleRow`) — and once the page has scrolled
+    /// `fold` (the row's height) under the bar, the title small in the bar's
+    /// middle, rising in on `Springs.move` (a fade under Reduce Motion) and
+    /// going back the same way. With no `fold` the row stays put, and so
+    /// does the empty bar.
+    public func largeTitleBar(_ title: String, fold: CGFloat? = nil) -> some View {
+        modifier(LargeTitleBar(title: title, fold: fold))
+    }
+}
+
+@available(iOS 26.0, *)
+private struct LargeTitleBar: ViewModifier {
     let title: String
-    let trailing: () -> Trailing
+    let fold: CGFloat?
     @State private var under = false
     @Environment(\.reducesMotion) private var still
 
@@ -104,41 +151,24 @@ private struct LargeTitleBar<Trailing: View>: ViewModifier {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onScrollGeometryChange(for: Bool.self) { g in
-                g.contentOffset.y + g.contentInsets.top > AccountSizes.fold
+                guard let fold, fold > 0 else { return false }
+                return g.contentOffset.y + g.contentInsets.top >= fold
             } action: { _, now in
-                withAnimation(Springs.move.reduced(still)) { under = now }
+                under = now
             }
             .toolbar {
-                // The large title, at the line's leading end while the page is at its top.
-                // Gone, rather than only faded, once it has handed over: the inline title
-                // in the middle then has the line to itself.
-                ToolbarItem(placement: .topBarLeading) {
-                    if !under {
-                        Text(title)
-                            .font(.largeTitle.bold())
-                            .foregroundStyle(.ink)
-                            .lineLimit(1)
-                            .minimumScaleFactor(AccountSizes.shrink)
-                            .dynamicTypeSize(...DynamicTypeSize.xLarge)
-                            .accessibilityAddTraits(.isHeader)
-                            .motionTransition(.opacity.combined(with: .offset(y: -MotionTokens.rise)))
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
+                // Always there, so the system's own inline title never is; seen
+                // only once the large title has gone under the bar.
                 ToolbarItem(placement: .principal) {
-                    if under {
-                        Text(title)
-                            .font(.headline)
-                            .foregroundStyle(.ink)
-                            .lineLimit(1)
-                            .accessibilityAddTraits(.isHeader)
-                            .motionTransition(.opacity.combined(with: .offset(y: MotionTokens.rise)))
-                    }
-                }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: Space.l) { trailing() }
-                        .imageScale(.large)
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.ink)
+                        .lineLimit(1)
+                        .opacity(under ? 1 : 0)
+                        .offset(y: under || still ? 0 : MotionTokens.rise)
+                        .motion(Springs.move, value: under)
+                        .accessibilityHidden(!under)
+                        .accessibilityAddTraits(.isHeader)
                 }
                 .sharedBackgroundVisibility(.hidden)
             }

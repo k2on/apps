@@ -15,9 +15,18 @@ struct AccountsView: View {
     @State private var renaming: AccountLine? = nil
     @State private var typed = ""
 
+    /// How tall the large title's row is: past it, the inline title comes into the bar.
+    @State private var fold: CGFloat = 0
+
     var body: some View {
         let rows = model.snapshot.accounts
         List {
+            // The large title, and at the end of its line what the tab offers and the account's face.
+            LargeTitleRow("Accounts", fold: $fold, padded: false) {
+                Button { present(.addAccount) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Add Account")
+                AccountButton()
+            }
             Section {
                 HeroFigure("Net Worth", cents: Accounts.netWorth(rows), tint: .neutral, note: "Every open account, less what's owed")
                     .listRowInsets(EdgeInsets())
@@ -72,12 +81,7 @@ struct AccountsView: View {
         }
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh() }
-        // The large title on the bar's own line, and at its end the + and the account's face.
-        .largeTitleBar("Accounts") {
-            Button { present(.addAccount) } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Add Account")
-            AccountButton()
-        }
+        .largeTitleBar("Accounts", fold: fold)
         .alert("Rename Account", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $typed)
             Button("Cancel", role: .cancel) { renaming = nil }
