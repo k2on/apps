@@ -174,12 +174,37 @@ jobs:
             ${{ env.NIX_CONFIG }}
             ${{ env.XCODE_NIX_CONF }}
 
+      # Main's builds, and a pull request's of this repository's (a fork's
+      # has no token), go to the cache: app-screens' Mac takes them from it.
+      - if: (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Anything named for Xcode (not XcodeGen), though none is in the
+          # store any more: Apple's licence keeps it off any cache.
+          pushFilter: "[Xx]code([^Gg]|$)"
+
+      # What the next step builds, evaluated with nothing beside it; the
+      # build then finds it in nix's evaluation cache.
+      - name: The packages, evaluated
+        env:
+          APP: ${{ matrix.app.name }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs="$APP-ios-kernel-simulator $APP-ios-simulator"
+          else attrs="$APP-ios-archive $APP-ios-kernel-simulator"; fi
+          refs=()
+          for a in $attrs; do refs+=("git+file://$PWD#packages.aarch64-darwin.$a"); done
+          start=$(date +%s)
+          nix path-info --derivation "${refs[@]}"
+          echo "evaluated in $(( $(date +%s) - start ))s"
+
       # The tests' simulator, booting under the nix build (meanwhile.sh), as
       # app-screens' does: a cold boot after the build was up to nine
-      # minutes before the first test. Started once nix is installed, whose
-      # build users' setting up a booting CoreSimulator slowed. The newest
-      # iPhone the image has for the newest iOS 26 runtime, its id left in
-      # $RUNNER_TEMP/udid.
+      # minutes before the first test. Started once nix is installed and the
+      # packages evaluated: a booting CoreSimulator slowed both (the
+      # evaluation to four minutes). The newest iPhone the image has for the
+      # newest iOS 26 runtime, its id left in $RUNNER_TEMP/udid.
       - if: matrix.app.test
         name: Start booting the tests' simulator
         run: |
@@ -194,17 +219,6 @@ jobs:
             echo "$id" > "$RUNNER_TEMP/udid"
             echo "Booting $id"
             xcrun simctl boot "$id" && xcrun simctl bootstatus "$id" -b'
-
-      # Main's builds, and a pull request's of this repository's (a fork's
-      # has no token), go to the cache: app-screens' Mac takes them from it.
-      - if: (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
-        with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Anything named for Xcode (not XcodeGen), though none is in the
-          # store any more: Apple's licence keeps it off any cache.
-          pushFilter: "[Xx]code([^Gg]|$)"
 
       # nix's archive (flake.nix, `<app>-ios-archive`, over the phone's
       # slice alone), the cache's when nothing it is built from moved, and

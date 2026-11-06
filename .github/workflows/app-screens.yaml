@@ -541,12 +541,13 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
 
-      # The servers' packages (each server.sh's `.#<name>`), evaluated once,
-      # alone, before anything runs beside it: evaluated under the apps'
-      # build, the same flake at once, it took one to five minutes. Their
-      # build in the background then finds them in nix's evaluation cache.
+      # The servers' packages (each server.sh's `.#<name>`) and the apps
+      # (ios-build.sh's), evaluated once, with nothing beside them: under a
+      # booting simulator and the servers' build, each evaluating a flake at
+      # once, it took one to five minutes. Their builds then find them in
+      # nix's evaluation cache.
       - if: steps.open.outputs.open == 'true'
-        name: The servers' packages, evaluated
+        name: The servers' packages and the apps, evaluated
         run: |
           refs=()
           for a in $APPS; do
@@ -557,6 +558,12 @@ jobs:
           start=$(date +%s)
           if [ ${#refs[@]} -gt 0 ]; then nix path-info --derivation "${refs[@]}" > /dev/null; fi
           echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
+          # An app the commit has none of is said by ios-build.sh.
+          start=$(date +%s)
+          for a in $APPS; do
+            nix path-info --derivation "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" || true
+          done
+          echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
       # As screens.yaml: the newest iPhone Pro, booting under the rest. One
       # for every app: each is installed on it in turn.
