@@ -69,11 +69,11 @@ impl DemoBank {
         let today = today.unwrap_or_else(crate::money_today);
         let mut bank = self.bank.lock().unwrap_or_else(|e| e.into_inner());
         let (intent, n, u) = peer.with(|p| -> Result<_, String> {
-            let lines = Vec::<AccountLine>::from_bytes(&p.ask("accounts", &().to_bytes())?).map_err(|e| e.to_string())?;
+            let lines = Vec::<AccountLine>::from_bytes(&p.ask("accounts.accounts", &().to_bytes())?).map_err(|e| e.to_string())?;
             let owed = lines.iter().find(|a| a.bank == seed::BANK_NAME).map_or(0, |a| a.cleared);
             let import = bank.next(&today, owed);
             let (n, u) = (import.upserts.len(), import.removed.len());
-            Ok((p.mutate("import", &import)?, n, u))
+            Ok((p.mutate("banks.import", &import)?, n, u))
         })?;
         let note = match (n, bank.syncs) {
             (0, _) => "Chase: nothing new at the bank".into(),

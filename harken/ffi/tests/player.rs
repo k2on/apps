@@ -213,7 +213,7 @@ impl Device<'_> {
 
     fn call(&self, transition: &str, input: Value) {
         self.peer
-            .mutate(transition.into(), input.to_string())
+            .mutate(format!("listening.{transition}"), input.to_string())
             .unwrap_or_else(|e| panic!("{transition}: {e:?}"));
         self.hall.carry();
     }
@@ -247,7 +247,7 @@ impl Device<'_> {
     }
 
     fn plays(&self) -> Vec<Value> {
-        serde_json::from_str::<Vec<Value>>(&self.peer.query("recently_played".into(), "null".into()).unwrap()).unwrap()
+        serde_json::from_str::<Vec<Value>>(&self.peer.query("listening.recently_played".into(), "null".into()).unwrap()).unwrap()
     }
 
     fn me(&self, id: &str) -> Present {
@@ -756,7 +756,7 @@ fn a_step_told_of_its_own_change_does_not_wait_on_itself() {
         let phone = on(&hall, "phone", true, "phone", None);
         let again = Arc::new(Again(Mutex::new(Some(phone.player.clone()))));
         // A play recorded is a change of the log, which a view the app keeps sees.
-        let _plays = phone.peer.view("recently_played".into(), "null".into()).unwrap();
+        let _plays = phone.peer.view("listening.recently_played".into(), "null".into()).unwrap();
         phone.peer.set_listener(Some(again.clone()));
         phone.call("start", start(&queue(), 0, 31_000, ""));
         phone.player.step();

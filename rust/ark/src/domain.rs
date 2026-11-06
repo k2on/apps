@@ -237,15 +237,6 @@ impl Domain {
         self.fns.get(name)
     }
 
-    /// The function a name means: itself, or the first whose last part it
-    /// is.
-    pub fn binding(&self, name: &str) -> Option<&str> {
-        match self.fns.get_key_value(name) {
-            Some((n, _)) => Some(n),
-            None => self.fns.keys().map(String::as_str).find(|n| n.rsplit('.').next() == Some(name)),
-        }
-    }
-
     pub fn schema_hash(&self) -> SchemaHash {
         self.schema.hash()
     }

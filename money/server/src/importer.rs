@@ -464,7 +464,7 @@ impl Job {
     }
 
     fn answer_with(&mut self, answer: Answer) {
-        if let Err(e) = self.author("answer", &answer) {
+        if let Err(e) = self.author("banks.answer", &answer) {
             self.say(format!("could not answer an ask: {e:#}"));
         }
     }
@@ -689,7 +689,7 @@ impl Job {
                 error_code: code,
                 error: why,
             };
-            if let Err(e) = self.author("failed", &failed) {
+            if let Err(e) = self.author("banks.failed", &failed) {
                 self.say(format!("{name}: could not say so: {e:#}"));
             }
         }
@@ -723,7 +723,7 @@ impl Job {
                 }
             }
             self.say(format!("{}: replaced by {}, removed", b.name, b.replaced_by));
-            if let Err(e) = self.author("retired", &BankName { bank: b.name.clone() }) {
+            if let Err(e) = self.author("banks.retired", &BankName { bank: b.name.clone() }) {
                 self.say(format!("{}: could not say it is retired: {e:#}", b.name));
             }
         }
@@ -775,7 +775,7 @@ impl Job {
                     institution_id: Some(filled.institution_id.clone()).filter(|i| !i.is_empty()),
                     ..import_of(name, &institution, &got.accounts, &Default::default())
                 };
-                self.author("import", &import)?;
+                self.author("banks.import", &import)?;
             }
             return Ok(Outcome::NotReady);
         };
@@ -794,7 +794,7 @@ impl Job {
             ..import_of(name, &institution, &got.accounts, &pulled)
         };
         let (upserts, removed) = (import.upserts.len(), import.removed.len());
-        self.author("import", &import)?;
+        self.author("banks.import", &import)?;
         if let Some(c) = self.store.banks.get_mut(name) {
             c.cursor = Some(pulled.cursor.clone());
         }
@@ -913,7 +913,7 @@ impl Job {
         if import.charges.is_empty() {
             return Ok(0);
         }
-        self.author("add_charges", import)?;
+        self.author("receipts.add_charges", import)?;
         Ok(import.charges.len())
     }
 
@@ -923,7 +923,7 @@ impl Job {
         if import.receipts.is_empty() {
             return Ok(0);
         }
-        self.author("add_receipts", import)?;
+        self.author("receipts.add_receipts", import)?;
         Ok(import.receipts.len())
     }
 

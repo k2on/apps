@@ -654,7 +654,7 @@ fn a_feed_is_followed_from_its_shows_page() {
         items: 50,
         error: String::new(),
     };
-    assert!(app.author("say a read".into(), "feed_read", &read));
+    assert!(app.author("say a read".into(), "library.feed_read", &read));
     app.peer.refresh();
     let id = "podcast/full-time-nix";
     let sub = app.peer.subscription_of(id).expect("its show followed").clone();
@@ -673,7 +673,7 @@ fn a_feed_is_followed_from_its_shows_page() {
         file: first.file.clone(),
         source: "https://media/1.mp3".into(),
     };
-    assert!(app.author("queue".into(), "queue_download", &queue));
+    assert!(app.author("queue".into(), "library.queue_download", &queue));
     app.peer.refresh();
     assert_eq!(app.length_of(&first), "queued");
     assert_eq!(app.peer.download_of(first.id).unwrap().said(), "Not on the server yet");
@@ -684,10 +684,14 @@ fn a_feed_is_followed_from_its_shows_page() {
         total: 100,
         error: String::new(),
     };
-    assert!(app.author("progress".into(), "download_progress", &going));
+    assert!(app.author("progress".into(), "library.download_progress", &going));
     app.peer.refresh();
     assert_eq!(app.length_of(&first), "25%");
-    assert!(app.author("here".into(), "downloaded", &crate::domain::Downloaded { file: first.file.clone() }));
+    assert!(app.author(
+        "here".into(),
+        "library.downloaded",
+        &crate::domain::Downloaded { file: first.file.clone() }
+    ));
     app.peer.refresh();
     assert_ne!(app.length_of(&first), "25%", "its length again");
 
@@ -716,7 +720,7 @@ fn an_episode_keeps_each_listeners_place_and_its_chapters() {
         duration_ms: first.duration_ms,
         name: "Ada".into(),
     };
-    assert!(app.author("keep the place".into(), "report_progress", &place));
+    assert!(app.author("keep the place".into(), "library.report_progress", &place));
     app.peer.refresh();
     assert_eq!(app.listened(first.id), "you 50%");
     let label = |app: &crate::App| app.row_entries(first.id).unwrap().1.iter().map(|e| e.label.clone()).collect::<Vec<_>>();
@@ -743,7 +747,7 @@ fn an_episode_keeps_each_listeners_place_and_its_chapters() {
             },
         ],
     };
-    assert!(app.author("chapters".into(), "set_chapters", &chapters));
+    assert!(app.author("chapters".into(), "library.set_chapters", &chapters));
     app.peer.refresh();
     let labels = label(&app);
     assert!(

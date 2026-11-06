@@ -10,11 +10,11 @@ fn harken_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let device = r#"{"can_play":true,"id":"","kind":"phone","name":"Pixel","user":""}"#;
     let p = harken_open(dir.path().to_str().unwrap().into(), None, device.into()).unwrap();
-    let lists = p.view("playlists".into(), "null".into()).unwrap();
-    p.mutate("create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
+    let lists = p.view("playlists.playlists".into(), "null".into()).unwrap();
+    p.mutate("playlists.create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
     assert_eq!(lists.take().ops.len(), 1, "patched");
     assert_eq!(
-        p.check("create_playlist".into(), r#"{"name":" "}"#.into()).as_deref(),
+        p.check("playlists.create_playlist".into(), r#"{"name":" "}"#.into()).as_deref(),
         Some("a playlist needs a name")
     );
     let l: serde_json::Value = serde_json::from_str(&harken_listening(p)).unwrap();

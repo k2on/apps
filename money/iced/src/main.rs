@@ -779,7 +779,7 @@ impl App {
                                 category_id: c,
                                 amount: cents,
                             };
-                            self.author("assign", "assign", &a);
+                            self.author("assign", "budget.assign", &a);
                         }
                         None => self.note = format!("{typed:?} is not an amount"),
                     }
@@ -794,7 +794,7 @@ impl App {
                     category_id: c,
                     amount: cents,
                 };
-                self.author("assign", "assign", &a);
+                self.author("assign", "budget.assign", &a);
             }
             Message::Auto(how, only) => {
                 let a = AutoAssign {
@@ -802,14 +802,14 @@ impl App {
                     how,
                     only,
                 };
-                self.author("assign the month", "auto_assign", &a);
+                self.author("assign the month", "budget.auto_assign", &a);
             }
             Message::TargetTyped(t) => self.target = t,
             Message::Formula(m) => return self.formula_msg(m),
             Message::Filter(m) => return self.filter_msg(m),
             Message::TargetDone => {
                 if let (Some(c), Some(cents)) = (self.selected, amount::parse(&self.target)) {
-                    self.author("set the target", "set_target", &SetTarget { id: c, target: cents.max(0) });
+                    self.author("set the target", "categories.set_target", &SetTarget { id: c, target: cents.max(0) });
                 }
             }
             Message::Collapse(g) => match self.collapsed.iter().position(|x| *x == g) {
@@ -823,7 +823,7 @@ impl App {
             Message::NewGroupTyped(t) => self.new_group = Some(t),
             Message::NewGroupDone => {
                 if let Some(name) = self.new_group.take().filter(|n| !n.trim().is_empty()) {
-                    self.author("add the group", "add_group", &AddGroup { name });
+                    self.author("add the group", "categories.add_group", &AddGroup { name });
                 }
             }
             Message::NewCategory(g) => {
@@ -838,14 +838,18 @@ impl App {
             }
             Message::NewCategoryDone => {
                 if let Some((g, name)) = self.new_category.take().filter(|(_, n)| !n.trim().is_empty()) {
-                    self.author("add the category", "add_category", &AddCategory { group_id: g, name });
+                    self.author("add the category", "categories.add_category", &AddCategory { group_id: g, name });
                 }
             }
             Message::HideCategory(c, hidden) => {
-                self.author("hide the category", "hide_category", &HideCategory { id: c, hidden });
+                self.author("hide the category", "categories.hide_category", &HideCategory { id: c, hidden });
             }
             Message::DeleteCategory(c) => {
-                if self.author("delete the category", "delete_category", &DeleteCategory { id: c, move_to: None }) {
+                if self.author(
+                    "delete the category",
+                    "categories.delete_category",
+                    &DeleteCategory { id: c, move_to: None },
+                ) {
                     self.selected = None;
                 }
             }
@@ -952,15 +956,15 @@ impl App {
             Message::SaveTxn => self.save_txn(),
             Message::CancelTxn => self.form = None,
             Message::DeleteTxn(id) => {
-                if self.author("delete the transaction", "delete_transactions", &Txns { ids: vec![id] }) {
+                if self.author("delete the transaction", "transactions.delete_transactions", &Txns { ids: vec![id] }) {
                     self.form = None;
                 }
             }
             Message::ToggleCleared(id, cleared) => {
-                self.author("clear it", "set_cleared", &SetCleared { id, cleared });
+                self.author("clear it", "transactions.set_cleared", &SetCleared { id, cleared });
             }
             Message::Approve(ids) => {
-                self.author("approve", "approve", &Txns { ids });
+                self.author("approve", "transactions.approve", &Txns { ids });
             }
             Message::Categorize(ids) => return self.open_dropdown(Choosing::Txns(ids), (self.pointer, false)),
             Message::ChooseCategory => return self.open_dropdown(Choosing::Form, self.form_category_at()),
@@ -1079,7 +1083,7 @@ impl App {
                         balance: if owed { -cents.abs() } else { cents },
                         date: self.today.clone(),
                     };
-                    if self.author("open the account", "open_account", &open) {
+                    if self.author("open the account", "accounts.open_account", &open) {
                         self.modal = None;
                     }
                 }
@@ -1191,16 +1195,16 @@ impl App {
             }
             Message::RenameDone => match self.renaming.take() {
                 Some((Naming::Category(id), name)) => {
-                    self.author("rename the category", "rename_category", &RenameCategory { id, name });
+                    self.author("rename the category", "categories.rename_category", &RenameCategory { id, name });
                 }
                 Some((Naming::Group(id), name)) => {
-                    self.author("rename the group", "rename_group", &RenameGroup { id, name });
+                    self.author("rename the group", "categories.rename_group", &RenameGroup { id, name });
                 }
                 Some((Naming::Account(id), name)) => {
-                    self.author("rename the account", "rename_account", &RenameAccount { id, name });
+                    self.author("rename the account", "accounts.rename_account", &RenameAccount { id, name });
                 }
                 Some((Naming::Filter(id), name)) => {
-                    self.author("rename the filter", "rename_filter", &RenameFilter { id, name });
+                    self.author("rename the filter", "filters.rename_filter", &RenameFilter { id, name });
                 }
                 None => {}
             },
@@ -1254,7 +1258,7 @@ impl App {
             }
             Message::NewKindDone => {
                 if let Some((parent_id, name)) = self.new_kind.take().filter(|(_, n)| !n.trim().is_empty()) {
-                    self.author("add the kind", "add_subcategory", &AddSubcategory { parent_id, name });
+                    self.author("add the kind", "categories.add_subcategory", &AddSubcategory { parent_id, name });
                 }
             }
             Message::Stores(m) => self.stores(m),
@@ -1284,7 +1288,7 @@ impl App {
         if self.server.is_none() {
             return self.demo_sync();
         }
-        if self.author("ask the bank to sync", "sync", &()) {
+        if self.author("ask the bank to sync", "banks.sync", &()) {
             self.note = "asked the server to ask the banks \u{2014} what they have arrives as it hears".into();
         }
     }
@@ -1296,7 +1300,7 @@ impl App {
             .map_or(0, |a| a.cleared);
         let import = self.bank.next(&self.today, owed);
         let (n, u) = (import.upserts.len(), import.removed.len());
-        if self.author("sync the bank", "import", &import) {
+        if self.author("sync the bank", "banks.import", &import) {
             self.note = match (n, self.bank.syncs) {
                 (0, _) => "Chase: nothing new at the bank".into(),
                 (_, 1) => format!("Chase: {n} new from the bank \u{2014} one still pending"),
@@ -1595,7 +1599,7 @@ impl App {
                         group_id: groups[group],
                         before: before.map(|b| ids[b]),
                     };
-                    self.author("move the category", "move_category", &m);
+                    self.author("move the category", "categories.move_category", &m);
                 }
             }
             Shift::Groups { first, last, before } => {
@@ -1604,7 +1608,7 @@ impl App {
                         id,
                         before: before.map(|b| groups[b]),
                     };
-                    self.author("move the group", "move_group", &m);
+                    self.author("move the group", "categories.move_group", &m);
                 }
             }
         }
@@ -1645,7 +1649,7 @@ impl App {
                 };
                 self.anchor = None;
                 self.select(Some(ids[row]));
-                if self.author("move the category", "move_category", &m) {
+                if self.author("move the category", "categories.move_category", &m) {
                     self.settle = Some(settle);
                 }
             }
@@ -1654,7 +1658,7 @@ impl App {
                     id: groups[group],
                     before: before.map(|b| groups[b]),
                 };
-                self.author("move the group", "move_group", &m);
+                self.author("move the group", "categories.move_group", &m);
             }
         }
         Task::none()
@@ -2157,7 +2161,7 @@ impl App {
             balance,
             date: self.today.clone(),
         };
-        if self.author("reconcile", "reconcile", &r) {
+        if self.author("reconcile", "transactions.reconcile", &r) {
             self.modal = None;
             self.note = format!("reconciled at {}", amount::money(balance));
         }
@@ -2194,10 +2198,10 @@ impl App {
                 self.peer.set_candidates(None);
                 if let Choice::Paid(txn_id) = choice {
                     match of.charge_id {
-                        Some(charge_id) => self.author("say what paid it", "pay_charge", &PayCharge { charge_id, txn_id }),
+                        Some(charge_id) => self.author("say what paid it", "receipts.pay_charge", &PayCharge { charge_id, txn_id }),
                         None => self.author(
                             "say what paid it",
-                            "pay",
+                            "receipts.pay",
                             &MatchReceipt {
                                 receipt_id: of.receipt_id,
                                 txn_id,
@@ -2208,7 +2212,7 @@ impl App {
             }
             Choosing::Items(items) => {
                 if let Choice::Category(c) = choice {
-                    self.author("file it", "file_items", &ClassifyItems { items, category_id: c });
+                    self.author("file it", "receipts.file_items", &ClassifyItems { items, category_id: c });
                 }
             }
             Choosing::SplitLine(i) => {
@@ -2225,7 +2229,7 @@ impl App {
             }
             Choosing::Txns(ids) => {
                 if let Choice::Category(c) = choice {
-                    self.author("categorize", "categorize", &Categorize { ids, category_id: c });
+                    self.author("categorize", "transactions.categorize", &Categorize { ids, category_id: c });
                     self.txn_anchor = None;
                 }
             }
@@ -2243,7 +2247,7 @@ impl App {
                             to,
                             amount: cents,
                         };
-                        self.author("move the money", "move_money", &m);
+                        self.author("move the money", "budget.move_money", &m);
                     }
                     _ => self.note = format!("{typed:?} is not an amount to move"),
                 }
@@ -2283,7 +2287,7 @@ impl App {
                     amount,
                     transfer_to: f.transfer_to,
                 };
-                self.author("save the transaction", "edit_transaction", &e)
+                self.author("save the transaction", "transactions.edit_transaction", &e)
             }
             None => {
                 let Some(account) = f.account else {
@@ -2300,7 +2304,7 @@ impl App {
                         cleared: f.cleared,
                         lines: splits,
                     };
-                    self.author("add the transaction", "add_split", &t)
+                    self.author("add the transaction", "transactions.add_split", &t)
                 } else {
                     let t = AddTransaction {
                         account_id: account,
@@ -2312,7 +2316,7 @@ impl App {
                         cleared: f.cleared,
                         transfer_to: f.transfer_to,
                     };
-                    self.author("add the transaction", "add_transaction", &t)
+                    self.author("add the transaction", "transactions.add_transaction", &t)
                 }
             }
         };
@@ -2327,7 +2331,7 @@ impl App {
     fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, lines: Vec<SplitPart>, whole: i64) {
         let was = self.peer.register.rows.iter().find(|t| t.id == id).map(|t| t.amount);
         if was != Some(whole) && self.peer.splits.as_ref().is_some_and(|(_, w)| !w.rows.is_empty()) {
-            self.author("unsplit it", "split", &SplitTxn { id, lines: vec![] });
+            self.author("unsplit it", "transactions.split", &SplitTxn { id, lines: vec![] });
         }
         let e = EditTransaction {
             id,
@@ -2338,7 +2342,9 @@ impl App {
             amount: whole,
             transfer_to: None,
         };
-        if self.author("save the transaction", "edit_transaction", &e) && self.author("split it", "split", &SplitTxn { id, lines }) {
+        if self.author("save the transaction", "transactions.edit_transaction", &e)
+            && self.author("split it", "transactions.split", &SplitTxn { id, lines })
+        {
             self.form = None;
             self.peer.set_splits(None);
         }

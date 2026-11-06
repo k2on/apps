@@ -11,7 +11,7 @@ use money_domain::*;
 use money_seed as seed;
 
 fn accounts(p: &Peer) -> Vec<AccountLine> {
-    p.query("accounts", &()).unwrap_or_default()
+    p.query("accounts.accounts", &()).unwrap_or_default()
 }
 
 /// Falsified by seeding a store without its snapshot, or with rows the

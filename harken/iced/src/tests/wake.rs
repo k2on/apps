@@ -150,7 +150,7 @@ fn every_page_draws_without_holding_the_peer_twice() {
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), None);
     app.peer.ensure_playlist();
     let name = crate::domain::CreatePlaylist { name: "Hymns".into() };
-    assert!(app.author("make a playlist".into(), "create_playlist", &name));
+    assert!(app.author("make a playlist".into(), "playlists.create_playlist", &name));
     let _ = app.update(Message::Wake);
     for (which, debug) in [(false, false), (true, false), (false, true)] {
         if which {

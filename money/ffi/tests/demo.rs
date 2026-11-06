@@ -23,20 +23,20 @@ fn the_demo_is_the_seeded_household() {
     assert_eq!(st.link, "alone", "{st:?}");
     assert_eq!(st.user, seed::ME);
 
-    let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap().rows();
+    let accounts = AccountLineView::new(p.clone(), "accounts.accounts".into(), "null".into()).unwrap().rows();
     let names: Vec<&str> = accounts.iter().map(|a| a.name.as_str()).collect();
     for n in ["Checking", "Savings", "Cash", "Mortgage", "Retirement", "Chase Sapphire"] {
         assert!(names.contains(&n), "{names:?}");
     }
     let month = r#"{"month":"2026-10"}"#;
-    let lines = BudgetLineView::new(p.clone(), "month".into(), month.into()).unwrap().rows();
+    let lines = BudgetLineView::new(p.clone(), "budget.month".into(), month.into()).unwrap().rows();
     let dining = lines.iter().find(|l| l.name == "Dining Out").unwrap();
     assert!(dining.available < 0, "the seed overspends it: {}", dining.available);
-    let summary = SummaryView::new(p.clone(), "summary".into(), month.into()).unwrap().rows();
+    let summary = SummaryView::new(p.clone(), "budget.summary".into(), month.into()).unwrap().rows();
     assert_eq!(summary.len(), 1);
     assert!(summary[0].ready_to_assign > 0, "{:?}", summary[0]);
 
-    let inbox = TxnLineView::new(p.clone(), "inbox".into(), "null".into()).unwrap();
+    let inbox = TxnLineView::new(p.clone(), "transactions.inbox".into(), "null".into()).unwrap();
     let waiting = inbox.rows().len();
     assert!(waiting > 0, "the card's last days wait for a look");
 
@@ -60,7 +60,11 @@ fn the_demo_is_the_seeded_household() {
 #[test]
 fn a_day_is_the_same_household_every_time() {
     let (a, b) = (demo(), demo());
-    let rows = |p: Arc<Peer>| TxnLineView::new(p, "register".into(), r#"{"account_id":null}"#.into()).unwrap().rows();
+    let rows = |p: Arc<Peer>| {
+        TxnLineView::new(p, "transactions.register".into(), r#"{"account_id":null}"#.into())
+            .unwrap()
+            .rows()
+    };
     assert_eq!(rows(a), rows(b));
     assert!(money_demo(Some("26 October".into())).is_err());
     assert_eq!(money_add_months("2026-11".into(), 2), "2027-01");

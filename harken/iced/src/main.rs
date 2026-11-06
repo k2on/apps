@@ -2282,7 +2282,7 @@ impl App {
             voice,
             name,
         };
-        let _ = self.author(what, "name_voice", &input);
+        let _ = self.author(what, "library.name_voice", &input);
         self.ctx.close_picker();
     }
 
@@ -2676,7 +2676,7 @@ impl App {
                 // A full look: the server walks its music again and syncs
                 // its catalogue. Refused, `author` says why on the status
                 // line; only the library's role may ask.
-                let asked = self.author("resync the library".into(), "look", &crate::domain::LookAt { paths: Vec::new() });
+                let asked = self.author("resync the library".into(), "library.look", &crate::domain::LookAt { paths: Vec::new() });
                 self.resync = Some(match asked {
                     true => "Asked. New music appears as the server finds it.".into(),
                     false => self.note.clone(),
@@ -2755,7 +2755,7 @@ impl App {
                     kind: kind.into(),
                     url: url.trim().to_string(),
                 };
-                let followed = self.author("follow the feed".into(), "subscribe", &input);
+                let followed = self.author("follow the feed".into(), "library.subscribe", &input);
                 let note = self.note.clone();
                 if let Some(adding) = self.adding.as_mut() {
                     adding.said = (!followed).then_some(note);
@@ -2772,10 +2772,14 @@ impl App {
                 self.menu_about = None;
             }
             Message::Unfollow(url) => {
-                let _ = self.author("unfollow the feed".into(), "unsubscribe", &crate::domain::Unsubscribe { url });
+                let _ = self.author("unfollow the feed".into(), "library.unsubscribe", &crate::domain::Unsubscribe { url });
             }
             Message::FetchOlder(url, more) => {
-                let _ = self.author("fetch older episodes".into(), "fetch_older", &crate::domain::FetchOlder { url, more });
+                let _ = self.author(
+                    "fetch older episodes".into(),
+                    "library.fetch_older",
+                    &crate::domain::FetchOlder { url, more },
+                );
             }
             Message::SignOut => {
                 // The session revoked through the domain (pushed while
@@ -2968,14 +2972,14 @@ impl App {
                                 playlist_id: key(value),
                                 media_id: key(media),
                             };
-                            self.author(format!("put {title} on {list}"), "add_to_playlist", &a)
+                            self.author(format!("put {title} on {list}"), "playlists.add_to_playlist", &a)
                         }
                         false => {
                             let a = RemoveFromPlaylist {
                                 playlist_id: key(value),
                                 media_id: key(media),
                             };
-                            self.author(format!("take {title} off {list}"), "remove_from_playlist", &a)
+                            self.author(format!("take {title} off {list}"), "playlists.remove_from_playlist", &a)
                         }
                     };
                     // Refused at once: the tick the panel shows is not true.
@@ -3005,7 +3009,11 @@ impl App {
                 // row: its id is chosen inside the mutation, and the refresh
                 // has just spliced it in. The track is not added to it here —
                 // one tap away, on a row that now exists.
-                if self.author(format!("make the playlist {}", name.trim()), "create_playlist", &CreatePlaylist { name }) {
+                if self.author(
+                    format!("make the playlist {}", name.trim()),
+                    "playlists.create_playlist",
+                    &CreatePlaylist { name },
+                ) {
                     self.peer.refresh();
                     let at = self.ctx.picker.as_ref().map(|p| p.at);
                     let _ = self.open_picker();

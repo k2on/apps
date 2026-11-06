@@ -23,7 +23,7 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
     let c = hub.accept(d.me().clone());
     d.connected();
     d.linked = true;
-    let f = d.function("create_playlist").unwrap().name.clone();
+    let f = d.function("demo.create_playlist").unwrap().name.clone();
     d.mutate_at(&f, CreatePlaylist { name: "Road".into() }.to_bytes(), 1).unwrap();
     let frames = d.take_frames();
     assert!(

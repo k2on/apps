@@ -40,7 +40,7 @@ fn signing_in_moves_the_same_replica_on() {
     let id = p
         .client
         .lock()
-        .mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
+        .mutate("library.add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
         .expect("a window holding the library role takes a song signed out");
     p.refresh();
     let mut app = App::with_peer(p, "http://127.0.0.1:9".into(), None);
@@ -90,7 +90,7 @@ fn a_refusal_names_what_was_refused() {
     let mut p = signed_in("alice");
     p.client
         .lock()
-        .mutate("add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
+        .mutate("library.add_song", &song("Air", "Bach", "Suites", "music/air.mp3"))
         .unwrap();
     p.refresh();
     p.ensure_playlist();

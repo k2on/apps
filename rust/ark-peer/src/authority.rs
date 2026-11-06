@@ -104,7 +104,7 @@ impl ServerConfig {
     /// The live domain's function whose name's last part is `last`: what a
     /// server authors as devices come and go, and after a restart.
     fn hook(&self, last: &str) -> Option<String> {
-        self.live.as_ref()?.binding(last).map(String::from)
+        self.live.as_ref()?.fns.keys().find(|n| n.rsplit('.').next() == Some(last)).cloned()
     }
 }
 
@@ -344,7 +344,7 @@ impl Authority {
     }
 
     /// An intent the authority authors itself at `now` of the function
-    /// `name` (its binding, or the binding's last part) on `input`: its id,
+    /// `name` on `input`: its id,
     /// or why it was refused as it was sequenced.
     pub fn mutate_at(&mut self, name: &str, input: impl crate::Arg, now: i64) -> Result<EntryId, String> {
         let (space, f, id) = self.intent(name)?;

@@ -102,7 +102,7 @@ fn q_opens_the_queue_and_the_row_menu_puts_a_track_next_or_last() {
     for t in ["a", "b", "c"] {
         p.client
             .lock()
-            .mutate("add_song", &song(t, "Bach", "Suites", &format!("music/{t}.mp3")))
+            .mutate("library.add_song", &song(t, "Bach", "Suites", &format!("music/{t}.mp3")))
             .unwrap();
     }
     p.refresh();

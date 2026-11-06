@@ -56,14 +56,14 @@
 //! its name); an entry's id its hex.
 //!
 //! ```text
-//! {"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}
+//! {"cmd":"mutate","name":"playlists.create_playlist","args":{"name":"Road trip"}}
 //!                              {"ok":true,"id":"<hex>"} | {"ok":false,"why":"…"}
 //! {"cmd":"status"}             {"cursor":N,"pending":K,"held":0,"behind":false,"linked":b,
 //!                               "denied":null|"…","user":"…",…}
 //! {"cmd":"hash"}               {"cursor":N,"hash":"hex","view":"hex"}
 //! {"cmd":"wait","cursor":N,"timeout_ms":T}      {"ok":b,"cursor":N}
 //! {"cmd":"settle","timeout_ms":T}               {"ok":b,"cursor":N,"pending":K}
-//! {"cmd":"query","name":"playlists","args":{}}  {"rows":…} | {"ok":false,"why":"…"}
+//! {"cmd":"query","name":"playlists.playlists","args":{}}  {"rows":…} | {"ok":false,"why":"…"}
 //! {"cmd":"rejections"}         {"rejections":[{"id":…,"reason":"…"}]} — since last asked;
 //!                              `"all":true` for every one this directory has seen
 //! {"cmd":"standing","id":…}    {"standing":"pending|confirmed|rejected|unknown","why":…}
@@ -636,15 +636,8 @@ impl Headless {
     /// Answer one command. `quit` is answered like `persist`; the loop is
     /// what stops.
     fn handle(&mut self, cmd: Cmd) -> Answer {
-        let binding = |name: &str| {
-            self.peer
-                .with(|p| p.function(name).ok().map(|f| f.name.clone()))
-        };
         match cmd {
             Cmd::Mutate { name, args } => {
-                let Some(name) = binding(&name) else {
-                    return Answer::refused(format!("no function {name}"));
-                };
                 match self
                     .args(&name, &args)
                     .and_then(|a| self.peer.mutate(name, a).map_err(|e| e.to_string()))
@@ -685,9 +678,6 @@ impl Headless {
                     .set("pending", json!(st.pending))
             }
             Cmd::Query { name, args } => {
-                let Some(name) = binding(&name) else {
-                    return Answer::refused(format!("no function {name}"));
-                };
                 let answer = self
                     .args(&name, &args)
                     .and_then(|a| self.peer.query(name, a).map_err(|e| e.to_string()))
@@ -1093,10 +1083,12 @@ mod tests {
     fn the_commands_read() {
         let id = "0000000000000000000000000000002a";
         assert_eq!(
-            parse(r#"{"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}"#)
-                .unwrap(),
+            parse(
+                r#"{"cmd":"mutate","name":"playlists.create_playlist","args":{"name":"Road trip"}}"#
+            )
+            .unwrap(),
             Cmd::Mutate {
-                name: "create_playlist".into(),
+                name: "playlists.create_playlist".into(),
                 args: json!({"name": "Road trip"}),
             }
         );
@@ -1114,9 +1106,9 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(r#"{"cmd":"query","name":"playlists"}"#).unwrap(),
+            parse(r#"{"cmd":"query","name":"playlists.playlists"}"#).unwrap(),
             Cmd::Query {
-                name: "playlists".into(),
+                name: "playlists.playlists".into(),
                 args: json!({})
             }
         );
@@ -1251,13 +1243,13 @@ mod tests {
         let before = line(&mut h, r#"{"cmd":"hash"}"#);
         let made = line(
             &mut h,
-            r#"{"cmd":"mutate","name":"create_playlist","args":{"name":"Road trip"}}"#,
+            r#"{"cmd":"mutate","name":"playlists.create_playlist","args":{"name":"Road trip"}}"#,
         );
         assert_eq!(made["ok"], json!(true), "{made}");
         let id = made["id"].clone();
         let refused = line(
             &mut h,
-            r#"{"cmd":"mutate","name":"create_playlist","args":{"name":" "}}"#,
+            r#"{"cmd":"mutate","name":"playlists.create_playlist","args":{"name":" "}}"#,
         );
         assert_eq!(refused["ok"], json!(false));
         assert!(
@@ -1267,7 +1259,7 @@ mod tests {
                 .contains("a playlist needs a name"),
             "{refused}"
         );
-        let rows = line(&mut h, r#"{"cmd":"query","name":"playlists"}"#);
+        let rows = line(&mut h, r#"{"cmd":"query","name":"playlists.playlists"}"#);
         assert_eq!(rows["rows"].as_array().unwrap().len(), 1, "{rows}");
         assert_eq!(rows["rows"][0]["name"], json!("Road trip"));
         let after = line(&mut h, r#"{"cmd":"hash"}"#);
@@ -1318,7 +1310,7 @@ mod tests {
             let made = line(
                 &mut h,
                 &format!(
-                    r#"{{"cmd":"mutate","name":"create_playlist","args":{{"name":"{name}"}}}}"#
+                    r#"{{"cmd":"mutate","name":"playlists.create_playlist","args":{{"name":"{name}"}}}}"#
                 ),
             );
             assert_eq!(made["ok"], json!(true), "{made}");
@@ -1373,7 +1365,7 @@ mod tests {
         let mut h = Headless::open(&f, harken()).unwrap();
         let made = line(
             &mut h,
-            r#"{"cmd":"mutate","name":"create_playlist","args":{"name":"Offline"}}"#,
+            r#"{"cmd":"mutate","name":"playlists.create_playlist","args":{"name":"Offline"}}"#,
         );
         assert!(
             made["ok"] == json!(true) && made["id"].is_string(),

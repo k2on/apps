@@ -46,7 +46,7 @@ fn a_taps_trace_prints_what_it_caused_everywhere() {
         .collect();
     carry(&mut hub, &mut ds);
     let tap = ds[0].0.begin("tap new playlist");
-    ds[0].0.mutate("create_playlist", &CreatePlaylist { name: "Road".into() }).unwrap();
+    ds[0].0.mutate("demo.create_playlist", &CreatePlaylist { name: "Road".into() }).unwrap();
     ds[0].0.end();
     carry(&mut hub, &mut ds);
     // As a server writes them, and as `arkdb` reads them.

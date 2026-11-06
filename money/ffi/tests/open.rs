@@ -12,11 +12,11 @@ use money_ffi::{money_domain, money_open, money_send, Sent};
 fn money_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let p = money_open(dir.path().to_str().unwrap().into(), None).unwrap();
-    p.mutate("setup".into(), "null".into()).unwrap();
-    let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap();
+    p.mutate("budget.setup".into(), "null".into()).unwrap();
+    let accounts = AccountLineView::new(p.clone(), "accounts.accounts".into(), "null".into()).unwrap();
     assert!(accounts.rows().is_empty());
     let open = r#"{"name":"Checking","kind":"checking","on_budget":true,"balance":120000,"date":"2026-10-01"}"#;
-    let Sent::Intent { id } = money_send(p.clone(), "open_account".into(), open.into()) else {
+    let Sent::Intent { id } = money_send(p.clone(), "accounts.open_account".into(), open.into()) else {
         panic!("opened")
     };
     let o = p.outcome(id).unwrap();
@@ -28,11 +28,11 @@ fn money_opens_and_is_called_by_name() {
 
     let nameless = r#"{"name":" ","kind":"checking","on_budget":true,"balance":0,"date":"2026-10-01"}"#;
     assert_eq!(
-        p.check("open_account".into(), nameless.into()).as_deref(),
+        p.check("accounts.open_account".into(), nameless.into()).as_deref(),
         Some("an account needs a name")
     );
     assert_eq!(
-        money_send(p.clone(), "open_account".into(), nameless.into()),
+        money_send(p.clone(), "accounts.open_account".into(), nameless.into()),
         Sent::Refused {
             why: "an account needs a name".into()
         }

@@ -119,29 +119,29 @@ impl Peer {
         let all = filtered(Ledger::All, &Filter::all()).to_bytes();
         let look = filtered(Ledger::Inbox, &Filter::all()).to_bytes();
         let mut p = Peer {
-            accounts: Watched::open(c, "accounts", none(), read),
-            groups: Watched::open(c, "groups", none(), read),
-            lines: Watched::open(c, "month", month_of(month), read),
-            summary: Watched::open(c, "summary", month_of(month), read),
-            spending: Watched::open(c, "spending", month_of(month), read),
-            register: Watched::open(c, "filtered", all.clone(), read),
-            total: Watched::open(c, "filtered_total", all, read),
-            inbox: Watched::open(c, "filtered", look, read),
-            payees: Watched::open(c, "payees", none(), read),
-            banks: Watched::open(c, "banks", none(), read),
-            tree: Watched::open(c, "tree", none(), read),
-            receipts: Watched::open(c, "receipts", none(), read),
-            photos: Watched::open(c, "photos", none(), read),
+            accounts: Watched::open(c, "accounts.accounts", none(), read),
+            groups: Watched::open(c, "budget.groups", none(), read),
+            lines: Watched::open(c, "budget.month", month_of(month), read),
+            summary: Watched::open(c, "budget.summary", month_of(month), read),
+            spending: Watched::open(c, "budget.spending", month_of(month), read),
+            register: Watched::open(c, "transactions.filtered", all.clone(), read),
+            total: Watched::open(c, "transactions.filtered_total", all, read),
+            inbox: Watched::open(c, "transactions.filtered", look, read),
+            payees: Watched::open(c, "transactions.payees", none(), read),
+            banks: Watched::open(c, "banks.banks", none(), read),
+            tree: Watched::open(c, "categories.tree", none(), read),
+            receipts: Watched::open(c, "receipts.receipts", none(), read),
+            photos: Watched::open(c, "receipts.photos", none(), read),
             txn: None,
-            unfiled: Watched::open(c, "items", ItemsIn { category_id: None }.to_bytes(), read),
+            unfiled: Watched::open(c, "receipts.items", ItemsIn { category_id: None }.to_bytes(), read),
             receipt: None,
             charges: None,
             candidates: None,
             splits: None,
-            linked: Watched::open(c, "linked", none(), read),
-            asks: Watched::open(c, "asks", none(), read),
-            filters: Watched::open(c, "saved", none(), read),
-            formulas: Watched::open(c, "formulas", month_of(month), read),
+            linked: Watched::open(c, "banks.linked", none(), read),
+            asks: Watched::open(c, "banks.asks", none(), read),
+            filters: Watched::open(c, "filters.saved", none(), read),
+            formulas: Watched::open(c, "categories.formulas", month_of(month), read),
             preview: None,
             ledger: Ledger::All,
             adhoc: Filter::all(),
@@ -248,13 +248,13 @@ impl Peer {
             return;
         }
         let c = &mut self.client;
-        let old = std::mem::replace(&mut self.lines, Watched::open(c, "month", month_of(month), read));
+        let old = std::mem::replace(&mut self.lines, Watched::open(c, "budget.month", month_of(month), read));
         old.close(c);
-        let old = std::mem::replace(&mut self.summary, Watched::open(c, "summary", month_of(month), read));
+        let old = std::mem::replace(&mut self.summary, Watched::open(c, "budget.summary", month_of(month), read));
         old.close(c);
-        let old = std::mem::replace(&mut self.spending, Watched::open(c, "spending", month_of(month), read));
+        let old = std::mem::replace(&mut self.spending, Watched::open(c, "budget.spending", month_of(month), read));
         old.close(c);
-        let old = std::mem::replace(&mut self.formulas, Watched::open(c, "formulas", month_of(month), read));
+        let old = std::mem::replace(&mut self.formulas, Watched::open(c, "categories.formulas", month_of(month), read));
         old.close(c);
         self.month = month.into();
     }
@@ -268,9 +268,9 @@ impl Peer {
             return;
         }
         let c = &mut self.client;
-        let old = std::mem::replace(&mut self.register, Watched::open(c, "filtered", input.clone(), read));
+        let old = std::mem::replace(&mut self.register, Watched::open(c, "transactions.filtered", input.clone(), read));
         old.close(c);
-        let old = std::mem::replace(&mut self.total, Watched::open(c, "filtered_total", input, read));
+        let old = std::mem::replace(&mut self.total, Watched::open(c, "transactions.filtered_total", input, read));
         old.close(c);
         (self.ledger, self.adhoc) = (ledger, adhoc);
     }
@@ -287,7 +287,7 @@ impl Peer {
         if let Some(old) = self.preview.take() {
             old.close(c);
         }
-        self.preview = input.map(|i| Watched::open(c, "preview_formula", i, read));
+        self.preview = input.map(|i| Watched::open(c, "categories.preview_formula", i, read));
     }
 
     /// The formula a category's month follows, if it follows one.
@@ -317,7 +317,7 @@ impl Peer {
         }
         if let Some(id) = id {
             let input = OneTxn { id }.to_bytes();
-            self.txn = Some((id, Watched::open(c, "for_txn", input, read)));
+            self.txn = Some((id, Watched::open(c, "receipts.for_txn", input, read)));
         }
         self.follow_txn();
     }
@@ -351,8 +351,8 @@ impl Peer {
         }
         if let Some(id) = id {
             let input = OneReceipt { receipt_id: id.into() }.to_bytes();
-            self.receipt = Some((id.into(), Watched::open(c, "receipt_items", input.clone(), read)));
-            self.charges = Some(Watched::open(c, "charges", input, read));
+            self.receipt = Some((id.into(), Watched::open(c, "receipts.receipt_items", input.clone(), read)));
+            self.charges = Some(Watched::open(c, "receipts.charges", input, read));
         }
     }
 
@@ -367,7 +367,7 @@ impl Peer {
         }
         if let Some(p) = of {
             let input = p.to_bytes();
-            self.candidates = Some((p, Watched::open(c, "candidates", input, read)));
+            self.candidates = Some((p, Watched::open(c, "receipts.candidates", input, read)));
         }
     }
 
@@ -381,7 +381,7 @@ impl Peer {
             old.close(c);
         }
         if let Some(id) = id {
-            self.splits = Some((id, Watched::open(c, "splits", OneTxn { id }.to_bytes(), read)));
+            self.splits = Some((id, Watched::open(c, "transactions.splits", OneTxn { id }.to_bytes(), read)));
         }
     }
 

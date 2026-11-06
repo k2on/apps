@@ -67,15 +67,15 @@ impl App {
         match m {
             Msg::Connect => {
                 let _ = self.step(Message::Go(Page::Settings));
-                self.ask_page("connect a bank", "connect", &());
+                self.ask_page("connect a bank", "banks.connect", &());
             }
-            Msg::Reconnect(bank) => self.ask_page("reconnect the bank", "reconnect", &BankName { bank }),
+            Msg::Reconnect(bank) => self.ask_page("reconnect the bank", "banks.reconnect", &BankName { bank }),
             Msg::Disconnect(bank) => self.modal = Some(Modal::Disconnect(bank)),
             Msg::Disconnected(bank) => {
                 self.modal = None;
                 if self.server.is_none() {
                     self.note = "the demo has no server to disconnect a bank from".into();
-                } else if self.author("disconnect the bank", "disconnect", &BankName { bank }) {
+                } else if self.author("disconnect the bank", "banks.disconnect", &BankName { bank }) {
                     self.dismissed = None;
                     self.note = "asked the server to disconnect the bank".into();
                 }
@@ -85,19 +85,19 @@ impl App {
                     plaid_account_id,
                     name: String::new(),
                 };
-                if self.author("open an account for it", "open", &open) {
+                if self.author("open an account for it", "banks.open", &open) {
                     self.note = "opened \u{2014} its history arrives with the bank's next import".into();
                 }
             }
             Msg::Pick(plaid) => self.pick(&plaid),
-            Msg::AddAccounts(bank) => self.ask_page("add accounts", "add_accounts", &BankName { bank }),
+            Msg::AddAccounts(bank) => self.ask_page("add accounts", "banks.add_accounts", &BankName { bank }),
             Msg::Link(plaid_account_id, account_id) => {
                 self.modal = None;
                 let l = LinkAccount {
                     plaid_account_id,
                     account_id,
                 };
-                if self.author("link it", "link", &l) {
+                if self.author("link it", "banks.link", &l) {
                     self.note = "linked \u{2014} the bank's next import writes there".into();
                 }
             }

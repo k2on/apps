@@ -147,7 +147,7 @@ fn settings_keep_amazons_login_off_the_budget() {
 
     // Somebody in the household makes a change, so the log has entries.
     let mut bob = signed_in(&server, "bob");
-    bob.mutate("setup", &());
+    bob.mutate("budget.setup", &());
     pump_until(&mut [&mut bob], 10, |ps| ps[0].pending() == 0);
 
     let s: Stores = alice.call(calls::FORGET_AMAZON, &()).unwrap();

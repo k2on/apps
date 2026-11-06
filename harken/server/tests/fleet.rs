@@ -47,14 +47,14 @@ const NO_PLAYLIST: Id = [0; 16];
 /// What a peer's library holds, as media ids in library order.
 fn media(p: &mut PeerProc) -> Vec<Id> {
     ids_of(
-        &p.query("library", vec![("playlist_id", id(NO_PLAYLIST))]),
+        &p.query("library.library", vec![("playlist_id", id(NO_PLAYLIST))]),
         "id",
     )
 }
 
 /// The files a peer's library holds.
 fn files(p: &mut PeerProc) -> BTreeSet<String> {
-    p.query("library", vec![("playlist_id", id(NO_PLAYLIST))])
+    p.query("library.library", vec![("playlist_id", id(NO_PLAYLIST))])
         .iter()
         .map(|r| r["file"].as_str().unwrap().to_string())
         .collect()
@@ -62,7 +62,7 @@ fn files(p: &mut PeerProc) -> BTreeSet<String> {
 
 /// The caller's playlists on a peer: `(name, id)` in the order made.
 fn playlists(p: &mut PeerProc) -> Vec<(String, Id)> {
-    p.query("playlists", vec![])
+    p.query("playlists.playlists", vec![])
         .iter()
         .map(|r| (r["name"].as_str().unwrap().to_string(), id_of(&r["id"])))
         .collect()
@@ -78,7 +78,7 @@ fn playlist(p: &mut PeerProc, name: &str) -> Id {
 
 fn add(p: &mut PeerProc, list: Id, m: Id) -> Id {
     p.author(
-        "add_to_playlist",
+        "playlists.add_to_playlist",
         vec![("playlist_id", id(list)), ("media_id", id(m))],
     )
 }
@@ -129,10 +129,10 @@ fn three_peers_online_agree_and_a_playlist_is_in_log_order() {
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("bob"));
     for i in 0..8 {
-        a.author("add_song", song(&format!("online-{i}")));
+        a.author("library.add_song", song(&format!("online-{i}")));
     }
-    a.author("create_playlist", named("Shared"));
-    c.author("create_playlist", named("Bob's"));
+    a.author("playlists.create_playlist", named("Shared"));
+    c.author("playlists.create_playlist", named("Bob's"));
     f.converged(&mut [&mut a, &mut b, &mut c]);
     let m = media(&mut b);
     assert_eq!(m.len(), 8);
@@ -143,14 +143,17 @@ fn three_peers_online_agree_and_a_playlist_is_in_log_order() {
         add(&mut c, bobs, m[(round * 3) % 8]);
         if round == 3 {
             b.author(
-                "remove_from_playlist",
+                "playlists.remove_from_playlist",
                 vec![("playlist_id", id(shared)), ("media_id", id(m[0]))],
             );
-            c.author("add_all_to_playlist", vec![("playlist_id", id(bobs))]);
+            c.author(
+                "playlists.add_all_to_playlist",
+                vec![("playlist_id", id(bobs))],
+            );
         }
         if round == 5 {
             a.author(
-                "remove_from_playlist",
+                "playlists.remove_from_playlist",
                 vec![("playlist_id", id(shared)), ("media_id", id(m[6]))],
             );
         }
@@ -216,9 +219,9 @@ fn a_black_holed_peer_lands_after_everyone_else() {
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("alice"));
     for i in 0..40 {
-        a.author("add_song", song(&format!("bh-{i}")));
+        a.author("library.add_song", song(&format!("bh-{i}")));
     }
-    a.author("create_playlist", named("Mix"));
+    a.author("playlists.create_playlist", named("Mix"));
     f.converged(&mut [&mut a, &mut b, &mut c]);
     let m = media(&mut c);
     let mix = playlist(&mut c, "Mix");
@@ -261,7 +264,7 @@ fn burst(peers: &mut [&mut PeerProc], round: usize, n: usize) {
     for i in 0..n {
         for p in peers.iter_mut() {
             let name = format!("{}-{round}-{i}", p.name);
-            p.author("create_playlist", named(&name));
+            p.author("playlists.create_playlist", named(&name));
         }
     }
 }
@@ -286,7 +289,7 @@ fn a_server_stopped_mid_stream_loses_nothing() {
     let mut a = f.peer("a", Some("alice"));
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("bob"));
-    a.author("add_song", song("stop-song"));
+    a.author("library.add_song", song("stop-song"));
     f.converged(&mut [&mut a, &mut b, &mut c]);
     burst(&mut [&mut a, &mut b, &mut c], 0, 10);
     f.server.stop();
@@ -364,7 +367,7 @@ fn a_server_that_lost_its_log_re_bases_everyone_onto_what_it_has() {
     let mut a = f.peer("a", Some("alice"));
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("bob"));
-    a.author("add_song", song("lost with the log"));
+    a.author("library.add_song", song("lost with the log"));
     burst(&mut [&mut a, &mut b, &mut c], 0, 5);
     let before = f.converged(&mut [&mut a, &mut b, &mut c]);
     assert_eq!(before.head, 16);
@@ -528,25 +531,28 @@ fn a_peer_killed_after_mutate_or_after_the_ack_converges() {
     let f = Fleet::new("peer-kill");
     let mut p = f.peer("p", Some("alice"));
     let mut q = f.peer("q", Some("alice"));
-    p.author("add_song", song("durable"));
+    p.author("library.add_song", song("durable"));
     f.converged(&mut [&mut p, &mut q]);
 
     // (a)
     p.proxy.blackhole();
-    p.author("create_playlist", named("Written before the kill"));
+    p.author(
+        "playlists.create_playlist",
+        named("Written before the kill"),
+    );
     p.kill9();
     p.proxy.pass();
     p.start();
     assert_eq!(p.status().pending, 1, "the intent was on disk");
     f.converged(&mut [&mut p, &mut q]);
-    p.author("create_playlist", named("Racing the pump"));
+    p.author("playlists.create_playlist", named("Racing the pump"));
     p.kill9();
     p.start();
     f.converged(&mut [&mut p, &mut q]);
 
     // (b)
     p.proxy.blackhole();
-    p.author("create_playlist", named("Acked, then forgotten"));
+    p.author("playlists.create_playlist", named("Acked, then forgotten"));
     p.quit();
     let saved = f.root.path().join("peer-p-before-ack");
     copy_dir(&p.dir, &saved);
@@ -642,10 +648,10 @@ fn a_first_sync_cut_mid_page_resumes_at_its_cursor() {
     if long {
         let t = Instant::now();
         for i in 0..500 {
-            s.author("add_song", song(&format!("page-{i:04}")));
+            s.author("library.add_song", song(&format!("page-{i:04}")));
         }
         for i in 0..10 {
-            s.author("create_playlist", named(&format!("List {i}")));
+            s.author("playlists.create_playlist", named(&format!("List {i}")));
         }
         assert!(s.settle(PATIENCE));
         let lists: Vec<Id> = playlists(&mut s).into_iter().map(|(_, i)| i).collect();
@@ -738,8 +744,8 @@ fn work_done_signed_out_is_the_signers_everywhere() {
     let mut s = f.peer("s", None);
     s.proxy.blackhole();
     let mut mine = vec![
-        s.author("add_song", song("nobody's")),
-        s.author("create_playlist", named("Made before signing in")),
+        s.author("library.add_song", song("nobody's")),
+        s.author("playlists.create_playlist", named("Made before signing in")),
     ];
     let list = playlist(&mut s, "Made before signing in");
     let m = media(&mut s);
@@ -802,8 +808,8 @@ fn the_same_name_twice_is_numbered_in_log_order() {
     f.converged(&mut [&mut a, &mut b]);
     a.proxy.blackhole();
     b.proxy.blackhole();
-    let ia = a.author("create_playlist", named("Road trip"));
-    let ib = b.author("create_playlist", named("Road trip"));
+    let ia = a.author("playlists.create_playlist", named("Road trip"));
+    let ib = b.author("playlists.create_playlist", named("Road trip"));
     assert_eq!(
         playlists(&mut a).len(),
         2,
@@ -863,7 +869,7 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
     let f = Fleet::new("turned-away");
     let mut p = f.peer("p", Some("alice"));
     let mut q = f.peer("q", Some("alice"));
-    p.author("add_song", song("kept"));
+    p.author("library.add_song", song("kept"));
     f.converged(&mut [&mut p, &mut q]);
     let old = p.status().session;
     let t = Instant::now();
@@ -886,11 +892,14 @@ fn a_peer_turned_away_keeps_its_work_until_signed_in_again() {
         "the other login is not touched: {other:?}"
     );
 
-    p.author("create_playlist", named("Kept through a revocation"));
+    p.author(
+        "playlists.create_playlist",
+        named("Kept through a revocation"),
+    );
     let list = playlist(&mut p, "Kept through a revocation");
     let m = media(&mut p);
     add(&mut p, list, m[0]);
-    p.author("create_playlist", named("And this"));
+    p.author("playlists.create_playlist", named("And this"));
     let (_, _, view) = p.hash();
     assert_eq!(p.status().pending, 3);
     assert_eq!(p.hash().2, view, "the store is kept");
@@ -1038,7 +1047,7 @@ fn a_black_holed_socket_is_closed_by_the_keepalive() {
     );
     let t = Instant::now();
     p.proxy.blackhole();
-    p.author("create_playlist", named("Said into the void"));
+    p.author("playlists.create_playlist", named("Said into the void"));
     assert!(
         eventually(PATIENCE, || f.server.room("alice") == 1),
         "the server closes the socket"
@@ -1086,7 +1095,7 @@ fn a_replayed_push_or_hello_changes_nothing() {
     let mut q = f.peer("q", Some("alice"));
     f.converged(&mut [&mut p, &mut q]);
 
-    let once = p.author("create_playlist", named("Once"));
+    let once = p.author("playlists.create_playlist", named("Once"));
     assert!(p.settle(PATIENCE));
     // The work in the log, the scanner's looks apart (they land when
     // they land).
@@ -1103,7 +1112,7 @@ fn a_replayed_push_or_hello_changes_nothing() {
     assert!(p.proxy.replay_where(is_push));
     // Whatever the peer says next travels behind the replay on the same
     // connection, so once it is answered the replay has been.
-    p.author("create_playlist", named("After the replay"));
+    p.author("playlists.create_playlist", named("After the replay"));
     let done = f.converged(&mut [&mut p, &mut q]);
     assert_eq!(
         done.work(),
@@ -1138,7 +1147,7 @@ fn a_replayed_push_or_hello_changes_nothing() {
     assert!(matches!(Frame::dec(&frame), Ok(Frame::Hello { .. })));
     assert!(eventually(PATIENCE, || f.server.room("alice") == 2));
     assert!(p.proxy.replay_where(is_hello));
-    p.author("create_playlist", named("After the second hello"));
+    p.author("playlists.create_playlist", named("After the second hello"));
     f.converged(&mut [&mut p, &mut q]);
     let s = p.status();
     assert!(
@@ -1263,7 +1272,7 @@ fn fuzz(seed: u64, steps: usize) {
                 let m = media(p);
                 if lists.is_empty() || m.is_empty() || rng.chance(15) {
                     let name = names[rng.below(names.len())];
-                    let r = p.mutate("create_playlist", named(name));
+                    let r = p.mutate("playlists.create_playlist", named(name));
                     format!("{} create_playlist {name}: {}", p.name, r.is_ok())
                 } else {
                     let (list_name, list) = lists[rng.below(lists.len())].clone();
@@ -1271,17 +1280,19 @@ fn fuzz(seed: u64, steps: usize) {
                     if k < 60 {
                         let x = m[rng.below(m.len())];
                         let r = p.mutate(
-                            "add_to_playlist",
+                            "playlists.add_to_playlist",
                             vec![("playlist_id", id(list)), ("media_id", id(x))],
                         );
                         format!("{} add_to_playlist {list_name}: {}", p.name, r.is_ok())
                     } else if k < 85 {
-                        let items =
-                            ids_of(&p.query("playlist", vec![("playlist_id", id(list))]), "id");
+                        let items = ids_of(
+                            &p.query("playlists.playlist", vec![("playlist_id", id(list))]),
+                            "id",
+                        );
                         match items.first() {
                             Some(x) => {
                                 let r = p.mutate(
-                                    "remove_from_playlist",
+                                    "playlists.remove_from_playlist",
                                     vec![("playlist_id", id(list)), ("media_id", id(*x))],
                                 );
                                 format!(
@@ -1293,7 +1304,10 @@ fn fuzz(seed: u64, steps: usize) {
                             None => format!("{} nothing to remove from {list_name}", p.name),
                         }
                     } else {
-                        let r = p.mutate("add_all_to_playlist", vec![("playlist_id", id(list))]);
+                        let r = p.mutate(
+                            "playlists.add_all_to_playlist",
+                            vec![("playlist_id", id(list))],
+                        );
                         format!("{} add_all_to_playlist {list_name}: {}", p.name, r.is_ok())
                     }
                 }
@@ -1396,14 +1410,14 @@ fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
     let mut a = f.peer("a", Some("alice"));
     let mut b = f.peer("b", Some("alice"));
     let mut c = f.peer("c", Some("alice"));
-    a.author("create_playlist", named("Before"));
+    a.author("playlists.create_playlist", named("Before"));
     f.converged(&mut [&mut a, &mut b, &mut c]);
     let left_at = c.status().cursor;
 
     c.proxy.blackhole();
     let mut away = vec![];
     for i in 0..10 {
-        away.push(c.author("create_playlist", named(&format!("away-{i}"))));
+        away.push(c.author("playlists.create_playlist", named(&format!("away-{i}"))));
     }
     assert!(
         eventually(PATIENCE, || f.server.room("alice") == 2),
@@ -1411,8 +1425,8 @@ fn a_peer_away_past_the_horizon_is_served_the_snapshot() {
     );
     let t = Instant::now();
     for i in 0..100 {
-        a.author("create_playlist", named(&format!("a-{i}")));
-        b.author("create_playlist", named(&format!("b-{i}")));
+        a.author("playlists.create_playlist", named(&format!("a-{i}")));
+        b.author("playlists.create_playlist", named(&format!("b-{i}")));
     }
     assert!(a.settle(PATIENCE) && b.settle(PATIENCE));
     measured(
@@ -1476,7 +1490,7 @@ fn alone_peer(f: &Fleet, name: &str, user: &str) -> PeerProc {
 /// `n` songs authored, each with a title of its own.
 fn songs(p: &mut PeerProc, tag: &str, n: usize) -> Vec<Id> {
     (0..n)
-        .map(|i| p.author("add_song", song(&format!("{tag}-{i:04}"))))
+        .map(|i| p.author("library.add_song", song(&format!("{tag}-{i:04}"))))
         .collect()
 }
 
@@ -1510,7 +1524,7 @@ fn alone_then_a_fresh_server() {
     let f = Fleet::new("alone-fresh");
     let mut p = alone_peer(&f, "p", "alice");
     songs(&mut p, "alone", 50);
-    p.author("create_playlist", named("Alone"));
+    p.author("playlists.create_playlist", named("Alone"));
     let list = playlist(&mut p, "Alone");
     for m in media(&mut p).into_iter().take(10) {
         add(&mut p, list, m);
@@ -1563,7 +1577,7 @@ fn alone_beside_two_server_users_lands_after_theirs() {
     songs(&mut m, "mine", 30);
     songs(&mut a, "a", 20);
     songs(&mut b, "b", 20);
-    a.author("create_playlist", named("Theirs"));
+    a.author("playlists.create_playlist", named("Theirs"));
     // Not `converged`: the thirty are owed and not yet pushed.
     assert!(a.settle(PATIENCE) && b.settle(PATIENCE));
     let before = f.server.log_on_disk().expect("a log");
@@ -1607,7 +1621,7 @@ fn leave_more_intents_and_join_again() {
     let mut a = f.peer("a", Some("alice"));
     let mut m = f.peer("m", Some("alice"));
     songs(&mut a, "s", 12);
-    a.author("create_playlist", named("Shared"));
+    a.author("playlists.create_playlist", named("Shared"));
     f.converged(&mut [&mut a, &mut m]);
     let list = playlist(&mut m, "Shared");
     let ms = media(&mut m);
@@ -1725,7 +1739,7 @@ fn a_peer_alone_killed_mid_append_reopens_whole() {
         p.say(
             "mutate",
             vec![
-                ("name", json!("add_song")),
+                ("name", json!("library.add_song")),
                 ("args", args(song(&format!("burst-{i:04}")))),
             ],
         );
@@ -1818,18 +1832,18 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
     let mut alice = peer(&f, "alice");
     let mut bob = peer(&f, "bob");
     let refused = bob
-        .mutate("add_song", song("bob's"))
+        .mutate("library.add_song", song("bob's"))
         .expect_err("a library write by a login without the role");
     assert!(
         refused.contains("only the library writes the library"),
         "refused on bob's own device by the guard: {refused}"
     );
-    alice.author("create_playlist", named("Alice's"));
+    alice.author("playlists.create_playlist", named("Alice's"));
 
     // Granted by configuration, at a restart; a fresh login holds it.
     f.server.upgrade(vec![("HARKEN_ROLES", "library=alice")]);
     alice.sign_in("alice");
-    let kept = alice.author("add_song", song("alice's"));
+    let kept = alice.author("library.add_song", song("alice's"));
     let done = f.converged(&mut [&mut alice, &mut bob]);
     assert_eq!(
         done.log.rows::<Media>("media").len(),
@@ -1847,7 +1861,7 @@ fn a_role_granted_by_a_restart_and_revoked_by_another() {
     // Revoked at another restart, while her device believes it still
     // holds it: the device takes the song, the authority does not.
     f.server.upgrade(vec![("HARKEN_ROLES", "")]);
-    let late = alice.author("add_song", song("too late"));
+    let late = alice.author("library.add_song", song("too late"));
     assert!(
         eventually(PATIENCE, || alice.rejections().iter().any(|(i, why)| *i
             == late

@@ -120,23 +120,21 @@ impl Seeder {
         f(&mut self.store, &self.ctx, input).unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
     }
 
-    /// One mutation by the name the domain binds it to.
+    /// One mutation by its function's name.
     fn mutate(&mut self, what: &str, name: &str, input: &impl Encode) {
-        let b = domain().binding(name).unwrap_or_else(|| panic!("the demo authors {name}"));
-        self.apply(what, b, &input.to_bytes());
+        self.apply(what, name, &input.to_bytes());
     }
 
     fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> T {
-        let b = domain().binding(name).unwrap_or_else(|| panic!("the demo reads {name}"));
         let bytes = domain()
-            .ask(&self.store, &self.ctx, b, &input.to_bytes())
+            .ask(&self.store, &self.ctx, name, &input.to_bytes())
             .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
         T::from_bytes(&bytes).unwrap_or_else(|r| panic!("{name}: {r}"))
     }
 
     /// Which playlist is called `name`.
     fn playlist(&self, name: &str) -> Option<[u8; 16]> {
-        self.query::<Vec<Playlist>>("playlists", &())
+        self.query::<Vec<Playlist>>("playlists.playlists", &())
             .into_iter()
             .find(|p| p.name == name)
             .map(|p| p.id.0)
@@ -145,7 +143,7 @@ impl Seeder {
     /// The library's ids by title.
     fn ids(&self, titles: &[&str]) -> Vec<[u8; 16]> {
         let items: Vec<LibraryEntry> = self.query(
-            "library",
+            "library.library",
             &Library {
                 playlist_id: Key::new([0; 16]),
             },
@@ -207,19 +205,19 @@ pub fn seeded_disk(copies: usize) -> Memory {
 
     // Then the shows, each and its episodes.
     for (show, episodes) in shelf().calls() {
-        seed.mutate(&show.title, "add_show", &show);
+        seed.mutate(&show.title, "library.add_show", &show);
         for e in episodes {
-            seed.mutate(&e.title, "add_episode", &e);
+            seed.mutate(&e.title, "library.add_episode", &e);
         }
     }
     // …and what their feeds say beside them: who is on each, and what is
     // said in it.
     let (people, transcripts) = shelf().besides();
     for p in people {
-        seed.mutate(&p.file, "set_people", &p);
+        seed.mutate(&p.file, "library.set_people", &p);
     }
     for t in transcripts {
-        seed.mutate(&t.file, "set_transcript", &t);
+        seed.mutate(&t.file, "library.set_transcript", &t);
     }
 
     // Three playlists, so the sidebar shows what a playlist *is* here: an
@@ -241,14 +239,14 @@ pub fn seeded_disk(copies: usize) -> Memory {
         ("Water Music", &["Alla Hornpipe", "Bourrée", "Sarabande", "Gigue"]),
     ];
     for (name, titles) in SETS {
-        seed.mutate(name, "create_playlist", &CreatePlaylist { name: name.to_string() });
+        seed.mutate(name, "playlists.create_playlist", &CreatePlaylist { name: name.to_string() });
         let list = seed.playlist(name).expect("the playlist just made");
         for id in seed.ids(titles) {
             let a = AddToPlaylist {
                 playlist_id: Key::new(list),
                 media_id: Key::new(id),
             };
-            seed.mutate(name, "add_to_playlist", &a);
+            seed.mutate(name, "playlists.add_to_playlist", &a);
         }
     }
 

@@ -80,8 +80,8 @@ fn the_bridge_does_what_the_kit_does() {
     assert_eq!(alice.status().link, "online");
 
     // A mutate, a refusal and the form's check, by name with JSON.
-    let made = alice.mutate("create_playlist".into(), r#"{"name":" Road "}"#.into()).unwrap();
-    let refused = alice.mutate("create_playlist".into(), r#"{"name":"  "}"#.into());
+    let made = alice.mutate("demo.create_playlist".into(), r#"{"name":" Road "}"#.into()).unwrap();
+    let refused = alice.mutate("demo.create_playlist".into(), r#"{"name":"  "}"#.into());
     assert_eq!(
         refused,
         Err(Refusal::Refused {
@@ -89,10 +89,10 @@ fn the_bridge_does_what_the_kit_does() {
         })
     );
     assert_eq!(
-        alice.check("create_playlist".into(), r#"{"name":""}"#.into()).as_deref(),
+        alice.check("demo.create_playlist".into(), r#"{"name":""}"#.into()).as_deref(),
         Some("a playlist needs a name")
     );
-    assert_eq!(alice.check("create_playlist".into(), r#"{"name":"x"}"#.into()), None);
+    assert_eq!(alice.check("demo.create_playlist".into(), r#"{"name":"x"}"#.into()), None);
     assert!(alice.mutate("nothing".into(), "null".into()).is_err());
     until("confirmed", || {
         alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
@@ -101,43 +101,43 @@ fn the_bridge_does_what_the_kit_does() {
 
     // A view and its patches; a query answering the same.
     let args = format!(r#"{{"playlist_id":"{road}"}}"#);
-    let items = alice.view("items".into(), args.clone()).unwrap();
+    let items = alice.view("demo.items".into(), args.clone()).unwrap();
     assert_eq!(items.rows(), Vec::<String>::new());
     let before = told.0.load(Ordering::Relaxed);
     let add = format!(r#"{{"playlist_id":"{road}","track_id":"t1"}}"#);
-    alice.mutate("add_to_playlist".into(), add).unwrap();
+    alice.mutate("demo.add_to_playlist".into(), add).unwrap();
     let taken = items.take();
     let [row] = &taken.rows[..] else { panic!("one insert: {taken:?}") };
     assert_eq!(taken.ops[..], [Op::Insert { at: 0 }]);
     assert!(row.contains(r#""track_id":"t1""#), "{row}");
     assert_eq!(items.take().ops, vec![]);
     assert!(told.0.load(Ordering::Relaxed) > before, "the listener was told");
-    assert_eq!(alice.query("items".into(), args.clone()).unwrap(), format!("[{row}]"));
+    assert_eq!(alice.query("demo.items".into(), args.clone()).unwrap(), format!("[{row}]"));
 
     // Another device sees it; the live space carries a call between them.
     let bob = device(&db, "laptop", Some(login("bob@laptop")));
     bob.connect_with("", dial());
     until("bob has the item", || {
-        bob.query("items".into(), args.clone()).is_ok_and(|r| r.contains("t1"))
+        bob.query("demo.items".into(), args.clone()).is_ok_and(|r| r.contains("t1"))
     });
     until("both here", || bob.live_rows("here".into()).len() == 2);
-    alice.mutate("point".into(), r#"{"x":3}"#.into()).unwrap();
+    alice.mutate("room.point".into(), r#"{"x":3}"#.into()).unwrap();
     until("bob sees the pointer", || {
         bob.live_rows("pointer".into()).iter().any(|r| r.contains(r#""x":3"#))
     });
     assert!(
-        alice.mutate("point".into(), r#"{"x":"three"}"#.into()).is_err(),
+        alice.mutate("room.point".into(), r#"{"x":"three"}"#.into()).is_err(),
         "an input not of its type refused at once"
     );
     assert!(
-        alice.mutate("rename".into(), r#"{"name":7}"#.into()).is_err(),
+        alice.mutate("room.rename".into(), r#"{"name":7}"#.into()).is_err(),
         "any other refused at once"
     );
 
     // A device with no server keeps what it does pending, and hands it over
     // once it has one.
     let carol = device(&dc, "tablet", None);
-    carol.mutate("create_playlist".into(), r#"{"name":"Alone"}"#.into()).unwrap();
+    carol.mutate("demo.create_playlist".into(), r#"{"name":"Alone"}"#.into()).unwrap();
     let s = carol.status();
     assert!(s.cursor == 0 && s.pending == 1 && s.link == "alone", "{s:?}");
     carol.connect_with("", dial());
@@ -150,7 +150,7 @@ fn the_bridge_does_what_the_kit_does() {
     // Signed out: nothing dialled, the history kept.
     alice.logout();
     assert_eq!(alice.status().link, "signed out");
-    assert_eq!(alice.query("items".into(), args).unwrap(), format!("[{row}]"));
+    assert_eq!(alice.query("demo.items".into(), args).unwrap(), format!("[{row}]"));
     assert!(alice.take_refusals().is_empty());
 }
 
@@ -161,7 +161,7 @@ fn the_bridge_does_what_the_kit_does() {
 fn a_device_reopens_from_its_disk() {
     let d = tempfile::tempdir().unwrap();
     let p = device(&d, "phone", None);
-    p.mutate("create_playlist".into(), r#"{"name":"Kept"}"#.into()).unwrap();
+    p.mutate("demo.create_playlist".into(), r#"{"name":"Kept"}"#.into()).unwrap();
     drop(p);
     let p = device(&d, "phone", None);
     assert_eq!(playlists(&p).len(), 1);
@@ -300,7 +300,7 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
     let alice = device(&d, "phone", Some(login("alice@phone")));
     alice.connect_with("", hub.dialer(Arc::new(dev)));
     until("alice linked", || alice.status().linked);
-    let made = alice.mutate("create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
+    let made = alice.mutate("demo.create_playlist".into(), r#"{"name":"Road"}"#.into()).unwrap();
     until("confirmed", || {
         alice.outcome(made.clone()).is_some_and(|o| !o.pending && o.refused.is_none())
     });

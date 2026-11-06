@@ -139,8 +139,9 @@ pub fn hub_query<T: Encode + Send + 'static>(server: &Server, name: &'static str
                 ..Default::default()
             };
             let d = money_domain::shared();
-            let f = d.binding(name).unwrap().to_string();
-            let b = d.ask(&h.log.store, &ctx, &f, &input.to_bytes()).unwrap_or_else(|r| panic!("{name}: {r}"));
+            let b = d
+                .ask(&h.log.store, &ctx, name, &input.to_bytes())
+                .unwrap_or_else(|r| panic!("{name}: {r}"));
             T::from_bytes(&b).unwrap()
         })
         .unwrap()

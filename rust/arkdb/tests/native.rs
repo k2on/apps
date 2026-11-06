@@ -20,8 +20,8 @@ fn ctx() -> Ctx {
     }
 }
 
-/// Every function is registered by its name with its kind, a short name
-/// finds its binding, and a name trims and must be something — with the
+/// Every function is registered by its whole name with its kind (a last
+/// part alone names none), and a name trims and must be something — with the
 /// words a form shows, and the refusal the intent gets. Falsified by
 /// `non_empty` checking before `trim`: "  " passed.
 #[test]
@@ -30,7 +30,7 @@ fn the_demo_registers_its_functions_and_refines_its_inputs() {
     let kinds: Vec<(&str, Kind)> = d.fns.values().map(|f| (f.name.as_str(), f.kind)).collect();
     assert_eq!(kinds.len(), 6);
     assert!(kinds.contains(&("demo.items", Kind::View)) && kinds.contains(&("demo.top_two", Kind::Scope)));
-    assert_eq!(d.binding("create_playlist"), Some("demo.create_playlist"));
+    assert!(d.get("create_playlist").is_none() && d.get("demo.create_playlist").is_some());
     let blank = CreatePlaylist { name: "  ".into() };
     assert_eq!(blank.clone().check(), Err(vec![("name".into(), "a playlist needs a name".into())]));
     let named = CreatePlaylist { name: " Mix ".into() }.refine().unwrap();

@@ -2,8 +2,7 @@
 //! name, its views, and what became of what it did.
 //!
 //! An app authors ([`Peer::mutate`], on the space the function writes) and
-//! asks by a function's name (`create_playlist`, or its whole binding,
-//! `playlists.create_playlist`) — or calls the domain's own
+//! asks by a function's whole name (`playlists.create_playlist`) — or calls the domain's own
 //! view functions ([`Core::answer`]), of a device or a server alike — and holds the
 //! maintained views its lists are, each one's patches handed back. The peer keeps every intent's [`Outcome`] and, per space,
 //! the refusals its server sent until they are taken.
@@ -163,8 +162,7 @@ impl Peer {
         self.link.token.is_none()
     }
 
-    /// An intent of the function `name` (its binding, or the binding's last
-    /// part) on `input` — a value, or its encoding — on the space the
+    /// An intent of the function `name` on `input` — a value, or its encoding — on the space the
     /// function writes, now: its id, or the refusal its preview gave it
     /// here and now. A live one the config relays (`Config::ephemeral`)
     /// goes through the relay, under the id it is sent with when nothing
@@ -281,11 +279,11 @@ impl Core {
         [&self.log].into_iter().chain(&self.live).map(|m| &*m.domain)
     }
 
-    /// The function a name means ([`Domain::binding`]) and the domain it
-    /// is of: the log's, else the live space's.
+    /// The function of that name and the domain it is of: the log's, else
+    /// the live space's.
     fn found(&self, name: &str) -> Result<(&Domain, &Function), String> {
         self.domains()
-            .find_map(|d| Some((d, d.get(d.binding(name)?)?)))
+            .find_map(|d| Some((d, d.get(name)?)))
             .ok_or_else(|| format!("no function {name}"))
     }
 

@@ -29,7 +29,8 @@ fn on(app: &App, t: &str) {
 
 fn library(p: &mut Replica) {
     for t in ["a", "b", "c"] {
-        p.mutate("add_song", &song(t, "Bach", "Suites", &format!("music/{t}.mp3"))).unwrap();
+        p.mutate("library.add_song", &song(t, "Bach", "Suites", &format!("music/{t}.mp3")))
+            .unwrap();
     }
 }
 

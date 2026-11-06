@@ -117,7 +117,7 @@ impl App {
                     name: name.trim().to_string(),
                     filter: self.register_filter(),
                 };
-                if self.author("save the filter", "save_filter", &s) {
+                if self.author("save the filter", "filters.save_filter", &s) {
                     self.modal = None;
                     self.note = format!("saved as {}", s.name);
                     if let Some(f) = self.peer.filters.rows.iter().find(|f| f.name.eq_ignore_ascii_case(&s.name)) {
@@ -133,14 +133,14 @@ impl App {
                     id,
                     filter: self.register_filter(),
                 };
-                if self.author("save the filter", "change_filter", &c) {
+                if self.author("save the filter", "filters.change_filter", &c) {
                     self.note = "the filter's conditions are these now".into();
                     self.history.replace_next();
                     return self.update(Message::Go(Page::Ledger(Ledger::Saved(id))));
                 }
             }
             Msg::Delete(id) => {
-                if self.author("delete the filter", "delete_filter", &FilterId { id }) {
+                if self.author("delete the filter", "filters.delete_filter", &FilterId { id }) {
                     self.note = "the filter is gone".into();
                     return self.update(Message::Go(Page::Ledger(Ledger::All)));
                 }

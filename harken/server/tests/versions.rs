@@ -137,31 +137,31 @@ fn what_is_not_additive_is_refused() {
 const NO_PLAYLIST: Id = [0; 16];
 fn media(p: &mut PeerProc) -> Vec<Id> {
     ids_of(
-        &p.query("library", vec![("playlist_id", id(NO_PLAYLIST))]),
+        &p.query("library.library", vec![("playlist_id", id(NO_PLAYLIST))]),
         "id",
     )
 }
 
 fn playlist(p: &mut PeerProc, name: &str) -> Id {
-    let rows = p.query("playlists", vec![]);
+    let rows = p.query("playlists.playlists", vec![]);
     let hit = rows.iter().find(|r| r["name"] == json!(name));
     id_of(&hit.unwrap_or_else(|| panic!("{} has no playlist {name}", p.name))["id"])
 }
 
 fn add(p: &mut PeerProc, list: Id, m: Id) {
     p.author(
-        "add_to_playlist",
+        "playlists.add_to_playlist",
         vec![("playlist_id", id(list)), ("media_id", id(m))],
     );
 }
 
 fn create(p: &mut PeerProc, name: &str) {
-    p.author("create_playlist", vec![("name", json!(name))]);
+    p.author("playlists.create_playlist", vec![("name", json!(name))]);
 }
 
 fn songs(p: &mut PeerProc, tag: &str, n: usize) {
     for i in 0..n {
-        p.author("add_song", song(&format!("{tag}-{i}")));
+        p.author("library.add_song", song(&format!("{tag}-{i}")));
     }
 }
 

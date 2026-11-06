@@ -16,7 +16,7 @@ fn app() -> App {
     ] {
         p.client
             .lock()
-            .mutate("add_song", &song(t, who, album, &format!("music/{t}.mp3")))
+            .mutate("library.add_song", &song(t, who, album, &format!("music/{t}.mp3")))
             .unwrap();
     }
     p.refresh();
