@@ -1,0 +1,162 @@
+Attributes: Application, 0x107140df0, pid: 37910, label: 'Money'
+Element subtree:
+ →Application, 0x107140df0, pid: 37910, label: 'Money'
+    Window (Main), 0x1071406e0, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x107140010, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x107141150, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x107140370, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x10713d650, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x1071414b0, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x107140a40, {{0.0, 0.0}, {402.0, 874.0}}
+                  Other, 0x10713fc90, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x107141f90, {{0.0, 0.0}, {402.0, 874.0}}
+                      Other, 0x107142310, {{0.0, 0.0}, {402.0, 874.0}}
+                        Other, 0x107142660, {{0.0, 0.0}, {402.0, 874.0}}
+                          Other, 0x1071429e0, {{0.0, 0.0}, {402.0, 874.0}}, value: 4
+                            NavigationBar, 0x107142d30, {{0.0, 62.0}, {402.0, 54.0}}, identifier: 'Transactions'
+                              StaticText, 0x1070661d0, {{149.7, 73.7}, {102.7, 20.7}}, label: 'Transactions'
+                                Other, 0x107078f40, {{149.7, 73.7}, {102.7, 20.7}}
+                                  StaticText, 0x1070780a0, {{149.7, 82.0}, {102.7, 20.3}}, label: 'Transactions'
+                            Other, 0x107077c80, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x10707c350, {{0.0, 0.0}, {402.0, 874.0}}
+                                Other, 0x10707c470, {{0.0, 0.0}, {402.0, 874.0}}
+                                  Other, 0x10707c590, {{0.0, 0.0}, {402.0, 874.0}}
+                                    CollectionView, 0x10707c6b0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x10707c7d0, {{-16.0, -1632.0}, {434.0, 1817.7}}
+                                      Other, 0x10707c8f0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x10707ca10, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Cell, 0x10707cb30, {{16.0, 116.0}, {370.0, 52.0}}
+                                        Other, 0x10707cc50, {{16.0, 116.0}, {370.0, 52.0}}
+                                          Other, 0x10707cd70, {{16.0, 116.0}, {370.0, 52.0}}
+                                            Other, 0x10707ce90, {{16.0, 116.0}, {370.0, 52.0}}
+                                        Other, 0x10707cfb0, {{16.0, 116.0}, {370.0, 52.0}}
+                                          Other, 0x10707d0d0, {{16.0, 116.0}, {370.0, 52.0}}
+                                            Other, 0x10707d1f0, {{16.0, 116.0}, {370.0, 52.0}}
+                                              StaticText, 0x10707d310, {{16.0, 117.7}, {204.7, 40.7}}, label: 'Transactions'
+                                              Button, 0x10707d430, {{315.0, 127.3}, {23.0, 21.7}}, identifier: 'plus', label: 'Add Transaction'
+                                              Button, 0x10707d550, {{354.0, 122.0}, {32.0, 32.0}}, label: 'Signed in as alex'
+                                                StaticText, 0x10707d670, {{354.0, 122.0}, {32.0, 32.0}}, label: 'A'
+                                                Image, 0x10707d790, {{354.0, 122.0}, {32.0, 32.0}}
+                                      Other, 0x10707d8b0, {{-16.0, 185.7}, {434.0, 122.0}}
+                                      Cell, 0x10707d9d0, {{16.0, 203.0}, {370.0, 87.0}}
+                                        Other, 0x10707daf0, {{16.0, 203.0}, {370.0, 87.0}}
+                                          Other, 0x10707dc10, {{16.0, 203.0}, {370.0, 87.0}}
+                                            Other, 0x10707dd30, {{16.0, 203.0}, {370.0, 87.0}}
+                                        Other, 0x10707de50, {{16.0, 203.0}, {370.0, 87.0}}
+                                          Other, 0x10707df70, {{16.0, 203.0}, {370.0, 87.0}}
+                                            Other, 0x10707e090, {{16.0, 203.0}, {370.0, 87.0}}
+                                              Other, 0x10707e1b0, {{16.0, 203.0}, {370.0, 44.0}}, label: 'Search'
+                                                Image, 0x107079270, {{30.0, 216.7}, {16.3, 16.7}}, identifier: 'magnifyingglass', label: 'Search'
+                                                TextField, 0x107079390, {{56.3, 214.0}, {317.7, 22.0}}, placeholderValue: 'Payee, category, memo or amount'
+                                              SegmentedControl, 0x1070794b0, {{16.0, 259.0}, {370.0, 31.0}}
+                                                Button, 0x1070795d0, {{16.0, 259.0}, {185.0, 32.0}}, label: 'To Review (4)', Selected
+                                                Button, 0x1070796f0, {{201.0, 259.0}, {185.0, 32.0}}, label: 'All'
+                                      Other, 0x107079810, {{-16.0, 307.7}, {434.0, 2103.3}}
+                                      Cell, 0x107079930, {{16.0, 307.7}, {370.0, 40.3}}
+                                        Other, 0x107079a50, {{16.0, 307.7}, {370.0, 40.3}}
+                                        Other, 0x107079b70, {{16.0, 307.7}, {370.0, 40.3}}
+                                          Other, 0x107079c90, {{16.0, 307.7}, {370.0, 40.3}}
+                                            Other, 0x107079db0, {{16.0, 307.7}, {370.0, 40.3}}
+                                              StaticText, 0x107079ed0, {{32.0, 317.7}, {92.0, 20.3}}, label: '4 to Review'
+                                              Button, 0x107079ff0, {{287.7, 319.0}, {82.3, 18.0}}, label: 'Approve All'
+                                      Cell, 0x10707a110, {{16.0, 348.0}, {370.0, 71.3}}
+                                        Other, 0x10707a230, {{16.0, 348.0}, {370.0, 71.3}}
+                                          Other, 0x10707a350, {{16.0, 348.0}, {370.0, 71.3}}
+                                        Other, 0x10707a470, {{16.0, 348.0}, {370.0, 71.3}}
+                                          Other, 0x10707a590, {{16.0, 348.0}, {370.0, 71.3}}
+                                            Other, 0x10707a6b0, {{16.0, 348.0}, {370.0, 71.3}}
+                                              Button, 0x10707a7d0, {{16.0, 348.0}, {370.0, 71.3}}, label: 'Trader Joe's', value: -$110.45, Grocerie...
+                                                StaticText, 0x10707a8f0, {{52.0, 365.3}, {99.3, 20.3}}, label: 'Trader Joe's'
+                                                StaticText, 0x10707aa10, {{52.0, 387.7}, {55.0, 14.3}}, label: 'Groceries'
+                                                StaticText, 0x10707ab30, {{111.0, 387.7}, {96.0, 14.3}}, label: '· Chase Sapphire'
+                                                StaticText, 0x10707ac50, {{294.0, 363.0}, {76.0, 20.3}}, label: '-$110.45'
+                                                Image, 0x10707ad70, {{351.7, 386.3}, {17.0, 17.0}}, identifier: 'c.circle', label: 'C Circle'
+                                      Cell, 0x10707ae90, {{16.0, 419.0}, {370.0, 71.3}}
+                                        Other, 0x10707afb0, {{16.0, 419.0}, {370.0, 71.3}}
+                                          Other, 0x10707b0d0, {{16.0, 419.0}, {370.0, 71.3}}
+                                        Other, 0x10707b1f0, {{16.0, 419.0}, {370.0, 71.3}}
+                                          Other, 0x10707b310, {{16.0, 419.0}, {370.0, 71.3}}
+                                            Other, 0x10708b150, {{16.0, 419.0}, {370.0, 71.3}}
+                                              Button, 0x10708b270, {{16.0, 419.0}, {370.0, 71.3}}, label: 'Blue Bottle Coffee', value: -$31.55, Dining Ou...
+                                                StaticText, 0x10708b390, {{52.0, 436.3}, {144.3, 20.3}}, label: 'Blue Bottle Coffee'
+                                                StaticText, 0x10708b4b0, {{52.0, 458.7}, {60.0, 14.3}}, label: 'Dining Out'
+                                                StaticText, 0x10708b5d0, {{116.0, 458.7}, {96.0, 14.3}}, label: '· Chase Sapphire'
+                                                StaticText, 0x10708b6f0, {{304.7, 434.0}, {65.3, 20.3}}, label: '-$31.55'
+                                                Image, 0x10708b810, {{351.7, 457.3}, {17.0, 17.0}}, identifier: 'c.circle.fill', label: 'C Circle'
+                                      Other, 0x10708b930, {{52.0, 418.0}, {318.0, 1.0}}
+                                      Cell, 0x10708ba50, {{16.0, 490.7}, {370.0, 71.3}}
+                                        Other, 0x10708bb70, {{16.0, 490.7}, {370.0, 71.3}}
+                                          Other, 0x10708bc90, {{16.0, 490.7}, {370.0, 71.3}}
+                                        Other, 0x10708bdb0, {{16.0, 490.7}, {370.0, 71.3}}
+                                          Other, 0x10708bed0, {{16.0, 490.7}, {370.0, 71.3}}
+                                            Other, 0x10708bff0, {{16.0, 490.7}, {370.0, 71.3}}
+                                              Button, 0x10708c110, {{16.0, 490.7}, {370.0, 71.3}}, label: 'Netflix', value: -$15.00, Subscript...
+                                                StaticText, 0x10708c230, {{52.0, 508.0}, {52.3, 20.3}}, label: 'Netflix'
+                                                StaticText, 0x10708c350, {{52.0, 530.3}, {77.7, 14.3}}, label: 'Subscriptions'
+                                                StaticText, 0x10708c470, {{133.7, 530.3}, {96.0, 14.3}}, label: '· Chase Sapphire'
+                                                StaticText, 0x10708c590, {{304.7, 505.7}, {65.3, 20.3}}, label: '-$15.00'
+                                                Image, 0x10708c6b0, {{351.7, 529.0}, {17.0, 17.0}}, identifier: 'c.circle.fill', label: 'C Circle'
+                                      Other, 0x10708c7d0, {{52.0, 489.7}, {318.0, 1.0}}
+                                      Cell, 0x10708c8f0, {{16.0, 562.0}, {370.0, 71.3}}
+                                        Other, 0x10708ca10, {{16.0, 562.0}, {370.0, 71.3}}
+                                          Other, 0x10706a060, {{16.0, 562.0}, {370.0, 71.3}}
+                                        Other, 0x10706a180, {{16.0, 562.0}, {370.0, 71.3}}
+                                          Other, 0x10706a2a0, {{16.0, 562.0}, {370.0, 71.3}}
+                                            Other, 0x10706a3c0, {{16.0, 562.0}, {370.0, 71.3}}
+                                              Button, 0x10706a4e0, {{16.0, 562.0}, {370.0, 71.3}}, label: 'Whole Foods Market', value: -$135.46, Grocerie...
+                                                StaticText, 0x10706a600, {{52.0, 579.3}, {163.0, 20.3}}, label: 'Whole Foods Market'
+                                                StaticText, 0x10706a720, {{52.0, 601.7}, {55.0, 14.3}}, label: 'Groceries'
+                                                StaticText, 0x10706a840, {{111.0, 601.7}, {96.0, 14.3}}, label: '· Chase Sapphire'
+                                                StaticText, 0x10706a960, {{294.0, 577.0}, {76.0, 20.3}}, label: '-$135.46'
+                                                Image, 0x10706aa80, {{351.7, 600.3}, {17.0, 17.0}}, identifier: 'c.circle.fill', label: 'C Circle'
+                                      Other, 0x10706aba0, {{52.0, 561.0}, {318.0, 1.0}}
+                                      Cell, 0x10706acc0, {{16.0, 633.3}, {370.0, 29.7}}
+                                        Other, 0x10706ade0, {{16.0, 633.3}, {370.0, 29.7}}
+                                        Other, 0x10706af00, {{16.0, 633.3}, {370.0, 29.7}}
+                                          Other, 0x10706b020, {{16.0, 633.3}, {370.0, 29.7}}
+                                            Other, 0x10706b140, {{16.0, 633.3}, {370.0, 29.7}}
+                                              StaticText, 0x10706b260, {{16.0, 633.3}, {370.0, 29.7}}, label: 'Swipe right to approve, left to choose a category.'
+                                      Other, 0x10706b380, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x10706b4a0, {{396.0, 781.0}, {3.0, 7.0}}
+                                      Other, 0x10706b5c0, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x10706b6e0, {{396.0, 781.0}, {3.0, 7.0}}
+                            Other, 0x10706b800, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x10706b920, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x10706ba40, {{0.0, 791.0}, {402.0, 83.0}}
+                  Other, 0x10706bb60, {{0.0, 0.0}, {402.0, 874.0}}
+                    TabBar, 0x10706bc80, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar'
+                      Other, 0x10706bda0, {{21.0, 791.0}, {360.0, 62.0}}
+                        Other, 0x10706bec0, {{21.0, 791.0}, {103.7, 54.0}}
+                        Other, 0x10706bfe0, {{21.0, 791.0}, {360.0, 62.0}}
+                          Button, 0x10706c100, {{25.0, 795.0}, {103.7, 54.0}}, identifier: 'dollarsign.circle.fill', label: 'Budget'
+                            Image, 0x10706c220, {{63.0, 801.3}, {27.3, 27.3}}, identifier: 'dollarsign.circle.fill', label: 'dollarsign.circle.fill'
+                          Button, 0x10706c340, {{107.8, 795.0}, {103.7, 54.0}}, identifier: 'building.columns.fill', label: 'Accounts'
+                            Image, 0x10706c460, {{143.8, 800.7}, {31.7, 28.7}}, identifier: 'building.columns.fill', label: 'Building'
+                          Button, 0x10706c580, {{190.6, 795.0}, {103.7, 54.0}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'Transactions', Selected
+                            Image, 0x10706c6a0, {{229.6, 800.7}, {25.3, 28.7}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'list.bullet.rectangle.portrait.fill'
+                          Button, 0x10706c7c0, {{273.3, 795.0}, {103.7, 54.0}}, identifier: 'chart.pie.fill', label: 'Insights'
+                            Image, 0x10706c8e0, {{311.3, 801.3}, {27.3, 27.3}}, identifier: 'chart.pie.fill', label: 'chart pie'
+                        Other, 0x10706ca00, {{190.6, 795.0}, {103.7, 54.0}}
+                          Other, 0x10706cb20, {{190.6, 795.0}, {103.7, 54.0}}
+                            Other, 0x10706cc40, {{190.6, 795.0}, {103.7, 54.0}}
+                            Other, 0x10706cd60, {{190.6, 795.0}, {103.7, 54.0}}
+                              Other, 0x10706ce80, {{190.6, 795.0}, {103.7, 54.0}}
+                                Other, 0x10706cfa0, {{190.6, 795.0}, {103.7, 54.0}}
+                                  Other, 0x10706d0c0, {{190.6, 795.0}, {103.7, 54.0}}
+                                Other, 0x10706d1e0, {{190.6, 795.0}, {103.7, 54.0}}
+                              Other, 0x10706d300, {{190.6, 795.0}, {103.7, 54.0}}
+                  Other, 0x10706d420, {{0.0, 791.0}, {402.0, 83.0}}
+                    Other, 0x10706d540, {{0.0, 791.0}, {402.0, 83.0}}
+                      Other, 0x10706d660, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x10706d780, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x10706d8a0, {{0.0, 791.0}, {402.0, 83.0}}
+                            Other, 0x10706d9c0, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x10706dae0, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x10706dc00, {{0.0, 791.0}, {402.0, 83.0}}
+Path to element:
+ →Application, 0x107140df0, pid: 37910, label: 'Money'
+Query chain:
+ →Find: Application 'us.koon.money'
+  Output: {
+    Application, 0x107068040, pid: 37910, label: 'Money'
+  }
