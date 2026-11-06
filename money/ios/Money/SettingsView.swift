@@ -39,6 +39,8 @@ struct SettingsView: View {
                     if let p = model.snapshot.status?.pending, p > 0 {
                         LabeledContent("Waiting to Sync", value: "\(p) change\(p == 1 ? "" : "s")")
                     }
+                    let (server, login) = (model.server, model.login)
+                    NavigationLink("Add a Device") { AddDeviceView { await addDevice(server: server, login: login) } }
                 }
             }
             BanksSection()

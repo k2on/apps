@@ -521,7 +521,7 @@ enum Registers {
         if n.isEmpty { return rows }
         return rows.filter { r in
             r.payee.lowercased().contains(n) || r.category.lowercased().contains(n) || r.memo.lowercased().contains(n)
-                || formatAmount(cents: r.amount, signed: false, style: numberStyleUs()).contains(n) || r.account.lowercased().contains(n)
+                || formatAmount(cents: r.amount, withSign: false, style: numberStyleUs()).contains(n) || r.account.lowercased().contains(n)
         }
     }
 
@@ -569,7 +569,7 @@ enum Numbers {
 
     /// Says how ArkUI's figures write cents: once, before the first view draws.
     static func install() {
-        Cents.write = { cents, signed in formatAmount(cents: cents, signed: signed, style: style) }
+        Cents.write = { cents, signed in formatAmount(cents: cents, withSign: signed, style: style) }
     }
 }
 

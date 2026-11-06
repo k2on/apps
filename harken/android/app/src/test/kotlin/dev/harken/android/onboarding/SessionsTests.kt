@@ -4,7 +4,7 @@
 // the onboarding would.
 package dev.harken.android.onboarding
 
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.Login
 import dev.harken.android.alone
 import dev.harken.android.testLogin
 import org.junit.Assert.assertEquals

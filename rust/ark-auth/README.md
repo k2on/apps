@@ -21,6 +21,15 @@ them in with two fields, one line and one registration.
   public_url, data)` (or `Auth::new::<App>(.., key)`) holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
   logins and the one-minute single-use codes; `server::router(auth)` is
   `/auth/login`, `/auth/callback`, `/auth/exchange` as an axum 0.7 `Router`.
+- **onboarding** (everywhere; through UniFFI with the `ffi` feature, which
+  `ark-ffi` turns on): the one sign-in machine every app's shell walks —
+  `Onboarding::new(AppInfo)`, `.step()`, `.next(Event) -> Vec<Effect>`,
+  `.said()` — pure, its rules and sentences written once: the browser
+  opens by itself once a launch, a denial signs in again once, a join link
+  (`join_link`, `join_of`, `qr_code`) is asked about before it is used.
+  The server's half of a join link is `Auth::device_code` and
+  `Auth::redeem_device_code` (`/auth/device-code`, `/auth/redeem`):
+  one-time, ten minutes (`DEVICE_CODE_TTL_MS`), kept hashed.
 - **sessions**: a session is one login on one device, and a `SignIn` row
   the hub writes (`server::Hub`, which `ark-peer`'s `Handle` is) before the
   token goes out (`Auth::issue`; a server's own peer, `Auth::own`, keeps

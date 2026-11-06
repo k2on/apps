@@ -374,6 +374,14 @@ private fun AccountCard(ledger: Ledger) {
                 }
             }
         }
+        if (!ledger.demo) {
+            var adding by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = { adding = true },
+                modifier = Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, bottom = Space.s),
+            ) { Text("Add a Device") }
+            if (adding) dev.arkui.AddDeviceDialog(shell.addDevice, onDismiss = { adding = false })
+        }
         OutlinedButton(
             onClick = shell.onSignOut,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = c.error),

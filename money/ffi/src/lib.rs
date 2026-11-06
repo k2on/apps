@@ -7,8 +7,8 @@
 //! register, what needs a look, payees, banks, spending) hand over UniFFI's
 //! records, no JSON per row (`money_domain`'s `ffi` feature).
 //!
-//! Signing in is the bridge's, as harken's phones do it: the server's page
-//! (`login_url`, redirecting to `money://auth`), the code exchanged
+//! Signing in is `ark_auth::onboarding`'s machine, through the bridge: the server's page
+//! (`Effect::Browse`, redirecting to `money://auth`), the code exchanged
 //! (`exchange`), the peer told (`Peer::login`) and dialled (`socket_url`,
 //! `Peer::connect`). A refusal is a value wherever the app can ask before
 //! it acts (`Peer::check`) or after (`Peer::standing`, `take_rejections`);

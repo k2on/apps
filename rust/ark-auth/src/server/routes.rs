@@ -23,6 +23,8 @@ pub fn router(auth: Arc<Auth>) -> Router {
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/exchange", post(exchange))
+        .route("/auth/device-code", post(device_code))
+        .route("/auth/redeem", post(redeem))
         .route("/auth/picture", get(picture))
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .with_state(auth)
@@ -157,6 +159,30 @@ async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> 
     match auth.redeem(&body.code) {
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
+    }
+}
+
+/// A one-time code for another device, made by a signed-in one: its
+/// session's token as the bearer.
+async fn device_code(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
+    let bearer = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let Some(token) = bearer.and_then(|b| b.strip_prefix("Bearer ")).map(str::to_string) else {
+        return (StatusCode::UNAUTHORIZED, "sign in first").into_response();
+    };
+    match tokio::task::spawn_blocking(move || auth.device_code(&token)).await {
+        Ok(Ok((code, expires_ms))) => Json(serde_json::json!({ "code": code, "expires_ms": expires_ms })).into_response(),
+        Ok(Err(e)) => (StatusCode::FORBIDDEN, e).into_response(),
+        Err(e) => failed(e.to_string()),
+    }
+}
+
+/// A device code, for a login of the new device's own. Once.
+async fn redeem(State(auth): State<Arc<Auth>>, headers: HeaderMap, Json(body): Json<Exchange>) -> Response {
+    let device = device(&headers);
+    match tokio::task::spawn_blocking(move || auth.redeem_device_code(&body.code, &device)).await {
+        Ok(Ok(login)) => Json(login).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, e).into_response(),
+        Err(e) => failed(e.to_string()),
     }
 }
 

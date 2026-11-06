@@ -21,7 +21,9 @@ import dev.money.android.gen.StoreItem
 import dev.money.android.gen.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkui.SignInPhase
+import dev.arkdb.auth.Phase
+import dev.arkdb.auth.Said
+import dev.arkdb.auth.Step
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -47,16 +49,17 @@ class Screens {
     }
 
     private val none: () -> Unit = {}
+    private val said = Said(null, null, null)
 
-    @Test fun welcome() = shot("welcome") { StartScreens(Step.Welcome(), {}, none, none, none, none, none) }
+    @Test fun welcome() = shot("welcome") { StartScreens(Step.Server("", false, null), said, null, {}, none) }
 
     @Test fun welcomeRefused() =
         shot("welcome-refused") {
-            StartScreens(Step.Welcome(typed = "example.com", error = "example.com answered, but it isn't an Ark server: it has no health page."), {}, none, none, none, none, none)
+            StartScreens(Step.Server("example.com", false, "example.com answered, but it isn't an Ark server: it has no health page."), said, null, {}, none)
         }
 
     @Test fun signIn() =
-        shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", SignInPhase.Browser), {}, none, none, none, none, none) }
+        shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", Phase.BROWSER, null), said, null, {}, none) }
 
     @Test fun budget() = shot("budget") { BudgetScreen(book.state.value) }
 

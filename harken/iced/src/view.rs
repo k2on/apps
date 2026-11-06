@@ -498,6 +498,37 @@ impl App {
         if let Some(said) = &self.resync {
             library = library.push(text(said.clone()).size(12).style(style::faint(0.55)));
         }
+        // Another device signed in as this one: a code it scans or a link it opens.
+        let mut devices = column![].spacing(14).max_width(640);
+        if self.login.as_ref().is_some_and(|l| !l.token.is_empty()) {
+            devices = devices.push(
+                button(text("Add a Device").size(13))
+                    .style(style::action)
+                    .padding([5, 14])
+                    .on_press(Message::AddDevice),
+            );
+        }
+        match &self.device {
+            Some(Ok(link)) => {
+                if let Some(q) = ark_auth::onboarding::qr_code(link.clone()) {
+                    devices = devices.push(arkui::qr::qr_code(q.size as usize, q.dark, 220.0));
+                }
+                devices = devices.push(
+                    text("Scan this with the other device, or open the link there. It works once, for ten minutes.")
+                        .size(14)
+                        .style(style::faint(0.8)),
+                );
+                devices = devices.push(text(link.clone()).size(12).style(style::faint(0.55)));
+                devices = devices.push(
+                    button(text("Copy Link").size(13))
+                        .style(style::action)
+                        .padding([5, 14])
+                        .on_press(Message::CopyLink(link.clone())),
+                );
+            }
+            Some(Err(why)) => devices = devices.push(text(format!("Couldn't make a code: {why}.")).size(12).style(style::faint(0.55))),
+            None => {}
+        }
         let page = column![
             container(arkui::line::title("Settings")).padding(Padding {
                 top: PAGE_PADDING,
@@ -506,6 +537,8 @@ impl App {
             }),
             hero::heading("Library"),
             container(library).padding(Padding { top: 8.0, ..Padding::ZERO }),
+            hero::heading("Devices"),
+            container(devices).padding(Padding { top: 8.0, ..Padding::ZERO }),
             hero::heading("Display"),
             container(arkui::renderer::about()).padding(Padding { top: 8.0, ..Padding::ZERO }),
         ]

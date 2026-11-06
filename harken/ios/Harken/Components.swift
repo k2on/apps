@@ -528,7 +528,7 @@ struct AccountButton: View {
     private enum Then { case settings, signOut }
 
     var body: some View {
-        let who = model.login.map(Logins.name) ?? ""
+        let who = model.login.map { loginName(login: $0) } ?? ""
         let picture = model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? ""
         AccountFace(name: who, picture: picture) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {

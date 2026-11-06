@@ -14,10 +14,10 @@ pub fn number_style_us() -> NumberStyle {
     NumberStyle::us()
 }
 
-/// [`crate::amount`], or [`crate::amount_signed`] when `signed`.
+/// [`crate::amount`], or [`crate::amount_signed`] when `with_sign`.
 #[uniffi::export]
-pub fn format_amount(cents: i64, signed: bool, style: NumberStyle) -> String {
-    match signed {
+pub fn format_amount(cents: i64, with_sign: bool, style: NumberStyle) -> String {
+    match with_sign {
         true => crate::amount_signed(cents, &style),
         false => crate::amount(cents, &style),
     }

@@ -68,44 +68,16 @@ pub struct Due {
 }
 
 /// A login as the server hands it over: the token the link proves itself
-/// with, and who it is.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Login {
-    pub token: String,
-    pub session: String,
-    pub user: String,
-    pub name: String,
-    pub email: String,
-    pub roles: Vec<String>,
-    pub expires_ms: i64,
-    /// The provider's picture of them (`ark_auth::Account::picture`), or
-    /// empty. Last and defaulted, so a login made before it still builds.
-    #[uniffi(default = "")]
-    pub picture: String,
-}
+/// with, and who it is. The sign-in machine's (`ark_auth::onboarding`),
+/// which hands it to the app.
+pub use ark_auth::onboarding::Login;
 
-impl From<ark_auth::Login> for Login {
-    fn from(l: ark_auth::Login) -> Login {
-        Login {
-            token: l.token,
-            session: l.session,
-            user: l.user.id,
-            name: l.user.name,
-            email: l.user.email,
-            roles: l.user.roles,
-            expires_ms: l.expires_ms,
-            picture: l.user.picture,
-        }
-    }
-}
-
-impl Login {
-    fn who(&self) -> Who {
-        Who {
-            actor: self.user.clone(),
-            session: self.session.clone(),
-            roles: self.roles.clone(),
-        }
+/// Who a login is, as an entry carries it.
+fn who(l: &Login) -> Who {
+    Who {
+        actor: l.user.clone(),
+        session: l.session.clone(),
+        roles: l.roles.clone(),
     }
 }
 
@@ -366,7 +338,7 @@ impl Peer {
     /// started. What an app's own crate calls with its domain.
     pub fn open(config: Config, dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
         let disk = Files::new(dir).map_err(|e| format!("{dir}: {e}"))?;
-        let login = login.map(|l| (l.who(), l.token));
+        let login = login.map(|l| (who(&l), l.token));
         Peer::of(ark_peer::Peer::open_as(config, Box::new(disk), login))
     }
 
@@ -668,7 +640,7 @@ impl Peer {
     pub fn login(&self, login: Login) {
         self.shared.act(|s| {
             s.denied = None;
-            s.peer.login(login.who(), login.token)
+            s.peer.login(who(&login), login.token)
         });
     }
 
@@ -808,11 +780,30 @@ pub fn socket_url(server: String) -> String {
     ark_auth::socket_url(&server)
 }
 
-/// Where a sign-in starts: the server's own page, which sends its code on
-/// to `redirect` (`harken://auth`).
+/// A join link's device code redeemed at `server`
+/// (`ark_auth::onboarding::Effect::Redeem`): a login of this device's own.
+/// A refusal is the server's sentence.
 #[uniffi::export]
-pub fn login_url(server: String, redirect: String) -> String {
-    ark_auth::login_url(&server, &redirect, None)
+pub fn redeem(server: String, code: String) -> Result<Login, Refusal> {
+    Ok(ark_auth::client::redeem(&server, &code)?.into())
+}
+
+/// "Add a Device": the join link another device scans or opens — a
+/// one-time code made at `server` as `token`'s account, on the app's
+/// `scheme` — and its QR code. Blocking: the server is asked.
+#[uniffi::export]
+pub fn device_link(scheme: String, server: String, token: String) -> Result<DeviceLink, Refusal> {
+    let (code, _) = ark_auth::client::device_code(&server, &token)?;
+    let link = ark_auth::onboarding::join_link(scheme, server, Some(code));
+    let qr = ark_auth::onboarding::qr_code(link.clone()).ok_or("the link is too long for a QR code")?;
+    Ok(DeviceLink { link, qr })
+}
+
+/// What "Add a Device" shows: the link, and the link as a QR code.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct DeviceLink {
+    pub link: String,
+    pub qr: ark_auth::onboarding::Qr,
 }
 
 /// The login a sign-in's code stands for, from the server that gave it.

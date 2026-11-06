@@ -9,7 +9,6 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 
 use super::{alone, signed_in, signed_out, Queues};
-use crate::auth::{arrival, Arrival};
 use crate::places::Focus;
 use crate::{App, Message, ACCOUNT_BOTTOM, PAGE_PADDING};
 
@@ -128,23 +127,20 @@ fn the_menu_signs_out() {
     assert!(app.ctx.menu.is_none(), "a menu for nobody");
 }
 
-/// Nobody is asked to sign in: a window with a server and no login goes, and
-/// a server turning the login away sends it again — **once a load**. A
-/// sign-in that fails, or a page that comes back without a code, says why in
-/// its note and does not go again, or the window would go round and
-/// round; a reload starts afresh (`auth::came_back` takes its mark).
+/// Nobody is asked to sign in: a server turning the login away sends the
+/// window to sign in again — **once a load**, by the sign-in machine
+/// (`ark_auth::onboarding`, whose own tests hold every rule). A sign-in that
+/// fails says why in its note and does not go again, or the window would go
+/// round and round.
 ///
-/// Falsified by `sign_in_unasked` ignoring `sign_in_tried`: after the failed
-/// sign-in the note is replaced by "signing in — …": `it went again`.
+/// Falsified by the window not telling the machine of the denial: it stays
+/// running, and nothing goes to sign in.
 #[test]
 #[cfg(not(feature = "demo"))]
 fn a_sign_in_goes_by_itself_once_a_load() {
-    assert_eq!(arrival(Some("c".into()), true), Arrival::Exchange("c".into()));
-    assert_eq!(arrival(None, true), Arrival::CameBack);
-    assert_eq!(arrival(None, false), Arrival::Go);
-
-    // Turned away by the server: straight back to sign in.
+    use ark_auth::onboarding::{Phase, Step};
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
+    assert!(matches!(app.onboarding.step(), Step::Running { .. }), "{:?}", app.onboarding.step());
     let made: std::sync::Arc<std::sync::Mutex<Vec<Queues>>> = Default::default();
     app.peer.client.lock().connect_with("ws://queues", Queues::dialer(made.clone()));
     let _ = app.update(Message::Due);
@@ -153,27 +149,19 @@ fn a_sign_in_goes_by_itself_once_a_load() {
     q.push(Event::Closed("denied: expired".into()));
     let _ = app.update(Message::Wake);
     assert!(app.login.as_ref().is_some_and(|l| l.token.is_empty()), "the login was not turned away");
-    assert!(app.sign_in_tried, "it did not go to sign in");
-    assert!(app.note.starts_with("signing in"), "{}", app.note);
+    assert!(
+        matches!(app.onboarding.step(), Step::SignIn { phase: Phase::Browser, .. }),
+        "it did not go to sign in: {:?}",
+        app.onboarding.step()
+    );
+    assert!(app.note.contains("signed you out (expired)"), "{}", app.note);
 
     // …which fails: said once, and not tried again.
+    let _ = app.update(Message::Coded(Ok("c".into())));
     let _ = app.update(Message::SignedIn(Err("the provider refused".into())));
-    let said = "could not sign in: the provider refused \u{2014} reload to try again";
+    let said = "Signing in didn't finish: the provider refused.";
     assert_eq!(app.note, said);
-    let _ = app.sign_in_unasked();
-    assert_eq!(app.note, said, "it went again");
-
-    // A page back from signing in with nothing stays, and says so.
-    let mut page = App::with_peer(signed_out(), "http://127.0.0.1:9".into(), None);
-    let _ = page.arrive_signing_in(arrival(None, true));
-    assert!(page.note.contains("without a login"), "{}", page.note);
-    let _ = page.arrive_signing_in(arrival(None, false));
-    assert!(page.note.contains("without a login"), "it went again: {}", page.note);
-
-    // A fresh load with nobody goes.
-    let mut fresh = App::with_peer(signed_out(), "http://127.0.0.1:9".into(), None);
-    let _ = fresh.arrive_signing_in(arrival(None, false));
-    assert!(fresh.sign_in_tried && fresh.note.starts_with("signing in"), "{}", fresh.note);
+    assert!(matches!(app.onboarding.step(), Step::SignIn { phase: Phase::Idle, .. }));
 }
 
 /// The demo is alone, and says it is a demo: a header, and nothing to sign

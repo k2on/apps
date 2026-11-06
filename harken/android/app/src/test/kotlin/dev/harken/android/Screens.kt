@@ -43,7 +43,8 @@ import dev.harken.android.onboarding.Permission
 import dev.harken.android.onboarding.PermissionStep
 import dev.harken.android.onboarding.ServerStep
 import dev.harken.android.onboarding.SignInStep
-import dev.harken.android.onboarding.Step
+import dev.arkdb.auth.Phase
+import dev.arkdb.auth.Step
 import dev.arkui.BelowStatusBar
 import dev.arkui.Space
 import dev.harken.android.gen.Active
@@ -101,12 +102,12 @@ class Screens {
 
     @Test
     fun a1_server() {
-        shot("empty") { ServerStep(identity(), Step.Server(), {}, {}) }
-        shot("checking") { ServerStep(identity(), Step.Server("music.example.com", checking = true), {}, {}) }
+        shot("empty") { ServerStep(identity(), Step.Server("", false, null), {}, {}) }
+        shot("checking") { ServerStep(identity(), Step.Server("music.example.com", true, null), {}, {}) }
         shot("unreachable") {
             ServerStep(
                 identity(),
-                Step.Server("192.168.1.20:8787", error = "Couldn't reach 192.168.1.20:8787 over https or http: nothing answered there."),
+                Step.Server("192.168.1.20:8787", false, "Couldn't reach 192.168.1.20:8787 over https or http: nothing answered there."),
                 {},
                 {},
             )
@@ -116,7 +117,8 @@ class Screens {
                 identity(),
                 Step.Server(
                     "apps.example.com",
-                    error = "apps.example.com is an Ark server, but it serves an app this Harken doesn't know — another app, or a newer Harken than this one.",
+                    false,
+                    "apps.example.com is an Ark server, but it serves an app this Harken doesn't know — another app, or a newer Harken than this one.",
                 ),
                 {},
                 {},
@@ -126,15 +128,16 @@ class Screens {
 
     @Test
     fun a2_sign_in() {
-        shot("idle") { SignInStep(identity(), Step.SignIn(server), {}, {}) }
-        shot("browser") { SignInStep(identity(), Step.SignIn(server, Step.Phase.Browser), {}, {}) }
-        shot("exchanging") { SignInStep(identity(), Step.SignIn(server, Step.Phase.Exchanging), {}, {}) }
+        shot("idle") { SignInStep(identity(), Step.SignIn(server, Phase.IDLE, null), {}, {}) }
+        shot("browser") { SignInStep(identity(), Step.SignIn(server, Phase.BROWSER, null), {}, {}) }
+        shot("exchanging") { SignInStep(identity(), Step.SignIn(server, Phase.EXCHANGING, null), {}, {}) }
         shot("denied") {
             SignInStep(
                 identity(),
                 Step.SignIn(
                     server,
-                    error = "The server signed you out (the session was revoked). Sign in again — what's on this phone is kept, and syncs once you do.",
+                    Phase.IDLE,
+                    "The server signed you out (the session was revoked). Sign in again — what's on this phone is kept, and syncs once you do.",
                 ),
                 {},
                 {},
@@ -144,7 +147,7 @@ class Screens {
 
     @Test
     fun a3_permission() {
-        shot("notifications") { PermissionStep(identity(), Step.Ask(server, login, Permission.Notifications(WHY_NOTIFY)), {}, {}) }
+        shot("notifications") { PermissionStep(identity(), Permission.Notifications(WHY_NOTIFY), {}, {}) }
     }
 
     // Signed in just now, the server's snapshot on its way, after the page's beat: the one

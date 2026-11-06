@@ -49,6 +49,18 @@ public struct LocaleNumbers: Equatable, Sendable {
     /// after it (`$-12.00`).
     public var minusFirst: Bool
 
+    public init(currency: String, symbol: String, symbolFirst: Bool, symbolSpaced: Bool,
+                decimal: String, grouping: String, minus: String, minusFirst: Bool) {
+        self.currency = currency
+        self.symbol = symbol
+        self.symbolFirst = symbolFirst
+        self.symbolSpaced = symbolSpaced
+        self.decimal = decimal
+        self.grouping = grouping
+        self.minus = minus
+        self.minusFirst = minusFirst
+    }
+
     /// What NumberFormatter says of money in `locale`.
     public static func of(_ locale: Locale = .current) -> LocaleNumbers {
         let f = NumberFormatter()

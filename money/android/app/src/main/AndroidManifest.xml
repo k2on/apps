@@ -37,6 +37,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="money" android:host="auth" />
+                <data android:scheme="money" android:host="join" />
             </intent-filter>
         </activity>
     </application>

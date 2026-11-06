@@ -724,6 +724,7 @@ fun HarkenApp(
                                             SettingsData(library.name, library.user, library.email, library.server, status.linked, version(context), unlocked, library.picture),
                                             onBack = act::back,
                                             onSignOut = library::signOut,
+                                            addDevice = library::deviceLink,
                                             onVersion = {
                                                 taps++
                                                 when {

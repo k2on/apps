@@ -40,11 +40,25 @@ pub struct Server {
     pub logins: Option<Logins>,
     /// A name to offer a dev server's sign-in (`--user`, `?user=`).
     pub user: Option<String>,
-    /// This load has gone to sign in once, and does not go again by itself:
-    /// a sign-in that came back empty would otherwise go round for ever.
-    pub tried: bool,
+    /// Signing in, as every app's shell walks it: this load goes to sign in
+    /// once by itself, and a sign-in that came back empty is said, not
+    /// tried again (`ark_auth::onboarding`).
+    pub onboarding: ark_auth::onboarding::Onboarding,
     /// What the socket rings.
     pub bell: arkui::wake::Bell,
+    /// "Add a Device": the join link another device signs in with, once it
+    /// is made, or why it was not.
+    pub device: Option<Result<String, String>>,
+}
+
+/// Who money is, to the sign-in machine.
+pub fn app() -> ark_auth::onboarding::AppInfo {
+    ark_auth::onboarding::AppInfo {
+        name: "Money".into(),
+        scheme: "money".into(),
+        demo: false,
+        what: "your budget".into(),
+    }
 }
 
 /// The logins this device remembers, one per server.

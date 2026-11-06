@@ -10,6 +10,7 @@ import dev.arkui.server.Found
 import dev.arkui.server.Health
 import dev.arkui.server.Probe
 
+import dev.arkdb.auth.Remembered
 import dev.harken.android.testLogin
 import java.io.IOException
 import java.net.ConnectException
@@ -132,29 +133,28 @@ class ServerTests {
     @Test
     fun remembered() {
         val shelf = MemoryShelf()
-        val r = Remembered(shelf)
-        assertNull(r.server)
-        assertNull(r.login)
-        assertEquals(emptySet<String>(), r.asked)
+        val k = Kept(shelf)
+        assertNull(k.remembered.server)
+        assertNull(k.remembered.login)
+        assertEquals(emptySet<String>(), k.asked)
         val login =
             testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com").copy(token = "tok", expiresMs = 1234, picture = "https://pictures.example.invalid/ana.png")
-        r.server = "https://music.example.com"
-        r.login = login
+        k.remembered = Remembered("https://music.example.com", login, false)
         // A second store over the same shelf reads it back whole.
-        val again = Remembered(shelf)
-        assertEquals("https://music.example.com", again.server)
-        assertEquals(login, again.login)
+        val again = Kept(shelf)
+        assertEquals("https://music.example.com", again.remembered.server)
+        assertEquals(login, again.remembered.login)
         again.markAsked("notifications")
         again.markAsked("notifications")
         again.markAsked("contacts")
-        assertEquals(setOf("notifications", "contacts"), r.asked)
+        assertEquals(setOf("notifications", "contacts"), k.asked)
         // Signing out forgets the login and nothing else.
-        r.login = null
-        assertNull(again.login)
-        assertEquals("https://music.example.com", again.server)
+        k.remembered = k.remembered.copy(login = null)
+        assertNull(again.remembered.login)
+        assertEquals("https://music.example.com", again.remembered.server)
         assertEquals(setOf("notifications", "contacts"), again.asked)
         // A login that no longer parses is forgotten rather than trusted.
         shelf.put("ark.login", "{\"token\":")
-        assertNull(again.login)
+        assertNull(again.remembered.login)
     }
 }

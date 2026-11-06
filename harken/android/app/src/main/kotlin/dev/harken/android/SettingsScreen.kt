@@ -25,6 +25,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,7 +66,14 @@ data class Who(val name: String, val picture: String = "") {
 }
 
 @Composable
-fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit, onVersion: () -> Unit, onDiagnostics: () -> Unit) {
+fun SettingsScreen(
+    data: SettingsData,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit,
+    onVersion: () -> Unit,
+    onDiagnostics: () -> Unit,
+    addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
+) {
     Column(Modifier.fillMaxSize()) {
         PageBar("Settings", onBack)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberDestinationScrollState("settings")).padding(horizontal = Space.page)) {
@@ -82,6 +91,10 @@ fun SettingsScreen(data: SettingsData, onBack: () -> Unit, onSignOut: () -> Unit
                 Line(hostOf(data.server), if (data.linked) "Connected" else "Can't reach it right now — what's on this phone still works")
             }
             Spacer(Modifier.height(Space.l))
+            var adding by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("Add a Device") }
+            if (adding) dev.arkui.AddDeviceDialog(addDevice, onDismiss = { adding = false })
+            Spacer(Modifier.height(Space.s))
             OutlinedButton(
                 onClick = onSignOut,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
