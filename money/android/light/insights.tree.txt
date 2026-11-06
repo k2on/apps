@@ -1,0 +1,17 @@
+    #content
+                  'November 2026' [text]
+                    'Nothing spent in November yet.'
+                  [button] pressable
+                    'Previous month'
+                    [button]
+                  [button] pressable
+                    'Next month'
+                    [button]
+                  'Insights' [text]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                    'Insights' [text]

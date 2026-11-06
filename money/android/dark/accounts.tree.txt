@@ -1,0 +1,27 @@
+    #content
+                    'Net worth' [text]
+                    '$0.00' 'Net worth, $0.00' [text]
+                    'In the budget' [text]
+                    '$0.00' [text]
+                    'Tracking' [text]
+                    '$0.00' [text]
+                  [button] pressable
+                    'Add account' [text]
+                    [button]
+                  [button] pressable
+                    'Connect a bank' [text]
+                    [button]
+                  [button] pressable
+                    '?' 'Signed in as ?' [text]
+                    [button]
+                  'Accounts' [text]
+                [button] pressable
+                  'Add a transaction'
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]

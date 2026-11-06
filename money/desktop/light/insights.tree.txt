@@ -1,0 +1,13 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"Settings" at 41,107 53x17
+"Spending in November 2026" at 297,18 352x29
+"Income" at 282,77 40x14
+"$0.00" at 282,95 63x26
+"Spent" at 671,77 32x14
+"$0.00" at 671,95 63x26
+"Net" at 1059,77 19x14
+"$0.00" at 1059,95 63x26
+"Nothing spent this month yet." at 284,167 195x17
+"signed in as alex" at 1333,878 93x14

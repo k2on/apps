@@ -1,0 +1,24 @@
+    #content
+            'Library' [text]
+            [button] pressable
+              'New playlist'
+              [button]
+              [button] pressable
+                'Playlists' [text]
+              [button] pressable
+                'Albums' [text]
+              [button] pressable
+                'Artists' [text]
+              [button] pressable
+                'Songs' [text]
+              [button] pressable
+                'Podcasts' [text]
+              [button] pressable
+                'New playlist' [text]
+              'No playlists yet' [text]
+              "Make one, then put songs on it from any song's menu." [text]
+                [button] pressable
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                  'Library' [text]

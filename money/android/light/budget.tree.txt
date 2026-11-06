@@ -1,0 +1,23 @@
+    #content
+                    'Every dollar has a job' [text]
+                    '$0.00' 'Ready to assign, $0.00' [text]
+                  'No categories yet. Add a group from the menu to start a budget.' [text]
+                  [button] pressable
+                    'Previous month'
+                    [button]
+                  [button] pressable
+                    'Next month'
+                    [button]
+                  [button] pressable
+                    'More'
+                    [button]
+                  'November 2026' [text]
+                [button] pressable
+                  [button]
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]

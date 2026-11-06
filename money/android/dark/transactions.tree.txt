@@ -1,0 +1,18 @@
+    #content
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To review' [text]
+                      [button]
+                  "You're all caught up" [text]
+                  "New transactions from the bank wait here until you've looked at them." [text]
+                  'Transactions' [text]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]

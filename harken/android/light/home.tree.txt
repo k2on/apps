@@ -1,0 +1,12 @@
+    #content
+              'Home' [text]
+              [button] pressable
+                'Settings'
+                [button]
+              'Nothing here yet' [text]
+              'Harken plays what your server finds. Put music in its media folder, under music/, and it appears here.' [text]
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]

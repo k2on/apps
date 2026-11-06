@@ -1,0 +1,95 @@
+Attributes: Application, 0x103c353b0, pid: 20343, label: 'Money'
+Element subtree:
+ →Application, 0x103c353b0, pid: 20343, label: 'Money'
+    Window (Main), 0x103c354d0, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x103c4a1c0, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x103c4a2e0, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x103c43980, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x103c43aa0, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x103c4a400, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103c4a520, {{0.0, 0.0}, {402.0, 874.0}}
+                  Other, 0x103c496c0, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x103c497e0, {{0.0, 0.0}, {402.0, 874.0}}
+                      Other, 0x103c49900, {{0.0, 0.0}, {402.0, 874.0}}
+                        Other, 0x103c49a20, {{0.0, 0.0}, {402.0, 874.0}}
+                          Other, 0x103c49b40, {{0.0, 0.0}, {402.0, 874.0}}
+                            NavigationBar, 0x103c49c60, {{0.0, 62.0}, {402.0, 106.0}}, identifier: 'Budget'
+                              Other, 0x103c49d80, {{20.0, 66.0}, {38.0, 36.0}}, identifier: 'person.crop.circle', label: 'Account and settings'
+                                Other, 0x103c4a9b0, {{20.0, 66.0}, {38.0, 36.0}}
+                                  Button, 0x103c4aad0, {{20.0, 66.0}, {38.0, 36.0}}, identifier: 'person.crop.circle', label: 'Account and settings'
+                              Other, 0x103c4abf0, {{290.3, 66.0}, {38.0, 36.0}}, label: 'Budget options'
+                                Other, 0x103c4ad10, {{290.3, 66.0}, {38.0, 36.0}}
+                                  Button, 0x103c50a40, {{290.3, 66.0}, {38.0, 36.0}}, label: 'Budget options'
+                                    Button, 0x103c50b60, {{290.3, 66.0}, {38.0, 36.0}}
+                                      Image, 0x103c50c80, {{299.3, 82.0}, {20.0, 4.3}}, identifier: 'ellipsis', label: 'More'
+                              Other, 0x103c50da0, {{344.3, 66.0}, {37.7, 36.0}}, identifier: 'plus', label: 'Add Transaction'
+                                Other, 0x103c50ec0, {{344.3, 66.0}, {37.7, 36.0}}
+                                  Button, 0x103c50fe0, {{344.3, 66.0}, {37.7, 36.0}}, identifier: 'plus', label: 'Add Transaction'
+                              StaticText, 0x103c51100, {{16.0, 119.7}, {115.0, 40.7}}, label: 'Budget'
+                            Other, 0x103c51220, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103c51340, {{0.0, 0.0}, {402.0, 874.0}}
+                                Other, 0x103c51460, {{0.0, 0.0}, {402.0, 874.0}}
+                                  Other, 0x103c51580, {{0.0, 0.0}, {402.0, 874.0}}
+                                    CollectionView, 0x103c516a0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x103c517c0, {{-16.0, -1580.0}, {434.0, 3725.0}}
+                                      Other, 0x103c518e0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x103c51a00, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Cell, 0x103c51b20, {{16.0, 168.0}, {370.0, 209.0}}
+                                        Other, 0x103c51c40, {{16.0, 168.0}, {370.0, 209.0}}
+                                          Other, 0x103c51d60, {{16.0, 168.0}, {370.0, 209.0}}
+                                            Other, 0x103c51e80, {{16.0, 168.0}, {370.0, 209.0}}
+                                        Other, 0x103c51fa0, {{16.0, 168.0}, {370.0, 209.0}}
+                                          Other, 0x103c520c0, {{16.0, 168.0}, {370.0, 209.0}}
+                                            Other, 0x103c521e0, {{16.0, 168.0}, {370.0, 209.0}}
+                                              Other, 0x103c52300, {{81.3, 168.0}, {239.3, 30.7}}, label: 'November 2026'
+                                                Button, 0x103c52420, {{81.3, 168.0}, {36.7, 30.7}}, identifier: 'chevron.left', label: 'Previous'
+                                                StaticText, 0x103c52540, {{136.7, 173.2}, {128.7, 20.3}}, label: 'November 2026'
+                                                Button, 0x103c52660, {{284.0, 168.0}, {36.7, 30.7}}, identifier: 'chevron.right', label: 'Next'
+                                              StaticText, 0x103c52780, {{32.0, 214.7}, {338.0, 154.3}}, label: 'Ready to Assign', value: $0.00, Every dolla...
+                                                StaticText, 0x103c528a0, {{56.0, 238.7}, {134.3, 18.0}}, label: 'Ready to Assign'
+                                                StaticText, 0x103c529c0, {{56.0, 260.7}, {128.0, 52.7}}, label: '$0.00'
+                                                StaticText, 0x103c52ae0, {{56.0, 317.3}, {129.3, 15.7}}, label: 'Every dollar has a job'
+                                      Other, 0x103c52c00, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x103c52d20, {{396.0, 781.0}, {3.0, 7.0}}
+                                      Other, 0x103c52e40, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 1 page', value: 0%
+                                        Other, 0x103c52f60, {{396.0, 781.0}, {3.0, 7.0}}
+                            Other, 0x103c53080, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103c531a0, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103c532c0, {{0.0, 791.0}, {402.0, 83.0}}
+                  Other, 0x103c533e0, {{0.0, 0.0}, {402.0, 874.0}}
+                    TabBar, 0x103c53500, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar'
+                      Other, 0x103c53620, {{21.0, 791.0}, {360.0, 62.0}}
+                        Other, 0x103c53740, {{21.0, 791.0}, {103.7, 54.0}}
+                        Other, 0x103c53860, {{21.0, 791.0}, {360.0, 62.0}}
+                          Button, 0x103c53980, {{25.0, 795.0}, {103.7, 54.0}}, identifier: 'dollarsign.circle.fill', label: 'Budget', Selected
+                            Image, 0x103c53aa0, {{63.0, 801.3}, {27.3, 27.3}}, identifier: 'dollarsign.circle.fill', label: 'dollarsign.circle.fill'
+                          Button, 0x103c53bc0, {{107.8, 795.0}, {103.7, 54.0}}, identifier: 'building.columns.fill', label: 'Accounts'
+                            Image, 0x103c53ce0, {{143.8, 800.7}, {31.7, 28.7}}, identifier: 'building.columns.fill', label: 'Building'
+                          Button, 0x103c53e00, {{190.6, 795.0}, {103.7, 54.0}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'Transactions'
+                            Image, 0x103c53f20, {{229.6, 800.7}, {25.3, 28.7}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'list.bullet.rectangle.portrait.fill'
+                          Button, 0x103c54040, {{273.3, 795.0}, {103.7, 54.0}}, identifier: 'chart.pie.fill', label: 'Insights'
+                            Image, 0x103c54160, {{311.3, 801.3}, {27.3, 27.3}}, identifier: 'chart.pie.fill', label: 'chart pie'
+                        Other, 0x103c54280, {{25.0, 795.0}, {103.7, 54.0}}
+                          Other, 0x103c543a0, {{25.0, 795.0}, {103.7, 54.0}}
+                            Other, 0x103c544c0, {{25.0, 795.0}, {103.7, 54.0}}
+                            Other, 0x103c545e0, {{25.0, 795.0}, {103.7, 54.0}}
+                              Other, 0x103c54700, {{25.0, 795.0}, {103.7, 54.0}}
+                                Other, 0x103c54820, {{25.0, 795.0}, {103.7, 54.0}}
+                                  Other, 0x103c54940, {{25.0, 795.0}, {103.7, 54.0}}
+                                Other, 0x103c54a60, {{25.0, 795.0}, {103.7, 54.0}}
+                              Other, 0x103c54b80, {{25.0, 795.0}, {103.7, 54.0}}
+                  Other, 0x103c54ca0, {{0.0, 791.0}, {402.0, 83.0}}
+                    Other, 0x103c54dc0, {{0.0, 791.0}, {402.0, 83.0}}
+                      Other, 0x103c54ee0, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x103c55000, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x103c55120, {{0.0, 791.0}, {402.0, 83.0}}
+                            Other, 0x103c55240, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x103c55360, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x103c55480, {{0.0, 791.0}, {402.0, 83.0}}
+Path to element:
+ →Application, 0x103c353b0, pid: 20343, label: 'Money'
+Query chain:
+ →Find: Application 'us.koon.money'
+  Output: {
+    Application, 0x103c4a020, pid: 20343, label: 'Money'
+  }

@@ -1,0 +1,22 @@
+"Music" at 20,24 28x13
+"Songs" at 41,51 39x17
+"0" at 173,53 6x13
+"Shows" at 20,82 32x13
+"Podcasts" at 41,109 58x17
+"Sermons" at 41,137 57x17
+"Songs" at 224,16 67x29
+"0 tracks" at 303,22 48x16
+"Name" at 259,60 32x14
+"Artist" at 713,60 29x14
+"Album" at 985,60 35x14
+"Time" at 1348,60 27x14
+"" at 224,814 1162x16
+"z" at 1398,817 6x16
+"nothing playing — pick a track (the desktop build has no audio device; the browser one streams)" at 16,860 583x16
+"z" at 1136,715 6x14
+"zz" at 1136,737 56x16
+"scroll: the cursor in the middle" at 1200,737 184x16
+"zt" at 1136,757 56x16
+"scroll: the cursor at the top" at 1200,757 164x16
+"zb" at 1136,776 56x16
+"scroll: the cursor at the foot" at 1200,776 168x16

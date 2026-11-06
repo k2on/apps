@@ -1,0 +1,29 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"Settings" at 41,107 53x17
+"All Accounts" at 268,18 153x29
+"Every transaction in the household" at 268,49 210x16
+"$0.00" at 1021,23 51x21
+"0 transactions" at 994,45 78x14
+"+ Add Transaction" at 280,81 121x17
+"Add Account" at 433,81 82x17
+"Connect a Bank" at 545,81 103x17
+"Every account" at 298,119 86x16
+"Payee or bank text" [field] at 400,115 160x24
+"Any category" at 576,119 80x16
+"In and out" at 681,119 61x16
+"With transfers" at 768,119 85x16
+"Needs a look" at 879,119 78x16
+"Any time" at 983,119 54x16
+"ACCOUNT" at 272,195 55x14
+"DATE" at 402,195 30x14
+"PAYEE" at 498,195 35x14
+"CATEGORY" at 593,195 60x14
+"MEMO" at 688,195 35x14
+"OUTFLOW" at 752,195 55x14
+"INFLOW" at 852,195 43x14
+"Nothing here matches." at 288,241 149x17
+"Receipt" at 1108,52 64x20
+"Select a transaction to see its receipt." at 1108,84 228x16
+"signed in as alex" at 1333,878 93x14
