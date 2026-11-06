@@ -399,7 +399,7 @@ class RestorationTests(private val case: Case) {
             Destination.Library -> {}
             Destination.Album -> navs.getValue(tab).navigate(Route.Album(Demo.key("Water Music"), "Water Music").destination())
             Destination.Artist -> navs.getValue(tab).navigate(Route.Artist(Fixture.ARTIST).destination())
-            Destination.Playlist -> navs.getValue(tab).navigate(Route.Playlist(Fixture.playlists.first()).destination())
+            Destination.Playlist -> navs.getValue(tab).navigate(Route.Playlist(Fixture.first!!.hex, Fixture.playlists.first()).destination())
             Destination.Work -> navs.getValue(tab).navigate(Route.Work(Fixture.work, "").destination())
             Destination.Recording -> navs.getValue(tab).navigate(Route.Recording(Fixture.recording, "").destination())
             Destination.Show -> navs.getValue(tab).navigate(Route.Show(Fixture.show, "").destination())

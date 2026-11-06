@@ -1442,7 +1442,14 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     assert!(app.modal.is_none(), "{}", app.note);
     let saved = app.peer.filters().iter().find(|f| f.name == "Acme pay").expect("saved").clone();
     assert_eq!(app.page, Page::Ledger(Ledger::Saved(saved.id)));
-    assert_eq!(app.route(), Route::Filter { name: "Acme pay".into() });
+    assert_eq!(
+        app.route(),
+        Route::Filter {
+            id: saved.id.hex(),
+            name: "Acme pay".into()
+        }
+    );
+    assert_eq!(app.route().path(), format!("filter/{}/acme-pay", saved.id.hex()));
     assert_eq!(saved.total, app.peer.total().total);
     let places = app.places();
     let entry = places
@@ -1473,10 +1480,14 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     let _ = app.update(Message::CloseModal);
     // Renamed where it stands, and deleted.
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Saved(saved.id))));
+    let before = app.route();
     let _ = app.update(Message::Rename(crate::Naming::Filter(saved.id)));
     let _ = app.update(Message::RenameTyped("Paychecks".into()));
     let _ = app.update(Message::RenameDone);
-    assert_eq!(app.route(), Route::Filter { name: "Paychecks".into() });
+    // Renamed, it is the same route, and the route from before still finds it.
+    assert_eq!(app.route(), before);
+    assert_eq!(app.route().title(), "Paychecks");
+    assert_eq!(app.page_of(&before), Some(Page::Ledger(Ledger::Saved(saved.id))));
     let _ = app.update(Message::Filter(filter::Msg::Delete(saved.id)));
     assert_eq!(app.page, Page::Ledger(Ledger::All));
     assert!(app.peer.filters().is_empty());
@@ -1502,7 +1513,13 @@ fn an_accounts_register_is_its_filter() {
     assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Account(checking)), "the account stays lit");
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
     assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
-    assert_eq!(app.route(), Route::Account { name: "Checking".into() });
+    assert_eq!(
+        app.route(),
+        Route::Account {
+            id: checking.hex(),
+            name: "Checking".into()
+        }
+    );
     // Every account taken off: All Accounts; needs a look: the inbox.
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Account(checking))));
     assert_eq!(app.page, Page::Ledger(Ledger::All));
@@ -1529,16 +1546,71 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
     assert!(app.peer.register().iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
     let checking = account(&app, "Checking").id;
     for (fragment, page) in [
-        ("#filter/Acme%20pay", Page::Ledger(Ledger::Saved(id))),
-        ("#account/Checking", Page::Ledger(Ledger::Account(checking))),
-        ("#accounts", Page::Ledger(Ledger::All)),
-        ("#inbox", Page::Ledger(Ledger::Inbox)),
+        (format!("#filter/{}/acme-pay", id.hex()), Page::Ledger(Ledger::Saved(id))),
+        (format!("#account/{}/checking", checking.hex()), Page::Ledger(Ledger::Account(checking))),
+        // A link from before ids: still read, by name.
+        ("#filter/Acme%20pay".into(), Page::Ledger(Ledger::Saved(id))),
+        ("#account/Checking".into(), Page::Ledger(Ledger::Account(checking))),
+        ("#accounts".into(), Page::Ledger(Ledger::All)),
+        ("#inbox".into(), Page::Ledger(Ledger::Inbox)),
     ] {
-        let route = arkui::router::parse::<Route>(fragment);
+        let route = arkui::router::parse::<Route>(&fragment);
         assert_eq!(app.page_of(&route), Some(page), "{fragment}");
-        assert_eq!(arkui::router::fragment(&route), fragment);
+        // Read back it has no slug, which is only for reading, and is the same route.
+        assert_eq!(arkui::router::parse::<Route>(&arkui::router::fragment(&route)), route);
     }
-    assert_eq!(app.page_of(&Route::Filter { name: "nobody".into() }), None);
+    // An id that is no row's is not found by its slug's name.
+    let gone = arkui::router::parse::<Route>("#account/ffffffffffffffffffffffffffffffff/checking");
+    assert_eq!(app.page_of(&gone), None);
+    assert_eq!(
+        app.page_of(&Route::Filter {
+            id: String::new(),
+            name: "nobody".into()
+        }),
+        None
+    );
+}
+
+/// A link from before ids lands on the account, and is written over with
+/// its id rather than after it: back goes to where the window was, not to
+/// the link and straight back. Falsified by not `landed`'s replace.
+#[test]
+fn an_older_link_is_written_over_with_its_id() {
+    use arkui::navigator::Navigator;
+    use arkui::router::AddressBar;
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Budget));
+    app.history.push(&Route::from_path("account/Checking").unwrap());
+    let _ = app.update(Message::Sync);
+    assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
+    assert_eq!(
+        app.history.router().bar().read().as_deref(),
+        Some(format!("#account/{}/checking", checking.hex()).as_str())
+    );
+    app.history.back();
+    let _ = app.update(Message::Sync);
+    assert_eq!(app.page, Page::Budget, "back got past the link");
+}
+
+/// Renaming an account keeps its register: the route it was opened at,
+/// read back from the bar, is still its register under the new name.
+/// Falsified by finding an account by name: the old link finds nothing and
+/// lands on All Accounts.
+#[test]
+fn a_renamed_accounts_register_is_still_its_own() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let link = arkui::router::fragment(&app.route());
+    let _ = app.update(Message::Rename(crate::Naming::Account(checking)));
+    let _ = app.update(Message::RenameTyped("Everyday".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(account(&app, "Everyday").id, checking, "{}", app.note);
+    let route = arkui::router::parse::<Route>(&link);
+    assert_eq!(app.page_of(&route), Some(Page::Ledger(Ledger::Account(checking))));
+    assert_eq!(app.route(), route);
+    assert_eq!(app.route().title(), "Everyday");
 }
 
 /// The register's keys in a filtered register: `j`, `v`, `c` and the

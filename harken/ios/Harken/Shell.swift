@@ -137,10 +137,10 @@ struct Destination: View {
         switch route {
         case let .album(key, _): AlbumPage(model: model, id: key)
         case let .artist(n): ArtistPage(model: model, name: n)
-        case let .playlist(name):
-            // By its name, which is what the route says; one that is gone is
-            // the page's own "gone".
-            PlaylistPage(model: model, id: model.playlists.first { $0.name == name }?.id ?? Id(String(repeating: "0", count: 32)))
+        case .playlist:
+            // By its id (an older link's by its name), so a renamed one keeps
+            // its page; one that is gone is the page's own "gone".
+            PlaylistPage(model: model, id: model.playlists.first { route.names(id: $0.id.hex, name: $0.name) }?.id ?? Id(String(repeating: "0", count: 32)))
         case let .work(key, _): WorkPage(model: model, id: key)
         case let .recording(key, _): RecordingPage(model: model, id: key)
         case let .show(key, _): ShowPage(model: model, id: key)

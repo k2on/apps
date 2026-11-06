@@ -3,12 +3,16 @@
 //! stack, a deep link, the listening session's "played from", Android
 //! Auto's media ids.
 //!
-//! **A route carries names, not ids.** A playlist is identified by its name,
-//! which is unique to the person whose it is; an album, a work, a recording
-//! and a show by the key the domain derives, which has slashes of its own
+//! **A row is named by its id.** A playlist carries its row's id and, after
+//! it, a slug of its name only to read (`playlist/<id>/road-trip`), so a
+//! renamed playlist keeps its page and two of one name (two people's) are
+//! two routes; an older link's name (`playlist/Road%20trip`) still reads, and
+//! only that one is found by name ([`Route::names`]). An album, a work, a
+//! recording and a show have no row of their own: they are named by the key
+//! the domain derives, which has slashes of its own
 //! (`johann-sebastian-bach/bwv-988`), and the title to draw beside it. What a
 //! route is called is not which route it is: two routes are the same when
-//! their paths are, so a route read back from a path — which has no title —
+//! their keys are (`Routable::key`, the path without a slug), so a route read back from a path — which has no title —
 //! is the route it was written from.
 //!
 //! **A stale route lands on the library.** A link to a playlist since
@@ -38,9 +42,11 @@ pub enum Route {
     Podcasts,
     #[route("/sermons")]
     Sermons,
-    /// A playlist, by its name.
+    /// A playlist, by its id (`Id::hex`), its name after it only to read;
+    /// an older link's by its name (`Route::names`).
+    #[route("/playlist/:id(hex)/~name")]
     #[route("/playlist/:name")]
-    Playlist { name: String },
+    Playlist { id: String, name: String },
     /// An album by its key (`keys::album_id`), and its name: two records of
     /// one title are two albums.
     #[route("/album/:key")]
@@ -91,7 +97,7 @@ impl Route {
             Route::Transcript => "Transcript".into(),
             Route::Diagnostics => "Diagnostics".into(),
             Route::Join { .. } => "Sign In".into(),
-            Route::Playlist { name } | Route::Artist { name } => name.clone(),
+            Route::Playlist { name, .. } | Route::Artist { name } => name.clone(),
             Route::Album { title, .. } | Route::Work { title, .. } | Route::Recording { title, .. } | Route::Show { title, .. } => title.clone(),
         }
     }
@@ -137,6 +143,18 @@ impl Route {
     /// rule, and now every shell's.
     pub fn fallback(&self) -> Route {
         Route::Library
+    }
+
+    /// Whether the route is the playlist of this id (`Id::hex`) and name —
+    /// what every shell finds a playlist's route by. By the id; by the name
+    /// only for an older link's, which has none. So a renamed playlist keeps
+    /// its page, and of two of one name only the one meant is found.
+    pub fn names(&self, id: &str, name: &str) -> bool {
+        match self {
+            Route::Playlist { id: mine, .. } if !mine.is_empty() => mine == id,
+            Route::Playlist { name: mine, .. } => !mine.is_empty() && mine == name,
+            _ => false,
+        }
     }
 
     /// The work a recording is a performance of, by its key: everything
@@ -197,6 +215,12 @@ impl Route {
     pub fn ffi_work(&self) -> Option<Route> {
         self.work()
     }
+
+    /// Whether the route is this playlist's (`Route::names`).
+    #[uniffi::method(name = "names")]
+    pub fn ffi_names(&self, id: String, name: String) -> bool {
+        self.names(&id, &name)
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +230,16 @@ mod tests {
 
     fn keyed(key: &str, title: &str) -> (String, String) {
         (key.into(), title.into())
+    }
+
+    const ROAD: &str = "0000000000000000000000000000000a";
+    const OTHER: &str = "0000000000000000000000000000000b";
+
+    fn playlist(id: &str, name: &str) -> Route {
+        Route::Playlist {
+            id: id.into(),
+            name: name.into(),
+        }
     }
 
     /// Every variant survives its path — a slash would look like the
@@ -225,10 +259,9 @@ mod tests {
             Route::Composers,
             Route::Podcasts,
             Route::Sermons,
-            Route::Playlist { name: "Favorites".into() },
-            Route::Playlist {
-                name: "100% & more? #2".into(),
-            },
+            playlist(ROAD, "Favorites"),
+            playlist(ROAD, "100% & more? #2"),
+            playlist("", "100% & more? #2"),
             Route::Album { key: ak, title: at },
             Route::Artist {
                 name: "Antonín Dvořák".into(),
@@ -248,15 +281,10 @@ mod tests {
                 code: None,
             },
         ]);
-        // The spelling itself, which the listening session and every old
-        // link already carry.
-        assert_eq!(
-            Route::Playlist {
-                name: "100% & more? #2".into()
-            }
-            .path(),
-            "playlist/100%25%20%26%20more%3F%20%232"
-        );
+        // The spelling itself: a playlist by its id, and an older link's,
+        // which the listening session's records carry, as it was.
+        assert_eq!(playlist(ROAD, "Road trip").path(), format!("playlist/{ROAD}/road-trip"));
+        assert_eq!(playlist("", "100% & more? #2").path(), "playlist/100%25%20%26%20more%3F%20%232");
         assert_eq!(
             Route::Work {
                 key: "johann-sebastian-bach/bwv-988".into(),
@@ -284,6 +312,22 @@ mod tests {
         assert!(set.contains(&read));
     }
 
+    /// A renamed playlist is the same route, still found; two playlists of
+    /// one name are two; an older link's name is found by name, and only it.
+    /// Falsified by finding a playlist by its name.
+    #[test]
+    fn a_playlist_is_its_id() {
+        let before = playlist(ROAD, "Road trip");
+        assert_eq!(before, playlist(ROAD, "Summer"));
+        assert_eq!(Route::from_path(&before.path()), Some(playlist(ROAD, "")));
+        assert!(before.names(ROAD, "Summer") && !before.names(OTHER, "Road trip"));
+        assert_ne!(playlist(ROAD, "Favorites"), playlist(OTHER, "Favorites"));
+        let old = Route::from_path("#playlist/Road%20trip").unwrap();
+        assert_eq!(old, playlist("", "Road trip"));
+        assert!(old.names(OTHER, "Road trip") && !old.names(OTHER, "Summer"));
+        assert!(!Route::Library.names(ROAD, "Songs"));
+    }
+
     /// A path nobody wrote names nothing, and an old `composer/` link is the
     /// person's page.
     #[test]
@@ -306,7 +350,7 @@ mod tests {
     #[test]
     fn titles_kinds_and_roots() {
         assert_eq!(Route::Library.title(), "Songs");
-        assert_eq!(Route::Playlist { name: "Sunday".into() }.title(), "Sunday");
+        assert_eq!(playlist(ROAD, "Sunday").title(), "Sunday");
         assert_eq!(
             Route::Show {
                 key: "sermon/x".into(),
@@ -323,8 +367,8 @@ mod tests {
             .kind(),
             "Podcast"
         );
-        assert_eq!(Route::Playlist { name: "a".into() }.heading(), Some("Playlists"));
-        assert!(Route::Albums.is_root() && !Route::Playlist { name: "a".into() }.is_root() && !Route::Settings.is_root());
+        assert_eq!(playlist(ROAD, "a").heading(), Some("Playlists"));
+        assert!(Route::Albums.is_root() && !playlist(ROAD, "a").is_root() && !Route::Settings.is_root());
         assert_eq!(Route::Artist { name: "a".into() }.fallback(), Route::Library);
         let (key, title) = keyed("w/k@who", "");
         assert_eq!(

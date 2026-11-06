@@ -485,11 +485,24 @@ impl App {
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
-        if let Some(page) = app.history.poll(true).and_then(|p| app.page_of(&p)) {
-            let _ = app.step(Message::Go(page));
+        if let Some(linked) = app.history.poll(true) {
+            if let Some(page) = app.page_of(&linked) {
+                let _ = app.step(Message::Go(page));
+            }
+            app.landed(&linked);
         }
         app.history.sync(&app.route());
         app
+    }
+
+    /// The bar said `linked` and the app landed somewhere it spells
+    /// otherwise — an older link's name, now the account's id; a stale one's
+    /// fallback — so where it is is written over the link, not after it: the
+    /// back button would go to the link, land here again, and never get past.
+    fn landed(&mut self, linked: &Route) {
+        if self.route() != *linked {
+            self.history.replace_next();
+        }
     }
 
     #[cfg(feature = "demo")]
@@ -736,10 +749,13 @@ impl App {
         // An account is named in the bar, so a link to one waits for the
         // accounts to have arrived.
         let ready = !self.peer.accounts().is_empty();
-        if let Some(page) = self.history.poll(ready).and_then(|p| self.page_of(&p)) {
-            if page != self.page {
-                let _ = self.step(Message::Go(page));
+        if let Some(linked) = self.history.poll(ready) {
+            if let Some(page) = self.page_of(&linked) {
+                if page != self.page {
+                    let _ = self.step(Message::Go(page));
+                }
             }
+            self.landed(&linked);
         }
         self.history.sync(&self.route());
         // Whatever the message came to is said for a moment over the page
@@ -780,20 +796,33 @@ impl App {
             Page::Settings => Route::Settings,
             Page::Ledger(Ledger::Inbox) => Route::Inbox,
             Page::Ledger(Ledger::Account(id)) => named(
-                self.peer.account(id).map(|a| Route::Account { name: a.name.clone() }),
-                Route::Account { name: String::new() },
+                self.peer.account(id).map(|a| Route::Account {
+                    id: id.hex(),
+                    name: a.name.clone(),
+                }),
+                Route::Account {
+                    id: id.hex(),
+                    name: String::new(),
+                },
             ),
             Page::Ledger(Ledger::Saved(id)) => named(
-                self.peer.saved(id).map(|f| Route::Filter { name: f.name.clone() }),
-                Route::Filter { name: String::new() },
+                self.peer.saved(id).map(|f| Route::Filter {
+                    id: id.hex(),
+                    name: f.name.clone(),
+                }),
+                Route::Filter {
+                    id: id.hex(),
+                    name: String::new(),
+                },
             ),
             Page::Ledger(Ledger::Adhoc) => Route::Filtered,
         }
     }
 
     /// The page a route is, if it is one here: an account or a saved filter
-    /// by its name; conditions not saved, the last ones this window had. The
-    /// banks are Settings' here, and a category is the budget's.
+    /// by its id (an older link's by its name, `Route::names`); conditions
+    /// not saved, the last ones this window had. The banks are Settings'
+    /// here, and a category is the budget's.
     fn page_of(&self, route: &Route) -> Option<Page> {
         Some(match route {
             Route::Budget | Route::Category { .. } => Page::Budget,
@@ -801,8 +830,12 @@ impl App {
             Route::Accounts => Page::Ledger(Ledger::All),
             Route::Settings | Route::Banks | Route::Bank { .. } => Page::Settings,
             Route::Inbox => Page::Ledger(Ledger::Inbox),
-            Route::Account { name } => Page::Ledger(Ledger::Account(self.peer.accounts().iter().find(|a| &a.name == name)?.id)),
-            Route::Filter { name } => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| &f.name == name)?.id)),
+            Route::Account { .. } => Page::Ledger(Ledger::Account(
+                self.peer.accounts().iter().find(|a| route.names(&a.id.hex(), &a.name))?.id,
+            )),
+            Route::Filter { .. } => Page::Ledger(Ledger::Saved(
+                self.peer.filters().iter().find(|f| route.names(&f.id.hex(), &f.name))?.id,
+            )),
             Route::Filtered => Page::Ledger(Ledger::Adhoc),
             // A sign-in link is the onboarding's, not a page.
             Route::Join { .. } => return None,

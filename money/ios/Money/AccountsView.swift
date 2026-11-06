@@ -42,7 +42,7 @@ struct AccountsView: View {
             ForEach(Accounts.shelves(rows)) { shelf in
                 Section {
                     ForEach(shelf.rows) { a in
-                        NavigationLink(value: Route.account(name: a.name)) { AccountRow(account: a) }
+                        NavigationLink(value: Route.account(id: a.id.hex, name: a.name)) { AccountRow(account: a) }
                             .contextMenu {
                                 Button { typed = a.name; renaming = a } label: { Label("Rename", systemImage: "pencil") }
                                 if !a.closed {

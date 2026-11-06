@@ -69,12 +69,12 @@ sealed class Page {
     /** Every song, in the order they were added. */
     object Songs : Page()
 
-    /** The route this page is (the domain's `Route`): a playlist by its name; one this phone cannot name is none. */
+    /** The route this page is (the domain's `Route`): a playlist by its id, its name to read; one this phone has not got is none. */
     fun route(playlists: List<Playlist>): Route? =
         when (this) {
             is ForAlbum -> Route.Album(id, "")
             is ForArtist -> Route.Artist(name)
-            is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { Route.Playlist(it.name) }
+            is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { Route.Playlist(it.id.hex, it.name) }
             is ForWork -> Route.Work(id, "")
             is ForRecording -> Route.Recording(id, "")
             is ForShow -> Route.Show(id, "")
@@ -89,12 +89,12 @@ sealed class Page {
     fun from(playlists: List<Playlist>): String = route(playlists)?.let { "#" + it.path() } ?: ""
 
     companion object {
-        /** The page a route shows, if it is a list this phone has: a playlist by its name. */
+        /** The page a route shows, if it is a list this phone has: a playlist by its id (an older link's by its name, `names`). */
         fun of(route: Route?, playlists: List<Playlist>): Page? =
             when (route) {
                 is Route.Album -> ForAlbum(route.key)
                 is Route.Artist -> ForArtist(route.name)
-                is Route.Playlist -> playlists.firstOrNull { it.name == route.name }?.let { ForPlaylist(it.id) }
+                is Route.Playlist -> playlists.firstOrNull { route.names(it.id.hex, it.name) }?.let { ForPlaylist(it.id) }
                 is Route.Work -> ForWork(route.key)
                 is Route.Recording -> ForRecording(route.key)
                 is Route.Show -> ForShow(route.key)

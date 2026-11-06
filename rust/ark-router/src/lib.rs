@@ -8,10 +8,14 @@
 //! notification's target or a restored back stack would say, so a route
 //! named on one device is the same route on another.
 //!
-//! **A path carries names, not ids.** An id is not something a person types;
-//! `album/Water%20Music` is. So a shell resolves a name against what it has —
-//! which also decides what a stale link does: land somewhere that is a page,
-//! rather than on a heading with nothing under it.
+//! **A row is named by its id.** A route to a row that has one — an
+//! account, a category, a playlist — carries the id, and the name after it
+//! only to be read (`account/<id>/checking`; [`Routable::key`] leaves it
+//! out), so a renamed row keeps its routes and two rows of one name are two
+//! routes. What has no row of its own is named by a name or a derived key
+//! (`album/Water%20Music`). Either way a shell resolves the route against
+//! what it has, which also decides what a stale link does: land somewhere
+//! that is a page, rather than on a heading with nothing under it.
 //!
 //! **One separator.** A path is a kind, or a kind, `/` and one
 //! percent-encoded name ([`join`], [`split`]): a `/` in a name is `%2F`, so
@@ -38,7 +42,10 @@ pub fn assert_round_trips<R: Routable + std::fmt::Debug>(routes: &[R]) {
         let path = route.path();
         let back = R::from_path(&path).unwrap_or_else(|| panic!("{path} reads back as nothing"));
         assert_eq!(&back, route, "round trip of {path}");
-        assert_eq!(back.path(), path, "{path} reads back spelled otherwise");
+        // Read back, a route has no slug (its title is the shell's to find),
+        // so it is written as its key.
+        assert_eq!(back.path(), route.key(), "{path} reads back spelled otherwise");
+        assert_eq!(R::from_path(&route.key()).as_ref(), Some(route), "{path}'s key reads as it");
         assert_eq!(R::from_path(&format!("#{path}")).as_ref(), Some(route), "#{path}, as a URL's fragment");
         assert!(!path.contains(['#', ' ']), "{path} would not survive a URL");
     }
@@ -55,6 +62,12 @@ pub trait Routable: Clone + PartialEq {
     /// The route a path names, or `None` for a path that names nothing here.
     /// A leading `#` is allowed, so a URL's fragment reads as it is.
     fn from_path(path: &str) -> Option<Self>;
+    /// Which route it is: the path without its readable slug
+    /// (`account/<id>`, not `account/<id>/checking`). Two routes are the same
+    /// when their keys are.
+    fn key(&self) -> String {
+        self.path()
+    }
     /// Where a path that names nothing lands: the app's first page.
     fn home() -> Self;
 }
@@ -120,6 +133,50 @@ mod tests {
         Shelf { room: String, key: String },
         #[route("/join?server=:server&code=:code")]
         Join { server: String, code: Option<String> },
+        #[route("/account/:id(hex)/~name")]
+        #[route("/account/:name")]
+        Account { id: String, name: String },
+    }
+
+    const ID: &str = "0123456789abcdef0123456789abcdef";
+
+    fn account(id: &str, name: &str) -> Route {
+        Route::Account {
+            id: id.into(),
+            name: name.into(),
+        }
+    }
+
+    /// A route by id is written with its name as a slug, is the same route
+    /// whatever it is called, and reads back without the slug or with any
+    /// other. An old link's name still reads, and is written as it was.
+    /// Falsified by putting the slug in `key`: a rename is another route.
+    #[test]
+    fn an_id_is_which_and_a_slug_is_for_reading() {
+        let checking = account(ID, "Joint / Savings #2");
+        assert_eq!(checking.path(), format!("account/{ID}/joint-savings-2"));
+        assert_eq!(checking.key(), format!("account/{ID}"));
+        assert_round_trips(&[
+            checking.clone(),
+            account(ID, ""),
+            account("", "Checking"),
+            account("", "Joint / Savings #2"),
+        ]);
+        // Renamed, it is the same route, and a link with the old slug finds it.
+        assert_eq!(account(ID, "Shared"), checking);
+        assert_eq!(Route::from_path(&format!("#account/{ID}/old-name")), Some(account(ID, "")));
+        assert_eq!(Route::from_path(&format!("account/{}", ID.to_uppercase())), Some(account(ID, "")));
+        // Two of one name are two routes.
+        assert_ne!(account(ID, "Checking"), account(&ID.replace('0', "f"), "Checking"));
+        // The old spelling: a name, written back as it was.
+        assert_eq!(
+            Route::from_path("account/Joint%20%2F%20Savings%20%232"),
+            Some(account("", "Joint / Savings #2"))
+        );
+        assert_eq!(account("", "Checking").path(), "account/Checking");
+        assert_ne!(account("", "Checking"), account(ID, "Checking"), "a name is not an id");
+        assert_eq!(Route::from_path("account"), None);
+        assert_eq!(Route::from_path("account/"), None);
     }
 
     /// A query's fields are escaped, read in any order, and an optional one

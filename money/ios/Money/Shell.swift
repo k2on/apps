@@ -132,15 +132,16 @@ struct Shell: View {
         .environment(\.open) { r in navs[t, default: Navigator()].push(r) }
     }
 
-    /// What a route on the back stack draws. An account, a category and a
-    /// bank are named by the route and found by their names; an account that
-    /// is gone is the route's fallback, All Accounts.
+    /// What a route on the back stack draws. An account and a category are
+    /// found by the route's id (an older link's by its name, `names`), so a
+    /// renamed one keeps its page; a bank by its name, its key. An account
+    /// that is gone is the route's fallback, All Accounts.
     @ViewBuilder private func destination(_ r: Route) -> some View {
         switch r {
-        case let .category(name):
-            if let l = model.snapshot.lines.first(where: { $0.name == name }) { CategoryView(id: l.categoryId) } else { ContentUnavailableView("This Category Is Gone", systemImage: "tray") }
+        case .category:
+            if let l = model.snapshot.lines.first(where: { r.names(id: $0.categoryId.hex, name: $0.name) }) { CategoryView(id: l.categoryId) } else { ContentUnavailableView("This Category Is Gone", systemImage: "tray") }
         case .accounts: RegisterView(account: nil)
-        case let .account(name): RegisterView(account: model.snapshot.accounts.first { $0.name == name }?.id)
+        case .account: RegisterView(account: model.snapshot.accounts.first { r.names(id: $0.id.hex, name: $0.name) }?.id)
         case .banks: BanksView()
         case let .bank(name): BankView(name: name)
         case .settings: SettingsView()

@@ -409,12 +409,12 @@ enum Page: Hashable {
     }
 
     /// The route this page is (harken's `Route`, the domain's): a playlist
-    /// by its name; one this phone cannot name is none.
+    /// by its id, its name to read; one this phone has not got is none.
     func route(_ playlists: [Playlist]) -> Route? {
         switch self {
         case let .album(id): return .album(key: id, title: "")
         case let .artist(name): return .artist(name: name)
-        case let .playlist(id): return playlists.first(where: { $0.id == id }).map { .playlist(name: $0.name) }
+        case let .playlist(id): return playlists.first(where: { $0.id == id }).map { .playlist(id: $0.id.hex, name: $0.name) }
         case let .work(id): return .work(key: id, title: "")
         case let .recording(id): return .recording(key: id, title: "")
         case let .show(id): return .show(key: id, title: "")
@@ -423,12 +423,12 @@ enum Page: Hashable {
     }
 
     /// The page a route shows, if it is a list of tracks this phone has: a
-    /// playlist by its name.
+    /// playlist by its id (an older link's by its name, `Route.names`).
     static func of(_ route: Route, playlists: [Playlist]) -> Page? {
         switch route {
         case let .album(key, _): return .album(key)
         case let .artist(name): return .artist(name)
-        case let .playlist(name): return playlists.first(where: { $0.name == name }).map { .playlist($0.id) }
+        case .playlist: return playlists.first(where: { route.names(id: $0.id.hex, name: $0.name) }).map { .playlist($0.id) }
         case let .work(key, _): return .work(key)
         case let .recording(key, _): return .recording(key)
         case let .show(key, _): return .show(key)

@@ -49,13 +49,19 @@ final class RowsTests: XCTestCase {
     func testAPagesRouteIsTheDesktopsSpelling() {
         let p = Playlist(id: Fx.id(7), name: "Road trip", pos: 0, createdMs: 0, userId: "ana")
         // The spelling itself is the domain's (`harken_domain::routes`, tested there); a page
-        // finds its route, and a "played from" its page, a playlist by its name.
+        // finds its route, and a "played from" its page, a playlist by its id; an older
+        // "played from", by its name.
         XCTAssertEqual(Page.album("music/Handel/Water Music/water-music").from([]), "#album/music%2FHandel%2FWater%20Music%2Fwater-music")
-        XCTAssertEqual(Page.playlist(p.id).from([p]), "#playlist/Road%20trip")
+        XCTAssertEqual(Page.playlist(p.id).from([p]), "#playlist/\(p.id.hex)/road-trip")
         XCTAssertEqual(Page.playlist(Fx.id(8)).from([p]), "")
         XCTAssertEqual(Page.songs.from([]), "#library")
         XCTAssertEqual(Page.of(from: "#album/.catalogue%2Fbourr%C3%A9e", playlists: []), .album(".catalogue/bourrée"))
         XCTAssertEqual(Page.of(from: "#playlist/Road%20trip", playlists: [p]), .playlist(p.id))
+        XCTAssertEqual(Page.of(from: Page.playlist(p.id).from([p]), playlists: [p]), .playlist(p.id))
+        // Renamed, the same page; and of two of one name, only the one the route names.
+        let renamed = Playlist(id: p.id, name: "Summer", pos: 0, createdMs: 0, userId: "ana")
+        let twin = Playlist(id: Fx.id(9), name: "Road trip", pos: 1, createdMs: 0, userId: "bo")
+        XCTAssertEqual(Page.of(from: Page.playlist(p.id).from([p]), playlists: [twin, renamed]), .playlist(p.id))
         XCTAssertEqual(Page.of(from: "#artist/", playlists: []), nil)
         XCTAssertEqual(Page.of(from: "", playlists: []), nil)
         XCTAssertEqual(Page.of(from: Page.recording("bach/bwv-988@kimiko").from([]), playlists: []), .recording("bach/bwv-988@kimiko"))

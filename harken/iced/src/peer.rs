@@ -651,7 +651,7 @@ impl Peer {
             });
         }
         choices.extend(self.playlists().iter().map(|p| Choice {
-            source: Route::Playlist { name: p.name.clone() },
+            source: p.route(),
             label: p.name.clone(),
             count: None,
         }));
@@ -805,9 +805,9 @@ impl Peer {
                 Some(("work", WorkInput { id: id.clone() }.to_bytes())),
                 Some(("recordings", Recordings { work_id: id.clone() }.to_bytes())),
             ),
-            // By its name, which is what the route says: one since deleted
+            // By its id (an older link's by its name): one since deleted
             // opens nothing, and the router lands it on its fallback.
-            Route::Playlist { name } => match self.playlist_named(name) {
+            Route::Playlist { .. } => match self.playlist_of(&self.source) {
                 Some(p) => (Some(("playlist", PlaylistInput { playlist_id: key(p.id) }.to_bytes())), None, None),
                 None => (None, None, None),
             },
@@ -953,6 +953,9 @@ impl Peer {
                 (known || self.appears(name)).then(|| route.clone())
             }
             Route::Transcript => Some(Route::Transcript),
+            // By its id, so a renamed one is found under its new name; an
+            // older link's, by the name it carries.
+            Route::Playlist { .. } => self.playlist_of(route).map(Playlist::route),
             // By *querying*, not against a list this peer holds: a link
             // arriving cold has no page yet, and the key is enough to ask with.
             Route::Work { key, .. } => self.work_named(key).map(|title| Route::Work { key: key.clone(), title }),
@@ -969,9 +972,10 @@ impl Peer {
         found.unwrap_or_else(|| route.fallback())
     }
 
-    /// A playlist of the caller's by its name, which is what its route says.
-    pub fn playlist_named(&self, name: &str) -> Option<&Playlist> {
-        self.playlists().iter().find(|p| p.name == name)
+    /// The playlist of the caller's a route names: by its id, and only for
+    /// an older link's, which has none, by its name (`Route::names`).
+    pub fn playlist_of(&self, route: &Route) -> Option<&Playlist> {
+        self.playlists().iter().find(|p| route.names(&p.hex(), &p.name))
     }
 
     /// Narrow the Songs page to what holds `needle` in its title or its

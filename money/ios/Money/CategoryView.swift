@@ -256,7 +256,7 @@ struct CategoryView: View {
 
             Section {
                 if let card = l.card {
-                    NavigationLink(value: model.snapshot.account(card).map { Route.account(name: $0.name) } ?? Route.accounts) { Label("Card's Transactions", systemImage: "creditcard") }
+                    NavigationLink(value: model.snapshot.account(card).map { Route.account(id: $0.id.hex, name: $0.name) } ?? Route.accounts) { Label("Card's Transactions", systemImage: "creditcard") }
                 }
                 Button { model.hide(category: l.categoryId, !l.hidden) } label: {
                     Label(l.hidden ? "Show in Budget" : "Hide from Budget", systemImage: l.hidden ? "eye" : "eye.slash")

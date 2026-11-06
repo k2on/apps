@@ -148,7 +148,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
                 onEdit = { t -> form = formOf(t, book.state.value) },
-                onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.name) } ?: Route.Accounts)) },
+                onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.id.hex, it.name) } ?: Route.Accounts)) },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
@@ -218,9 +218,10 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
                 composable("register/{arg}") { e ->
-                    // The route names the account; one that is gone is the route's fallback, All Accounts.
+                    // The route names the account by its id (an older link's by its name, `names`), so a
+                    // renamed one keeps its register; one that is gone is the route's fallback, All Accounts.
                     val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
-                    val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { it.name == a.name }?.id }
+                    val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { a.names(it.id.hex, it.name) }?.id }
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
                 composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }

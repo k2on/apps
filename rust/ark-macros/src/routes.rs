@@ -2,15 +2,25 @@
 //! per variant — `#[route("/album/:key")]`, `#[route("/join?server=:server&code=:code")]`
 //! — the way a web router names its routes. What it writes: `path()` and
 //! `from_path()` (each `:name` the variant's field of that name,
-//! percent-encoded by `ark_router::url`), the route's identity as its path
-//! (`PartialEq`, `Eq`, `Hash`), and `ark_router::Routable`, whose `home` is
-//! the variant marked `#[home]`.
+//! percent-encoded by `ark_router::url`), `key()`, the route's identity
+//! (`PartialEq`, `Eq` and `Hash` by it), and `ark_router::Routable`, whose
+//! `home` is the variant marked `#[home]`.
 //!
-//! A variant may have more than one `#[route]`: the first is how it is
-//! written, the rest are read too (an old link's spelling). A field that is
-//! in no pattern — a title — is not part of the path, and a route read back
-//! has it as its type's default. A pattern's last `:name` in the path takes
-//! the rest of it, so a slash an old link left unescaped in it survives.
+//! **Ids, and a slug.** `:id(hex)` is a row's id (`ark_router::url::id`): it
+//! reads only 32 hex digits, so an old link's name in its place falls
+//! through to the next pattern. A last segment `~name` is the field `name` as
+//! a readable slug (`account/<id>/checking`): written when there is one, and
+//! on reading allowed and ignored, so the field reads back as its default.
+//! A slug is not in the `key`, so a renamed row is the same route.
+//!
+//! A variant may have more than one `#[route]`. It is written by the first
+//! whose path fields (the slug aside) are all non-empty, and read by every
+//! one, in order: `#[route("/account/:id(hex)/~name")] #[route("/account/:name")]`
+//! writes the id, still reads an old link's name, and an old link read back
+//! (no id, a name) is written as it was. A field that is in no pattern — a
+//! title — is not part of the path, and a route read back has it as its
+//! type's default. A pattern's last `:name` in the path takes the rest of it,
+//! so a slash an old link left unescaped in it survives.
 //!
 //! A query field is a `String`, which a path must carry, or an
 //! `Option<String>`, which is left out of the path when it is `None` and
@@ -21,7 +31,10 @@ use syn::{Data, DeriveInput, Error, Fields, LitStr, Type};
 
 enum Seg {
     Lit(String),
-    Param(syn::Ident),
+    /// A field, and whether it is a row's id (`:id(hex)`).
+    Param(syn::Ident, bool),
+    /// A field as a readable slug, last: `~name`.
+    Slug(syn::Ident),
 }
 
 struct Pattern {
@@ -30,14 +43,29 @@ struct Pattern {
 }
 
 impl Pattern {
+    /// The fields the pattern reads: its path's and its query's, not a slug's.
     fn fields(&self) -> impl Iterator<Item = &syn::Ident> {
         self.segs
             .iter()
             .filter_map(|s| match s {
-                Seg::Param(i) => Some(i),
-                Seg::Lit(_) => None,
+                Seg::Param(i, _) => Some(i),
+                Seg::Lit(_) | Seg::Slug(_) => None,
             })
             .chain(self.query.iter().map(|(_, f)| f))
+    }
+
+    fn slug(&self) -> Option<&syn::Ident> {
+        match self.segs.last() {
+            Some(Seg::Slug(i)) => Some(i),
+            _ => None,
+        }
+    }
+}
+
+fn field(name: &str, lit: &LitStr) -> syn::Result<syn::Ident> {
+    match syn::parse_str::<syn::Ident>(name) {
+        Ok(_) => Ok(syn::Ident::new(name, lit.span())),
+        Err(_) => Err(Error::new(lit.span(), format!("`{name}` is not a field's name"))),
     }
 }
 
@@ -51,22 +79,32 @@ fn parse_pattern(lit: &LitStr) -> syn::Result<Pattern> {
     if body.is_empty() {
         return Err(Error::new(lit.span(), "a route's path needs at least one segment"));
     }
-    let segs = body
-        .split('/')
-        .map(|s| match s.strip_prefix(':') {
-            Some(name) if !name.is_empty() => Ok(Seg::Param(syn::Ident::new(name, lit.span()))),
-            _ if s.is_empty() || s.contains([':', '#', '%', '&', '=']) => Err(Error::new(lit.span(), format!("`{s}` is not a path segment"))),
-            _ => Ok(Seg::Lit(s.to_string())),
-        })
-        .collect::<syn::Result<_>>()?;
+    let parts: Vec<&str> = body.split('/').collect();
+    let mut segs = vec![];
+    for (n, s) in parts.iter().enumerate() {
+        let seg = if let Some(name) = s.strip_prefix(':') {
+            match name.strip_suffix("(hex)") {
+                Some(name) => Seg::Param(field(name, lit)?, true),
+                None => Seg::Param(field(name, lit)?, false),
+            }
+        } else if let Some(name) = s.strip_prefix('~') {
+            if n + 1 != parts.len() || n == 0 {
+                return Err(Error::new(lit.span(), "a slug (`~name`) is the last segment, after another"));
+            }
+            Seg::Slug(field(name, lit)?)
+        } else if s.is_empty() || s.contains([':', '#', '%', '&', '=', '~', '(', ')']) {
+            return Err(Error::new(lit.span(), format!("`{s}` is not a path segment")));
+        } else {
+            Seg::Lit(s.to_string())
+        };
+        segs.push(seg);
+    }
     let query = match query {
         None => vec![],
         Some(q) => q
             .split('&')
             .map(|pair| match pair.split_once("=:") {
-                Some((k, f)) if !k.is_empty() && !f.is_empty() && !k.contains(['=', '#', '%', '/']) => {
-                    Ok((k.to_string(), syn::Ident::new(f, lit.span())))
-                }
+                Some((k, f)) if !k.is_empty() && !f.is_empty() && !k.contains(['=', '#', '%', '/']) => Ok((k.to_string(), field(f, lit)?)),
                 _ => Err(Error::new(lit.span(), format!("`{pair}` is not `name=:field`"))),
             })
             .collect::<syn::Result<_>>()?,
@@ -100,9 +138,9 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                 home = Some(vi.clone());
             }
         }
-        let Some(first) = patterns.first() else {
+        if patterns.is_empty() {
             return Err(Error::new(vi.span(), "every route needs a #[route(\"/…\")]"));
-        };
+        }
         let fields: Vec<(syn::Ident, bool)> = match &v.fields {
             Fields::Named(f) => f.named.iter().map(|f| (f.ident.clone().unwrap(), optional(&f.ty))).collect(),
             Fields::Unit => vec![],
@@ -110,77 +148,119 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
         };
         let is_optional = |i: &syn::Ident| fields.iter().any(|(f, o)| f == i && *o);
         for p in &patterns {
-            for i in p.fields() {
+            for i in p.fields().chain(p.slug()) {
                 if !fields.iter().any(|(f, _)| f == i) {
                     return Err(Error::new(i.span(), format!("`{vi}` has no field `{i}`")));
                 }
             }
             for s in &p.segs {
-                if let Seg::Param(i) = s {
+                if let Seg::Param(i, _) | Seg::Slug(i) = s {
                     if is_optional(i) {
                         return Err(Error::new(i.span(), "an optional field goes in the query"));
                     }
                 }
             }
         }
-        // Writing: the first pattern.
-        let pushes = first.segs.iter().enumerate().map(|(n, s)| {
-            let sep = if n > 0 { quote!(out.push('/');) } else { quote!() };
-            match s {
-                Seg::Lit(l) => quote! { #sep out.push_str(#l); },
-                Seg::Param(i) => quote! { #sep ::ark_router::url::encode(#i, &mut out); },
+        // Writing: the first pattern whose path fields are all there. Only
+        // the first pattern with a given set of them can ever be chosen.
+        let mut bound: Vec<syn::Ident> = vec![];
+        let mut choices: Vec<(Vec<String>, Vec<syn::Ident>, TokenStream)> = vec![];
+        for p in &patterns {
+            let needs: Vec<syn::Ident> = p.fields().filter(|i| !is_optional(i)).cloned().collect();
+            let mut set: Vec<String> = needs.iter().map(|i| i.to_string()).collect();
+            set.sort();
+            if choices.iter().any(|(s, ..)| *s == set) {
+                continue;
             }
-        });
-        let queries = first.query.iter().map(|(k, f)| {
-            let key = format!("{k}=");
-            match is_optional(f) {
-                false => quote! {
-                    out.push(sep); sep = '&';
-                    out.push_str(#key);
-                    ::ark_router::url::encode(#f, &mut out);
-                },
-                true => quote! {
-                    if let ::core::option::Option::Some(value) = #f {
+            for i in p.fields().chain(p.slug()) {
+                if !bound.contains(i) {
+                    bound.push(i.clone());
+                }
+            }
+            let pushes = p.segs.iter().enumerate().map(|(n, s)| {
+                let sep = if n > 0 { quote!(out.push('/');) } else { quote!() };
+                match s {
+                    Seg::Lit(l) => quote! { #sep out.push_str(#l); },
+                    Seg::Param(i, _) => quote! { #sep ::ark_router::url::encode(#i, &mut out); },
+                    Seg::Slug(i) => quote! {
+                        if slugs {
+                            let slug = ::ark_router::url::slug(#i);
+                            if !slug.is_empty() {
+                                out.push('/');
+                                out.push_str(&slug);
+                            }
+                        }
+                    },
+                }
+            });
+            let queries = p.query.iter().map(|(k, f)| {
+                let key = format!("{k}=");
+                match is_optional(f) {
+                    false => quote! {
                         out.push(sep); sep = '&';
                         out.push_str(#key);
-                        ::ark_router::url::encode(value, &mut out);
-                    }
-                },
-            }
-        });
-        let binds: Vec<&syn::Ident> = first.fields().collect();
+                        ::ark_router::url::encode(#f, &mut out);
+                    },
+                    true => quote! {
+                        if let ::core::option::Option::Some(value) = #f {
+                            out.push(sep); sep = '&';
+                            out.push_str(#key);
+                            ::ark_router::url::encode(value, &mut out);
+                        }
+                    },
+                }
+            });
+            let query_sep = match p.query.is_empty() {
+                true => quote!(),
+                false => quote!(#[allow(unused_assignments)] let mut sep = '?';),
+            };
+            choices.push((set, needs, quote! { #(#pushes)* #query_sep #(#queries)* }));
+        }
         let pat = match &v.fields {
             Fields::Unit => quote!(#name::#vi),
-            _ => quote!(#name::#vi { #(#binds,)* .. }),
+            _ => quote!(#name::#vi { #(#bound,)* .. }),
         };
-        let query_sep = match first.query.is_empty() {
-            true => quote!(),
-            false => quote!(#[allow(unused_assignments)] let mut sep = '?';),
+        let write = match choices.len() {
+            1 => choices[0].2.clone(),
+            _ => {
+                let fallback = choices[0].2.clone();
+                let arms = choices.iter().map(|(_, needs, body)| {
+                    let conds = needs.iter().map(|i| quote!(!#i.is_empty()));
+                    quote! { if true #(&& #conds)* { #body } else }
+                });
+                quote! { #(#arms)* { #fallback } }
+            }
         };
-        writes.push(quote! { #pat => { #(#pushes)* #query_sep #(#queries)* } });
+        writes.push(quote! { #pat => { #write } });
         // Reading: every pattern, in order.
         for p in &patterns {
-            let n = p.segs.len();
-            let last_param = matches!(p.segs.last(), Some(Seg::Param(_)));
-            let count = if last_param {
+            let slugged = p.slug().is_some();
+            let n = p.segs.len() - usize::from(slugged);
+            let last_param = !slugged && matches!(p.segs.last(), Some(Seg::Param(_, false)));
+            let count = if slugged {
+                quote!((parts.len() == #n || parts.len() == #n + 1))
+            } else if last_param {
                 quote!(parts.len() >= #n)
             } else {
                 quote!(parts.len() == #n)
             };
             let checks = p.segs.iter().enumerate().filter_map(|(i, s)| match s {
                 Seg::Lit(l) => Some(quote!(parts[#i] == #l)),
-                Seg::Param(_) => None,
+                _ => None,
             });
             let lets = p.segs.iter().enumerate().filter_map(|(i, s)| match s {
-                Seg::Param(f) if i + 1 == n => Some(quote! {
+                Seg::Param(f, true) => Some(quote! {
+                    let #f = ::ark_router::url::id(parts[#i])?;
+                }),
+                Seg::Param(f, false) if last_param && i + 1 == n => Some(quote! {
                     let #f = ::ark_router::url::decode(&parts[#i..].join("/"));
                     if #f.is_empty() { return ::core::option::Option::None; }
                 }),
-                Seg::Param(f) => Some(quote! {
+                Seg::Param(f, false) => Some(quote! {
                     let #f = ::ark_router::url::decode(parts[#i]);
                     if #f.is_empty() { return ::core::option::Option::None; }
                 }),
-                Seg::Lit(_) => None,
+                Seg::Lit(_) | Seg::Slug(_) => None,
             });
             let query_lets = p.query.iter().map(|(k, f)| {
                 let found = quote! {
@@ -223,9 +303,20 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
     };
     Ok(quote! {
         impl #name {
-            /// The path, with no `#` or `/` in front: `kind`, `kind/name`, or
-            /// `kind?key=value&…`.
+            /// The path, with no `#` or `/` in front: `kind`, `kind/name`,
+            /// `kind/<id>/slug`, or `kind?key=value&…`.
             pub fn path(&self) -> ::std::string::String {
+                self.write_path(true)
+            }
+
+            /// Which route this is: its path without a slug. Two routes are
+            /// the same when their keys are.
+            pub fn key(&self) -> ::std::string::String {
+                self.write_path(false)
+            }
+
+            #[allow(unused_variables, clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
+            fn write_path(&self, slugs: bool) -> ::std::string::String {
                 let mut out = ::std::string::String::new();
                 match self { #(#writes)* }
                 out
@@ -250,11 +341,11 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
-        /// Two routes are the same when their paths are: a title is what a
+        /// Two routes are the same when their keys are: a title is what a
         /// route is called, not which it is.
         impl ::core::cmp::PartialEq for #name {
             fn eq(&self, other: &#name) -> bool {
-                self.path() == other.path()
+                self.key() == other.key()
             }
         }
 
@@ -262,7 +353,7 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
 
         impl ::core::hash::Hash for #name {
             fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
-                ::core::hash::Hash::hash(&self.path(), state)
+                ::core::hash::Hash::hash(&self.key(), state)
             }
         }
 
@@ -272,6 +363,9 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
             }
             fn from_path(path: &str) -> ::core::option::Option<#name> {
                 #name::from_path(path)
+            }
+            fn key(&self) -> ::std::string::String {
+                #name::key(self)
             }
             fn home() -> #name {
                 #name::#home

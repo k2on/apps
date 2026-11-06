@@ -111,7 +111,7 @@ private struct PlaylistsList: View {
                     .listRowSeparator(.hidden)
             }
             ForEach(model.playlists) { p in
-                let r = Route.playlist(name: p.name)
+                let r = Route.playlist(id: p.id.hex, name: p.name)
                 Button { open(r) } label: {
                     HStack(spacing: Space.l) {
                         CoverView(seed: p.name, url: "", side: 56).frame(width: 56, height: 56).zoomSource(r, zoom)

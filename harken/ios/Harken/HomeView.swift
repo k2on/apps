@@ -68,8 +68,8 @@ struct HomeView: View {
                 .font(.subheadline).foregroundStyle(.quiet).padding(.horizontal, Space.page)
         } else {
             CoverShelf(items: s.playlists) { p in
-                CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .playlist(name: p.name)) {
-                    open(.playlist(name: p.name))
+                CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .playlist(id: p.id.hex, name: p.name)) {
+                    open(.playlist(id: p.id.hex, name: p.name))
                 }
             }
         }

@@ -1044,6 +1044,11 @@ impl App {
     pub fn arrive(&mut self) {
         if let Some(place) = self.history.poll(!self.peer.choices.is_empty()) {
             let wanted = self.peer.resolve(&place);
+            // Landed elsewhere for it (an older link's name, a stale link's
+            // fallback): written over the link, so back gets past it.
+            if wanted != place {
+                self.history.replace_next();
+            }
             if let Some(at) = self.peer.choices.iter().position(|c| c.source == wanted) {
                 self.cursors[Pane::Sidebar as usize] = at;
             }
@@ -3544,6 +3549,12 @@ impl App {
         let ready = !self.peer.choices.is_empty();
         if let Some(place) = self.history.poll(ready) {
             let wanted = self.peer.resolve(&place);
+            // Landed elsewhere for it (an older link's name, now the
+            // playlist's id; a stale link's fallback): written over the link,
+            // so the back button gets past it.
+            if wanted != place {
+                self.history.replace_next();
+            }
             if wanted != self.peer.source {
                 tasks.push(self.update(Message::Select(wanted)));
             }
