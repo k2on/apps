@@ -27,7 +27,8 @@ struct SearchView: View {
         }
         .listStyle(.plain)
         .scrollEdges()
-        .navigationTitle("Search")
+        // The large title on the bar's own line, the account's face at its end.
+        .largeTitleBar("Search") { AccountButton() }
         .searchable(text: needle, prompt: "Songs, albums, artists")
         .onSubmit(of: .search) { model.searched(model.needle) }
         // The covers of an answer that just arrived decoded before its rows ask.

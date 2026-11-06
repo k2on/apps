@@ -81,9 +81,9 @@ struct InsightsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Insights")
         .refreshable { await model.refresh() }
-        .toolbar { ToolbarItem(placement: .topBarLeading) { AccountButton() } }
+        // The large title on the bar's own line, the account's face at its end.
+        .largeTitleBar("Insights") { AccountButton() }
     }
 
     /// The groups' colours, in the order the most spent takes them: the

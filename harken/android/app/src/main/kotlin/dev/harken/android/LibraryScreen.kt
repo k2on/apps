@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arkui.AccountFace
 import dev.arkui.Cover
 import dev.arkui.Empty
 import dev.arkui.Glyph
@@ -85,6 +86,8 @@ data class LibraryData(
     val shows: List<Show> = emptyList(),
     /** The feeds the library follows: one that is no show yet is listed over the shows of its kind. */
     val feeds: List<Subscription> = emptyList(),
+    /** Who is signed in: the face at the end of the title, which raises the account sheet. */
+    val who: Who = Who(""),
 )
 
 @Composable
@@ -94,7 +97,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
         // The + makes what the list shown is of: a playlist, or — over the podcasts or the sermons —
         // a show found to follow.
         val kind = tab.kind
-        TabTitle("Library") {
+        TabTitle("Library", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) }) {
             if (kind != null) {
                 IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Follow sermons" else "Follow a podcast") }
             } else {

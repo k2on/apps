@@ -55,6 +55,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
@@ -95,32 +97,32 @@ public fun Heading(
 
 /**
  * A tab's own title, with what it offers at the end: the theme's largest headline, bold, so it reads
- * as the iPhone's large title does. [bar] is what sits in the row above it, at its end — the
- * account's face — where a large top app bar has its actions, so a tab drawn this way and one
- * under Material's large bar put the face in the same place.
+ * as the iPhone's large title does. [actions] (a +) sit at the line's end, and [account] — the
+ * account's face ([AccountFace]) — after them, at the very end of the title's own line, centred on
+ * it, as the iPhone's apps put it: not in a row above the title.
  */
 @Composable
 public fun TabTitle(
     title: String,
-    bar: (@Composable RowScope.() -> Unit)? = null,
+    account: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    if (bar != null) {
-        Row(
-            Modifier.fillMaxWidth().height(64.dp).padding(end = Space.xs),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-            content = bar,
-        )
-    }
     Row(
         Modifier.fillMaxWidth()
             .padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs)
             .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).semantics { heading() },
+        )
         actions()
+        account?.invoke()
     }
 }
 

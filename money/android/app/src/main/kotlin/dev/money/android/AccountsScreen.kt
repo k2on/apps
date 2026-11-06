@@ -26,8 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,7 +33,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -82,13 +79,8 @@ fun AccountsScreen(ledger: Ledger) {
     val closed = ledger.accounts.filter { it.closed }
 
     Page(
+        // The face is the page's, at the end of the title, badged while a bank wants somebody there.
         title = "Accounts",
-        actions = {
-            // The face opens Settings, badged while a bank wants somebody there.
-            IconButton(onClick = shell.onSettings) {
-                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }, ledger.picture) }
-            }
-        },
         fab = {
             androidx.compose.material3.FloatingActionButton(onClick = { shell.onAdd(null) }) {
                 Icon(Icons.Default.Add, contentDescription = "Add a transaction")

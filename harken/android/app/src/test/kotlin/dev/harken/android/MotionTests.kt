@@ -250,6 +250,9 @@ class MotionTests {
     /** What the last song's menu to open can do. */
     private var menu: MenuActions? = null
 
+    /** How the account sheet, once the face has raised it, opens Settings. */
+    private var account: (() -> Unit)? = null
+
     /**
      * The real app over the demo's songs, running `test`. `threaded`, its session reads on a thread
      * of its own, as a phone's does — so a page's rows arrive a moment after the page — rather than
@@ -280,7 +283,7 @@ class MotionTests {
                 val config = LocalConfiguration.current
                 val night = remember(config, dark) { Configuration(config).apply { uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or (if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO) } }
                 CompositionLocalProvider(LocalConfiguration provides night) {
-                    Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, start = start, motion = motion, onMenu = { menu = it }) }
+                    Host(back) { HarkenApp(session, playbackOf = { c, s -> Playback(c, s, connect = false) }, start = start, motion = motion, onMenu = { menu = it }, onAccount = { account = it }) }
                 }
                 LaunchedEffect(Unit) {
                     frames(800)
@@ -787,6 +790,8 @@ class MotionTests {
         var artistExpected: androidx.compose.ui.geometry.Rect? = null
         var settings: Origin? = Origin(androidx.compose.ui.geometry.Rect.Zero, 0f)
         var settingsRose = -1
+        var sheetRose = false
+        var sheetLeftSettings = false
         val d = paparazzi.context.resources.displayMetrics.density
         app(
             { view, motion, b ->
@@ -819,12 +824,19 @@ class MotionTests {
                     artist = motion.taken
                     b.onBackPressed()
                     frames(600)
-                    // Settings has nothing to grow from: it rises.
+                    // Settings has nothing to grow from: it rises. The face raises the account sheet,
+                    // and Settings is the sheet's row.
                     click(view, "Home")
                     frames(300)
+                    account = null
+                    all(root(view)).first { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it.startsWith("Signed in as") } }.config[SemanticsActions.OnClick].action!!.invoke()
+                    frames(300)
+                    sheetRose = account != null
+                    sheetLeftSettings = !has(view, "Settings")
                     motion.rose = 0
                     shots.series = "rise"
-                    all(root(view)).first { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it.startsWith("Signed in as") } }.config[SemanticsActions.OnClick].action!!.invoke()
+                    // The sheet is a window of its own, which layoutlib does not raise: its row, by hand.
+                    account!!.invoke()
                     frames(500)
                     shots.series = null
                     settings = motion.taken
@@ -841,6 +853,8 @@ class MotionTests {
         assertTrue("the album grew out of the row's cover: $album against $albumExpected", album != null && album!!.art && near(album!!.bounds, albumExpected!!))
         assertEquals("and did not rise", 0, albumRose)
         assertTrue("the artist grew out of the row: $artist against $artistExpected", artist != null && !artist!!.art && near(artist!!.bounds, artistExpected!!))
+        assertTrue("the face raised the account sheet", sheetRose)
+        assertTrue("rather than opening Settings itself", sheetLeftSettings)
         assertEquals("settings had nothing to grow from", null, settings)
         assertTrue("so it rose: $settingsRose", settingsRose > 0)
     }

@@ -145,7 +145,13 @@ system's browser sheet (`ASWebAuthenticationSession`) to
 `/auth/exchange`, and the replica opened and dialled at `/sync`. Settings
 signs out, or leaves the demo.
 
-**Settings** (the account button, marked when a bank wants somebody) has
+The **account**: the person's face at the end of each tab's large title,
+on its own line with the tab's + (ArkUI's `largeTitleBar` and
+`AccountFace`), marked when a bank wants somebody, raises the account
+sheet (ArkUI's `AccountSheet`): who and where, the banks that want a look,
+Settings, and Sign Out or Leave the Demo.
+
+**Settings** (from the account sheet) has
 the **Banks** (`money_domain::banks`, money/README.md's banks): each
 connected bank with how it is doing and when it last synced, and
 **Connect a Bank**, which asks the server (`banks.connect`) and opens

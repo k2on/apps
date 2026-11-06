@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,7 +44,7 @@ import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
-import dev.arkui.Face
+import dev.arkui.AccountFace
 import dev.arkui.TabTitle
 import dev.arkui.destinationKeepsAPlace
 import dev.arkui.quiet
@@ -93,7 +92,7 @@ data class HomeData(
     val offline: String?,
     /** The server's host while the library has never arrived from it; null once it has. */
     val fetching: String? = null,
-    /** Who is signed in: the face at the top that opens Settings. */
+    /** Who is signed in: the face at the end of the title, which raises the account sheet. */
     val who: Who = Who(""),
 )
 
@@ -113,8 +112,8 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
-            // The face where money's is: in the bar above the title, opening Settings.
-            TabTitle("Home", bar = { IconButton(onClick = act::settings) { Face(data.who.name, data.who.picture) } })
+            // The face at the end of the title's own line, raising the account sheet.
+            TabTitle("Home", account = { AccountFace(data.who.name, data.who.picture, onClick = act::account) })
         }
         if (data.offline != null) item { Offline(data.offline) }
         when {

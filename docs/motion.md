@@ -388,9 +388,9 @@ must anyway.
 
 ## Materials and Scroll Edges
 
-**Chrome floats; content scrolls under it.** Bars, the player's transport
-and the account's face are a layer over the content, not a strip that
-takes room from it. On the iPhone that is Liquid Glass
+**Chrome floats; content scrolls under it.** Bars and the player's
+transport are a layer over the content, not a strip that takes room from
+it. On the iPhone that is Liquid Glass
 (`GlassEffectContainer`, `.buttonStyle(.glass)`); on Android it is
 `Glass.kt`'s solid capsule in the brightest surface with a soft shadow,
 which borrows only how glass moves (pieces glide on `Springs.move`, bud out
@@ -412,6 +412,19 @@ rising 4 px and unveiling on `SMOOTH`, the art and the name as one; it
 goes back the same way when the header returns, turning mid-way. Pressed,
 it scrolls the page to its top. A scroll the keys made, or reduced motion,
 puts it there or takes it away at once.
+
+**The account is on the title's line.** A tab's root has the person's
+face at the trailing end of its large title's own line, centred on it, and
+what the tab offers (a +) just before it, as Apple's iOS 26 apps have it:
+no glass and no button chrome, only the round picture or the initials on
+the accent. On the iPhone the line is the navigation bar's
+(`largeTitleBar`, Account.swift): once the page scrolls under the bar the
+large title rises away and the inline one rises into the bar's middle on
+`Springs.move` (`MotionTokens.rise`, transform and opacity only, a fade
+under Reduce Motion), and back again over the top; the face stays. On
+Android it is `TabTitle`'s `account`, or `LargeTitleLine` in a large top
+app bar, and goes up with the large title. Tapped, either raises the
+account sheet (`AccountSheet`), the system's own sheet motion.
 
 **Materials follow the person's settings.** Reduce Transparency makes glass
 the solid container; Increase Contrast gives it a defined edge and stronger

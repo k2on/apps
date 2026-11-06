@@ -39,7 +39,8 @@ struct HomeView: View {
         // On the scroll view itself, so the fade under the tab bar and the
         // mini player is this one's, not only an environment value above it.
         .scrollEdges()
-        .navigationTitle("Home")
+        // The large title on the bar's own line, the account's face at its end.
+        .largeTitleBar("Home") { AccountButton() }
         .animation(Springs.fade, value: s.loaded)
     }
 

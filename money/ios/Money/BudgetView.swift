@@ -94,19 +94,18 @@ struct BudgetView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.compact)
-        .navigationTitle("Budget")
         .refreshable { await model.refresh() }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { AccountButton() }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if editing {
-                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
-                        .fontWeight(.semibold)
-                } else {
-                    options
-                    AddTransactionButton()
-                }
+        // The large title on the bar's own line, and at its end what the budget
+        // offers — its options and the + — and the account's face.
+        .largeTitleBar("Budget") {
+            if editing {
+                Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
+                    .fontWeight(.semibold)
+            } else {
+                options
+                AddTransactionButton()
             }
+            AccountButton()
         }
         .alert(naming?.title ?? "",
                isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {

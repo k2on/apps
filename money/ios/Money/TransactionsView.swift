@@ -38,16 +38,16 @@ struct TransactionsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Transactions")
+        // The large title on the bar's own line, and at its end the + and the account's face.
+        .largeTitleBar("Transactions") {
+            AddTransactionButton()
+            AccountButton()
+        }
         .searchable(text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)
         .onAppear { model.hold(register: nil) }
         .onDisappear { model.release(register: nil) }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { AccountButton() }
-            ToolbarItem(placement: .topBarTrailing) { AddTransactionButton() }
-        }
     }
 
     @ViewBuilder private func review(_ rows: [TxnLine]) -> some View {

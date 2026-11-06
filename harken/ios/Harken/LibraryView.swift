@@ -45,7 +45,6 @@ struct LibraryView: View {
                 }
             }
         }
-        .navigationTitle("Library")
         // The filter row, inset under the navigation bar rather than a bar of
         // its own (`safeAreaBar`), whose soft edge would wash out the large
         // title over it. On the page's own colour, so a list scrolled up goes
@@ -58,18 +57,18 @@ struct LibraryView: View {
             }
             .background(Color.page)
         }
-        .toolbar {
-            // On Podcasts and Sermons the + finds a show to follow; on the rest it makes a playlist.
-            // At the top right, as money's +: the top left is the account's face alone.
-            ToolbarItem(placement: .topBarTrailing) {
-                if let kind = tab.kind {
-                    Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
-                        .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
-                } else {
-                    Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("New playlist")
-                }
+        // The large title on the bar's own line, and at its end the + and the
+        // account's face. On Podcasts and Sermons the + finds a show to follow;
+        // on the rest it makes a playlist.
+        .largeTitleBar("Library") {
+            if let kind = tab.kind {
+                Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
+            } else {
+                Button { present(.newPlaylist(then: nil)) } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New playlist")
             }
+            AccountButton()
         }
     }
 }

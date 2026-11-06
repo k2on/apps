@@ -71,14 +71,12 @@ struct AccountsView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Accounts")
         .refreshable { await model.refresh() }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { AccountButton() }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { present(.addAccount) } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("Add Account")
-            }
+        // The large title on the bar's own line, and at its end the + and the account's face.
+        .largeTitleBar("Accounts") {
+            Button { present(.addAccount) } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Add Account")
+            AccountButton()
         }
         .alert("Rename Account", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $typed)

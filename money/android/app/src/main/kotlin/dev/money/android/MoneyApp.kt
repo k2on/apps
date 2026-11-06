@@ -48,6 +48,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
+import dev.arkui.AccountFace
+import dev.arkui.AccountGroup
+import dev.arkui.AccountRow
+import dev.arkui.AccountSheet
+import dev.arkui.ArkGlyphs
+import dev.arkui.LargeTitleLine
 import dev.arkui.LargeTitles
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
@@ -93,6 +100,8 @@ class Shell(
     val onSettings: () -> Unit,
     val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
+    /** The account sheet: what the face at the end of a tab's title raises. */
+    val onAccountSheet: () -> Unit = {},
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
@@ -104,6 +113,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var form by remember { mutableStateOf<TxnForm?>(null) }
+    var account by remember { mutableStateOf(false) }
     LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
     // What the hand feels of a change the book has taken, on the frame it shows: the iPhone's
     // `.sensoryFeedback` on the same events (`Book.felt`).
@@ -129,6 +139,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
+                onAccountSheet = { account = true },
             )
         }
 
@@ -187,6 +198,41 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
             }
         }
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }
+        if (account) AccountOf(ledger, shell, onDismiss = { account = false })
+    }
+}
+
+/**
+ * The account sheet: who is using the budget, the server and whether it answers, the banks that
+ * want somebody in Settings, Settings, and the way out — arkui's, as harken's is.
+ */
+@Composable
+private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
+    AccountSheet(
+        name = ledger.who,
+        picture = ledger.picture,
+        detail = if (ledger.demo) "The demo household, on this phone only" else "",
+        server = if (ledger.demo) null else ledger.server.substringAfter("://"),
+        linked = ledger.link.linked,
+        onSettings = shell.onSettings,
+        onSignOut = shell.onSignOut,
+        onDismiss = onDismiss,
+        signOut = if (ledger.demo) "Leave the Demo" else "Sign Out",
+    ) { leave ->
+        val wanting = ledger.banksWanting
+        if (wanting > 0) {
+            AccountGroup {
+                val red = MaterialTheme.colorScheme.error
+                AccountRow(
+                    ArkGlyphs.Attention,
+                    if (wanting == 1) "A Bank Needs a Look" else "$wanting Banks Need a Look",
+                    onClick = { leave(shell.onSettings) },
+                    under = "In Settings, under Banks",
+                    tint = red,
+                    chevron = true,
+                )
+            }
+        }
     }
 }
 
@@ -261,6 +307,8 @@ fun bankSaid(t: TxnLine): String {
  * A page as every screen here is laid out: a large top app bar that collapses as the content
  * scrolls, its `actions`, a back arrow when `onBack` is given, the FAB, the snackbar, and pull to
  * refresh asking the bank for anything new. `content` gets the padding to keep clear of the bar.
+ * A tab's root (no `onBack`) has the account's face at the end of its large title's line
+ * (arkui's `LargeTitleLine`), raising the account sheet; a page pushed over it has none.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -277,6 +325,8 @@ fun Page(
     val shell = LocalShell.current
     val ledger by shell.book.state.collectAsStateWithLifecycle()
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // A tab's root has the account at the end of its large title, while the title is out.
+    val open by remember(bar) { derivedStateOf { bar.state.collapsedFraction < 0.5f } }
     Scaffold(
         modifier = modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
@@ -287,7 +337,26 @@ fun Page(
             // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
             LargeTitles {
                 LargeTopAppBar(
-                    title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = {
+                        val text: @Composable () -> Unit = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        if (onBack != null) {
+                            text()
+                        } else {
+                            LargeTitleLine(
+                                shown = open,
+                                account = {
+                                    val wanting = ledger.banksWanting
+                                    AccountFace(
+                                        ledger.who,
+                                        ledger.picture,
+                                        onClick = shell.onAccountSheet,
+                                        attention = if (wanting > 0) "Banks need a look" else null,
+                                    )
+                                },
+                                title = text,
+                            )
+                        }
+                    },
                     navigationIcon = {
                         if (onBack != null) {
                             IconButton(onClick = onBack) {

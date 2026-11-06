@@ -1,6 +1,6 @@
 // Who is signed in, as a face: their initials on the accent, and their
 // picture over them once it has arrived. One face for every app — money's
-// account button and harken's draw this, the same size in the same place —
+// account face and harken's draw this, the same size in the same place —
 // so a person looks the same whichever app they opened. The picture is the
 // server's copy of it (`Pictures.url`, ark-auth's `picture_url`), fetched once
 // and kept decoded in memory: `/auth/picture` answers anybody, so no login
@@ -42,7 +42,7 @@ import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** How large an account button's face is: the toolbar's, in every app. */
+/** How large the account's face is, at the end of a tab's title, in every app. */
 public val FaceSide: Dp = 32.dp
 
 /**

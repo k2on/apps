@@ -67,6 +67,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
 import uniffi.harken_domain.Playlist
 import dev.harken.android.onboarding.ArkSession
+import dev.arkui.AccountSheet
 import dev.arkui.LifecycleCapped
 import dev.arkui.LocalCoverLoader
 import dev.arkui.LocalPageMotion
@@ -214,6 +215,8 @@ fun HarkenApp(
     sheet: PlayerSheet = rememberPlayerSheet(),
     /** Told what a song's menu can do as it opens: a test's way to choose from a sheet it cannot reach. */
     onMenu: (MenuActions) -> Unit = {},
+    /** Told, as the account sheet opens, how its Settings row opens Settings: the same, for that sheet. */
+    onAccount: (settings: () -> Unit) -> Unit = {},
     /** Told each tab's stack once: a test's way to reach a destination, and to read the graphs back. */
     onNavs: (Map<Tab, NavHostController>) -> Unit = {},
 ) {
@@ -288,8 +291,12 @@ fun HarkenApp(
     var transcript by remember { mutableStateOf(false) }
     // The kind of show a shows page's + is finding one to follow as, while its sheet is up.
     var finding by remember { mutableStateOf<String?>(null) }
+    // The account sheet, which the face at the end of a tab's title raises.
+    var account by remember { mutableStateOf(false) }
 
     val offline = if (status.link == "waiting" || status.link == "offline") session.server.substringAfter("://") else null
+    // Who is signed in, as the face at the end of each tab's title draws them.
+    val who = Who(library.name, library.picture)
     val fetching = if (!status.synced) session.server.substringAfter("://") else null
     val playing = player.now?.id
 
@@ -384,6 +391,10 @@ fun HarkenApp(
             }
 
             override fun settings() = nav().navigate(Route.Settings.pattern)
+
+            override fun account() {
+                account = true
+            }
 
             override fun back() {
                 nav().popBackStack()
@@ -537,7 +548,7 @@ fun HarkenApp(
                             destinations(Route.entries.filter { it.on(t) }, motion, Route::pattern) { r, back ->
                                 when (r) {
                                     Route.Home ->
-                                        HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching, Who(library.name, library.picture)), albumOf, act)
+                                        HomeScreen(HomeData(loaded, last, tracks, playlists, albums, offline, fetching, who), albumOf, act)
                                     Route.Search -> {
                                         var needle by rememberSaveable { mutableStateOf("") }
                                         var recent by remember { mutableStateOf(device.searches) }
@@ -570,10 +581,11 @@ fun HarkenApp(
                                             playing,
                                             offline,
                                             act,
+                                            who,
                                         )
                                     }
                                     Route.Library ->
-                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows, subscriptions), albumOf, playing, act)
+                                        LibraryScreen(libraryTab, { libraryTab = it }, LibraryData(loaded, playlists, albums, artists, tracks, offline, complete, composers, shows, subscriptions, who), albumOf, playing, act)
                                     Route.Album -> {
                                         val page = Page.parse("album/" + back.arguments?.getString("arg")) as? Page.ForAlbum
                                         if (page != null) {
@@ -854,6 +866,21 @@ fun HarkenApp(
                         onName = { voice, name -> media?.let { library.nameVoice(it, voice, name) } },
                     )
                 }
+            }
+            if (account) {
+                // Settings, from the sheet: the page it always was, on the tab the face was on.
+                val settings = { act.settings() }
+                LaunchedEffect(Unit) { onAccount(settings) }
+                AccountSheet(
+                    name = library.name,
+                    picture = library.picture,
+                    detail = library.email.ifEmpty { library.user },
+                    server = library.server.substringAfter("://"),
+                    linked = status.linked,
+                    onSettings = settings,
+                    onSignOut = library::signOut,
+                    onDismiss = { account = false },
+                )
             }
             finding?.let { kind ->
                 // Opened all the way: the keyboard comes up with it, and the results want the room.
