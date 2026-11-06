@@ -3537,6 +3537,9 @@ fn panic_to_console() {
 pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
+    // Which renderer draws the window, decided before iced starts and said
+    // on stderr (`arkui::renderer`): iced would fall back to the CPU silently.
+    arkui::renderer::choose();
     arkui::theme::install(palette::HARKEN);
     // Whether to move, asked of the system now rather than in a frame.
     arkui::motion::reduced();

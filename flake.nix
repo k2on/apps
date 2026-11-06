@@ -339,15 +339,34 @@
           };
 
           # The desktop window. winit and wgpu open the display and the GPU
-          # by dlopen at run time, so the libraries go on the library path.
-          # money's demo window is the same.
+          # by dlopen at run time, so the libraries go on the library path
+          # — at launch, by nix/gpu-env.sh, because which come first is the
+          # host's to answer: on NixOS the GPU driver in /run/opengl-driver
+          # was linked against the host's libwayland, and the flake's ahead
+          # of it on LD_LIBRARY_PATH kept every Mesa driver from loading, so
+          # iced drew on the CPU without a word (the script says why, in
+          # full). The window then says which renderer it got, on stderr
+          # (rust/arkui/src/renderer.rs). money's demo window is the same.
+          icedLibs = lib.makeLibraryPath (with pkgs; [
+            wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
+          ]);
+          # What a shell (or a launcher) sources to be given that path.
+          gpuEnv = pkgs.writeText "ark-gpu-env.sh" ''
+            ARK_FLAKE_LIBS=${icedLibs}
+            ARK_LDD=${lib.getBin pkgs.glibc}/bin/ldd
+            ${builtins.readFile ./nix/gpu-env.sh}
+          '';
           icedApp = packageId:
             let built = crate { inherit packageId; }; in
             if pkgs.stdenv.hostPlatform.isLinux then
-              pkgs.runCommand (lib.removePrefix "rust_" built.name) { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
-                makeWrapper ${built}/bin/${packageId} $out/bin/${packageId} --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath (with pkgs; [
-                  wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
-                ])}
+              pkgs.runCommand (lib.removePrefix "rust_" built.name) { } ''
+                mkdir -p $out/bin
+                cat > $out/bin/${packageId} <<'EOF'
+                #!${pkgs.runtimeShell}
+                source ${gpuEnv}
+                exec -a "$0" ${built}/bin/${packageId} "$@"
+                EOF
+                chmod +x $out/bin/${packageId}
               ''
             else built;
           harken-iced = icedApp "harken-iced";
@@ -1534,7 +1553,14 @@
           # link, and a dozen at once ran a 16 GB laptop out of memory (the
           # tests themselves stay under 100 MB). `-j` on the command line
           # still says otherwise.
-          devShells = let cargoJobs = { CARGO_BUILD_JOBS = "4"; }; in {
+          #
+          # On Linux a shell also has the desktop window's library path
+          # (nix/gpu-env.sh, as the launcher does), so `cargo run -p
+          # money-iced` reaches the GPU as `nix run .#money-iced` does.
+          devShells = let
+            cargoJobs = { CARGO_BUILD_JOBS = "4"; }
+              // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux { shellHook = "source ${gpuEnv}"; };
+          in {
             rust = pkgs.mkShell ({
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
             } // cargoJobs);

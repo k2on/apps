@@ -46,6 +46,7 @@ pub mod motion_tokens;
 pub mod outline;
 pub mod panel;
 pub mod picker;
+pub mod renderer;
 pub mod reorder;
 pub mod route;
 pub mod scroll;
