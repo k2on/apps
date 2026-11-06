@@ -417,11 +417,11 @@ puts it there or takes it away at once.
 face at the trailing end of its large title's own line, centred on it, and
 what the tab offers (a +) just before it, as Apple's iOS 26 apps have it:
 no glass and no button chrome, only the round picture or the initials on
-the accent. On the iPhone the line is the navigation bar's
-(`largeTitleBar`, Account.swift): once the page scrolls under the bar the
-large title rises away and the inline one rises into the bar's middle on
+the accent. On the iPhone the line is the page's own first row
+(`LargeTitleRow`, Account.swift), which scrolls with the page; once it has
+gone under the bar the inline title rises into the bar's middle on
 `Springs.move` (`MotionTokens.rise`, transform and opacity only, a fade
-under Reduce Motion), and back again over the top; the face stays. On
+under Reduce Motion), and goes back the same way (`largeTitleBar`). On
 Android it is `TabTitle`'s `account`, or `LargeTitleLine` in a large top
 app bar, and goes up with the large title. Tapped, either raises the
 account sheet (`AccountSheet`), the system's own sheet motion.

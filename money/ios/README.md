@@ -146,7 +146,7 @@ system's browser sheet (`ASWebAuthenticationSession`) to
 signs out, or leaves the demo.
 
 The **account**: the person's face at the end of each tab's large title,
-on its own line with the tab's + (ArkUI's `largeTitleBar` and
+on its own line with the tab's + (ArkUI's `LargeTitleRow` and
 `AccountFace`), marked when a bank wants somebody, raises the account
 sheet (ArkUI's `AccountSheet`): who and where, the banks that want a look,
 Settings, and Sign Out or Leave the Demo.
