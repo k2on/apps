@@ -281,13 +281,19 @@ jobs:
             mode=${pr:+pr}
           fi
           # A PR's only while it is open: this run may have waited behind
-          # others until after it was merged or closed. And its base: the
-          # iPhone's are taken only for a PR into main.
+          # others until after it was merged or closed. Only for the PR's
+          # head: a run of an older commit (a job of it re-run, a run that
+          # waited) would cancel the head's shots in the same concurrency
+          # group and publish the older commit's over them. And its base:
+          # the iPhone's are taken only for a PR into main.
           base=
           if [ "$mode" = pr ]; then
-            read -r state base < <(gh api "repos/$repo/pulls/$pr" --jq '"\(.state) \(.base.ref)"')
+            read -r state base headsha < <(gh api "repos/$repo/pulls/$pr" --jq '"\(.state) \(.base.ref) \(.head.sha)"')
             if [ "$state" != open ]; then
               echo "#$pr is $state: nothing to take"
+              mode=
+            elif [ -n "$headsha" ] && [ "$headsha" != "$SHA" ]; then
+              echo "#$pr is at ${headsha:0:7} now, not ${SHA:0:7}: nothing to take"
               mode=
             fi
           fi
@@ -496,10 +502,15 @@ jobs:
           open=true
           if [ -n "$PR" ]; then
             # Not known (the API not answering): taken, as before it asked.
-            state=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .state) || state=open
+            read -r state head < <(gh api "repos/${{ github.repository }}/pulls/$PR" --jq '"\(.state) \(.head.sha)"') || state=open
             if [ "$state" != open ]; then
               open=false
               echo "::notice::#$PR is $state now: nothing taken"
+            elif [ -n "$head" ] && [ "$head" != "$SHA" ]; then
+              # A newer commit came while this one waited for a runner:
+              # its own run takes its shots, and these would be stale.
+              open=false
+              echo "::notice::#$PR is at ${head:0:7} now, not ${SHA:0:7}: nothing taken"
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
@@ -826,8 +837,10 @@ jobs:
       - id: open
         name: The pull request, still open
         run: |
-          state=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .state) || state=open
-          [ "$state" = open ] || echo "::notice::#$PR is $state now: nothing compared"
+          read -r state head < <(gh api "repos/${{ github.repository }}/pulls/$PR" --jq '"\(.state) \(.head.sha)"') || state=open
+          # Not compared or published once the PR has a newer commit: its own run does that.
+          if [ "$state" = open ] && [ -n "$head" ] && [ "$head" != "$SHA" ]; then state=moved; fi
+          [ "$state" = open ] || echo "::notice::#$PR is $state now (${head:0:7}, not ${SHA:0:7}): nothing compared"
           echo "open=$([ "$state" = open ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - if: steps.open.outputs.open == 'true'
         uses: actions/checkout@v4
