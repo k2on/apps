@@ -60,7 +60,8 @@ struct LibraryView: View {
         }
         .toolbar {
             // On Podcasts and Sermons the + finds a show to follow; on the rest it makes a playlist.
-            ToolbarItem(placement: .topBarLeading) {
+            // At the top right, as money's +: the top left is the account's face alone.
+            ToolbarItem(placement: .topBarTrailing) {
                 if let kind = tab.kind {
                     Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
                         .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
