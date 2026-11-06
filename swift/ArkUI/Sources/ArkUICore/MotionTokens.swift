@@ -43,20 +43,40 @@ public enum MotionTokens {
     public static let pausedScale: Double = 0.9
     /// How far a thing that comes in where it stays rises as it comes: a nudge.
     public static let rise: Double = 8.0
-    /// The most a band past a scroll's end is ever drawn, as a share of the view.
-    public static let bandReach: Double = 0.33
+    /// How hard a scroll past its end is pulled: Gecko's resistance, 1/this of a pixel at the edge.
+    public static let bandResistance: Double = 16.0
+    /// How many of Gecko's pixels of pull one trackpad pixel is.
+    public static let bandGain: Double = 4.0
+    /// The most one move draws a band further, in pixels.
+    public static let bandStep: Double = 8.0
+    /// The stiffness a band springs back on: Firefox's overscroll spring.
+    public static let bandStiffness: Double = 200.0
+    /// The damping a band springs back with: a touch over critically damped.
+    public static let bandDamping: Double = 1.1
+    /// The share of a release's speed a band springs back set off at.
+    public static let bandThrow: Double = 0.5
+    /// The fastest a band springs back set off, a second.
+    public static let bandFlingMax: Double = 10000.0
+    /// Within this of the edge, in pixels, a band has sprung back.
+    public static let bandRest: Double = 1.0
     /// A coast slower than this, a second, has stopped.
-    public static let coastStop: Double = 20.0
+    public static let coastStop: Double = 10.0
+    /// A release slower than this, a second, does not coast.
+    public static let coastMin: Double = 125.0
     /// How far back a release's speed is read from its moves, in milliseconds.
     public static let velocityMs: Int = 100
     /// A pause this long between a drag's moves, in milliseconds, means it had stopped.
     public static let velocityGapMs: Int = 40
     /// With no word from the system, a trackpad still this long has been let go, in milliseconds.
     public static let liftMs: Int = 50
+    /// The same, while it is pulled past an end, in milliseconds.
+    public static let bandLiftMs: Int = 800
     /// A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.
     public static let coastSpent: Double = 0.25
     /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
     public static let response: Double = 0.237482
     /// A fade's response.
     public static let fadeResponse: Double = 0.125664
+    /// A band's response as it springs back.
+    public static let bandResponse: Double = 0.444288
 }

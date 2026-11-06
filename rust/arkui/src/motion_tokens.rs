@@ -42,19 +42,39 @@ pub const SHIFT: f32 = 0.2;
 pub const PAUSED_SCALE: f32 = 0.9;
 /// How far a thing that comes in where it stays rises as it comes: a nudge.
 pub const RISE: f32 = 8.0;
-/// The most a band past a scroll's end is ever drawn, as a share of the view.
-pub const BAND_REACH: f32 = 0.33;
+/// How hard a scroll past its end is pulled: Gecko's resistance, 1/this of a pixel at the edge.
+pub const BAND_RESISTANCE: f32 = 16.0;
+/// How many of Gecko's pixels of pull one trackpad pixel is.
+pub const BAND_GAIN: f32 = 4.0;
+/// The most one move draws a band further, in pixels.
+pub const BAND_STEP: f32 = 8.0;
+/// The stiffness a band springs back on: Firefox's overscroll spring.
+pub const BAND_STIFFNESS: f32 = 200.0;
+/// The damping a band springs back with: a touch over critically damped.
+pub const BAND_DAMPING: f32 = 1.1;
+/// The share of a release's speed a band springs back set off at.
+pub const BAND_THROW: f32 = 0.5;
+/// The fastest a band springs back set off, a second.
+pub const BAND_FLING_MAX: f32 = 10000.0;
+/// Within this of the edge, in pixels, a band has sprung back.
+pub const BAND_REST: f32 = 1.0;
 /// A coast slower than this, a second, has stopped.
-pub const COAST_STOP: f32 = 20.0;
+pub const COAST_STOP: f32 = 10.0;
+/// A release slower than this, a second, does not coast.
+pub const COAST_MIN: f32 = 125.0;
 /// How far back a release's speed is read from its moves, in milliseconds.
 pub const VELOCITY_MS: u64 = 100;
 /// A pause this long between a drag's moves, in milliseconds, means it had stopped.
 pub const VELOCITY_GAP_MS: u64 = 40;
 /// With no word from the system, a trackpad still this long has been let go, in milliseconds.
 pub const LIFT_MS: u64 = 50;
+/// The same, while it is pulled past an end, in milliseconds.
+pub const BAND_LIFT_MS: u64 = 800;
 /// A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it.
 pub const COAST_SPENT: f32 = 0.25;
 /// A move's response, Apple's period of the spring: 2π/√stiffness, in seconds.
 pub const RESPONSE: f32 = 0.237482;
 /// A fade's response.
 pub const FADE_RESPONSE: f32 = 0.125664;
+/// A band's response as it springs back.
+pub const BAND_RESPONSE: f32 = 0.444288;

@@ -257,9 +257,12 @@ dependencies = [
  "iced_test",
  "image",
  "js-sys",
+ "raw-window-handle",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wayland-client",
+ "wayland-protocols",
  "web-sys",
  "zbus",
 ]

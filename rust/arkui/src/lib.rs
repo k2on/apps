@@ -57,6 +57,7 @@ pub mod table;
 pub mod theme;
 pub mod toast;
 pub mod tokens;
+pub mod touchpad;
 pub mod url;
 pub mod velocity;
 pub mod vim;

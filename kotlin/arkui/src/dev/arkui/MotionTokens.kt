@@ -43,16 +43,34 @@ public object MotionTokens {
     public const val PAUSED_SCALE: Float = 0.9f
     /** How far a thing that comes in where it stays rises as it comes: a nudge. */
     public const val RISE: Float = 8.0f
-    /** The most a band past a scroll's end is ever drawn, as a share of the view. */
-    public const val BAND_REACH: Float = 0.33f
+    /** How hard a scroll past its end is pulled: Gecko's resistance, 1/this of a pixel at the edge. */
+    public const val BAND_RESISTANCE: Float = 16.0f
+    /** How many of Gecko's pixels of pull one trackpad pixel is. */
+    public const val BAND_GAIN: Float = 4.0f
+    /** The most one move draws a band further, in pixels. */
+    public const val BAND_STEP: Float = 8.0f
+    /** The stiffness a band springs back on: Firefox's overscroll spring. */
+    public const val BAND_STIFFNESS: Float = 200.0f
+    /** The damping a band springs back with: a touch over critically damped. */
+    public const val BAND_DAMPING: Float = 1.1f
+    /** The share of a release's speed a band springs back set off at. */
+    public const val BAND_THROW: Float = 0.5f
+    /** The fastest a band springs back set off, a second. */
+    public const val BAND_FLING_MAX: Float = 10000.0f
+    /** Within this of the edge, in pixels, a band has sprung back. */
+    public const val BAND_REST: Float = 1.0f
     /** A coast slower than this, a second, has stopped. */
-    public const val COAST_STOP: Float = 20.0f
+    public const val COAST_STOP: Float = 10.0f
+    /** A release slower than this, a second, does not coast. */
+    public const val COAST_MIN: Float = 125.0f
     /** How far back a release's speed is read from its moves, in milliseconds. */
     public const val VELOCITY_MS: Int = 100
     /** A pause this long between a drag's moves, in milliseconds, means it had stopped. */
     public const val VELOCITY_GAP_MS: Int = 40
     /** With no word from the system, a trackpad still this long has been let go, in milliseconds. */
     public const val LIFT_MS: Int = 50
+    /** The same, while it is pulled past an end, in milliseconds. */
+    public const val BAND_LIFT_MS: Int = 800
     /** A lift seen only by its stillness, slower than this share of the gesture's fastest, has run down by itself: no coast after it. */
     public const val COAST_SPENT: Float = 0.25f
 }

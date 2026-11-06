@@ -104,7 +104,7 @@ older `Springs.MOVE = 0.88` and no `Press`, `Haptics` or reduced motion.
 | The longest a settle may take | `Springs.CAP_MS` (450 ms), `Capped` | — (SwiftUI springs are not capped) | `motion::CAP` (`CAP_MS`) on `reorder`'s settle; closed form otherwise, `LAST_FRAME` 50 ms past rest |
 | Where a flick lands | `Springs.project`, `Springs.nearest`, `DECELERATION` 0.998, `SNAPPY` 0.99 | `Momentum.project`, `Momentum.target`, `Momentum.normal`/`snappy` | `motion::project`, and `motion::coast(v, ms)` (the same decay, closed form) for a trackpad's coast (`scroll::elastic`) |
 | Velocity as the spring wants it | `Animatable.animateTo(…, initialVelocity)` in px/s | `Momentum.relative(_:from:to:)` (share of the gap per second) | `Slide::moving_at(speed)` in px/s; a trackpad's speed from its last moves, `velocity::Velocity` (`VELOCITY_MS` 100, `VELOCITY_GAP_MS` 40) |
-| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12; Apple's rubber band `Springs.band(x, limit)` (`RUBBER_BAND` 0.55), the player card past its ends | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `motion::rubberband(x, d)` (`RUBBER_BAND` 0.55), a list past its ends (`scroll::band`, held to `BAND_REACH` 0.33 of the view; the thumb `scroll::thumb`); `swipe::band(x)`, `STRETCH` 180 px |
+| A drag past its edge | `Springs.preview(r)`, `PREVIEW` 0.1, `GIVE` 0.12; Apple's rubber band `Springs.band(x, limit)` (`RUBBER_BAND` 0.55), the player card past its ends | `Momentum.band(x, limit:)`, Apple's rubber band (`MotionTokens.rubberBand` 0.55) | `motion::rubberband(x, d)` (`RUBBER_BAND` 0.55), a list past its ends as Firefox has it (`scroll::band`, Gecko's resistance: `BAND_RESISTANCE` 16, `BAND_GAIN` 4, `BAND_STEP` 8 px; back on `scroll::BACK`, `BAND_STIFFNESS` 200, `BAND_DAMPING` 1.1; the thumb `scroll::thumb`); `swipe::band(x)`, `STRETCH` 180 px |
 | No coasting after a fling | `Springs.noDecay()` | — | — |
 | Reduced motion | `reducedMotion()`, `LocalReducedMotion`, `ReducedMotion.ALWAYS_ANIMATE`, `unlessReduced(spec)`, `keepMotion()` | `\.reducesMotion`, `Motion.alwaysAnimate`, `.motion(_:value:)`, `.motionTransition(_:)`, `.motionScale(_:)`, `Animation.reduced(_:)`, `Springs.calm` | `motion::reduced()`, `ALWAYS_ANIMATE`, `ARK_REDUCE_MOTION`, `Spring::or_instant`, `Shown::new` (becomes `FADE`) |
 | Press | `Modifier.pressable(press = Press.Give \| Press.Highlight)`, `Press.SCALE` 0.97, `Press.HIGHLIGHT` 0.1 | `.buttonStyle(.press)`, `.buttonStyle(.pressRow)` | the widget's pressed colour; no scale |
@@ -318,24 +318,38 @@ fourth. A hard wall reads as frozen; resistance reads as "responsive, but
 there's nothing more here". The expanding card (the player) bands past
 both its ends on Android, as the iPhone's full player bands past its top;
 on the desktop and in the browser every page and list is
-`arkui::scroll::elastic`, which scrolls a trackpad as a browser does — never
+`arkui::scroll::elastic`, which scrolls a trackpad as Firefox does — never
 a mouse wheel's lines, never under reduced motion. Let go while moving, it
 coasts on at the speed the last tenth of a second of moves gives
 (`velocity::Velocity`, a weighted line through them, not the last move),
-slowing by `DECELERATION` a millisecond (`motion::coast`), until a new
-touch, a click or a key stops it; where the system coasts by itself (macOS,
-and a browser on a Mac) its coast is followed, never doubled. The fingers
-are let go when the system says so (Wayland's `axis_stop`, macOS's phase,
-both arriving as a wheel event that moves nowhere) or, where it never
-says (a browser), after `LIFT_MS` of stillness. Pulled past an end the list
-is drawn `rubberband(pull, view)` past it, of the whole pull and held to
-`BAND_REACH` of the view, gives the band back first when pulled the other
-way, and springs back only when the fingers lift, on `SMOOTH` from where
-it is and as fast as it was drawn going, never past the edge; a coast that
-reaches an end carries its speed into the band and springs back the same
-way. While it bands the scrollbar's thumb stays at that end and shortens
-as if the band were more content (`scroll::thumb`). None of it touches
-the scroll offset the keys, the scroll edge and the small header read.
+slowing by `DECELERATION` a millisecond (`motion::coast`, which is Gecko's
+desktop fling, `apz.fling_friction` 0.002), until it is slower than
+`COAST_STOP`; a release slower than `COAST_MIN` does not coast. Fingers
+landing on the trackpad stop it at once, where it is, as in Firefox: on
+Wayland the hold gesture (`zwp_pointer_gesture_hold_v1`, heard on winit's
+own display by `arkui::touchpad`, started by `arkui::window::boot`), and
+everywhere any word from the wheel — even one that moves nowhere — a
+click, a touch or a key. Where the system coasts by itself (macOS, and a
+browser on a Mac) its coast is followed, never doubled, and stops when the
+system's does. The fingers are let go only when the system says so
+(Wayland's `axis_stop`, macOS's phase, both arriving as a wheel event that
+moves nowhere); where it never says (X11, a browser, whose `wheel` has no
+phase) after `LIFT_MS` of stillness, or `BAND_LIFT_MS` past an end, so a
+band held still is not let go under the fingers. Pulled past an end the
+list is drawn with Gecko's resistance (`scroll::band`): each pixel more of
+pull goes `(1 − band/view) / BAND_RESISTANCE` of `BAND_GAIN` pixels
+further, which is `view · (1 − e^(−pull · gain / (resistance · view)))` —
+the same curve as `Springs.preview`, limited by the whole view, so it is
+harder and harder to pull and never a wall. Pulled the other way the band
+is given back first, pixel for pixel; it springs back only when the
+fingers lift, on Firefox's overscroll spring (`scroll::BACK`), set off at
+`BAND_THROW` of the speed it was let go going out, to the edge and no
+further; let go fast going in, a coast gives the band back and goes on
+into the list. A coast that reaches an end carries its speed into the
+band and springs back the same way. While it bands the scrollbar's thumb
+stays at that end and shortens as if the band were more content
+(`scroll::thumb`). None of it touches the scroll offset the keys, the
+scroll edge and the small header read.
 
 **Cap the settle.** However slow and far the release, the settle is done
 within `CAP_MS`: Compose's `Capped` cuts a spring's tail that the tuning did
@@ -616,7 +630,8 @@ them are where each lives here.
   `Springs.band`, `Momentum.band`, `motion::rubberband`,
   `scroll::elastic`; `Springs.preview`, `swipe::band`.
 - **Coast** — a scroll let go while moving, going on and slowing by
-  `DECELERATION` a millisecond. `motion::coast`, `scroll::elastic`.
+  `DECELERATION` a millisecond, stopped by fingers landing.
+  `motion::coast`, `scroll::elastic`, `touchpad`.
 - **Preview** — a gesture's visible progress before it commits, bounded,
   as Android's predictive back. `Springs.PREVIEW`, `GIVE`.
 - **Interruptible** — can be grabbed or retargeted mid-flight from its
