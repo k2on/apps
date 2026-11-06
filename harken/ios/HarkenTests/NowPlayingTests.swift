@@ -122,4 +122,39 @@ final class NowPlayingTests: XCTestCase {
         now += Sought.forgetMs + 1
         XCTAssertEqual(s.shown(clock: 36_000, track: "a", counting: true, now: now), 36_000, "never agreed: the clock's again, after a while")
     }
+
+    /// The full player's More, whatever plays: a song is its own row, from
+    /// the songs; an episode — not among the songs, and its show's — is made
+    /// of what plays, of its show's kind, so its menu goes to its show and
+    /// marks it played; and what the library cannot place still has a row.
+    /// Falsified by More finding what plays among the songs alone: an
+    /// episode had no row, and the player drew no More.
+    func testMoreHasARowWhateverPlays() {
+        let songs = (0..<3).map { Fx.entry($0) }
+        let podcast = ShowsEntry(art: "", author: "", description: "", episodes: 1, feed: "", id: "podcast/full-time-nix", kind: "podcast",
+                                 link: "", newestMs: 0, title: "Full Time Nix")
+        let sermons = ShowsEntry(art: "", author: "Tim Keller", description: "", episodes: 1, feed: "", id: "sermon/gospel-in-life", kind: "sermon",
+                                 link: "", newestMs: 0, title: "Gospel in Life")
+        let shows = [podcast, sermons]
+
+        let song = Playing(id: songs[1].id.hex, title: "Song 1", artist: "Handel", album: "Water Music", art: "")
+        XCTAssertEqual(song.entry(durationMs: 200_000, songs: songs, shows: shows).id, songs[1].id, "a song is its own row")
+        XCTAssertNil(song.show(in: shows))
+
+        for (s, kind) in [(podcast, "podcast"), (sermons, "sermon")] {
+            let ep = Playing(id: Fx.id(900).hex, title: "Bump", artist: s.title, album: "", art: "", file: ".feeds/bump.mp3")
+            let row = ep.entry(durationMs: 1_800_000, songs: songs, shows: shows)
+            XCTAssertEqual(row.id, Fx.id(900))
+            XCTAssertEqual(row.kind, kind)
+            XCTAssertEqual(row.file, ".feeds/bump.mp3")
+            XCTAssertEqual(row.durationMs, 1_800_000)
+            XCTAssertEqual(ShowsEntry.of(row, in: shows)?.id, s.id, "its menu goes to its show")
+        }
+
+        let stray = Playing(id: Fx.id(4242).hex, title: "A Stray Recording", artist: "Nobody Known", album: "", art: "", file: "music/stray.flac")
+        let row = stray.entry(durationMs: 61_000, songs: songs, shows: shows)
+        XCTAssertEqual(row.title, "A Stray Recording")
+        XCTAssertEqual(row.kind, "song")
+        XCTAssertNil(ShowsEntry.of(row, in: shows))
+    }
 }

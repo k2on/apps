@@ -441,7 +441,9 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
  *   place empty.
  * - `expanded` is the full face, laid out at the screen's size, composed only while the card is
  *   above the bar — collapsed, it takes no touch and no tick. Its first argument goes on the space
- *   it leaves for the travelling piece, which is told where that is.
+ *   it leaves for the travelling piece, which is told where that is. A [GlassMorph] on it opens
+ *   its menu in the card's own [GlassLayer], drawn after the travelling piece, so that the piece,
+ *   drawn over the face, is never drawn over the menu.
  * - `traveler` is the piece both faces share, drawn by the card itself at the expanded size and
  *   scaled from the bar's [ExpandingCardSpec.thumb] to that space. `artScale` is how much of that
  *   space it takes expanded, about its centre (a cover a little smaller while paused); read as it
@@ -509,6 +511,8 @@ public fun ExpandingCard(
     // Where the expanded face leaves room for the piece: read as the card is placed, just after the
     // face.
     val slot = remember { Spot() }
+    // Where the expanded face's glass menus open: over the face and over the piece alike.
+    val menus = rememberGlassLayer()
     val skip = rememberDraggableState { d -> sheet.swipe += d }
 
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
@@ -544,9 +548,12 @@ public fun ExpandingCard(
                                     },
                                 ))
                         if (full) {
-                            expanded(slot.modifier, Modifier.layoutId(FULL))
+                            // Its glass menus open in the card's own layer, drawn after the
+                            // travelling piece: a cover carried over the face cannot cover them.
+                            ProvideGlassLayer(menus) { expanded(slot.modifier, Modifier.layoutId(FULL)) }
                         }
                         traveler(Modifier.layoutId(ART))
+                        if (full) GlassLayerHost(menus, Modifier.layoutId(OVER))
                     },
                     modifier =
                         Modifier.layout { m, c ->
@@ -605,6 +612,7 @@ public fun ExpandingCard(
                     var mini: Placeable? = null
                     var face: Placeable? = null
                     var art: Placeable? = null
+                    var over: Placeable? = null
                     val side = (w - 2 * g.xl).roundToInt().coerceAtLeast(1)
                     for (m in measurables) {
                         when (m.layoutId) {
@@ -618,6 +626,8 @@ public fun ExpandingCard(
                             FULL ->
                                 face = m.measure(Constraints.fixed(w.roundToInt(), h.roundToInt()))
                             ART -> art = m.measure(Constraints.fixed(side, side))
+                            OVER ->
+                                over = m.measure(Constraints.fixed(w.roundToInt(), h.roundToInt()))
                         }
                     }
                     layout(c.maxWidth, c.maxHeight) {
@@ -671,6 +681,12 @@ public fun ExpandingCard(
                                 shadowElevation = g.artShadow * p
                             }
                         }
+                        // The face's menus, last: where the face is, and in with it.
+                        over?.placeWithLayer(dx.roundToInt(), dy.roundToInt()) {
+                            alpha =
+                                ((sheet.p - spec.expandedIn) / (1f - spec.expandedIn)).coerceIn(
+                                    0f, 1f)
+                        }
                     }
                 }
             },
@@ -686,3 +702,4 @@ private const val DIM = "dim"
 private const val MINI = "mini"
 private const val FULL = "full"
 private const val ART = "art"
+private const val OVER = "over"
