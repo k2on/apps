@@ -16,7 +16,9 @@
 # `publish.desktop` the list), photographed with no window by arkui-shots.
 #
 # **After the publish.** This runs when build finishes (Android) and when
-# ios starts (the iPhone, which builds the commit itself, beside ios). Android takes
+# ios has ended (the iPhone, which builds the commit itself, after ios, so as
+# to fetch what ios built and pushed to the cache: the kernel's simulator
+# slice and, on a PR, the app; one kernel per commit). Android takes
 # that run's own APKs: one is there only when its inputs moved and it was
 # built (and so offered on F-Droid). The iPhone takes nix's build at that
 # run's commit, of each app whose shots would differ from those kept: what
@@ -60,8 +62,10 @@
 name: app-screens
 
 on:
-  # The iPhone as soon as ios has started, since it builds the commit
-  # itself and needs nothing of ios's run. A pull request's Android as
+  # The iPhone once ios has ended: it builds the commit itself, and ios
+  # has by then built and pushed to the cache (main's and a PR's of this
+  # repository's) the kernel and app it would otherwise build a second time,
+  # a Mac's five to twelve minutes. A pull request's Android as
   # soon as build has started too: its emulator boots and its server
   # starts while the APK builds, and each app is taken once its APK is
   # uploaded (await-apk.sh), not once the run (its tests) has ended. Main's
@@ -97,7 +101,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  # An event of its own: ios's `completed` must not cancel the iPhone's
+  # An event of its own: build's `completed` must not cancel the Android
   # shots its `requested` started.
   group: app-screens-${{ github.event.workflow_run.name || 'published' }}-${{ github.event.action || 'run' }}-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ inputs.pr }}
   cancel-in-progress: true
@@ -172,7 +176,7 @@ jobs:
             done
           }
           # What was decided, as the jobs read it. Nothing for this event
-          # (ios's end, a PR's build ending, a PR closed, nothing moved):
+          # (ios's start, a PR's build ending, a PR closed, nothing moved):
           # nothing to do, publish included.
           said() {
             android=${android# } ios=${ios# } desktop=${desktop# }
@@ -292,7 +296,7 @@ jobs:
             made=$(gh api "repos/$repo/actions/runs/$RUN/artifacts" --paginate --jq '.artifacts[] | select(.expired | not) | .name')
           fi
           # Every app with shots, and of those what this run built: an APK
-          # in build's run; each iPhone app whose hash moved as ios starts,
+          # in build's run; each iPhone app whose hash moved once ios ends,
           # and every desktop window as build starts, as nix has it.
           if [ -n "$mode" ]; then
             for a in $(jq -r '.android[]' "$RUNNER_TEMP/apps.json"); do
@@ -308,7 +312,7 @@ jobs:
             # runs. Android's and the desktop's (Linux) are shot for every
             # one. And only of a branch of this repository's: a fork's flake
             # is not even evaluated.
-            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = requested ] && [ "$HEAD_REPO" = "$repo" ] && { [ "$mode" != pr ] || [ "$base" = main ]; }; then
+            if [ "$WORKFLOW" = ios ] && [ "$ACTION" = completed ] && [ "$HEAD_REPO" = "$repo" ] && { [ "$mode" != pr ] || [ "$base" = main ]; }; then
               # shellcheck disable=SC2046
               iphone $(iphones)
             fi
@@ -516,21 +520,10 @@ jobs:
         name: The pinned Xcode
         run: bash .github/xcode-pinned.sh src
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
-      # for every app: each is installed on it in turn.
-      - if: steps.open.outputs.open == 'true'
-        name: Start booting a simulator
-        run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            device=$(xcrun simctl list devices available -j | jq -r "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
-            echo "Booting $device"
-            echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
-
       # Relaxed: every build is sandboxed but the one that says __noChroot
-      # (the app's own xcodebuild, flake.nix says why).
+      # (the app's own xcodebuild, flake.nix says why). Installed before
+      # anything starts in the background: setting up its build users while
+      # a booting simulator brought CoreSimulator up took minutes.
       - if: steps.open.outputs.open == 'true'
         uses: cachix/install-nix-action@v31
         with:
@@ -548,6 +541,46 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
 
+      # The servers' packages (each server.sh's `.#<name>`) and the apps
+      # (ios-build.sh's), evaluated once, with nothing beside them: under a
+      # booting simulator and the servers' build, each evaluating a flake at
+      # once, it took one to five minutes. Their builds then find them in
+      # nix's evaluation cache.
+      - if: steps.open.outputs.open == 'true'
+        name: The servers' packages and the apps, evaluated
+        run: |
+          refs=()
+          for a in $APPS; do
+            if [ -f "$a/screens/server.sh" ]; then
+              while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$a/screens/server.sh" | cut -c3- | sort -u)
+            fi
+          done
+          start=$(date +%s)
+          # A dry run: a package may be a source path, not a derivation
+          # (harken-covers), which `path-info --derivation` refuses. Only a
+          # warm-up: what fails here is said again by the build after.
+          if [ ${#refs[@]} -gt 0 ]; then nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::the servers' packages did not all evaluate"; fi
+          echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
+          # An app the commit has none of is said by ios-build.sh.
+          start=$(date +%s)
+          for a in $APPS; do
+            nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
+          done
+          echo "evaluated the apps in $(( $(date +%s) - start ))s"
+
+      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
+      # for every app: each is installed on it in turn.
+      - if: steps.open.outputs.open == 'true'
+        name: Start booting a simulator
+        run: |
+          bash .github/screens/meanwhile.sh start boot bash -c '
+            device=$(xcrun simctl list devices available -j | jq -r "
+              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
+              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
+            echo "Booting $device"
+            echo "$device" > "$RUNNER_TEMP/device"
+            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
+
       # Each app's server, as nix builds it (its server.sh), all at once, each
       # on its own port: the cache's once main's run has pushed it, or else
       # built, under the apps' build.
@@ -559,8 +592,9 @@ jobs:
               if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
-      # Each app as nix has it at the commit (ios-build.sh): the cache's, or
-      # built, with Xcode put in the store first only then (once, for all).
+      # Each app as nix has it at the commit (ios-build.sh): the cache's
+      # (what ios built and pushed, as this run starts once it has ended),
+      # or built.
       - if: steps.open.outputs.open == 'true'
         id: build
         name: The apps, built by nix

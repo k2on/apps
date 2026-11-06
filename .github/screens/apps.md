@@ -199,19 +199,24 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
 
 - **On main**: Android once `build` has ended and its deploy has
   succeeded, from that run's APKs: an APK is there only when its inputs
-  moved and it went to F-Droid. The iPhone as soon as `ios` has started,
-  each app whose hash moved built by nix at that commit, the cache's if
-  its build has not. The
+  moved and it went to F-Droid. The iPhone once `ios` has ended, each
+  app whose hash moved built by nix at that commit: the cache's if its
+  build has not moved, and the kernel's simulator slice the one `ios`
+  built for its tests and pushed. The
   desktop as soon as `build` has started, the same way: every window built
   by nix at that commit (build.yaml's own build of it fills the cache).
   Each phone taken whole replaces what the `screens` branch had at
   `apps/<app>/<phone>/`.
-- **On a pull request**: both phones as soon as their run starts. `build`
+- **On a pull request**: Android as soon as `build` starts, the iPhone
+  once `ios` has ended. `build`
   builds the APKs whose inputs differ from what main published, and each
   app's job, its emulator booted and its server up meanwhile, takes its
   APK the moment the run uploads it (`await-apk.sh`), before the run's
   tests have ended; an app with no new APK is passed over. The iPhone apps
-  are built by nix at the PR's commit, beside `ios`, and the desktop
+  are built by nix at the PR's commit after `ios`, which for an app with
+  tests has built its kernel's simulator slice and its app at that commit
+  and pushed them to the cache (a branch of this repository's), so the
+  Mac here fetches them: one kernel per commit. The desktop
   windows at the PR's commit as `build` starts, beside it. The shots go to
   the branch `screens-pr-<number>`, and one comment on the PR, kept up to
   date, has a row for each screen that changed or is new on any phone:

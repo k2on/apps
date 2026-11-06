@@ -288,47 +288,9 @@
           # published screenshots (.github/screens/hero.py).
           screens-python = pkgs.python3.withPackages (ps: [ ps.pillow ]);
 
-          # The ffmpeg the screens workflow cuts the phones' recordings with
-          # (.github/screens/encode.sh), and nothing else: H.264 out through
-          # x264, the native decoders and the MP4 and MOV containers, the
-          # filters (setpts, fps, scale, format, mpdecimate) and ffprobe. No
-          # other codec, no network, no device, no docs — a tenth of what
-          # Homebrew's ffmpeg builds and pulls in on the macOS runner.
-          screens-ffmpeg = pkgs.ffmpeg-headless.override {
-            withHeadlessDeps = false;
-            withGPL = true;
-            withX264 = true;
-            withZlib = true;
-            # Its own tests build against it.
-            withPixelutils = true;
-            withMultithread = true;
-            buildFfmpeg = true;
-            buildFfprobe = true;
-            buildAvcodec = true;
-            buildAvformat = true;
-            buildAvfilter = true;
-            buildAvutil = true;
-            buildSwscale = true;
-            buildSwresample = true;
-            # Empty with no device on, but nixpkgs links its tools against it.
-            buildAvdevice = true;
-          };
-
-          # XcodeGen, which writes showcase/ios's Xcode project for the
-          # screens workflow: upstream's own release, a universal macOS binary
-          # and its presets, pinned here, as nixpkgs 24.11 has none.
-          xcodegen = pkgs.stdenvNoCC.mkDerivation rec {
-            pname = "xcodegen";
-            version = "2.46.0";
-            src = pkgs.fetchzip {
-              url = "https://github.com/yonaskolb/XcodeGen/releases/download/${version}/xcodegen.zip";
-              hash = "sha256-7NjCsInBjkOL1RqWSaWKGDJxp/gn71rmhTWG2ErHDqA=";
-            };
-            # Signed as it is: stripping or patching it would break that.
-            dontFixup = true;
-            installPhase = "mkdir -p $out && cp -r bin share $out/";
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-          };
+          # The screens workflows' ffmpeg and XcodeGen, in a file of their
+          # own: screens.yaml's cache of them is keyed on it.
+          inherit (import ./nix/screens-tools.nix { inherit pkgs; }) screens-ffmpeg xcodegen;
 
           # The server (harken/server: the server and harken-peer): its
           # crate and what it reaches, under the features it asks for, and
@@ -745,105 +707,220 @@
           # as `<Framework>.xcframework` (`HarkenFFI`, `MoneyFFI`), with
           # UniFFI's Swift and the typed half under `swift/`. Linking for iOS
           # needs Apple's SDK, which only a macOS builder has: on Linux these
-          # derivations evaluate and are not built (meta.platforms), and they
-          # have not been built anywhere yet.
+          # derivations evaluate and are not built (meta.platforms).
           # It is cargo's build, over the lockfile's crates vendored, and not
           # a derivation per crate: nixpkgs has no iOS package set that
           # compiles with the builder's Xcode (the workflow, ios.yaml, builds
           # it with cargo too).
+          #
+          # **Each slice only where it is wanted.** A kernel is built for the
+          # `targets` asked for, each a cargo build of its own: the simulator's
+          # alone for the screenshots' app and the tests, the phone's alone for
+          # the archive, so no build compiles a slice nothing of it links (each
+          # was half of a kernel's time).
+          #
+          # **The crates' dependencies apart** (`iosDeps`), as crane's
+          # `buildDepsOnly` has them: the lockfile's crates compiled once for a
+          # target, over the workspace's manifests and an empty stand-in for
+          # each of its crates (`stubs`), so that derivation moves only with
+          # Cargo.lock, the manifests, the toolchain and Xcode. A kernel starts
+          # from its `target/` and compiles only the workspace's crates.
+          #
+          # **Only the phone's crates.** A kernel's source is the crates its
+          # library is built from (`phoneCrates`, its path dependencies read
+          # from their manifests) and, of the rest of the workspace, only the
+          # manifests, each crate an empty stand-in: cargo reads the whole
+          # workspace (`--locked --offline`), and a desktop window's or a
+          # server's change is no phone's.
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           iosRust = rust.override { targets = iosTargets; };
-          # One app's: `name`, `crate` and `so` as `androidPhone`'s, and the
-          # framework's name. With `xcode`, the pinned Xcode (`xcode` below),
-          # it is built from the runner's installed copy of it, under the
-          # strict sandbox with that one directory let in; without, from
-          # whatever Xcode the builder has selected, unsandboxed.
-          iosPhone = { name, crate, so, framework, xcode ? null }: pkgs.stdenv.mkDerivation {
-            pname = "${name}-ios-xcframework";
-            version = "0.1.0";
-            src = only rustDirs;
-            sourceRoot = "source/rust";
-            cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
-            nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
-            # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
-            # Xcode, outside the store. Pinned, only its directory is read,
-            # from inside the sandbox (`__impureHostDeps`, which the builder's
-            # nix.conf must allow: `allowed-impure-host-deps`).
-            __noChroot = xcode == null;
-            __impureHostDeps = lib.optional (xcode != null) xcode.app;
-            # The iOS targets compile and link with the builder's Xcode: its
-            # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
-            # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
-            # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
-            # fails under them: both are taken back for these two targets. The
-            # Swift is UniFFI's from the library built for this Mac.
-            buildPhase = let
-              tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
-            in ''
-              runHook preBuild
-              # The apps' own deployment target: what ios.yaml's cargo had.
-              export IPHONEOS_DEPLOYMENT_TARGET=17.0
-              ${if xcode == null then ''
-                export PATH=/usr/bin:$PATH
-                export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
-              '' else ''
-                export DEVELOPER_DIR=${xcode.developer}
-                ${xcode.check}
-                export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
-                export HOME=$TMPDIR/home
-                mkdir -p "$HOME"
-              ''}
-              unset SDKROOT
-              ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
-                export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
-                export CARGO_TARGET_${u}_LINKER=${tc}/clang
-                cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
-              '') iosTargets}
-              ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
-              mkdir -p headers
-              cp $TMPDIR/bindings/swift/*.h headers/
-              cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
-              ${if xcode == null then ''
-                /usr/bin/xcodebuild -create-xcframework \
-                  -library target/aarch64-apple-ios/release/lib${so}.a -headers headers \
-                  -library target/aarch64-apple-ios-sim/release/lib${so}.a -headers headers \
-                  -output ${framework}.xcframework
-              '' else ''
-                # By hand, as xcodebuild lays it out: under the strict sandbox
-                # `xcodebuild -create-xcframework` crashes (xcode-strict.yaml),
-                # and an xcframework of static libraries is only this.
-                for slice in ios-arm64:aarch64-apple-ios ios-arm64-simulator:aarch64-apple-ios-sim; do
-                  id=''${slice%%:*} target=''${slice##*:}
-                  mkdir -p ${framework}.xcframework/$id
-                  cp target/$target/release/lib${so}.a ${framework}.xcframework/$id/
-                  cp -r headers ${framework}.xcframework/$id/Headers
-                done
-                slice() {
-                  echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
-                  echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
-                  echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
-                  [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
-                  echo "</dict>"
-                }
-                {
-                  echo '<?xml version="1.0" encoding="UTF-8"?>'
-                  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-                  echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
-                  slice ios-arm64 ""
-                  slice ios-arm64-simulator simulator
-                  echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
-                  echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
-                } > ${framework}.xcframework/Info.plist
-              ''}
-              runHook postBuild
-            '';
-            installPhase = ''
-              mkdir -p $out/swift
-              cp -r ${framework}.xcframework $out/
-              cp $TMPDIR/bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
-            '';
-            meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+          # Each target's slice of the xcframework: its directory and its
+          # platform variant.
+          iosSlice = {
+            aarch64-apple-ios = { id = "ios-arm64"; variant = ""; };
+            aarch64-apple-ios-sim = { id = "ios-arm64-simulator"; variant = "simulator"; };
           };
+          # The workspace's crates, by directory from the repository's root,
+          # and by package name.
+          rustMembers = map (m: if lib.hasPrefix "../" m then lib.removePrefix "../" m else "rust/${m}")
+            (builtins.fromTOML (builtins.readFile ./rust/Cargo.toml)).workspace.members;
+          rustManifest = dir: builtins.fromTOML (builtins.readFile (./. + "/${dir}/Cargo.toml"));
+          rustMember = lib.listToAttrs (map (d: { name = (rustManifest d).package.name; value = d; }) rustMembers);
+          # `a/b/../c` as `a/c`.
+          normalise = p: lib.concatStringsSep "/" (lib.foldl' (acc: s:
+            if s == ".." then lib.init acc else if s == "." || s == "" then acc else acc ++ [ s ]) [ ] (lib.splitString "/" p));
+          # A crate's path dependencies (what it links: [dependencies] and
+          # [build-dependencies], a target's own included; not its tests').
+          rustPathDeps = dir:
+            let
+              m = rustManifest dir;
+              tables = [ m ] ++ lib.attrValues (m.target or { });
+              deps = lib.concatMap (t: lib.attrValues ((t.dependencies or { }) // (t.build-dependencies or { }))) tables;
+            in
+            lib.concatMap (d: lib.optional (builtins.isAttrs d && d ? path) (normalise "${dir}/${d.path}")) deps;
+          phoneCrates = crate: map (x: x.key) (builtins.genericClosure {
+            startSet = [{ key = rustMember.${crate}; }];
+            operator = x: map (d: { key = d; }) (rustPathDeps x.key);
+          });
+          # The shell that writes an empty stand-in for each target of each
+          # crate in `dirs` (its lib.rs, main.rs, src/bin/*, build.rs, as it
+          # has them), from the repository's root.
+          stubs = dirs: lib.concatMapStrings (dir:
+            let
+              has = f: builtins.pathExists (./. + "/${dir}/${f}");
+              bin = ./. + "/${dir}/src/bin";
+              bins = lib.optionals (builtins.pathExists bin)
+                (map (n: "src/bin/${n}") (lib.attrNames (lib.filterAttrs (_: t: t == "regular") (builtins.readDir bin))));
+            in
+            lib.concatMapStrings (f: ''
+              mkdir -p "$(dirname ${dir}/${f})"
+              echo ${if f == "src/lib.rs" then "" else "'fn main() {}'"} > ${dir}/${f}
+            '') (lib.filter has [ "src/lib.rs" "src/main.rs" "build.rs" ] ++ bins)) dirs;
+          # A source of the workspace's manifests and lockfile, the crates in
+          # `real` as they are, every other one a stand-in.
+          rustSource = real: {
+            src = only ([ "rust/Cargo.toml" "rust/Cargo.lock" ] ++ real ++ map (d: "${d}/Cargo.toml") rustMembers);
+            sourceRoot = "source/rust";
+            # Unpacked read-only but for the source root: the stand-ins are
+            # written beside it.
+            postUnpack = ''
+              chmod -R u+w source
+              (cd source && ${stubs (lib.subtractLists real rustMembers)})
+            '';
+          };
+          # The environment each iOS cargo build is in, and its cargo build of
+          # `crate` for each of `targets`.
+          iosCargo = { crate, targets, xcode }:
+            let tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
+            in {
+              inherit tc;
+              cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
+              nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
+              # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
+              # Xcode, outside the store. Pinned, only its directory is read,
+              # from inside the sandbox (`__impureHostDeps`, which the builder's
+              # nix.conf must allow: `allowed-impure-host-deps`).
+              __noChroot = xcode == null;
+              __impureHostDeps = lib.optional (xcode != null) xcode.app;
+              # The iOS targets compile and link with the builder's Xcode: its
+              # developer directory, clang, ar and SDKs. nixpkgs' darwin stdenv
+              # sets DEVELOPER_DIR and SDKROOT to its own macOS SDK, which has no
+              # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
+              # fails under them: both are taken back for these targets.
+              build = ''
+                # The apps' own deployment target: what ios.yaml's cargo had.
+                export IPHONEOS_DEPLOYMENT_TARGET=17.0
+                ${if xcode == null then ''
+                  export PATH=/usr/bin:$PATH
+                  export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
+                '' else ''
+                  export DEVELOPER_DIR=${xcode.developer}
+                  ${xcode.check}
+                  export PATH=$DEVELOPER_DIR/usr/bin:${tc}:$PATH
+                  export HOME=$TMPDIR/home
+                  mkdir -p "$HOME"
+                ''}
+                unset SDKROOT
+                ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
+                  export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
+                  export CARGO_TARGET_${u}_LINKER=${tc}/clang
+                  cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
+                '') targets}
+              '';
+            };
+          # The lockfile's crates, compiled for `targets` as `crate` links
+          # them: its `target/`, which a kernel starts from.
+          iosDeps = { name, crate, targets, xcode ? null }:
+            let c = iosCargo { inherit crate targets xcode; };
+            in pkgs.stdenv.mkDerivation ({
+              pname = "${name}-ios-deps";
+              version = "0.1.0";
+              inherit (c) cargoDeps nativeBuildInputs __noChroot __impureHostDeps;
+              buildPhase = ''
+                runHook preBuild
+                ${c.build}
+                runHook postBuild
+              '';
+              installPhase = "mkdir -p $out && cp -r target $out/";
+              dontFixup = true;
+              meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+            } // rustSource [ ]);
+          # One app's: `name`, `crate` and `so` as `androidPhone`'s, the
+          # framework's name, and its `targets`. With `xcode`, the pinned
+          # Xcode (`xcode` below), it is built from the runner's installed
+          # copy of it, under the strict sandbox with that one directory let
+          # in; without, from whatever Xcode the builder has selected,
+          # unsandboxed. The Swift is UniFFI's from the library built for
+          # this Mac.
+          iosPhone = { name, crate, so, framework, xcode ? null, targets ? iosTargets }:
+            let
+              c = iosCargo { inherit crate targets xcode; };
+              deps = iosDeps { inherit name crate targets xcode; };
+            in
+            pkgs.stdenv.mkDerivation ({
+              pname = "${name}-ios-xcframework${lib.optionalString (targets != iosTargets) "-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}"}";
+              version = "0.1.0";
+              inherit (c) cargoDeps nativeBuildInputs __noChroot __impureHostDeps;
+              passthru = { inherit deps; };
+              buildPhase = ''
+                runHook preBuild
+                # The dependencies as `deps` compiled them, every file of
+                # them one time, newer than the vendored crates unpacked
+                # here (so cargo takes them as built from these); and the
+                # workspace's crates newer still than what it compiled of
+                # their stand-ins, so that cargo compiles them again, and
+                # only them.
+                cp -r ${deps}/target target
+                chmod -R u+w target
+                now=$(date +%s)
+                find target -exec touch -h -d "@$now" {} +
+                find .. -path '*/target' -prune -o -name '*.rs' -exec touch -d "@$((now + 2))" {} +
+                ${c.build}
+                ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
+                mkdir -p headers
+                cp $TMPDIR/bindings/swift/*.h headers/
+                cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
+                ${if xcode == null then ''
+                  /usr/bin/xcodebuild -create-xcframework \
+                    ${lib.concatMapStrings (t: "-library target/${t}/release/lib${so}.a -headers headers ") targets} \
+                    -output ${framework}.xcframework
+                '' else ''
+                  # By hand, as xcodebuild lays it out: under the strict sandbox
+                  # `xcodebuild -create-xcframework` crashes (xcode-strict.yaml),
+                  # and an xcframework of static libraries is only this.
+                  for slice in ${lib.concatMapStringsSep " " (t: "${iosSlice.${t}.id}:${t}") targets}; do
+                    id=''${slice%%:*} target=''${slice##*:}
+                    mkdir -p ${framework}.xcframework/$id
+                    cp target/$target/release/lib${so}.a ${framework}.xcframework/$id/
+                    cp -r headers ${framework}.xcframework/$id/Headers
+                  done
+                  slice() {
+                    echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
+                    echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
+                    echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                    [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
+                    echo "</dict>"
+                  }
+                  {
+                    echo '<?xml version="1.0" encoding="UTF-8"?>'
+                    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                    echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
+                    ${lib.concatMapStrings (t: ''
+                      slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}"
+                    '') targets}
+                    echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
+                    echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
+                  } > ${framework}.xcframework/Info.plist
+                ''}
+                runHook postBuild
+              '';
+              installPhase = ''
+                mkdir -p $out/swift
+                cp -r ${framework}.xcframework $out/
+                cp $TMPDIR/bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
+              '';
+              meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+            } // rustSource (phoneCrates crate));
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
 
@@ -907,8 +984,9 @@
               fi
             '';
           };
-          # One app's kernel, from the pinned Xcode, under the strict sandbox.
-          iosKernel = { ffi, framework }: iosPhone (ffi // { inherit framework xcode; });
+          # One app's kernel, from the pinned Xcode, under the strict sandbox:
+          # of `targets`, both slices unless told.
+          iosKernel = { ffi, framework, targets ? iosTargets }: iosPhone (ffi // { inherit framework xcode targets; });
           # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
           # `framework` its kernel's; `kind` "simulator" (the .app, for its
@@ -919,7 +997,12 @@
           iosApp = { name, App, ffi, framework, kind }:
             let
               bundle = "${bundlePrefix}.${name}";
-              kernel = iosKernel { inherit ffi framework; };
+              # Only the slice it links: the simulator's for the screenshots'
+              # app, the phone's for the archive.
+              kernel = iosKernel {
+                inherit ffi framework;
+                targets = { simulator = [ "aarch64-apple-ios-sim" ]; archive = [ "aarch64-apple-ios" ]; }.${kind};
+              };
               dev = xcode.developer;
               common = ''
                 -project ${App}.xcodeproj -scheme ${App} -configuration Release \
@@ -989,8 +1072,13 @@
             };
           moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
           harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          # Both slices; and the simulator's alone, which the tests link
+          # (ios.yaml) and the screenshots' app is built over: the same
+          # derivation, so built once.
           money-ios-kernel = iosKernel { inherit (moneyIos) ffi framework; };
           harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
+          money-ios-kernel-simulator = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
+          harken-ios-kernel-simulator = iosKernel { inherit (harkenIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
           harken-ios-simulator = iosApp (harkenIos // { kind = "simulator"; });
           money-ios-archive = iosApp (moneyIos // { kind = "archive"; });
@@ -1136,7 +1224,7 @@
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
             inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
-            inherit money-ios-kernel harken-ios-kernel;
+            inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.

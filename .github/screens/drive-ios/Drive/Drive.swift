@@ -103,7 +103,8 @@ final class Drive: XCTestCase {
         for shot in shots {
             app.terminate()
             app.launch()
-            sleep(2)
+            // Up, not a fixed two seconds: each step waits for what it names.
+            _ = app.wait(for: .runningForeground, timeout: 10)
             for step in shot.steps {
                 // A step that is done already: what it opens is on the screen.
                 if let done = step.unless, app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", done, done)).firstMatch.waitForExistence(timeout: 2) {
@@ -128,15 +129,34 @@ final class Drive: XCTestCase {
                 if step.relaunch == true {
                     app.terminate()
                     app.launch()
-                    sleep(2)
+                    _ = app.wait(for: .runningForeground, timeout: 10)
                 }
                 if let text = step.type { app.typeText(text) }
                 if let seconds = step.wait { sleep(UInt32(seconds)) }
             }
-            sleep(3)
-            try XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
+            try settled().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
             try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
         }
+    }
+
+    /// The screen once it has stopped moving, in place of a fixed three
+    /// seconds after a fixed two (the app's launch): two seconds for what
+    /// loads (a cover, a chart) to start drawing, then the same picture three
+    /// times, half a second apart; or, for a screen that never stands
+    /// still, what it is after `limit`.
+    private func settled(limit: Double = 6) -> XCUIScreenshot {
+        sleep(2)
+        var last = XCUIScreen.main.screenshot()
+        var same = 0
+        let until = Date().addingTimeInterval(limit - 2)
+        while Date() < until {
+            usleep(500_000)
+            let now = XCUIScreen.main.screenshot()
+            same = now.pngRepresentation == last.pngRepresentation ? same + 1 : 0
+            last = now
+            if same == 2 { break }
+        }
+        return last
     }
 
     /// The address typed and checked; the system's "wants to use … to sign

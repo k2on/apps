@@ -160,6 +160,23 @@ capture() {
   done 3<<< "$shots"
 }
 
+# The simulator warmed before the first recording: just booted, it is busy
+# with itself for a while, and the first recording of a run was the one
+# taken again (`recording`, some eighty-five seconds each). The showcase
+# opened once on that shot, waited for, left a few seconds, and closed.
+warm() {
+  local first
+  first=$(awk '$2 == "recording" { print $1; exit }' <<< "$shots")
+  [ -n "$first" ] || return 0
+  echo "warming the simulator on $first"
+  listen ready
+  xcrun simctl launch booted "$bundle" -showcase "$first" >/dev/null
+  heard 60 || true
+  sleep 10
+  xcrun simctl terminate booted "$bundle" 2>/dev/null || true
+}
+warm
+
 for theme in light dark; do
   appearance "$theme"
   if ! capture "$theme"; then
