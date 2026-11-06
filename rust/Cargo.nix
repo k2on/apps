@@ -7090,6 +7090,11 @@ rec {
             optional = true;
           }
           {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
           }
@@ -7111,11 +7116,6 @@ rec {
           }
         ];
         devDependencies = [
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
           {
             name = "arkdb";
             packageId = "arkdb";
