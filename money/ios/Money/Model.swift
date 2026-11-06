@@ -30,6 +30,15 @@ final class Model: ObservableObject {
     @Published private(set) var bankPage: URL? = nil
     /// The answered ask put away from Settings.
     @Published private(set) var dismissedAsk: Id? = nil
+    /// Bumped whenever a view a screen holds moved, or was first held: the
+    /// screens read it again.
+    @Published private(set) var moves = 0
+
+    /// The views, held and kept by the core: what a screen holding one
+    /// (ArkUI's `.holding`) reads it from.
+    private(set) var session: Session? = nil
+    /// Told which views moved, on the main queue: the app's `Watched`.
+    var onMoved: ([MoneyView]) -> Void = { _ in }
 
     // MARK: what it holds
 
@@ -121,12 +130,18 @@ final class Model: ObservableObject {
                         publish: { [weak self] s in self?.took(s) },
                         notice: { [weak self] n in self?.notice = n },
                         denied: { [weak self] d in self?.send(.denied(d)) },
-                        failed: { [weak self] w in self?.failed(w) })
+                        failed: { [weak self] w in self?.failed(w) },
+                        opened: { [weak self] s in self?.session = s },
+                        moved: { [weak self] views in
+                            self?.moves += 1
+                            self?.onMoved(views)
+                        })
     }
 
     private func close() {
         bridge?.close()
         bridge = nil
+        session = nil
         snapshot = Snapshot()
     }
 
@@ -186,11 +201,34 @@ final class Model: ObservableObject {
     func showThisMonth() { showMonth(thisMonth) }
     var monthName: String { formatMonth(month: month) }
 
-    // MARK: registers
+    // MARK: what a screen holds
 
-    func hold(register account: Id?) { bridge?.hold(register: account) }
-    func release(register account: Id?) { bridge?.release(register: account) }
-    func register(_ account: Id?) -> [TxnLine]? { snapshot.registers[Registers.key(account)] }
+    /// `view` held for a screen until the answer is let go (ArkUI's
+    /// `.holding`, through the app's `Watched`).
+    func hold(_ view: MoneyView) -> Holding? {
+        let h = session?.hold(view: view)
+        moves += 1
+        return h
+    }
+
+    /// `f` of the session's `view`, once something holds it.
+    private func read<T>(_ view: MoneyView, _ f: (Session) -> T) -> T? {
+        guard let s = session, s.version(view: view) > 0 else { return nil }
+        return f(s)
+    }
+
+    /// `account`'s register (none: every account's), while a screen holds it.
+    func register(_ account: Id?) -> [TxnLine]? { read(.register(account: account)) { $0.register(account: account) } }
+
+    /// What paid for `txn`, while a screen holds it.
+    func paid(_ txn: Id) -> [ReceiptLine] {
+        read(.paid(txn: txn)) { $0.paid(txn: txn).map { ReceiptLine(json: J.parse($0)) } } ?? []
+    }
+
+    /// A receipt's items, while a screen holds them.
+    func items(_ receipt: String) -> [ItemLine] {
+        read(.items(receipt: receipt)) { $0.items(receipt: receipt).map { ItemLine(json: J.parse($0)) } } ?? []
+    }
 
     // MARK: the budget's buttons
 
@@ -259,10 +297,6 @@ final class Model: ObservableObject {
 
     // MARK: receipts
 
-    func hold(paid txn: Id) { bridge?.hold(paid: txn) }
-    func release(paid txn: Id) { bridge?.release(paid: txn) }
-    func hold(items receipt: String) { bridge?.hold(items: receipt) }
-    func release(items receipt: String) { bridge?.release(items: receipt) }
     /// A file's bytes, once the phone has them; asked for when it does not.
     func file(_ f: FileRef) -> Data? {
         if let d = snapshot.files[f.hash] { return d }

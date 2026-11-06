@@ -12,6 +12,8 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
+# The views an app holds (`views`), as `ark_peer::store` keys them.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Typed views for the phones (docs/plan-v5.md, Landed: typed views): the
@@ -21,6 +23,3 @@ ark-ffi = { path = "../../rust/ark-ffi", optional = true }
 
 [features]
 ffi = ["dep:uniffi", "dep:ark-ffi"]
-
-[dev-dependencies]
-ark-peer = { path = "../../rust/ark-peer", default-features = false }

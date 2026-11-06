@@ -71,6 +71,7 @@ pub mod local;
 pub mod migrate;
 pub mod observe;
 pub mod signed;
+pub mod store;
 pub mod watched;
 
 #[cfg(not(target_arch = "wasm32"))]

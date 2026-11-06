@@ -7,6 +7,8 @@
 // cleared balance? Yes locks it; no asks what the bank says and adjusts.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,14 +85,10 @@ fun RegisterScreen(ledger: Ledger, account: Id?, onBack: () -> Unit) {
     val shell = LocalShell.current
     val book = shell.book
     val acc = account?.let { ledger.account(it) }
-    DisposableEffect(account) {
-        book.holdRegister(account)
-        onDispose { book.releaseRegister(account) }
-    }
     var reconciling by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
-    val rows = ledger.register(account)
+    val rows = book.watched.watch(MoneyView.Register(account)) { book.session.register(account) }
 
     Page(
         title = if (account == null) "All Accounts" else acc?.name ?: "Account",

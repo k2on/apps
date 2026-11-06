@@ -7,7 +7,8 @@
 //! which ([`filters`]), and transfers made of
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
-//! per part. Who is signed in is `ark-auth`'s two tables and functions, and
+//! per part; every view an app opens, and what a page is made of
+//! ([`views`]). Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
 //! `money/ffi`). The demo's household is beside the app, not in it: `money/seed`.
@@ -41,6 +42,7 @@ pub mod stores;
 pub mod transactions;
 pub mod transfers;
 pub mod types;
+pub mod views;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -48,6 +50,7 @@ uniffi::setup_scaffolding!();
 pub use ark::row::Id;
 pub use schema::*;
 pub use types::*;
+pub use views::MoneyView;
 
 /// The bank importer's role: a server's Plaid importer holds it, and
 /// nobody else unless the server's configuration grants it. Only

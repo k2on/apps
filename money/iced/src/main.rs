@@ -708,14 +708,14 @@ impl App {
         // one in the form, else the cursor's); a receipt typed goes with the
         // transaction it was for.
         let open = self.receipt_txn();
-        if open != self.peer.txn.as_ref().map(|(t, _)| *t) {
+        if open != self.peer.txn() {
             self.paper = None;
         }
         self.peer.set_txn(open);
         self.load_photo();
         // An account is named in the bar, so a link to one waits for the
         // accounts to have arrived.
-        let ready = !self.peer.accounts.rows.is_empty();
+        let ready = !self.peer.accounts().is_empty();
         if let Some(page) = self.history.poll(ready).and_then(|p| self.page_of(&p)) {
             if page != self.page {
                 let _ = self.step(Message::Go(page));
@@ -772,8 +772,8 @@ impl App {
             Place::Accounts => Page::Ledger(Ledger::All),
             Place::Settings => Page::Settings,
             Place::Inbox => Page::Ledger(Ledger::Inbox),
-            Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts.rows.iter().find(|a| &a.name == name)?.id)),
-            Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters.rows.iter().find(|f| &f.name == name)?.id)),
+            Place::Account(name) => Page::Ledger(Ledger::Account(self.peer.accounts().iter().find(|a| &a.name == name)?.id)),
+            Place::Filter(name) => Page::Ledger(Ledger::Saved(self.peer.filters().iter().find(|f| &f.name == name)?.id)),
             Place::Filtered => Page::Ledger(Ledger::Adhoc),
         })
     }
@@ -943,7 +943,7 @@ impl App {
                 // The register's account, when it is one account's.
                 let account = self
                     .register_account()
-                    .or_else(|| self.peer.accounts.rows.iter().find(|a| a.on_budget && !a.closed).map(|a| a.id));
+                    .or_else(|| self.peer.accounts().iter().find(|a| a.on_budget && !a.closed).map(|a| a.id));
                 self.form = Some(TxnForm {
                     account,
                     date: self.today.clone(),
@@ -955,7 +955,7 @@ impl App {
                 if self.form.as_ref().is_some_and(|f| f.editing == Some(id)) {
                     return Task::none();
                 }
-                if let Some(t) = self.peer.register.rows.iter().find(|t| t.id == id) {
+                if let Some(t) = self.peer.register().iter().find(|t| t.id == id) {
                     let transfer_to = match t.transfer {
                         true => self.transfer_of(t.id),
                         false => None,
@@ -977,7 +977,7 @@ impl App {
                     });
                     // A split one opens on its lines.
                     self.peer.set_splits(Some(id));
-                    let lines = self.peer.splits.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+                    let lines = self.peer.splits().map(<[_]>::to_vec).unwrap_or_default();
                     if let (Some(f), false) = (&mut self.form, lines.is_empty()) {
                         f.split = Some(
                             lines
@@ -1248,7 +1248,7 @@ impl App {
             Message::Rename(named) => {
                 let name = match named {
                     Naming::Category(c) => self.peer.line(c).map(|l| l.name.clone()),
-                    Naming::Group(g) => self.peer.groups.rows.iter().find(|r| r.id == g).map(|r| r.name.clone()),
+                    Naming::Group(g) => self.peer.groups().iter().find(|r| r.id == g).map(|r| r.name.clone()),
                     Naming::Account(a) => self.peer.account(a).map(|a| a.name.clone()),
                     Naming::Filter(f) => self.peer.saved(f).map(|f| f.name.clone()),
                 };
@@ -1377,9 +1377,7 @@ impl App {
 
     #[cfg(any(feature = "demo", test))]
     fn demo_sync(&mut self) {
-        let owed = (self.peer.accounts.rows.iter())
-            .find(|a| a.bank == seed::BANK_NAME)
-            .map_or(0, |a| a.cleared);
+        let owed = (self.peer.accounts().iter()).find(|a| a.bank == seed::BANK_NAME).map_or(0, |a| a.cleared);
         let import = self.bank.next(&self.today, owed);
         let (n, u) = (import.upserts.len(), import.removed.len());
         if self.author("sync the bank", "import", &import) {
@@ -1401,15 +1399,13 @@ impl App {
     /// and the rows the cursor can be on: none when folded.
     pub fn shown(&self) -> Vec<Shown<'_>> {
         self.peer
-            .groups
-            .rows
+            .groups()
             .iter()
             .filter(|g| self.show_hidden || !g.hidden)
             .map(|g| {
                 let lines: Vec<&BudgetLine> = self
                     .peer
-                    .lines
-                    .rows
+                    .lines()
                     .iter()
                     .filter(|l| l.group_id == g.id && (self.show_hidden || !l.hidden))
                     .collect();
@@ -1795,14 +1791,14 @@ impl App {
     /// The register's cursor's row.
     fn txn_cursor(&self) -> Option<usize> {
         let at = self.txn_at?;
-        self.peer.register.rows.iter().position(|t| t.id == at)
+        self.peer.register().iter().position(|t| t.id == at)
     }
 
     /// The register's rows under the cursor, first to last: one, or from the
     /// visual selection's anchor to the cursor.
     pub fn txn_lit(&self) -> Option<(usize, usize)> {
         let at = self.txn_cursor()?;
-        let rows = &self.peer.register.rows;
+        let rows = self.peer.register();
         let from = self.txn_anchor.and_then(|a| rows.iter().position(|t| t.id == a)).unwrap_or(at);
         Some((from.min(at), from.max(at)))
     }
@@ -1810,7 +1806,7 @@ impl App {
     /// The transactions under the cursor.
     pub fn txn_selected(&self) -> Vec<Id<Txn>> {
         match self.txn_lit() {
-            Some((a, b)) => self.peer.register.rows[a..=b].iter().map(|t| t.id).collect(),
+            Some((a, b)) => self.peer.register()[a..=b].iter().map(|t| t.id).collect(),
             None => Vec::new(),
         }
     }
@@ -1822,8 +1818,7 @@ impl App {
     pub fn register_act(&mut self, action: vim::Action) -> Task<Message> {
         let rows: Vec<(Id<Txn>, bool, Cleared, String)> = self
             .peer
-            .register
-            .rows
+            .register()
             .iter()
             .map(|t| (t.id, t.approved, t.cleared, t.payee.clone()))
             .collect();
@@ -1894,10 +1889,10 @@ impl App {
 
     /// `/` and `n`/`N` in the register: the next payee with the search in it.
     fn find_txn(&mut self, delta: isize) -> Task<Message> {
-        let payees: Vec<String> = self.peer.register.rows.iter().map(|t| t.payee.clone()).collect();
+        let payees: Vec<String> = self.peer.register().iter().map(|t| t.payee.clone()).collect();
         match vim::find(&payees, &self.search, self.txn_cursor().unwrap_or(0), delta) {
             Some(i) => {
-                self.txn_at = Some(self.peer.register.rows[i].id);
+                self.txn_at = Some(self.peer.register()[i].id);
                 self.reveal_txn(i)
             }
             None => {
@@ -1924,7 +1919,7 @@ impl App {
         // The last row is followed by the page's padding, inside what
         // scrolls (`view::page_pad`): scrolled to it, the list goes to its
         // end, so the row stands clear of the window's foot.
-        let last = i + 1 >= self.peer.register.rows.len();
+        let last = i + 1 >= self.peer.register().len();
         let foot = if last { view::PAD } else { 0.0 };
         let seen = self.register_view();
         let y = if top < self.register_scroll {
@@ -1943,7 +1938,7 @@ impl App {
     /// dropdown's corner, under it. The register's columns are the ones
     /// `view_ledger` lays out, worked out for this window's width.
     fn category_at(&self, id: Id<Txn>) -> (Point, bool) {
-        let i = self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0);
+        let i = self.peer.register().iter().position(|t| t.id == id).unwrap_or(0);
         let above = if self.form.as_ref().is_some_and(|f| f.editing.is_none()) {
             view::TXN_ROW
         } else {
@@ -1955,7 +1950,7 @@ impl App {
     /// Where the form's category box is on screen: its list hangs under it.
     fn form_category_at(&self) -> (Point, bool) {
         let i = match self.form.as_ref().and_then(|f| f.editing) {
-            Some(id) => self.peer.register.rows.iter().position(|t| t.id == id).unwrap_or(0),
+            Some(id) => self.peer.register().iter().position(|t| t.id == id).unwrap_or(0),
             None => 0,
         };
         self.under(i as f32 * view::TXN_ROW + FORM_LINE)
@@ -2003,7 +1998,7 @@ impl App {
         let query = d.search.query.to_lowercase();
         let has = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
         if let Choosing::Payer(_) = &d.choosing {
-            let rows = self.peer.candidates.as_ref().map(|(_, w)| w.rows.clone()).unwrap_or_default();
+            let rows = self.peer.candidates().map(<[_]>::to_vec).unwrap_or_default();
             let txns = rows
                 .iter()
                 .map(|c| (format!("{} \u{2014} {}", c.payee, c.date), c))
@@ -2067,8 +2062,7 @@ impl App {
         if let (Choosing::Form, Some(f)) = (&d.choosing, &self.form) {
             let transfers = self
                 .peer
-                .accounts
-                .rows
+                .accounts()
                 .iter()
                 .filter(|a| !a.closed && Some(a.id) != f.account && has(&a.name))
                 .map(|a| item(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)))
@@ -2091,19 +2085,17 @@ impl App {
         }
         let moving = matches!(d.choosing, Choosing::Move { .. });
         let cards = money_domain::cards::card_group();
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
+        for g in self.peer.groups().iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
             let items = self
                 .peer
-                .lines
-                .rows
+                .lines()
                 .iter()
                 .filter(|l| l.group_id == g.id && !l.hidden)
                 .flat_map(|l| {
                     // The envelope, then its kinds, each named from it.
                     let kinds = self
                         .peer
-                        .tree
-                        .rows
+                        .tree()
                         .iter()
                         .filter(move |n| n.depth >= 2 && !n.hidden && n.path.starts_with(&format!("{} \u{203a} {} \u{203a} ", g.name, l.name)))
                         .filter_map(|n| self.peer.category_name(n.id).map(|name| (name, n.id)))
@@ -2161,7 +2153,7 @@ impl App {
             Choosing::Txns(ids) => {
                 let mut on = ids
                     .iter()
-                    .map(|id| self.peer.register.rows.iter().find(|t| t.id == *id).map(|t| t.account_id));
+                    .map(|id| self.peer.register().iter().find(|t| t.id == *id).map(|t| t.account_id));
                 let first = on.next()??;
                 if !on.all(|a| a == Some(first)) {
                     return None;
@@ -2191,13 +2183,13 @@ impl App {
                 None => Task::none(),
             },
             (Pane::Page, Page::Ledger(_)) => {
-                let Some(i) = self.txn_at.and_then(|id| self.peer.register.rows.iter().position(|t| t.id == id)) else {
+                let Some(i) = self.txn_at.and_then(|id| self.peer.register().iter().position(|t| t.id == id)) else {
                     return Task::none();
                 };
                 // The register's rows are one height, and a new
                 // transaction's form one more above them.
                 let above = usize::from(self.form.as_ref().is_some_and(|f| f.editing.is_none()));
-                let rows = self.peer.register.rows.len() + above;
+                let rows = self.peer.register().len() + above;
                 let content = rows as f32 * view::TXN_ROW;
                 match arkui::scroll::offset_for(i + above, rows, self.register_view(), content, self.register_scroll, place) {
                     Some(y) => {
@@ -2239,9 +2231,9 @@ impl App {
 
     /// The other account of a transfer.
     fn transfer_of(&self, id: Id<Txn>) -> Option<Id<Account>> {
-        let t = self.peer.register.rows.iter().find(|t| t.id == id)?;
+        let t = self.peer.register().iter().find(|t| t.id == id)?;
         let name = t.payee.strip_prefix("Transfer : ")?;
-        self.peer.accounts.rows.iter().find(|a| a.name == name).map(|a| a.id)
+        self.peer.accounts().iter().find(|a| a.name == name).map(|a| a.id)
     }
 
     fn reconcile(&mut self, account: Id<Account>, balance: i64) {
@@ -2418,8 +2410,8 @@ impl App {
     /// form says. A split whose amount moves is unsplit first, as the
     /// domain keeps a split's amount to its lines.
     fn save_split(&mut self, id: Id<Txn>, f: &TxnForm, lines: Vec<SplitPart>, whole: i64) {
-        let was = self.peer.register.rows.iter().find(|t| t.id == id).map(|t| t.amount);
-        if was != Some(whole) && self.peer.splits.as_ref().is_some_and(|(_, w)| !w.rows.is_empty()) {
+        let was = self.peer.register().iter().find(|t| t.id == id).map(|t| t.amount);
+        if was != Some(whole) && self.peer.splits().is_some_and(|w| !w.is_empty()) {
             self.author("unsplit it", "split", &SplitTxn { id, lines: vec![] });
         }
         let e = EditTransaction {

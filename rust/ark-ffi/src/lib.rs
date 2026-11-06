@@ -34,7 +34,9 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
+pub mod session;
 pub mod typed;
+pub use session::{Hold, Session};
 pub use typed::{Op, RowId, Taken, Twin, Typed};
 
 /// Why something was not done, as a sentence: what a form shows.
@@ -198,6 +200,8 @@ struct Kept {
 struct State {
     peer: ark_peer::Peer,
     views: BTreeMap<u64, Kept>,
+    /// Each app's store of its views ([`Session`]), by number.
+    stores: BTreeMap<u64, Box<dyn session::Attached>>,
     next: u64,
     /// Until when the driver wakes often: a live call's relay is due.
     hurry: u64,
@@ -222,6 +226,9 @@ impl State {
                 Update::Reset => k.update = Update::Reset,
             }
             moved = true;
+        }
+        for a in self.stores.values_mut() {
+            moved |= a.settle(&mut self.peer);
         }
         let replies = self.peer.replies_waiting();
         moved |= replies > self.replies;
@@ -272,6 +279,7 @@ impl Shared {
         if let Some(l) = l {
             l.changed();
         }
+        self.tell_sessions();
     }
 
     /// How long the driver may sleep: until the next dial, a relay's
@@ -372,6 +380,7 @@ impl Peer {
         let state = State {
             peer,
             views: BTreeMap::new(),
+            stores: BTreeMap::new(),
             next: 0,
             hurry: 0,
             denied: None,

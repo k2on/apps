@@ -72,8 +72,7 @@ struct RegisterView: View {
         .searchable(text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.selection, trigger: cleared)
-        .onAppear { model.hold(register: account) }
-        .onDisappear { model.release(register: account) }
+        .holding(MoneyView.register(account: account))
         .toolbar {
             if let a {
                 ToolbarItem(placement: .topBarTrailing) {

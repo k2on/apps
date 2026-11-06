@@ -50,10 +50,10 @@ class RulesTests {
     private fun ruled(): Pair<BudgetLine, Long> {
         book.holdRegister(null)
         val onBudget = l.accounts.filter { it.onBudget }.map { it.id }.toSet()
-        val pay = l.register(null).first { it.categoryId == Book.READY_TO_ASSIGN && it.amount > 0 && !it.transfer && it.date.startsWith(l.month) }
+        val pay = book.register(null).first { it.categoryId == Book.READY_TO_ASSIGN && it.amount > 0 && !it.transfer && it.date.startsWith(l.month) }
         val text = pay.payee.lowercase()
         val matched =
-            l.register(null)
+            book.register(null)
                 .filter { t ->
                     t.amount > 0 && !t.transfer && t.date.startsWith(l.month) && t.accountId in onBudget &&
                         (t.payee.lowercase().contains(text) || t.importedPayee.lowercase().contains(text))

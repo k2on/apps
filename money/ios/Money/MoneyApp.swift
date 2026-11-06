@@ -13,6 +13,8 @@ import SwiftUI
 @main
 struct MoneyApp: App {
     @StateObject private var model: Model
+    /// The views the screens hold (`.holding`), told what moved by the model.
+    @State private var watched: Watched<MoneyView>
     @Environment(\.scenePhase) private var phase
     @State private var wasAway = false
 
@@ -22,13 +24,18 @@ struct MoneyApp: App {
         // Money written as every client writes it, in the phone's locale.
         Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        _model = StateObject(wrappedValue: Model(shelf: DefaultsShelf(), root: support))
+        let model = Model(shelf: DefaultsShelf(), root: support)
+        let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
+        model.onMoved = { [weak watched] views in watched?.moved(views) }
+        _model = StateObject(wrappedValue: model)
+        _watched = State(initialValue: watched)
     }
 
     var body: some Scene {
         WindowGroup {
             Root()
                 .environmentObject(model)
+                .environment(watched)
                 .tint(Color.accent)
                 // The derived square in the green (ArkUI's are neutral).
                 .environment(\.squares, .green)

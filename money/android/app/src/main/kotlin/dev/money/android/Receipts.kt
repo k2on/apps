@@ -7,6 +7,8 @@
 // (a reading put right), shown as its photo, or taken off.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -52,7 +54,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -137,7 +138,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
             val photo = ledger.photoOf(r.id)
             ReceiptPaper(ledger, r, photo)
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(vertical = Space.s)) {
-                TextButton(onClick = { typing = ReceiptDraft.of(r, ledger.items[r.id].orEmpty(), txn) }) { Text("Edit") }
+                TextButton(onClick = { typing = ReceiptDraft.of(r, book.itemsOf(r.id), txn) }) { Text("Edit") }
                 if (photo != null) TextButton(onClick = { showing = photo.file }) { Text("Photo") }
                 if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take Off") }
             }
@@ -195,11 +196,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
 fun ReceiptPaper(ledger: Ledger, r: ReceiptLine, photo: PhotoLine?) {
     val book = LocalShell.current.book
     val a = LocalAmounts.current
-    DisposableEffect(r.id) {
-        book.holdItems(r.id)
-        onDispose { book.releaseItems(r.id) }
-    }
-    val items = ledger.items[r.id].orEmpty()
+    val items = book.watched.watch(MoneyView.Items(r.id)) { book.itemsOf(r.id) }
     Column {
         when (photo?.state) {
             "check" -> Banner("Check this: what was read doesn't add up to the total", MaterialTheme.colorScheme.errorContainer)

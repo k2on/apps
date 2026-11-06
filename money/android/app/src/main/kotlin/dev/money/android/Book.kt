@@ -3,18 +3,20 @@
 // demo's household — kept in step with it, and every change the screens
 // make, as one of the domain's functions.
 //
-// **Everything that touches the views runs on one thread** (`run`): the
-// first read, every splice, every mutation and the read after it. The peer
-// says when anything moved (its listener, on a thread of the kernel's); a
-// drain then runs there once, asks each view what it did, splices the
-// patches into the lists it holds, and publishes one [Ledger] — an
-// immutable snapshot the screens draw from (`state`, a StateFlow). A peer
-// at rest runs nothing: there is no clock here.
+// **The views are the core's** (`Session`, money/ffi): it holds each one by
+// count, keeps its rows spliced on the kernel's thread, says which moved
+// (`Changed`), and a page is what the domain says it is made of — the
+// budget for a month is its lines, summary and spending. The book holds
+// what every screen draws from as long as it is open, and the month's
+// budget for the month on screen; a screen holds the rest while it shows
+// them (`watched.watch(view) { read }`, arkui's): a register, a receipt's
+// items.
 //
-// **The lists are spliced, not re-read**, as harken's are: each view is read
-// once and then asked what it did (`Held`). The month's three views are
-// opened again for another month; a register is held while a screen shows
-// it and let go after the last one leaves.
+// **Everything else runs on one thread** (`run`): every mutation, and the
+// drain after it or after the core said something moved, which reads again
+// the views whose version moved and publishes one [Ledger] — an immutable
+// snapshot the screens draw from (`state`, a StateFlow). A peer at rest
+// runs nothing: there is no clock here.
 //
 // **A refusal is said, not thrown.** The domain's own sentence for why a
 // change was not taken — refused here, or by the server later — is a note
@@ -23,18 +25,15 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
+import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Update
-import dev.arkdb.ffi.View
-import dev.arkdb.ffi.splice
 import dev.money.android.gen.AddCategory
 import dev.money.android.gen.AddPhoto
 import dev.money.android.gen.FileRef
 import dev.money.android.gen.ItemLine
 import dev.money.android.gen.MatchReceipt
-import dev.money.android.gen.OneReceipt
 import dev.money.android.gen.PhotoLine
 import dev.money.android.gen.ReceiptLine
 import dev.money.android.gen.WriteReceipt
@@ -51,19 +50,21 @@ import dev.money.android.gen.HideCategory
 import dev.money.android.gen.IgnoreLinked
 import dev.money.android.gen.LinkAccount
 import dev.money.android.gen.Money
-import dev.money.android.gen.Month
 import dev.money.android.gen.MoveCategory
 import dev.money.android.gen.MoveGroup
 import dev.money.android.gen.MoveMoney
 import dev.money.android.gen.OpenLinked
 import dev.money.android.gen.OpenAccount
 import dev.money.android.gen.Reconcile
-import dev.money.android.gen.Register
 import dev.money.android.gen.RenameCategory
 import dev.money.android.gen.SetCleared
 import dev.money.android.gen.SetTarget
 import dev.money.android.gen.Txns
+import dev.money.ffi.Changed
 import dev.money.ffi.DemoBank
+import dev.money.ffi.Holding
+import dev.money.ffi.MoneyView
+import dev.money.ffi.Session
 import dev.money.ffi.moneyAddMonths
 import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
@@ -90,6 +91,7 @@ import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
 import uniffi.money_domain.TxnLine
 import dev.arkui.Feedback
+import dev.arkui.Watched
 import kotlinx.coroutines.flow.update
 
 /** What the hand last felt of the book's changes, and how many there have been (`Book.felt`). */
@@ -114,8 +116,6 @@ data class Ledger(
     val groups: List<GroupLine> = emptyList(),
     val accounts: List<AccountLine> = emptyList(),
     val inbox: List<TxnLine> = emptyList(),
-    /** Each held register by [key]. */
-    val registers: Map<String, List<TxnLine>> = emptyMap(),
     val payees: List<PayeeLine> = emptyList(),
     val spending: List<SpendingLine> = emptyList(),
     val banks: List<BankLine> = emptyList(),
@@ -140,14 +140,10 @@ data class Ledger(
     val photos: List<PhotoLine> = emptyList(),
     /** Every receipt, the newest first. */
     val receipts: List<ReceiptLine> = emptyList(),
-    /** The items of each receipt a screen holds, by its id. */
-    val items: Map<String, List<ItemLine>> = emptyMap(),
 ) {
     fun line(category: Id): BudgetLine? = lines.firstOrNull { it.categoryId == category }
 
     fun account(id: Id): AccountLine? = accounts.firstOrNull { it.id == id }
-
-    fun register(account: Id?): List<TxnLine> = registers[key(account)] ?: emptyList()
 
     /**
      * The receipts that paid for `txn` (`receipt` the one its line names) — whole, or by one of their
@@ -193,32 +189,7 @@ data class Ledger(
          * and changes as the cards do — never renamed, deleted, moved out, or a transaction's category.
          */
         fun isPayment(l: BudgetLine): Boolean = l.card != null || l.groupId == Book.CARD_GROUP
-
-        /** A register's key: an account's id, or `all`. */
-        fun key(account: Id?): String = account?.hex ?: "all"
     }
-}
-
-/** A view read once and then spliced: the rows a screen holds. */
-private class Held<T>(private val view: View<T>) : AutoCloseable {
-    val rows: ArrayList<T> = ArrayList(view.rows())
-
-    /** What the view did since, spliced in; whether anything moved. */
-    fun settle(): Boolean =
-        when (val u = view.take()) {
-            is Update.Unchanged -> false
-            is Update.Patched -> {
-                rows.splice(u.changes)
-                true
-            }
-            is Update.Reset -> {
-                rows.clear()
-                rows.addAll(u.rows)
-                true
-            }
-        }
-
-    override fun close() = view.close()
 }
 
 /** A transaction being entered or corrected: what the form holds. */
@@ -259,6 +230,12 @@ private constructor(
     /** The domain's functions, typed. */
     val money: Money = Money(peer)
 
+    /** The views, held and kept by the core. */
+    val session: Session = Session(peer)
+
+    /** The views as a screen holds them while it shows them (arkui's `watch`). */
+    val watched: Watched<MoneyView> = Watched({ session.hold(it) })
+
     private val bank: DemoBank? = if (demo) DemoBank() else null
     private val _state = MutableStateFlow(Ledger(today = today, month = today.take(7), demo = demo, server = server))
     private val _notes = MutableSharedFlow<String>(extraBufferCapacity = 16)
@@ -293,20 +270,12 @@ private constructor(
 
     // Held on `run`'s thread only.
     private var month: String = today.take(7)
-    private var accounts: Held<AccountLine>? = null
-    private var groups: Held<GroupLine>? = null
-    private var lines: Held<BudgetLine>? = null
-    private var summary: Held<Summary>? = null
-    private var spending: Held<SpendingLine>? = null
-    private var inbox: Held<TxnLine>? = null
-    private var payees: Held<PayeeLine>? = null
-    private var banks: Held<BankLine>? = null
-    private var linked: Held<LinkedLine>? = null
-    private var asks: Held<AskLine>? = null
-    private var photos: Held<PhotoLine>? = null
-    private var receipts: Held<ReceiptLine>? = null
-    private val items = HashMap<String, Pair<Held<ItemLine>, Int>>()
-    private val registers = HashMap<String, Pair<Held<TxnLine>, Int>>()
+    /** What every screen draws from, held while the book is open. */
+    private val always = ArrayList<Holding>()
+    /** The month on screen's budget. */
+    private var budget: Holding? = null
+    /** Each view's version when it was last read into the ledger. */
+    private val seen = HashMap<MoneyView, ULong>()
     private var syncing = false
 
     /**
@@ -318,31 +287,28 @@ private constructor(
     private class Awaiting(val after: Id?)
 
     private fun start() {
-        accounts = Held(money.accounts())
-        groups = Held(money.groups())
-        openMonth()
-        inbox = Held(money.inbox())
-        payees = Held(money.payees())
-        banks = Held(money.banks())
-        linked = Held(money.linked())
-        asks = Held(money.asks())
-        photos = Held(money.photos())
-        receipts = Held(money.receipts())
+        for (v in ALWAYS) always.add(session.hold(v))
+        budget = session.hold(MoneyView.Budget(month))
         if (listen) {
             peer.setListener(
                 object : Listener {
                     override fun changed() = drainSoon()
                 })
+            session.setListener(
+                object : Changed {
+                    override fun moved(views: List<MoneyView>) {
+                        watched.moved(views)
+                        drainSoon()
+                    }
+                })
         }
         drain()
     }
 
-    private fun openMonth() {
-        listOf(lines, summary, spending).forEach { it?.close() }
-        val m = Month(month)
-        lines = Held(money.month(m))
-        summary = Held(money.summary(m))
-        spending = Held(money.spending(m))
+    private fun showBudget() {
+        val was = budget
+        budget = session.hold(MoneyView.Budget(month))
+        was?.close()
     }
 
     private fun post(f: () -> Unit) {
@@ -367,16 +333,17 @@ private constructor(
         }
     }
 
-    // On `run`'s thread: every view settled, the server's refusals said, one Ledger published.
+    // On `run`'s thread: what moved read again, the server's refusals said, one Ledger published.
     private fun drain() {
         draining.set(false)
         if (closed) return
-        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
-        for ((h, _) in items.values) h.settle()
-        for ((h, _) in registers.values) h.settle()
         for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
+        val was = _state.value
+        val b = MoneyView.Budget(month)
+        val got = if (fresh(b) || was.month != month) session.budget(month) else null
+        val asks = if (fresh(MoneyView.Asks)) session.asks() else was.asks
         awaiting?.let { w ->
-            when (val f = follow(asks?.rows.orEmpty(), w.after)) {
+            when (val f = follow(asks, w.after)) {
                 is Follow.Open -> {
                     awaiting = null
                     browse(f.url)
@@ -393,17 +360,16 @@ private constructor(
             Ledger(
                 today = today,
                 month = month,
-                summary = summary?.rows?.firstOrNull(),
-                lines = lines?.rows?.toList().orEmpty(),
-                groups = groups?.rows?.toList().orEmpty(),
-                accounts = accounts?.rows?.toList().orEmpty(),
-                inbox = inbox?.rows?.toList().orEmpty(),
-                registers = registers.mapValues { it.value.first.rows.toList() },
-                payees = payees?.rows?.toList().orEmpty(),
-                spending = spending?.rows?.toList().orEmpty(),
-                banks = banks?.rows?.toList().orEmpty(),
-                linked = linked?.rows?.toList().orEmpty(),
-                asks = asks?.rows?.toList().orEmpty(),
+                summary = if (got != null) got.summary else was.summary,
+                lines = got?.lines ?: was.lines,
+                groups = if (fresh(MoneyView.Groups)) session.groups() else was.groups,
+                accounts = if (fresh(MoneyView.Accounts)) session.accounts() else was.accounts,
+                inbox = if (fresh(MoneyView.Inbox)) session.inbox() else was.inbox,
+                payees = if (fresh(MoneyView.Payees)) session.payees() else was.payees,
+                spending = got?.spending ?: was.spending,
+                banks = if (fresh(MoneyView.Banks)) session.banks() else was.banks,
+                linked = if (fresh(MoneyView.Linked)) session.linked() else was.linked,
+                asks = asks,
                 link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
                 picture = signed?.let { Faces.url(server, it.user, it.picture) }.orEmpty(),
@@ -412,10 +378,15 @@ private constructor(
                 syncing = syncing,
                 ready = true,
                 denied = s.denied,
-                photos = photos?.rows?.toList().orEmpty(),
-                receipts = receipts?.rows?.toList().orEmpty(),
-                items = items.mapValues { it.value.first.rows.toList() },
+                photos = if (fresh(MoneyView.Photos)) session.photos().map { PhotoLine.of(J.parse(it)) } else was.photos,
+                receipts = if (fresh(MoneyView.Receipts)) session.receipts().map { ReceiptLine.of(J.parse(it)) } else was.receipts,
             )
+    }
+
+    // Whether `v` moved since it was last read here; it counts as read from now.
+    private fun fresh(v: MoneyView): Boolean {
+        val now = session.version(v)
+        return seen.put(v, now) != now
     }
 
     /** A sentence for the snackbar, from a screen. */
@@ -449,14 +420,14 @@ private constructor(
     fun showMonth(m: String) = post {
         if (m != month) {
             month = m
-            openMonth()
+            showBudget()
         }
     }
 
     /** `n` months later (or earlier); zero is this month. */
     fun stepMonth(n: Int) = post {
         month = if (n == 0) today.take(7) else moneyAddMonths(month, n.toLong())
-        openMonth()
+        showBudget()
     }
 
     fun assign(category: Id, amount: Long) =
@@ -472,7 +443,7 @@ private constructor(
 
     /** An overspent category made whole from `from` (none: Ready to Assign). */
     fun cover(category: Id, from: Id?) = post {
-        val short = -(lines?.rows?.firstOrNull { it.categoryId == category }?.available ?: 0)
+        val short = -(session.budget(month).lines.firstOrNull { it.categoryId == category }?.available ?: 0)
         if (short <= 0) return@post
         try {
             money.moveMoney(MoveMoney(month, from, category, short))
@@ -486,7 +457,7 @@ private constructor(
      * Ready to Assign, as the desktop's "Assign $X to cover the debt" does.
      */
     fun coverCard(category: Id) = post {
-        val l = lines?.rows?.firstOrNull { it.categoryId == category } ?: return@post
+        val l = session.budget(month).lines.firstOrNull { it.categoryId == category } ?: return@post
         if (l.underfunded <= 0) return@post
         try {
             money.assign(Assign(month, category, l.assigned + l.underfunded))
@@ -595,7 +566,7 @@ private constructor(
     // An ask whose answer is a page to open: the newest ask before it kept, so the drain knows its answer.
     private fun askPage(what: String, f: (Money) -> Unit) = post {
         if (demo) return@post say("The demo has no server to connect a bank through")
-        val after = asks?.rows?.firstOrNull()?.id
+        val after = session.asks().firstOrNull()?.id
         try {
             f(money)
             awaiting = Awaiting(after)
@@ -642,38 +613,10 @@ private constructor(
         }
     }
 
-    /** Hold `account`'s register (none: every account's) while a screen shows it. */
-    fun holdRegister(account: Id?) = post {
-        val k = Ledger.key(account)
-        val had = registers[k]
-        registers[k] =
-            if (had != null) had.first to had.second + 1 else Held(money.register(Register(account))) to 1
-    }
-
-    fun releaseRegister(account: Id?) = post {
-        val k = Ledger.key(account)
-        val had = registers[k] ?: return@post
-        if (had.second <= 1) {
-            registers.remove(k)
-            had.first.close()
-        } else registers[k] = had.first to had.second - 1
-    }
-
     // * Receipts
 
-    /** Hold a receipt's items while a screen shows it. */
-    fun holdItems(receipt: String) = post {
-        val had = items[receipt]
-        items[receipt] = if (had != null) had.first to had.second + 1 else Held(money.receiptItems(OneReceipt(receipt))) to 1
-    }
-
-    fun releaseItems(receipt: String) = post {
-        val had = items[receipt] ?: return@post
-        if (had.second <= 1) {
-            items.remove(receipt)
-            had.first.close()
-        } else items[receipt] = had.first to had.second - 1
-    }
+    /** A receipt's items, as far as a screen holds them (`MoneyView.Items`). */
+    fun itemsOf(receipt: String): List<ItemLine> = session.items(receipt).map { ItemLine.of(J.parse(it)) }
 
     /**
      * A photo of a receipt, for `txn` when it was taken for one: kept on this phone at once, sent to the
@@ -715,11 +658,12 @@ private constructor(
         val shut = {
             closed = true
             peer.setListener(null)
-            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.close()
-            for ((h, _) in items.values) h.close()
-            items.clear()
-            for ((h, _) in registers.values) h.close()
-            registers.clear()
+            session.setListener(null)
+            for (h in always) h.close()
+            always.clear()
+            budget?.close()
+            budget = null
+            session.close()
             peer.close()
         }
         try {
@@ -731,6 +675,20 @@ private constructor(
     }
 
     companion object {
+        /** What every screen draws from: held as long as the book is open. */
+        private val ALWAYS =
+            listOf(
+                MoneyView.Accounts,
+                MoneyView.Groups,
+                MoneyView.Inbox,
+                MoneyView.Payees,
+                MoneyView.Banks,
+                MoneyView.Linked,
+                MoneyView.Asks,
+                MoneyView.Photos,
+                MoneyView.Receipts,
+            )
+
         /** The budget's own category, where money that comes in goes: the same id on every peer. */
         val READY_TO_ASSIGN: Id = Id(fixed("ready to assign"))
 

@@ -11097,6 +11097,11 @@ rec {
             optional = true;
           }
           {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -11110,13 +11115,6 @@ rec {
             name = "uniffi";
             packageId = "uniffi";
             optional = true;
-            usesDefaultFeatures = false;
-          }
-        ];
-        devDependencies = [
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
             usesDefaultFeatures = false;
           }
         ];

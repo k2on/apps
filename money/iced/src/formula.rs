@@ -132,15 +132,14 @@ impl App {
 
     /// The saved filters, for a term to sum, in a menu at the pointer.
     fn pick_filter(&mut self, i: usize) {
-        if self.peer.filters.rows.is_empty() {
+        if self.peer.filters().is_empty() {
             self.note = "no filters yet: open a register, set its conditions, and Save as filter\u{2026}".into();
             return;
         }
         let chosen = self.formula.terms.get(i).and_then(|t| t.filter);
         let entries = self
             .peer
-            .filters
-            .rows
+            .filters()
             .iter()
             .map(|f| {
                 let glyph = if chosen == Some(f.id) { glyphs::TICKED } else { glyphs::SEARCH };
@@ -226,7 +225,7 @@ impl App {
             Some(f) => dim(format!("{} \u{2014} since {}.", f.text, format::month(&f.from)), 11),
             None => dim("Each month, what saved filters add up to, times a factor: like a spreadsheet's cell.", 11),
         });
-        let preview = self.peer.preview.as_ref().and_then(|p| p.rows.first());
+        let preview = self.peer.preview();
         for (i, t) in self.formula.terms.iter().enumerate() {
             let name = t
                 .filter

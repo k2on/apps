@@ -22,14 +22,29 @@ final class Seen {
     var notices = [String]()
     var failures = [String]()
     var bridge: Bridge!
+    /// The session's views, as a screen holds them.
+    var session: Session?
+    /// What the test holds, as a screen showing it would.
+    var held = [MoneyView: Holding]()
 
     init(month: String = Fx.month) {
         bridge = Bridge(.demo(today: Fx.today), month: month, deliver: { $0() },
                         publish: { [unowned self] s in self.snap = s },
                         notice: { [unowned self] n in self.notices.append(n) },
                         denied: { _ in },
-                        failed: { [unowned self] w in self.failures.append(w) })
+                        failed: { [unowned self] w in self.failures.append(w) },
+                        opened: { [unowned self] s in self.session = s })
         bridge.settle()
+    }
+
+    /// `v` held, as a screen showing it holds it; let go with `release`.
+    func hold(_ v: MoneyView) { held[v] = session?.hold(view: v) }
+    func release(_ v: MoneyView) { held[v] = nil }
+
+    /// `account`'s register while it is held; none when nothing holds it.
+    func register(_ account: Id?) -> [TxnLine]? {
+        guard let s = session, s.version(view: .register(account: account)) > 0 else { return nil }
+        return s.register(account: account)
     }
 
     /// A line of the month, by its category's name.

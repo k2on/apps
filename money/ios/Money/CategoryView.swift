@@ -159,8 +159,7 @@ struct CategoryView: View {
         .navigationTitle(l.name)
         .navigationSubtitle(l.group)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { AddTransactionButton() } }
-        .onAppear { model.hold(register: nil) }
-        .onDisappear { model.release(register: nil) }
+        .holding(MoneyView.register(account: nil))
         .sensoryFeedback(.success, trigger: assigned)
         .alert("Rename Category", isPresented: $renaming) {
             TextField("Name", text: $typed)
@@ -270,8 +269,7 @@ struct CategoryView: View {
         .navigationTitle(l.name)
         .navigationSubtitle(l.group)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { AddTransactionButton(account: l.card) } }
-        .onAppear { model.hold(register: nil) }
-        .onDisappear { model.release(register: nil) }
+        .holding(MoneyView.register(account: nil))
         .sensoryFeedback(.success, trigger: assigned)
     }
 

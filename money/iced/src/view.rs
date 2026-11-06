@@ -301,7 +301,7 @@ impl App {
             ("Closed", |a| a.closed),
         ];
         let accounts = sections.into_iter().flat_map(|(name, keep)| {
-            self.peer.accounts.rows.iter().filter(move |a| keep(a)).map(move |a| {
+            self.peer.accounts().iter().filter(move |a| keep(a)).map(move |a| {
                 let label = match a.mask.is_empty() {
                     true => a.name.clone(),
                     false => format!("{} \u{2022}\u{2022}{}", a.name, a.mask),
@@ -312,8 +312,7 @@ impl App {
         // The saved filters, after the accounts: registers like theirs.
         let saved = self
             .peer
-            .filters
-            .rows
+            .filters()
             .iter()
             .map(|f| (glyphs::SEARCH, f.name.clone(), Some("Filters"), Page::Ledger(Ledger::Saved(f.id))));
         pages.into_iter().chain(accounts).chain(saved).collect()
@@ -337,7 +336,7 @@ impl App {
     fn view_sidebar(&self) -> Element<'_, Message> {
         let cursor = self.sidebar_at();
         let focused = self.pane == Pane::Sidebar && self.keys_free();
-        let inbox = self.peer.inbox.rows.len();
+        let inbox = self.peer.inbox().len();
         let items = self
             .places()
             .into_iter()
@@ -386,7 +385,7 @@ impl App {
         .style(look::ready(s.ready_to_assign));
 
         let mut notices = row![].spacing(14).align_y(Alignment::Center);
-        let inbox = self.peer.inbox.rows.len();
+        let inbox = self.peer.inbox().len();
         if inbox > 0 {
             notices = notices.push(link(
                 format!(
@@ -699,7 +698,7 @@ impl App {
 
     fn inspect_month(&self) -> Column<'_, Message> {
         let s = self.peer.summary();
-        let lines = &self.peer.lines.rows;
+        let lines = self.peer.lines();
         let carried: i64 = lines.iter().map(|l| l.carried).sum();
         let name = format::month(&self.peer.month);
         let summary = container(
@@ -859,7 +858,7 @@ impl App {
             ),
         ]
         .spacing(6);
-        for n in self.peer.tree.rows.iter().filter(|n| n.depth >= 2 && self.is_under(n, l.category_id)) {
+        for n in self.peer.tree().iter().filter(|n| n.depth >= 2 && self.is_under(n, l.category_id)) {
             let indent = 12.0 * (n.depth - 2) as f32;
             kinds = kinds.push(row![Space::new().width(Length::Fixed(indent)), text(n.name.clone()).size(12)]);
         }
@@ -972,7 +971,7 @@ impl App {
     /// household's tools on every account's, the bar of its conditions,
     /// and its transactions.
     fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
-        let rows = &self.peer.register.rows;
+        let rows = self.peer.register();
         let account = self.register_account().and_then(|a| self.peer.account(a));
         // The account column, unless every row is one account's.
         let all = account.is_none();
@@ -1023,7 +1022,7 @@ impl App {
                 let n = self.banks_wanting();
                 tools = tools.push(quiet(&format!("Banks need a look ({n})"), Message::Go(Page::Settings)));
             }
-            if !self.peer.banks.rows.is_empty() {
+            if !self.peer.banks().is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
         }
@@ -1271,7 +1270,7 @@ impl App {
         let mut under = row![].spacing(10).align_y(Alignment::Center);
         if f.editing.is_none() && all {
             under = under.push(dim("Into", 12));
-            for a in self.peer.accounts.rows.iter().filter(|a| !a.closed) {
+            for a in self.peer.accounts().iter().filter(|a| !a.closed) {
                 under = under.push(
                     button(text(a.name.clone()).size(12))
                         .on_press(Message::FormAccount(a.id))
@@ -1409,7 +1408,7 @@ impl App {
 
     fn view_reflect(&self) -> Element<'_, Message> {
         let s = self.peer.summary();
-        let spending = &self.peer.spending.rows;
+        let spending = self.peer.spending();
         let total: i64 = spending.iter().map(|g| g.spent).sum();
         let most = spending.first().map_or(1, |g| g.spent.max(1));
         let mut bars = column![].spacing(10);
@@ -1447,7 +1446,7 @@ impl App {
         .spacing(12);
         // Paying a card is not spending (what it bought was), so it is not
         // in the bars; what the cards owe beyond what is set aside is.
-        let cards: Vec<&BudgetLine> = self.peer.lines.rows.iter().filter(|l| l.card.is_some()).collect();
+        let cards: Vec<&BudgetLine> = self.peer.lines().iter().filter(|l| l.card.is_some()).collect();
         if !cards.is_empty() {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
             tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
@@ -1625,7 +1624,7 @@ impl App {
         if let (Choosing::Form, Some(f)) = (choosing, &self.form) {
             if f.editing.is_none() {
                 list = list.push(container(text("Transfer to").size(10).style(style::faint(0.5))).padding([6, 10]));
-                for a in self.peer.accounts.rows.iter().filter(|a| !a.closed && Some(a.id) != f.account) {
+                for a in self.peer.accounts().iter().filter(|a| !a.closed && Some(a.id) != f.account) {
                     list = list.push(option(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)));
                 }
             }
@@ -1636,12 +1635,11 @@ impl App {
         };
         list = list.push(container(text("Inflow").size(10).style(style::faint(0.5))).padding([6, 10]));
         list = list.push(option("Ready to Assign".into(), Some(self.peer.summary().ready_to_assign), rta));
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
+        for g in self.peer.groups().iter().filter(|g| !g.hidden) {
             list = list.push(container(text(g.name.clone()).size(10).style(style::faint(0.5))).padding([6, 10]));
             for l in self
                 .peer
-                .lines
-                .rows
+                .lines()
                 .iter()
                 .filter(|l| l.group_id == g.id && !l.hidden && Some(l.category_id) != skip)
             {
