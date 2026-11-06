@@ -82,10 +82,15 @@ import dev.arkui.AccountSheet
 import dev.arkui.ArkGlyphs
 import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
+import dev.arkui.Links
+import dev.arkui.Navigator
+import dev.arkui.RouteArg
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
+import uniffi.money_domain.Route
 import uniffi.money_domain.TxnLine
+import uniffi.money_domain.routeFromPath
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector) {
@@ -143,7 +148,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
                 onEdit = { t -> form = formOf(t, book.state.value) },
-                onAccount = { id -> nav.navigate("register/${id?.hex ?: ALL}") },
+                onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.name) } ?: Route.Accounts)) },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
@@ -151,6 +156,20 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 addDevice = addDevice,
             )
         }
+
+    // A link the app was opened with (`money://account/Checking`): its route, navigated to. The
+    // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
+    Links("money") { link ->
+        Navigator(nav, ::destination).handle(link, "money", ::routeFromPath) { r ->
+            when (r) {
+                is Route.Join -> true
+                is Route.Budget, is Route.Category -> true.also { nav.go(Tab.Budget) }
+                is Route.Reflect -> true.also { nav.go(Tab.Insights) }
+                is Route.Inbox -> true.also { nav.go(Tab.Activity) }
+                else -> false
+            }
+        }
+    }
 
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -198,9 +217,10 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 composable(Tab.Accounts.route) { AccountsScreen(ledger) }
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
-                composable("register/{account}") { e ->
-                    val hex = e.arguments?.getString("account").orEmpty()
-                    val id = if (hex == ALL) null else Id(hex)
+                composable("register/{arg}") { e ->
+                    // The route names the account; one that is gone is the route's fallback, All Accounts.
+                    val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
+                    val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { it.name == a.name }?.id }
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
                 composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
@@ -245,8 +265,19 @@ private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
     }
 }
 
-/** The register route's account for All Accounts: every account's transactions. */
-private const val ALL = "all"
+/** Where the back stack goes for a register's route: an account's, or All Accounts. */
+private fun register(route: Route): String = "register/" + RouteArg.of(route.path())
+
+/**
+ * Where the back stack goes for a route this phone pushes: a register (a saved filter's is every
+ * account's here), or Settings, which is where the banks are.
+ */
+private fun destination(route: Route): String =
+    when (route) {
+        is Route.Settings, is Route.Banks, is Route.Bank -> "settings"
+        is Route.Account -> register(route)
+        else -> register(Route.Accounts)
+    }
 
 /** A tab, kept where it was; the tab showing goes back to its top. */
 private fun NavHostController.go(t: Tab) {

@@ -131,7 +131,7 @@ class Car(
 
     private fun pageItem(page: Page, title: String, subtitle: String?, picture: Uri, type: Int, group: String? = null): MediaItem =
         MediaItem.Builder()
-            .setMediaId(page.route)
+            .setMediaId(page.from(library.playlists.value))
             .setMediaMetadata(
                 grouped(
                         MediaMetadata.Builder()
@@ -217,9 +217,9 @@ class Car(
                     queued(library.tracks.value).mapIndexed { i, t -> track(SONGS, i, t) }
                 }
                 else -> {
-                    val p = Page.parse(parent) ?: return null
+                    val p = Page.of(parent, library.playlists.value) ?: return null
                     library.whole()
-                    queued(library.read(p)).mapIndexed { i, t -> track(p.route, i, t) }
+                    queued(library.read(p)).mapIndexed { i, t -> track(p.from(library.playlists.value), i, t) }
                 }
             }
         return page(all, page, size)
@@ -260,7 +260,7 @@ class Car(
             val p = resolve(id) ?: return null
             return track(id.split('|')[1], p.at, p.queue[p.at])
         }
-        return when (val p = Page.parse(id)) {
+        return when (val p = Page.of(id, library.playlists.value)) {
             is Page.ForAlbum -> library.albums.value.firstOrNull { it.id == p.id }?.let { album(it) }
             is Page.ForArtist -> library.artists.value.firstOrNull { it.name == p.name }?.let { artist(it) }
             is Page.ForPlaylist -> library.playlists.value.firstOrNull { it.id == p.id }?.let(::playlist)
@@ -273,9 +273,9 @@ class Car(
     /** What choosing the item `id` plays: the list it was in, from it; a page, from its start. */
     suspend fun resolve(id: String): Pick? {
         if (!id.startsWith("t|")) {
-            val p = Page.parse(id) ?: return null
+            val p = Page.of(id, library.playlists.value) ?: return null
             library.whole()
-            return Pick(queued(library.read(p)), 0, 0, p.place(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
+            return Pick(queued(library.read(p)), 0, 0, p.from(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
         }
         val parts = id.split('|')
         if (parts.size != 4) return null
@@ -299,12 +299,12 @@ class Car(
             }
             list == SONGS -> {
                 val q = queued(library.tracks.value)
-                at(q).takeIf { it >= 0 }?.let { Pick(q, it, 0, Page.Songs.place(library.playlists.value)) }
+                at(q).takeIf { it >= 0 }?.let { Pick(q, it, 0, Page.Songs.from(library.playlists.value)) }
             }
             else -> {
-                val p = Page.parse(list) ?: return null
+                val p = Page.of(list, library.playlists.value) ?: return null
                 val q = queued(library.read(p))
-                at(q).takeIf { it >= 0 }?.let { Pick(q, it, 0, p.place(library.playlists.value)) }
+                at(q).takeIf { it >= 0 }?.let { Pick(q, it, 0, p.from(library.playlists.value)) }
             }
         }
     }
@@ -312,7 +312,7 @@ class Car(
     // A play heard again: from the page it was played from, where the track is on it — as Home's
     // last played does — or the track alone, when the page has not got it any more.
     private suspend fun again(p: Played): Pick {
-        val page = Page.ofPlace(p.from, library.playlists.value)
+        val page = Page.of(p.from, library.playlists.value)
         if (page != null) {
             val q = queued(library.read(page))
             val at = q.indexOfFirst { it.id == p.track }
@@ -331,7 +331,7 @@ class Car(
             return again(it)
         }
         val all = queued(library.tracks.value)
-        return if (all.isEmpty()) null else Pick(all.shuffled(random), 0, 0, Page.Songs.place(library.playlists.value))
+        return if (all.isEmpty()) null else Pick(all.shuffled(random), 0, 0, Page.Songs.from(library.playlists.value))
     }
 
     /** What the search for `query` finds, as the phone's search groups it: albums, artists, songs. */
@@ -376,13 +376,13 @@ class Car(
     private suspend fun albumNamed(q: String, exact: Boolean): Pick? {
         val a = library.albums.value.firstOrNull { matches(it.name, q, exact) } ?: return null
         val page = Page.ForAlbum(a.id)
-        return Pick(queued(library.read(page)), 0, 0, page.place(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
+        return Pick(queued(library.read(page)), 0, 0, page.from(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
     }
 
     private suspend fun playlistNamed(q: String, exact: Boolean): Pick? {
         val p = library.playlists.value.firstOrNull { matches(it.name, q, exact) } ?: return null
         val page = Page.ForPlaylist(p.id)
-        return Pick(queued(library.read(page)), 0, 0, page.place(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
+        return Pick(queued(library.read(page)), 0, 0, page.from(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
     }
 
     // An artist, shuffled: every track of theirs, in an order of its own.
@@ -390,7 +390,7 @@ class Car(
         val a = library.artists.value.firstOrNull { matches(it.name, q, exact) } ?: return null
         val page = Page.ForArtist(a.name)
         val q2 = queued(library.read(page)).shuffled(random)
-        return Pick(q2, 0, 0, page.place(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
+        return Pick(q2, 0, 0, page.from(library.playlists.value)).takeIf { it.queue.isNotEmpty() }
     }
 
     // The songs `q` finds, from the one whose title is `q` if there is one, else the first.

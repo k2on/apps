@@ -106,20 +106,40 @@ final class Model: ObservableObject {
         }
     }
 
-    /// What the browser sheet came back with: the redirect, or why there was
-    /// none (none for closed).
+    /// What the browser sheet came back with: the redirect, or why there
+    /// was none (none for closed).
     func signInReturned(_ url: URL?, error: String?) {
         browse = nil
         if let u = url, let code = Probe.code(u, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
         send(.cameBack(why: url == nil ? error : "it came back without a code"))
     }
 
-    /// A link the system opened the app with, or a code scanned:
-    /// `money://auth?code=…` is a sign-in coming back, `money://join?…` a
-    /// server and a code to join with (asked about first).
+    /// A link the system opened the app with, or a code scanned.
+    /// `money://auth?code=…` is a sign-in coming back. Any other link of this
+    /// app's is a route (the domain's `Route`): `money://join?…`, a server and
+    /// a code to join with, goes to the sign-in machine (`Event.joined`,
+    /// asked about first); the rest is the shell's to navigate to ([link]).
+    /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
+        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }) {
+            if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
+            link = url
+            return
+        }
         if let j = joinOf(link: url.absoluteString) { send(.joined(server: j.server, code: j.code)) }
+    }
+
+    /// A link the system opened the app with that names a page
+    /// (`money://…`), for the shell to navigate to (`Navigator.handle`);
+    /// nil again once it has.
+    @Published var link: URL? = nil
+
+    /// What a link names that is not a page: a sign-in link (`money://join?…`)
+    /// is the sign-in machine's ([open(url:)]), and is not navigated to.
+    func takes(_ route: Route) -> Bool {
+        if case .join = route { return true }
+        return false
     }
 
     // MARK: the session

@@ -29,7 +29,7 @@ struct AccountsView: View {
                 HeroFigure("Net Worth", cents: Accounts.netWorth(rows), tint: .neutral, note: "Every open account, less what's owed")
             }
             Section {
-                NavigationLink(value: Route.register(nil)) {
+                NavigationLink(value: Route.accounts) {
                     Label {
                         LabeledContent("All Accounts") {
                             CentsText(rows.filter { !$0.closed && $0.onBudget }.reduce(0) { $0 + $1.balance })
@@ -42,7 +42,7 @@ struct AccountsView: View {
             ForEach(Accounts.shelves(rows)) { shelf in
                 Section {
                     ForEach(shelf.rows) { a in
-                        NavigationLink(value: Route.register(a.id)) { AccountRow(account: a) }
+                        NavigationLink(value: Route.account(name: a.name)) { AccountRow(account: a) }
                             .contextMenu {
                                 Button { typed = a.name; renaming = a } label: { Label("Rename", systemImage: "pencil") }
                                 if !a.closed {

@@ -282,7 +282,7 @@ fn bench_real() {
     eprintln!("{:>22} {:>9} {:>9} {:>9} {:>9} {:>9}", "", "update", "view", "layout", "draw", "frame");
     let n = 15;
     let songs: Vec<_> = (0..n)
-        .map(|_| frame.take(&mut app, Some(crate::Message::Select(crate::places::Source::Library))))
+        .map(|_| frame.take(&mut app, Some(crate::Message::Select(crate::routes::Route::Library))))
         .collect();
     row("songs opened", &songs);
     let hovers: Vec<_> = (0..n).map(|i| frame.take(&mut app, Some(crate::Message::HoverAt(i % 12)))).collect();
@@ -321,7 +321,10 @@ fn bench_real() {
     let _ = frame.take(&mut app, Some(crate::Message::CloseQueue));
     let album = app.peer.rows()[0].clone();
     let detail = app.peer.detail_of(album.id);
-    let to = crate::places::Source::Album(detail.album_id.clone(), detail.album.clone());
+    let to = crate::routes::Route::Album {
+        key: detail.album_id.clone(),
+        title: detail.album.clone(),
+    };
     let albums: Vec<_> = (0..n)
         .map(|i| {
             frame.take(
@@ -329,7 +332,7 @@ fn bench_real() {
                 Some(crate::Message::Select(if i % 2 == 0 {
                     to.clone()
                 } else {
-                    crate::places::Source::Library
+                    crate::routes::Route::Library
                 })),
             )
         })
@@ -350,9 +353,9 @@ fn bench_real() {
     let transcript: Vec<_> = (0..n)
         .map(|i| {
             let to = if i % 2 == 0 {
-                crate::places::Source::Transcript
+                crate::routes::Route::Transcript
             } else {
-                crate::places::Source::Library
+                crate::routes::Route::Library
             };
             frame.take(&mut app, Some(crate::Message::Select(to)))
         })

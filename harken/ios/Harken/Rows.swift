@@ -408,43 +408,46 @@ enum Page: Hashable {
         }
     }
 
-    /// Where a track was played from, as the listening session and the plays
-    /// carry it — the desktop's address-bar spelling (`#album/Water%20Music`),
-    /// so a page named on one device is the same page on another. A playlist
-    /// by its name; one this phone cannot name is nowhere in particular.
-    func place(_ playlists: [Playlist]) -> String {
+    /// The route this page is (harken's `Route`, the domain's): a playlist
+    /// by its name; one this phone cannot name is none.
+    func route(_ playlists: [Playlist]) -> Route? {
         switch self {
-        case let .album(id): return "#album/" + Places.encode(id)
-        case let .artist(name): return "#artist/" + Places.encode(name)
-        case let .playlist(id):
-            guard let p = playlists.first(where: { $0.id == id }) else { return "" }
-            return "#playlist/" + Places.encode(p.name)
-        case let .work(id): return "#work/" + Places.encode(id)
-        case let .recording(id): return "#recording/" + Places.encode(id)
-        case let .show(id): return "#show/" + Places.encode(id)
-        case .songs: return "#library"
+        case let .album(id): return .album(key: id, title: "")
+        case let .artist(name): return .artist(name: name)
+        case let .playlist(id): return playlists.first(where: { $0.id == id }).map { .playlist(name: $0.name) }
+        case let .work(id): return .work(key: id, title: "")
+        case let .recording(id): return .recording(key: id, title: "")
+        case let .show(id): return .show(key: id, title: "")
+        case .songs: return .library
         }
     }
 
-    /// The page a place names; nil for nowhere, or a page this phone has not got.
-    static func of(place: String, playlists: [Playlist]) -> Page? {
-        var body = Substring(place)
-        if body.hasPrefix("#") { body = body.dropFirst() }
-        let kind = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        let rest = body.firstIndex(of: "/").map { String(body[body.index(after: $0)...]) } ?? ""
-        let name = Places.decode(rest)
-        switch kind {
-        case "album": return name.isEmpty ? nil : .album(name)
-        case "artist": return name.isEmpty ? nil : .artist(name)
-        case "playlist": return playlists.first(where: { $0.name == name }).map { .playlist($0.id) }
-        // A composer's page is their artist page: a person has one.
-        case "composer": return name.isEmpty ? nil : .artist(name)
-        case "work": return name.isEmpty ? nil : .work(name)
-        case "recording": return name.isEmpty ? nil : .recording(name)
-        case "show": return name.isEmpty ? nil : .show(name)
-        case "library": return .songs
+    /// The page a route shows, if it is a list of tracks this phone has: a
+    /// playlist by its name.
+    static func of(_ route: Route, playlists: [Playlist]) -> Page? {
+        switch route {
+        case let .album(key, _): return .album(key)
+        case let .artist(name): return .artist(name)
+        case let .playlist(name): return playlists.first(where: { $0.name == name }).map { .playlist($0.id) }
+        case let .work(key, _): return .work(key)
+        case let .recording(key, _): return .recording(key)
+        case let .show(key, _): return .show(key)
+        case .library: return .songs
         default: return nil
         }
+    }
+
+    /// Where a track was played from, as the listening session and the plays
+    /// carry it: the route's path as the desktop's address bar says it
+    /// (`#album/Water%20Music`), so a page named on one device is the same
+    /// page on another. One this phone cannot name is nowhere in particular.
+    func from(_ playlists: [Playlist]) -> String {
+        route(playlists).map { "#" + $0.path() } ?? ""
+    }
+
+    /// The page a "played from" names; nil for nowhere, or a page this phone has not got.
+    static func of(from: String, playlists: [Playlist]) -> Page? {
+        routeFromPath(path: from).flatMap { of($0, playlists: playlists) }
     }
 }
 
@@ -464,8 +467,8 @@ enum Listing: Hashable {
     case appearances(String)
 }
 
-/// A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved.
-enum Places {
+/// A name percent-encoded as `ark-router`'s `url::encode` writes it: what is not unreserved.
+enum Percent {
     static func unreserved(_ c: UInt8) -> Bool {
         (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) || c == 0x2D || c == 0x5F || c == 0x2E || c == 0x7E
     }
@@ -510,7 +513,7 @@ enum Files {
         while base.hasSuffix("/") { base.removeLast() }
         var out = base + "/media"
         for part in file.split(separator: "/", omittingEmptySubsequences: false) {
-            out += "/" + Places.encode(String(part))
+            out += "/" + Percent.encode(String(part))
         }
         return out
     }

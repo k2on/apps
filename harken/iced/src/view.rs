@@ -15,8 +15,8 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::listening::{self, Clock, Output};
 use crate::nav::{Layout, Mark};
-use crate::places::{Focus, Pane, Source};
 use crate::player::Player;
+use crate::routes::{Focus, Glyph, Pane, Route};
 use crate::rows::{Item, Person};
 use crate::{licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
 
@@ -286,7 +286,7 @@ impl App {
         art::picture(seed, self.covers.handle(&self.art_url(art_path)), side, corner)
     }
 
-    fn card(&self, title: &str, under: String, tally: i64, open: Source, round: bool, art_path: &str) -> cards::Card<Message> {
+    fn card(&self, title: &str, under: String, tally: i64, open: Route, round: bool, art_path: &str) -> cards::Card<Message> {
         cards::Card {
             // The square is derived from the name, so it is the square this
             // record has on every page and on the phone.
@@ -319,11 +319,11 @@ impl App {
         let titled = (PAGE_PADDING + 32.0, title.clone(), None);
         let half = arkui::compact::ART / 2.0;
         let (after, title, art) = match &p.source {
-            Source::Album(id, _) => {
+            Route::Album { key: id, .. } => {
                 let art = p.albums().iter().find(|a| &a.id == id).map(|a| a.art.clone()).unwrap_or_default();
                 (cover, title, Some((art, 4.0)))
             }
-            Source::Artist(name) => match self.banner_of(name) {
+            Route::Artist { name } => match self.banner_of(name) {
                 Some(b) => (hero::height(self.pane_width()) - band, title, Some((b.to_string(), half))),
                 None => {
                     let artist = p.artists().iter().find(|a| &a.name == name).map(|a| a.art.clone());
@@ -333,12 +333,12 @@ impl App {
                     (cover, title, Some((art.unwrap_or_default(), half)))
                 }
             },
-            Source::Show(id, _) => {
+            Route::Show { key: id, .. } => {
                 let art = p.shows().iter().find(|s| &s.id == id).map(|s| s.art.clone()).unwrap_or_default();
                 (cover, title, Some((art, 4.0)))
             }
-            Source::Work(..) | Source::Recording(..) => (cover, title, None),
-            Source::Albums | Source::Artists | Source::Composers | Source::Podcasts | Source::Sermons | Source::Settings => titled,
+            Route::Work { .. } | Route::Recording { .. } => (cover, title, None),
+            Route::Albums | Route::Artists | Route::Composers | Route::Podcasts | Route::Sermons | Route::Settings => titled,
             _ => return None,
         };
         Some(Small { after, title, art })
@@ -376,7 +376,7 @@ impl App {
     }
 
     /// The header every page that is *about* something opens with.
-    fn view_header(&self, name: &str, under: &str, open_under: Option<Source>, facts: String, art_path: &str, round: bool) -> Element<'_, Message> {
+    fn view_header(&self, name: &str, under: &str, open_under: Option<Route>, facts: String, art_path: &str, round: bool) -> Element<'_, Message> {
         let side = 116.0;
         cards::header(
             self.picture(name, art_path, side, if round { side / 2.0 } else { 8.0 }),
@@ -392,7 +392,7 @@ impl App {
     /// An album's or an artist's header: its tracks and how long they run —
     /// and, on an artist page, how many albums, because that is the fact that
     /// differs there.
-    fn view_record(&self, name: &str, under: &str, open_under: Option<Source>, albums: Option<usize>, art_path: &str) -> Element<'_, Message> {
+    fn view_record(&self, name: &str, under: &str, open_under: Option<Route>, albums: Option<usize>, art_path: &str) -> Element<'_, Message> {
         let rows = self.peer.rows();
         let tracks = rows.len() as i64;
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
@@ -412,7 +412,7 @@ impl App {
     fn view_page(&self) -> Element<'_, Message> {
         let p = &self.peer;
         match &p.source {
-            Source::Albums => self.view_cards(
+            Route::Albums => self.view_cards(
                 p.albums()
                     .iter()
                     // Who played it and when it came out, as a catalogue's
@@ -423,24 +423,41 @@ impl App {
                             true => format!("{who}  \u{b7}  {}", a.released),
                             false => who.clone(),
                         };
-                        self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art)
+                        self.card(
+                            &a.name,
+                            under,
+                            a.tracks,
+                            Route::Album {
+                                key: a.id.clone(),
+                                title: a.name.clone(),
+                            },
+                            false,
+                            &a.art,
+                        )
                     })
                     .collect(),
                 "No albums yet.",
             ),
             // A person is a circle and a record is a square.
-            Source::Artists => self.view_cards(
+            Route::Artists => self.view_cards(
                 p.artists()
                     .iter()
-                    .map(|a| self.card(&a.name, String::new(), a.tracks, Source::Artist(a.name.clone()), true, &a.art))
+                    .map(|a| self.card(&a.name, String::new(), a.tracks, Route::Artist { name: a.name.clone() }, true, &a.art))
                     .collect(),
                 "Nobody yet.",
             ),
-            Source::Composers => self.view_cards(
+            Route::Composers => self.view_cards(
                 p.composers()
                     .iter()
                     .map(|c| {
-                        let mut card = self.card(&c.name, span(c.born, c.died), c.works, Source::Artist(c.name.clone()), true, &c.art);
+                        let mut card = self.card(
+                            &c.name,
+                            span(c.born, c.died),
+                            c.works,
+                            Route::Artist { name: c.name.clone() },
+                            true,
+                            &c.art,
+                        );
                         if c.born == 0 && c.died == 0 {
                             card.under = count(c.works, "work");
                         }
@@ -449,27 +466,29 @@ impl App {
                     .collect(),
                 "Nobody yet.",
             ),
-            Source::Podcasts | Source::Sermons if !self.debug => self.view_shows(),
-            Source::Show(id, title) if !self.debug => self.view_show(id, title),
-            Source::Transcript if !self.debug => self.view_transcript(),
+            Route::Podcasts | Route::Sermons if !self.debug => self.view_shows(),
+            Route::Show { key: id, title } if !self.debug => self.view_show(id, title),
+            Route::Transcript if !self.debug => self.view_transcript(),
             // The keymap and the numbers are drawn where the table is, so
             // they keep the page they have always been drawn on.
-            Source::Album(_, name) | Source::Artist(name) | Source::Recording(_, name) | Source::Playlist(_, name) if self.debug => {
+            Route::Album { title: name, .. } | Route::Artist { name } | Route::Recording { title: name, .. } | Route::Playlist { name, .. }
+                if self.debug =>
+            {
                 padded(with_header(self.view_record(name, "", None, None, ""), self.view_list()))
             }
-            Source::Album(id, name) => self.view_album(id, name),
-            Source::Playlist(_, name) => self.view_playlist(name),
-            Source::Artist(name) => self.view_artist(name),
+            Route::Album { key: id, title: name } => self.view_album(id, name),
+            Route::Playlist { name, .. } => self.view_playlist(name),
+            Route::Artist { name } => self.view_artist(name),
             // One composer's page, as a catalogue opens one: their banner, then
             // their works as a list in columns — the catalogue number under
             // each, the one name a work has that survives translation — then
             // their records.
             // One work and every performance of it: the rows are the same
             // music, and what tells them apart is who played it.
-            Source::Work(id, title) => self.view_work(id, title),
+            Route::Work { key: id, title } => self.view_work(id, title),
             // One performance, in the order the work goes.
-            Source::Recording(id, who) => self.view_recording(id, who),
-            Source::Settings => self.view_settings(),
+            Route::Recording { key: id, title: who } => self.view_recording(id, who),
+            Route::Settings => self.view_settings(),
             _ => padded(self.view_list()),
         }
     }
@@ -579,7 +598,10 @@ impl App {
                     &s.title,
                     s.author.clone(),
                     s.episodes,
-                    Source::Show(s.id.clone(), s.title.clone()),
+                    Route::Show {
+                        key: s.id.clone(),
+                        title: s.title.clone(),
+                    },
                     false,
                     &s.art,
                 );
@@ -1424,7 +1446,13 @@ impl App {
         if let Some(t) = &track {
             let show = self.peer.shows().iter().find(|s| s.title == t.creator);
             let name = text(t.creator.clone()).size(15).style(style::accent).width(Length::Fill);
-            under = under.push(linked(name.into(), show.map(|s| Source::Show(s.id.clone(), s.title.clone()))));
+            under = under.push(linked(
+                name.into(),
+                show.map(|s| Route::Show {
+                    key: s.id.clone(),
+                    title: s.title.clone(),
+                }),
+            ));
         }
         if l.cell(Mark::Follow).is_some() {
             let follow = row![icon::tinted(glyphs::PLAYING, 12.0, |p| p.primary.base.color), text("Follow").size(13)]
@@ -1650,7 +1678,10 @@ impl App {
                     title: w.title.clone(),
                     under: w.catalogue.clone(),
                     count: w.recordings.to_string(),
-                    open: Message::Select(Source::Work(w.id.clone(), w.title.clone())),
+                    open: Message::Select(Route::Work {
+                        key: w.id.clone(),
+                        title: w.title.clone(),
+                    }),
                 })
                 .collect();
             page = page.push(hero::heading(if short { "Well-Known Works" } else { "Works" }));
@@ -1687,7 +1718,17 @@ impl App {
             .map(|(i, a)| {
                 let under = if a.released > 0 { a.released.to_string() } else { String::new() };
                 (
-                    self.card(&a.name, under, a.tracks, Source::Album(a.id.clone(), a.name.clone()), false, &a.art),
+                    self.card(
+                        &a.name,
+                        under,
+                        a.tracks,
+                        Route::Album {
+                            key: a.id.clone(),
+                            title: a.name.clone(),
+                        },
+                        false,
+                        &a.art,
+                    ),
                     l.cell(Mark::Album(i)),
                 )
             })
@@ -1775,7 +1816,12 @@ impl App {
             }
             f.join("  \u{b7}  ")
         };
-        let open = |r: &crate::rows::Recording| Message::Select(Source::Recording(r.id.clone(), r.performers.clone()));
+        let open = |r: &crate::rows::Recording| {
+            Message::Select(Route::Recording {
+                key: r.id.clone(),
+                title: r.performers.clone(),
+            })
+        };
 
         // The fullest performance, set apart with a Play: the one to start
         // with. Every performance is listed under it all the same, the only
@@ -1873,10 +1919,10 @@ impl App {
         let cursor = focused.then_some(self.at(Pane::Tracks));
         // An album is the one place a track number means anything, and where
         // the performer replaces the album column that every row would repeat.
-        let album_page = matches!(p.source, Source::Album(..));
+        let album_page = matches!(p.source, Route::Album { .. });
         // A show's page has no albums: its column says how far everybody
         // has listened instead.
-        let show_page = matches!(p.source, Source::Show(..));
+        let show_page = matches!(p.source, Route::Show { .. });
         let mut part = String::new();
 
         let rows = p.rows().iter().enumerate().fold(column![].spacing(0), |mut col, (i, item)| {
@@ -1959,7 +2005,7 @@ impl App {
             headings
                 .push(table::heading("Name", NAME))
                 .push(table::heading(
-                    if matches!(p.source, Source::Show(..)) { "Show" } else { "Artist" },
+                    if matches!(p.source, Route::Show { .. }) { "Show" } else { "Artist" },
                     ARTIST,
                 ))
                 .push(table::heading(
@@ -1979,7 +2025,7 @@ impl App {
         // everywhere else this *is* the title.
         let titled = !matches!(
             p.source,
-            Source::Album(..) | Source::Artist(_) | Source::Recording(..) | Source::Playlist(..) | Source::Show(..)
+            Route::Album { .. } | Route::Artist { .. } | Route::Recording { .. } | Route::Playlist { .. } | Route::Show { .. }
         );
         let mut main = column![].spacing(10).width(Length::Fill);
         if titled {
@@ -1991,7 +2037,7 @@ impl App {
                     // after it keeps its room: the title gives way.
                     // The page's title, as money's month is: one look for both.
                     arkui::line::title(match (&p.source, &p.search) {
-                        (Source::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
+                        (Route::Library, Some(n)) => format!("{} matching “{n}”", p.source.title()),
                         _ => p.source.title().to_string(),
                     })
                     .cut(Cut::Middle)
@@ -2534,7 +2580,10 @@ impl App {
             column![
                 linked(
                     Line::new(track.title.as_str(), 13.0, Cut::End, |t| arkui::theme::of(t).background.base.text).into(),
-                    (!album.album_id.is_empty()).then(|| Source::Album(album.album_id.clone(), track.album.clone())),
+                    (!album.album_id.is_empty()).then(|| Route::Album {
+                        key: album.album_id.clone(),
+                        title: track.album.clone()
+                    }),
                 ),
                 linked(
                     Line::new(self.creator_line(track, position), 12.0, Cut::End, |t| style::dim(t)
@@ -2542,8 +2591,11 @@ impl App {
                         .unwrap_or_default())
                     .into(),
                     match show {
-                        Some(s) => Some(Source::Show(s.id.clone(), s.title.clone())),
-                        None => (!track.creator.is_empty()).then(|| Source::Artist(track.creator.clone())),
+                        Some(s) => Some(Route::Show {
+                            key: s.id.clone(),
+                            title: s.title.clone()
+                        }),
+                        None => (!track.creator.is_empty()).then(|| Route::Artist { name: track.creator.clone() }),
                     },
                 ),
             ]
@@ -2570,7 +2622,7 @@ impl App {
         // An episode with a transcript: the button that opens it, in the
         // accent while it is the page.
         if !self.cues().is_empty() {
-            let glyph = match self.peer.source == Source::Transcript {
+            let glyph = match self.peer.source == Route::Transcript {
                 true => icon::accent(glyphs::TRANSCRIPT, false),
                 false => icon::line(glyphs::TRANSCRIPT, false),
             };
@@ -2578,7 +2630,7 @@ impl App {
                 button(glyph)
                     .style(style::quiet)
                     .padding(arkui::button::ICON_PADDING)
-                    .on_press(Message::Select(Source::Transcript)),
+                    .on_press(Message::Select(Route::Transcript)),
             );
         }
         line = line.push(self.view_queue_button());
@@ -2741,7 +2793,7 @@ pub(crate) struct Small {
 
 /// `body`, opening `to` when clicked, with the pointer a hand over it; just
 /// `body` when it goes nowhere.
-fn linked(body: Element<'_, Message>, to: Option<Source>) -> Element<'_, Message> {
+fn linked(body: Element<'_, Message>, to: Option<Route>) -> Element<'_, Message> {
     match to {
         Some(to) => mouse_area(body)
             .on_press(Message::Select(to))

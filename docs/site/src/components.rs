@@ -494,11 +494,14 @@ pub const COMPONENTS: &[Component] = &[
         name: "Routes",
         section: Section::Behaviour,
         glyph: glyphs::BACK,
-        summary: "Places as addresses, kept in step with the address bar or the back stack.",
-        desktop: &["route", "url"],
+        summary: "An app's routes as paths, kept in step with the address bar or the back stack.",
+        desktop: &["router", "url"],
         android: Some(Mobile {
-            at: &["ui/Destination.kt: Destination, Destinations"],
-            how: &["Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."],
+            at: &["ui/Destination.kt: Destination, Destinations", "Router.kt: RouteArg"],
+            how: &[
+                "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack.",
+                "RouteArg.of(route.path()) / RouteArg.path(arg): a route's path as a destination's argument, and back.",
+            ],
         }),
         ios: None,
         shots: &[],

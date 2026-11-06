@@ -16,7 +16,7 @@
 //! for both, so they cannot drift apart.
 use arkui::vim::{self, Page, Section};
 
-use crate::places::Source;
+use crate::routes::Route;
 use crate::rows::{Item, Person, TrackDetail};
 use crate::{App, Message};
 
@@ -146,7 +146,7 @@ impl Layout {
     }
 
     /// One cell on a line of its own.
-    fn line(&mut self, mark: Mark, go: Option<Source>) {
+    fn line(&mut self, mark: Mark, go: Option<Route>) {
         if let Some(s) = go {
             let id = self.mark(mark, Message::Select(s));
             self.block(vec![id], 1);
@@ -182,14 +182,14 @@ pub fn runs(details: &[TrackDetail], headings: bool) -> Vec<(usize, usize)> {
 impl App {
     /// The page a person's name opens, whatever they did: one page a
     /// person has. `None` for nobody this library has.
-    pub fn person(&self, name: &str) -> Option<Source> {
+    pub fn person(&self, name: &str) -> Option<Route> {
         let p = &self.peer;
         if name.is_empty() {
             return None;
         }
         let played = || p.details.values().any(|d| names(&d.performer).contains(&name));
         let known = p.composers().iter().any(|c| c.name == name) || p.artists().iter().any(|a| a.name == name);
-        (known || played()).then(|| Source::Artist(name.to_string()))
+        (known || played()).then(|| Route::Artist { name: name.to_string() })
     }
 
     /// Who is under a track, as the page draws them: whoever played it, or
@@ -216,7 +216,13 @@ impl App {
                     ids.push(l.mark(Mark::Composer(start), Message::Select(s)));
                 }
                 if !d.work_id.is_empty() {
-                    ids.push(l.mark(Mark::Work(start), Message::Select(Source::Work(d.work_id.clone(), d.work.clone()))));
+                    ids.push(l.mark(
+                        Mark::Work(start),
+                        Message::Select(Route::Work {
+                            key: d.work_id.clone(),
+                            title: d.work.clone(),
+                        }),
+                    ));
                 }
                 let n = ids.len();
                 l.block(ids, n);
@@ -268,7 +274,15 @@ impl App {
     fn shelf<'a>(&self, l: &mut Layout, albums: impl Iterator<Item = &'a crate::rows::Album>, columns: usize) {
         let ids = albums
             .enumerate()
-            .map(|(i, a)| l.mark(Mark::Album(i), Message::Select(Source::Album(a.id.clone(), a.name.clone()))))
+            .map(|(i, a)| {
+                l.mark(
+                    Mark::Album(i),
+                    Message::Select(Route::Album {
+                        key: a.id.clone(),
+                        title: a.name.clone(),
+                    }),
+                )
+            })
             .collect();
         l.block(ids, columns);
     }
@@ -297,7 +311,7 @@ impl App {
     /// the person whose page it is on.
     pub fn guests(&self, item: &Item) -> Vec<Person> {
         let page = match &self.peer.source {
-            Source::Artist(name) => Some(name.as_str()),
+            Route::Artist { name } => Some(name.as_str()),
             _ => None,
         };
         let on = self.peer.people_of(item.id).into_iter();
@@ -315,7 +329,7 @@ impl App {
             .map(|(at, item)| {
                 let cell = row(l, at);
                 let guests = self.guests(item).into_iter().enumerate();
-                let names = guests.map(|(k, p)| l.mark(Mark::Guest(at, k), Message::Select(Source::Artist(p.name))));
+                let names = guests.map(|(k, p)| l.mark(Mark::Guest(at, k), Message::Select(Route::Artist { name: p.name })));
                 (cell, names.collect())
             })
             .collect();
@@ -392,7 +406,7 @@ impl App {
         };
         let detailed = !self.debug;
         match &p.source {
-            Source::Album(id, _) if detailed => {
+            Route::Album { key: id, .. } if detailed => {
                 let album = p.albums().iter().find(|a| a.id == *id);
                 let creator = album.map(|a| a.creator.clone()).unwrap_or_default();
                 self.by(&mut l, &self.album_by(id));
@@ -402,7 +416,7 @@ impl App {
                 self.faces(&mut l, &people);
             }
             // One person's page: a composer's works, or anybody else's songs.
-            Source::Artist(name) if detailed => {
+            Route::Artist { name } if detailed => {
                 // Beside their portrait, their Play and their web page.
                 if self.banner_of(name).is_none() {
                     let mut ids = vec![];
@@ -417,7 +431,10 @@ impl App {
                 }
                 let works = !p.works().is_empty();
                 if let Some(best) = self.best_known() {
-                    let open = Message::Select(Source::Work(best.id.clone(), best.title.clone()));
+                    let open = Message::Select(Route::Work {
+                        key: best.id.clone(),
+                        title: best.title.clone(),
+                    });
                     self.featured(&mut l, open, Message::PlayWork(best.id.clone()));
                 }
                 if works {
@@ -435,7 +452,7 @@ impl App {
                 let on = p.appearances();
                 self.episodes(&mut l, on, |l, at| l.mark(Mark::Episode(at), Message::PlayItem(on[at].id)));
             }
-            Source::Recording(_, who) if detailed => {
+            Route::Recording { title: who, .. } if detailed => {
                 let composer = p.works().first().map(|w| w.composer.clone()).unwrap_or_default();
                 l.line(Mark::Over, self.person(&composer));
                 self.by(&mut l, who);
@@ -450,13 +467,13 @@ impl App {
             // it; its episodes, each beside who is on it; and under them its
             // older ones fetched, while the feed has more than the library
             // keeps.
-            Source::Show(id, _) if detailed => {
+            Route::Show { key: id, .. } if detailed => {
                 let sub = p.subscription_of(id);
                 let hosts: Vec<usize> = self
                     .hosts()
                     .into_iter()
                     .enumerate()
-                    .map(|(k, h)| l.mark(Mark::By(k), Message::Select(Source::Artist(h.name))))
+                    .map(|(k, h)| l.mark(Mark::By(k), Message::Select(Route::Artist { name: h.name })))
                     .collect();
                 let n = hosts.len();
                 l.block(hosts, n);
@@ -475,13 +492,13 @@ impl App {
                     l.block(vec![id], 1);
                 }
             }
-            Source::Playlist(..) if detailed => {
+            Route::Playlist { .. } if detailed => {
                 self.play(&mut l);
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
             // A transcript: its Follow, while it is not following the line
             // being said, then its lines.
-            Source::Transcript if detailed => {
+            Route::Transcript if detailed => {
                 if !self.following {
                     let id = l.mark(Mark::Follow, Message::Follow(true));
                     l.block(vec![id], 1);
@@ -490,7 +507,7 @@ impl App {
             }
             // A shows page: its +, the feeds followed that are no show yet
             // each with its Unfollow, then the shows.
-            Source::Podcasts | Source::Sermons if detailed => {
+            Route::Podcasts | Route::Sermons if detailed => {
                 let id = l.mark(Mark::Add, Message::Adding(true));
                 l.block(vec![id], 1);
                 for (k, s) in self.unread_feeds() {
@@ -499,11 +516,14 @@ impl App {
                 }
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
             }
-            Source::Work(..) => {
+            Route::Work { .. } => {
                 let composer = p.works().first().map(|w| w.composer.clone()).unwrap_or_default();
                 l.line(Mark::Over, self.person(&composer));
                 if let Some(first) = p.recordings().first() {
-                    let open = Message::Select(Source::Recording(first.id.clone(), first.performers.clone()));
+                    let open = Message::Select(Route::Recording {
+                        key: first.id.clone(),
+                        title: first.performers.clone(),
+                    });
                     self.featured(&mut l, open, Message::PlayRecording(first.id.clone()));
                 }
                 l.page.sections.push(Section::run(0, grid.cells, grid.columns));
@@ -529,7 +549,7 @@ impl App {
     /// The kind of show a shows page lists.
     pub fn shows_kind(&self) -> &'static str {
         match self.peer.source {
-            Source::Sermons => "sermon",
+            Route::Sermons => "sermon",
             _ => "podcast",
         }
     }
@@ -575,21 +595,21 @@ impl App {
     pub fn main_grid(&self) -> vim::Grid {
         let p = &self.peer;
         match &p.source {
-            crate::places::Source::Albums => crate::SHELF.grid(p.albums().len(), self.pane_width()),
-            Source::Artists => crate::SHELF.grid(p.artists().len(), self.pane_width()),
-            Source::Composers => crate::SHELF.grid(p.composers().len(), self.pane_width()),
-            Source::Podcasts => crate::SHELF.grid(p.shows_of("podcast").len(), self.pane_width()),
-            Source::Sermons => crate::SHELF.grid(p.shows_of("sermon").len(), self.pane_width()),
-            Source::Artist(_) if !p.works().is_empty() => vim::Grid {
+            crate::routes::Route::Albums => crate::SHELF.grid(p.albums().len(), self.pane_width()),
+            Route::Artists => crate::SHELF.grid(p.artists().len(), self.pane_width()),
+            Route::Composers => crate::SHELF.grid(p.composers().len(), self.pane_width()),
+            Route::Podcasts => crate::SHELF.grid(p.shows_of("podcast").len(), self.pane_width()),
+            Route::Sermons => crate::SHELF.grid(p.shows_of("sermon").len(), self.pane_width()),
+            Route::Artist { .. } if !p.works().is_empty() => vim::Grid {
                 cells: self.listed_works().len(),
                 columns: self.listing_columns(),
             },
             // Every performance, under the one set apart.
-            Source::Work(..) => vim::Grid {
+            Route::Work { .. } => vim::Grid {
                 cells: p.recordings().len(),
                 columns: self.listing_columns(),
             },
-            Source::Transcript => vim::Grid::column(self.cues().len()),
+            Route::Transcript => vim::Grid::column(self.cues().len()),
             _ => vim::Grid::column(p.rows().len()),
         }
     }

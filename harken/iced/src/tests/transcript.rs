@@ -7,7 +7,7 @@ use super::now_playing::{carry, dial, hub, phone_who};
 use super::who;
 use crate::client::Replica;
 use crate::domain::{AddEpisode, AddShow, CueAt, SetTranscript, VoiceAt};
-use crate::places::{Pane, Source};
+use crate::routes::{Pane, Route};
 use crate::{App, Message};
 
 const FILE: &str = "https://media.transistor.fm/66c2ec4c/cb887ff2.mp3";
@@ -73,7 +73,10 @@ fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
     phone.connect_with("hub", dial(hub));
     let mut phone = Some(phone);
     carry(hub, &mut app, &mut phone);
-    let _ = app.update(Message::Select(Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into())));
+    let _ = app.update(Message::Select(Route::Show {
+        key: "podcast/full-time-nix".into(),
+        title: "Full Time Nix".into(),
+    }));
     let i = app.peer.rows()[0].clone();
     let queue = vec![crate::listening::Track {
         id: crate::peer::key(i.id),
@@ -92,7 +95,7 @@ fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
     let mut player = harken_player::Player::new("phone", None);
     assert_eq!(player.press(phone.as_mut().unwrap(), &start, None), None);
     carry(hub, &mut app, &mut phone);
-    let _ = app.update(Message::Select(Source::Transcript));
+    let _ = app.update(Message::Select(Route::Transcript));
     (app, phone)
 }
 

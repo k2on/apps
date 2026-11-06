@@ -145,14 +145,14 @@ class CatalogueTests {
     }
 
     @Test
-    fun aCataloguePageIsARouteAndAPlace() {
+    fun aCataloguePageIsARoute() {
         for (p in listOf(Page.ForArtist("Johann Sebastian Bach"), Page.ForWork("johann-sebastian-bach/bwv-988"), Page.ForRecording("johann-sebastian-bach/bwv-988@kimiko-ishizaka"))) {
-            assertEquals(p, Page.parse(p.route))
-            assertEquals(p, Page.ofPlace(p.place(emptyList()), emptyList()))
+            assertEquals(p, Page.of(routeOf(p.route(emptyList())!!.destination().substringAfter('/')), emptyList()))
+            assertEquals(p, Page.of(p.from(emptyList()), emptyList()))
         }
         // A composer's address, as the desktop wrote it, is their one page.
-        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.ofPlace("#composer/Johann%20Sebastian%20Bach", emptyList()))
-        assertEquals("#work/johann-sebastian-bach%2Fbwv-988", Page.ForWork("johann-sebastian-bach/bwv-988").place(emptyList()))
+        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.of("#composer/Johann%20Sebastian%20Bach", emptyList()))
+        assertEquals("#work/johann-sebastian-bach%2Fbwv-988", Page.ForWork("johann-sebastian-bach/bwv-988").from(emptyList()))
     }
 
     // Through the kernel ----------------------------------------------------------------------

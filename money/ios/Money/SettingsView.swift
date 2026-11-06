@@ -89,7 +89,7 @@ struct BanksSection: View {
         Section {
             if let ask { AskRow(ask: ask) }
             ForEach(s.banks) { b in
-                NavigationLink(value: Route.bank(b.name)) { BankRow(bank: b) }
+                NavigationLink(value: Route.bank(name: b.name)) { BankRow(bank: b) }
             }
             Button { model.connectBank() } label: { Label("Connect a Bank", systemImage: "plus.circle.fill") }
                 .disabled(!model.connectsBanks || (ask.map(BankAsks.isOpen) ?? false))

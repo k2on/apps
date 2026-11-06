@@ -37,6 +37,8 @@ import dev.harken.android.gen.WorkInput
 import dev.harken.android.gen.WorkSummary
 import dev.harken.android.gen.Works
 import uniffi.harken_domain.Playlist
+import uniffi.harken_domain.Route
+import uniffi.harken_domain.routeFromPath
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -46,108 +48,62 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Somewhere a screen goes, and a list it plays from. */
+/** Somewhere a screen goes, and a list it plays from: what the back stack's [Route] shows. */
 sealed class Page {
-    /** What the navigation calls it: names as the hex of their UTF-8, so no character is special. */
-    abstract val route: String
-
     /** One album, by its key (`music/Vivaldi/The Four Seasons/the-four-seasons`): two of one name are two pages. */
-    data class ForAlbum(val id: String) : Page() {
-        override val route: String
-            get() = "album/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
-    }
+    data class ForAlbum(val id: String) : Page()
 
-    data class ForArtist(val name: String) : Page() {
-        override val route: String
-            get() = "artist/" + Hex.encode(name.toByteArray(Charsets.UTF_8))
-    }
+    data class ForArtist(val name: String) : Page()
 
-    data class ForPlaylist(val id: Id) : Page() {
-        override val route: String
-            get() = "playlist/" + id.hex
-    }
+    data class ForPlaylist(val id: Id) : Page()
 
     /** One work and its performances, by the key the domain derives (`johann-sebastian-bach/bwv-988`). */
-    data class ForWork(val id: String) : Page() {
-        override val route: String
-            get() = "work/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
-    }
+    data class ForWork(val id: String) : Page()
 
     /** One performance, in the order the work goes, by its key (`…/bwv-988@kimiko-ishizaka`). */
-    data class ForRecording(val id: String) : Page() {
-        override val route: String
-            get() = "recording/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
-    }
+    data class ForRecording(val id: String) : Page()
 
     /** One podcast or series of sermons and its episodes, newest first, by its key (`podcast/full-time-nix`). */
-    data class ForShow(val id: String) : Page() {
-        override val route: String
-            get() = "show/" + Hex.encode(id.toByteArray(Charsets.UTF_8))
-    }
+    data class ForShow(val id: String) : Page()
 
     /** Every song, in the order they were added. */
-    object Songs : Page() {
-        override val route: String = "songs"
-    }
+    object Songs : Page()
+
+    /** The route this page is (the domain's `Route`): a playlist by its name; one this phone cannot name is none. */
+    fun route(playlists: List<Playlist>): Route? =
+        when (this) {
+            is ForAlbum -> Route.Album(id, "")
+            is ForArtist -> Route.Artist(name)
+            is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { Route.Playlist(it.name) }
+            is ForWork -> Route.Work(id, "")
+            is ForRecording -> Route.Recording(id, "")
+            is ForShow -> Route.Show(id, "")
+            is Songs -> Route.Library
+        }
 
     /**
-     * Where a track was played from, as the listening session and the plays carry it — the
-     * desktop's address-bar spelling (`rust/arkui`'s route: `#album/Water%20Music`), so a page
-     * named on one device is the same page on another. A playlist by its name, as there; one this
-     * phone cannot name is nowhere in particular. An album by its key, as a work is: its name is
-     * not one album's.
+     * Where a track was played from, as the listening session and the plays carry it: the route's
+     * path as the desktop's address bar says it (`#album/Water%20Music`), so a page named on one
+     * device is the same page on another. One this phone cannot name is nowhere in particular.
      */
-    fun place(playlists: List<Playlist>): String =
-        when (this) {
-            is ForAlbum -> "#album/" + Places.encode(id)
-            is ForArtist -> "#artist/" + Places.encode(name)
-            is ForPlaylist -> playlists.firstOrNull { it.id == id }?.let { "#playlist/" + Places.encode(it.name) } ?: ""
-            is ForWork -> "#work/" + Places.encode(id)
-            is ForRecording -> "#recording/" + Places.encode(id)
-            is ForShow -> "#show/" + Places.encode(id)
-            is Songs -> "#library"
-        }
+    fun from(playlists: List<Playlist>): String = route(playlists)?.let { "#" + it.path() } ?: ""
 
     companion object {
-        /** The page a place names (`#album/…`, [place]); null for nowhere, or a page this phone has not got. */
-        fun ofPlace(place: String, playlists: List<Playlist>): Page? {
-            val body = place.removePrefix("#")
-            val kind = body.substringBefore('/')
-            val name = Places.decode(body.substringAfter('/', ""))
-            return when (kind) {
-                "album" -> name.takeIf { it.isNotEmpty() }?.let { ForAlbum(it) }
-                "artist" -> name.takeIf { it.isNotEmpty() }?.let { ForArtist(it) }
-                "playlist" -> playlists.firstOrNull { it.name == name }?.let { ForPlaylist(it.id) }
-                // A composer's page is their artist page: one page per person.
-                "composer" -> name.takeIf { it.isNotEmpty() }?.let { ForArtist(it) }
-                "work" -> name.takeIf { it.isNotEmpty() }?.let { ForWork(it) }
-                "recording" -> name.takeIf { it.isNotEmpty() }?.let { ForRecording(it) }
-                "show" -> name.takeIf { it.isNotEmpty() }?.let { ForShow(it) }
-                "library" -> Songs
+        /** The page a route shows, if it is a list this phone has: a playlist by its name. */
+        fun of(route: Route?, playlists: List<Playlist>): Page? =
+            when (route) {
+                is Route.Album -> ForAlbum(route.key)
+                is Route.Artist -> ForArtist(route.name)
+                is Route.Playlist -> playlists.firstOrNull { it.name == route.name }?.let { ForPlaylist(it.id) }
+                is Route.Work -> ForWork(route.key)
+                is Route.Recording -> ForRecording(route.key)
+                is Route.Show -> ForShow(route.key)
+                is Route.Library -> Songs
                 else -> null
             }
-        }
 
-        /** The page a route names, or null. */
-        fun parse(route: String): Page? {
-            val kind = route.substringBefore('/')
-            val arg = route.substringAfter('/', "")
-            fun name(): String = String(Hex.decode(arg), Charsets.UTF_8)
-            return try {
-                when (kind) {
-                    "album" -> ForAlbum(name())
-                    "artist" -> ForArtist(name())
-                    "playlist" -> ForPlaylist(Id(arg).also { require(arg.length == 32) })
-                    "work" -> ForWork(name())
-                    "recording" -> ForRecording(name())
-                    "show" -> ForShow(name())
-                    "songs" -> Songs
-                    else -> null
-                }
-            } catch (e: Exception) {
-                null
-            }
-        }
+        /** The page a "played from" (or a car's media id) names; null for nowhere, or a page this phone has not got. */
+        fun of(from: String, playlists: List<Playlist>): Page? = of(routeFromPath(from), playlists)
     }
 }
 
@@ -172,8 +128,8 @@ fun transcriptKey(media: Id): String = "transcript:${media.hex}"
 
 fun appearancesKey(name: String): String = "appearances:$name"
 
-/** A place's name, percent-encoded as `rust/arkui`'s `url::encode` writes it: what is not unreserved. */
-object Places {
+/** A name percent-encoded as `ark-router`'s `url::encode` writes it: what is not unreserved. */
+object Percent {
     fun encode(s: String): String {
         val out = StringBuilder()
         for (b in s.toByteArray(Charsets.UTF_8)) {

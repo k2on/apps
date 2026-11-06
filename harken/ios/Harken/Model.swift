@@ -14,13 +14,6 @@ import FoundationNetworking
 #endif
 import Combine
 
-/// What a screen can ask to open: a page of a tab's stack, or Settings.
-enum Route: Hashable {
-    case page(Page)
-    case settings
-    case diagnostics
-}
-
 /// The tabs: Home, the Library, and Search's own. (`Tab` is SwiftUI's.)
 enum Pane: Hashable {
     case home, library, search
@@ -139,12 +132,32 @@ final class Model: ObservableObject {
         send(.cameBack(why: url == nil ? error : "it came back without a code"))
     }
 
-    /// A link the system opened the app with, or a code scanned:
-    /// `harken://auth?code=…` is a sign-in coming back, `harken://join?…` a
-    /// server and a code to join with (asked about first).
+    /// A link the system opened the app with, or a code scanned.
+    /// `harken://auth?code=…` is a sign-in coming back. Any other link of this
+    /// app's is a route (the domain's `Route`): `harken://join?…`, a server and
+    /// a code to join with, goes to the sign-in machine (`Event.joined`,
+    /// asked about first); the rest is the shell's to navigate to ([link]).
+    /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Model.code(url) { return send(.code(code: code)) }
+        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.harken.scheme, parse: { routeFromPath(path: $0) }) {
+            if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
+            link = url
+            return
+        }
         if let j = joinOf(link: url.absoluteString) { send(.joined(server: j.server, code: j.code)) }
+    }
+
+    /// A link the system opened the app with that names a page
+    /// (`harken://…`), for the shell to navigate to (`Navigator.handle`);
+    /// nil again once it has.
+    @Published var link: URL? = nil
+
+    /// What a link names that is not a page: a sign-in link (`harken://join?…`)
+    /// is the sign-in machine's ([open(url:)]), and is not navigated to.
+    func takes(_ route: Route) -> Bool {
+        if case .join = route { return true }
+        return false
     }
 
     /// The code in `harken://auth?code=…`, or none for any other link.
@@ -434,7 +447,7 @@ final class Model: ObservableObject {
     /// Play `list` from `at`, from the page it was on.
     func play(_ list: [LibraryEntry], at: Int, from page: Page?, shuffled: Bool = false, positionMs: Int64? = nil) {
         guard let q = Started.queue(list, at: at, shuffled: shuffled, album: albumName) else { return }
-        let from = page?.place(playlists) ?? ""
+        let from = page?.from(playlists) ?? ""
         // An episode begun picks up where its listener left it.
         let ms = positionMs ?? (shuffled ? 0 : list.indices.contains(at) ? mine(list[at].id)?.resumeMs ?? 0 : 0)
         press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled, positionMs: ms) }
