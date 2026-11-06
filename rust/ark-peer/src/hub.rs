@@ -96,10 +96,14 @@ fn journal(local: &mut Box<dyn Disk>, name: &str) -> Option<Journal> {
     })
     .ok()?;
     let mut ids: BTreeMap<EntryId, String> = ids.into_iter().collect();
-    let at = at.unwrap_or_else(|| {
-        let each = last.iter().flat_map(|(o, (_, n))| (1..=*n).map(move |l| (*o, l)));
-        each.filter(|(o, l)| ids.contains_key(&EntryId::of(o, *l))).collect()
-    });
+    let at = match at {
+        Some(at) => at,
+        None if ids.is_empty() => vec![],
+        None => {
+            let each = last.iter().flat_map(|(o, (_, n))| (1..=*n).map(move |l| (*o, l)));
+            each.filter(|(o, l)| ids.contains_key(&EntryId::of(o, *l))).collect()
+        }
+    };
     let refused = at
         .into_iter()
         .filter_map(|(o, l)| Some(((o, l), ids.remove(&EntryId::of(o, l))?)))

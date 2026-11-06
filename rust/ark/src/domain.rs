@@ -120,8 +120,14 @@ fn check_of<I: Input>() -> Check {
 fn input_of<I: Input>(b: &[u8]) -> Result<I, String> {
     match I::decode(b) {
         Ok(i) => i.refine(),
-        Err(e) => I::decode(&crate::json::fit(&I::describe(), b).ok_or(e)?)?.refine(),
+        Err(e) => fitted(b, e),
     }
+}
+
+/// [`input_of`] of bytes another build wrote: out of the way of the rest.
+#[cold]
+fn fitted<I: Input>(b: &[u8], e: String) -> Result<I, String> {
+    I::decode(&crate::json::fit(&I::describe(), b).ok_or(e)?)?.refine()
 }
 
 /// A mutator's function (`P` the space it writes).
