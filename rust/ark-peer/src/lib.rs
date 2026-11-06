@@ -716,11 +716,17 @@ impl Peer {
 
     /// A frame from its server, to the machine of its space; a call's
     /// reply, to what it was asked; a file's, to its files.
+    /// Told it cannot be served (§1.2), it closes its link until the app
+    /// is updated.
     pub(crate) fn told_frame(&mut self, f: Frame) {
         match f {
             Frame::Reply { id, reply } => self.told.replied(id, reply),
             f if f.is_file() => self.file_told(f),
             f => self.step(f.space(), Input::Frame { from: None, frame: f }),
+        }
+        if self.update_needed().is_some() && !self.link.offline {
+            tracing::warn!(target: "ark", peer = %self.label(), why = self.update_needed(), "update needed");
+            self.disconnect();
         }
     }
 

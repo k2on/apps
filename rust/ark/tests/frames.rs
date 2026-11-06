@@ -5,7 +5,7 @@ mod demo;
 
 use ark::format::Encode;
 use ark::frames::{Frame, Reply, Verdict};
-use ark::hash::EntryHash;
+use ark::hash::{EntryHash, SchemaHash};
 use ark::log::{Ctx, Cursor, EntryId, Logged, Origin, Record, Span, TraceId};
 use ark::schema::Space;
 use ark::store::Change;
@@ -57,6 +57,7 @@ fn every_frame() -> Vec<Frame> {
             hash: EntryHash([0; 32]),
             fill: None,
             most: ark::peer::PART as u64,
+            schema: demo::schema().hash(),
         },
         Frame::Hello {
             space: Space::Volatile,
@@ -67,9 +68,10 @@ fn every_frame() -> Vec<Frame> {
                 key: vec![0, 1],
             }),
             most: 16 << 10,
+            schema: SchemaHash([7; 32]),
         },
-        Frame::push(Space::Volatile, 0, [entry.clone()]),
-        Frame::push(Space::Durable, 0, [entry.clone(), entry]),
+        Frame::push(Space::Volatile, SchemaHash([7; 32]), 0, [entry.clone()]),
+        Frame::push(Space::Durable, SchemaHash::default(), 0, [entry.clone(), entry]),
         Frame::Verdict {
             space: Space::Durable,
             id,
@@ -140,6 +142,14 @@ fn every_frame() -> Vec<Frame> {
             hash: "ab".repeat(32),
             why: "not here yet".into(),
         },
+        Frame::Schema {
+            space: Space::Durable,
+            schema: demo::schema(),
+        },
+        Frame::Update {
+            space: Space::Volatile,
+            why: ark::frames::UPDATE.into(),
+        },
     ]
 }
 
@@ -171,17 +181,17 @@ fn every_frame_reads_back() {
     assert_eq!(Record::dec(&r.enc()), Ok(r));
 }
 
-/// A push is a page of intents: each at sequence 0 with no facts and zero
-/// hashes, its bytes those of `Logged::intent`, so the protocol carries
-/// one shape of entry. Falsified by `Frame::push` keeping the entry's
-/// `local` as its sequence: the page's first entry was at sequence 1.
+/// A push is a build's intents as they are, in order, beside the schema
+/// it was built with and where its pending intents begin. Falsified by
+/// `Frame::push` dropping the schema it is given: it named none.
 #[test]
-fn a_push_is_a_page_of_intents() {
+fn a_push_is_its_build_s_intents() {
     let f = every_frame().remove(3);
-    let Frame::Page { from, logged, .. } = &f else { panic!("{f:?}") };
-    assert_eq!(*from, 0);
-    assert!(logged
-        .iter()
-        .all(|l| l.seq == 0 && l.facts.is_empty() && l == &Logged::intent(l.entry.clone(), vec![])));
-    assert_eq!(logged.len(), 2);
+    let Frame::Push { from, intents, schema, .. } = &f else {
+        panic!("{f:?}")
+    };
+    assert_eq!((*from, *schema), (0, SchemaHash::default()));
+    assert_eq!(intents.len(), 2);
+    let f = every_frame().remove(2);
+    assert!(matches!(f, Frame::Push { schema, .. } if schema == SchemaHash([7; 32])), "{f:?}");
 }

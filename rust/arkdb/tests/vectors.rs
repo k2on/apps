@@ -73,16 +73,23 @@ fn protocol() {
         }
     }
     let id = EntryId::of("s", 1);
-    for (n, f) in [(
-        "server-verdict-refused-durable",
-        Frame::Verdict {
-            space: Space::Durable,
-            id,
-            verdict: Verdict::Refused {
-                why: "a playlist needs a name".into(),
+    let update = Frame::Update {
+        space: Space::Durable,
+        why: ark::frames::UPDATE.into(),
+    };
+    for (n, f) in [
+        (
+            "server-verdict-refused-durable",
+            Frame::Verdict {
+                space: Space::Durable,
+                id,
+                verdict: Verdict::Refused {
+                    why: "a playlist needs a name".into(),
+                },
             },
-        },
-    )] {
+        ),
+        ("server-update-durable", update),
+    ] {
         if seen.insert(n.into()) {
             frames.push((n.into(), f));
         }
@@ -98,7 +105,9 @@ fn protocol() {
     only("protocol", &written);
     for name in [
         "client-hello-volatile",
-        "client-page-durable",
+        "client-push-durable",
+        "client-schema-durable",
+        "server-update-durable",
         "server-verdict-at-volatile",
         "server-page-volatile",
         "server-part-durable",
@@ -145,8 +154,8 @@ fn rebase() {
     let (head, hash) = (net.hub.log.log().head().0, net.hub.log.store.state_hash());
     assert_eq!(
         hash.hex(),
-        "54e6f160d45bc0722c3b167ed47d938d63dc7d2ae0affe4edd2ee573da942d5d",
-        "K1's pin, as N4 re-derived it with rows postcard"
+        "c8ad6c12356e4cbbc585eaff62ad8ac06182833806f2d1b924db4022cfa93cdb",
+        "K1's pin, as N4 re-derived it with rows postcard, and moved by a build saying its schema (`54e6f160…` before)"
     );
     let right = fleet_vector(7, head, hash);
     vector("rebase", "fleet-seed-7.json", &format!("{right:#}\n")).unwrap();

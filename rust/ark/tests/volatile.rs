@@ -109,10 +109,10 @@ fn a_volatile_intent_is_its_own_space_end_to_end() {
         log.step(down(&fanouts(&o)[0]));
     }
     let o = log.step(mutate(demo::CREATE, demo::create_input("Mix"), 1));
-    assert!(sends(&o).iter().all(|f| matches!(f, Frame::Page { space: Space::Durable, .. })));
+    assert!(sends(&o).iter().all(|f| matches!(f, Frame::Push { space: Space::Durable, .. })));
     let o = live.step(waving("phone"));
     assert!(
-        matches!(&sends(&o)[..], [Frame::Page { space: Space::Volatile, logged, .. }] if logged[0].entry.id == log.pending()[0].entry.id),
+        matches!(&sends(&o)[..], [Frame::Push { space: Space::Volatile, intents, .. }] if intents[0].id == log.pending()[0].entry.id),
         "one id, two spaces"
     );
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);

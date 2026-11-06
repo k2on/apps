@@ -1,7 +1,7 @@
 {
   "found": "a device reopened after joining, unanswered, pushed its chain into a gap",
-  "hash": "0f1912f05273f433e5167d56cb840a561ea25616b454749b81589ff77b26b36f",
-  "head": 14,
+  "hash": "206be47ec3709539bf06febbdbf18f8c0cad504cde553500fb77980a39077875",
+  "head": 11,
   "seed": 7144,
-  "state": "b6ec85397145540dd9810f9f76b97d1d37323678f6c4d661799899d4d332fa0c"
+  "state": "e0603f29e65baaf0e2132c508c9577410cb932218fba10d6189ff05f469b48d4"
 }

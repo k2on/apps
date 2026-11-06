@@ -7,7 +7,10 @@
 //! structs derive it and the next releases written in this file. A domain
 //! is this build's Rust (§1.16): a release that moves a function is a new
 //! build, and an intent naming a function a server's build does not
-//! register is held — the kernel's own tests hold that (`ark/tests`).
+//! register is held from a newer build and refused as needing an update
+//! from any other; a build whose schema neither grows from the server's
+//! nor into it is told to update — the kernel's own tests hold that
+//! (`ark/tests/grow.rs`).
 //!
 //! **The fleet across versions.** Scenarios 1, 4 and 5 run a pinned
 //! previous revision beside this build's (`nix/versions.nix`, which

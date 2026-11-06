@@ -1,6 +1,7 @@
 //! The transforms that moved data from a schema before this one
 //! (`src/migrations.rs`), run over rows as a server kept them: exported,
-//! transformed, imported.
+//! transformed, imported; and a device of a build before one, told by a
+//! server of this build to update.
 
 use std::sync::Arc;
 
@@ -105,4 +106,37 @@ fn albums_of_one_name_in_two_folders_are_two() {
             None
         ]
     );
+}
+
+/// A device of the build before albums-by-folder — its schema the one the
+/// migration moved from — is told by a server of this build to update, and
+/// not served: neither schema grows from the other (`album` gained `id` as
+/// its first column), so its rows would be read otherwise. Falsified by a
+/// server judging no schema: its `Hello` was answered as any build's.
+#[test]
+fn a_device_from_before_albums_by_folder_is_told_to_update() {
+    use ark::frames::Frame;
+    use ark::peer::{Ctx, Input, Output, Peer, Role, To};
+    let was: Schema = serde_json::from_str(include_str!("../migrations/albums-by-folder.json")).unwrap();
+    assert!(ark::schema::compat(&was, &domain().schema).is_err() && ark::schema::compat(&domain().schema, &was).is_err());
+    let mut server = Peer::new(Arc::new(domain()), Role::authority(), Ctx::who("server", "server", vec![]));
+    let phone = Some(Ctx::who("alice", "phone", vec![]));
+    let hello = Frame::Hello {
+        space: Space::Durable,
+        cursor: 0,
+        hash: Default::default(),
+        fill: None,
+        most: ark::peer::PART as u64,
+        schema: was.hash(),
+    };
+    let schema = Frame::Schema {
+        space: Space::Durable,
+        schema: was,
+    };
+    server.step(Input::Frame {
+        from: phone.clone(),
+        frame: schema,
+    });
+    let out = server.step(Input::Frame { from: phone, frame: hello });
+    assert!(matches!(&out[..], [Output::Send(To::Back, Frame::Update { .. })]), "{out:?}");
 }

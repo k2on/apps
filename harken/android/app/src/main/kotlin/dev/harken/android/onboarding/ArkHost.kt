@@ -167,7 +167,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
                 // Signed in just now: opening, until the replica has what the server had —
                 // or the server cannot be reached, and there is nothing more to wait for.
                 viewModelScope.launch {
-                    s.status.first { it.synced || it.link == "waiting" }
+                    s.status.first { it.synced || it.link == "waiting" || it.link == "update needed" }
                     if (_session.value === s) send(Event.Synced)
                 }
             }

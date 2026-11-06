@@ -113,11 +113,14 @@ fn check_of<I: Input>() -> Check {
     Arc::new(|b| I::decode(b).map_err(|e| vec![(String::new(), e)])?.check().map(|_| ()))
 }
 
-/// An input from its encoding (no bytes are `()`'s), refined.
+/// An input from its encoding (no bytes are `()`'s), refined — as an
+/// older or a newer build wrote it, as a row is read (§1.2): a field
+/// appended since an empty value, one this build lacks dropped
+/// ([`crate::json::fit`]).
 fn input_of<I: Input>(b: &[u8]) -> Result<I, String> {
-    match b.is_empty() {
-        true => I::decode(&crate::format::encode(&())?)?.refine(),
-        false => I::decode(b)?.refine(),
+    match I::decode(b) {
+        Ok(i) => i.refine(),
+        Err(e) => I::decode(&crate::json::fit(&I::describe(), b).ok_or(e)?)?.refine(),
     }
 }
 

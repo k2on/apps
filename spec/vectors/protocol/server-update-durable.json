@@ -1,0 +1,5 @@
+{
+  "bytes": "0d000d757064617465206e6565646564",
+  "frame": {"Update":{"space":"durable","why":"update needed"}},
+  "name": "server-update-durable"
+}

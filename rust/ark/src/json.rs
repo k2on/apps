@@ -120,6 +120,43 @@ pub fn typed_value(t: &Type, b: &[u8]) -> Result<J, String> {
     crate::format::decode_seed(Seed(t), b)
 }
 
+/// A record's bytes as an older or a newer build of its type wrote them,
+/// read as this one's (§1.2, as a row is, [`crate::schema::Table::fit`]):
+/// a field past where they end takes its type's empty value — none, 0, "",
+/// false, nothing — and what follows this one's fields is dropped. None
+/// for a type that is no record, bytes of none of its fields (a record
+/// grows from one of its own, not from nothing), or a field missing with no
+/// empty value.
+pub fn fit(t: &Type, b: &[u8]) -> Option<Vec<u8>> {
+    let Type::Record(_, fs) = t else { return None };
+    if b.is_empty() {
+        return None;
+    }
+    let (mut rest, mut vs) = (b, vec![]);
+    for (_, t) in fs {
+        let v = match (rest.is_empty(), t) {
+            (true, Type::Option(_) | Type::Unit) => J::Null,
+            (true, Type::Int) => 0.into(),
+            (true, Type::Text) => "".into(),
+            (true, Type::Bool) => false.into(),
+            (true, Type::Bytes | Type::List(_)) => J::Array(vec![]),
+            (true, _) => return None,
+            (false, _) => {
+                let (v, r) = crate::format::take_seed(Seed(t), rest).ok()?;
+                rest = r;
+                v
+            }
+        };
+        vs.push(v);
+    }
+    let v = match positional(fs) {
+        true if vs.len() == 1 => vs.remove(0),
+        true => J::Array(vs),
+        false => J::Object(fs.iter().map(|f| f.0.clone()).zip(vs).collect()),
+    };
+    typed_bytes(t, &v).ok()
+}
+
 /// A value's key under its type, appended to `out`, or why it is not one.
 pub fn typed_key(t: &Type, v: &J, out: &mut Vec<u8>) -> Result<(), String> {
     let mut s = memcomparable::Serializer::new(std::mem::take(out));

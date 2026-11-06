@@ -225,13 +225,13 @@ fn the_health_says_the_head_and_who_is_connected() {
 /// `docs/plan-guards.md` D4 Only the authority writes raw. A client builds
 /// the function an authority's raw write is (bob renaming alice's
 /// playlist: a `Write` past every guard the domain has), loads its body
-/// and authors it. It previews and is pushed; the authority, whose content
-/// store holds only the functions of the modules its operator loaded,
-/// answers `Held`, and no frame carries a body to it: the intent stays
-/// pending on bob's device and alice's playlist keeps its name. Falsified
-/// by putting back the `Push` with a body the client answered `Held` with
-/// and the authority's loading of it (`ark::peer::Peer::push`): the
-/// playlist was renamed `Hijacked`.
+/// and authors it. It previews and is pushed; the authority, which runs
+/// only the functions its build has, refuses it — a function it does not
+/// run, from a build no newer, needs an update — and no frame carries a
+/// body to it: alice's playlist keeps its name. Falsified by putting back
+/// the `Push` with a body the client answered `Held` with and the
+/// authority's loading of it (`ark::peer::Peer::push`): the playlist was
+/// renamed `Hijacked`.
 #[test]
 fn a_clients_raw_write_is_refused() {
     let rt = runtime();
@@ -277,10 +277,13 @@ fn a_clients_raw_write_is_refused() {
         playlists(&server),
         [("Mine".to_string(), "alice".to_string())]
     );
-    assert_eq!(
-        (bob.pending(), bob.refused.len()),
-        (1, 0),
-        "held, not refused"
+    assert_eq!(bob.pending(), 0, "refused");
+    assert!(
+        bob.refused
+            .iter()
+            .any(|(_, why)| why.starts_with(ark::frames::UPDATE)),
+        "as needing an update: {:?}",
+        bob.refused
     );
     rt.block_on(server.stop());
 }

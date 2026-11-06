@@ -261,6 +261,17 @@ pub fn only(names: &[&str]) -> Arc<Domain> {
     Arc::new(d)
 }
 
+/// A newer build of the demo: its schema with a table appended (`tag`),
+/// its functions the same.
+pub fn newer() -> Arc<Domain> {
+    let mut s = schema();
+    s.tables.push(ark::schema::Table::new("tag").col("name", ark::row::Type::Text));
+    Arc::new(Domain {
+        schema: Arc::new(s),
+        ..demo()
+    })
+}
+
 /// `name`'s function, as `cas` runs it, given `peer` too.
 pub fn give(peer: &mut ark::peer::Peer, name: &str) {
     let f = demo().fns[name].clone();

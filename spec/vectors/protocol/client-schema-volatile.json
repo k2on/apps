@@ -1,0 +1,5 @@
+{
+  "bytes": "0c01020468657265030773657373696f6e0100046e616d6501000573696e636500000100000107706f696e746572020773657373696f6e01000178000001000001",
+  "frame": {"Schema":{"schema":{"tables":[{"columns":[{"default":null,"name":"session","ty":"Text"},{"default":null,"name":"name","ty":"Text"},{"default":null,"name":"since","ty":"Int"}],"indexes":[],"key":1,"name":"here","refs":[],"space":"volatile"},{"columns":[{"default":null,"name":"session","ty":"Text"},{"default":null,"name":"x","ty":"Int"}],"indexes":[],"key":1,"name":"pointer","refs":[],"space":"volatile"}]},"space":"volatile"}},
+  "name": "client-schema-volatile"
+}

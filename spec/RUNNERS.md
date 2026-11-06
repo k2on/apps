@@ -29,10 +29,11 @@ and `pairs` (a fuzz finding each).
 `{bytes, frame, name}`: one frame (`frames.rs`), `name` who writes it, its
 kind and its space (`client-hello-volatile`). The runner decodes `bytes`
 as a frame, encodes it again to the same bytes, and checks its JSON is
-`frame`. The kinds: `Hello`, `Page` (a client's intents at sequence 0, an
-authority's log), `Part` (a fill's), `Verdict`
-(`At`, where the intent's origin stands, and `Refused`, built by hand: no
-session sends it).
+`frame`. The kinds: `Schema` (a client's, at each connection), `Hello`,
+`Push` (a client's intents), `Page` (an authority's log), `Part` (a
+fill's), `Verdict` (`At`, where the intent's origin stands, and
+`Refused`), and `Update`; `Refused` and `Update` are built by hand: no
+session sends them.
 
 ## rebase
 

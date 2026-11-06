@@ -76,7 +76,10 @@ fn scenario() -> Scenario {
     assert_eq!(alice.log().head(), bob.log().head());
     // alice comes back: hello, and her intent pushed again
     let o = alice.step(Input::Connected);
-    assert!(matches!(sends(&o)[..], [Frame::Hello { cursor: 3, .. }, Frame::Page { .. }]));
+    assert!(matches!(
+        sends(&o)[..],
+        [Frame::Schema { .. }, Frame::Hello { cursor: 3, .. }, Frame::Push { .. }]
+    ));
     let (s, f) = deliver_up(&mut server, &who("alice"), &o);
     assert!(matches!(verdicts(&s)[..], [Some(Verdict::At { seq: 4, .. })]), "{s:?}");
     let l4 = logged(&f[0]);
@@ -167,7 +170,10 @@ fn step_1_an_authority_sequences_the_transcript() {
         let (acks, f) = deliver_up(
             &mut fresh,
             &who(&l.entry.actor),
-            &[Output::Send(To::Back, Frame::push(ark::schema::Space::Durable, 0, [l.entry.clone()]))],
+            &[Output::Send(
+                To::Back,
+                Frame::push(ark::schema::Space::Durable, Default::default(), 0, [l.entry.clone()]),
+            )],
         );
         assert!(matches!(verdicts(&acks)[..], [Some(Verdict::At { seq, .. })] if seq == l.seq));
         assert_eq!(&logged(&f[0]), l, "entry {}: its facts, state and hash", l.seq);
@@ -269,6 +275,7 @@ fn compaction_and_the_horizon() {
         hash,
         fill: None,
         most: ark::peer::PART as u64,
+        schema: Default::default(),
     };
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", demo::only(&[]));
@@ -315,16 +322,17 @@ fn edits_and_removes_rebase_too() {
     assert_eq!(pos_of(&alice.store, &pid(), "t4"), Some(4));
 }
 
-/// An intent naming a function the authority does not run is not judged:
-/// answered where its origin stands (`At`, its `last` below it), it stays
-/// pending on the device, which sends nothing back and pushes it again on
-/// its next connection; not judged again until the authority has the
-/// function, then sequenced. Falsified by `push` answering an unknown
-/// function with a refusal: the first push came back refused.
+/// An intent of a newer build naming a function the authority does not
+/// run is not judged: answered where its origin stands (`At`, its `last`
+/// below it), it stays pending on the device, which sends nothing back and
+/// pushes it again on its next connection; not judged again until the
+/// authority has the function, then sequenced. Falsified by `push`
+/// answering an unknown function with a refusal whatever the build: the
+/// first push came back refused.
 #[test]
 fn held_until_the_authority_has_it() {
     let mut server = authority(demo::only(&[CREATE]));
-    let mut alice = replica("alice", demo::cas());
+    let mut alice = replica("alice", demo::newer());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));
@@ -384,7 +392,7 @@ fn a_peer_opens_from_what_it_persisted() {
     let pending = sends(&pending)
         .into_iter()
         .map(|f| match f {
-            Frame::Page { mut logged, .. } => ark::log::Logged::intent(logged.remove(0).entry, vec![]),
+            Frame::Push { mut intents, .. } => ark::log::Logged::intent(intents.remove(0), vec![]),
             _ => unreachable!(),
         })
         .collect();
@@ -497,7 +505,7 @@ fn a_page_rebases_once() {
 #[test]
 fn what_comes_behind_a_held_intent_is_a_gap() {
     let mut server = authority(demo::only(&[CREATE]));
-    let mut alice = replica("alice", demo::cas());
+    let mut alice = replica("alice", demo::newer());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));
     deliver_up(&mut server, &who("alice"), &o);
     let o = alice.step(mutate(ADD, pair_input(&pid(), "t1"), 2));

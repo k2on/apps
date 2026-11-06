@@ -339,10 +339,19 @@ impl Peer {
         self.log.store.state_hash()
     }
 
-    /// Where its link stands, as a status line says it: `alone` (no
-    /// server), `signed out`, `online`, `offline`, `connecting` or
-    /// `waiting to dial`.
+    /// Why its server cannot serve this build, once it said so (§1.2): the
+    /// app is to be updated; the link is closed until it is.
+    pub fn update_needed(&self) -> Option<&str> {
+        self.log.update_needed().or(self.live.as_ref().and_then(|l| l.update_needed()))
+    }
+
+    /// Where its link stands, as a status line says it: `update needed`
+    /// (its server cannot serve this build), `alone` (no server), `signed
+    /// out`, `online`, `offline`, `connecting` or `waiting to dial`.
     pub fn link_state(&self) -> &'static str {
+        if self.update_needed().is_some() {
+            return "update needed";
+        }
         match (self.link.url.is_none(), self.link.token.is_some(), self.linked, self.link.offline) {
             // No server to dial: what it does is pending, kept here.
             (true, ..) => "alone",

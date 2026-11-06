@@ -133,8 +133,9 @@ impl Outcome {
 /// Where a device stands, as a status line says it.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct Status {
-    /// `alone` (no server), `signed out`, `online`, `offline`, `connecting`
-    /// or `waiting to dial`.
+    /// `update needed` (the server cannot serve this build: the app is to be
+    /// updated), `alone` (no server), `signed out`, `online`, `offline`,
+    /// `connecting` or `waiting to dial`.
     pub link: String,
     pub linked: bool,
     pub epoch: u64,

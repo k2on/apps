@@ -2,7 +2,9 @@
 //! of any schema its own grows from, and refuses one it does not; every
 //! device syncs with every server, a build older or newer, its rows and
 //! facts read under its own schema; a device's disk of a schema its own
-//! does not grow from starts empty, its pending intents kept.
+//! does not grow from starts empty, its pending intents kept; and a device
+//! of a schema its server's neither grows from nor into is told to update,
+//! and says so.
 
 mod support;
 
@@ -136,4 +138,29 @@ fn a_replica_of_a_schema_not_grown_from_starts_empty_its_pending_kept() {
         assert_eq!(p.log.pending().len(), 1, "its intent, pending");
         assert_eq!(playlists(&p), 1, "and run on top");
     }
+}
+
+/// A device of a schema its server's neither grows from nor into is told,
+/// as it connects, that it is to update: its status says so, its link is
+/// closed until it is, and it keeps its rows and its intent, nothing sent.
+/// Falsified by the server serving it: it was filled, and its intent
+/// judged.
+#[test]
+fn a_device_its_server_cannot_serve_says_it_is_to_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let (data, phone) = (dir.path().join("server"), dir.path().join("phone"));
+    let hub = server(support::config(), &data).unwrap();
+    hub.with(|p| p.mutate_at("demo.create_playlist", named("Hymns"), 1)).unwrap().unwrap();
+    let p = synced(retitled(), &phone, "alice@laptop", &hub, &["Psalms"], |p| {
+        p.link_state() == "update needed"
+    });
+    assert!(p.update_needed().is_some_and(|w| w.starts_with(ark::frames::UPDATE)));
+    assert!(!p.linked, "its link closed");
+    assert_eq!(
+        (p.log.pending().len(), playlists(&p), p.log.log().head().0),
+        (1, 1, 0),
+        "its own, and nothing sent"
+    );
+    assert_eq!(hub.with(|h| h.log.store.rows("playlist").count()).unwrap(), 1, "nothing judged");
+    hub.stop();
 }

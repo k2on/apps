@@ -79,7 +79,7 @@ fn log(playlists: u64, n: u64) -> Peer {
     let mut push = |a: &mut Peer, name: &str, input: Vec<u8>| {
         local += 1;
         let entry = Ctx::new(&me, Origin::named(&me.session), local, name.to_string(), input, local);
-        a.step(up(&me, &Frame::push(Space::Durable, 0, [entry])));
+        a.step(up(&me, &Frame::push(Space::Durable, Default::default(), 0, [entry])));
     };
     for j in 0..playlists {
         push(&mut a, CREATE, create_input(&format!("P{j}")));
@@ -141,7 +141,7 @@ fn a_page_decodes_in_bounded_allocations() {
     assert!(dec <= 12 * PAGE, "a page decoded in {dec} allocations");
     assert!(enc <= 32, "a page encoded in {enc} allocations");
     let Frame::Page { logged, .. } = &f else { unreachable!() };
-    let push = Frame::push(Space::Durable, 0, [logged[0].entry.clone()]).enc();
+    let push = Frame::push(Space::Durable, Default::default(), 0, [logged[0].entry.clone()]).enc();
     let (_, one) = allocs(|| Frame::dec(&push).unwrap());
     assert!(one <= 16, "a push decoded in {one} allocations");
 }

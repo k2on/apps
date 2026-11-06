@@ -1060,7 +1060,7 @@ fn a_black_holed_socket_is_closed_by_the_keepalive() {
 /// Whether a payload the peer sent is a frame of this kind (its first
 /// message on a connection is its token, which is no frame).
 fn is_push(b: &[u8]) -> bool {
-    matches!(Frame::dec(b), Ok(Frame::Page { logged, .. }) if logged.first().is_some_and(|l| l.seq == 0))
+    matches!(Frame::dec(b), Ok(Frame::Push { .. }))
 }
 
 fn is_hello(b: &[u8]) -> bool {
@@ -1097,7 +1097,7 @@ fn a_replayed_push_or_hello_changes_nothing() {
         .expect("a push was sent");
     let msg = Frame::dec(&frame).unwrap();
     assert!(
-        matches!(&msg, Frame::Page { logged, .. } if logged[0].entry.id.0 == once),
+        matches!(&msg, Frame::Push { intents, .. } if intents[0].id.0 == once),
         "{msg:?}"
     );
     assert!(p.proxy.replay_where(is_push));

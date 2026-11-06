@@ -139,8 +139,9 @@ final class Model: ObservableObject {
         snapshot = s
         follow()
         // Signed in just now: opening, until the replica has what the server had —
-        // or the server cannot be reached, and there is nothing more to wait for.
-        if case .opening = step, let st = s.status, st.linked || st.cursor > 0 || st.link == "waiting to dial" || st.link == "offline" {
+        // or the server cannot be reached, or cannot serve this build, and there is
+        // nothing more to wait for.
+        if case .opening = step, let st = s.status, st.linked || st.cursor > 0 || st.link == "waiting to dial" || st.link == "offline" || st.link == "update needed" {
             send(.synced)
         }
     }

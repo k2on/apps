@@ -45,12 +45,11 @@
 //! was built with, by name (§1.16): nothing it is sent is code. **Every
 //! push is answered**, by one rule: refused, or where its origin stands
 //! (`At { seq, last }`: the last `local` of it judged, and the head). Only
-//! the next of its origin, naming a function the authority runs, is judged
-//! first; one at or below `last` is in the log, and one past a gap or
-//! naming no function here is not judged — its `local` not passed, so one
-//! pushed after it is not judged either. A device's intent at or below
+//! the next of its origin is judged; one at or below `last` is in the log,
+//! and one past a gap, or held, is not judged — its `local` not passed, so
+//! one pushed after it is not judged either. A device's intent at or below
 //! `last` is confirmed. A push says where its device's pending intents
-//! begin (its page's `from`, the `local` before the first): the ones of
+//! begin (its `from`, the `local` before the first): the ones of
 //! its origin up to there it no longer holds — its disk lost them, or the
 //! authority's log is older than the one that judged them — and they are
 //! passed, so a device is never stuck behind an intent nobody holds, and
@@ -58,8 +57,16 @@
 //!
 //! **A schema grows** (§1.2). A peer's store reads the rows and facts of
 //! any schema its own grows from or into ([`crate::schema::Table::fit`],
-//! [`Store::apply_facts`]), so a replica of an older or a newer build than
-//! its authority syncs with it. A schema
+//! [`Store::apply_facts`]), and a function its inputs
+//! ([`crate::json::fit`]), so a replica of an older or a newer build than
+//! its authority syncs with it. A replica says its schema at each
+//! connection ([`Frame::Schema`]) and names it in each `Hello` and push;
+//! its authority serves one its own grows from or into ([`Stance`]), and
+//! answers one that is neither with [`Frame::Update`] — it is to update,
+//! asks nothing more and takes nothing — and holds its pushes. An intent
+//! naming a function the authority does not run is held from a newer
+//! build (its server is to update), and refused as needing an update from
+//! any other, so its device's queue moves on. A schema
 //! only grows: rows move within it by an export, a transform and an import
 //! ([`crate::dynamic`]).
 //!
@@ -132,8 +139,8 @@ use std::sync::Arc;
 
 use crate::domain::{Domain, Holds};
 use crate::format::Encode;
-use crate::frames::{Frame, Verdict};
-use crate::hash::EntryHash;
+use crate::frames::{Frame, Verdict, UPDATE};
+use crate::hash::{EntryHash, SchemaHash};
 pub use crate::log::{Ctx, Journal};
 use crate::log::{Cursor, EntryId, Kept, Logged, Origin, Record, Rows, Seq, Span};
 use crate::schema::Space;
@@ -155,13 +162,18 @@ macro_rules! said {
     }};
 }
 
-/// What a peer is: a replica, or the authority — its journal, and the
-/// scope each connection is fed by, by who it is (none: every one the log
-/// whole).
+/// What a peer is: a replica, or the authority — its journal, the scope
+/// each connection is fed by, by who it is (none: every one the log
+/// whole), and what it made of each build's schema it was told, by its
+/// hash.
 #[derive(Clone)]
 pub enum Role {
     Replica,
-    Authority { journal: Journal, feed: Option<Scoping> },
+    Authority {
+        journal: Journal,
+        feed: Option<Scoping>,
+        builds: BTreeMap<SchemaHash, Stance>,
+    },
 }
 
 impl Role {
@@ -170,8 +182,20 @@ impl Role {
         Role::Authority {
             journal: Journal::default(),
             feed: None,
+            builds: BTreeMap::new(),
         }
     }
+}
+
+/// What an authority makes of a replica's schema beside its own (§1.2):
+/// the same; one its own grows from, an older build's; one that grows from
+/// its own, a newer build's; or neither, which it cannot serve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    Same,
+    Older,
+    Newer,
+    Other,
 }
 
 /// The scope a connection is fed by, by who it is (§1.8): its union, by
@@ -340,6 +364,9 @@ pub struct Peer {
     pub part: Option<usize>,
     /// Its disk, while it is the upstream it fills from first.
     upstream: Option<Source>,
+    /// Why its authority cannot serve it, once it said so ([`Frame::Update`]):
+    /// it asks nothing more, and takes nothing it is sent.
+    update: Option<String>,
     keeping: Keeping,
 }
 
@@ -385,6 +412,7 @@ impl Peer {
             wants: vec![],
             part: None,
             upstream: None,
+            update: None,
             keeping: Keeping::default(),
         };
         p.store = p.blank();
@@ -434,6 +462,12 @@ impl Peer {
     /// Whether its disk is the upstream it fills from ([`Input::Read`]).
     pub fn reading(&self) -> bool {
         self.upstream.is_some()
+    }
+
+    /// Why its authority cannot serve this build, once it said so: it is to
+    /// update (§1.2).
+    pub fn update_needed(&self) -> Option<&str> {
+        self.update.as_deref()
     }
 
     /// The store's rows as confirmed — the pending intents' changes
@@ -494,6 +528,8 @@ impl Peer {
     pub fn step(&mut self, input: Input) -> Vec<Output> {
         let mut o = Out::default();
         match input {
+            // Told to update, it takes nothing it is sent.
+            Input::Frame { .. } if self.update.is_some() => {}
             Input::Frame { from, frame } => self.frame(from, frame, &mut o),
             Input::Mutate { func, input, now, cause } => self.mutate(func, input, now, cause, &mut o),
             Input::Open(d) => self.open(d, &mut o),
@@ -509,6 +545,9 @@ impl Peer {
         }
         if !o.told.is_empty() {
             o.out.insert(0, Output::Changes(o.told));
+        }
+        if self.update.is_some() {
+            o.out.retain(|x| !matches!(x, Output::Send(..)));
         }
         if self.space == Space::Volatile {
             o.out.retain(|x| !matches!(x, Output::Persist(_)));
@@ -630,7 +669,7 @@ impl Peer {
             run => {
                 self.local = local;
                 let from = self.pending.front().map_or(local, |p| p.entry.local) - 1;
-                o.send(Frame::push(self.space, from, [entry.clone()]));
+                o.send(Frame::push(self.space, self.store.schema_hash(), from, [entry.clone()]));
                 self.pending.push_back(Logged::intent(entry, run.unwrap_or_default()));
                 self.keeping.put += 1;
             }
@@ -674,19 +713,36 @@ impl Peer {
             return;
         }
         match (f, self.is_authority(), from) {
+            (Frame::Schema { schema, .. }, true, _) => self.judge(schema),
             (
                 Frame::Hello {
-                    cursor, hash, fill, most, ..
+                    cursor,
+                    hash,
+                    fill,
+                    most,
+                    schema,
+                    ..
                 },
                 true,
                 who,
             ) => {
+                if self.stance(schema) == Stance::Other {
+                    let why = format!("{UPDATE}: this server's schema neither grows from this build's nor into it");
+                    return o.send(Frame::Update { space: self.space, why });
+                }
                 // Never past [`PART`].
                 let feed = who.and_then(|w| self.feed_of(&w));
                 self.serve(feed, (cursor, hash), fill, (most as usize).clamp(1, PART), o)
             }
             // A peer's intents, each a push.
-            (Frame::Page { from, logged, .. }, true, Some(who)) => logged.into_iter().for_each(|l| self.push(&who, from, l.entry, o)),
+            (Frame::Push { schema, from, intents, .. }, true, Some(who)) => {
+                let stance = self.stance(schema);
+                intents.into_iter().for_each(|e| self.push(&who, from, e, stance, o))
+            }
+            (Frame::Update { why, .. }, false, _) => {
+                tracing::warn!(target: "ark", why = %why, "update needed");
+                self.update = Some(why);
+            }
             (Frame::Page { logged, .. }, false, _) => self.confirm(logged, o),
             (
                 Frame::Part {
@@ -775,11 +831,41 @@ impl Peer {
         move |table, row| feed.as_ref().is_none_or(|f| f.holds(table, row).unwrap_or(false))
     }
 
+    /// A replica's schema judged beside its own (§1.2), kept by its hash
+    /// for its `Hello`s and pushes to name.
+    fn judge(&mut self, theirs: crate::schema::Schema) {
+        let ours = self.store.schema_arc().clone();
+        let stance = match (crate::schema::compat(&theirs, &ours), crate::schema::compat(&ours, &theirs)) {
+            (Ok(()), _) => Stance::Older,
+            (_, Ok(())) => Stance::Newer,
+            _ => Stance::Other,
+        };
+        if let Role::Authority { builds, .. } = &mut self.role {
+            // A few builds are out at once; told of many, it starts afresh.
+            if builds.len() >= 64 {
+                builds.clear();
+            }
+            builds.insert(theirs.hash(), stance);
+        }
+    }
+
+    /// What it makes of a replica's schema, by its hash: its own, or one it
+    /// was told ([`Frame::Schema`]); one it was not told — its `Schema`
+    /// lost — is taken for a newer build's, served, and what it names that
+    /// is not here held.
+    fn stance(&self, schema: SchemaHash) -> Stance {
+        match &self.role {
+            Role::Authority { builds, .. } if schema != self.store.schema_hash() => builds.get(&schema).copied().unwrap_or(Stance::Newer),
+            _ => Stance::Same,
+        }
+    }
+
     /// A pushed intent judged, its device's pending beginning past `from`,
-    /// and the verdict sent back: every push is answered.
-    fn push(&mut self, who: &Ctx, from: i64, entry: Ctx, o: &mut Out) {
+    /// its build's schema as `stance` says, and the verdict sent back:
+    /// every push is answered.
+    fn push(&mut self, who: &Ctx, from: i64, entry: Ctx, stance: Stance, o: &mut Out) {
         let id = entry.id;
-        let verdict = self.verdict_on(who, from, entry, o);
+        let verdict = self.verdict_on(who, from, entry, stance, o);
         o.send(Frame::Verdict {
             space: self.space,
             id,
@@ -787,7 +873,7 @@ impl Peer {
         });
     }
 
-    fn verdict_on(&mut self, who: &Ctx, from: i64, mut entry: Ctx, o: &mut Out) -> Verdict {
+    fn verdict_on(&mut self, who: &Ctx, from: i64, mut entry: Ctx, stance: Stance, o: &mut Out) -> Verdict {
         let head = self.log().head().0;
         let known = self.domain.fns.contains_key(&entry.func);
         let j = self.journal_mut();
@@ -806,11 +892,13 @@ impl Peer {
             o.persist(Record::Journal(j.clone()));
         }
         let last = j.last_of(&entry.origin);
-        // Not the next of its origin, or naming no function here: where its
-        // origin stands. At or below the last and not refused, it is in the
-        // log at or below the head — every entry up to which this connection
-        // is sent before the verdict; past it, not judged.
-        if entry.local != last + 1 || !known {
+        // Not the next of its origin, or held — of a build it cannot serve,
+        // or naming a function a newer build has and it does not yet: where
+        // its origin stands. At or below the last and not refused, it is in
+        // the log at or below the head — every entry up to which this
+        // connection is sent before the verdict; past it, not judged.
+        let held = stance == Stance::Other || !known && stance == Stance::Newer;
+        if entry.local != last + 1 || held {
             match entry.local > last {
                 true if entry.local == last + 1 => said!(warn, "held", &entry, last = last),
                 true => said!(warn, "gap", &entry, last = last),
@@ -819,7 +907,12 @@ impl Peer {
             return Verdict::At { seq: head, last };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        let (origin, local, run) = (entry.origin, entry.local, self.attempt(&entry, o));
+        // A function it does not run, of a build not newer, is retired.
+        let run = match known {
+            true => self.attempt(&entry, o),
+            false => Err(format!("{UPDATE}: this server runs no function {}", entry.func)),
+        };
+        let (origin, local) = (entry.origin, entry.local);
         self.judged(entry, run, o).map_or_else(
             |why| {
                 let j = self.journal_mut();
@@ -906,6 +999,7 @@ impl Peer {
                     hash: h,
                     fill,
                     most: self.most(),
+                    schema: self.store.schema_hash(),
                 });
             }
         }
@@ -1038,7 +1132,12 @@ impl Peer {
         let most = self.most() as usize;
         let from = self.pending.front().map_or(0, |p| p.entry.local - 1);
         for page in pages(self.pending.make_contiguous(), most, Logged::weight) {
-            o.send(Frame::push(self.space, from, page.iter().map(|p| p.entry.clone())));
+            o.send(Frame::push(
+                self.space,
+                self.store.schema_hash(),
+                from,
+                page.iter().map(|p| p.entry.clone()),
+            ));
         }
     }
 
@@ -1048,8 +1147,11 @@ impl Peer {
         if self.is_authority() {
             return;
         }
-        // What was asked on the connection before is not coming.
+        // What was asked on the connection before is not coming; what it
+        // is, first (§1.2).
         self.asked = None;
+        let schema = (**self.store.schema_arc()).clone();
+        o.send(Frame::Schema { space: self.space, schema });
         self.ask(o);
         self.repush(o);
     }

@@ -1,11 +1,14 @@
 //! §1.11 The frames: one `Sum` type, encoded by §1.1. **The protocol is
-//! pages**: a peer sends pages of its intents; an authority answers with
+//! pages**: a peer pushes pages of its intents; an authority answers with
 //! verdicts and pages of its chain.
 //!
 //! ```text
-//! Hello   { space, cursor, hash, fill: Option<{ table, key }>, most }
+//! Schema  { space, schema }
+//! Hello   { space, cursor, hash, fill: Option<{ table, key }>, most, schema }
+//! Push    { space, schema, from, intents: [Ctx] }
 //! Page    { space, from, logged: [Logged] }
 //! Verdict { space, id, verdict: At { seq, last } | Refused { why } }
+//! Update  { space, why }
 //! Part    { space, seq, hash, from: Option<{ table, key }>, rows: [(table, [row])], next }
 //! Call    { id, name, input }
 //! Reply   { id, reply: Ok { output } | Refused { why } }
@@ -16,16 +19,25 @@
 //! Absent  { hash, why }
 //! ```
 //!
-//! An authority's `Page` is its log from `from`, sequenced. A peer's `Page`
-//! is its intents not yet sequenced, each at sequence 0 with no facts and
-//! zero hashes ([`Logged::intent`]) — a push being a page of one; what it
-//! did with no server is pushed so too, as intents (§1.7) — and its `from`
-//! the `local` its pending intents begin after: what its origin had up to
-//! there, it no longer holds. A `Verdict` answers
-//! one intent: refused, or where its origin stands — the last `local` of
-//! it the authority judged, and its head: an intent at or below that last
-//! is in the log at or below the head; one past it was not judged (past a
-//! gap, or naming a function the authority does not run).
+//! An authority's `Page` is its log from `from`, sequenced. A peer's `Push`
+//! is its intents not yet sequenced — what it did with no server is pushed
+//! so too (§1.7) — and its `from` the `local` its pending intents begin
+//! after: what its origin had up to there, it no longer holds. A `Verdict`
+//! answers one intent: refused, or where its origin stands — the last
+//! `local` of it the authority judged, and its head: an intent at or below
+//! that last is in the log at or below the head; one past it was not
+//! judged (past a gap, or held: see below).
+//!
+//! **A build says its schema** (§1.2): a replica's `Schema` whole, at each
+//! connection before its `Hello`, and its hash in each `Hello` and `Push`.
+//! An authority serves a replica whose schema its own grows from (an older
+//! build's) or into (a newer one's) — their rows and facts read under each
+//! one's own ([`crate::schema::Table::fit`]) — and answers one whose schema
+//! is neither once, with `Update`, instead of filling it: it is to update,
+//! and asks nothing more until it does; its pushes are held. An intent
+//! naming a function the authority does not run is held from a newer build
+//! (its server is to update), and refused with [`UPDATE`] from any other
+//! (the function is retired), so its device's queue moves on.
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
 //! `Hello` its log cannot page — the first, no rows, where they stand (no
@@ -62,8 +74,8 @@
 //!
 //! **No code crosses the wire.** An entry names its function by name; an
 //! authority runs exactly the functions its program was built with, and
-//! an intent naming one it does not run is not judged: it stays pending on
-//! the device, pushed again on its next connection. Nothing a client sends is ever loaded.
+//! an intent naming one it does not run is held or refused, as above.
+//! Nothing a client sends is ever loaded.
 //!
 //! Every frame names its space, so two machines share a connection (§1.9):
 //! a verdict's id is `(origin, local)`'s, and each space counts its own.
@@ -75,9 +87,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::format::Encode;
-use crate::hash::EntryHash;
+use crate::hash::{EntryHash, SchemaHash};
 use crate::log::{Ctx, Cursor, EntryId, Logged, Rows, Seq};
-use crate::schema::Space;
+use crate::schema::{Schema, Space};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
@@ -88,6 +100,7 @@ pub enum Frame {
         /// Where its fill stands, filling: the part from there is asked.
         fill: Option<Cursor>,
         most: u64,
+        schema: SchemaHash,
     },
     Page {
         space: Space,
@@ -140,6 +153,20 @@ pub enum Frame {
         hash: String,
         why: String,
     },
+    Push {
+        space: Space,
+        schema: SchemaHash,
+        from: i64,
+        intents: Vec<Ctx>,
+    },
+    Schema {
+        space: Space,
+        schema: Schema,
+    },
+    Update {
+        space: Space,
+        why: String,
+    },
 }
 
 /// The call a device ships what it said of itself by (docs/plan-observe.md):
@@ -151,6 +178,11 @@ pub const EVENTS: &str = "ark.events";
 /// `Hello`s (§1.9): its input the bytes its server's live space authors
 /// `on_join` from — the driver's to read, no machine's — answered nothing.
 pub const DEVICE: &str = "ark.device";
+
+/// What an intent refused because its build is older than its server's
+/// begins with, and what an authority that cannot serve a build says: the
+/// device is to update.
+pub const UPDATE: &str = "update needed";
 
 /// One thing a peer said of itself: when (its clock, ms), which peer, how
 /// loud (`error`, `warn`, `info`, `debug`, `trace`), what (`msg`), and its
@@ -187,7 +219,13 @@ impl Frame {
     /// The space whose log the frame is about.
     pub fn space(&self) -> Space {
         match self {
-            Frame::Hello { space, .. } | Frame::Page { space, .. } | Frame::Verdict { space, .. } | Frame::Part { space, .. } => *space,
+            Frame::Hello { space, .. }
+            | Frame::Push { space, .. }
+            | Frame::Schema { space, .. }
+            | Frame::Update { space, .. }
+            | Frame::Page { space, .. }
+            | Frame::Verdict { space, .. }
+            | Frame::Part { space, .. } => *space,
             // About no log: the log's space, whose machine passes it by.
             Frame::Call { .. }
             | Frame::Reply { .. }
@@ -207,11 +245,16 @@ impl Frame {
         )
     }
 
-    /// A peer's intents, not yet sequenced, as a page: its pending
-    /// beginning after `from`.
-    pub fn push(space: Space, from: i64, entries: impl IntoIterator<Item = Ctx>) -> Frame {
-        let logged = entries.into_iter().map(|e| Logged::intent(e, vec![])).collect();
-        Frame::Page { space, from, logged }
+    /// A peer's intents, not yet sequenced, pushed by a build of
+    /// `schema`: its pending beginning after `from`.
+    pub fn push(space: Space, schema: SchemaHash, from: i64, intents: impl IntoIterator<Item = Ctx>) -> Frame {
+        let intents = intents.into_iter().collect();
+        Frame::Push {
+            space,
+            schema,
+            from,
+            intents,
+        }
     }
 
     pub fn enc(&self) -> Vec<u8> {

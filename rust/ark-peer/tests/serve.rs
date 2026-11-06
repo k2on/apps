@@ -281,7 +281,7 @@ fn a_refusal_is_forgotten_once_its_device_moves_past_it() {
     assert_eq!(refused(&hub), 1, "kept while her device may push it again");
     let origin = ark::log::Origin::named(&alice.session);
     let road = Ctx::new(&alice, origin, 2, "demo.create_playlist", named("Road"), 2);
-    hub.frame(c, Frame::push(Space::Durable, 1, [road]).enc(), 1);
+    hub.frame(c, Frame::push(Space::Durable, config().log.schema_hash(), 1, [road]).enc(), 1);
     assert_eq!(refused(&hub), 0, "forgotten: her pending intents begin past it");
     let disk = hub.log.disk.take().unwrap();
     let hub = Peer::serve(config(), disk, 0);
@@ -364,6 +364,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
         hash: Default::default(),
         fill: None,
         most: ark::peer::PART as u64,
+        schema: Default::default(),
     };
     hub.frame(c, device.enc(), 1);
     hub.frame(c, hello.enc(), 1);

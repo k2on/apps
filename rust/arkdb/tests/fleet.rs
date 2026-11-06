@@ -10,9 +10,11 @@ use arkdb::vectors::fleet;
 /// K1's pin (`rust/ark/tests/fleet.rs`, now moved here): twenty entries,
 /// this state. N1 moved the state (`ff04f56d…` before): rows are their
 /// JSON and ids drawn without the codec; the twenty entries are as they were.
-/// N4 made rows postcard (`8316d1f4…` as JSON).
+/// N4 made rows postcard (`8316d1f4…` as JSON). A build saying its schema
+/// at each connection put a frame more on the wire, and seed 7's drops and
+/// repeats fell elsewhere (`54e6f160…` before): twenty entries still.
 const HEAD: i64 = 20;
-const HASH: &str = "54e6f160d45bc0722c3b167ed47d938d63dc7d2ae0affe4edd2ee573da942d5d";
+const HASH: &str = "c8ad6c12356e4cbbc585eaff62ad8ac06182833806f2d1b924db4022cfa93cdb";
 
 /// Seed 7 converges to K1's pin through the hub: every client's log is the
 /// hub's, entry for entry and hash for hash, every store is its store,
