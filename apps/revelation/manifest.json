@@ -1,0 +1,27 @@
+{
+ "version": "42287678475",
+ "commit": "bfea6407a04a60d09dc650ccf3376c0ea74180a6",
+ "made": "2026-11-06 20:24 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  }
+ }
+}

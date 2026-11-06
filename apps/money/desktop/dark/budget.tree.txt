@@ -1,0 +1,114 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"4" at 217,81 6x13
+"Settings" at 41,107 53x17
+"On Budget" at 20,138 53x13
+"Checking" at 41,165 60x17
+"$14,236.90" at 160,165 69x16
+"Savings" at 41,192 51x17
+"$6,900.00" at 168,193 61x16
+"Cash" at 41,220 32x17
+"$74.16" at 187,221 42x16
+"Chase Sapphire ••4417" at 41,248 122x17
+"-$310.44" at 175,249 54x16
+"Tracking" at 20,279 43x13
+"Mortgage" at 41,306 62x17
+"-$312,450.00" at 148,307 81x16
+"Retirement" at 41,334 73x17
+"$64,300.00" at 160,335 69x16
+"November 2026" at 297,26 192x29
+"4 transactions need a look →" at 268,61 173x16
+"3 underfunded" at 455,61 89x16
+"$1,284.50" at 970,28 124x29
+"Ready to Assign" at 970,59 97x16
+"+ Category Group" at 268,96 109x16
+"Show hidden categories" at 395,96 144x16
+"Category" at 284,130 322x14
+"Assigned" at 676,130 50x14
+"Activity" at 805,130 41x14
+"Available" at 1046,130 50x14
+"Credit Card Payments" at 307,169 172x18
+"$0.00" at 686,169 44x18
+"-$1,577.50" at 765,169 85x18
+"Chase Sapphire" at 324,222 110x18
+"$0.00" at 686,222 40x18
+"-$1,577.50" at 770,222 76x18
+"Covered" at 902,223 54x17
+"$310.44" at 1020,222 64x18
+"Bills" at 307,277 33x18
+"$2,330.00" at 651,277 79x18
+"-$2,010.00" at 765,277 85x18
+"Rent" at 324,330 33x18
+"$1,850.00" at 655,330 71x18
+"-$1,850.00" at 770,330 76x18
+"100% goal" at 887,331 69x17
+"$0.00" at 1040,330 44x18
+"Electric" at 324,384 52x18
+"$120.00" at 668,384 58x18
+"—" at 832,384 14x18
+"100% goal" at 887,385 69x17
+"$143.73" at 1020,384 64x18
+"Water" at 324,438 42x18
+"$45.00" at 677,438 49x18
+"—" at 832,438 14x18
+"100% goal" at 887,439 69x17
+"$54.62" at 1030,438 54x18
+"Internet" at 324,492 56x18
+"$70.00" at 677,492 49x18
+"—" at 832,492 14x18
+"100% goal" at 887,493 69x17
+"$70.00" at 1030,492 54x18
+"Phone" at 324,546 43x18
+"$85.00" at 677,546 49x18
+"—" at 832,546 14x18
+"100% goal" at 887,547 69x17
+"$85.00" at 1030,546 54x18
+"Insurance" at 324,600 69x18
+"$160.00" at 668,600 58x18
+"-$160.00" at 783,600 63x18
+"100% goal" at 887,601 69x17
+"$0.00" at 1040,600 44x18
+"Everyday" at 307,655 73x18
+"$1,030.00" at 651,655 79x18
+"-$295.44" at 780,655 70x18
+"Groceries" at 324,708 67x18
+"$650.00" at 668,708 58x18
+"-$245.91" at 783,708 63x18
+"100% goal" at 887,709 69x17
+"$404.09" at 1020,708 64x18
+"Dining Out" at 324,762 75x18
+"$120.00" at 668,762 58x18
+"-$31.55" at 792,762 54x18
+"60% goal" at 895,763 61x17
+"$88.45" at 1030,762 54x18
+"Gas & Transit" at 324,816 95x18
+"$180.00" at 668,816 58x18
+"—" at 832,816 14x18
+"100% goal" at 887,817 69x17
+"$238.04" at 1020,816 64x18
+"Household" at 324,870 74x18
+"$80.00" at 677,870 49x18
+"-$17.98" at 792,870 54x18
+"100% goal" at 887,871 69x17
+"$62.02" at 1030,870 54x18
+"November 2026's Summary" at 1162,66 217x18
+"Left over from last month" at 1162,101 177x16
+"$19,719.00" at 1339,101 69x16
+"Assigned this month" at 1162,125 185x16
+"$4,105.50" at 1347,125 61x16
+"Activity" at 1162,148 181x16
+"-$3,897.94" at 1343,148 65x16
+"Available" at 1162,172 177x16
+"$19,926.56" at 1339,172 69x16
+"Income this month" at 1162,205 185x16
+"$5,390.00" at 1347,205 61x16
+"Overspent last month" at 1162,228 212x16
+"$0.00" at 1374,228 34x16
+"Auto-Assign" at 1162,284 95x18
+"Every category at once, for this month." at 1162,310 216x14
+"Underfunded" at 1172,337 85x17
+"Assigned last month" at 1172,372 133x17
+"Reset assigned amounts" at 1172,407 160x17
+"One budget, one household" at 1162,469 218x18
+"Everyone your household's sign-in lets in sees and changes this same budget, on every device, offline or not. Select a category to see its story." at 1162,493 226x57

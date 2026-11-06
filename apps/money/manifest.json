@@ -1,0 +1,157 @@
+{
+ "version": "42287678475",
+ "commit": "bfea6407a04a60d09dc650ccf3376c0ea74180a6",
+ "made": "2026-11-06 20:24 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transactions",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "desktop": {
+   "device": {
+    "corner": 0,
+    "cutout": "none",
+    "height": 1800,
+    "name": "Desktop, 1440\u00d7900",
+    "width": 2880
+   },
+   "shots": [
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "keys",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transactions",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "ios": {
+   "device": {
+    "name": "iPhone 17 Pro",
+    "width": 1206,
+    "height": 2622,
+    "corner": 165,
+    "cutout": "island"
+   },
+   "shots": [
+    {
+     "id": "accounts",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "budget",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "insights",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    },
+    {
+     "id": "transactions",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  }
+ }
+}
