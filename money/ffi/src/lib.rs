@@ -32,10 +32,12 @@ mod demo;
 mod hall;
 #[cfg(feature = "page")]
 mod page;
+mod session;
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 #[cfg(feature = "page")]
 pub use page::money_page_corners;
+pub use session::{Budget, Changed, Holding, MoneyView, Session};
 
 /// money's peer as a phone is made of it: the domain for the log, and no
 /// live space — a budget has nothing but what was said.

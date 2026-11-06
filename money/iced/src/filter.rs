@@ -120,7 +120,7 @@ impl App {
                 if self.author("save the filter", "save_filter", &s) {
                     self.modal = None;
                     self.note = format!("saved as {}", s.name);
-                    if let Some(f) = self.peer.filters.rows.iter().find(|f| f.name.eq_ignore_ascii_case(&s.name)) {
+                    if let Some(f) = self.peer.filters().iter().find(|f| f.name.eq_ignore_ascii_case(&s.name)) {
                         let id = f.id;
                         self.history.replace_next();
                         return self.update(Message::Go(Page::Ledger(Ledger::Saved(id))));
@@ -217,7 +217,7 @@ impl App {
                     menu::Entry::run(tick(f.accounts.is_empty() && !f.on_budget), "Every account", edit(Edit::AllAccounts)),
                     menu::Entry::run(tick(f.on_budget), "Only on the budget", edit(Edit::OnBudget(!f.on_budget))),
                 ];
-                for a in self.peer.accounts.rows.iter() {
+                for a in self.peer.accounts().iter() {
                     entries.push(menu::Entry::run(
                         tick(f.accounts.contains(&a.id)),
                         a.name.clone(),

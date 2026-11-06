@@ -9,17 +9,16 @@
 // — never on a clock, so a budget at rest runs nothing at all. A burst of
 // tells is one drain.
 //
-// **The lists are spliced, not re-read.** The accounts, the groups, the
-// month's lines and its summary, what the month spent, what needs a look,
-// the payees, the banks, what their accounts feed and the reader's asks
-// of them are the kernel's maintained views (`LiveView<T>` over UniFFI's
-// records, no JSON per row), read once and, after every change, asked what
-// they did and their patches spliced into the lists the screens hold. The
-// month's three are opened again when the month on screen changes. A
-// register is a view too, held by its account while a screen shows it
-// ([hold]) and let go when the last one leaves; so are what paid for a
-// transaction and a receipt's items, while a sheet shows them. Every
-// receipt and every receipt photo is kept whole.
+// **The views are the core's** (`Session`, money/ffi): it holds each one
+// by count, keeps its rows spliced on the kernel's thread and says which
+// moved (`Changed`); a page is what the domain says it is made of — the
+// budget for a month is its lines, summary and spending. The session holds
+// what every screen draws from (the accounts, the groups, the month's
+// budget, what needs a look, the payees, the banks, what their accounts
+// feed, the reader's asks, every receipt and photo) and reads again into
+// the snapshot what moved; a screen holds the rest while it shows it
+// (ArkUI's `.holding(view)`: a register, what paid for a transaction, a
+// receipt's items) and reads it from the session.
 //
 // **Files** (docs/plan-files.md) are the peer's: a photo taken is kept on
 // the phone and sent when there is a connection, and one a screen wants is
@@ -47,15 +46,9 @@ struct Snapshot {
     var linked = [LinkedLine]()
     /// The reader's own asks about banks, newest first.
     var asks = [AskLine]()
-    /// The registers held, by account — `Registers.all` for every account's.
-    var registers = [String: [TxnLine]]()
     /// Every receipt, and every photo of one with where reading it stands.
     var receipts = [ReceiptLine]()
     var photos = [PhotoLine]()
-    /// What paid for each transaction a sheet shows (`receipts.for_txn`), and
-    /// each receipt's items a sheet shows, by transaction and by receipt.
-    var paid = [String: [ReceiptLine]]()
-    var items = [String: [ItemLine]]()
     /// The files a screen asked for, by hash, once they are on the phone.
     var files = [String: Data]()
     var status: Status? = nil
@@ -66,12 +59,6 @@ struct Snapshot {
     func account(_ id: Id?) -> AccountLine? { id.flatMap { i in accounts.first { $0.id == i } } }
 }
 
-extension Registers {
-    /// The key of every account's register.
-    static let all = "all"
-    static func key(_ account: Id?) -> String { account?.hex ?? all }
-}
-
 /// What the peer says when anything moved: the session's queue is told.
 private final class Told: Listener, @unchecked Sendable {
     private let then: () -> Void
@@ -79,31 +66,11 @@ private final class Told: Listener, @unchecked Sendable {
     func changed() { then() }
 }
 
-/// A view and the list it is spliced into; on the session's queue only.
-final class Held<E> {
-    private let open: (Money) throws -> LiveView<E>
-    private var view: LiveView<E>? = nil
-    private(set) var rows = [E]()
-    init(_ open: @escaping (Money) throws -> LiveView<E>) { self.open = open }
-
-    func hydrate(_ m: Money) {
-        view = try? open(m)
-        rows = view?.rows() ?? []
-    }
-
-    /// What it did since last asked, spliced; true when it moved.
-    func update() -> Bool {
-        guard let v = view else { return false }
-        switch v.take() {
-        case .unchanged: return false
-        case .patched(let changes):
-            rows.splice(changes)
-            return true
-        case .reset(let all):
-            rows = all
-            return true
-        }
-    }
+/// What the session says when views moved: the screens told which.
+private final class Moved: Changed, @unchecked Sendable {
+    private let then: ([MoneyView]) -> Void
+    init(_ then: @escaping ([MoneyView]) -> Void) { self.then = then }
+    func moved(views: [MoneyView]) { then(views) }
 }
 
 /// How the session's peer is had: the household on a server, or the demo's.
@@ -123,6 +90,8 @@ final class Bridge {
     private let notice: (String) -> Void
     private let denied: (String) -> Void
     private let failed: (String) -> Void
+    private let opened: (Session) -> Void
+    private let moved: ([MoneyView]) -> Void
 
     // On `queue` only.
     private var money: Money? = nil
@@ -131,21 +100,13 @@ final class Bridge {
     private var draining = false
     private var deniedSaid = false
     private var snap = Snapshot()
-    private let accounts = Held<AccountLine> { try $0.accounts() }
-    private let groups = Held<GroupLine> { try $0.groups() }
-    private let inbox = Held<TxnLine> { try $0.inbox() }
-    private let payees = Held<PayeeLine> { try $0.payees() }
-    private let banks = Held<BankLine> { try $0.banks() }
-    private let linked = Held<LinkedLine> { try $0.linked() }
-    private let asks = Held<AskLine> { try $0.asks() }
-    private var lines: Held<BudgetLine>
-    private var summary: Held<Summary>
-    private var spending: Held<SpendingLine>
-    private var registers = [String: (held: Held<TxnLine>, refs: Int)]()
-    private let receipts = Held<ReceiptLine> { try $0.receipts() }
-    private let photos = Held<PhotoLine> { try $0.photos() }
-    private var paid = [String: (held: Held<ReceiptLine>, refs: Int)]()
-    private var items = [String: (held: Held<ItemLine>, refs: Int)]()
+    private var session: Session? = nil
+    /// What every screen draws from, held while the session is open.
+    private var always = [Holding]()
+    /// The month on screen's budget.
+    private var budget: Holding? = nil
+    /// Each view's version when it was last read into the snapshot.
+    private var seen = [MoneyView: UInt64]()
     /// The files asked for and not on the phone yet: the peer fetches them,
     /// and each drain looks again.
     private var wanted = [String: FileRef]()
@@ -155,25 +116,22 @@ final class Bridge {
     init(_ opening: Opening, month: String,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) },
          publish: @escaping (Snapshot) -> Void, notice: @escaping (String) -> Void,
-         denied: @escaping (String) -> Void, failed: @escaping (String) -> Void) {
+         denied: @escaping (String) -> Void, failed: @escaping (String) -> Void,
+         opened: @escaping (Session) -> Void = { _ in }, moved: @escaping ([MoneyView]) -> Void = { _ in }) {
         self.opening = opening
         self.deliver = deliver
         self.publish = publish
         self.notice = notice
         self.denied = denied
         self.failed = failed
+        self.opened = opened
+        self.moved = moved
         snap.month = month
-        let held = Bridge.month(month)
-        lines = held.0
-        summary = held.1
-        spending = held.2
         queue.async { self.open() }
     }
 
-    private static func month(_ m: String) -> (Held<BudgetLine>, Held<Summary>, Held<SpendingLine>) {
-        let input = Month(month: m)
-        return (Held { try $0.month(input) }, Held { try $0.summary(input) }, Held { try $0.spending(input) })
-    }
+    /// What every screen draws from, held as long as the session is open.
+    private static let always: [MoneyView] = [.accounts, .groups, .inbox, .payees, .banks, .linked, .asks, .receipts, .photos]
 
     /// The replica's directory for `server` under `root`: one per server, not
     /// per person — the household's log is the server's and everyone in it
@@ -207,43 +165,48 @@ final class Bridge {
         }
         let m = Money(peer: peer)
         money = m
+        let s = Session(peer: peer)
+        session = s
         peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
-        accounts.hydrate(m)
-        groups.hydrate(m)
-        lines.hydrate(m)
-        summary.hydrate(m)
-        spending.hydrate(m)
-        inbox.hydrate(m)
-        payees.hydrate(m)
-        banks.hydrate(m)
-        linked.hydrate(m)
-        asks.hydrate(m)
-        receipts.hydrate(m)
-        photos.hydrate(m)
-        for (_, r) in registers { r.held.hydrate(m) }
-        for (_, r) in paid { r.held.hydrate(m) }
-        for (_, r) in items { r.held.hydrate(m) }
-        copyAll()
+        s.setListener(listener: Moved { [weak self] views in
+            guard let self else { return }
+            self.main { self.moved(views) }
+            self.drainSoon()
+        })
+        always = Bridge.always.map { s.hold(view: $0) }
+        budget = s.hold(view: .budget(month: snap.month))
+        main { self.opened(s) }
+        read()
         snap.loaded = true
         drain()
     }
 
-    private func copyAll() {
-        snap.accounts = accounts.rows
-        snap.groups = groups.rows
-        snap.lines = lines.rows
-        snap.summary = summary.rows.first
-        snap.spending = spending.rows
-        snap.inbox = inbox.rows
-        snap.payees = payees.rows
-        snap.banks = banks.rows
-        snap.linked = linked.rows
-        snap.asks = asks.rows
-        snap.receipts = receipts.rows
-        snap.photos = photos.rows
-        for (k, r) in registers { snap.registers[k] = r.held.rows }
-        for (k, r) in paid { snap.paid[k] = r.held.rows }
-        for (k, r) in items { snap.items[k] = r.held.rows }
+    /// Whether `v` moved since it was last read here; it counts as read from now.
+    private func fresh(_ v: MoneyView) -> Bool {
+        guard let s = session else { return false }
+        let now = s.version(view: v)
+        defer { seen[v] = now }
+        return seen[v] != now
+    }
+
+    // On `queue`: what moved since it was last read, read again.
+    private func read() {
+        guard let s = session else { return }
+        if fresh(.accounts) { snap.accounts = s.accounts() }
+        if fresh(.groups) { snap.groups = s.groups() }
+        if fresh(.budget(month: snap.month)) {
+            let b = s.budget(month: snap.month)
+            snap.lines = b.lines
+            snap.summary = b.summary
+            snap.spending = b.spending
+        }
+        if fresh(.inbox) { snap.inbox = s.inbox() }
+        if fresh(.payees) { snap.payees = s.payees() }
+        if fresh(.banks) { snap.banks = s.banks() }
+        if fresh(.linked) { snap.linked = s.linked() }
+        if fresh(.asks) { snap.asks = s.asks() }
+        if fresh(.receipts) { snap.receipts = s.receipts().map { ReceiptLine(json: J.parse($0)) } }
+        if fresh(.photos) { snap.photos = s.photos().map { PhotoLine(json: J.parse($0)) } }
     }
 
     private func drainSoon() {
@@ -259,7 +222,8 @@ final class Bridge {
         draining = false
         guard !closed, let m = money else { return }
         snap.moved += 1
-        splice()
+        read()
+        fetch()
         let st = m.peer.status()
         snap.status = st
         if let d = st.denied, !deniedSaid {
@@ -271,25 +235,6 @@ final class Bridge {
             main { self.notice("Not saved: \(w)") }
         }
         show()
-    }
-
-    private func splice() {
-        if accounts.update() { snap.accounts = accounts.rows }
-        if groups.update() { snap.groups = groups.rows }
-        if lines.update() { snap.lines = lines.rows }
-        if summary.update() { snap.summary = summary.rows.first }
-        if spending.update() { snap.spending = spending.rows }
-        if inbox.update() { snap.inbox = inbox.rows }
-        if payees.update() { snap.payees = payees.rows }
-        if banks.update() { snap.banks = banks.rows }
-        if linked.update() { snap.linked = linked.rows }
-        if asks.update() { snap.asks = asks.rows }
-        for (k, r) in registers where r.held.update() { snap.registers[k] = r.held.rows }
-        if receipts.update() { snap.receipts = receipts.rows }
-        if photos.update() { snap.photos = photos.rows }
-        for (k, r) in paid where r.held.update() { snap.paid[k] = r.held.rows }
-        for (k, r) in items where r.held.update() { snap.items[k] = r.held.rows }
-        fetch()
     }
 
     // On `queue`: every file still wanted looked for again — one arrived rings
@@ -320,119 +265,15 @@ final class Bridge {
 
     // MARK: what the screens ask for
 
-    /// The budget shows `month` now: its lines, summary and spending opened for it.
+    /// The budget shows `month` now: its budget held for it.
     func show(month: String) {
         queue.async {
             guard month != self.snap.month else { return }
             self.snap.month = month
-            (self.lines, self.summary, self.spending) = Bridge.month(month)
-            guard !self.closed, let m = self.money else { return }
-            self.lines.hydrate(m)
-            self.summary.hydrate(m)
-            self.spending.hydrate(m)
-            self.snap.lines = self.lines.rows
-            self.snap.summary = self.summary.rows.first
-            self.snap.spending = self.spending.rows
+            guard !self.closed, let s = self.session else { return }
+            self.budget = s.hold(view: .budget(month: month))
+            self.read()
             self.show()
-        }
-    }
-
-    /// A register held once more while a screen shows it: `account`'s, or every account's.
-    func hold(register account: Id?) {
-        let k = Registers.key(account)
-        queue.async {
-            if var e = self.registers[k] {
-                e.refs += 1
-                self.registers[k] = e
-                return
-            }
-            let input = Register(accountId: account)
-            let h = Held<TxnLine> { try $0.register(input) }
-            self.registers[k] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.registers[k] = h.rows
-            self.show()
-        }
-    }
-
-    /// Held once less; let go when no screen holds it.
-    func release(register account: Id?) {
-        let k = Registers.key(account)
-        queue.async {
-            guard var e = self.registers[k] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.registers[k] = e
-            } else {
-                self.registers[k] = nil
-                self.snap.registers[k] = nil
-                self.show()
-            }
-        }
-    }
-
-    /// What paid for a transaction held while a sheet shows it.
-    func hold(paid txn: Id) {
-        let k = txn.hex
-        queue.async {
-            if var e = self.paid[k] {
-                e.refs += 1
-                self.paid[k] = e
-                return
-            }
-            let h = Held<ReceiptLine> { try $0.forTxn(OneTxn(id: txn)) }
-            self.paid[k] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.paid[k] = h.rows
-            self.show()
-        }
-    }
-
-    func release(paid txn: Id) {
-        let k = txn.hex
-        queue.async {
-            guard var e = self.paid[k] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.paid[k] = e
-            } else {
-                self.paid[k] = nil
-                self.snap.paid[k] = nil
-                self.show()
-            }
-        }
-    }
-
-    /// A receipt's items held while a sheet shows them.
-    func hold(items receipt: String) {
-        queue.async {
-            if var e = self.items[receipt] {
-                e.refs += 1
-                self.items[receipt] = e
-                return
-            }
-            let h = Held<ItemLine> { try $0.receiptItems(OneReceipt(receiptId: receipt)) }
-            self.items[receipt] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.items[receipt] = h.rows
-            self.show()
-        }
-    }
-
-    func release(items receipt: String) {
-        queue.async {
-            guard var e = self.items[receipt] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.items[receipt] = e
-            } else {
-                self.items[receipt] = nil
-                self.snap.items[receipt] = nil
-                self.show()
-            }
         }
     }
 
@@ -533,9 +374,10 @@ final class Bridge {
         queue.async {
             self.closed = true
             self.money?.peer.setListener(listener: nil)
-            self.registers = [:]
-            self.paid = [:]
-            self.items = [:]
+            self.session?.setListener(listener: nil)
+            self.always = []
+            self.budget = nil
+            self.session = nil
             self.wanted = [:]
             self.money = nil
             self.bank = nil

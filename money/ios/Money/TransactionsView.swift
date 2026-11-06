@@ -52,8 +52,7 @@ struct TransactionsView: View {
         .largeTitleBar("Transactions", fold: fold)
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)
-        .onAppear { model.hold(register: nil) }
-        .onDisappear { model.release(register: nil) }
+        .holding(MoneyView.register(account: nil))
     }
 
     @ViewBuilder private func review(_ rows: [TxnLine]) -> some View {

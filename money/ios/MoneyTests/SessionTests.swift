@@ -26,10 +26,9 @@ final class SessionTests: XCTestCase {
     func testARegisterIsHeldAndSpliced() {
         let s = Seen()
         guard let checking = s.account("Checking") else { return XCTFail("Checking") }
-        XCTAssertNil(s.snap.registers[Registers.key(checking.id)])
-        s.bridge.hold(register: checking.id)
-        s.bridge.settle()
-        let rows = s.snap.registers[Registers.key(checking.id)] ?? []
+        XCTAssertNil(s.register(checking.id))
+        s.hold(.register(account: checking.id))
+        let rows = s.register(checking.id) ?? []
         XCTAssertFalse(rows.isEmpty)
         XCTAssertTrue(rows.allSatisfy { $0.accountId == checking.id })
         // Newest first, a day at a time.
@@ -44,14 +43,13 @@ final class SessionTests: XCTestCase {
         guard let add = d.adding else { return XCTFail("a new transaction's input") }
         XCTAssertEqual(add.amount, -1_250)
         s.write { try $0.addTransaction(add) }
-        let after = s.snap.registers[Registers.key(checking.id)] ?? []
+        let after = s.register(checking.id) ?? []
         XCTAssertEqual(after.count, rows.count + 1)
         XCTAssertEqual(after.first?.payee, "Corner Bakery")
         XCTAssertEqual(after.first?.category, "Dining Out")
 
-        s.bridge.release(register: checking.id)
-        s.bridge.settle()
-        XCTAssertNil(s.snap.registers[Registers.key(checking.id)])
+        s.release(.register(account: checking.id))
+        XCTAssertNil(s.register(checking.id))
     }
 
     /// The inbox empties as it is looked at: what has a category approved,

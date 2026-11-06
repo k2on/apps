@@ -9,6 +9,8 @@
 // sentence, and nothing else.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,7 +44,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,10 +97,7 @@ fun ActivityScreen(ledger: Ledger) {
     var filing by remember { mutableStateOf<List<Id>?>(null) }
     val list = rememberLazyListState()
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
-    DisposableEffect(Unit) {
-        book.holdRegister(null)
-        onDispose { book.releaseRegister(null) }
-    }
+    val everything = book.watched.watch(MoneyView.Register(null)) { book.session.register(null) }
     val waiting = ledger.inbox
     val review = search(waiting, needle)
 
@@ -129,7 +127,7 @@ fun ActivityScreen(ledger: Ledger) {
                 }
             }
             if (all) {
-                days(search(ledger.register(null), needle), ledger.today, showAccount = true)
+                days(search(everything, needle), ledger.today, showAccount = true)
             } else if (review.isEmpty()) {
                 item(key = "caught-up") { CaughtUp(needle) }
             } else {

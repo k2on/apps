@@ -52,7 +52,7 @@ class BookTests {
 
     @Test fun readyToAssignIsTheDomainsOwnCategory() {
         book.holdRegister(null)
-        val income = l.register(null).filter { it.category == "Ready to Assign" }
+        val income = book.register(null).filter { it.category == "Ready to Assign" }
         assertTrue("the seed's paychecks", income.isNotEmpty())
         assertTrue(income.all { it.categoryId == Book.READY_TO_ASSIGN })
     }
@@ -134,23 +134,23 @@ class BookTests {
         val c = l.lines.first()
         val form = newForm(l, acc.id).copy(payee = "Corner Shop", category = c.categoryId, amount = -1_234)
         book.save(form)
-        val t = l.register(acc.id).first { it.payee == "Corner Shop" }
+        val t = book.register(acc.id).first { it.payee == "Corner Shop" }
         assertEquals(-1_234L, t.amount)
         assertEquals(Cleared.UNCLEARED, t.cleared)
         assertEquals(acc.balance - 1_234, l.account(acc.id)!!.balance)
 
         book.save(formOf(t, l).copy(amount = -2_000, memo = "and milk"))
-        val edited = l.register(acc.id).first { it.id == t.id }
+        val edited = book.register(acc.id).first { it.id == t.id }
         assertEquals(-2_000L, edited.amount)
         assertEquals("and milk", edited.memo)
 
         book.setCleared(t.id, true)
-        assertEquals(Cleared.CLEARED, l.register(acc.id).first { it.id == t.id }.cleared)
+        assertEquals(Cleared.CLEARED, book.register(acc.id).first { it.id == t.id }.cleared)
 
         book.delete(listOf(t.id))
-        assertNull(l.register(acc.id).firstOrNull { it.id == t.id })
+        assertNull(book.register(acc.id).firstOrNull { it.id == t.id })
         book.releaseRegister(acc.id)
-        assertFalse(l.registers.containsKey(Ledger.key(acc.id)))
+        assertTrue("let go: nothing holds it", book.register(acc.id).isEmpty())
     }
 
     @Test fun aTransferMovesMoneyBetweenAccounts() {
@@ -164,7 +164,7 @@ class BookTests {
         val acc = l.accounts.first { it.onBudget && it.cleared != 0L }
         book.holdRegister(acc.id)
         book.reconcile(acc.id, acc.cleared)
-        val rows = l.register(acc.id)
+        val rows = book.register(acc.id)
         assertTrue(rows.filter { it.cleared != Cleared.UNCLEARED }.all { it.cleared == Cleared.RECONCILED })
         // A bank that says otherwise: the difference is an adjustment, and the balance agrees.
         book.reconcile(acc.id, acc.cleared + 777)
@@ -230,7 +230,7 @@ class BookTests {
 
     @Test fun theFormRemembersWhatItCorrects() {
         book.holdRegister(null)
-        val t = l.register(null).first { !it.transfer && it.categoryId != null }
+        val t = book.register(null).first { !it.transfer && it.categoryId != null }
         val f = formOf(t, l)
         assertEquals(t.id, f.editing)
         assertEquals(t.amount, f.amount)
@@ -242,7 +242,7 @@ class BookTests {
 
     @Test fun theBanksOwnWordsAreShownWhenTheySayMore() {
         book.holdRegister(null)
-        val t = l.register(null).first { !it.transfer }
+        val t = book.register(null).first { !it.transfer }
         val chipotle = t.copy(payee = "Chipotle", imported = true, importedPayee = "CHIPOTLE 1234 SAN FRANCISCO CA ")
         assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", bankSaid(chipotle))
         assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", formOf(chipotle, l).bankSaid)
@@ -255,10 +255,5 @@ class BookTests {
         for (s in l.inbox.filter { it.imported }) {
             assertTrue(bankSaid(s).isEmpty() || bankSaid(s) == s.importedPayee.trim())
         }
-    }
-
-    @Test fun aRegistersKeyIsItsAccount() {
-        assertEquals("all", Ledger.key(null))
-        assertEquals("ab".repeat(16), Ledger.key(Id("ab".repeat(16))))
     }
 }

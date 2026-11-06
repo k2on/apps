@@ -114,11 +114,11 @@ class CardsTests {
         book.holdRegister(from.id)
         val c = l.lines.first { !Ledger.isPayment(it) }
         book.save(newForm(l, from.id).copy(payee = "Moved", category = c.categoryId, amount = -5_000))
-        val t = l.register(from.id).first { it.payee == "Moved" }
+        val t = book.register(from.id).first { it.payee == "Moved" }
         assertFalse(t.transfer)
         val toBefore = l.account(to.id)!!.balance
         book.save(formOf(t, l).copy(category = null, transferTo = to.id))
-        val made = l.register(from.id).first { it.id == t.id }
+        val made = book.register(from.id).first { it.id == t.id }
         assertTrue(made.transfer)
         assertEquals(toBefore + 5_000, l.account(to.id)!!.balance)
         // Corrected again, the form knows it for the transfer it is.

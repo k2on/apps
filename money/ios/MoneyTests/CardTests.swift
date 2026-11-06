@@ -113,15 +113,14 @@ final class CardTests: XCTestCase {
         let s = Seen()
         guard let checking = s.account("Checking"), let card = s.account("Chase Sapphire"), let pay = s.line("Chase Sapphire")
         else { return XCTFail("the demo's accounts") }
-        s.bridge.hold(register: checking.id)
-        s.bridge.settle()
+        s.hold(.register(account: checking.id))
         var d = Draft(account: checking.id, date: Fx.today)
         d.payee = "Chase"
         d.memo = "card payment"
         d.cents = 5_000
         guard let add = d.adding else { return XCTFail("the payment's input") }
         s.write { try $0.addTransaction(add) }
-        guard let typed = s.snap.registers[Registers.key(checking.id)]?.first(where: { $0.memo == "card payment" })
+        guard let typed = s.register(checking.id)?.first(where: { $0.memo == "card payment" })
         else { return XCTFail("the payment typed") }
         XCTAssertFalse(typed.transfer)
 
@@ -133,7 +132,7 @@ final class CardTests: XCTestCase {
         XCTAssertNil(e.edit?.categoryId)
         guard let edit = e.edit else { return XCTFail("the edit") }
         s.write { try $0.editTransaction(edit) }
-        guard let made = s.snap.registers[Registers.key(checking.id)]?.first(where: { $0.id == typed.id })
+        guard let made = s.register(checking.id)?.first(where: { $0.id == typed.id })
         else { return XCTFail("the payment, after") }
         XCTAssertTrue(made.transfer)
         XCTAssertEqual(made.payee, "Transfer : Chase Sapphire")
@@ -147,8 +146,7 @@ final class CardTests: XCTestCase {
         XCTAssertTrue(again.transfer)
         XCTAssertEqual(again.transferTo, card.id)
         XCTAssertEqual(again.edit?.transferTo, card.id)
-        s.bridge.release(register: checking.id)
-        s.bridge.settle()
+        s.release(.register(account: checking.id))
     }
 
     /// A transfer's account is read from its payee: an open one before a

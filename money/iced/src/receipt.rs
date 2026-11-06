@@ -82,7 +82,7 @@ impl App {
 
     fn open_txn(&self) -> Option<&TxnLine> {
         let id = self.receipt_txn()?;
-        self.peer.register.rows.iter().find(|t| t.id == id)
+        self.peer.register().iter().find(|t| t.id == id)
     }
 
     pub fn receipt(&mut self, m: Msg) -> Task<Message> {
@@ -247,11 +247,11 @@ impl App {
 
     /// A transaction's receipt and what is done with it, one under another.
     fn view_receipt<'a>(&'a self, t: &'a TxnLine) -> Element<'a, Message> {
-        let photos: Vec<&PhotoLine> = self.peer.photos.rows.iter().filter(|p| p.txn_id == Some(t.id)).collect();
+        let photos: Vec<&PhotoLine> = self.peer.photos().iter().filter(|p| p.txn_id == Some(t.id)).collect();
         let mut side = column![].spacing(8);
         match self.peer.txn_receipts().first() {
             Some(r) => {
-                let photo = self.peer.photos.rows.iter().find(|p| p.receipt_id == r.id);
+                let photo = self.peer.photos().iter().find(|p| p.receipt_id == r.id);
                 side = side.push(self.view_paper(r, photo));
                 if photo.is_some_and(|p| p.state == "check") {
                     side = side.push(
@@ -270,8 +270,8 @@ impl App {
                 }
                 side = side.push(links);
                 // Paid shipment by shipment: each charge and what paid it.
-                if let Some(c) = self.peer.charges.as_ref().filter(|_| r.charges > 0) {
-                    side = side.push(self.view_charges(&c.rows));
+                if let Some(c) = self.peer.charges().filter(|_| r.charges > 0) {
+                    side = side.push(self.view_charges(c));
                 }
             }
             None => {
@@ -290,7 +290,7 @@ impl App {
                     ]
                     .spacing(16),
                 );
-                let free = unmatched(&self.peer.receipts.rows, t);
+                let free = unmatched(self.peer.receipts(), t);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
                     for r in free {

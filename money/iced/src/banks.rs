@@ -96,7 +96,7 @@ impl App {
                 self.author(if ignored { "ignore it" } else { "follow it" }, "ignore", &i);
             }
             Msg::OpenPage(url) => self.open_page(url),
-            Msg::Dismiss => self.dismissed = self.peer.asks.rows.first().map(|a| a.id),
+            Msg::Dismiss => self.dismissed = self.peer.asks().first().map(|a| a.id),
         }
         iced::Task::none()
     }
@@ -122,13 +122,11 @@ impl App {
         let suggested = self.suggested(l);
         let mut at = 0;
         let siblings = |a: Id<Account>| {
-            (self.peer.linked.rows.iter())
-                .any(|o| o.bank == l.bank && o.plaid_account_id != l.plaid_account_id && !o.ignored && o.account_id == Some(a))
+            (self.peer.linked().iter()).any(|o| o.bank == l.bank && o.plaid_account_id != l.plaid_account_id && !o.ignored && o.account_id == Some(a))
         };
         for a in self
             .peer
-            .accounts
-            .rows
+            .accounts()
             .iter()
             .filter(|a| !a.closed && Some(a.id) != l.account_id && !siblings(a.id))
         {
@@ -148,7 +146,7 @@ impl App {
     /// feeds from an account with the same last digits and type.
     pub fn suggested(&self, l: &LinkedLine) -> Option<Id<Account>> {
         let institution = |bank: &str| {
-            (self.peer.banks.rows.iter())
+            (self.peer.banks().iter())
                 .find(|b| b.name == bank)
                 .map(|b| b.institution.trim().to_lowercase())
                 .filter(|i| !i.is_empty())
@@ -157,16 +155,16 @@ impl App {
         if l.mask.is_empty() {
             return None;
         }
-        (self.peer.linked.rows.iter())
+        (self.peer.linked().iter())
             .filter(|o| o.bank != l.bank && !o.ignored && o.mask == l.mask && o.kind == l.kind && o.subtype == l.subtype)
             .filter(|o| institution(&o.bank).as_ref() == Some(&mine))
             .find_map(|o| o.account_id)
-            .filter(|a| self.peer.accounts.rows.iter().any(|x| x.id == *a && !x.closed))
+            .filter(|a| self.peer.accounts().iter().any(|x| x.id == *a && !x.closed))
     }
 
     /// A bank's account's menu, at the pointer, on the entry suggested.
     fn pick(&mut self, plaid: &str) {
-        let Some(l) = self.peer.linked.rows.iter().find(|l| l.plaid_account_id == plaid) else {
+        let Some(l) = self.peer.linked().iter().find(|l| l.plaid_account_id == plaid) else {
             return;
         };
         let (entries, at) = self.choices(l);
@@ -197,7 +195,7 @@ impl App {
     /// it; nothing more to wait for once the ask is otherwise answered.
     pub fn follow_ask(&mut self) {
         let Some(since) = self.awaiting else { return };
-        let Some(a) = self.peer.asks.rows.first().filter(|a| a.asked_ms >= since - 1_000) else {
+        let Some(a) = self.peer.asks().first().filter(|a| a.asked_ms >= since - 1_000) else {
             return;
         };
         match a.state {
@@ -225,13 +223,13 @@ impl App {
     /// What wants somebody on Settings: a login run out, or an
     /// account waiting for a choice.
     pub fn banks_wanting(&self) -> usize {
-        self.peer.banks.rows.iter().map(|b| b.waiting as usize + b.needs_login as usize).sum()
+        self.peer.banks().iter().map(|b| b.waiting as usize + b.needs_login as usize).sum()
     }
 
     /// The ask on show: the newest of this person's, while it is open or
     /// lately answered, unless it was put away.
     fn ask_shown(&self, now: i64) -> Option<&AskLine> {
-        let a = self.peer.asks.rows.first()?;
+        let a = self.peer.asks().first()?;
         let open = matches!(a.state, AskState::Asked | AskState::Waiting);
         (Some(a.id) != self.dismissed && (open || now - a.answered_ms < SHOWN_MS)).then_some(a)
     }
@@ -284,7 +282,7 @@ impl App {
         let mut tools = row![action("+ Connect a bank", Message::Banks(Msg::Connect))]
             .spacing(10)
             .align_y(Alignment::Center);
-        if !self.peer.banks.rows.is_empty() {
+        if !self.peer.banks().is_empty() {
             tools = tools.push(quiet("Sync", Message::Sync));
         }
         let explain = "Banks and cards connected through Plaid. Their logins are kept on the server, never here; \
@@ -301,10 +299,10 @@ impl App {
         if let Some(a) = self.ask_shown(now) {
             body = body.push(self.view_ask(a, now));
         }
-        for b in &self.peer.banks.rows {
+        for b in self.peer.banks() {
             body = body.push(self.view_bank(b, now));
         }
-        if self.peer.banks.rows.is_empty() {
+        if self.peer.banks().is_empty() {
             body = body.push(dim(
                 "No banks yet. Connect one: Plaid's page opens in your browser, and the login stays on the server.",
                 13,
@@ -357,7 +355,7 @@ impl App {
             .push(quiet("Add accounts", Message::Banks(Msg::AddAccounts(b.name.clone()))))
             .push(quiet("Disconnect", Message::Banks(Msg::Disconnect(b.name.clone()))));
         let mut accounts = column![].spacing(6);
-        for l in self.peer.linked.rows.iter().filter(|l| l.bank == b.name) {
+        for l in self.peer.linked().iter().filter(|l| l.bank == b.name) {
             accounts = accounts.push(self.view_linked(l));
         }
         container(column![head, accounts].spacing(12))
@@ -421,7 +419,7 @@ impl App {
     }
 
     pub fn view_disconnect<'a>(&'a self, bank: &'a str) -> Element<'a, Message> {
-        let b = self.peer.banks.rows.iter().find(|b| b.name == bank);
+        let b = self.peer.banks().iter().find(|b| b.name == bank);
         let name = b
             .map(|b| {
                 if b.institution.is_empty() {

@@ -81,6 +81,7 @@ extension EnvironmentValues {
 
 struct Shell: View {
     @EnvironmentObject private var model: Model
+    @Environment(Watched<MoneyView>.self) private var watched
     @State private var tab: Pane = .budget
     @State private var sheet: Sheet? = nil
     @State private var paths: [Pane: NavigationPath] = [:]
@@ -110,6 +111,7 @@ struct Shell: View {
         .sheet(item: $sheet) { s in
             sheetView(s)
                 .environmentObject(model)
+                .environment(watched)
                 .environment(\.present) { next in present(next) }
         }
         .toast($model.notice)

@@ -48,18 +48,25 @@ let lines = try m.month(Month(month: "2026-10"))       // LiveView<BudgetLine>
 try m.assign(Assign(month: "2026-10", categoryId: id, amount: 25_000))   // its intent's id
 ```
 
-**Views are typed and kept.** The views a budget is drawn from hand over
-UniFFI's own records (`uniffi.money_domain` on Android; the same module
-on iOS), no JSON per row: `accounts` (`AccountLine`), `groups`
-(`GroupLine`), `month` (`BudgetLine`), `summary` (`Summary`, one row),
-`spending` (`SpendingLine`), `register` and `inbox` (`TxnLine`),
-`payees` (`PayeeLine`), `banks` (`BankLine`), `linked` (`LinkedLine`, each of a
-bank's accounts and the one it feeds, what `link` and `ignore` act on). A `LiveView<T>` is read
-once (`rows()`), then asked what it did (`take()`: unchanged, its patches,
-or a reset with every row) and spliced into the list the screen holds.
-`peer.setListener` says when anything moved, on the kernel's thread; the
-app takes its views then and publishes — an `@Observable` model on iOS,
-a `StateFlow` on Android. Nothing runs on a clock.
+**Views are the core's.** `Session(peer)` holds the views the screens
+draw, each named by a `MoneyView` — `accounts`, `groups`, `budget(month)`,
+`inbox`, `register(account)`, `payees`, `banks`, `linked`, `asks`,
+`photos`, `receipts`, `paid(txn)`, `items(receipt)` — and what a page is
+made of is the domain's (`money_domain::MoneyView`): a month's budget is
+its lines, its summary, its spending and its formulas on every platform.
+`session.hold(view)` holds one while a screen shows it (a `Holding`, let
+go when dropped; held twice, it stays until both are), the core keeps its
+rows spliced on its own thread, `session.setListener(Changed)` is told
+which views moved (`moved(views)`, on that thread; the app hops to its
+main thread), and `session.version(view)` grows whenever one did. A view is
+read by name: `session.budget(month)` (`Budget`: lines, summary, spending),
+`session.register(account)`, … — UniFFI's own records
+(`uniffi.money_domain` on Android; the same module on iOS), no JSON per
+row; the receipts' rows, which have no record, come as their JSON. ArkUI
+draws them: `watched.watch(view) { read }` on Android, `.holding(view)` on
+iOS; the iced window holds `ark_peer::store::Store<MoneyView>` itself.
+`session.send(name, json)` is `moneySend` with its refusal kept
+(`session.refusal()`). Nothing runs on a clock.
 
 **Refusals are values.** A form asks first: `peer.check(name, json)` is
 the domain's own sentence for the first refinement the input fails ("an

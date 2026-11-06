@@ -65,7 +65,7 @@ impl<UT, T: Twin<UT>> Twin<UT> for Vec<T> {
 
 /// A row id across the bridge: its sixteen bytes, as their hex (the apps'
 /// `Id`, by `uniffi.toml`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RowId(pub [u8; 16]);
 
 uniffi::custom_type!(RowId, String, {
