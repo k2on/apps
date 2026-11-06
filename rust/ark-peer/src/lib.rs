@@ -224,6 +224,20 @@ pub struct Peer {
     missed: Option<Vec<Told>>,
     /// The files rows name, and where each transfer is (`files`).
     pub(crate) files: files::Files,
+    /// Its disk, while it is the upstream its replica fills from first.
+    pub(crate) reading: Option<Reading>,
+}
+
+/// A device's disk read as the upstream its replica fills from first
+/// ([`ark::peer::Source`]): whether it was asked yet — at the first pump,
+/// once the app's views are watched — its answers not taken yet, and how
+/// many times the replica had diverged when it began. Once filled — or
+/// diverged — the replica asks its server.
+pub(crate) struct Reading {
+    source: ark::peer::Source,
+    pub(crate) asked: bool,
+    pub(crate) said: std::collections::VecDeque<Vec<u8>>,
+    diverged: usize,
 }
 
 /// What a device last wrote of its pending intents ([`local::Kept`]): its
@@ -341,6 +355,7 @@ impl Peer {
             runners: vec![],
             missed: None,
             files: files::Files::default(),
+            reading: None,
         }
     }
 
@@ -393,8 +408,19 @@ impl Peer {
             ..Saved::default()
         };
         let mut stored = p.log.stored();
+        let source = ark::peer::Source::of(Space::Durable, &mut stored);
         stored.push(Record::Pending { pending, at: kept.at, local });
         p.step(Space::Durable, Input::Open(stored));
+        if let Some(source) = source {
+            p.log.begin_fill();
+            let (asked, said, diverged) = (false, Default::default(), p.log.diverged.len());
+            p.reading = Some(Reading {
+                source,
+                asked,
+                said,
+                diverged,
+            });
+        }
         p
     }
 
@@ -441,15 +467,20 @@ impl Peer {
     /// record to the disk; changes to the views; verdicts kept.
     fn route(&mut self, space: Space, from: Option<ConnId>, input: Input) -> Vec<Output> {
         let label = self.label();
+        let wants = matches!(input, Input::Frame { .. }).then(|| self.reads(space));
         let Some(m) = self.instance(space) else { return vec![] };
+        m.wants = wants.unwrap_or(std::mem::take(&mut m.wants));
         let space_name = ["durable", "volatile"][space as usize];
         let out = tracing::debug_span!(target: "ark", "step", peer = %label, space = space_name, conn = from).in_scope(|| m.step(input));
         for o in &out {
             match o {
-                Output::Send(To::Back, b) => match from {
-                    Some(c) => self.hub.held.push((c, b.clone())),
-                    None if self.linked => self.frames.push(b.clone()),
-                    None => {}
+                Output::Send(To::Back, b) => match (from, &mut self.reading) {
+                    (Some(c), _) => self.hub.held.push((c, b.clone())),
+                    (None, Some(r)) if space == Space::Durable && matches!(Frame::dec(b), Ok(Frame::Hello { .. })) => {
+                        r.said.extend(r.source.answer(b))
+                    }
+                    (None, _) if self.linked => self.frames.push(b.clone()),
+                    _ => {}
                 },
                 Output::Send(To::All, b) => self.fanout(space, b),
                 Output::Changes(told) => {
@@ -477,7 +508,45 @@ impl Peer {
             (false, Space::Durable) => self.keep_pending(),
             _ => {}
         }
+        let read = self.reading.as_ref().filter(|_| space == Space::Durable).map(|r| r.diverged);
+        if read.is_some_and(|d| self.log.diverged.len() > d || self.log.fill.is_none()) {
+            self.reading = None;
+            if self.linked {
+                self.step(Space::Durable, Input::Connected);
+            }
+        }
         out
+    }
+
+    /// The tables its views of `space` read: what its fill takes first.
+    fn reads(&self, space: Space) -> Vec<String> {
+        let views = self.views.iter().flatten().filter(|w| w.space == space);
+        views.filter_map(|w| w.view.as_ref()).flat_map(|v| v.reads()).collect()
+    }
+
+    /// One of its disk's answers taken, if one is waiting: what a driver
+    /// carrying frames by hand takes between them.
+    pub fn read_one(&mut self) -> bool {
+        let b = self.said();
+        b.map(|b| self.receive(b)).is_some()
+    }
+
+    /// Its disk's next answer — its first `Hello` said to it, the fill
+    /// begun again at the tables its views read now, the first time.
+    pub(crate) fn said(&mut self) -> Option<Vec<u8>> {
+        if let Some(r) = self.reading.as_mut().filter(|r| !r.asked) {
+            r.asked = true;
+            self.log.wants = self.reads(Space::Durable);
+            self.log.begin_fill();
+            self.step(Space::Durable, Input::Connected);
+        }
+        self.reading.as_mut()?.said.pop_front()
+    }
+
+    /// Its disk read to the end now: what a driver reading its store at
+    /// once, before it pumps, asks first.
+    pub fn read_whole(&mut self) {
+        while self.read_one() {}
     }
 
     /// Its replica, changed by `f`, kept.
@@ -549,9 +618,11 @@ impl Peer {
             Space::Volatile => &self.live.as_ref().expect("a machine that spoke").store,
         };
         let domain = self.config.domain_of(space);
-        // Read once for every view, each table's rows only when a view's
-        // plan asks for them.
-        let p = ark::plan::Pushed::of(store, cs);
+        // Read once for every view, of the tables they read: what they are
+        // told of a table none reads (a fill's) is nothing to them.
+        let reads = self.reads(space);
+        let cs: Vec<Change> = cs.iter().filter(|c| reads.iter().any(|t| t == c.table())).cloned().collect();
+        let p = ark::plan::Pushed::of(store, &cs);
         for (i, w) in self.views.iter_mut().enumerate() {
             let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
             let pushed = w.view.as_mut().map(|v| v.pushed(&p));
@@ -734,6 +805,7 @@ impl Peer {
     /// again from a new origin's first `local` — and the live machine
     /// started over.
     pub fn sign_in(&mut self, who: Ctx) {
+        self.read_whole();
         let was = &self.log.me;
         let other = !was.actor.is_empty() && was.actor != who.actor;
         if other {

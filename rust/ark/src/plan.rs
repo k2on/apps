@@ -141,6 +141,10 @@ impl Deps {
         }
     }
 
+    fn reads(&self, out: &mut Vec<String>) {
+        out.extend(self.by.keys().map(|(t, _)| t.to_string()));
+    }
+
     /// The elements a settle's moved rows reach.
     fn hit(&self, p: &Pushed) -> BTreeSet<Okey> {
         let mut out = BTreeSet::new();
@@ -159,6 +163,8 @@ trait Op<S, T>: Send {
     fn hydrate(&mut self, store: &Store, keep: bool) -> Vec<(Okey, T)>;
     /// What a settle did to its output.
     fn push(&mut self, p: &Pushed) -> Delta<T>;
+    /// The tables it reads, its closures' reads among them.
+    fn reads(&self, out: &mut Vec<String>);
 }
 
 // * The operators
@@ -187,6 +193,10 @@ impl<S: Tables, T: Elem> Op<S, T> for ScanOp<T> {
             .take_while(|(k, _)| k.starts_with(&self.prefix))
             .map(|(k, (_, b))| (k.clone(), dec(b)))
             .collect()
+    }
+
+    fn reads(&self, out: &mut Vec<String>) {
+        out.push(self.table.clone());
     }
 }
 
@@ -259,6 +269,11 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, U> for EachOp<S, T, U> {
         }
         out
     }
+
+    fn reads(&self, out: &mut Vec<String>) {
+        self.input.reads(out);
+        self.deps.reads(out);
+    }
 }
 
 /// The first `n` of its input, which it keeps whole.
@@ -294,6 +309,10 @@ impl<S: Tables, T: Elem> Op<S, T> for TakeOp<S, T> {
             .filter(|k| before.get(*k) != after.get(*k))
             .map(|k| (k.clone(), after.get(k).cloned()))
             .collect()
+    }
+
+    fn reads(&self, out: &mut Vec<String>) {
+        self.input.reads(out);
     }
 }
 
@@ -370,6 +389,11 @@ impl<S: Tables, T: Elem, K: Key + Clone + Send + 'static, A: Elem> Op<S, A> for 
             }
         }
         out
+    }
+
+    fn reads(&self, out: &mut Vec<String>) {
+        self.input.reads(out);
+        self.deps.reads(out);
     }
 }
 
@@ -448,6 +472,11 @@ impl<S: Tables, T: Elem, U: Elem> Op<S, (T, U)> for JoinOp<S, T, U> {
         self.r
             .push(dr, &self.l, &mut out, |b, u, a, t| ([&a[..], b].concat(), (t.clone(), u.clone())));
         out
+    }
+
+    fn reads(&self, out: &mut Vec<String>) {
+        self.left.reads(out);
+        self.right.reads(out);
     }
 }
 
@@ -750,6 +779,8 @@ pub trait Maintained: Send {
         self.pushed(&Pushed::of(store, changes))
     }
     fn rows(&self) -> Vec<Vec<u8>>;
+    /// The tables it reads: what a fill takes first (§1.7).
+    fn reads(&self) -> Vec<String>;
 }
 
 impl<S: Tables, T: Value> Maintained for View<S, T> {
@@ -758,6 +789,11 @@ impl<S: Tables, T: Value> Maintained for View<S, T> {
     }
     fn rows(&self) -> Vec<Vec<u8>> {
         self.list.values().map(Value::encode).collect()
+    }
+    fn reads(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.built.iter().map(|(t, _, _)| t.to_string()).collect();
+        self.plan.op.reads(&mut out);
+        out
     }
 }
 

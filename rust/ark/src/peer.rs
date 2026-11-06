@@ -59,21 +59,23 @@
 //! only grows: rows move within it by an export, a transform and an import
 //! ([`crate::dynamic`]).
 //!
-//! **A fill** is how a replica the log cannot page is sent the rows: in
-//! parts of about [`PART`] bytes, the tables a domain sends later
-//! after the rest, each part asked for (a `Hello` saying where the fill
-//! stands) once the one before is held, so what the authority logs
-//! meanwhile is never behind more than a part. A part is no frozen
-//! snapshot: it is the rows of its key ranges as they stand at the
-//! authority's head when it is sent, and every entry before that head was
-//! sent before it, so a replica at that head puts its rows and is right
-//! there. Entries come as they are logged,
-//! their facts put as they are over rows not all sent yet; nothing is
-//! judged. A replica makes nothing durable while filling, and the store
-//! whole when the last part is taken: one reopened mid-fill fills again.
-//! Its own intents are the authority's to judge, one its store refuses
-//! pending unrun. A union fed by a scope, and the volatile space, are sent
-//! as fills too.
+//! **A fill** is how a replica's rows come to it, from an upstream: its
+//! authority, for one the log cannot page, or its own disk, as it opens
+//! ([`Source`]). The first part says only where the rows stand; then the
+//! replica asks, by a `Hello` saying where its fill stands, for each part
+//! once the one before is held — of about [`PART`] bytes, of one table,
+//! from where it stands to where the next begins — and when a table is
+//! done, for the next: the first its views read ([`Peer::wants`]) not
+//! taken yet, and then its schema's. A part is no frozen snapshot: it is
+//! its rows as they stand when it is sent, at the replica's head or
+//! before it, and the facts confirmed since the fill began on its table
+//! are put again over it, so a replica puts its rows and is right there.
+//! Entries come as they are logged, their facts put as they are over rows
+//! not all sent yet; nothing is judged. A replica makes nothing durable
+//! while filling, and the store whole when the last part is taken: one
+//! reopened mid-fill fills again. Its own intents are the authority's to
+//! judge, one its store refuses pending unrun. A connection fed by a
+//! scope, and the volatile space, are filled so too.
 //!
 //! **An authority's own facts** are an intent naming no function, its input
 //! their encoding: run, they are applied as they are, judged by the store as
@@ -85,9 +87,8 @@
 //! of its own kind, asked of a table's row under the connection's identity
 //! — is sent everything through it, and the authority keeps nothing of it:
 //! each entry with the facts the scope's filter makes of its own
-//! (`scoped`), and a fill of the rows the scope holds, its union, in one
-//! part — sent only when the union holds the rows its rows reference. Its
-//! chain is the log's, each hash keyed by who it is and its scope, so a
+//! (`scoped`), and a fill of the rows the scope holds, its union, each
+//! part's rows through it as they are read. Its chain is the log's, each hash keyed by who it is and its scope, so a
 //! `Hello` stands in the log only for a replica fed as it is now: one fed
 //! otherwise is filled afresh. What goes to all goes through each
 //! connection's scope ([`Peer::fed`]). The replica is the same machine: it
@@ -121,7 +122,7 @@
 //! intents are rebased by their own changes over the head, never by an
 //! entry below it, so a replica folds as an authority does.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use crate::domain::{Domain, Holds};
@@ -320,9 +321,16 @@ pub struct Peer {
     asked: Option<(Seq, Option<Cursor>)>,
     /// When it folds its log (none: never).
     pub fold: Option<Fold>,
-    /// A replica filling: where its next part begins (the start: none
-    /// taken yet). Nothing is made durable until the fill is done.
+    /// A replica filling: where its next part begins, a table it picks
+    /// and a key in it. Nothing is made durable until the fill is done.
     pub fill: Option<Cursor>,
+    /// Filling: the tables taken whole, and the facts confirmed since the
+    /// fill began on tables not yet, put again over each part of theirs.
+    taken: BTreeSet<String>,
+    waiting: Vec<Change>,
+    /// The tables its views read: what its fill takes first. Its driver's
+    /// to say, as its views come and go and read.
+    pub wants: Vec<String>,
     /// How many bytes a replica would have each frame it is sent of rows or
     /// entries carry — a part of a fill, a page of the log — and each page
     /// of its own pushes, about, said in each `Hello`; none: [`PART`].
@@ -370,6 +378,9 @@ impl Peer {
             asked: None,
             fold: None,
             fill: None,
+            taken: BTreeSet::new(),
+            waiting: vec![],
+            wants: vec![],
             part: None,
         };
         p.store = p.blank();
@@ -652,8 +663,8 @@ impl Peer {
     /// A `Hello` at `at` from a connection fed as `feed` says: the pages
     /// from there, each of about `most` bytes, when this log has that hash
     /// there, and then, when its fill stands at `fill`, the part from
-    /// there; a fill's first part when it does not — of about `most` bytes
-    /// of rows, or of the union whole.
+    /// there, of about `most` bytes of rows; a fill's first part when it
+    /// does not.
     fn serve(&mut self, feed: Option<Feed>, at: (Seq, EntryHash), fill: Option<Cursor>, most: usize, o: &mut Out) {
         let key = |h: EntryHash| feed.as_ref().map_or(h, |f| f.key(h));
         let has = self.log().hash_at(at.0).is_some_and(|h| key(h) == at.1);
@@ -669,25 +680,14 @@ impl Peer {
             }
         }
         if !has || fill.is_some() {
-            let (seq, hash) = self.log().head();
-            let order = self.fill_order();
-            let part = match &feed {
-                None => part(self.space, &self.store, &order, (seq, hash), fill.filter(|_| has), most),
-                Some(f) => {
-                    let Ok(union) = f.union(self) else { return };
-                    part(self.space, &union, &order, (seq, f.key(hash)), None, usize::MAX)
-                }
-            };
-            o.send(part);
+            let at = (self.log().head().0, key(self.log().head().1));
+            let from = fill.filter(|_| has);
+            let c = from.clone().unwrap_or_default();
+            // A scope's rows, its union, as they are read (§1.8).
+            let held = |r: &&[u8]| feed.as_ref().is_none_or(|f| f.holds(&c.table, r).unwrap_or(false));
+            let rows = self.store.keyed_from(&c.table, &c.key).filter(|(_, r)| held(r));
+            o.send(part(self.space, at, from, rows, most));
         }
-    }
-
-    /// The tables of this peer's space in the order a fill sends them: the
-    /// schema's, those its domain sends later after the rest.
-    fn fill_order(&self) -> Vec<String> {
-        let tables = self.store.schema_arc().tables.iter().filter(|t| t.space == self.space);
-        let (later, first): (Vec<_>, Vec<_>) = tables.map(|t| t.name.clone()).partition(|t| self.domain.later.contains(t));
-        first.into_iter().chain(later).collect()
     }
 
     /// How `who` is fed (§1.8): none, the log whole; or by its scope.
@@ -788,6 +788,9 @@ impl Peer {
                 }
                 return self.ask(o);
             }
+            if self.fill.is_some() {
+                self.waiting.extend(l.facts.iter().filter(|c| !self.taken.contains(c.table())).cloned());
+            }
             let previewed = !undone && self.pending.front().is_some_and(|p| p.entry.id == l.entry.id && p.facts == l.facts);
             if previewed {
                 self.pending.pop_front();
@@ -853,8 +856,32 @@ impl Peer {
         self.undo_pending(o);
         self.stand((seq, EntryHash::default()), o);
         self.redo_pending(o);
-        self.fill = Some(Cursor::default());
+        self.begin_fill();
         self.ask(o);
+    }
+
+    /// A fill begun where it stands: nothing of it taken, its first part
+    /// asked from where it would go on — what a replica opened from its
+    /// disk does, to fill from it ([`Source`]).
+    pub fn begin_fill(&mut self) {
+        (self.taken, self.waiting) = (BTreeSet::new(), vec![]);
+        self.fill = self.next_table();
+    }
+
+    /// Where a fill goes on: the start of the first table not taken whole
+    /// yet, of those its views read and then of its schema's (§1.7).
+    fn next_table(&self) -> Option<Cursor> {
+        let schema = self.store.schema_arc();
+        let tables = schema.tables.iter().filter(|t| t.space == self.space).map(|t| &t.name);
+        let mut order = self.wants.iter().filter(|w| tables.clone().any(|t| t == *w)).chain(tables.clone());
+        let table = order.find(|t| !self.taken.contains(*t))?.clone();
+        Some(Cursor { table, key: vec![] })
+    }
+
+    /// Whether a fill under way is at a table its views read: they come
+    /// first.
+    pub fn wanting(&self) -> bool {
+        self.fill.as_ref().is_some_and(|c| self.wants.contains(&c.table))
     }
 
     /// The store emptied, its log standing on `at`, told as what moved.
@@ -868,46 +895,53 @@ impl Peer {
     /// begins one — unless this peer stands where it was taken, filled
     /// already — the store emptied, the log standing on where the part was
     /// taken: an authority is always right, one restarted behind its
-    /// replicas too. Any other is the one from where the fill stands, at the
-    /// head — every entry the authority logged before it was sent before it
-    /// — or it is passed by: past a gap, the head asked for again, and the
-    /// part. Its rows are put as they are, judging nothing (a row may name
-    /// one not sent yet: every row is the authority's, judged where it was
-    /// written): what the store held of the rows' ranges is what the entries
-    /// since the fill began wrote there, and the authority's rows at its
-    /// head hold that too. The last is the fill done, and the store made
-    /// durable whole; until then nothing is, so a peer reopened mid-fill
-    /// fills again. The pending intents run again on top of each.
+    /// replicas too. Any other is the one from where the fill stands, at
+    /// the head or before it, or it is passed by — past a gap, the head
+    /// asked for again, and the part. Its rows are put as they are, judging nothing (a row
+    /// may name one not sent yet: every row is the authority's, judged
+    /// where it was written), and the facts confirmed since the fill began
+    /// on their table put again over them: rows of any moment since are
+    /// right then. A table done is taken whole, and the fill goes on at the
+    /// next its views read, or its schema has; none left is the fill done,
+    /// and the store made durable whole — until then nothing is, so a peer
+    /// reopened mid-fill fills again. The pending intents run again on top
+    /// of each.
     fn take(&mut self, at: (Seq, EntryHash), from: Option<Cursor>, rows: Rows, next: Option<Cursor>, o: &mut Out) {
         let first = from.is_none();
-        if first {
-            if self.fill.is_none() && at == self.log().head() {
-                return;
-            }
-        } else if self.fill.is_none() || from != self.fill {
+        if first && self.fill.is_none() && at == self.log().head() || !first && (self.fill.is_none() || from != self.fill) {
             return;
-        } else if at != self.log().head() {
+        } else if !first && at.0 > self.log().head().0 {
             self.asked = None;
             return self.ask(o);
         }
         self.undo_pending(o);
         if first {
             self.stand(at, o);
+            self.begin_fill();
         }
         for (table, rows) in &rows {
-            match self.store.put_rows(table, rows) {
+            let again: Vec<Change> = self.waiting.iter().filter(|c| c.table() == table).cloned().collect();
+            match self
+                .store
+                .put_rows(table, rows)
+                .and_then(|m| Ok([m, self.store.force_all(&again)?].concat()))
+            {
                 Ok(moved) => o.tell(None, moved),
                 Err(_) => {
                     self.redo_pending(o);
                     return self.diverge(at.0, o);
                 }
             }
+            if next.as_ref().is_none_or(|c| c.table != *table) {
+                self.taken.insert(table.clone());
+            }
         }
-        self.fill = next;
+        self.fill = next.or_else(|| self.next_table());
         match self.fill {
             Some(_) => self.ask(o),
             None => {
                 tracing::info!(target: "ark", seq = at.0, "filled");
+                self.waiting.clear();
                 o.persist(Record::Rows(self.store.kv_rows()))
             }
         }
@@ -1035,40 +1069,104 @@ impl Peer {
     }
 }
 
-/// The part of `store`'s fill from `from` (none: the first, from the
-/// rows' start), of its rows as they stand at `head`: tables in `order`,
-/// each's rows in key order, until about `most` bytes of rows; and where
-/// the next begins, unless none is left. A cursor at a table this peer
-/// lacks begins the fill again.
-fn part(space: Space, store: &Store, order: &[String], (seq, hash): (Seq, EntryHash), from: Option<Cursor>, most: usize) -> Frame {
-    let start = from.as_ref().and_then(|c| order.iter().position(|t| *t == c.table));
-    let from = from.filter(|_| start.is_some());
-    let (mut rows, mut size, mut next) = (vec![], 0, None);
-    for (i, table) in order.iter().enumerate().skip(start.unwrap_or(0)) {
-        let key = from.as_ref().filter(|_| Some(i) == start).map_or(&[][..], |c| &c.key[..]);
-        let mut held = vec![];
-        for (k, r) in store.keyed_from(table, key) {
+/// §1.7 A replica's own disk as its first upstream: what it made durable —
+/// its rows whole where its log stood, and the entries logged after —
+/// answering its `Hello`s as its authority would, from those. A replica
+/// opens standing where its rows did, filling them from it as it fills from
+/// its server: each part as it is taken, the tables its views read first;
+/// its driver asks its server only once it is done.
+pub struct Source {
+    space: Space,
+    at: (Seq, EntryHash),
+    rows: BTreeMap<String, Vec<Vec<u8>>>,
+    tail: Vec<Logged>,
+}
+
+impl Source {
+    /// The rows and entries of a disk's records — its rows whole, first,
+    /// then the entries after — taken out of them as a source, unless they
+    /// hold no row but the log's: the records left stand where those rows
+    /// did.
+    pub fn of(space: Space, records: &mut Vec<Record>) -> Option<Source> {
+        let Some(Record::Rows(rows)) = records.first() else { return None };
+        let at = Logged::from_bytes(rows.iter().find(|(t, _)| t == LOG)?.1.last()?).ok()?;
+        if rows.iter().all(|(t, rs)| t == LOG || rs.is_empty()) {
+            return None;
+        }
+        let Record::Rows(rows) = std::mem::replace(&mut records[0], Record::Rows(crate::log::standing(vec![], at.seq, at.hash))) else {
+            unreachable!()
+        };
+        let rows = rows.into_iter().filter(|(t, _)| t != LOG).collect();
+        let tail = records
+            .drain(1..)
+            .filter_map(|r| if let Record::Logged(l) = r { Some(l) } else { None })
+            .collect();
+        Some(Source {
+            space,
+            at: (at.seq, at.hash),
+            rows,
+            tail,
+        })
+    }
+
+    /// Its answer to a `Hello` of its replica, filling from it: the entries
+    /// after where that stands, and the part from where its fill does.
+    pub fn answer(&self, hello: &[u8]) -> Vec<Vec<u8>> {
+        let Ok(Frame::Hello {
+            cursor,
+            fill: Some(from),
+            most,
+            ..
+        }) = Frame::dec(hello)
+        else {
+            return vec![];
+        };
+        let logged: Vec<Logged> = self.tail.iter().filter(|l| l.seq > cursor).cloned().collect();
+        let page = (!logged.is_empty()).then(|| {
+            Frame::Page {
+                space: self.space,
+                from: cursor,
+                logged,
+            }
+            .enc()
+        });
+        let n = from.key.as_slice().try_into().map_or(0, u64::from_be_bytes) as usize;
+        let rows = self.rows.get(&from.table).into_iter().flatten().enumerate().skip(n);
+        let rows = rows.map(|(i, r)| ((i as u64).to_be_bytes(), &r[..]));
+        page.into_iter()
+            .chain([part(self.space, self.at, Some(from), rows, (most as usize).clamp(1, PART)).enc()])
+            .collect()
+    }
+}
+
+/// A part of a fill, its rows as they stand at `(seq, hash)`: none, the
+/// first, which only says where they stand — the replica asks for each
+/// table it would have next — or, from where its fill stands, that table's
+/// rows in key order (`rows`, from its key on, each with its own) until
+/// about `most` bytes, and where the next begins, unless the table
+/// is done. A table this peer lacks has none.
+pub fn part<'a, K: AsRef<[u8]>>(
+    space: Space,
+    (seq, hash): (Seq, EntryHash),
+    from: Option<Cursor>,
+    rows: impl Iterator<Item = (K, &'a [u8])>,
+    most: usize,
+) -> Frame {
+    let (mut held, mut size, mut next) = (vec![], 0, None);
+    if let Some(c) = &from {
+        for (k, r) in rows {
             if size >= most {
                 next = Some(Cursor {
-                    table: table.clone(),
-                    key: k.to_vec(),
+                    table: c.table.clone(),
+                    key: k.as_ref().to_vec(),
                 });
                 break;
             }
             size += r.len();
             held.push(r.to_vec());
         }
-        rows.push((table.clone(), held));
-        if next.is_none() && size >= most {
-            next = order.get(i + 1).map(|t| Cursor {
-                table: t.clone(),
-                key: vec![],
-            });
-        }
-        if next.is_some() {
-            break;
-        }
     }
+    let rows = from.as_ref().map(|c| vec![(c.table.clone(), held)]).unwrap_or_default();
     Frame::Part {
         space,
         seq,
@@ -1109,20 +1207,6 @@ impl Feed {
     /// `l` as a connection fed as `feed` says is sent it.
     fn fed(feed: Option<&Feed>, l: Logged) -> Result<Logged, String> {
         feed.map_or(Ok(l.clone()), |f| f.logged(l))
-    }
-
-    /// The rows of `p`'s store the scope holds, as a store: refused unless
-    /// it holds every row they reference.
-    fn union(&self, p: &Peer) -> Result<Store, String> {
-        let mut rows = vec![];
-        for (t, rs) in p.store.snapshot_rows() {
-            let held: Result<_, String> = rs
-                .into_iter()
-                .filter_map(|r| self.holds(&t, &r).map(|h| h.then_some(r)).transpose())
-                .collect();
-            rows.push((t, held?));
-        }
-        p.of_rows(&rows)
     }
 }
 

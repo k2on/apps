@@ -209,7 +209,8 @@ impl Peer {
             let wait = self.relayed.map_or(0, |t| t + every - crate::now_ms()).max(0);
             crate::monotonic_ms() + wait as u64
         });
-        let backlog = (!self.link.backlog.is_empty()).then(crate::monotonic_ms);
+        let read = self.reading.as_ref().is_some_and(|r| !r.asked || !r.said.is_empty());
+        let backlog = (!self.link.backlog.is_empty() || read).then(crate::monotonic_ms);
         self.link.due.into_iter().chain(self.due()).chain(relay).chain(backlog).min()
     }
 
@@ -260,7 +261,12 @@ impl Peer {
         l.backlog.extend(l.wire.as_mut().map(|w| w.events()).unwrap_or_default());
         let (mut left, ends) = (l.chunk, l.budget.map(|b| now + b));
         while left > 0 {
-            let Some(e) = self.link.backlog.pop_front() else { break };
+            // Its disk's answers once its connection's are in: past the
+            // tables its views read, one a pump, so the app draws between.
+            let disk = self.link.backlog.is_empty();
+            let Some(e) = self.link.backlog.pop_front().or_else(|| self.said().map(Event::Frame)) else {
+                break;
+            };
             left -= 1;
             p.moved = true;
             match e {
@@ -305,7 +311,7 @@ impl Peer {
                     p.shown = true;
                 }
             }
-            if ends.is_some_and(|e| crate::monotonic_ms() >= e) {
+            if ends.is_some_and(|e| crate::monotonic_ms() >= e) || disk && !self.log.wanting() {
                 break;
             }
         }

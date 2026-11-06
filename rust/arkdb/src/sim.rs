@@ -373,11 +373,18 @@ impl Net {
 
     /// Nothing in flight and nothing pending, in either space.
     pub fn quiet(&self) -> bool {
-        let pending = |c: &Peer| c.log.pending.is_empty() && c.live.as_ref().is_none_or(|l| l.pending.is_empty());
+        let pending = |c: &Peer| c.log.pending.is_empty() && c.live.as_ref().is_none_or(|l| l.pending.is_empty()) && c.log.fill.is_none();
         self.to_server.values().all(|m| m.is_empty()) && self.to_client.values().all(|m| m.is_empty()) && self.clients.values().all(pending)
     }
 
     fn drain(&mut self) {
+        // A device reopened reads its disk an answer a round, among the rest.
+        let ids: Vec<i64> = self.clients.keys().copied().collect();
+        for i in ids {
+            if self.client(i).read_one() {
+                self.told_by_client(i);
+            }
+        }
         for (i, ms) in std::mem::take(&mut self.to_server) {
             for m in ms {
                 self.up(i, m);

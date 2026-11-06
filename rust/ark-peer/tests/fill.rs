@@ -1,9 +1,8 @@
 //! A fill (§1.7): a replica the authority cannot page is sent its rows in
-//! parts, each asked for once the one before is held, the tables a domain
-//! sends later last; what the authority logs meanwhile is taken as it
-//! comes; a fill reopened goes on where it was; an intent made meanwhile
-//! is the authority's to judge. The demo, its playlists sent later: the
-//! items come before the playlists they name.
+//! parts, each asked for once the one before is held, the tables its views
+//! read first; what the authority logs meanwhile is taken as it comes; a
+//! fill reopened goes on where it was; an intent made meanwhile is the
+//! authority's to judge.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -13,10 +12,10 @@ use ark::format::Encode;
 use ark::frames::Frame;
 use ark::peer::{Ctx, Input, Journal, Output, Peer as Machine, Role, To};
 use ark_peer::{Instance, Memory};
-use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Playlist, RemoveFromPlaylist, RenamePlaylist};
+use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 
 fn module() -> Domain {
-    arkdb::demo::demo().later("playlist")
+    arkdb::demo::demo()
 }
 
 fn who(name: &str) -> Ctx {
@@ -143,17 +142,19 @@ fn same(alice: &Machine, server: &Machine) {
     assert!(alice.diverged.is_empty(), "and never diverged");
 }
 
-/// A replica the authority cannot page is filled in parts, the items
-/// first and every one of them in the first part, the playlists after;
-/// filled, it is the authority's store. Falsified by a fill sending tables
-/// in the schema's order: no item was held after the first part.
+/// A replica the authority cannot page is filled in parts: the first says
+/// where it stands, and then the table its views read — the items, every
+/// one in the part after — and the playlists after; filled, it is the
+/// authority's store. Falsified by a fill taking tables in the schema's
+/// order: no item was held after the first part of rows.
 #[test]
-fn a_fill_comes_in_parts_the_later_tables_last() {
+fn a_fill_takes_first_the_tables_its_views_read() {
     let mut server = server();
     library(&mut server);
     let mut alice = alice();
+    alice.machine.wants = vec!["item".into()];
     let mut wire = connect(&mut alice);
-    wire.run(&mut server, &mut alice, Some(1));
+    wire.run(&mut server, &mut alice, Some(2));
     assert_eq!(items(&alice), 5, "every item, in the first part");
     assert!(playlists(&alice).len() < 80, "and not every playlist");
     assert!(alice.fill.is_some());
@@ -219,7 +220,7 @@ fn what_is_logged_during_a_fill_is_taken() {
     library(&mut server);
     let mut alice = alice();
     let mut wire = connect(&mut alice);
-    wire.run(&mut server, &mut alice, Some(1));
+    wire.run(&mut server, &mut alice, Some(2));
     let (held, all) = (playlists(&alice), playlists(&server));
     let sent = held[0].id;
     let unsent = all.iter().find(|p| held.iter().all(|h| h.id != p.id)).unwrap().id;
@@ -325,4 +326,48 @@ fn an_intent_during_a_fill_is_the_authoritys_to_judge() {
     assert!(alice.pending.is_empty(), "every intent confirmed");
     same(&alice, &server);
     assert_eq!(items(&alice), 6);
+}
+
+/// A device reopened fills from its disk as it fills from its server: its
+/// rows are not read whole as it opens, but taken in parts, the tables its
+/// views read first and the rest a part a pump; filled, it is the store it
+/// kept. Falsified by opening a device's rows whole: it held every playlist
+/// before its first pump.
+#[test]
+fn a_device_opens_as_it_fills_from_its_disk() {
+    let mut server = server();
+    library(&mut server);
+    let config = ark_peer::Config::of(Arc::new(module()));
+    let mut d = ark_peer::Peer::open(config, who("alice"), Box::new(Memory::default()));
+    d.connected();
+    let mut up = d.take_frames();
+    while !up.is_empty() {
+        for f in up.drain(..) {
+            for o in server.step(Input::Frame {
+                from: Some(who("alice")),
+                bytes: f,
+            }) {
+                if let Output::Send(To::Back | To::All, b) = o {
+                    d.receive(b);
+                }
+            }
+        }
+        up = d.take_frames();
+    }
+    same(&d.log, &server);
+    let mut d = d.reopen();
+    assert!(playlists(&d.log).is_empty() && items(&d.log) == 0, "nothing read as it opens");
+    let first = playlists(&server)[0].id;
+    let items_of = Items { playlist_id: first }.to_bytes();
+    d.watch(ark::schema::Space::Durable, "demo.items", &items_of, who("alice")).unwrap();
+    d.pump();
+    assert_eq!(items(&d.log), 5, "the table its view reads, in its first pump");
+    assert!(playlists(&d.log).len() < 80, "and not every playlist");
+    let mut pumps = 1;
+    while d.log.fill.is_some() {
+        d.pump();
+        pumps += 1;
+    }
+    assert!(pumps > 3, "a part a pump: {pumps}");
+    same(&d.log, &server);
 }

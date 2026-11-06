@@ -15,7 +15,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark::frames::{Frame, Verdict};
 use ark::hash::EntryHash;
-use ark::log::{Cursor, EntryId, Logged, Origin, Record};
+use ark::log::{EntryId, Logged, Origin, Record};
 use ark::peer::{Ctx, Input, Output, Peer, To};
 use ark::store::{Change, LOG};
 use demo::{create_input, pair_input, pos_of, rename_input, ADD, CREATE, REMOVE, RENAME};
@@ -243,8 +243,8 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
     }));
     assert_eq!(carol.diverged, vec![2]);
     let hello = sends(&o);
-    // The fill begun again: its first part asked for.
-    assert!(matches!(&hello[..], [Frame::Hello { cursor: 2, fill: Some(from), .. }] if *from == Cursor::default()));
+    // The fill begun again: its first table asked for from its start.
+    assert!(matches!(&hello[..], [Frame::Hello { cursor: 2, fill: Some(from), .. }] if from.key.is_empty()));
     let mut server = s.server.clone();
     let mut up_frames = hello;
     while !up_frames.is_empty() {
@@ -256,7 +256,8 @@ fn a_divergence_is_found_at_its_entry_and_healed() {
 }
 
 /// Compaction: the horizon at 2; a hello at 0 is answered with a fill a
-/// replica stands on, one at 2 with the tail. Falsified by `Log::has`
+/// replica stands on — its first part, where it stands, and then each table
+/// it asks — one at 2 with the tail. Falsified by `Log::has`
 /// answering for any sequence below the base: the hello at 0 was paged from
 /// an entry the log no longer has.
 #[test]
@@ -276,7 +277,11 @@ fn compaction_and_the_horizon() {
     let at0 = sends(&server.step(up(&who("x"), &hello(0, EntryHash::default()))));
     let mut r = replica("x", demo::only(&[]));
     assert!(matches!(&at0[..], [Frame::Part { from: None, next: None, .. }]));
-    r.step(down(&at0[0]));
+    let mut said = at0;
+    while !said.is_empty() {
+        let asks: Vec<Frame> = said.drain(..).flat_map(|f| sends(&r.step(down(&f)))).collect();
+        said = asks.iter().flat_map(|f| sends(&server.step(up(&who("x"), f)))).collect();
+    }
     assert_eq!((r.log().head(), r.store.state_hash().hex()), (server.log().head(), FINAL.into()));
     let at2 = sends(&server.step(up(&who("x"), &hello(2, h2))));
     assert!(matches!(&at2[..], [Frame::Page { from: 2, logged, .. }] if logged.iter().map(|l| l.seq).collect::<Vec<_>>() == [3, 4]));

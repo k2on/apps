@@ -735,6 +735,7 @@ fn household(today: &str, now: i64) -> Store {
 /// server's importer would.
 pub fn open(disk: Memory) -> Replica {
     let mut peer = Replica::open_as(Config::of(domain()), Box::new(disk), None);
+    peer.read_whole();
     peer.set_roles([BANK]);
     peer
 }

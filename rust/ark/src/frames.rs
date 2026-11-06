@@ -28,11 +28,12 @@
 //! gap, or naming a function the authority does not run).
 //!
 //! A `Part` is a part of a fill (§1.7): the authority's answer to a
-//! `Hello` its log cannot page — the first, from its rows' start (no
+//! `Hello` its log cannot page — the first, no rows, where they stand (no
 //! `from`) — and, after the pages, to one that says where its fill stands
-//! (`fill`): the part from there, of rows as they stand when the authority
-//! answers, each table's from where the part begins to where the next
-//! does. A replica asks for each part once it holds the one before. A
+//! (`fill`): the part from there, of one table's rows as they stand when
+//! the authority answers, to where the next begins (none: the table done).
+//! A replica asks for each part once it holds the one before, the tables
+//! its views read first. A
 //! `Hello` says how big a replica would have the frames it is sent — a
 //! part, `most` bytes of rows at most, or a page, `most` bytes of entries —
 //! one that takes them on the thread it draws on asks for small ones, and
