@@ -154,7 +154,6 @@ fun AccountsScreen(ledger: Ledger) {
     if (adding) AddAccountSheet(onDismiss = { adding = false })
 }
 
->>>
 
 /** An account in its section's card: its mark, its name and what feeds it, its count to review, its balance. */
 @Composable
@@ -190,7 +189,6 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
     }
 }
 
->>>
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -238,7 +236,7 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
             AmountField(
                 typed,
                 onType = { typed = it },
-                label = if (owed) "What you owe on it" else "What's in it today",
+                label = if (kind.owes()) "What you owe on it" else "What's in it today",
                 error = if (cents == null) "That isn't an amount" else null,
                 modifier = Modifier.fillMaxWidth())
             ListItem(
