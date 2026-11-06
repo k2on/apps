@@ -411,12 +411,14 @@ impl Kept {
 }
 
 /// What an authority keeps beside its log: each origin's last `local` and
-/// the actor it is bound to; the intents it refused, and why — an intent
-/// at or below its origin's last and not refused is in the log, or folded
-/// below its horizon.
+/// the actor it is bound to; the intents pushed to it it refused, and why,
+/// by origin and `local` — an intent at or below its origin's last and not
+/// refused is in the log, or folded below its horizon. A refusal is kept
+/// until a push of its origin says its device no longer holds it (its
+/// page's `from`), so they are as many as devices hold.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
-    pub refused: BTreeMap<EntryId, String>,
+    pub refused: BTreeMap<(Origin, i64), String>,
     pub last: BTreeMap<Origin, (String, i64)>,
 }
 
@@ -431,6 +433,14 @@ impl Journal {
     pub fn pass(&mut self, origin: Origin, actor: &str, local: i64) {
         let l = self.last.entry(origin).or_insert_with(|| (actor.into(), 0));
         l.1 = l.1.max(local);
+    }
+
+    /// `origin`'s refusals at or below `local` forgotten: its device holds
+    /// them no more. Whether there were any.
+    pub(crate) fn forget(&mut self, origin: Origin, local: i64) -> bool {
+        let gone: Vec<_> = self.refused.range((origin, i64::MIN)..=(origin, local)).map(|(k, _)| *k).collect();
+        gone.iter().for_each(|k| _ = self.refused.remove(k));
+        !gone.is_empty()
     }
 
     /// Whether `origin` is bound to an actor other than `actor`.

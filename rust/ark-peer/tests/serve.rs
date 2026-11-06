@@ -2,8 +2,9 @@
 //! WebSocket converge; a token proving nobody is closed; a revoked session
 //! is closed and its link dials again; the log survives a restart; a disk
 //! that refuses holds every delivery until it writes; the journal keeps a
-//! refusal across a restart; a web build is served with its build as the
-//! validator.
+//! refusal across a restart, as an older build kept it too, and forgets it
+//! once its device holds it no more; a web build is served with its build
+//! as the validator.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -262,6 +263,56 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
         "taken"
     );
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "refused again");
+}
+
+/// A refusal is kept only while its device may push it again: once a push
+/// of its origin says its pending intents begin past it (its page's
+/// `from`), it is forgotten and the journal written without it, so a
+/// server's refusals are what its devices hold, not every one it made.
+/// Falsified by a journal that never shrank, as before: it held the
+/// refusal after alice's device moved past it, and after a restart.
+#[test]
+fn a_refusal_is_forgotten_once_its_device_moves_past_it() {
+    let alice = dev("alice@laptop").unwrap();
+    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let c = hub.accept(alice.clone());
+    let refused = |h: &Peer| h.log.journal().unwrap().refused.len();
+    hub.frame(c, push(&alice, 1, " "), 1);
+    assert_eq!(refused(&hub), 1, "kept while her device may push it again");
+    let origin = ark::log::Origin::named(&alice.session);
+    let road = Ctx::new(&alice, origin, 2, "demo.create_playlist", named("Road"), 2);
+    hub.frame(c, Frame::push(Space::Durable, 1, [road]).enc(), 1);
+    assert_eq!(refused(&hub), 0, "forgotten: her pending intents begin past it");
+    let disk = hub.log.disk.take().unwrap();
+    let hub = Peer::serve(config(), disk, 0);
+    assert_eq!(refused(&hub), 0, "the journal written without it");
+    assert_eq!(hub.log.journal().unwrap().last_of(&origin), 2);
+}
+
+/// A journal an older build kept — its refusals by id alone — is read: a
+/// refused intent pushed again is answered as it was, not judged afresh.
+/// Falsified by reading only this build's journal: the intent was taken.
+#[test]
+fn an_older_build_s_journal_is_read() {
+    let alice = dev("alice@laptop").unwrap();
+    let origin = ark::log::Origin::named(&alice.session);
+    let mut disk = Memory::default();
+    let last = std::collections::BTreeMap::from([(origin, (alice.actor.clone(), 1i64))]);
+    let refused = vec![(ark::log::EntryId::of(origin, 1), "a playlist needs a name".to_string())];
+    disk.put("local.journal", &ark::format::encode(&(last, refused)).unwrap()).unwrap();
+    let mut hub = Peer::serve(config(), Box::new(disk), 0);
+    let c = hub.accept(alice.clone());
+    let out = hub.frame(c, push(&alice, 1, "Road"), 1);
+    assert!(
+        out.iter().any(|(_, b)| matches!(
+            Frame::dec(b),
+            Ok(Frame::Verdict {
+                verdict: Verdict::Refused { .. },
+                ..
+            })
+        )),
+        "refused again"
+    );
 }
 
 /// A web build's tag is the store hash on the store, and off it the

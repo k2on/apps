@@ -281,7 +281,9 @@ impl Peer {
                 Some(Event::Frame(b)) => {
                     // Read once, here: the machine takes the frame as it is.
                     let f = Frame::dec(&b).ok();
-                    let (space, part) = f.as_ref().map_or((Space::Durable, false), |f| (f.space(), matches!(f, Frame::Part { .. })));
+                    let (space, part) = f
+                        .as_ref()
+                        .map_or((Space::Durable, false), |f| (f.space(), matches!(f, Frame::Part { .. })));
                     p.frames[space as usize] += 1;
                     if let Some(f) = f {
                         self.told_frame(f);

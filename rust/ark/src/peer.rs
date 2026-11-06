@@ -635,14 +635,11 @@ impl Peer {
     /// and it logged with its facts and told everyone, or its refusal kept.
     fn judged(&mut self, entry: Ctx, run: Result<Vec<Change>, String>, o: &mut Out) -> Result<Seq, String> {
         let id = entry.id;
-        let j = self.journal_mut();
-        j.pass(entry.origin, &entry.actor, entry.local);
+        self.journal_mut().pass(entry.origin, &entry.actor, entry.local);
         let facts = match run {
             Ok(facts) => facts,
             Err(why) => {
                 tracing::warn!(target: "ark", entry = %crate::hash::hex(&id.0), why = %why, "refused");
-                j.refused.insert(id, why.clone());
-                o.persist(Record::Journal(j.clone()));
                 return Err(why);
             }
         };
@@ -788,15 +785,20 @@ impl Peer {
         let head = self.log().head().0;
         let known = self.domain.fns.contains_key(&entry.func);
         let j = self.journal_mut();
-        if let Some(why) = j.refused.get(&entry.id) {
+        if let Some(why) = j.refused.get(&(entry.origin, entry.local)) {
             return Verdict::Refused { why: why.clone() };
         }
         if !entry.id_checks() || j.others(&entry.origin, &who.actor) {
             let why = "an id that is not its own, or from an origin of another actor".into();
             return Verdict::Refused { why };
         }
-        // What its device no longer holds pending is nowhere: passed.
-        j.pass(entry.origin, &who.actor, from.min(entry.local - 1));
+        // What its device no longer holds pending is nowhere: passed, and
+        // its refusals forgotten.
+        let held = from.min(entry.local - 1);
+        j.pass(entry.origin, &who.actor, held);
+        if j.forget(entry.origin, held) {
+            o.persist(Record::Journal(j.clone()));
+        }
         let last = j.last_of(&entry.origin);
         // Not the next of its origin, or naming no function here: where its
         // origin stands. At or below the last and not refused, it is in the
@@ -811,9 +813,16 @@ impl Peer {
             return Verdict::At { seq: head, last };
         }
         (entry.actor, entry.session, entry.roles) = (who.actor.clone(), who.session.clone(), who.roles.clone());
-        let (local, run) = (entry.local, self.attempt(&entry, o));
-        self.judged(entry, run, o)
-            .map_or_else(|why| Verdict::Refused { why }, |seq| Verdict::At { seq, last: local })
+        let (origin, local, run) = (entry.origin, entry.local, self.attempt(&entry, o));
+        self.judged(entry, run, o).map_or_else(
+            |why| {
+                let j = self.journal_mut();
+                j.refused.insert((origin, local), why.clone());
+                o.persist(Record::Journal(j.clone()));
+                Verdict::Refused { why }
+            },
+            |seq| Verdict::At { seq, last: local },
+        )
     }
 
     /// Confirmed entries, applied by their facts: a page is one rebase.

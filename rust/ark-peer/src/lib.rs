@@ -445,7 +445,7 @@ impl Peer {
                 },
                 Output::Send(To::All, f) => self.fanout(space, &f),
                 Output::Persist(Record::Pending(k)) => self.keep_pending(&k),
-                Output::Persist(Record::Journal(j)) => self.put_beside(hub::JOURNAL, &hub::journal_bytes(&j)),
+                Output::Persist(Record::Journal(j)) => self.put_beside(hub::JOURNAL, &hub::journal_bytes(&j, false)),
                 Output::Persist(_) => {}
                 Output::Changes(told) => {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {

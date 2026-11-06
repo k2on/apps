@@ -64,17 +64,46 @@ fn kept<T: Encode>(local: &mut Box<dyn Disk>, name: &str) -> Option<T> {
     T::from_bytes(&local.get(name).ok()??).ok()
 }
 
-/// The log's journal as it is kept beside it: each origin's last, then
-/// what it refused.
-pub(crate) fn journal_bytes(j: &Journal) -> Vec<u8> {
-    let refused: Vec<(EntryId, String)> = j.refused.iter().map(|(id, why)| (*id, why.clone())).collect();
-    ark::format::encode(&(&j.last, refused)).expect("a journal serializes")
+/// What an authority refused, by id, as an older build kept it, and where
+/// each stands, by origin and `local`, which it lacks.
+type Ids = Vec<(EntryId, String)>;
+type At = Vec<(Origin, i64)>;
+
+/// A journal as it is kept beside its log (`local.journal`, or the live
+/// space's, `local.live`): as an older build kept it — each origin's last
+/// and what it refused, by id, in one order or the other — and, after, where
+/// each refusal stands.
+pub(crate) fn journal_bytes(j: &Journal, live: bool) -> Vec<u8> {
+    let (ids, at): (Ids, At) = j.refused.iter().map(|(&(o, l), why)| ((EntryId::of(o, l), why.clone()), (o, l))).unzip();
+    match live {
+        false => ark::format::encode(&(&j.last, ids, at)),
+        true => ark::format::encode(&(ids, &j.last, at)),
+    }
+    .expect("a journal serializes")
 }
 
-/// The log's journal as it was kept.
-fn journal(local: &mut Box<dyn Disk>) -> Option<Journal> {
-    let (last, refused): (Lasts, Vec<(EntryId, String)>) = kept(local, JOURNAL)?;
-    let refused = refused.into_iter().collect();
+/// A journal as it was kept ([`journal_bytes`]): by an older build, its
+/// refusals found among each origin's `local`s, up to its last.
+fn journal(local: &mut Box<dyn Disk>, name: &str) -> Option<Journal> {
+    let b = local.get(name).ok()??;
+    let (last, ids, at): (Lasts, Ids, Option<At>) = match name == LIVE {
+        false => <(Lasts, Ids, At)>::from_bytes(&b).map(|(l, i, a)| (l, i, Some(a))),
+        true => <(Ids, Lasts, At)>::from_bytes(&b).map(|(i, l, a)| (l, i, Some(a))),
+    }
+    .or_else(|_| match name == LIVE {
+        false => <(Lasts, Ids)>::from_bytes(&b).map(|(l, i)| (l, i, None)),
+        true => <(Ids, Lasts)>::from_bytes(&b).map(|(i, l)| (l, i, None)),
+    })
+    .ok()?;
+    let mut ids: BTreeMap<EntryId, String> = ids.into_iter().collect();
+    let at = at.unwrap_or_else(|| {
+        let each = last.iter().flat_map(|(o, (_, n))| (1..=*n).map(move |l| (*o, l)));
+        each.filter(|(o, l)| ids.contains_key(&EntryId::of(o, *l))).collect()
+    });
+    let refused = at
+        .into_iter()
+        .filter_map(|(o, l)| Some(((o, l), ids.remove(&EntryId::of(o, l))?)))
+        .collect();
     Some(Journal { last, refused })
 }
 
@@ -137,7 +166,7 @@ impl Peer {
         if let Some(e) = &log.failure {
             panic!("the log on disk does not read: {e}");
         }
-        stored.extend(journal(&mut local).map(Record::Journal));
+        stored.extend(journal(&mut local, JOURNAL).map(Record::Journal));
         log.step(Input::Open(stored));
         let origin = log.origin;
         // The live authority's origin is another at every open, as a
@@ -156,7 +185,7 @@ impl Peer {
         p.keep_files(files);
         (p.hub.serving, p.hub.next) = (true, 1);
         if let (Some(Record::Rows(rows)), Some(live)) = (kept(&mut p.local, VOLATILE), &mut p.live) {
-            let j = kept::<Journal>(&mut p.local, LIVE).map(Record::Journal);
+            let j = journal(&mut p.local, LIVE).map(Record::Journal);
             live.step(Input::Open([Record::Rows(rows)].into_iter().chain(j).collect()));
             if let Some(f) = p.config.hook("on_restore") {
                 let _ = p.author(Space::Volatile, &f, vec![], now);
@@ -172,7 +201,7 @@ impl Peer {
         let Some(live) = &mut self.live else { return };
         let (seq, hash) = live.log().head();
         let rows = Record::Rows(ark::log::standing(live.store.snapshot_rows(), seq, hash));
-        let j = live.journal().expect("the live authority's").to_bytes();
+        let j = journal_bytes(live.journal().expect("the live authority's"), true);
         self.put_beside(VOLATILE, &rows.enc());
         self.put_beside(LIVE, &j);
     }
