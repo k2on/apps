@@ -9,31 +9,26 @@
 #if os(iOS)
 import SwiftUI
 
-/// Cents in the locale's currency format: `$1,234.56`.
+/// Cents as the locale writes money, `$1,234.56`, by the app's library
+/// (`Cents.write`).
 public struct CentsText: View {
     let cents: Int64
-    let code: String
     let signed: Bool
 
     /// `signed` writes a plus on what is above nothing, as an inflow reads.
-    public init(_ cents: Int64, code: String = CentsText.code, signed: Bool = false) {
+    public init(_ cents: Int64, signed: Bool = false) {
         self.cents = cents
-        self.code = code
         self.signed = signed
     }
 
-    /// The locale's currency, US dollars when it has none.
-    public static var code: String { Locale.current.currency?.identifier ?? "USD" }
-
     public var body: some View {
-        Text(CentsText.string(cents, code: code, signed: signed))
+        Text(CentsText.string(cents, signed: signed))
             .monospacedDigit()
     }
 
     /// The text alone, for a label or an accessibility value.
-    public static func string(_ cents: Int64, code: String = CentsText.code, signed: Bool = false) -> String {
-        let style = Decimal.FormatStyle.Currency(code: code).sign(strategy: signed ? .always() : .automatic)
-        return Cents.decimal(cents).formatted(style)
+    public static func string(_ cents: Int64, signed: Bool = false) -> String {
+        Cents.write(cents, signed)
     }
 }
 

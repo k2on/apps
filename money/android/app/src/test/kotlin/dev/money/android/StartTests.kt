@@ -7,7 +7,6 @@ package dev.money.android
 import dev.arkdb.ffi.Login
 import dev.arkui.SignInPhase
 import dev.arkui.server.Found
-import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -126,11 +125,7 @@ class StartTests {
         assertNull(Remembered(shelf).login)
     }
 
-    @Test fun theDayAndTheMonthAreWrittenInTheLocale() {
-        assertEquals("October 2026", Dates.month("2026-10", Locale.US))
-        assertEquals("Today", Dates.heading("2026-10-26", "2026-10-26", Locale.US))
-        assertEquals("Yesterday", Dates.heading("2026-10-25", "2026-10-26", Locale.US))
-        assertEquals("Mon, Oct 19", Dates.heading("2026-10-19", "2026-10-26", Locale.US))
+    @Test fun theDatePickersDayIsTheDay() {
         assertEquals("2026-10-26", Dates.ofMillis(Dates.millis("2026-10-26")!!))
     }
 }

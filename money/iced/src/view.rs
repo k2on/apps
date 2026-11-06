@@ -2,11 +2,11 @@
 //! the month's budget and its inspector, an account's register, or where
 //! the month's money went — with a panel over it when one is open.
 
-use arkui::{glyphs, icon, layer, menu, outline, panel, style, table};
+use arkui::{format, glyphs, icon, layer, menu, outline, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
-use money_domain::dates::{month_name, month_of};
+use money_domain::dates::month_of;
 use money_domain::*;
 
 use crate::amount::{money, money_or_blank};
@@ -58,7 +58,7 @@ impl App {
     /// have none.
     pub(crate) fn compact_title(&self) -> Option<String> {
         match self.page {
-            Page::Reflect => Some(format!("Spending in {}", month_name(&self.peer.month))),
+            Page::Reflect => Some(format!("Spending in {}", format::month(&self.peer.month))),
             Page::Settings => Some("Settings".into()),
             _ => None,
         }
@@ -389,7 +389,7 @@ impl App {
         let this = month_of(&self.today);
         let mut month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            page_title(month_name(&self.peer.month)),
+            page_title(format::month(&self.peer.month)),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -730,7 +730,7 @@ impl App {
         let s = self.peer.summary();
         let lines = &self.peer.lines.rows;
         let carried: i64 = lines.iter().map(|l| l.carried).sum();
-        let name = month_name(&self.peer.month);
+        let name = format::month(&self.peer.month);
         let summary = container(
             column![
                 bold(format!("{name}'s Summary"), 14),
@@ -1446,7 +1446,7 @@ impl App {
                         .girth(Length::Fixed(14.0))
                         .style(look::progress(Tone::Funded)),
                     text(money(g.spent)).size(13).width(Length::Fixed(110.0)),
-                    text(format!("{:.0}%", 100.0 * g.spent as f32 / total.max(1) as f32))
+                    text(format::percent(g.spent, total))
                         .size(12)
                         .style(style::dim)
                         .width(Length::Fixed(48.0)),
@@ -1460,7 +1460,7 @@ impl App {
         }
         let month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            page_title(format!("Spending in {}", month_name(&self.peer.month))),
+            page_title(format!("Spending in {}", format::month(&self.peer.month))),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -1798,10 +1798,7 @@ pub(crate) fn store_name(store: &str) -> String {
 
 /// How many, in thousandths, as a line says it: `2`, `11.482 gal`.
 pub(crate) fn quantity(thousandths: i64, unit: &str) -> String {
-    let n = match thousandths % 1000 {
-        0 => (thousandths / 1000).to_string(),
-        _ => format!("{:.3}", thousandths as f64 / 1000.0).trim_end_matches('0').to_string(),
-    };
+    let n = format::quantity(thousandths);
     match unit {
         "" | "ea" => format!("\u{00d7}{n}"),
         u => format!("{n} {u}"),

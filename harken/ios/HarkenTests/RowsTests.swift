@@ -20,15 +20,8 @@ final class RowsTests: XCTestCase {
         XCTAssertEqual(Files.url("https://h", ""), "")
     }
 
-    func testLengthsAsTheyAreSaid() {
-        XCTAssertEqual(Spell.clock(229_000), "3:49")
-        XCTAssertEqual(Spell.clock(3_723_000), "1:02:03")
-        XCTAssertEqual(Spell.length(48 * 60_000), "48 min")
-        XCTAssertEqual(Spell.length(150 * 60_000), "2 hr 30 min")
-        XCTAssertEqual(Spell.length(60 * 60_000), "1 hr")
-        XCTAssertEqual(Spell.count(1, "song"), "1 song")
-        XCTAssertEqual(Spell.count(12, "song"), "12 songs")
-        XCTAssertEqual(Spell.facts([Spell.count(2, "song"), nil, ""]), "2 songs")
+    func testFactsLeaveOutWhatIsNotKnown() {
+        XCTAssertEqual(Spell.facts(["2 songs", nil, ""]), "2 songs")
     }
 
     /// An episode's row says its length, then what is left of it, then that it is played.
@@ -105,10 +98,8 @@ final class RowsTests: XCTestCase {
         let all = [on("Jacek Galowicz", "Host"), on("Kiara Grouwstra", "Guest"), on("Ada", "host"), on("Bo", "Producer"), on("Kiara Grouwstra", "Guest")]
         XCTAssertEqual(PeopleEntry.hosts(all).map { $0.name }, ["Jacek Galowicz", "Ada"])
         XCTAssertEqual(PeopleEntry.guests(all).map { $0.name }, ["Kiara Grouwstra", "Bo"])
-        XCTAssertEqual(PeopleEntry.named(PeopleEntry.guests(all)), "Kiara Grouwstra, Bo")
         // A host who is also listed as a guest is a host.
         XCTAssertEqual(PeopleEntry.guests([on("Ada", "Host"), on("Ada", "Guest")]).count, 0)
-        XCTAssertEqual(PeopleEntry.named([]), "")
     }
 
     /// A person's link opens in the browser only when it is a web page.

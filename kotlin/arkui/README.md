@@ -42,8 +42,10 @@ expressive shapes (`ExpressiveShapes`) and an emphasised type scale
 label; `SectionHeader`; and `Stepper`, a title stepped back and forth.
 
 **Money as a locale writes it** (`Amounts.kt`, `AmountField.kt`): minor
-units formatted and parsed in the phone's locale and currency
-(`Amounts`, `LocalAmounts`), drawn in tabular figures (`AmountText`), and
+units formatted and parsed in the phone's locale and currency — what
+java.text says of the locale read once (`LocaleNumbers`), the writing the
+app's library's (`ark_format`, every client's), handed in as `Amounts`
+and provided as `LocalAmounts` — drawn in tabular figures (`AmountText`), and
 typed on the number pad with the symbol before it (`AmountField`); one
 worked out elsewhere, shown with a small mark after it and not offered
 for editing (`MarkedAmount`).

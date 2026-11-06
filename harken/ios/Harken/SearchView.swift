@@ -93,7 +93,7 @@ struct SearchView: View {
             Section("Artists") {
                 CoverShelf(items: r.artists) { a in
                     let to = Route.page(.artist(a.name))
-                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: Spell.count(Int(a.tracks), "song"), side: 112, round: true, opens: to) {
+                    CoverCard(seed: a.name, url: RowCover.url(model, a.art), title: a.name, under: formatCount(n: a.tracks, word: "song"), side: 112, round: true, opens: to) {
                         model.searched(model.needle)
                         open(to)
                     }

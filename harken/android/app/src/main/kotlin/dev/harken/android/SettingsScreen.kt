@@ -39,6 +39,7 @@ import dev.arkui.Space
 import dev.arkui.quiet
 import dev.arkui.pressable
 import dev.arkui.rememberDestinationScrollState
+import uniffi.ark_format.formatClock
 
 /** What Settings draws. */
 data class SettingsData(
@@ -208,7 +209,7 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
             when {
                 s == null -> "—"
                 a == null -> "idle"
-                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${Media.clock(a.position(h.serverNow()))}"
+                else -> "${a.at.toInt() + 1} of ${a.queue.size}, ${if (a.clock.playing) "playing" else "paused"} at ${formatClock(a.position(h.serverNow()))}"
             }
     out +=
         "output" to
@@ -233,7 +234,7 @@ fun listeningNumbers(h: Heard): List<Pair<String, String>> {
                     "$l + ${s.followers(l).joinToString(", ") { it.id }} · volume $level${if (s.groupMuted(l)) " (muted)" else ""}"
                 } ?: "none")
     if (s != null && s.scrub.isEmpty()) out += "scrub" to "none"
-    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to Media.clock(at)
+    for ((id, at) in s?.scrub.orEmpty()) out += "scrub ${if (id == h.me) "(this phone)" else id}" to formatClock(at)
     return out
 }
 

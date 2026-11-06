@@ -187,7 +187,7 @@ struct BankHealthText: View {
         case .failed: Text("The last import failed").foregroundStyle(.error)
         case .new: Text("Waiting for its first import").foregroundStyle(.quiet)
         case let .synced(ms):
-            Text("Synced \(Date(timeIntervalSince1970: Double(ms) / 1000), format: .relative(presentation: .named))")
+            Text("Synced \(formatAgo(ms: ms, nowMs: nowMs()))")
                 .foregroundStyle(.quiet)
         }
     }
@@ -240,7 +240,7 @@ struct BankView: View {
                 Section("Last Import") {
                     Text(why).foregroundStyle(.error)
                     LabeledContent("Failed") {
-                        Text(Date(timeIntervalSince1970: Double(b.failedMs) / 1000), format: .relative(presentation: .named))
+                        Text(formatAgoAlone(ms: b.failedMs, nowMs: nowMs()))
                     }
                 }
             case .new, .synced:
@@ -248,11 +248,7 @@ struct BankView: View {
             }
             Section {
                 LabeledContent("Last Synced") {
-                    if b.syncedMs > 0 {
-                        Text(Date(timeIntervalSince1970: Double(b.syncedMs) / 1000), format: .relative(presentation: .named))
-                    } else {
-                        Text("Never")
-                    }
+                    Text(formatAgoAlone(ms: b.syncedMs, nowMs: nowMs()))
                 }
                 LabeledContent("Brought In", value: "\(b.added) new, \(b.updated) changed")
                 if b.deleted > 0 { LabeledContent("Removed", value: "\(b.deleted)") }

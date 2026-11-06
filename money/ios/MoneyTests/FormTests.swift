@@ -6,17 +6,19 @@ import Foundation
 import XCTest
 
 final class FormTests: XCTestCase {
-    func testAmountsAreReadAsTheDesktopReadsThem() {
-        XCTAssertEqual(Cents.parse("12"), 1_200)
-        XCTAssertEqual(Cents.parse("12.5"), 1_250)
-        XCTAssertEqual(Cents.parse("$1,200.00"), 120_000)
-        XCTAssertEqual(Cents.parse("-3.10"), -310)
-        XCTAssertEqual(Cents.parse(""), 0)
-        XCTAssertNil(Cents.parse("1.234"))
-        XCTAssertNil(Cents.parse("twelve"))
-        XCTAssertEqual(Cents.editable(123_450), "1234.50")
-        XCTAssertEqual(Cents.editable(0), "")
-        XCTAssertEqual(Cents.plain(-123_456_789), "-$1,234,567.89")
+    func testTheLocaleIsReadAsNumberFormatterWritesMoney() {
+        let us = LocaleNumbers.of(Locale(identifier: "en_US"))
+        XCTAssertEqual(us, LocaleNumbers(currency: "USD", symbol: "$", symbolFirst: true, symbolSpaced: false,
+                                         decimal: ".", grouping: ",", minus: "-", minusFirst: true))
+        let de = LocaleNumbers.of(Locale(identifier: "de_DE"))
+        XCTAssertEqual(de.currency, "EUR")
+        XCTAssertFalse(de.symbolFirst)
+        XCTAssertTrue(de.symbolSpaced)
+        XCTAssertEqual(de.decimal, ",")
+        XCTAssertEqual(de.grouping, ".")
+    }
+
+    func testAmountsAreKeyedAsApplePayTakesThem() {
         // The keypad: digits from the right, and back.
         var c: Int64 = 0
         for d in [1, 2, 3, 4] { c = Cents.typing(c, digit: d) }

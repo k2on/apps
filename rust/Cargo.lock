@@ -208,6 +208,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-format"
+version = "0.1.0"
+dependencies = [
+ "uniffi",
+]
+
+[[package]]
 name = "ark-macros"
 version = "0.1.0"
 dependencies = [
@@ -253,6 +260,8 @@ dependencies = [
 name = "arkui"
 version = "0.1.0"
 dependencies = [
+ "ark-format",
+ "chrono",
  "iced",
  "iced_test",
  "image",
@@ -2228,6 +2237,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-ffi",
+ "ark-format",
  "ark-peer",
  "arkdb",
  "harken-domain",
@@ -3543,6 +3553,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-ffi",
+ "ark-format",
  "ark-peer",
  "arkdb",
  "image",

@@ -66,6 +66,9 @@ import dev.arkui.quiet
 import dev.arkui.rememberHero
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatClock
+import uniffi.ark_format.formatCount
+import uniffi.ark_format.formatLength
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -153,7 +156,7 @@ fun TrackRow(
             Text(under, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(
-            LocalDownloads.current[track.id]?.short ?: Media.clock(track.durationMs),
+            LocalDownloads.current[track.id]?.short ?: formatClock(track.durationMs),
             style = quiet(MaterialTheme.typography.bodySmall),
             modifier = Modifier.padding(horizontal = Space.s),
         )
@@ -450,7 +453,7 @@ fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
             if (composer.isNotEmpty()) Text(composer, style = quiet(MaterialTheme.typography.labelSmall))
             Text(work, style = MaterialTheme.typography.titleMedium)
         }
-        if (ms > 0) Text(Media.clock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
+        if (ms > 0) Text(formatClock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
     }
 }
 
@@ -460,7 +463,7 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
     Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.xl)) {
         if (year > 0) Text(year.toString(), style = quiet(MaterialTheme.typography.bodySmall))
         val ms = tracks.sumOf { it.durationMs }
-        Text(Media.count(tracks.size, "track") + if (ms > 0) ", " + Media.spell(ms) else "", style = quiet(MaterialTheme.typography.bodySmall))
+        Text(formatCount(tracks.size.toLong(), "track") + if (ms > 0) ", " + formatLength(ms) else "", style = quiet(MaterialTheme.typography.bodySmall))
         for (terms in licences) Text(terms, style = quiet(MaterialTheme.typography.bodySmall))
         if (label.isNotEmpty()) {
             Spacer(Modifier.height(Space.l))

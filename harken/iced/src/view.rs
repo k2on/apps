@@ -7,7 +7,7 @@
 //! keyboard, where a panel goes, how many cards fit are all answered in
 //! `main.rs`, the same numbers the keyboard uses.
 use arkui::fit::{drawable, Cut};
-use arkui::format::{clock, plural, span, spell};
+use arkui::format::{clock, clock_secs, count, length, names, plural, span};
 use arkui::line::Line;
 use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
 use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, slider, stack, text, text_input, Row, Space};
@@ -296,7 +296,7 @@ impl App {
             // The tally when nothing else is known, which is a fact rather
             // than a dash where one should be.
             under: match under.is_empty() {
-                true => format!("{tally} {}", plural(tally, "track")),
+                true => count(tally, "track"),
                 false => under,
             },
             round,
@@ -401,9 +401,9 @@ impl App {
             Some(n) => format!("{n} {}  \u{b7}  ", plural(n as i64, "album")),
             None => String::new(),
         };
-        facts.push_str(&format!("{tracks} {}", plural(tracks, "track")));
+        facts.push_str(&count(tracks, "track"));
         if ms > 0 {
-            facts.push_str(&format!("  \u{b7}  {}", spell(ms)));
+            facts.push_str(&format!("  \u{b7}  {}", length(ms)));
         }
         self.view_header(name, under, open_under, facts, art_path, albums.is_some())
     }
@@ -443,7 +443,7 @@ impl App {
                     .map(|c| {
                         let mut card = self.card(&c.name, span(c.born, c.died), c.works, Source::Artist(c.name.clone()), true, &c.art);
                         if c.born == 0 && c.died == 0 {
-                            card.under = format!("{} {}", c.works, plural(c.works, "work"));
+                            card.under = count(c.works, "work");
                         }
                         card
                     })
@@ -552,7 +552,7 @@ impl App {
                     &s.art,
                 );
                 if s.author.is_empty() {
-                    card.under = format!("{} {}", s.episodes, plural(s.episodes, "episode"));
+                    card.under = count(s.episodes, "episode");
                 }
                 cards::view_card(side, &card, Some(at) == cursor, Message::HoverAt(at))
             });
@@ -695,7 +695,7 @@ impl App {
     pub(crate) fn length_of(&self, item: &crate::rows::Item) -> String {
         match self.peer.download_of(item.id) {
             Some(d) => d.short(),
-            None => clock(item.duration_ms as f64 / 1000.0),
+            None => clock(item.duration_ms),
         }
     }
 
@@ -1020,11 +1020,11 @@ impl App {
         if year > 0 {
             foot = foot.push(text(year.to_string()).size(12).style(style::faint(0.5)));
         }
-        let mut length = format!("{n} {}", plural(n, "track"));
+        let mut said = count(n, "track");
         if ms > 0 {
-            length.push_str(&format!(", {}", spell(ms)));
+            said.push_str(&format!(", {}", length(ms)));
         }
-        foot = foot.push(text(length).size(12).style(style::faint(0.5)));
+        foot = foot.push(text(said).size(12).style(style::faint(0.5)));
         let details: Vec<_> = rows.iter().map(|i| self.peer.detail_of(i.id)).collect();
         for terms in licences(&details) {
             foot = foot.push(text(terms).size(12).style(style::faint(0.5)));
@@ -1125,7 +1125,7 @@ impl App {
         let ms: i64 = rows.iter().map(|i| i.duration_ms).sum();
         let mut small = format!("Playlist  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "track"));
         if ms > 0 {
-            small.push_str(&format!("  \u{b7}  {}", spell(ms)));
+            small.push_str(&format!("  \u{b7}  {}", length(ms)));
         }
         let header = self.view_cover(&l, name, self.mosaic(name, self.cover_side()), None, name, "", "", small);
         padded(with_header(header, self.view_list()))
@@ -1144,7 +1144,7 @@ impl App {
         let kind = if id.starts_with("sermon/") { "Sermons" } else { "Podcast" };
         let mut small = format!("{kind}  \u{b7}  {} {}", rows.len(), plural(rows.len() as i64, "episode"));
         if ms > 0 {
-            small.push_str(&format!("  \u{b7}  {}", spell(ms)));
+            small.push_str(&format!("  \u{b7}  {}", length(ms)));
         }
         let art = self.picture(title, show.map_or("", |s| s.art.as_str()), self.cover_side(), 8.0);
         // Who hosts it, where its feed says, each opening their page; who
@@ -1152,7 +1152,7 @@ impl App {
         let hosts: Vec<String> = self.hosts().into_iter().map(|h| h.name).collect();
         let header = match hosts.is_empty() {
             true => self.view_cover(&l, title, art, None, title, "", &show.map_or(String::new(), |s| s.author.clone()), small),
-            false => self.view_cover(&l, title, art, None, title, "Hosted by", &hosts.join(", "), small),
+            false => self.view_cover(&l, title, art, None, title, "Hosted by", &names(&hosts), small),
         };
         // What it is about, as much as a header wants: a feed's runs long.
         let said = show.map_or(String::new(), |s| match s.description.chars().count() > 600 {
@@ -1189,6 +1189,7 @@ impl App {
         let focused = self.has_keys(Pane::Tracks);
         let cursor = focused.then_some(self.at(Pane::Tracks));
         let now = crate::client::now_ms();
+        let offset = arkui::format::utc_offset_minutes(now);
         // About three lines of the description at its size, from the room
         // the page leaves it: iced does not end a text at a line.
         let room = (self.pane_width() - 2.0 * GUTTER - SCROLLBAR - 48.0).max(200.0);
@@ -1205,7 +1206,7 @@ impl App {
                 }
             };
             let mut words = column![].spacing(4).width(Length::Fill);
-            let day = arkui::format::day(detail.as_ref().map_or(0, |d| d.published_ms), now);
+            let day = arkui::format::published(detail.as_ref().map_or(0, |d| d.published_ms), now, offset);
             let over: Vec<&str> = [shows.then_some(item.creator.as_str()), Some(day.as_str())]
                 .into_iter()
                 .flatten()
@@ -1249,9 +1250,9 @@ impl App {
                 (Some(_), _) => self.length_of(item),
                 (None, Some(m)) if m.finished => "Played".to_string(),
                 (None, Some(m)) if m.position_ms > 0 && m.duration_ms > m.position_ms => {
-                    format!("{} left", spell(m.duration_ms - m.position_ms))
+                    format!("{} left", length(m.duration_ms - m.position_ms))
                 }
-                (None, _) if item.duration_ms > 0 => spell(item.duration_ms),
+                (None, _) if item.duration_ms > 0 => length(item.duration_ms),
                 _ => String::new(),
             };
             let (glyph, press) = match here && sounding {
@@ -1452,7 +1453,7 @@ impl App {
             if now {
                 words = words.font(hero::BOLD);
             }
-            let at = text(clock(c.start_ms as f64 / 1000.0))
+            let at = text(clock(c.start_ms))
                 .size(11)
                 .width(Length::Fixed(CLOCK_WIDTH))
                 .style(move |t| text::Style {
@@ -1540,7 +1541,7 @@ impl App {
         let works = p.works().len() as i64;
         let albums = p.albums_by(name);
         let tracks = p.rows().len() as i64;
-        let episodes = format!("{} {}", on.len(), plural(on.len() as i64, "episode"));
+        let episodes = count(on.len() as i64, "episode");
         // Whether they made anything here, or are only on episodes.
         let made = artist.is_some() || composer.is_some();
         let counts = match made {
@@ -1597,14 +1598,11 @@ impl App {
             }));
         }
         if let Some(best) = self.best_known() {
-            let facts = [
-                best.catalogue.clone(),
-                format!("{} {}", best.recordings, plural(best.recordings, "recording")),
-            ]
-            .into_iter()
-            .filter(|f| !f.is_empty())
-            .collect::<Vec<_>>()
-            .join("  \u{b7}  ");
+            let facts = [best.catalogue.clone(), count(best.recordings, "recording")]
+                .into_iter()
+                .filter(|f| !f.is_empty())
+                .collect::<Vec<_>>()
+                .join("  \u{b7}  ");
             page = page.push(self.view_featured(&l, "Most Recorded", &best.id, &best.art, best.title.clone(), facts));
         }
         // Each work under who it is by, its catalogue number under it, and
@@ -1739,9 +1737,9 @@ impl App {
             if r.recorded > 0 {
                 f.push(r.recorded.to_string());
             }
-            f.push(format!("{} {}", r.tracks, plural(r.tracks, "track")));
+            f.push(count(r.tracks, "track"));
             if r.duration_ms > 0 {
-                f.push(spell(r.duration_ms));
+                f.push(length(r.duration_ms));
             }
             f.join("  \u{b7}  ")
         };
@@ -1966,9 +1964,7 @@ impl App {
                     })
                     .cut(Cut::Middle)
                     .gives_way(),
-                    text(format!("{} {}", p.rows().len(), plural(p.rows().len() as i64, "track")))
-                        .size(12)
-                        .style(style::dim),
+                    text(count(p.rows().len() as i64, "track")).size(12).style(style::dim),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center),
@@ -2166,20 +2162,15 @@ impl App {
                 rows.push((
                     "clock".into(),
                     match a.clock {
-                        Clock::Paused { at_ms } => format!("paused at {}", clock(at_ms as f64 / 1000.0)),
+                        Clock::Paused { at_ms } => format!("paused at {}", clock(at_ms)),
                         Clock::Playing { at_ms, since } => {
-                            format!("playing from {} since {since}", clock(at_ms as f64 / 1000.0))
+                            format!("playing from {} since {since}", clock(at_ms))
                         }
                     },
                 ));
                 rows.push((
                     "at \u{b7} queue \u{b7} position".into(),
-                    format!(
-                        "{} \u{b7} {} \u{b7} {}",
-                        a.at,
-                        a.queue.len(),
-                        clock(listening::Remote::position_ms(a) as f64 / 1000.0)
-                    ),
+                    format!("{} \u{b7} {} \u{b7} {}", a.at, a.queue.len(), clock(listening::Remote::position_ms(a))),
                 ));
                 rows.push(("from".into(), a.from.clone()));
             }
@@ -2247,7 +2238,7 @@ impl App {
             },
         ));
         for (device, ms) in scrub.into_iter().flatten() {
-            rows.push((format!("  {device}"), clock(*ms as f64 / 1000.0)));
+            rows.push((format!("  {device}"), clock(*ms)));
         }
         rows.push((String::new(), String::new()));
         rows.push((
@@ -2533,7 +2524,7 @@ impl App {
         // Each clock as wide as the longest it can say, so the bar between
         // them does not shift as the seconds go by.
         let seek = row![
-            text(clock(position))
+            text(clock_secs(position))
                 .size(11)
                 .style(style::dim)
                 .width(Length::Fixed(CLOCK_WIDTH))
@@ -2542,7 +2533,7 @@ impl App {
                 .on_release(Message::SeekDone)
                 .style(style::seek)
                 .width(Length::Fill),
-            text(clock(duration)).size(11).style(style::dim).width(Length::Fixed(CLOCK_WIDTH)),
+            text(clock_secs(duration)).size(11).style(style::dim).width(Length::Fixed(CLOCK_WIDTH)),
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -2685,7 +2676,7 @@ fn work_heading<'a>(composer: Element<'a, Message>, work: Element<'a, Message>, 
     let line = row![
         container(text("")).width(TRANSPORT),
         words,
-        table::cell(clock(ms as f64 / 1000.0), TIME, false, false, true),
+        table::cell(clock(ms), TIME, false, false, true),
         // Where a track's menu button is, so the lengths line up.
         container(text("")).width(Length::Fixed(icon::SIZE + 12.0)),
     ]

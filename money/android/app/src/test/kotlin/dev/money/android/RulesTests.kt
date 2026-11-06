@@ -41,7 +41,7 @@ class RulesTests {
         val c = some().copy(ruled = true, rule = "10% of income matching ACME PAYROLL in Checking, Savings")
         assertEquals("Assigned by rule: 10% of income matching ACME PAYROLL in Checking, Savings", rulesLine(c))
         assertEquals("Assigned by rule", rulesLine(c.copy(rule = "")))
-        assertEquals("Assigned by rule", storyOf(c.copy(target = 0, activity = 0, available = 0, carried = 0, assigned = 0), dev.arkui.Amounts()))
+        assertEquals("Assigned by rule", storyOf(c.copy(target = 0, activity = 0, available = 0, carried = 0, assigned = 0), LibraryAmounts()))
     }
 
     // * The demo, with a rule set as the desktop sets one

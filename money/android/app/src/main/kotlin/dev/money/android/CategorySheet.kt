@@ -76,6 +76,7 @@ import dev.arkui.Stat
 import dev.arkui.Tone
 import dev.arkui.toneColors
 import uniffi.money_domain.BudgetLine
+import uniffi.ark_format.formatMonthAlone
 
 /** Which page of the sheet is showing. */
 private enum class Leaf {
@@ -180,7 +181,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
             AmountField(
                 assigned,
                 onType = { assigned = it },
-                label = "Assigned in ${Dates.monthAlone(ledger.month)}",
+                label = "Assigned in ${formatMonthAlone(ledger.month)}",
                 error = if (typed == null) "That isn't an amount" else null,
                 onDone = { typed?.let { book.assign(l.categoryId, it) } },
                 modifier = Modifier.fillMaxWidth(),

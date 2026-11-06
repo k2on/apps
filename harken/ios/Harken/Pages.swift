@@ -160,12 +160,12 @@ struct ArtistPage: View {
         let episodes = model.appearances(of: name) ?? []
         let face = model.face(name)
         let onlyOn = !episodes.isEmpty && works.isEmpty && tracks.isEmpty && albums.isEmpty
-        let counts = onlyOn ? Spell.count(episodes.count, "episode")
-            : Spell.facts([Spell.count(albums.count, "album"), Spell.count(tracks.count, "track")])
+        let counts = onlyOn ? formatCount(n: Int64(episodes.count), word: "episode")
+            : Spell.facts([formatCount(n: Int64(albums.count), word: "album"), formatCount(n: Int64(tracks.count), word: "track")])
         // What they are and when they lived, as a catalogue heads a person;
         // nobody's years known, and it is how much of them there is here.
-        let lived = Catalogue.life(born: artist?.born ?? 0, died: artist?.died ?? 0)
-        let life = lived.isEmpty ? Catalogue.life(born: composer?.born ?? 0, died: composer?.died ?? 0) : lived
+        let lived = formatSpan(born: artist?.born ?? 0, died: artist?.died ?? 0)
+        let life = lived.isEmpty ? formatSpan(born: composer?.born ?? 0, died: composer?.died ?? 0) : lived
         // Somebody only on podcasts is what their newest episode calls them: "Guest", "Host".
         let role = episodes.first.flatMap { model.people[$0.id] }?.first(where: { $0.name == name })?.role ?? ""
         let what = !works.isEmpty ? "Composer" : onlyOn ? role : "Artist"
@@ -429,7 +429,7 @@ struct ShowPage: View {
         ScrollViewReader { proxy in
             List {
                 PageHeader(kind: id.hasPrefix("sermon/") ? "Sermons" : "Podcast", title: title, by: show.flatMap { $0.author.isEmpty ? nil : $0.author },
-                           facts: Spell.facts([Spell.count(episodes.count, "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
+                           facts: Spell.facts([formatCount(n: Int64(episodes.count), word: "episode"), Spell.total(episodes)]), canPlay: !episodes.isEmpty,
                            onPlay: { model.play(episodes, at: 0, from: page) }, onShuffle: { model.shuffle(episodes, from: page) }) {
                     CoverView(seed: title, url: RowCover.url(model, show?.art ?? ""), side: Space.header).frame(width: Space.header, height: Space.header)
                 }
@@ -439,7 +439,7 @@ struct ShowPage: View {
                 // Who hosts it, once: the newest episode's hosts, as its feed names them.
                 let hosts = PeopleEntry.hosts(episodes.first.flatMap { model.people[$0.id] } ?? [])
                 if !hosts.isEmpty {
-                    PeopleLine(people: hosts, words: "Hosted by " + PeopleEntry.named(hosts), side: 26, font: .subheadline)
+                    PeopleLine(people: hosts, words: "Hosted by " + formatNames(names: hosts.map(\.name)), side: 26, font: .subheadline)
                         .frame(maxWidth: .infinity)
                         .listRowSeparator(.hidden)
                 }
@@ -545,7 +545,7 @@ struct PlaylistPage: View {
         let name = playlist?.name ?? "Playlist"
         ScrollViewReader { proxy in
             List {
-                PageHeader(kind: "Playlist", title: name, facts: Spell.facts([Spell.count(tracks.count, "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
+                PageHeader(kind: "Playlist", title: name, facts: Spell.facts([formatCount(n: Int64(tracks.count), word: "song"), Spell.total(tracks)]), canPlay: !tracks.isEmpty,
                            onPlay: { model.play(tracks, at: 0, from: page) }, onShuffle: { model.shuffle(tracks, from: page) }) {
                     CoverView(seed: name, url: "", side: Space.header).frame(width: Space.header, height: Space.header)
                 }

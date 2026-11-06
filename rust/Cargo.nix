@@ -67,6 +67,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-format" = rec {
+      packageId = "ark-format";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-format";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-macros" = rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -894,6 +904,25 @@ rec {
         };
         resolvedDefaultFeatures = [ "bindgen" ];
       };
+      "ark-format" = rec {
+        crateName = "ark-format";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format; };
+        libName = "ark_format";
+        dependencies = [
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
       "ark-macros" = rec {
         crateName = "ark-macros";
         version = "0.1.0";
@@ -1071,6 +1100,17 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui; };
         dependencies = [
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "clock" ];
+          }
           {
             name = "iced";
             packageId = "iced";
@@ -7057,6 +7097,11 @@ rec {
             packageId = "ark-ffi";
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -11094,6 +11139,11 @@ rec {
           {
             name = "ark-ffi";
             packageId = "ark-ffi";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";

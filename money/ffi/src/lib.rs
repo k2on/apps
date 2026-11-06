@@ -23,6 +23,11 @@ use ark_peer::Config;
 
 uniffi::setup_scaffolding!();
 
+/// Numbers, days and lengths as every client writes them: in this library,
+/// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
+/// come with the app's, and the phones print what the desktop prints.
+pub use ark_format;
+
 mod demo;
 mod hall;
 #[cfg(feature = "page")]
@@ -83,10 +88,4 @@ pub fn money_today() -> String {
 #[uniffi::export]
 pub fn money_add_months(month: String, n: i64) -> String {
     money_domain::dates::add_months(&month, n)
-}
-
-/// A month as a heading says it: `October 2026`.
-#[uniffi::export]
-pub fn money_month_name(month: String) -> String {
-    money_domain::dates::month_name(&month)
 }

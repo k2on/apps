@@ -6,7 +6,6 @@
 // offered a payment category.
 package dev.money.android
 
-import dev.arkui.Amounts
 import dev.arkui.Tone
 import java.util.Locale
 import org.junit.After
@@ -17,12 +16,13 @@ import org.junit.Before
 import org.junit.Test
 import uniffi.money_domain.AccountLine
 import uniffi.money_domain.BudgetLine
+import dev.arkui.LocaleNumbers
 
 class CardsTests {
     private lateinit var book: Book
     private val l: Ledger
         get() = book.state.value
-    private val a = Amounts(Locale.US)
+    private val a = LibraryAmounts(LocaleNumbers.of(Locale.US))
 
     @Before fun open() {
         book = demoBook()

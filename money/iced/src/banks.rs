@@ -17,6 +17,7 @@
 //! account), every account here, and nothing — the account another login
 //! to the same bank feeds with the same last digits already on the cursor.
 
+use arkui::format::ago;
 use arkui::{glyphs, icon, menu, style};
 use iced::widget::{button, column, container, row, text, Column};
 use iced::{Alignment, Element, Length, Padding};
@@ -49,17 +50,6 @@ pub enum Msg {
 
 /// How long an answered ask stays on the page.
 const SHOWN_MS: i64 = 15 * 60 * 1000;
-
-/// A time ago, in words.
-fn ago(then_ms: i64, now_ms: i64) -> String {
-    let m = (now_ms - then_ms).max(0) / 60_000;
-    match m {
-        0 => "just now".into(),
-        1..=59 => format!("{m} min ago"),
-        60..=2879 => format!("{} h ago", m / 60),
-        _ => format!("{} days ago", m / 1440),
-    }
-}
 
 impl App {
     /// Settings' Banks section's messages.
@@ -471,18 +461,5 @@ fn ago_or_in(then_ms: i64, now_ms: i64) -> String {
     match m {
         0 => "it closes in under a minute".into(),
         _ => format!("it closes in {m} min"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ago;
-
-    #[test]
-    fn times_ago_read() {
-        assert_eq!(ago(0, 30_000), "just now");
-        assert_eq!(ago(0, 5 * 60_000), "5 min ago");
-        assert_eq!(ago(0, 3 * 3_600_000), "3 h ago");
-        assert_eq!(ago(0, 3 * 86_400_000), "3 days ago");
     }
 }

@@ -19,6 +19,8 @@ struct MoneyApp: App {
     init() {
         // money's accent, the green, before the first view draws it.
         Accent.use(.green)
+        // Money written as every client writes it, in the phone's locale.
+        Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         _model = StateObject(wrappedValue: Model(shelf: DefaultsShelf(), root: support))
     }

@@ -167,7 +167,7 @@ struct PaperReceipt: View {
                     Text(ReceiptDraft.typed(-i.amount))
                 }
                 if i.quantity != 1000 {
-                    Text("  \(quantity(i)) \(i.unit)").foregroundStyle(Color.black.opacity(0.55))
+                    Text("  \(formatQuantity(thousandths: i.quantity)) \(i.unit)").foregroundStyle(Color.black.opacity(0.55))
                 }
             }
             if items.isEmpty && receipt.items > 0 { Text("…").frame(maxWidth: .infinity) }
@@ -192,14 +192,6 @@ struct PaperReceipt: View {
         Text(String(repeating: "-", count: 40)).lineLimit(1).truncationMode(.tail).foregroundStyle(Color.black.opacity(0.5))
     }
 
-    /// Thousandths as a person reads them: `2`, `11.482`.
-    private func quantity(_ i: ItemLine) -> String {
-        let whole = i.quantity / 1000, frac = i.quantity % 1000
-        if frac == 0 { return "\(whole)" }
-        var f = String(format: "%03d", Int(frac.magnitude))
-        while f.hasSuffix("0") { f.removeLast() }
-        return "\(whole).\(f)"
-    }
 }
 
 /// A receipt typed by hand, or one already read put right: where, when, and

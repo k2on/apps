@@ -23,17 +23,6 @@ class MediaTests {
     }
 
     @Test
-    fun lengthsAsTheyAreSaid() {
-        assertEquals("3:49", Media.clock(229_000))
-        assertEquals("1:02:03", Media.clock(3_723_000))
-        assertEquals("48 min", Media.spell(48 * 60_000L))
-        assertEquals("2 hr 30 min", Media.spell(150 * 60_000L))
-        assertEquals("1 hr", Media.spell(60 * 60_000L))
-        assertEquals("1 song", Media.count(1, "song"))
-        assertEquals("12 songs", Media.count(12, "song"))
-    }
-
-    @Test
     fun aCoverIsShrunkByPowersOfTwoAndNeverBelowWhatIsWanted() {
         assertEquals(1, Covers.sampleSize(500, 600))
         assertEquals(1, Covers.sampleSize(1000, 600))

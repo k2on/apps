@@ -1,0 +1,17 @@
+[package]
+name = "ark-format"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Numbers, days and lengths as people read them, the same text in every client: amounts in a number style each platform reads once from its own formatter, percentages, how long ago, a day's heading, a length, a count, a list of names."
+
+# No UI and no clock: every function is pure, the time and the number style
+# are its arguments. The phones reach it through UniFFI (the `ffi` feature,
+# linked into each app's library, `money/ffi` and `harken/ffi`); the desktop
+# and the browser through arkui, which re-exports it (`arkui::format`).
+
+[dependencies]
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+ffi = ["dep:uniffi"]

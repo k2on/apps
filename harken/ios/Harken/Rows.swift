@@ -124,9 +124,6 @@ extension PeopleEntry: Identifiable {
         return people.filter { seen.insert($0.name).inserted }
     }
 
-    /// Their names in a line, in the feed's order: `Jacek Galowicz, Kiara Grouwstra`.
-    static func named(_ people: [PeopleEntry]) -> String { people.map { $0.name }.joined(separator: ", ") }
-
     /// Their web page, when the feed gives one a browser opens.
     var web: URL? {
         guard let c = URLComponents(string: link.trimmingCharacters(in: .whitespaces)),
@@ -533,23 +530,6 @@ enum Spell {
         return (String(a) + String(z)).uppercased()
     }
 
-    /// A track's length as a row shows it: `m:ss`, or `h:mm:ss` past an hour.
-    static func clock(_ ms: Int64) -> String {
-        let s = max(ms, 0) / 1000
-        func two(_ n: Int64) -> String { n < 10 ? "0\(n)" : "\(n)" }
-        if s >= 3600 { return "\(s / 3600):\(two(s / 60 % 60)):\(two(s % 60))" }
-        return "\(s / 60):\(two(s % 60))"
-    }
-
-    /// A record's length, as a header says it: `48 min`, `2 hr 30 min`.
-    static func length(_ ms: Int64) -> String {
-        let min = (ms + 30_000) / 60_000
-        if min < 1 { return "under a minute" }
-        if min < 60 { return "\(min) min" }
-        if min % 60 == 0 { return "\(min / 60) hr" }
-        return "\(min / 60) hr \(min % 60) min"
-    }
-
     /// How much of an episode is left to hear, as its row says it: its
     /// length (`47 min`) until the signed-in person begins it, then what is
     /// left (`12 min left`), then `Played`. Nothing for a length not known.
@@ -557,46 +537,17 @@ enum Spell {
         if mine?.finished == true { return "Played" }
         let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : durationMs
         guard whole > 0 else { return "" }
-        guard let m = mine, m.positionMs > 0 else { return length(whole) }
-        return length(max(whole - m.positionMs, 0)) + " left"
-    }
-
-    private static let thisYear: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMd")
-        return f
-    }()
-
-    private static let anotherYear: DateFormatter = {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
-        return f
-    }()
-
-    /// When an episode came out, as a podcast app's row says it: `Today`,
-    /// `Yesterday`, `Oct 21`, and its year when that is not this one.
-    static func day(_ ms: Int64, now: Date = Date()) -> String {
-        let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-        let cal = Calendar.current
-        if cal.isDate(d, inSameDayAs: now) { return "Today" }
-        if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(d, inSameDayAs: y) { return "Yesterday" }
-        return (cal.isDate(d, equalTo: now, toGranularity: .year) ? thisYear : anotherYear).string(from: d)
-    }
-
-    /// `1 song`, `12 songs`.
-    static func count(_ n: Int, _ one: String, _ many: String? = nil) -> String {
-        "\(n) \(n == 1 ? one : (many ?? one + "s"))"
+        guard let m = mine, m.positionMs > 0 else { return formatLength(ms: whole) }
+        return formatLength(ms: max(whole - m.positionMs, 0)) + " left"
     }
 
     /// The facts a page's header says, joined: "12 songs · 48 min".
-    static func facts(_ parts: [String?]) -> String {
-        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-    }
+    static func facts(_ parts: [String?]) -> String { formatFacts(parts: parts.compactMap { $0 }) }
 
     /// A list's whole length, or none for nothing.
     static func total(_ tracks: [LibraryEntry]) -> String? {
         let ms = tracks.reduce(Int64(0)) { $0 + $1.durationMs }
-        return ms > 0 ? length(ms) : nil
+        return ms > 0 ? formatLength(ms: ms) : nil
     }
 }
 

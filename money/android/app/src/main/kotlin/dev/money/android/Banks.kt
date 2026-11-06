@@ -18,6 +18,7 @@ import uniffi.money_domain.AccountLine
 import uniffi.money_domain.AskLine
 import uniffi.money_domain.AskState
 import uniffi.money_domain.BankLine
+import uniffi.ark_format.formatAgo
 
 /** What to do about an ask this phone made, once the asks have moved. */
 sealed interface Follow {
@@ -98,11 +99,11 @@ data class BankStatus(val words: String, val alarm: Boolean = false)
 fun bankStatus(b: BankLine, now: Long): BankStatus =
     when {
         b.needsLogin -> BankStatus("The bank wants its login again", alarm = true)
-        b.error.isNotEmpty() -> BankStatus("The last import failed ${Dates.ago(b.failedMs, now)}: ${b.error}", alarm = true)
+        b.error.isNotEmpty() -> BankStatus("The last import failed ${formatAgo(b.failedMs, now)}: ${b.error}", alarm = true)
         b.syncedMs == 0L -> BankStatus("Waiting for its first import")
         else ->
             BankStatus(
-                "Synced ${Dates.ago(b.syncedMs, now)} · ${b.added} new, ${b.updated} changed" +
+                "Synced ${formatAgo(b.syncedMs, now)} · ${b.added} new, ${b.updated} changed" +
                     if (b.locked > 0) ", ${b.locked} left alone (reconciled)" else "")
     }
 

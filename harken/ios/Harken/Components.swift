@@ -103,7 +103,7 @@ struct TrackRow<Leading: View>: View {
                     }
                     Spacer(minLength: 0)
                     // Its file not on the server yet: how its download goes, in place of its length.
-                    Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+                    Text(model.download(track.id)?.short ?? formatClock(ms: track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
                 }
                 .frame(minHeight: 64)
                 .contentShape(Rectangle())
@@ -148,7 +148,7 @@ struct EpisodeRow: View {
         let whole = (mine?.durationMs ?? 0) > 0 ? mine!.durationMs : track.durationMs
         let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
         let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
-        let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
+        let day = formatPublished(ms: detail?.publishedMs ?? 0, nowMs: nowMs(), offsetMinutes: Int32(TimeZone.current.secondsFromGMT() / 60))
         let over = Spell.facts([show, day])
         VStack(alignment: .leading, spacing: Space.xs) {
             // The words let a touch through to the row's button behind them.
@@ -163,7 +163,7 @@ struct EpisodeRow: View {
             }
             .allowsHitTesting(false)
             if !people.isEmpty {
-                PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
+                PeopleLine(people: people, words: "with " + formatNames(names: people.map(\.name)))
                     .padding(.top, 2)
             }
             HStack(spacing: Space.m) {
@@ -298,7 +298,7 @@ struct TrackActions: View {
             if !chapters.isEmpty, case let .show(show)? = from {
                 Menu {
                     ForEach(chapters, id: \.startMs) { c in
-                        Button("\(Spell.clock(c.startMs))  \(c.title)") {
+                        Button("\(formatClock(ms: c.startMs))  \(c.title)") {
                             let list = model.rows(.show(show)) ?? [track]
                             model.play(list, at: list.firstIndex { $0.id == track.id } ?? 0, from: .show(show), positionMs: c.startMs)
                         }

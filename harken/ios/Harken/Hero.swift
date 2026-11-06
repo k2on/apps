@@ -293,7 +293,7 @@ struct WorkHeading: View {
                 Text(work).font(.headline).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+            Text(formatClock(ms: ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
         }
         // In from where a track's title starts; and short of where its menu
         // is, so the lengths line up.
@@ -348,7 +348,7 @@ struct RecordFoot: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
-        let length = [Spell.count(tracks.count, "track"), Spell.total(tracks)].compactMap { $0 }.joined(separator: ", ")
+        let length = [formatCount(n: Int64(tracks.count), word: "track"), Spell.total(tracks)].compactMap { $0 }.joined(separator: ", ")
         VStack(alignment: .leading, spacing: 3) {
             if year > 0 { Text(String(year)) }
             Text(length)

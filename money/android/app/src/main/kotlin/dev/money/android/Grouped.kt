@@ -46,6 +46,7 @@ import dev.arkui.Stepper
 import dev.arkui.Tone
 import dev.arkui.chartPalette
 import dev.arkui.pressable
+import uniffi.ark_format.formatMonth
 
 /** A card's corners, as the iPhone's grouped lists round theirs. */
 val CardCorner: Dp = 20.dp
@@ -190,7 +191,7 @@ fun MonthPager(ledger: Ledger, modifier: Modifier = Modifier) {
     val book = LocalShell.current.book
     Row(modifier.fillMaxWidth().offset(y = -Space.xs).padding(bottom = Space.s), horizontalArrangement = Arrangement.Center) {
         Stepper(
-            label = Dates.month(ledger.month),
+            label = formatMonth(ledger.month),
             onPrevious = { book.stepMonth(-1) },
             onNext = { book.stepMonth(1) },
             previousLabel = "Previous month",

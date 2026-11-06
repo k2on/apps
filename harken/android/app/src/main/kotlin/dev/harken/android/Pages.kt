@@ -72,10 +72,16 @@ import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatCount
+import uniffi.ark_format.formatFacts
+import uniffi.ark_format.formatLength
+import uniffi.ark_format.formatNames
+import uniffi.ark_format.formatPublished
+import uniffi.ark_format.formatSpan
 
-private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
+private fun facts(vararg parts: String?): String = formatFacts(parts.filterNotNull())
 
-private fun length(tracks: List<Track>): String? = tracks.sumOf { it.durationMs }.takeIf { it > 0 }?.let(Media::spell)
+private fun length(tracks: List<Track>): String? = tracks.sumOf { it.durationMs }.takeIf { it > 0 }?.let(::formatLength)
 
 /**
  * A record's tracks under the works they are movements of, as a catalogue lists them: each run of
@@ -199,14 +205,14 @@ fun ArtistPage(
     val page = Page.ForArtist(name)
     val counts =
         facts(
-            if (albums.isEmpty()) null else Media.count(albums.size, "album"),
-            if (tracks.isEmpty() && appearances.isNotEmpty()) null else Media.count(tracks.size, "song"),
+            if (albums.isEmpty()) null else formatCount(albums.size.toLong(), "album"),
+            if (tracks.isEmpty() && appearances.isNotEmpty()) null else formatCount(tracks.size.toLong(), "song"),
             length(tracks),
-            if (appearances.isEmpty()) null else Media.count(appearances.size, "episode"),
+            if (appearances.isEmpty()) null else formatCount(appearances.size.toLong(), "episode"),
         )
     // What they are and when they lived, as a catalogue heads a person; nobody's years known, and
     // it is how much of them there is here.
-    val life = artist?.let { Catalogue.span(it.born, it.died) }?.takeIf { it.isNotEmpty() } ?: composer?.let { Catalogue.span(it.born, it.died) } ?: ""
+    val life = artist?.let { formatSpan(it.born, it.died) }?.takeIf { it.isNotEmpty() } ?: composer?.let { formatSpan(it.born, it.died) } ?: ""
     val kind =
         when {
             works.isNotEmpty() -> "Composer"
@@ -280,7 +286,7 @@ fun ArtistPage(
             item { SectionHeading("Albums") }
             item {
                 Shelf("albums", albums, key = { it.id }) { a ->
-                    CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
+                    CoverCard(a.name, a.art, a.name, formatCount(a.tracks, "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
                 }
             }
         }
@@ -518,7 +524,7 @@ fun ShowPage(
                 title = title,
                 by = show?.author?.takeIf { it.isNotEmpty() },
                 onBy = null,
-                facts = facts(Media.count(episodes.size, "episode"), length(episodes)),
+                facts = facts(formatCount(episodes.size.toLong(), "episode"), length(episodes)),
                 canPlay = episodes.isNotEmpty(),
                 onPlay = { act.play(episodes, 0, page) },
                 onShuffle = { act.shuffle(episodes, page) },
@@ -655,7 +661,7 @@ private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
             }
             Spacer(Modifier.width(Space.s))
             Text(
-                "with " + OnEpisode.named(guests),
+                "with " + formatNames(guests.map { it.name }),
                 style = quiet(MaterialTheme.typography.labelMedium),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -701,7 +707,7 @@ fun EpisodeRow(
     show: String = "",
 ) {
     Recompositions.hit("EpisodeRow")
-    val dated = facts(show, Episodes.dated(detail?.publishedMs ?: 0, now))
+    val dated = facts(show, formatPublished(detail?.publishedMs ?: 0, now, java.util.TimeZone.getDefault().getOffset(now) / 60_000))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
     Column(Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight)) {
@@ -769,7 +775,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
                 title = name,
                 by = null,
                 onBy = null,
-                facts = facts(Media.count(tracks.size, "song"), length(tracks)),
+                facts = facts(formatCount(tracks.size.toLong(), "song"), length(tracks)),
                 canPlay = tracks.isNotEmpty(),
                 onPlay = { act.play(tracks, 0, page) },
                 onShuffle = { act.shuffle(tracks, page) },

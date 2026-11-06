@@ -1422,6 +1422,10 @@
                   grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/dev/money/ffi/money_ffi.kt"
                   grep -q "class TxnLineView" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
                   grep -q "func moneyDemo" "$TMPDIR/money/swift/money_ffi.swift"
+                  # Every client's formatting, linked into each library.
+                  grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
+                  grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"
+                  grep -q 'fun `formatLength`' "$TMPDIR/bindings/kotlin/uniffi/ark_format/ark_format.kt"
                 '';
                 # The bindings it wrote: harken's, which the iOS type-check
                 # reads, and money's under `money/`, which money's reads.
