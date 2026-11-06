@@ -4,11 +4,11 @@ SwiftUI over money's library (`../ffi`, `docs/plan-v5.md` §1.16): the Rust
 kernel with money's domain linked in, as `MoneyFFI.xcframework` — the same
 code the server, the desktop window and the browser run. The kernel keeps
 the replica, dials the server, keeps the views and says what became of
-every change; the app's code is its screens and its model. It calls the
-domain by name through the Swift `arkdb gen swift` writes
-(`Money/Gen/Money.swift`, never edited: `ARK_WRITE_GEN=1 cargo test -p
-money-ffi --test gen` writes it) over UniFFI's Swift and the bridge's typed
-half (`rust/ark-ffi/swift/Typed.swift`).
+every change; the app's code is its screens and its model. Every change
+is one of the domain's (`MoneyChange`, `session.send(change:)`), every view
+UniFFI's records, and what a row says — `line.tone()`, `line.captions(style:)`,
+`ask.said(now:)`, the form's `Draft` and its `problem()` — the records'
+own methods: nothing crosses as JSON, and no rule is the app's.
 
 The desktop window (`money/iced`) is the spec: every page it has is here,
 drawn the way Apple's own apps draw theirs rather than ported. harken's iOS

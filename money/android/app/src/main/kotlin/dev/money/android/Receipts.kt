@@ -87,12 +87,14 @@ import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import dev.arkui.Tokens
-import dev.money.android.gen.FileRef
-import dev.money.android.gen.ItemLine
-import dev.money.android.gen.PhotoLine
-import dev.money.android.gen.ReceiptLine
-import dev.money.android.gen.StoreItem
-import dev.money.android.gen.WriteReceipt
+import dev.arkdb.ffi.FileRef
+import uniffi.money_domain.ItemLine
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.PhotoLine
+import uniffi.money_domain.ReceiptLine
+import uniffi.money_domain.StoreItem
+import uniffi.money_domain.WriteReceipt
+import uniffi.money_domain.storeName
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.max
@@ -164,7 +166,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
                 onClick = { typing = ReceiptDraft.blank(txn, date, amount) },
                 label = { Text("Type It") },
                 leadingIcon = { Icon(Glyphs.Write, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
-            if (ledger.unmatched.isNotEmpty()) {
+            if (ledger.unmatched(amount, date).isNotEmpty()) {
                 AssistChip(
                     onClick = { attaching = true },
                     label = { Text("Attach One") },
@@ -183,7 +185,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
     }
     typing?.let { d -> ReceiptEditor(d, onDismiss = { typing = null }) }
     if (attaching) {
-        AttachDialog(ledger.unmatched, amount, date, onPick = { r ->
+        AttachDialog(ledger.unmatched(amount, date), onPick = { r ->
             book.pay(r.id, txn)
             attaching = false
         }, onDismiss = { attaching = false })
@@ -260,13 +262,6 @@ private fun Rule() {
 /** Money as a receipt prints it: no sign for what was paid, a minus for what was taken off. */
 private fun money(a: dev.arkui.Amounts, paid: Long): String = if (paid < 0) "-" + a.format(-paid) else a.format(paid)
 
-private fun storeName(store: String): String =
-    when (store) {
-        "amazon" -> "Amazon"
-        "target" -> "Target"
-        "costco" -> "Costco"
-        else -> "Receipt"
-    }
 
 /** A photo taken for the transaction and not read into a receipt yet. */
 @Composable
@@ -325,11 +320,10 @@ fun PhotoViewer(f: FileRef, onDismiss: () -> Unit) {
     }
 }
 
-/** The receipts nothing pays for, the nearest in amount and then in days first, to attach one. */
+/** The receipts nothing pays for, the nearest first (the core's `unmatchedReceipts`), to attach one. */
 @Composable
-private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: String, onPick: (ReceiptLine) -> Unit, onDismiss: () -> Unit) {
+private fun AttachDialog(near: List<ReceiptLine>, onPick: (ReceiptLine) -> Unit, onDismiss: () -> Unit) {
     val a = LocalAmounts.current
-    val near = unmatched.sortedWith(compareBy({ abs(it.total - amount) }, { abs((Dates.millis(it.date) ?: 0) - (Dates.millis(date) ?: 0)) })).take(30)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Attach a Receipt") },
@@ -412,7 +406,7 @@ fun ReceiptEditor(start: ReceiptDraft, onDismiss: () -> Unit) {
                         d.copy(items = items.toList()).write(a).fold(
                             onSuccess = {
                                 // The domain's own sentence first (a day that isn't one), under the form.
-                                val why = book.check("receipts.write_receipt", it.json())
+                                val why = book.check(MoneyChange.WriteReceipt(it))
                                 if (why != null) {
                                     error = why
                                 } else {

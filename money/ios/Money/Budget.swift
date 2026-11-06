@@ -1,12 +1,11 @@
-// The budget's arithmetic as the screens need it, and nothing of Apple's
-// but Foundation: the month's lines in their groups, what an available
-// amount says (`Tone`), the cards' payment categories (`Cards`), the
-// accounts in their sections, which way Move Money goes and what a rule
-// leaves nobody to assign (`Ruled`), the transaction
-// form and its inputs, payees offered as one types, and days as the domain
-// writes them. Every rule here is the desktop's (`money/iced`), so the
-// phone and the window agree; all of it is held by `MoneyTests`, over the
-// demo's household where it reads one.
+// The budget as SwiftUI lists it, and nothing of Apple's but Foundation:
+// the month's lines in their groups, the rows Edit rearranges, which way
+// Move Money goes, the transaction form's state, a register by day, and
+// days as a picker holds them. Every rule is the core's (`money_domain`:
+// a line's `tone()`, `story`, `captions`, `meter()`, `isPayment()`; the
+// accounts' `accountShelves`; the form's `Draft`; the asks' `follow`), so
+// the phone, Android and the window say the same; the core's tests hold
+// them (money/domain/tests/words.rs).
 import ArkUICore
 import Foundation
 
@@ -22,62 +21,6 @@ extension PayeeLine: Identifiable { public var id: String { name } }
 extension AskLine: Identifiable {}
 extension LinkedLine: Identifiable { public var id: String { plaidAccountId } }
 
-/// The budget's own ids: the same on every peer (`money_domain::budget::fixed`).
-enum Fixed {
-    /// Ready to Assign, the category money coming in is for: the first
-    /// sixteen bytes of sha256("money ready to assign").
-    static let readyToAssign = Id("332338b3e3e3aaa714a82657645453dc")
-    /// The cards' group, "Credit Card Payments" (`money_domain::cards::card_group`):
-    /// the first sixteen bytes of sha256("money credit card payments").
-    static let cardGroup = Id("5aa01fc974fd8b643be86dcac41a33c7")
-}
-
-// MARK: a category's figure
-
-/// What an available amount says: the colour of its pill. The desktop's `Tone`.
-enum Tone: Equatable {
-    /// Nothing, neither good nor bad.
-    case zero
-    /// Money with a job.
-    case funded
-    /// Short of what its target asks this month — or, a card's payment,
-    /// of what the card owes.
-    case short
-    /// Below nothing: spent more cash than it had, which next month's
-    /// Ready to Assign pays for.
-    case over
-    /// Below nothing, all of it on a card: new debt rather than cash gone.
-    /// Amber, as YNAB draws it.
-    case onCard
-
-    static func of(available: Int64, target: Int64, assigned: Int64) -> Tone {
-        if available < 0 { return .over }
-        if assigned < target { return .short }
-        return available == 0 ? .zero : .funded
-    }
-
-    /// A line's tone, the desktop's `tone`: overspending on a card apart
-    /// from cash, and a card's payment short while it leaves debt uncovered.
-    static func of(_ l: BudgetLine) -> Tone {
-        if l.available < 0 && l.creditOverspent >= -l.available { return .onCard }
-        if l.available >= 0 && l.card != nil && l.underfunded > 0 { return .short }
-        return of(available: l.available, target: l.target, assigned: l.assigned)
-    }
-}
-
-/// How far a category's month is toward its target, 0 to 1; none without one.
-func funded(_ l: BudgetLine) -> Double? {
-    guard l.target > 0 else { return nil }
-    return min(max(Double(l.assigned) / Double(l.target), 0), 1)
-}
-
-/// What Ready to Assign says under itself.
-func readyWords(_ s: Summary) -> String {
-    if s.readyToAssign < 0 { return "You've assigned more than you have" }
-    if s.readyToAssign == 0 { return "Every dollar has a job" }
-    return "Give these dollars a job"
-}
-
 // MARK: the month, by group
 
 /// One group of the budget and its categories in one month, with its totals.
@@ -90,9 +33,9 @@ struct GroupMonth: Identifiable, Equatable {
     var available: Int64 { lines.reduce(0) { $0 + $1.available } }
     /// The cards' own group, Credit Card Payments: named, filled and
     /// emptied as the cards are, never by hand.
-    var isCards: Bool { Cards.isGroup(group.id) }
-    /// What of the cards' debt its categories do not cover.
-    var uncovered: Int64 { Cards.uncovered(lines) }
+    var isCards: Bool { group.isCards() }
+    /// What of the cards' debt its categories do not cover (the core's).
+    var uncovered: Int64 { Money.uncovered(lines: lines) }
 }
 
 enum Months {
@@ -108,64 +51,18 @@ enum Months {
     /// The month a day is in: `2026-10` of `2026-10-26`.
     static func of(_ day: String) -> String { String(day.prefix(7)) }
 
-    /// How many categories ask for attention this month, as a badge says it.
-    static func attention(_ s: Summary?) -> Int { Int((s?.overspent ?? 0) + (s?.underfunded ?? 0)) }
+    /// How many categories ask for attention this month, as a badge says it (the core's).
+    static func attention(_ s: Summary?) -> Int { Int(s?.attention() ?? 0) }
 }
 
 // MARK: credit cards
 
-/// What a line says of a card under its name: the desktop's `progress`.
-enum CardWord: Equatable {
-    /// A card's payment that leaves this much of its debt uncovered.
-    case short(Int64)
-    /// A card's payment that has all the card owes set aside.
-    case covered
-    /// A category that spent this much more on a card than it had: debt.
-    case onCard(Int64)
-}
-
-/// The budget's cards as the screens draw them (`money_domain::cards`): a
-/// card on the budget has a payment category in the cards' group, first in
-/// the budget, which holds the money set aside for it. Spending on the
-/// card from a category that has the money moves it there; spending more
-/// than a category has is credit overspending — debt, which the payment
-/// category shows as not covered until money is assigned to it.
 enum Cards {
-    static func isGroup(_ id: Id) -> Bool { id == Fixed.cardGroup }
-
-    /// Whether a line is a card's payment category: the cards', named and
-    /// kept as its card is, and no transaction's category.
-    static func isPayment(_ l: BudgetLine) -> Bool { l.card != nil || isGroup(l.groupId) }
-
-    static func word(_ l: BudgetLine) -> CardWord? {
-        if isPayment(l) {
-            if l.underfunded > 0 { return .short(l.underfunded) }
-            return l.debt > 0 ? .covered : nil
-        }
-        return l.creditOverspent > 0 ? .onCard(l.creditOverspent) : nil
-    }
-
-    /// How much of what the card owes is set aside, 0 to 1; none when it owes nothing.
-    static func covered(_ l: BudgetLine) -> Double? {
-        guard isPayment(l), l.debt > 0 else { return nil }
-        return min(max(Double(l.debt - l.underfunded) / Double(l.debt), 0), 1)
-    }
-
-    /// What assigning a card's payment category covers its debt with: what
-    /// it was given and what it lacks; none when nothing is uncovered.
-    static func toCover(_ l: BudgetLine) -> Int64? {
-        guard isPayment(l), l.underfunded > 0 else { return nil }
-        return l.assigned + l.underfunded
-    }
-
-    /// What of the cards' debt their payment categories do not cover.
-    static func uncovered(_ lines: [BudgetLine]) -> Int64 { lines.filter(isPayment).reduce(0) { $0 + $1.underfunded } }
-
     /// The groups a transaction's category is chosen from: every one but
     /// the cards', whose categories are paid into by a transfer to the
     /// card, never chosen.
     static func choosable(_ groups: [GroupMonth]) -> [GroupMonth] {
-        groups.filter { !$0.isCards }.map { GroupMonth(group: $0.group, lines: $0.lines.filter { !isPayment($0) }) }
+        groups.filter { !$0.isCards }.map { GroupMonth(group: $0.group, lines: $0.lines.filter { !$0.isPayment() }) }
     }
 }
 
@@ -217,18 +114,18 @@ enum Arranging {
         guard var at = after.firstIndex(where: { $0.id == row.id }) else { return nil }
         switch row {
         case let .category(l):
-            let cards = Cards.isPayment(l)
+            let cards = l.isPayment()
             if !after[..<at].contains(where: \.isGroup) {
                 after.remove(at: at)
                 guard let first = after.firstIndex(where: { r in
-                    if case let .group(g) = r { return Cards.isGroup(g.id) == cards }
+                    if case let .group(g) = r { return g.isCards() == cards }
                     return false
                 }) else { return nil }
                 at = first + 1
                 after.insert(row, at: at)
             }
             guard after.map(\.id) != rows.map(\.id), case let .group(g)? = after[..<at].last(where: \.isGroup),
-                  Cards.isGroup(g.id) == cards
+                  g.isCards() == cards
             else { return nil }
             var before: Id? = nil
             if at + 1 < after.count, case let .category(next) = after[at + 1] { before = next.categoryId }
@@ -290,128 +187,33 @@ enum Moves {
     /// or all a category has.
     static func suggested(_ line: BudgetLine?) -> Int64 { line.map { Int64($0.available.magnitude) } ?? 0 }
 
-    /// What assigning `line` to its target takes this month.
-    static func toTarget(_ l: BudgetLine) -> Int64 { max(l.target - l.assigned, 0) }
 
     /// The categories Move Money offers to move to or from, besides `id`:
     /// none whose month follows a rule, which the domain refuses either way.
     static func others(_ groups: [GroupMonth], besides id: Id?) -> [BudgetLine] {
-        groups.flatMap(\.lines).filter { $0.categoryId != id && Ruled.editable($0) }
+        groups.flatMap(\.lines).filter { $0.categoryId != id && !$0.ruled }
     }
 }
 
 // MARK: assigned by rule
 
-/// A category whose month follows a rule (`money_domain::rules`): its
-/// assignment is the rule's share of matching income, never typed — the
-/// domain refuses assigning it and moving money to or from it, and
-/// Auto-Assign passes it by. The phone shows the rule; the desktop sets it.
 enum Ruled {
-    /// The mark an amount the rule set wears (an SF Symbol).
+    /// The mark an amount its formula set wears (an SF Symbol).
     static let symbol = "function"
-
-    /// Whether the month's assignment of `l` is anybody's to change by hand.
-    static func editable(_ l: BudgetLine) -> Bool { !l.ruled }
-
-    /// What the category's page says in place of assigning it; none when the
-    /// month is assigned by hand.
-    static func words(_ l: BudgetLine) -> String? {
-        guard l.ruled else { return nil }
-        let r = l.rule.trimmingCharacters(in: .whitespaces)
-        return r.isEmpty ? "Assigned by rule" : "Assigned by rule: \(r)"
-    }
-}
-
-// MARK: the accounts
-
-/// The sidebar's sections, as the Accounts tab lists them.
-enum Shelving: String, CaseIterable {
-    case budget = "Budget"
-    case tracking = "Tracking"
-    case closed = "Closed"
-}
-
-struct AccountShelf: Identifiable, Equatable {
-    let kind: Shelving
-    let rows: [AccountLine]
-    var id: String { kind.rawValue }
-    var total: Int64 { rows.reduce(0) { $0 + $1.balance } }
-}
-
-enum Accounts {
-    /// The kinds an account can be, in the order a form offers them, with
-    /// what to call each (`money_domain::accounts::KINDS`).
-    static let kinds: [(kind: String, name: String)] = [
-        ("checking", "Checking"), ("savings", "Savings"), ("cash", "Cash"),
-        ("credit", "Credit Card"), ("loan", "Loan or Mortgage"), ("investment", "Investment"),
-    ]
-
-    static func name(ofKind k: String) -> String { kinds.first { $0.kind == k }?.name ?? k.capitalized }
-
-    /// Whether an account of `kind` is in the budget unless somebody says otherwise.
-    static func onBudget(byDefault kind: String) -> Bool { !["loan", "investment"].contains(kind) }
-
-    /// Whether the balance of an account of `kind` is what is owed on it.
-    static func owes(_ kind: String) -> Bool { ["credit", "loan"].contains(kind) }
-
-    /// The SF Symbol an account of `kind` is drawn with.
-    static func symbol(_ kind: String) -> String {
-        switch kind {
-        case "checking": return "building.columns.fill"
-        case "savings": return "dollarsign.circle.fill"
-        case "cash": return "banknote.fill"
-        case "credit": return "creditcard.fill"
-        case "loan": return "house.fill"
-        case "investment": return "chart.line.uptrend.xyaxis"
-        default: return "building.columns.fill"
-        }
-    }
-
-    /// Open accounts on budget, then tracking ones, then the closed; a
-    /// section with nothing in it is left out.
-    static func shelves(_ rows: [AccountLine]) -> [AccountShelf] {
-        let ordered = rows.sorted { ($0.pos, $0.name) < ($1.pos, $1.name) }
-        return Shelving.allCases.map { s in
-            AccountShelf(kind: s, rows: ordered.filter { a in
-                switch s {
-                case .budget: return !a.closed && a.onBudget
-                case .tracking: return !a.closed && !a.onBudget
-                case .closed: return a.closed
-                }
-            })
-        }.filter { !$0.rows.isEmpty }
-    }
-
-    /// Everything the household has less everything it owes: the open accounts' balances.
-    static func netWorth(_ rows: [AccountLine]) -> Int64 { rows.filter { !$0.closed }.reduce(0) { $0 + $1.balance } }
-
-    /// The account a new transaction goes to when none is chosen: the first open one on budget.
-    static func usual(_ rows: [AccountLine]) -> AccountLine? { shelves(rows).first { $0.kind == .budget }?.rows.first }
-
-    /// What the account's line says under its name: the bank and its last digits, or its kind.
-    static func subtitle(_ a: AccountLine) -> String {
-        if !a.bank.isEmpty { return a.mask.isEmpty ? a.bank.capitalized : "\(a.bank.capitalized) ••\(a.mask)" }
-        return name(ofKind: a.kind)
-    }
 }
 
 // MARK: the transaction form
 
-/// A transaction as the form holds it while it is typed: a new one, or one being corrected.
-struct Draft: Equatable {
-    /// The one corrected; none for a new one.
-    var editing: Id? = nil
-    var account: Id? = nil
-    var date: String
-    var payee = ""
-    var category: Id? = nil
-    /// The other account, for a transfer: the payee is then that account.
-    var transferTo: Id? = nil
-    var memo = ""
+/// A transaction as the form holds it while it is typed: the core's
+/// `Draft` (its rules, `problem()`, and the change it is, `toChange()`),
+/// and what the form shows beside it. The amount is typed unsigned, its
+/// way (`inflow`) chosen apart.
+@dynamicMemberLookup
+struct TxnForm: Equatable {
+    var draft: Draft
     /// How much, never below nothing; `inflow` says which way.
     var cents: Int64 = 0
     var inflow = false
-    var cleared = false
     /// Who entered the one corrected.
     var by = ""
     /// What the bank called the one corrected, when it says more than its payee.
@@ -420,79 +222,39 @@ struct Draft: Equatable {
     /// only the account it is with is chosen again.
     var transfer = false
 
-    init(account: Id?, date: String) {
-        self.account = account
-        self.date = date
+    /// A new one on `date`, in `account` or the usual one (the core's).
+    init(account: Id?, accounts: [AccountLine], date: String) {
+        draft = newDraft(accounts: accounts, account: account, date: date)
     }
 
-    /// The form over a transaction already in the register; `accounts` say
-    /// which a transfer is with.
-    init(_ t: TxnLine, accounts: [AccountLine] = []) {
-        editing = t.id
-        account = t.accountId
-        date = t.date
-        payee = t.payee
-        category = t.categoryId
-        memo = t.memo
+    /// The form over a transaction already in a register.
+    init(_ t: TxnLine) {
+        draft = t.draft()
         cents = Int64(t.amount.magnitude)
         inflow = t.amount > 0
-        cleared = t.cleared != .uncleared
         by = t.userId
-        bank = Registers.bankDescription(t)
+        bank = t.bankSaid()
         transfer = t.transfer
-        if t.transfer { transferTo = Registers.transferAccount(t, accounts) }
     }
 
-    /// The amount in the domain's sign: spending below nothing.
-    var amount: Int64 { inflow ? cents : -cents }
-
-    /// Why it cannot be saved yet, as the button's footnote says it; none when it can.
-    var problem: String? {
-        if account == nil { return "Choose an account." }
-        if cents == 0 { return "Enter an amount." }
-        if Days.date(date) == nil { return "Choose a day." }
-        return nil
+    subscript<T>(dynamicMember path: WritableKeyPath<Draft, T>) -> T {
+        get { draft[keyPath: path] }
+        set { draft[keyPath: path] = newValue }
     }
 
-    /// A payee chosen from what the field offered: its last category comes with it, unless one is chosen.
-    mutating func choose(_ p: PayeeLine) {
-        payee = p.name
-        if category == nil && transferTo == nil { category = p.categoryId }
+    /// The draft as it is sent: its amount in the domain's sign.
+    var sent: Draft {
+        var d = draft
+        d.amount = inflow ? cents : -cents
+        return d
     }
 
-    /// The category chosen, or a transfer: one excludes the other.
-    mutating func choose(category c: Id?) { category = c; transferTo = nil }
-    mutating func choose(transfer a: Id) { transferTo = a; category = nil }
+    /// Why it cannot be saved yet, as the button's footnote says it (the core's).
+    var problem: String? { sent.problem() }
 
-    var adding: AddTransaction? {
-        guard editing == nil, let a = account else { return nil }
-        return AddTransaction(accountId: a, date: date, payee: payee.trimmingCharacters(in: .whitespaces),
-                              categoryId: transferTo == nil ? category : nil, memo: memo, amount: amount,
-                              cleared: cleared, transferTo: transferTo)
-    }
-
-    var edit: EditTransaction? {
-        guard let id = editing else { return nil }
-        // A transfer chosen for one that was none makes it one, paired with
-        // the matching transaction there or given its other half (the
-        // domain's `transfers::make`); the same account again changes nothing.
-        return EditTransaction(id: id, date: date, payee: payee.trimmingCharacters(in: .whitespaces), categoryId: category,
-                               memo: memo, amount: amount, transferTo: transferTo)
-    }
-}
-
-enum Payees {
-    /// Who the payee field offers while `typed` is typed: names that start
-    /// with it first, then ones that contain it, the most paid first; none
-    /// once the name is typed whole.
-    static func suggest(_ typed: String, _ payees: [PayeeLine], limit: Int = 4) -> [PayeeLine] {
-        let t = typed.trimmingCharacters(in: .whitespaces).lowercased()
-        if t.isEmpty { return Array(payees.sorted { $0.count > $1.count }.prefix(limit)) }
-        if payees.contains(where: { $0.name.lowercased() == t }) { return [] }
-        let starts = payees.filter { $0.name.lowercased().hasPrefix(t) }
-        let within = payees.filter { !$0.name.lowercased().hasPrefix(t) && $0.name.lowercased().contains(t) }
-        return Array((starts.sorted { $0.count > $1.count } + within.sorted { $0.count > $1.count }).prefix(limit))
-    }
+    mutating func choose(_ p: PayeeLine) { draft = draft.withPayee(payee: p) }
+    mutating func choose(category c: Id?) { draft = draft.withCategory(category: c) }
+    mutating func choose(transfer a: Id) { draft = draft.withTransfer(account: a) }
 }
 
 // MARK: registers
@@ -514,43 +276,6 @@ enum Registers {
         }
         return out
     }
-
-    /// The rows a search finds: its words in the payee, the category, the memo or the amount.
-    static func search(_ rows: [TxnLine], _ needle: String) -> [TxnLine] {
-        let n = needle.trimmingCharacters(in: .whitespaces).lowercased()
-        if n.isEmpty { return rows }
-        return rows.filter { r in
-            r.payee.lowercased().contains(n) || r.category.lowercased().contains(n) || r.memo.lowercased().contains(n)
-                || formatAmount(cents: r.amount, withSign: false, style: numberStyleUs()).contains(n) || r.account.lowercased().contains(n)
-        }
-    }
-
-    /// Whether a line has a category it can be approved with.
-    static func needsCategory(_ t: TxnLine) -> Bool { t.category == "Needs a category" }
-
-    /// What the bank called an imported line, as its form shows it under the
-    /// payee: none for one typed in, one the bank said nothing of, or one
-    /// whose payee already says it (`CHIPOTLE` for Chipotle).
-    static func bankDescription(_ t: TxnLine) -> String? {
-        let d = t.importedPayee.trimmingCharacters(in: .whitespacesAndNewlines)
-        let payee = t.payee.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.imported, !d.isEmpty, d.caseInsensitiveCompare(payee) != .orderedSame else { return nil }
-        return d
-    }
-
-    /// The account a transfer's line is with, as its payee names it
-    /// (`Transfer : Savings`, the domain's `txn_line`): an open one before a
-    /// closed one of the same name; none for a line that is no transfer.
-    static func transferAccount(_ t: TxnLine, _ accounts: [AccountLine]) -> Id? {
-        let prefix = "Transfer : "
-        guard t.transfer, t.payee.hasPrefix(prefix) else { return nil }
-        let name = String(t.payee.dropFirst(prefix.count))
-        let named = accounts.filter { $0.name == name && $0.id != t.accountId }
-        return (named.first { !$0.closed } ?? named.first)?.id
-    }
-
-    /// The cleared, uncleared and working balances of an account's register.
-    static func balances(_ a: AccountLine) -> (cleared: Int64, uncleared: Int64, working: Int64) { (a.cleared, a.uncleared, a.balance) }
 }
 
 // MARK: days

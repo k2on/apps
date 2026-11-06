@@ -561,9 +561,11 @@ pub fn summary_of(db: &Db<Money>, categories: impl Iterator<Item = Category>, mo
         out.activity += s.activity;
         out.available += s.available;
         out.overspent += (s.available < 0) as i64;
+        // What Auto-Assign would fund: a month its formula assigns is
+        // nobody's to fund by hand, so it is not counted short.
         out.underfunded += match cards.card_for(c.id) {
             Some(card) => crate::cards::debt(db, card, month) > s.available,
-            None => s.assigned < c.target,
+            None => s.assigned < c.target && crate::formulas::formula_in(db, c.id, month).is_none(),
         } as i64;
     }
     out.ready_to_assign = income_through - assigned_through + overspent_before;

@@ -8,7 +8,6 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import dev.money.android.gen.Auto
 import dev.money.ffi.moneyDemo
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -18,7 +17,14 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import uniffi.money_domain.AccountKind
+import uniffi.money_domain.Auto
 import uniffi.money_domain.Cleared
+import uniffi.money_domain.Draft
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.OpenAccount
+import uniffi.money_domain.cardGroupId
+import uniffi.money_domain.readyToAssignId
 
 const val TODAY = "2026-10-26"
 
@@ -54,7 +60,7 @@ class BookTests {
         book.holdRegister(null)
         val income = book.register(null).filter { it.category == "Ready to Assign" }
         assertTrue("the seed's paychecks", income.isNotEmpty())
-        assertTrue(income.all { it.categoryId == Book.READY_TO_ASSIGN })
+        assertTrue(income.all { it.categoryId == readyToAssignId() })
     }
 
     @Test fun assigningTakesFromReadyToAssign() {
@@ -78,7 +84,7 @@ class BookTests {
     @Test fun overspendingIsCoveredFromAnotherCategory() {
         val c = l.lines.first { it.available >= 0 }
         val checking = l.accounts.first { it.onBudget && !it.closed }
-        book.save(TxnForm(account = checking.id, date = TODAY, payee = "Overspent", category = c.categoryId, amount = -(c.available + 4_200)))
+        book.save(Draft(editing = null, account = checking.id, date = TODAY, payee = "Overspent", category = c.categoryId, transferTo = null, memo = "", amount = -(c.available + 4_200), cleared = false))
         assertEquals(-4_200L, l.line(c.categoryId)!!.available)
         assertTrue(l.summary!!.overspent >= 1)
         val from = l.lines.first { it.categoryId != c.categoryId && it.available >= 4_200 }
@@ -89,15 +95,15 @@ class BookTests {
 
     @Test fun aTargetAndAutoAssignFundIt() {
         // Not a card's payment category, the budget's first: what it lacks is the card's debt, not a target.
-        val c = l.lines.first { !Ledger.isPayment(it) && it.available >= 0 }
+        val c = l.lines.first { !it.isPayment() && it.available >= 0 }
         book.setTarget(c.categoryId, c.assigned + 10_000)
-        assertEquals(toneOf(l.line(c.categoryId)!!), dev.arkui.Tint.Caution)
-        book.autoAssign(Auto.Underfunded, listOf(c.categoryId))
+        assertEquals(l.line(c.categoryId)!!.tone().tint(), dev.arkui.Tint.Caution)
+        book.autoAssign(Auto.UNDERFUNDED, listOf(c.categoryId))
         assertEquals(c.assigned + 10_000, l.line(c.categoryId)!!.assigned)
     }
 
     @Test fun aRefusalIsSaidInTheDomainsWords() {
-        book.assign(Book.READY_TO_ASSIGN, 100)
+        book.assign(readyToAssignId(), 100)
         assertTrue(book.said.last(), book.said.last().startsWith("Couldn't assign it: "))
         assertTrue(book.said.last().contains("Ready to Assign"))
     }
@@ -132,14 +138,14 @@ class BookTests {
         val acc = l.accounts.first { it.onBudget && !it.closed }
         book.holdRegister(acc.id)
         val c = l.lines.first()
-        val form = newForm(l, acc.id).copy(payee = "Corner Shop", category = c.categoryId, amount = -1_234)
+        val form = newForm(l, acc.id).draft.copy(payee = "Corner Shop", category = c.categoryId, amount = -1_234)
         book.save(form)
         val t = book.register(acc.id).first { it.payee == "Corner Shop" }
         assertEquals(-1_234L, t.amount)
         assertEquals(Cleared.UNCLEARED, t.cleared)
         assertEquals(acc.balance - 1_234, l.account(acc.id)!!.balance)
 
-        book.save(formOf(t, l).copy(amount = -2_000, memo = "and milk"))
+        book.save(TxnForm.of(t).draft.copy(amount = -2_000, memo = "and milk"))
         val edited = book.register(acc.id).first { it.id == t.id }
         assertEquals(-2_000L, edited.amount)
         assertEquals("and milk", edited.memo)
@@ -155,7 +161,7 @@ class BookTests {
 
     @Test fun aTransferMovesMoneyBetweenAccounts() {
         val (from, to) = l.accounts.filter { it.onBudget && !it.closed }.take(2)
-        book.save(TxnForm(account = from.id, date = TODAY, transferTo = to.id, amount = -5_000))
+        book.save(Draft(editing = null, account = from.id, date = TODAY, payee = "", category = null, transferTo = to.id, memo = "", amount = -5_000, cleared = false))
         assertEquals(from.balance - 5_000, l.account(from.id)!!.balance)
         assertEquals(to.balance + 5_000, l.account(to.id)!!.balance)
     }
@@ -172,9 +178,9 @@ class BookTests {
     }
 
     @Test fun anAccountIsOpenedAfterItsNameIsChecked() {
-        assertNotNull(book.check("accounts.open_account", """{"name":"","kind":"checking","on_budget":true,"balance":0,"date":"2026-10-26"}"""))
-        assertNull(book.check("accounts.open_account", """{"name":"Credit Union","kind":"savings","on_budget":true,"balance":0,"date":"2026-10-26"}"""))
-        book.openAccount("Credit Union", "savings", onBudget = true, balance = 50_000)
+        assertNotNull(book.check(MoneyChange.OpenAccount(OpenAccount("", AccountKind.CHECKING, true, 0, TODAY))))
+        assertNull(book.check(MoneyChange.OpenAccount(OpenAccount("Credit Union", AccountKind.SAVINGS, true, 0, TODAY))))
+        book.openAccount("Credit Union", AccountKind.SAVINGS, onBudget = true, balance = 50_000)
         val a = l.accounts.first { it.name == "Credit Union" }
         assertEquals(50_000L, a.balance)
         assertTrue(a.onBudget)
@@ -205,11 +211,11 @@ class BookTests {
 
     @Test fun categoriesAreAddedHiddenAndDeleted() {
         // The first group is the cards', which takes none: its categories come and go with the cards.
-        assertEquals(Book.CARD_GROUP, l.byGroup().first().first.id)
-        book.addCategory(Book.CARD_GROUP, "Kayak")
+        assertEquals(cardGroupId(), l.byGroup().first().first.id)
+        book.addCategory(cardGroupId(), "Kayak")
         assertTrue(book.said.last(), book.said.last().startsWith("Couldn't add the category: "))
         assertNull(l.lines.firstOrNull { it.name == "Kayak" })
-        val g = l.byGroup().first { it.first.id != Book.CARD_GROUP }.first
+        val g = l.byGroup().first { it.first.id != cardGroupId() }.first
         book.addCategory(g.id, "Kayak")
         val c = l.lines.first { it.name == "Kayak" }
         assertEquals(g.id, c.groupId)
@@ -231,11 +237,11 @@ class BookTests {
     @Test fun theFormRemembersWhatItCorrects() {
         book.holdRegister(null)
         val t = book.register(null).first { !it.transfer && it.categoryId != null }
-        val f = formOf(t, l)
+        val f = TxnForm.of(t).draft
         assertEquals(t.id, f.editing)
         assertEquals(t.amount, f.amount)
         assertEquals(t.categoryId, f.category)
-        val n = newForm(l, null)
+        val n = newForm(l, null).draft
         assertEquals(TODAY, n.date)
         assertEquals(l.accounts.first { it.onBudget && !it.closed }.id, n.account)
     }
@@ -244,16 +250,7 @@ class BookTests {
         book.holdRegister(null)
         val t = book.register(null).first { !it.transfer }
         val chipotle = t.copy(payee = "Chipotle", imported = true, importedPayee = "CHIPOTLE 1234 SAN FRANCISCO CA ")
-        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", bankSaid(chipotle))
-        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", formOf(chipotle, l).bankSaid)
-        // Entered by hand, said in nothing, or said as the payee already is: nothing more to show.
-        assertEquals("", bankSaid(chipotle.copy(imported = false)))
-        assertEquals("", bankSaid(chipotle.copy(importedPayee = "  ")))
-        assertEquals("", bankSaid(chipotle.copy(importedPayee = "CHIPOTLE")))
-        // What the demo's bank sends is kept as it sent it.
-        book.sync()
-        for (s in l.inbox.filter { it.imported }) {
-            assertTrue(bankSaid(s).isEmpty() || bankSaid(s) == s.importedPayee.trim())
-        }
+        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", TxnForm.of(chipotle).bankSaid)
     }
+
 }

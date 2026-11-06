@@ -63,15 +63,6 @@ pub struct Paper {
 /// What a receipt's photo may be, for the chooser.
 const PHOTOS: &[&str] = &["image/jpeg", "image/png", "image/heic", "image/webp"];
 
-/// The receipts that paid for nothing yet, nearest this transaction in
-/// amount and then in days first.
-pub fn unmatched<'a>(receipts: &'a [ReceiptLine], t: &TxnLine) -> Vec<&'a ReceiptLine> {
-    let mut free: Vec<&ReceiptLine> = receipts.iter().filter(|r| r.txn_id.is_none() && r.charges == 0).collect();
-    free.sort_by_key(|r| ((r.total - t.amount).abs(), money_domain::dates::days_between(&r.date, &t.date).abs()));
-    free.truncate(5);
-    free
-}
-
 impl App {
     /// The transaction whose receipt is beside the register: the one open
     /// in the form, else the one under the register's cursor.
@@ -257,7 +248,7 @@ impl App {
                     side = side.push(
                         text("Check this: what was read does not add up to the total.")
                             .size(12)
-                            .style(look::Tone::Short.text()),
+                            .style(look::Looks::text(look::Tone::Short)),
                     );
                 }
                 let mut links = row![].spacing(16);
@@ -290,10 +281,10 @@ impl App {
                     ]
                     .spacing(16),
                 );
-                let free = unmatched(self.peer.receipts(), t);
+                let free = money_domain::words::unmatched_for(self.peer.receipts(), t.amount, &t.date);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
-                    for r in free {
+                    for r in &free {
                         let what = format!("{} \u{b7} {} \u{b7} {}", r.date, place_of(r), money(-r.total));
                         side = side.push(
                             row![
@@ -338,7 +329,7 @@ impl App {
                     match i.quantity {
                         // One, or none said (a coupon is -1): no count.
                         q if q == 1000 || q <= 0 => format!("  {filed}"),
-                        q => format!("  {} \u{b7} {filed}", crate::view::quantity(q, &i.unit)),
+                        q => format!("  {} \u{b7} {filed}", money_domain::words::quantity(q, &i.unit)),
                     },
                     10,
                     tint
@@ -470,7 +461,7 @@ impl App {
 /// A receipt's store, as its paper names it.
 fn place_of(r: &ReceiptLine) -> String {
     match (r.place.trim(), r.store.as_str()) {
-        ("", s) => crate::view::store_name(s),
+        ("", s) => money_domain::words::store_name(s),
         (p, _) => p.into(),
     }
 }

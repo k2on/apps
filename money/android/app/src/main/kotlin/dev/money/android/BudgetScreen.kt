@@ -121,84 +121,22 @@ import dev.arkui.makingWay
 import dev.arkui.rememberReorder
 import dev.arkui.sections
 import dev.arkui.tintColors
-import dev.money.android.gen.Auto
+import uniffi.money_domain.Auto
+import uniffi.money_domain.Tone
+import uniffi.money_domain.cardGroupId
 import uniffi.money_domain.BudgetLine
 import uniffi.money_domain.GroupLine
 import dev.arkui.pressable
 import dev.arkui.Press
 
-/**
- * Whether what a category is given this month is anybody's to change here: not Ready to Assign's, and
- * not one whose month follows its rule (`money/domain/src/rules.rs`) — its amount is the rule's, so it
- * is not assigned, moved to or from, or auto-assigned by hand. The rule itself is set on the desktop.
- */
-fun assignable(l: BudgetLine): Boolean = !l.ruled && l.categoryId != Book.READY_TO_ASSIGN
-
-/**
- * The month's underfunded categories auto-assign would fund: the summary's, less those whose month
- * follows a rule short of its target — auto-assign passes them by.
- */
-fun fundable(ledger: Ledger): Long =
-    (ledger.summary?.underfunded ?: 0L) - ledger.lines.count { it.ruled && !Ledger.isPayment(it) && it.assigned < it.target }
-
-/** Whether a category overspent only on a card: its shortfall is the card's debt now, not next month's. */
-fun creditOverspent(l: BudgetLine): Boolean = l.available < 0 && l.creditOverspent >= -l.available
-
-/**
- * What a category's pill says about it, as YNAB's colours do: red for cash overspent (next month pays
- * for it), amber for overspending that was all on a card (it is debt now) and for a card's payment
- * that does not cover what the card owes, else as its target reads it.
- */
-fun toneOf(l: BudgetLine): Tint =
-    when {
-        creditOverspent(l) -> Tint.Caution
-        l.available < 0 -> Tint.Negative
-        Ledger.isPayment(l) && l.underfunded > 0 -> Tint.Caution
-        Ledger.isPayment(l) -> if (l.available > 0) Tint.Positive else Tint.Neutral
-        l.target > 0 && l.assigned < l.target -> Tint.Caution
-        l.available > 0 -> Tint.Positive
-        else -> Tint.Neutral
-    }
-
-/**
- * How far along a category is, and in what, as the iPhone's bar draws it: for a card's payment, how
- * much of what the card owes it has (amber while short); otherwise how much of its target it was
- * given — red when overspent, amber when overspent on a card or short of its target.
- */
+/** A bar in a line's meter tone ([meterColor] of the core's `Meter`). */
 @Composable
-private fun meterOf(l: BudgetLine): Pair<Float, Color> {
+private fun meterColor(t: Tone): Color {
     val c = MaterialTheme.colorScheme
-    if (Ledger.isPayment(l)) {
-        val covered = if (l.debt > 0) (l.available.toFloat() / l.debt).coerceIn(0f, 1f) else 0f
-        return covered to if (covered >= 1f) c.primary else c.tertiary
-    }
-    val funded = if (l.target > 0) (l.assigned.toFloat() / l.target).coerceIn(0f, 1f) else 0f
-    return funded to
-        when {
-            creditOverspent(l) -> c.tertiary
-            l.available < 0 -> c.error
-            funded < 1f -> c.tertiary
-            else -> c.primary
-        }
-}
-
-/** The line under a category's name: what is happening to it, in words. */
-fun storyOf(l: BudgetLine, a: Amounts): String {
-    val had = l.carried + l.assigned
-    return when {
-        creditOverspent(l) -> "${a.format(l.creditOverspent)} on a card, not covered"
-        l.available < 0 && l.creditOverspent > 0 -> "Overspent by ${a.format(-l.available)}, ${a.format(l.creditOverspent)} of it on a card"
-        l.available < 0 -> "Overspent by ${a.format(-l.available)}"
-        // A card's: what of its debt is not covered yet.
-        Ledger.isPayment(l) && l.underfunded > 0 -> "${a.format(l.underfunded)} short of the ${a.format(l.debt)} owed"
-        Ledger.isPayment(l) && l.debt > 0 -> "Covered: ${a.format(l.debt)} owed"
-        Ledger.isPayment(l) -> "Nothing owed on the card"
-        l.target > 0 && l.assigned < l.target -> "${a.format(l.target - l.assigned)} more needed this month"
-        l.activity < 0 && had > 0 -> "Spent ${a.format(-l.activity)} of ${a.format(had)}"
-        l.activity < 0 -> "Spent ${a.format(-l.activity)}"
-        l.target > 0 -> "Funded"
-        l.ruled -> "Assigned by rule"
-        else -> ""
+    return when (t) {
+        Tone.OVERSPENT -> c.error
+        Tone.SHORT, Tone.ON_CARD -> c.tertiary
+        else -> c.primary
     }
 }
 
@@ -207,8 +145,8 @@ fun storyOf(l: BudgetLine, a: Amounts): String {
  * and nothing else goes among them (the domain's `move_category`).
  */
 fun fitsOf(budget: List<Pair<GroupLine, List<BudgetLine>>>): (Any, Any?) -> Boolean {
-    val payments = budget.flatMap { it.second }.filter { Ledger.isPayment(it) }.map { categoryKey(it.categoryId) }.toSet()
-    val cards = groupKey(Book.CARD_GROUP)
+    val payments = budget.flatMap { it.second }.filter { it.isPayment() }.map { categoryKey(it.categoryId) }.toSet()
+    val cards = groupKey(cardGroupId())
     return { row, header -> (row in payments) == (header == cards) }
 }
 
@@ -257,9 +195,9 @@ fun BudgetScreen(ledger: Ledger) {
                     DropdownMenuItem(text = { Text("This Month") }, onClick = { menu = false; book.stepMonth(0) })
                     HorizontalDivider()
                 }
-                DropdownMenuItem(text = { Text("Auto-Assign Underfunded") }, onClick = { menu = false; book.autoAssign(Auto.Underfunded) })
-                DropdownMenuItem(text = { Text("Auto-Assign Last Month") }, onClick = { menu = false; book.autoAssign(Auto.LastMonth) })
-                DropdownMenuItem(text = { Text("Reset Assigned Amounts") }, onClick = { menu = false; book.autoAssign(Auto.Reset) })
+                DropdownMenuItem(text = { Text("Auto-Assign Underfunded") }, onClick = { menu = false; book.autoAssign(Auto.UNDERFUNDED) })
+                DropdownMenuItem(text = { Text("Auto-Assign Last Month") }, onClick = { menu = false; book.autoAssign(Auto.LAST_MONTH) })
+                DropdownMenuItem(text = { Text("Reset Assigned Amounts") }, onClick = { menu = false; book.autoAssign(Auto.RESET) })
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("New Group") }, onClick = { menu = false; newGroup = "" })
                 DropdownMenuItem(
@@ -302,7 +240,7 @@ fun BudgetScreen(ledger: Ledger) {
                         GroupHeader(
                             g,
                             available = rows.sumOf { lines[it]?.available ?: 0L },
-                            short = if (g.id == Book.CARD_GROUP) rows.sumOf { lines[it]?.underfunded ?: 0L } else 0L,
+                            short = if (g.id == cardGroupId()) rows.sumOf { lines[it]?.underfunded ?: 0L } else 0L,
                             folded = folded,
                             closed = closed,
                             lifted = reorder.dragged == gk,
@@ -323,7 +261,7 @@ fun BudgetScreen(ledger: Ledger) {
                     item(key = "foot/$hex") {
                         GroupFoot(
                             // The cards' group is the cards': its categories come and go with them.
-                            onAdd = if (g.id == Book.CARD_GROUP) null else { { newCategory = g.id to "" } },
+                            onAdd = if (g.id == cardGroupId()) null else { { newCategory = g.id to "" } },
                             modifier = Modifier.makingWay(this))
                     }
                 }
@@ -359,14 +297,6 @@ fun BudgetScreen(ledger: Ledger) {
     }
 }
 
-/** What Ready to Assign says under itself: the iPhone's `readyWords`. */
-fun readyWords(ready: Long): String =
-    when {
-        ready < 0 -> "You've assigned more than you have"
-        ready == 0L -> "Every dollar has a job"
-        else -> "Give these dollars a job"
-    }
-
 /**
  * Ready to Assign: the one figure the budget is about, and under it what needs a look as pills —
  * how many categories are overspent, how many are underfunded (a tap funds them), or that the
@@ -378,14 +308,10 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
     val book = LocalShell.current.book
     val s = ledger.summary
     val ready = s?.readyToAssign ?: 0L
-    val tone = when {
-        ready > 0 -> Tint.Positive
-        ready < 0 -> Tint.Negative
-        else -> Tint.Neutral
-    }
+    val tone = s?.tone()?.tint() ?: Tint.Neutral
     val over = s?.overspent ?: 0L
-    val fund = fundable(ledger)
-    HeroCard("Ready to Assign", ready, tone, note = readyWords(ready), modifier = modifier) {
+    val fund = s?.underfunded ?: 0L
+    HeroCard("Ready to Assign", ready, tone, note = s?.readyWords().orEmpty(), modifier = modifier) {
         if (over > 0 || fund > 0 || (s != null && s.assigned > 0)) {
             FlowRow(Modifier.padding(top = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 if (over > 0) {
@@ -395,7 +321,7 @@ private fun ReadyCard(ledger: Ledger, modifier: Modifier = Modifier) {
                     Pill(
                         Tint.Caution,
                         Modifier.clip(CircleShape).pressable(onClickLabel = "Assign every underfunded category its target", onClick = {
-                            book.autoAssign(Auto.Underfunded)
+                            book.autoAssign(Auto.UNDERFUNDED)
                         })) { PillLabel(Glyphs.Auto, "$fund underfunded") }
                 }
                 if (over == 0L && fund == 0L) {
@@ -528,22 +454,6 @@ fun CardTile(modifier: Modifier = Modifier) {
 }
 
 /**
- * The two ends of the line under a category's bar, as the iPhone writes them: what it was given
- * (of its target, when it has one) and what it spent; for a card's payment, whether what the card
- * owes is covered and how much it owes. Empty where there is nothing to say.
- */
-fun captionsOf(l: BudgetLine, a: Amounts): Pair<String, String> {
-    val spent = if (l.activity != 0L) "Spent ${a.format(-l.activity)}" else ""
-    return when {
-        Ledger.isPayment(l) && l.debt <= 0 -> "Nothing owed" to ""
-        Ledger.isPayment(l) -> (if (l.underfunded > 0) "${a.format(l.underfunded)} short" else "Covered") to "Owed ${a.format(l.debt)}"
-        l.target > 0 -> "${a.format(l.assigned)} of ${a.format(l.target)}" to spent
-        l.activity != 0L || l.assigned != 0L || l.ruled -> "Assigned ${a.format(l.assigned)}" to spent
-        else -> "" to ""
-    }
-}
-
-/**
  * A category's row in its group's card: its name and its pill, then — when it has a target, or is
  * a card's payment with something owed — the bar of how far it is, and the line under it. Lifted,
  * the drag's own ground shows through; `first` has no hairline over it.
@@ -551,11 +461,11 @@ fun captionsOf(l: BudgetLine, a: Amounts): Pair<String, String> {
 @Composable
 private fun CategoryRow(l: BudgetLine, first: Boolean, lifted: Boolean, actions: List<CustomAccessibilityAction>, onClick: () -> Unit) {
     val a = LocalAmounts.current
-    val (fraction, color) = meterOf(l)
-    val story = storyOf(l, a)
-    val (left, right) = captionsOf(l, a)
-    val card = Ledger.isPayment(l)
-    val barred = (card && l.debt > 0) || (!card && l.target > 0)
+    val meter = l.meter()
+    val story = l.story(a.style)
+    val captions = l.captions(a.style)
+    val (left, right) = captions.left to captions.right
+    val card = l.isPayment()
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     // The first row is the top of its group's card, under the group's heading.
     val top = if (first) Modifier.clip(cardTop(RoundedCornerShape(CardCorner))) else Modifier
@@ -586,14 +496,14 @@ private fun CategoryRow(l: BudgetLine, first: Boolean, lifted: Boolean, actions:
                         modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(Space.s))
                     // A month its rule assigns is marked, as the desktop marks its cell: not one to assign here.
-                    Pill(toneOf(l)) {
+                    Pill(l.tone().tint()) {
                         if (l.ruled) MarkedAmount(l.available, Glyphs.Rule, "assigned by rule", style = MaterialTheme.typography.labelLarge)
                         else AmountText(l.available, style = MaterialTheme.typography.labelLarge)
                     }
                 }
-                if (barred) {
+                if (meter != null) {
                     Spacer(Modifier.height(Space.s))
-                    ProgressBar(fraction, color = color, height = 4.dp)
+                    ProgressBar(meter.fraction().toFloat(), color = meterColor(meter.tone), height = 4.dp)
                 }
                 if (left.isNotEmpty() || right.isNotEmpty()) {
                     Spacer(Modifier.height(Space.xs))

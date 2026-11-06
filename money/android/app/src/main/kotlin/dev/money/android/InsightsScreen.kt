@@ -66,7 +66,7 @@ fun InsightsScreen(ledger: Ledger) {
         if (parts.isEmpty()) "Nothing spent in $month yet."
         else "Spent ${a.format(total)} in $month: " + parts.joinToString(", ") { "${it.label} ${a.format(it.value)}" }
     // The groups that did anything this month, the cards' not among them: paying a card is no spending.
-    val groups = ledger.byGroup(false).filter { (g, ls) -> g.id != Book.CARD_GROUP && ls.any { it.assigned != 0L || it.activity != 0L } }
+    val groups = ledger.byGroup(false).filter { (g, ls) -> !g.isCards() && ls.any { it.assigned != 0L || it.activity != 0L } }
 
     Page(title = "Insights") { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xl)) {

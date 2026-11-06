@@ -3,7 +3,10 @@
 //! said as a value.
 
 use ark_ffi::Taken;
+use ark_ffi::Twin;
+use money_domain::accounts::AccountKind;
 use money_domain::AccountLineView;
+use money_domain::{MoneyChange, OpenAccount, UniFfiTag};
 use money_ffi::{money_domain, money_open, money_send, Sent};
 
 /// Falsified by `config` registering the module alone (no domain): there
@@ -17,8 +20,16 @@ fn money_opens_and_is_called_by_name() {
     p.mutate("setup".into(), "null".into()).unwrap();
     let accounts = AccountLineView::new(p.clone(), "accounts".into(), "null".into()).unwrap();
     assert!(accounts.rows().is_empty());
-    let open = r#"{"name":"Checking","kind":"checking","on_budget":true,"balance":120000,"date":"2026-10-01"}"#;
-    let Sent::Intent { id } = money_send(p.clone(), "open_account".into(), open.into()) else {
+    let open = |name: &str, balance: i64| {
+        Twin::<UniFfiTag>::ffi(MoneyChange::OpenAccount(OpenAccount {
+            name: name.into(),
+            kind: AccountKind::Checking,
+            on_budget: true,
+            balance,
+            date: "2026-10-01".into(),
+        }))
+    };
+    let Sent::Intent { id } = money_send(p.clone(), open("Checking", 120_000)) else {
         panic!("opened")
     };
     assert_eq!(p.standing(id), ark_ffi::Standing::Confirmed, "alone, its own authority");
@@ -33,7 +44,7 @@ fn money_opens_and_is_called_by_name() {
         Some("an account needs a name")
     );
     assert_eq!(
-        money_send(p.clone(), "open_account".into(), nameless.into()),
+        money_send(p.clone(), open(" ", 0)),
         Sent::Refused {
             why: "an account needs a name".into()
         }

@@ -5,6 +5,10 @@
 
 use std::sync::{Arc, Mutex};
 
+use ark_ffi::Twin;
+use money_domain::accounts::AccountKind;
+use money_domain::changes::MoneyChangeFfi;
+use money_domain::{Assign, MoneyChange, OpenAccount, UniFfiTag};
 use money_ffi::{money_demo, Changed, MoneyView, Sent, Session};
 
 const TODAY: &str = "2026-10-26";
@@ -24,6 +28,21 @@ impl Changed for Told {
 
 fn budget(m: &str) -> MoneyView {
     MoneyView::Budget { month: m.into() }
+}
+
+/// A change as a phone builds it: UniFFI's enum.
+fn change(c: MoneyChange) -> MoneyChangeFfi {
+    Twin::<UniFfiTag>::ffi(c)
+}
+
+fn open(name: &str) -> MoneyChangeFfi {
+    change(MoneyChange::OpenAccount(OpenAccount {
+        name: name.into(),
+        kind: AccountKind::Checking,
+        on_budget: true,
+        balance: 0,
+        date: TODAY.into(),
+    }))
 }
 
 /// A month's budget held is its lines, its summary and its spending, read
@@ -62,12 +81,12 @@ fn the_app_is_told_what_moved() {
     let _r = s.hold(MoneyView::Register { account: None });
     let line = s.budget("2026-10".into()).lines.into_iter().find(|l| l.name == "Groceries").unwrap();
     let v = s.version(budget("2026-10"));
-    let input = format!(
-        r#"{{"month":"2026-10","category_id":"{}","amount":{}}}"#,
-        ark::hash::hex(&line.category_id.0),
-        line.assigned + 2_500
-    );
-    assert!(matches!(s.send("assign".into(), input), Sent::Intent { .. }));
+    let assign = change(MoneyChange::Assign(Assign {
+        month: "2026-10".into(),
+        category_id: money_domain::Id::new(line.category_id.0),
+        amount: line.assigned + 2_500,
+    }));
+    assert!(matches!(s.send(assign), Sent::Intent { .. }));
     let moved = told.0.lock().unwrap().clone();
     assert!(moved.contains(&budget("2026-10")), "{moved:?}");
     assert!(!moved.contains(&MoneyView::Register { account: None }), "{moved:?}");
@@ -98,18 +117,52 @@ fn a_view_is_held_while_any_screen_holds_it() {
 fn a_refusal_is_kept_until_the_next_change() {
     let s = session();
     let ready = "account needs a name";
-    let open = |name: &str| format!(r#"{{"name":"{name}","kind":"checking","on_budget":true,"balance":0,"date":"{TODAY}"}}"#);
-    assert!(matches!(s.send("open_account".into(), open(" ")), Sent::Refused { why } if why.contains(ready)));
+    assert_eq!(s.check(open(" ")).as_deref(), Some("an account needs a name"), "asked before it is sent");
+    assert!(matches!(s.send(open(" ")), Sent::Refused { why } if why.contains(ready)));
     assert!(s.refusal().is_some_and(|w| w.contains(ready)));
-    assert!(matches!(s.send("open_account".into(), open("Travel")), Sent::Intent { .. }));
+    assert!(matches!(s.send(open("Travel")), Sent::Intent { .. }));
     assert_eq!(s.refusal(), None);
 }
 
-/// The receipts' rows, which have no record, come as their JSON.
+/// The receipts' rows are records too, as every view's are. Falsified by
+/// `receipts` reading the rows' JSON: it did not compile.
 #[test]
-fn the_receipts_come_as_their_json() {
+fn the_receipts_are_records() {
     let s = session();
     let _r = s.hold(MoneyView::Receipts);
     let rows = s.receipts();
-    assert!(rows.iter().all(|r| r.starts_with('{') && r.contains("\"store\"")), "{rows:?}");
+    assert!(!rows.is_empty() && rows.iter().all(|r| !r.store.is_empty()), "{rows:?}");
+    let _p = s.hold(MoneyView::Photos);
+    let _ = s.photos();
+}
+
+/// A search is the core's filter over a register: payee or the bank's own
+/// words, any case; told when it moves, as any view is. Falsified by a
+/// search matching the memo: "coffee" found the seed's lunch whose memo
+/// says it.
+#[test]
+fn a_search_is_the_cores_filter() {
+    let s = session();
+    let told = Arc::new(Told::default());
+    s.set_listener(Some(told.clone()));
+    let q = MoneyView::Search {
+        account: None,
+        text: "WHOLE".into(),
+    };
+    let _h = s.hold(q.clone());
+    let found = s.search(None, "WHOLE".into());
+    assert!(
+        !found.is_empty()
+            && found
+                .iter()
+                .all(|t| t.payee.to_lowercase().contains("whole") || t.imported_payee.to_lowercase().contains("whole")),
+        "{found:?}"
+    );
+    let first = found[0].account_id;
+    let _one = s.hold(MoneyView::Search {
+        account: Some(first),
+        text: "whole".into(),
+    });
+    assert!(s.search(Some(first), "whole".into()).iter().all(|t| t.account_id == first));
+    assert!(s.version(q) > 0);
 }

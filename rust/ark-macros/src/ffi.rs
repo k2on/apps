@@ -66,7 +66,11 @@ fn named(fields: &Fields, span: Span) -> syn::Result<Vec<Field>> {
     match fields {
         Fields::Named(n) => Ok(n.named.iter().map(|f| (f.ident.clone().unwrap(), f.ty.clone(), None)).collect()),
         Fields::Unit => Ok(vec![]),
-        Fields::Unnamed(u) if u.unnamed.len() == 1 => Ok(vec![(Ident::new("value", span), u.unnamed[0].ty.clone(), Some(Index::from(0)))]),
+        Fields::Unnamed(u) if u.unnamed.len() == 1 => Ok(vec![(
+            Ident::new("value", Span::call_site()),
+            u.unnamed[0].ty.clone(),
+            Some(Index::from(0)),
+        )]),
         Fields::Unnamed(_) => err(span, "a twin names its fields: one unnamed field at most"),
     }
 }

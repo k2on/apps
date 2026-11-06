@@ -11,11 +11,15 @@ use ark::prelude::*;
 
 use crate::accounts::account_of;
 use crate::budget::{ensure_setup, ready_to_assign, Plan};
+use crate::changes::MoneyChange;
 use crate::schema::*;
 use crate::types::*;
 
 /// What a reconciliation that did not agree adds, to make it.
 pub const ADJUSTMENT: &str = "Reconciliation Balance Adjustment";
+
+/// What a register says of a transaction on the budget for no category.
+pub const NEEDS_A_CATEGORY: &str = "Needs a category";
 
 /// A category a transaction in `account` may be for: on budget, any that
 /// is (or none yet); off budget, none — it is only tracked.
@@ -413,11 +417,11 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
         None => t.payee.clone(),
     };
     let label = match (&category, &other) {
-        _ if t.split && lines.iter().any(|l| l.category_id.is_none()) => "Needs a category".into(),
+        _ if t.split && lines.iter().any(|l| l.category_id.is_none()) => NEEDS_A_CATEGORY.into(),
         _ if t.split => format!("Split ({})", lines.len()),
         (Some(c), _) => c.name.clone(),
         (None, Some(_)) => String::new(),
-        (None, None) if account.on_budget => "Needs a category".into(),
+        (None, None) if account.on_budget => NEEDS_A_CATEGORY.into(),
         (None, None) => String::new(),
     };
     TxnLine {
@@ -440,6 +444,7 @@ pub fn txn_line(db: &Db<Money>, t: &Txn) -> TxnLine {
         user_id: t.user_id.clone(),
         receipt: crate::receipts::receipt_of(db, t.id).unwrap_or_default(),
         photos: db.photo.by(Photo::TXN_ID).from(Some(t.id)).all().len() as i64,
+        transfer_account_id: other.as_ref().map(|o| o.id),
     }
 }
 
@@ -518,4 +523,168 @@ pub fn remembered(db: &Db<Money>, payee: &str) -> Option<Id<Category>> {
         .all()
         .into_iter()
         .find_map(|t| t.category_id.filter(|c| *c != ready_to_assign()))
+}
+
+// * The form
+
+/// A transaction as a form holds it while it is typed: a new one, or one
+/// being corrected. Every client's form is this, checked by one set of
+/// rules ([`Draft::problem`]) and sent as one change ([`Draft::to_change`]):
+///
+/// - a new one is for an account ("Choose an account."),
+/// - for something ("Enter an amount."),
+/// - on a day ("Choose a day."),
+/// - to somebody, unless it is a transfer ("Enter a payee."),
+///
+/// then the domain's own refinements (a payee at most 120 characters). The
+/// payee and the memo are sent trimmed; a transfer's payee is its other
+/// account, and it is for no category.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
+pub struct Draft {
+    /// The one corrected; none for a new one.
+    pub editing: Option<Id<Txn>>,
+    pub account: Option<Id<Account>>,
+    pub date: String,
+    pub payee: String,
+    pub category: Option<Id<Category>>,
+    /// The other account, for a transfer.
+    pub transfer_to: Option<Id<Account>>,
+    pub memo: String,
+    /// Positive in, negative out, in cents.
+    pub amount: i64,
+    pub cleared: bool,
+}
+
+impl Draft {
+    /// A new transaction on `date`, in `account` or (none) the usual one
+    /// ([`crate::accounts::usual`]).
+    pub fn new(accounts: &[AccountLine], account: Option<Id<Account>>, date: &str) -> Draft {
+        Draft {
+            account: account.or_else(|| crate::accounts::usual(accounts)),
+            date: date.into(),
+            ..Draft::default()
+        }
+    }
+
+    /// The form over a transaction already in a register.
+    pub fn of(t: &TxnLine) -> Draft {
+        Draft {
+            editing: Some(t.id),
+            account: Some(t.account_id),
+            date: t.date.clone(),
+            payee: if t.transfer { String::new() } else { t.payee.clone() },
+            category: t.category_id,
+            transfer_to: t.transfer_account_id,
+            memo: t.memo.clone(),
+            amount: t.amount,
+            cleared: t.cleared != Cleared::Uncleared,
+        }
+    }
+
+    /// A payee chosen from what the field offered: its last category comes
+    /// with it, unless one is chosen or it is a transfer.
+    pub fn with_payee(&self, p: &PayeeLine) -> Draft {
+        let mut d = self.clone();
+        d.payee = p.name.clone();
+        if d.category.is_none() && d.transfer_to.is_none() {
+            d.category = p.category_id;
+        }
+        d
+    }
+
+    /// A category chosen: no transfer then.
+    pub fn with_category(&self, c: Option<Id<Category>>) -> Draft {
+        Draft {
+            category: c,
+            transfer_to: None,
+            ..self.clone()
+        }
+    }
+
+    /// A transfer to `account` chosen: no category then.
+    pub fn with_transfer(&self, account: Id<Account>) -> Draft {
+        Draft {
+            transfer_to: Some(account),
+            category: None,
+            ..self.clone()
+        }
+    }
+
+    /// Why it cannot be saved yet, as the button's footnote says it; none
+    /// when it can.
+    pub fn problem(&self) -> Option<String> {
+        if self.editing.is_none() && self.account.is_none() {
+            return Some("Choose an account.".into());
+        }
+        if self.amount == 0 {
+            return Some("Enter an amount.".into());
+        }
+        if !crate::dates::is_day(&self.date) {
+            return Some("Choose a day.".into());
+        }
+        if self.transfer_to.is_none() && self.payee.trim().is_empty() {
+            return Some("Enter a payee.".into());
+        }
+        self.change().and_then(|c| c.problem())
+    }
+
+    /// The change that saves it, once nothing is wrong with it
+    /// ([`Draft::problem`]).
+    pub fn to_change(&self) -> Option<MoneyChange> {
+        match self.problem() {
+            None => self.change(),
+            Some(_) => None,
+        }
+    }
+
+    fn change(&self) -> Option<MoneyChange> {
+        let transfer = self.transfer_to.is_some();
+        let payee = if transfer { String::new() } else { self.payee.trim().to_string() };
+        let category_id = if transfer { None } else { self.category };
+        let memo = self.memo.trim().to_string();
+        Some(match self.editing {
+            Some(id) => MoneyChange::EditTransaction(EditTransaction {
+                id,
+                date: self.date.clone(),
+                payee,
+                category_id,
+                memo,
+                amount: self.amount,
+                transfer_to: self.transfer_to,
+            }),
+            None => MoneyChange::AddTransaction(AddTransaction {
+                account_id: self.account?,
+                date: self.date.clone(),
+                payee,
+                category_id,
+                memo,
+                amount: self.amount,
+                cleared: self.cleared,
+                transfer_to: self.transfer_to,
+            }),
+        })
+    }
+}
+
+/// Who a payee field offers while `typed` is typed: names that start with
+/// it first, then ones that hold it, the most paid first; none once the
+/// name is typed whole; the most paid when nothing is typed. At most
+/// `limit`.
+pub fn suggest(typed: &str, payees: &[PayeeLine], limit: usize) -> Vec<PayeeLine> {
+    let t = typed.trim().to_lowercase();
+    let mut by_count: Vec<&PayeeLine> = payees.iter().collect();
+    by_count.sort_by_key(|p| std::cmp::Reverse(p.count));
+    if t.is_empty() {
+        return by_count.into_iter().take(limit).cloned().collect();
+    }
+    if payees.iter().any(|p| p.name.to_lowercase() == t) {
+        return vec![];
+    }
+    let starts = by_count.iter().filter(|p| p.name.to_lowercase().starts_with(&t));
+    let within = by_count.iter().filter(|p| {
+        let n = p.name.to_lowercase();
+        !n.starts_with(&t) && n.contains(&t)
+    });
+    starts.chain(within).take(limit).map(|p| (*p).clone()).collect()
 }

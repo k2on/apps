@@ -81,11 +81,6 @@ fun search(rows: List<TxnLine>, needle: String): List<TxnLine> {
     }
 }
 
-/**
- * Whether a transaction wants a category before it can be approved: the domain says so in its
- * category's place (a split with a line that has none says it too), as the iPhone reads it.
- */
-fun needsCategory(t: TxnLine): Boolean = t.category == "Needs a category"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,7 +126,7 @@ fun ActivityScreen(ledger: Ledger) {
             } else if (review.isEmpty()) {
                 item(key = "caught-up") { CaughtUp(needle) }
             } else {
-                val ready = review.filter { !it.approved && !needsCategory(it) }.map { it.id }
+                val ready = review.filter { !it.approved && !it.needsCategory() }.map { it.id }
                 item(key = "h-review") {
                     Row(
                         Modifier.fillMaxWidth().padding(start = Space.page + Space.l, end = Space.page, top = Space.l),
@@ -145,7 +140,7 @@ fun ActivityScreen(ledger: Ledger) {
                         }
                 }
                 itemsIndexed(review, key = { _, t -> "r" + t.id.hex }) { i, t ->
-                    val needs = needsCategory(t)
+                    val needs = t.needsCategory()
                     TxnRow(
                         t,
                         showAccount = true,

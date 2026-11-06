@@ -86,6 +86,34 @@ impl<UT, R> Twin<UT> for ark::row::Id<R> {
     }
 }
 
+/// A file a row names (`ark::file::FileRef`, docs/plan-files.md) across
+/// the bridge: its hash, size and media type.
+#[derive(Clone, Debug, PartialEq, Eq, Default, uniffi::Record)]
+#[uniffi(name = "FileRef")]
+pub struct FileRefFfi {
+    pub hash: String,
+    pub size: i64,
+    pub media: String,
+}
+
+impl<UT> Twin<UT> for ark::file::FileRef {
+    type Ffi = FileRefFfi;
+    fn ffi(self) -> FileRefFfi {
+        FileRefFfi {
+            hash: self.hash,
+            size: self.size,
+            media: self.media,
+        }
+    }
+    fn from_ffi(f: FileRefFfi) -> Self {
+        ark::file::FileRef {
+            hash: f.hash,
+            size: f.size,
+            media: f.media,
+        }
+    }
+}
+
 /// One change to a typed view's rows; an insert's and an update's row is
 /// the next of the rows taken with it.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]

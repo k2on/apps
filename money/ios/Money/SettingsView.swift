@@ -3,7 +3,7 @@
 // for a real server. Nothing here is a cursor or a count of pending intents
 // beyond a plain "waiting to sync".
 //
-// **Banks** are connected from here (Banks.swift says how): Connect a Bank
+// **Banks** are connected from here (the core's `AskLine.said`, `BankLine.status` and `follow` say how): Connect a Bank
 // asks the server, and Plaid's page opens in Safari's view the moment the
 // server answers with it (Shell.swift); the ask's row says where it stands
 // until the server has finished. Each bank is a row with how it is doing,
@@ -85,14 +85,14 @@ struct BanksSection: View {
 
     var body: some View {
         let s = model.snapshot
-        let ask = BankAsks.shown(s.asks, now: nowMs(), dismissed: model.dismissedAsk)
+        let ask = askShown(asks: s.asks, dismissed: model.dismissedAsk, now: nowMs())
         Section {
             if let ask { AskRow(ask: ask) }
             ForEach(s.banks) { b in
                 NavigationLink(value: Route.bank(name: b.name)) { BankRow(bank: b) }
             }
             Button { model.connectBank() } label: { Label("Connect a Bank", systemImage: "plus.circle.fill") }
-                .disabled(!model.connectsBanks || (ask.map(BankAsks.isOpen) ?? false))
+                .disabled(!model.connectsBanks || (ask.map { $0.isOpen() } ?? false))
         } header: {
             Text("Banks")
         } footer: {
@@ -116,21 +116,21 @@ struct AskRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                 mark
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Text(BankAsks.words(ask, now: now))
+                    Text(ask.said(now: now))
                         .fixedSize(horizontal: false, vertical: true)
                     if ask.state == .waiting {
                         Button("Open Plaid's Page") { model.openPage(ask) }
                             .fontWeight(.semibold)
                             .buttonStyle(.borderless)
-                        if let m = BankAsks.minutesLeft(ask, now: now) {
-                            Text(m < 1 ? "It closes in under a minute." : "It closes in \(m) min.")
+                        if let closes = ask.closes(now: now) {
+                            Text(closes + ".")
                                 .font(.caption)
                                 .foregroundStyle(.quiet)
                         }
                     }
                 }
                 Spacer(minLength: 0)
-                if !BankAsks.isOpen(ask) {
+                if !ask.isOpen() {
                     Button { withAnimation(Springs.move.reduced(still)) { model.dismiss(ask: ask) } } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet)
                     }
@@ -161,7 +161,7 @@ struct BankRow: View {
         HStack(spacing: Space.m) {
             AccountMark(kind: "checking")
             VStack(alignment: .leading, spacing: 2) {
-                Text(Banks.title(bank)).lineLimit(1)
+                Text(bank.title()).lineLimit(1)
                 BankHealthText(bank: bank).font(.caption).lineLimit(1)
             }
             Spacer(minLength: Space.s)
@@ -184,14 +184,9 @@ struct BankHealthText: View {
     let bank: BankLine
 
     var body: some View {
-        switch Banks.health(bank) {
-        case .needsLogin: Text("Log in again to keep it syncing").foregroundStyle(.error)
-        case .failed: Text("The last import failed").foregroundStyle(.error)
-        case .new: Text("Waiting for its first import").foregroundStyle(.quiet)
-        case let .synced(ms):
-            Text("Synced \(formatAgo(ms: ms, nowMs: nowMs()))")
-                .foregroundStyle(.quiet)
-        }
+        // The core's sentence (`BankLine.status`), red when it wants somebody.
+        let s = bank.status(now: nowMs())
+        Text(s.words).foregroundStyle(s.alarm ? Color.error : Color.quiet)
     }
 }
 
@@ -214,15 +209,14 @@ struct BankView: View {
 
     private func page(_ b: BankLine) -> some View {
         let s = model.snapshot
-        let title = Banks.title(b)
-        let accounts = Banks.accounts(of: b.name, s.linked)
-        let ask = BankAsks.shown(s.asks, now: nowMs(), dismissed: model.dismissedAsk).flatMap { $0.bank == b.name ? $0 : nil }
+        let title = b.title()
+        let accounts = bankAccounts(bank: b.name, linked: s.linked)
+        let ask = askShown(asks: s.asks, dismissed: model.dismissedAsk, now: nowMs()).flatMap { $0.bank == b.name ? $0 : nil }
         return List {
             if let ask {
                 Section { AskRow(ask: ask) }
             }
-            switch Banks.health(b) {
-            case .needsLogin:
+            if b.needsLogin {
                 Section {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
@@ -238,15 +232,13 @@ struct BankView: View {
                         .fontWeight(.semibold)
                         .disabled(!model.connectsBanks)
                 }
-            case let .failed(why):
+            } else if !b.error.isEmpty {
                 Section("Last Import") {
-                    Text(why).foregroundStyle(.error)
+                    Text(b.error).foregroundStyle(.error)
                     LabeledContent("Failed") {
                         Text(formatAgoAlone(ms: b.failedMs, nowMs: nowMs()))
                     }
                 }
-            case .new, .synced:
-                EmptyView()
             }
             Section {
                 LabeledContent("Last Synced") {
@@ -302,7 +294,7 @@ struct LinkedRow: View {
         HStack(spacing: Space.m) {
             AccountMark(kind: line.opensAs.isEmpty ? line.kind : line.opensAs)
             VStack(alignment: .leading, spacing: 2) {
-                Text(Banks.name(line)).lineLimit(1)
+                Text(line.title()).lineLimit(1)
                 Text(about).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                 feeds.font(.caption).lineLimit(1)
             }
@@ -320,8 +312,8 @@ struct LinkedRow: View {
     }
 
     private var about: String {
-        guard let b = line.balance else { return Banks.kind(line) }
-        return "\(Banks.kind(line)) · the bank says \(CentsText.string(b))"
+        guard let b = line.balance else { return line.kindWords() }
+        return "\(line.kindWords()) · the bank says \(CentsText.string(b))"
     }
 
     @ViewBuilder private var feeds: some View {
@@ -335,9 +327,9 @@ struct LinkedRow: View {
     }
 
     @ViewBuilder private var choices: some View {
-        let free = Banks.linkable(line, model.snapshot.accounts)
+        let free = linkableAccounts(accounts: model.snapshot.accounts, kind: line.opensAs)
         if line.waiting {
-            Button { model.openAccount(for: line.plaidAccountId) } label: { Label(Banks.opens(line), systemImage: "plus.circle") }
+            Button { model.openAccount(for: line.plaidAccountId) } label: { Label(line.opensWords(), systemImage: "plus.circle") }
         }
         Menu {
             if free.isEmpty {

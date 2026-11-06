@@ -90,6 +90,7 @@ import dev.arkui.Transitions
 import dev.arkui.reducedMotion
 import uniffi.money_domain.Route
 import uniffi.money_domain.TxnLine
+import uniffi.money_domain.newDraft
 import uniffi.money_domain.routeFromPath
 
 /** The four tabs. */
@@ -147,7 +148,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 book = book,
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
-                onEdit = { t -> form = formOf(t, book.state.value) },
+                onEdit = { t -> form = TxnForm.of(t) },
                 onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.id.hex, it.name) } ?: Route.Accounts)) },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
@@ -311,38 +312,8 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(reduced: 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(reduced: Boolean): ExitTransition =
     if (between()) ExitTransition.None else Transitions.popOut(reduced)
 
-/** A new transaction: today, in `account` or the first open budget account, money going out. */
-fun newForm(l: Ledger, account: Id?): TxnForm =
-    TxnForm(
-        account = account ?: l.accounts.firstOrNull { it.onBudget && !it.closed }?.id,
-        date = l.today,
-    )
-
-/** A transaction as the form corrects it. */
-fun formOf(t: TxnLine, l: Ledger): TxnForm =
-    TxnForm(
-        editing = t.id,
-        account = t.accountId,
-        date = t.date,
-        payee = if (t.transfer) "" else t.payee,
-        category = t.categoryId,
-        transferTo = if (t.transfer) l.accounts.firstOrNull { "Transfer : ${it.name}" == t.payee }?.id else null,
-        memo = t.memo,
-        amount = t.amount,
-        cleared = t.cleared != uniffi.money_domain.Cleared.UNCLEARED,
-        by = t.userId,
-        bankSaid = bankSaid(t),
-        receipt = t.receipt,
-    )
-
-/**
- * The bank's own description of `t` when it was imported and that says something the payee does not;
- * otherwise empty.
- */
-fun bankSaid(t: TxnLine): String {
-    val said = t.importedPayee.trim()
-    return if (t.imported && said.isNotEmpty() && !said.equals(t.payee.trim(), ignoreCase = true)) said else ""
-}
+/** A new transaction: today, in `account` or the usual one (the core's), money going out. */
+fun newForm(l: Ledger, account: Id?): TxnForm = TxnForm(newDraft(l.accounts, account, l.today))
 
 /**
  * A page as every screen here is laid out: a large top app bar that collapses as the content

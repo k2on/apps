@@ -37,7 +37,7 @@ uniffi::setup_scaffolding!();
 pub mod session;
 pub mod typed;
 pub use session::{Hold, Session};
-pub use typed::{Op, RowId, Taken, Twin, Typed};
+pub use typed::{FileRefFfi, Op, RowId, Taken, Twin, Typed};
 
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -457,6 +457,23 @@ impl Peer {
             }
             s.peer.begin(&name);
             let out = s.peer.mutate_bytes(&name, input);
+            s.peer.end();
+            out
+        })?;
+        Ok(ark::hash::hex(&id.0))
+    }
+
+    /// An intent of the function `name` on its input's bytes (the value
+    /// format), as [`Peer::mutate`] makes one of JSON: what an app's typed
+    /// change (money's `MoneyChange`) is sent as, no JSON on the way.
+    pub fn mutate_encoded(&self, name: &str, input: Vec<u8>) -> Result<String, Refusal> {
+        let _call = tracing::debug_span!(target: "ark", "ffi", call = "mutate", name = %name).entered();
+        let id = self.shared.act(|s| {
+            if s.peer.open_span().is_some() {
+                return s.peer.mutate_bytes(name, input);
+            }
+            s.peer.begin(name);
+            let out = s.peer.mutate_bytes(name, input);
             s.peer.end();
             out
         })?;

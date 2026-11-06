@@ -27,19 +27,15 @@ fn more_than_0(n: &i64) -> bool {
     *n > 0
 }
 
-fn is_kind(k: &str) -> bool {
-    crate::accounts::KINDS.contains(&k)
-}
-
 // * Accounts
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct OpenAccount {
     #[ark(trim, non_empty, why = "an account needs a name")]
     #[ark(len = "0..=80")]
     pub name: String,
-    #[ark(check = "is_kind", why = "checking, savings, cash, credit, loan or investment")]
-    pub kind: String,
+    pub kind: crate::accounts::AccountKind,
     pub on_budget: bool,
     /// What is in it today, in cents: what you owe on a card or a loan is
     /// negative.
@@ -49,6 +45,7 @@ pub struct OpenAccount {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct RenameAccount {
     pub id: Id<Account>,
     #[ark(trim, non_empty, why = "an account needs a name")]
@@ -57,6 +54,7 @@ pub struct RenameAccount {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct CloseAccount {
     pub id: Id<Account>,
     pub closed: bool,
@@ -65,6 +63,7 @@ pub struct CloseAccount {
 // * Groups and categories
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddGroup {
     #[ark(trim, non_empty, why = "a group needs a name")]
     #[ark(len = "0..=80")]
@@ -72,6 +71,7 @@ pub struct AddGroup {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct RenameGroup {
     pub id: Id<Group>,
     #[ark(trim, non_empty, why = "a group needs a name")]
@@ -80,6 +80,7 @@ pub struct RenameGroup {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct HideGroup {
     pub id: Id<Group>,
     pub hidden: bool,
@@ -88,12 +89,14 @@ pub struct HideGroup {
 /// A group gone, and with it its categories: what was spent from them is
 /// moved to `move_to`, or left for nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct DeleteGroup {
     pub id: Id<Group>,
     pub move_to: Option<Id<Category>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddCategory {
     pub group_id: Id<Group>,
     #[ark(trim, non_empty, why = "a category needs a name")]
@@ -103,6 +106,7 @@ pub struct AddCategory {
 
 /// A kind of a category, under it: "Eggs" under "Groceries".
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddSubcategory {
     pub parent_id: Id<Category>,
     #[ark(trim, non_empty, why = "a category needs a name")]
@@ -111,6 +115,7 @@ pub struct AddSubcategory {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct RenameCategory {
     pub id: Id<Category>,
     #[ark(trim, non_empty, why = "a category needs a name")]
@@ -119,6 +124,7 @@ pub struct RenameCategory {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct HideCategory {
     pub id: Id<Category>,
     pub hidden: bool,
@@ -127,6 +133,7 @@ pub struct HideCategory {
 /// A category moved: an envelope into a group (`group_id`, a heading),
 /// a kind under another category (`group_id`, its new parent).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct MoveCategory {
     pub id: Id<Category>,
     pub group_id: Id<Group>,
@@ -136,6 +143,7 @@ pub struct MoveCategory {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct MoveGroup {
     pub id: Id<Group>,
     /// The group it goes in front of; none for after every other.
@@ -145,6 +153,7 @@ pub struct MoveGroup {
 
 /// What a category wants each month, in cents; 0 for nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SetTarget {
     pub id: Id<Category>,
     #[ark(check = "at_least_0", why = "a target is never below nothing")]
@@ -155,6 +164,7 @@ pub struct SetTarget {
 /// `move_to`, or (none) its spending left for nothing and its money back
 /// to be assigned.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct DeleteCategory {
     pub id: Id<Category>,
     pub move_to: Option<Id<Category>>,
@@ -164,6 +174,7 @@ pub struct DeleteCategory {
 
 /// A category's assigned amount for a month, set.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Assign {
     #[ark(check = "is_month", why = "a month, as 2026-10")]
     pub month: String,
@@ -174,6 +185,7 @@ pub struct Assign {
 /// Money moved between two categories in a month, or to and from what is
 /// ready to assign (`None`).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct MoveMoney {
     #[ark(check = "is_month", why = "a month, as 2026-10")]
     pub month: String,
@@ -185,6 +197,7 @@ pub struct MoveMoney {
 
 /// A whole month assigned at once, the way the budget's quick buttons do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub enum Auto {
     /// Each category given what it was given the month before.
     #[default]
@@ -196,6 +209,7 @@ pub enum Auto {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AutoAssign {
     #[ark(check = "is_month", why = "a month, as 2026-10")]
     pub month: String,
@@ -207,6 +221,7 @@ pub struct AutoAssign {
 // * Transactions
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddTransaction {
     pub account_id: Id<Account>,
     #[ark(check = "is_day", why = "a day, as 2026-10-26")]
@@ -226,6 +241,7 @@ pub struct AddTransaction {
 /// Its own input, so that `AddTransaction` keeps the shape every client
 /// sends.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddSplit {
     pub account_id: Id<Account>,
     #[ark(check = "is_day", why = "a day, as 2026-10-26")]
@@ -240,6 +256,7 @@ pub struct AddSplit {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct EditTransaction {
     pub id: Id<Txn>,
     #[ark(check = "is_day", why = "a day, as 2026-10-26")]
@@ -258,11 +275,13 @@ pub struct EditTransaction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Txns {
     pub ids: Vec<Id<Txn>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Categorize {
     pub ids: Vec<Id<Txn>>,
     pub category_id: Option<Id<Category>>,
@@ -271,6 +290,7 @@ pub struct Categorize {
 /// One line of a split: part of the transaction's amount, for a category
 /// (none: not yet said).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SplitPart {
     pub category_id: Option<Id<Category>>,
     pub amount: i64,
@@ -281,6 +301,7 @@ pub struct SplitPart {
 /// A transaction split into `lines`, which add up to its amount; no lines
 /// is unsplit, for no category until somebody gives it one.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SplitTxn {
     pub id: Id<Txn>,
     pub lines: Vec<SplitPart>,
@@ -293,6 +314,7 @@ pub struct OneTxn {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SetCleared {
     pub id: Id<Txn>,
     pub cleared: bool,
@@ -301,6 +323,7 @@ pub struct SetCleared {
 /// The bank says the account holds `balance` on `date`: every cleared
 /// transaction becomes reconciled, and a difference is an adjustment.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Reconcile {
     pub account_id: Id<Account>,
     pub balance: i64,
@@ -312,6 +335,7 @@ pub struct Reconcile {
 
 /// One account of a linked bank, as Plaid reported it at the import.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct BankAccount {
     pub plaid_account_id: String,
     pub name: String,
@@ -333,6 +357,7 @@ pub struct BankAccount {
 
 /// A transaction Plaid added or changed, our sign: what left is negative.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct BankTxn {
     pub transaction_id: String,
     pub plaid_account_id: String,
@@ -348,6 +373,7 @@ pub struct BankTxn {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct BankRemoved {
     pub transaction_id: String,
     pub plaid_account_id: String,
@@ -356,6 +382,7 @@ pub struct BankRemoved {
 /// One run of a bank's `/transactions/sync`, whole: what the server's
 /// importer authors (`crate::plaid::import`).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Import {
     #[ark(trim, non_empty, why = "a bank needs a name")]
     pub bank: String,
@@ -383,12 +410,14 @@ pub struct Import {
 /// A bank's account made to feed an account already here, in place of the
 /// one its first import opened.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct LinkAccount {
     pub plaid_account_id: String,
     pub account_id: Id<Account>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct IgnoreLinked {
     pub plaid_account_id: String,
     pub ignored: bool,
@@ -402,6 +431,7 @@ fn is_store(s: &str) -> bool {
 
 /// A thing bought, as a store's adapter read it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct StoreItem {
     pub name: String,
     pub sku: String,
@@ -414,6 +444,7 @@ pub struct StoreItem {
 
 /// A receipt or order, as a store's adapter read it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct StoreReceipt {
     /// The store's own id for it: an order number, a receipt's barcode.
     pub order_id: String,
@@ -426,6 +457,7 @@ pub struct StoreReceipt {
 
 /// One store's receipts, from one export ([`crate::stores`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ReceiptImport {
     #[ark(check = "is_store", why = "amazon, target or costco")]
     pub store: String,
@@ -434,6 +466,7 @@ pub struct ReceiptImport {
 
 /// One item of one receipt.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ItemRef {
     pub receipt_id: String,
     pub line: i64,
@@ -442,6 +475,7 @@ pub struct ItemRef {
 /// Items filed under a category (none: unfiled); every unfiled item with
 /// the same key as one of them is filed with it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ClassifyItems {
     pub items: Vec<ItemRef>,
     pub category_id: Option<Id<Category>>,
@@ -450,6 +484,7 @@ pub struct ClassifyItems {
 /// A charge a store made, as its adapter read it: for which order, on
 /// which day, how much (our sign: a refund is positive), on which card.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct StoreCharge {
     pub order_id: String,
     pub date: String,
@@ -459,6 +494,7 @@ pub struct StoreCharge {
 
 /// One store's charges, from one history ([`crate::stores`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ChargeImport {
     #[ark(check = "is_store", why = "amazon, target or costco")]
     pub store: String,
@@ -467,6 +503,7 @@ pub struct ChargeImport {
 
 /// A charge said to be paid by a transaction, or by none found yet.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct PayCharge {
     pub charge_id: String,
     pub txn_id: Option<Id<Txn>>,
@@ -474,6 +511,7 @@ pub struct PayCharge {
 
 /// A receipt said to be paid by a transaction (none: by none found yet).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct MatchReceipt {
     pub receipt_id: String,
     pub txn_id: Option<Id<Txn>>,
@@ -483,6 +521,7 @@ pub struct MatchReceipt {
 /// credit card's a credit account, a savings account's savings. Blank is
 /// the bank's name for it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct OpenLinked {
     pub plaid_account_id: String,
     #[ark(trim, len = "0..=80")]
@@ -491,6 +530,7 @@ pub struct OpenLinked {
 
 /// A connected bank, by the name the server keeps it under.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct BankName {
     #[ark(trim, non_empty, why = "which bank?")]
     pub bank: String,
@@ -498,6 +538,7 @@ pub struct BankName {
 
 /// The importer's answer to an ask (`crate::banks::answer`).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Answer {
     pub id: Id<BankAsk>,
     pub state: AskState,
@@ -510,6 +551,7 @@ pub struct Answer {
 
 /// The importer could not import a bank: what Plaid said.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct BankFailed {
     #[ark(trim, non_empty, why = "a bank needs a name")]
     pub bank: String,
@@ -526,6 +568,7 @@ fn is_month_or_now(m: &Option<String>) -> bool {
 
 /// A filter kept under a name ([`crate::filters`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SaveFilter {
     #[ark(trim, non_empty, why = "a filter needs a name")]
     #[ark(len = "0..=80")]
@@ -534,6 +577,7 @@ pub struct SaveFilter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct RenameFilter {
     pub id: Id<SavedFilter>,
     #[ark(trim, non_empty, why = "a filter needs a name")]
@@ -544,17 +588,20 @@ pub struct RenameFilter {
 /// A saved filter's conditions, changed: every formula that sums it moves
 /// with it, in every month it covers.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ChangeFilter {
     pub id: Id<SavedFilter>,
     pub filter: Filter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct FilterId {
     pub id: Id<SavedFilter>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct MoveFilter {
     pub id: Id<SavedFilter>,
     /// The filter it goes in front of; none for after every other.
@@ -566,6 +613,7 @@ pub struct MoveFilter {
 /// `times / per` of what each term's saved filter adds up to in it,
 /// rounded once to the cent ([`crate::formulas`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SetFormula {
     pub category_id: Id<Category>,
     /// The first month it assigns; none is this month.
@@ -577,6 +625,7 @@ pub struct SetFormula {
 
 /// A category assigned by hand again from a month on (none is this one).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct ClearFormula {
     pub category_id: Id<Category>,
     #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
@@ -598,6 +647,7 @@ pub struct PreviewFormula {
 /// bank line holds `matching`. It is a formula of one term, over a saved
 /// filter of exactly those conditions ([`crate::formulas::set_rule`]).
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct SetRule {
     pub category_id: Id<Category>,
     /// The first month it assigns; none is this month.
@@ -761,7 +811,9 @@ pub struct Summary {
     /// this month's money.
     pub overspent_last_month: i64,
     /// Categories overspent this month, and how many were assigned less
-    /// than their target in it.
+    /// than their target in it — those Auto-Assign would fund: a month a
+    /// formula assigns is not counted — or are a card's payment short of
+    /// its debt.
     pub overspent: i64,
     pub underfunded: i64,
 }
@@ -793,6 +845,9 @@ pub struct TxnLine {
     /// when none; and how many photos of a receipt were taken for it.
     pub receipt: String,
     pub photos: i64,
+    /// The other account of a transfer: the one its payee names.
+    #[serde(default)]
+    pub transfer_account_id: Option<Id<Account>>,
 }
 
 /// Somebody paid, and the category their last transaction was for.
@@ -974,6 +1029,7 @@ pub struct SplitLine {
 
 /// A receipt, and how far along its items are.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct ReceiptLine {
     pub id: String,
     pub store: String,
@@ -1021,6 +1077,7 @@ pub struct CandidateLine {
 
 /// A thing bought, wherever it was bought.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct ItemLine {
     pub receipt_id: String,
     pub line: i64,
@@ -1042,6 +1099,7 @@ pub struct ItemLine {
 /// the device ([`ark_peer::Peer::put_file`]), and the transaction it was
 /// taken for, when it was.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct AddPhoto {
     pub file: ark::file::FileRef,
     pub txn_id: Option<Id<Txn>>,
@@ -1051,6 +1109,7 @@ pub struct AddPhoto {
 /// server has, then the reading's `sure`, `settled` or `check`; `failed`
 /// with why, while it is tried again.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct PhotoLine {
     pub id: Id<Photo>,
     pub file: ark::file::FileRef,
@@ -1066,6 +1125,7 @@ pub struct PhotoLine {
 /// transaction it is for. `receipt_id` blank is a new one; the total is
 /// the items'.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct WriteReceipt {
     pub receipt_id: String,
     pub txn_id: Option<Id<Txn>>,

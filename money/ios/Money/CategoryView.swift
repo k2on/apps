@@ -32,19 +32,19 @@ struct CategoryView: View {
 
     var body: some View {
         if let l = model.snapshot.line(id) {
-            if Cards.isPayment(l) { payment(l) } else { page(l) }
+            if l.isPayment() { payment(l) } else { page(l) }
         } else {
             ContentUnavailableView("No Category", systemImage: "questionmark.folder", description: Text("It may have been deleted on another device."))
         }
     }
 
     private func page(_ l: BudgetLine) -> some View {
-        let tone = Tone.of(l)
+        let tone = l.tone()
         let spentHere = (model.register(nil) ?? []).filter { $0.categoryId == id && Months.of($0.date) == model.month }
         return List {
             Section {
                 HeroFigure("Available", cents: l.available, tint: tone.tint, note: model.monthName) {
-                    if let words = Ruled.words(l) {
+                    if let words = l.ruleWords() {
                         Label(words, systemImage: Ruled.symbol)
                             .font(.subheadline)
                             .foregroundStyle(.quiet)
@@ -68,7 +68,7 @@ struct CategoryView: View {
 
             Section {
                 figure("Left Over from Last Month", l.carried)
-                if Ruled.editable(l) {
+                if l.assignable() {
                     Button { present(.assign(l.categoryId)) } label: {
                         LabeledContent("Assigned This Month") { CentsText(l.assigned).foregroundStyle(Color.ink) }
                     }
@@ -94,28 +94,28 @@ struct CategoryView: View {
             Section("Target") {
                 if l.target > 0 {
                     HStack(spacing: Space.l) {
-                        Gauge(value: funded(l) ?? 0) {
+                        Gauge(value: l.meter()?.fraction() ?? 0) {
                             EmptyView()
                         } currentValueLabel: {
-                            Text("\(Int(((funded(l) ?? 0) * 100).rounded()))%").font(.caption.weight(.semibold))
+                            Text("\(Int(((l.meter()?.fraction() ?? 0) * 100).rounded()))%").font(.caption.weight(.semibold))
                         }
                         .gaugeStyle(.accessoryCircularCapacity)
                         .tint(tone == .short ? Color.caution : Color.positive)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(CentsText.string(l.target)) a month").font(.headline)
-                            Text(l.assigned >= l.target ? "Funded this month" : "\(CentsText.string(Moves.toTarget(l))) more to meet it")
+                            Text(l.assigned >= l.target ? "Funded this month" : "\(CentsText.string(l.toTarget())) more to meet it")
                                 .font(.subheadline)
                                 .foregroundStyle(l.assigned >= l.target ? Color.positive : Color.quiet)
                         }
                     }
                     .padding(.vertical, Space.xs)
                     .accessibilityElement(children: .combine)
-                    if l.assigned < l.target && Ruled.editable(l) {
+                    if l.assigned < l.target && l.assignable() {
                         Button {
                             model.assign(l.categoryId, l.target)
                             assigned += 1
                         } label: {
-                            Label("Assign \(CentsText.string(Moves.toTarget(l)))", systemImage: "target")
+                            Label("Assign \(CentsText.string(l.toTarget()))", systemImage: "target")
                         }
                     }
                     Button { present(.target(l.categoryId)) } label: { Label("Edit Target", systemImage: "scope") }
@@ -129,7 +129,7 @@ struct CategoryView: View {
                 }
             }
 
-            if Ruled.editable(l) {
+            if l.assignable() {
                 Section {
                     quick("Assigned Last Month", l.assignedLastMonth, l)
                     quick("Spent Last Month", -l.spentLastMonth, l)
@@ -183,12 +183,12 @@ struct CategoryView: View {
     /// name is the card's and it goes when the card does: nothing to rename
     /// or delete, and no target — the debt is its target.
     private func payment(_ l: BudgetLine) -> some View {
-        let tone = Tone.of(l)
+        let tone = l.tone()
         let onCard = (model.register(nil) ?? []).filter { $0.accountId == l.card && Months.of($0.date) == model.month }
         return List {
             Section {
                 HeroFigure("Available for Payment", cents: l.available, tint: tone.tint, note: model.monthName) {
-                    if let cover = Cards.toCover(l) {
+                    if let cover = l.toCover() {
                         Button {
                             model.assign(l.categoryId, cover)
                             assigned += 1
@@ -221,7 +221,7 @@ struct CategoryView: View {
                 LabeledContent("Not Covered") {
                     CentsText(l.underfunded).foregroundStyle(l.underfunded > 0 ? Color.caution : Color.positive)
                 }
-                if let c = Cards.covered(l) {
+                if let c = l.meter()?.fraction() {
                     ProgressView(value: c) {
                         EmptyView()
                     } currentValueLabel: {

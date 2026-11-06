@@ -50,7 +50,7 @@ fn a_bank_is_connected_from_the_app() {
     let mut alice = caught_up(&server, "alice");
     let kept = OpenAccount {
         name: "Checking".into(),
-        kind: "checking".into(),
+        kind: money_domain::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 50_000,
         date: "2026-09-01".into(),

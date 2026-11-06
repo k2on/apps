@@ -51,9 +51,9 @@ final class Seen {
     func line(_ name: String) -> BudgetLine? { snap.lines.first { $0.name == name } }
     func account(_ name: String) -> AccountLine? { snap.accounts.first { $0.name == name } }
 
-    /// `f` done on the session, and everything it moved published.
-    func write(_ f: @escaping (Money) throws -> Void) {
-        bridge.write("do it", f)
+    /// One of the domain's changes sent through the session, and everything it moved published.
+    func write(_ change: MoneyChange) {
+        bridge.write("do it", change)
         bridge.settle()
     }
 }
@@ -65,7 +65,7 @@ extension Fx {
     /// that follows that rule.
     static func line(_ name: String, available: Int64, target: Int64 = 0, assigned: Int64 = 0, card: Id? = nil,
                      debt: Int64 = 0, underfunded: Int64 = 0, creditOverspent: Int64 = 0, rule: String? = nil) -> BudgetLine {
-        BudgetLine(categoryId: id(name.count), groupId: card == nil ? id(100) : Fixed.cardGroup, group: card == nil ? "Everyday" : "Credit Card Payments",
+        BudgetLine(categoryId: id(name.count), groupId: card == nil ? id(100) : cardGroupId(), group: card == nil ? "Everyday" : "Credit Card Payments",
                    groupPos: card == nil ? 2 : 1, name: name, pos: 1, hidden: false, target: target, assigned: assigned, activity: 0,
                    available: available, carried: 0, assignedLastMonth: 0, spentLastMonth: 0, averageSpent: 0,
                    card: card, debt: debt, underfunded: underfunded, creditOverspent: creditOverspent,

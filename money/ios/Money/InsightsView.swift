@@ -63,8 +63,8 @@ struct InsightsView: View {
                     // Paying a card is not spending (what it bought was), so
                     // it is in neither figure; what the cards owe beyond
                     // what is set aside for them is said apart.
-                    if s.lines.contains(where: Cards.isPayment) {
-                        let short = Cards.uncovered(s.lines)
+                    if s.lines.contains(where: { $0.isPayment() }) {
+                        let short = uncovered(lines: s.lines)
                         LabeledContent("Card Debt Not Covered") {
                             CentsText(short).foregroundStyle(short > 0 ? Color.caution : Color.positive).rolls(on: model.snapshot.month)
                         }
