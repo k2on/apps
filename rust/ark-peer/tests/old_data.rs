@@ -58,8 +58,7 @@ fn create_playlist(ctx: &Ctx, db: &mut Db<App>, input: CreatePlaylist) -> Result
 }
 
 fn config() -> Config {
-    Config::of(Arc::new(ark::register!(
-        Domain::new::<App>("app", "1").with(ark_auth::register::<App>); create_playlist)))
+    Config::of(Arc::new(ark::functions!(Domain::new::<App>("app", "1").with(ark_auth::register::<App>))))
 }
 
 /// The token the writer's sign-in was given, and what the fixture holds:

@@ -16,7 +16,7 @@ fn config() -> Config {
 }
 
 fn server() -> Handle<ark_peer::Authority> {
-    let c = arkdb::demo::hub(config());
+    let c = arkdb::room::hub(config());
     Handle::spawn(ark_peer::Authority::serve(c, Box::new(Memory::default()), 0).unwrap())
 }
 
@@ -37,7 +37,7 @@ fn login(token: &str) -> Login {
 
 /// A device on a disk of its own, saying `name` in the live space.
 fn device(dir: &tempfile::TempDir, name: &str, who: Option<Login>) -> Arc<Peer> {
-    let c = arkdb::demo::device(config(), name, 10);
+    let c = arkdb::room::device(config(), name, 10);
     Peer::open(c, dir.path().to_str().unwrap(), who).expect("opened")
 }
 

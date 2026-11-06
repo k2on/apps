@@ -746,31 +746,6 @@ pub fn receipt_items(_: &Ctx, _: &Db<Money>, input: OneReceipt) -> Result<Plan<I
         .sort(|l| l.line))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Tax spread in proportion, and every cent accounted for.
-    #[test]
-    fn shares_add_up_to_the_whole() {
-        assert_eq!(shares(-8740, &[-429, -3599, -4181]), vec![-457, -3832, -4451]);
-        assert_eq!(shares(-100, &[-1, -1, -1]), vec![-33, -33, -34]);
-        assert_eq!(shares(-500, &[-1000, 200]), vec![-625, 125]);
-        assert_eq!(shares(-500, &[0, 0]), vec![-500, 0]);
-        for (t, p) in [(-12345, vec![-333, -667, -1]), (999, vec![1, 2, 3, 4])] {
-            assert_eq!(shares(t, &p).iter().sum::<i64>(), t);
-        }
-    }
-
-    #[test]
-    fn words_fold_plurals_and_case() {
-        assert_eq!(words("KS ORGANIC EGGS 24CT"), ["ks", "organic", "egg", "24ct"].map(String::from).to_vec());
-        assert_eq!(words("Glass"), vec!["glass".to_string()]);
-        assert_eq!(key_of("costco", "", "KS Eggs, 24ct"), "costco:~ks egg 24ct");
-        assert_eq!(key_of("amazon", "B07X", "x"), "amazon:B07X");
-    }
-}
-
 // * Photos
 
 /// A photo of a paper receipt, kept, and read by the server: a [`Photo`]
@@ -896,4 +871,29 @@ pub fn for_txn(_: &Ctx, _: &Db<Money>, input: OneTxn) -> Result<Plan<ReceiptLine
                 .any(|p| matches!(&p.state, Job::Done(d) if d.receipt_id == r.id))
     });
     Ok(receipt_lines(mine))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tax spread in proportion, and every cent accounted for.
+    #[test]
+    fn shares_add_up_to_the_whole() {
+        assert_eq!(shares(-8740, &[-429, -3599, -4181]), vec![-457, -3832, -4451]);
+        assert_eq!(shares(-100, &[-1, -1, -1]), vec![-33, -33, -34]);
+        assert_eq!(shares(-500, &[-1000, 200]), vec![-625, 125]);
+        assert_eq!(shares(-500, &[0, 0]), vec![-500, 0]);
+        for (t, p) in [(-12345, vec![-333, -667, -1]), (999, vec![1, 2, 3, 4])] {
+            assert_eq!(shares(t, &p).iter().sum::<i64>(), t);
+        }
+    }
+
+    #[test]
+    fn words_fold_plurals_and_case() {
+        assert_eq!(words("KS ORGANIC EGGS 24CT"), ["ks", "organic", "egg", "24ct"].map(String::from).to_vec());
+        assert_eq!(words("Glass"), vec!["glass".to_string()]);
+        assert_eq!(key_of("costco", "", "KS Eggs, 24ct"), "costco:~ks egg 24ct");
+        assert_eq!(key_of("amazon", "B07X", "x"), "amazon:B07X");
+    }
 }

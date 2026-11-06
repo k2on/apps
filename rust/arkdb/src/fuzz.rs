@@ -140,13 +140,13 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     hub.feed = Arc::new(move |w: &Ctx| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
-        (hub.live, hub.live_keep) = (Some(Arc::new(crate::demo::room())), Some(4));
+        (hub.live, hub.live_keep) = (Some(Arc::new(crate::room::room())), Some(4));
     }
 
     let n = 2 + r.below(3) as i64;
     let partial = r.one_in(2);
     let config = |i: i64| match live {
-        true => crate::demo::device(Config::of(Arc::new(crate::demo::demo())), &format!("d{i}"), 50),
+        true => crate::room::device(Config::of(Arc::new(crate::demo::demo())), &format!("d{i}"), 50),
         false => Config::of(Arc::new(crate::demo::demo())),
     };
     let logins: Vec<(Ctx, Config)> = (0..n).map(|i| (login(i + !partial as i64, 0, r.one_in(3)), config(i))).collect();
@@ -165,8 +165,8 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
         let whole = !(partial && i == 0);
         let op = match r.below(40) {
             0..=11 => g.mutate(&mut r, &net, i),
-            12..=13 if live => Op::Call(i, "room.point".into(), crate::demo::Point { x: r.below(100) as i64 }.to_bytes()),
-            14 if live => Op::Call(i, "room.rename".into(), crate::demo::Rename { name: "x".into() }.to_bytes()),
+            12..=13 if live => Op::Call(i, "room.point".into(), crate::room::Point { x: r.below(100) as i64 }.to_bytes()),
+            14 if live => Op::Call(i, "room.rename".into(), crate::room::Rename { name: "x".into() }.to_bytes()),
             15 => Op::Partition(i),
             16 => Op::Heal(i),
             17 if r.one_in(3) => Op::Restart,

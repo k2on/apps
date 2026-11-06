@@ -19,6 +19,7 @@
 
 extern crate self as ark;
 
+pub use ark_macros::functions;
 pub use domain::{effect, Domain};
 
 pub mod db;

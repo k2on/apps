@@ -2,14 +2,14 @@
 //! `Input`, `Describe` and `Schema` read a struct or an enum and write what
 //! the kernel needs of it — its table, its key, its typed indexes, its
 //! refinements, its type description, its tables' handles — and
-//! `#[mutator(..)]` and the rest leave a function as it is and add the one
-//! line that registers it by name.
+//! `#[mutator(..)]` and the rest leave a function as it is, declared by a
+//! name that `functions!` reads from the source and registers.
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
-use syn::{Data, DeriveInput, Expr, Fields, Ident, ItemFn, LitStr, Token, Type};
+use syn::{Data, DeriveInput, Expr, Fields, Ident, LitStr, Token, Type};
 
 pub(crate) fn err<T>(span: Span, msg: &str) -> syn::Result<T> {
     Err(syn::Error::new(span, msg))
@@ -455,28 +455,76 @@ pub fn schema(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// `#[mutator("name")]` and the rest: the function as it is, and beside
-/// it a module of its name whose `register` adds it to a domain.
-pub fn register(kind: &str, attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let (name, f): (LitStr, ItemFn) = (syn::parse2(attr)?, syn::parse2(item)?);
-    let (ident, vis) = (&f.sig.ident, &f.vis);
-    let method = format_ident!("{}", kind);
-    let add = if kind == "scope" {
-        quote!(d.scope(#name, super::#ident()))
-    } else {
-        quote!(d.#method(#name, super::#ident))
-    };
-    let doc = format!("Registers `{}` as `{}`.", ident, name.value());
-    Ok(quote! {
-        #f
+/// `#[mutator("name")]` and the rest: the function as it is. What declares
+/// it is the attribute itself, which [`functions`] reads.
+pub fn function(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
+    syn::parse2::<LitStr>(attr)?;
+    Ok(item)
+}
 
-        #[doc(hidden)]
-        #[allow(non_snake_case)]
-        #vis mod #ident {
-            #[doc = #doc]
-            pub fn register(d: ::ark::domain::Domain) -> ::ark::domain::Domain {
-                #add
-            }
+/// `functions!(domain)`: `domain` with every function of the file it is
+/// written in, and of the modules that file declares, registered by the
+/// name its `#[mutator(..)]`, `#[view(..)]` or `#[scope(..)]` gives it. A
+/// module or a function under `#[cfg(..)]`, and a module at a `#[path]`, are
+/// not read.
+pub fn functions(domain: TokenStream) -> syn::Result<TokenStream> {
+    let Some(file) = proc_macro::Span::call_site().local_file() else {
+        return err(Span::call_site(), "functions! reads the file it is written in, which is not on disk");
+    };
+    let mut found = vec![];
+    read(&file, &mut vec![], &mut found)?;
+    let adds = found.iter().map(|(kind, name, path)| match kind.as_str() {
+        "scope" => quote!(.scope(#name, self::#(#path)::*())),
+        _ => {
+            let method = format_ident!("{}", kind);
+            quote!(.#method(#name, self::#(#path)::*))
         }
-    })
+    });
+    Ok(quote!((#domain) #(#adds)*))
+}
+
+/// A function found: its kind, its name, its path from the file
+/// [`functions`] is written in.
+type Found = (String, LitStr, Vec<Ident>);
+
+fn read(file: &std::path::Path, at: &mut Vec<Ident>, found: &mut Vec<Found>) -> syn::Result<()> {
+    let text = std::fs::read_to_string(file).or_else(|e| err(Span::call_site(), &format!("{}: {e}", file.display())))?;
+    // A file declares its modules in the directory of its name; a crate's
+    // root, or a `mod.rs`, beside it.
+    let dir = match file.with_extension("") {
+        d if d.is_dir() && !["lib", "main", "mod"].iter().any(|r| d.ends_with(r)) => d,
+        _ => file.with_file_name(""),
+    };
+    scan(&syn::parse_file(&text)?.items, &dir, at, found)
+}
+
+fn scan(items: &[syn::Item], dir: &std::path::Path, at: &mut Vec<Ident>, found: &mut Vec<Found>) -> syn::Result<()> {
+    let has = |attrs: &[syn::Attribute], name: &str| attrs.iter().any(|a| a.path().is_ident(name));
+    for item in items {
+        match item {
+            syn::Item::Fn(f) if !has(&f.attrs, "cfg") => {
+                for a in &f.attrs {
+                    let kind = a.path().segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+                    if ["mutator", "view", "scope"].contains(&kind.as_str()) {
+                        let path = at.iter().chain([&f.sig.ident]).cloned().collect();
+                        found.push((kind, a.parse_args()?, path));
+                    }
+                }
+            }
+            syn::Item::Mod(m) if !has(&m.attrs, "cfg") && !has(&m.attrs, "path") => {
+                at.push(m.ident.clone());
+                match &m.content {
+                    Some((_, inner)) => scan(inner, &dir.join(m.ident.to_string()), at, found)?,
+                    None => {
+                        let one = dir.join(format!("{}.rs", m.ident));
+                        let many = dir.join(m.ident.to_string()).join("mod.rs");
+                        read(if one.exists() { &one } else { &many }, at, found)?;
+                    }
+                }
+                at.pop();
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }

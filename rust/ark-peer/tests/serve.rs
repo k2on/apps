@@ -347,7 +347,7 @@ fn a_web_build_is_its_own_validator() {
 fn the_live_space_is_restored_and_on_restore_authored() {
     let config = ServerConfig {
         live_keep: Some(8),
-        live: Some(Arc::new(arkdb::demo::room())),
+        live: Some(Arc::new(arkdb::room::room())),
         ..config().into()
     };
     let mut hub = Authority::serve(config.clone(), Box::new(Memory::default()), 0).unwrap();
@@ -356,7 +356,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     let device = Frame::Call {
         id: 0,
         name: ark::frames::DEVICE.into(),
-        input: arkdb::demo::Arrival { name: "phone".into() }.to_bytes(),
+        input: arkdb::room::Arrival { name: "phone".into() }.to_bytes(),
     };
     let hello = Frame::Hello {
         space: Space::Volatile,
@@ -368,7 +368,7 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     };
     hub.frame(c, device.enc(), 1);
     hub.frame(c, hello.enc(), 1);
-    hub.mutate_at("room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2).unwrap();
+    hub.mutate_at("room.point", arkdb::room::Point { x: 7 }.to_bytes(), 2).unwrap();
     let live = |h: &Authority| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

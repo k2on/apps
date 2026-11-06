@@ -50,7 +50,7 @@ pub fn mine() -> Scope<Photos> {
 }
 
 fn domain() -> Domain {
-    ark::register!(Domain::new::<Photos>("photos", "1"); add, mine)
+    ark::functions!(Domain::new::<Photos>("photos", "1"))
 }
 
 fn config() -> Config {

@@ -92,7 +92,9 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
   it holds (§1.8).
 
 A helper or a guard takes `&Db<S>` and cannot write: the borrow checker
-is the effect system. The attribute only registers a function by name:
+is the effect system. The attribute only declares a function by name;
+`ark::functions!` registers every one its file and that file's modules
+declare (none under `#[cfg]` or at a `#[path]`), so none is listed by hand:
 
 ```rust
 #[scope("demo.top_two")]
@@ -102,8 +104,7 @@ pub fn top_two() -> Scope<Demo> {
 
 /// The demo, every function registered.
 pub fn demo() -> Domain {
-    ark::register!(Domain::new::<Demo>("demo", "1");
-        create_playlist, add_to_playlist, rename_playlist, remove_from_playlist, items, top_two)
+    ark::functions!(Domain::new::<Demo>("demo", "1"))
 }
 ```
 

@@ -3,8 +3,9 @@
 //! A [`Domain`] is what a crate of plain Rust registers: the schema its
 //! `#[derive(Schema)]` struct is, and per name — `playlists.add_to_playlist`
 //! — a function and its input's type description. `#[mutator(..)]`,
-//! `#[view(..)]` and `#[scope(..)]` only register a function by name
-//! ([`register!`]); what it does is the Rust.
+//! `#[view(..)]` and `#[scope(..)]` only declare a function by name, and
+//! [`functions!`](crate::functions) registers every one a crate declares;
+//! what it does is the Rust.
 //!
 //! - a **mutator** is `fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>`:
 //!   the machine of the space it writes (`P`, durable unless it says
@@ -226,8 +227,8 @@ impl Domain {
         })
     }
 
-    /// `register(self)`: what `#[mutator(..)]` and the rest generate, and
-    /// [`register!`] calls.
+    /// `register(self)`: a set of functions registered together, a
+    /// crate's (`ark_auth::register`) or a job's.
     pub fn with(self, register: fn(Domain) -> Domain) -> Domain {
         register(self)
     }
@@ -298,13 +299,4 @@ impl Domain {
         let w = f.watch.as_ref().ok_or_else(|| format!("{name} is not a view"))?;
         w(store, ctx, input)
     }
-}
-
-/// Registers functions by their paths: `register!(domain; demo::create,
-/// demo::rename)` is `domain.with(demo::create::register)…`.
-#[macro_export]
-macro_rules! register {
-    ($d:expr; $($($p:ident)::+),* $(,)?) => {
-        $d $(.with($($p)::+::register))*
-    };
 }

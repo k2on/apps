@@ -149,8 +149,7 @@ pub fn mine() -> Scope<Demo> {
 
 /// The demo, every function registered.
 pub fn demo() -> Domain {
-    ark::register!(Domain::new::<Demo>("demo", "1");
-        create_playlist, add_to_playlist, rename_playlist, remove_from_playlist, items, top_two, mine)
+    ark::functions!(Domain::new::<Demo>("demo", "1"))
 }
 
 pub fn schema() -> Schema {

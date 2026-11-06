@@ -303,8 +303,10 @@ kernel through FFI (N3); ArkLang, the checker and the interpreter go.
    tables; a **view** returns a `Plan<R>` built by `plan::scan::<R>()
    .filter(..).sort(..).take(n)`, `group`, `join`, because maintenance must
    see the plan. `#[mutator("playlists.add_to_playlist")]` (and `live`,
-   `query`, `view`, `scope`) only registers the function by name in a
-   `Domain`: name → function and its input's type description.
+   `query`, `view`, `scope`) only declares the function by name;
+   `ark::functions!` reads every declaration of its file and that file's
+   modules and registers each in a `Domain`: name → function and its
+   input's type description.
 2. **Reads are typed handles.** `db.playlist.get(id)`, `db.playlist_item
    .by(PlaylistItem::PLAYLIST_POS).from(id).last()`, `scan`, `range`: the
    author names the index, a wrong column is a compile error, and nothing

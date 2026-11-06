@@ -223,10 +223,7 @@ pub fn has_search(_: &Ctx, _: &Db<Library>, input: Needle) -> View<(i64, String)
 
 /// The library, every view registered.
 pub fn library() -> Domain {
-    ark::register!(Domain::new::<Library>("library", "1");
-        top_two_by_pos, playlist_with_items, projection, having_admits_on_a_child, group_source,
-        lookup_chain, related_on_a_non_key_column, expression_order_under_a_limit,
-        related_three_deep, playlist_join_item, kept_max, has_search)
+    ark::functions!(Domain::new::<Library>("library", "1"))
 }
 
 /// A sum of integers taken whole and judged once (v4's §6.5 rule): an
@@ -278,7 +275,6 @@ pub mod colors {
     pub type Sum = (Option<Color>, i64, i64);
 
     /// Per colour, last first: the colour, how many, the sum of `k1`.
-    #[view("colors.kept_sums")]
     pub fn kept_sums(_: &Ctx, _: &Db<Colors>, _: ()) -> Result<Plan<Colors, Sum>, String> {
         Ok(scan::<Colors, T1>()
             .group(
@@ -289,7 +285,7 @@ pub mod colors {
     }
 
     pub fn domain() -> Domain {
-        ark::register!(Domain::new::<Colors>("colors", "1"); kept_sums)
+        Domain::new::<Colors>("colors", "1").view("colors.kept_sums", kept_sums)
     }
 }
 
@@ -334,7 +330,6 @@ pub mod pairs {
 
     /// The rows of `t0` whose `p0` is not the input's, per `c00`: those of
     /// two or more, each its `c00`, how many, the sum of `n0`.
-    #[view("pairs.kept_sums")]
     pub fn kept_sums(_: &Ctx, _: &Db<Pairs>, input: Other) -> Result<Plan<Pairs, (i64, i64, i64)>, String> {
         Ok(scan::<Pairs, T0>()
             .filter(move |r| r.p0 != input.f_p0)
@@ -343,7 +338,7 @@ pub mod pairs {
     }
 
     pub fn domain() -> Domain {
-        ark::register!(Domain::new::<Pairs>("pairs", "1"); kept_sums)
+        Domain::new::<Pairs>("pairs", "1").view("pairs.kept_sums", kept_sums)
     }
 }
 

@@ -197,7 +197,7 @@ fn carried(server: &mut Peer, alice: &mut Peer, o: &[ark::peer::Output]) -> Vec<
 /// refused.
 #[test]
 fn an_input_of_an_older_or_a_newer_build_is_read() {
-    let noted = ark::register!(ark::Domain::new::<demo::Demo>("demo", "2"); create_noted);
+    let noted = ark::functions!(ark::Domain::new::<demo::Demo>("demo", "2"));
     let mut server = authority(Arc::new(noted));
     let mut alice = replica("alice", demo::cas());
     let o = alice.step(mutate(CREATE, create_input("Road"), 1));

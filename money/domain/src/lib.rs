@@ -57,27 +57,11 @@ pub const BANK: &str = "bank";
 /// This domain's version: what a build says it runs, beside its schema's hash.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Every function, registered by its name.
+/// Every function this crate declares, registered by its name.
 pub fn domain() -> Domain {
-    ark::register!(Domain::new::<Money>("money", VERSION);
-        budget::setup, budget::assign, budget::move_money, budget::auto_assign,
-        budget::groups, budget::month, budget::summary, budget::spending,
-        categories::add_group, categories::rename_group, categories::hide_group, categories::delete_group,
-        categories::add_category, categories::rename_category, categories::hide_category, categories::move_category, categories::move_group,
-        categories::set_target, categories::delete_category, categories::add_subcategory, categories::tree,
-        formulas::set_formula, formulas::clear_formula, formulas::formulas, formulas::preview_formula, formulas::set_rule,
-        filters::save_filter, filters::rename_filter, filters::change_filter, filters::delete_filter, filters::move_filter,
-        filters::saved, filters::filtered, filters::filtered_total,
-        accounts::open_account, accounts::rename_account, accounts::close_account, accounts::accounts,
-        transactions::add_transaction, transactions::edit_transaction, transactions::delete_transactions,
-        transactions::approve, transactions::categorize, transactions::set_cleared, transactions::reconcile,
-        transactions::register, transactions::inbox, transactions::payees, transactions::split, transactions::add_split, transactions::splits,
-        receipts::add_receipts, receipts::file_items, receipts::pay, receipts::receipts, receipts::items, receipts::receipt_items,
-        receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates, receipts::add_photo, receipts::photos, receipts::write_receipt, receipts::for_txn,
-        plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, plaid::retired,
-        banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
-    .with(ark_auth::register::<Money>)
-    .with(<Photo as ark::effect::Effect>::register::<Money>)
+    ark::functions!(Domain::new::<Money>("money", VERSION))
+        .with(ark_auth::register::<Money>)
+        .with(<Photo as ark::effect::Effect>::register::<Money>)
 }
 
 /// What a connection fed by scope holds (§1.8): the budget whole — it is

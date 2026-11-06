@@ -24,7 +24,7 @@ use ark::format::Encode;
 use ark::schema::Space;
 use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
-use arkdb::demo::{Arrival, Point};
+use arkdb::room::{Arrival, Point};
 
 /// harken-server's live `keep`.
 const KEEP: usize = 256;
@@ -36,7 +36,7 @@ fn hub() -> Authority {
 fn scoped_hub(feed: ark_peer::Scoping) -> Authority {
     let c = ark_peer::ServerConfig {
         live_keep: Some(KEEP),
-        live: Some(Arc::new(arkdb::demo::room())),
+        live: Some(Arc::new(arkdb::room::room())),
         feed,
         ..ark_peer::ServerConfig::of(Arc::new(domain()))
     };
@@ -46,7 +46,7 @@ fn scoped_hub(feed: ark_peer::Scoping) -> Authority {
 fn device(k: usize) -> Peer {
     let c = Config {
         device: Some(Arrival { name: format!("d{k}") }.to_bytes()),
-        live: Some(Arc::new(arkdb::demo::room())),
+        live: Some(Arc::new(arkdb::room::room())),
         ..Config::of(Arc::new(domain()))
     };
     let who = dev(&format!("u{k}@d{k}")).unwrap();
@@ -158,7 +158,7 @@ fn live_held_measured() {
 }
 
 /// Of the room's pointers, a connection fed by the demo's scope holds only
-/// its own (`arkdb::demo::room_top_two`), as it is filled and as the
+/// its own (`arkdb::room::room_top_two`), as it is filled and as the
 /// pointers move; one fed whole holds every one. Falsified by the hub
 /// before the live machine was given the feed: `u0`'s device held `u1`'s
 /// pointer.
@@ -186,7 +186,7 @@ fn a_scoped_connection_holds_only_its_live_rows() {
         let rows = live(p)
             .store
             .rows("pointer")
-            .map(|r| arkdb::demo::Pointer::from_bytes(r).unwrap().session);
+            .map(|r| arkdb::room::Pointer::from_bytes(r).unwrap().session);
         rows.collect()
     };
     assert_eq!(pointers(&hub), ["u0@d0", "u1@d1"]);

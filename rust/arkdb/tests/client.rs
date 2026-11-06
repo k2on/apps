@@ -15,7 +15,8 @@ use ark::peer::Ctx;
 use ark::row::Id;
 use ark::schema::Space;
 use ark_peer::{Config, Disk, Memory, Peer};
-use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items, Point, Rename};
+use arkdb::demo::{AddToPlaylist, CreatePlaylist, Items};
+use arkdb::room::{Point, Rename};
 use arkdb::sim::{who, Net, Op};
 
 fn demo() -> Config {
@@ -121,9 +122,9 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
     let hub = ark_peer::ServerConfig {
         live_keep: Some(8),
-        ..arkdb::demo::hub(demo()).into()
+        ..arkdb::room::hub(demo()).into()
     };
-    let config = |name: &str| arkdb::demo::device(demo(), name, 100);
+    let config = |name: &str| arkdb::room::device(demo(), name, 100);
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);
     n.deliver();
     let ctx = Ctx::default();

@@ -68,7 +68,7 @@ fn cas() -> Domain {
         schema: schema(),
         ..Arc::unwrap_or_clone(demo::only(&[demo::CREATE]))
     };
-    let waves = ark::register!(Domain::new::<Waves>("waves", "1"); wave);
+    let waves = ark::functions!(Domain::new::<Waves>("waves", "1"));
     c.fns.insert("waves.wave".into(), waves.fns["waves.wave"].clone());
     c
 }

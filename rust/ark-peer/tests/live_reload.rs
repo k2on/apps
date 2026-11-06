@@ -7,11 +7,12 @@ use ark::format::Encode;
 use ark::schema::Space;
 use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
-use arkdb::demo::{Arrival, CreatePlaylist, Point};
+use arkdb::demo::CreatePlaylist;
+use arkdb::room::{Arrival, Point};
 
 fn hub() -> Authority {
     let c = ark_peer::ServerConfig {
-        live: Some(Arc::new(arkdb::demo::room())),
+        live: Some(Arc::new(arkdb::room::room())),
         ..ark_peer::ServerConfig::of(Arc::new(domain()))
     };
     Authority::serve(c, Box::new(Memory::default()), 0).unwrap()
@@ -20,7 +21,7 @@ fn hub() -> Authority {
 fn device() -> Peer {
     let c = Config {
         device: Some(Arrival { name: "d0".into() }.to_bytes()),
-        live: Some(Arc::new(arkdb::demo::room())),
+        live: Some(Arc::new(arkdb::room::room())),
         ..Config::of(Arc::new(domain()))
     };
     let mut p = Peer::open(c, dev("u0@d0").unwrap(), Box::new(Memory::default()));

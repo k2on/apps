@@ -49,23 +49,31 @@ pub fn schema(input: TokenStream) -> TokenStream {
     out(domain::schema(syn::parse_macro_input!(input as syn::DeriveInput)))
 }
 
-/// `#[mutator("name")]`: registers `fn(&Ctx, &mut Db<S, P>, I) ->
+/// `#[mutator("name")]`: declares `fn(&Ctx, &mut Db<S, P>, I) ->
 /// Result<(), String>` by name, on the space `P` it writes (`Db<S>` the
 /// log's, `Db<S, Volatile>` the live space's).
 #[proc_macro_attribute]
 pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("mutator", attr.into(), item.into()))
+    out(domain::function(attr.into(), item.into()))
 }
 
-/// `#[view("name")]`: registers `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
+/// `#[view("name")]`: declares `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
 /// String>`, a query kept up to date.
 #[proc_macro_attribute]
 pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("view", attr.into(), item.into()))
+    out(domain::function(attr.into(), item.into()))
 }
 
-/// `#[scope("name")]`: registers `fn() -> Scope<S>`.
+/// `#[scope("name")]`: declares `fn() -> Scope<S>`.
 #[proc_macro_attribute]
 pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::register("scope", attr.into(), item.into()))
+    out(domain::function(attr.into(), item.into()))
+}
+
+/// `functions!(domain)`: `domain` with every function the file it is
+/// written in declares, and the modules that file declares, each by its
+/// name: no list of them is kept by hand.
+#[proc_macro]
+pub fn functions(domain: TokenStream) -> TokenStream {
+    out(domain::functions(domain.into()))
 }

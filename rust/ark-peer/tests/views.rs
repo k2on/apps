@@ -7,11 +7,10 @@ use ark::format::Encode;
 use ark::prelude::*;
 use ark::schema::Space;
 use ark_peer::{Config, Memory, Patch, Peer};
-use arkdb::demo::{add_to_playlist, create_playlist, rename_playlist, AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
+use arkdb::demo::{AddToPlaylist, CreatePlaylist, Demo, Item, Playlist, RenamePlaylist};
 
 /// The items of the playlist of this name of the reader's: refused when
 /// there is none, which is read as the view is made.
-#[view("demo.named")]
 pub fn named(ctx: &Ctx, db: &Db<Demo>, input: CreatePlaylist) -> Result<Plan<Demo, Item>, String> {
     let key = (ctx.user().to_string(), input.name);
     let p: Playlist = db
@@ -35,7 +34,7 @@ fn author(p: &mut Peer, name: &str, input: Vec<u8>) {
 /// had no rows.
 #[test]
 fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
-    let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
+    let domain = arkdb::demo::demo().view("demo.named", named);
     let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
     author(&mut p, "demo.create_playlist", CreatePlaylist { name: "Road".into() }.to_bytes());
     let road = p.log.pending()[0].entry.id.draw(0);
@@ -78,7 +77,7 @@ fn a_view_that_cannot_be_kept_up_is_made_again_under_its_number() {
 /// bob signed in it said it was patched.
 #[test]
 fn a_watched_view_keeps_its_rows_typed_and_follows_the_login() {
-    let domain = ark::register!(Domain::new::<Demo>("demo", "1"); create_playlist, add_to_playlist, rename_playlist, named);
+    let domain = arkdb::demo::demo().view("demo.named", named);
     let mut p = Peer::open_as(Config::of(Arc::new(domain)), Box::new(Memory::default()), None);
     p.sign_in(ark::peer::Ctx::who("alice", "a", vec![]));
     let road = CreatePlaylist { name: "Road".into() }.to_bytes();

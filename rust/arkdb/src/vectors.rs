@@ -19,7 +19,8 @@ use ark::store::{Change, Store};
 use ark_peer::Config;
 use serde_json::{json, Value};
 
-use crate::demo::{AddToPlaylist, CreatePlaylist, Point, Rename};
+use crate::demo::{AddToPlaylist, CreatePlaylist};
+use crate::room::{Point, Rename};
 use crate::sim::{who, Net, Op};
 
 fn dir(d: &str) -> PathBuf {
@@ -123,10 +124,10 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
     let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
     let hub = ark_peer::ServerConfig {
         live_keep: Some(4),
-        ..crate::demo::hub(demo()).into()
+        ..crate::room::hub(demo()).into()
     };
 
-    let device = |name: &str| crate::demo::device(demo(), name, 100);
+    let device = |name: &str| crate::room::device(demo(), name, 100);
     let point = |i, x| Op::Call(i, "room.point".into(), Point { x }.to_bytes());
     let steps = |n: usize| vec![Op::Step; n];
     vec![
