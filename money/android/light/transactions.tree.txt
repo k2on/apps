@@ -1,0 +1,54 @@
+    #content
+                  [field] pressable
+                    'Payee, category, memo or amount' [text]
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To Review (4)' [text]
+                      [button]
+                  '4 to Review' [text]
+                  [button] pressable
+                    'Approve All' [text]
+                    [button]
+                    [button] pressable
+                      "Trader Joe's, -$110.45, Groceries, waiting for review, uncleared"
+                      "Trader Joe's" [text]
+                      'Groceries' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$110.45' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Blue Bottle Coffee, -$31.55, Dining Out, waiting for review, cleared'
+                      'Blue Bottle Coffee' [text]
+                      'Dining Out' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$31.55' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Netflix, -$15.00, Subscriptions, waiting for review, cleared'
+                      'Netflix' [text]
+                      'Subscriptions' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$15.00' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Whole Foods Market, -$135.46, Groceries, waiting for review, cleared'
+                      'Whole Foods Market' [text]
+                      'Groceries' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$135.46' [text]
+                      [button] pressable
+                  'Swipe right to approve. Tap one to choose its category or change it.' [text]
+                'Transactions' [text]
+                [button] pressable
+                  'Signed in as Alex'
+                  [button]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
