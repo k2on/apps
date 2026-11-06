@@ -58,6 +58,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.NameField
 import dev.arkui.Cover
 import dev.arkui.SheetRow
 import dev.arkui.Springs
@@ -179,21 +180,10 @@ fun NewPlaylistCard(name: String, problem: String?, adding: Boolean, onName: (St
     }
 }
 
-/** Naming a new playlist: the field, and the module's sentence when the name will not do. */
+/** Naming a new playlist: ArkUI's field, and the module's sentence when the name will not do. */
 @Composable
 fun NewPlaylist(name: String, problem: String?, onName: (String) -> Unit) {
-    Column {
-        OutlinedTextField(
-            value = name,
-            onValueChange = onName,
-            label = { Text("Name") },
-            singleLine = true,
-            isError = problem != null && name.isNotEmpty(),
-            supportingText = { Text(if (problem != null && name.isNotEmpty()) problem.replaceFirstChar { it.uppercase() } else "A name you already use gets a number after it.") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(Space.xs))
-    }
+    NameField(name, onName, problem, hint = "A name you already use gets a number after it.")
 }
 
 /** What the device picker's rows can do: hand the sound over, and each row's volume and group. */

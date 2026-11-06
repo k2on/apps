@@ -60,6 +60,10 @@ import dev.arkui.Cover
 import dev.arkui.CoverCard
 import dev.arkui.Empty
 import dev.arkui.Glyph
+import dev.arkui.HeroBanner
+import dev.arkui.HeroEntry
+import dev.arkui.HeroHeading
+import dev.arkui.HeroMore
 import dev.arkui.MoreButton
 import dev.arkui.PinnedBar
 import dev.arkui.PinnedPage
@@ -243,7 +247,7 @@ fun ArtistPage(
     val face = listOf(artist?.art, composer?.art, person?.art, banner).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
     PinnedPage(list, name, act::back, art = { side -> Cover(name, face, side, Modifier.size(side), round = true) }, under = banner.isNotEmpty()) {
         if (banner.isNotEmpty()) {
-            item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name) }
+            item { HeroBanner(name, banner, facts(kind, life.ifEmpty { counts }), name) }
             if (works.isEmpty() && tracks.isNotEmpty()) {
                 item {
                     Row(Modifier.padding(start = Space.page, end = Space.page, top = Space.l), verticalAlignment = Alignment.CenterVertically) {
@@ -276,14 +280,14 @@ fun ArtistPage(
             }
         }
         if (works.isNotEmpty()) {
-            item { SectionHeading(if (short) "Well-Known Works" else "Works") }
+            item { HeroHeading(if (short) "Well-Known Works" else "Works") }
             // Each work under who it is by, its catalogue number under it, and how many performances
             // of it there are at its right.
-            items(listed, key = { "work:" + it.id }) { w -> Entry(w.title, by, w.catalogue, w.recordings.toString(), onOpen = { act.open(Page.ForWork(w.id)) }) }
-            if (short) item { MoreLine("See All ${works.size} Works") { onAll(true) } }
+            items(listed, key = { "work:" + it.id }) { w -> HeroEntry(w.title, by, w.catalogue, w.recordings.toString(), onOpen = { act.open(Page.ForWork(w.id)) }) }
+            if (short) item { HeroMore("See All ${works.size} Works") { onAll(true) } }
         }
         if (albums.isNotEmpty()) {
-            item { SectionHeading("Albums") }
+            item { HeroHeading("Albums") }
             item {
                 Shelf("albums", albums, key = { it.id }) { a ->
                     CoverCard(a.name, a.art, a.name, formatCount(a.tracks, "track"), 136.dp, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
@@ -292,7 +296,7 @@ fun ArtistPage(
         }
         // Somebody's songs, where they wrote no works: a composer's are their works' performances.
         if (works.isEmpty() && tracks.isNotEmpty()) {
-            item { SectionHeading("Songs") }
+            item { HeroHeading("Songs") }
             underWorks(
                 tracks,
                 details,
@@ -310,7 +314,7 @@ fun ArtistPage(
         }
         // The episodes they are on, newest first, each saying whose show it is.
         if (appearances.isNotEmpty()) {
-            item { SectionHeading("Episodes") }
+            item { HeroHeading("Episodes") }
             item { HorizontalDivider(Modifier.padding(start = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
             itemsIndexed(appearances, key = { _, t -> "episode:" + t.id.hex }) { i, t ->
                 EpisodeRow(
@@ -390,9 +394,9 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
         }
         // Every performance, under the one set apart — the only one too.
         if (recordings.isNotEmpty()) {
-            item { SectionHeading("Recordings") }
+            item { HeroHeading("Recordings") }
             items(recordings, key = { "take:" + it.id }) { r ->
-                Entry(Catalogue.who(r), "", Catalogue.takeFacts(r), "", onOpen = { act.open(Page.ForRecording(r.id)) }) { m ->
+                HeroEntry(Catalogue.who(r), "", Catalogue.takeFacts(r), "", onOpen = { act.open(Page.ForRecording(r.id)) }) { m ->
                     Cover(r.id, r.art, 64.dp, Modifier.size(64.dp).then(m), corner = 4.dp)
                 }
             }
@@ -456,18 +460,18 @@ fun RecordingPage(
         }
         item { Foot(tracks, year, take?.label ?: "", Catalogue.licences(tracks.map { details[it.id] })) }
         if (on.isNotEmpty()) {
-            item { SectionHeading(if (on.size == 1) "From the Album" else "From the Albums") }
+            item { HeroHeading(if (on.size == 1) "From the Album" else "From the Albums") }
             items(on, key = { "album:" + it.id }) { a ->
-                Entry(a.name, "", a.by, "", onOpen = { act.open(Page.ForAlbum(a.id)) }) { m ->
+                HeroEntry(a.name, "", a.by, "", onOpen = { act.open(Page.ForAlbum(a.id)) }) { m ->
                     Cover(a.name, a.art, 64.dp, Modifier.size(64.dp).then(m), corner = 4.dp)
                 }
             }
         }
         if (people.isNotEmpty()) {
-            item { SectionHeading("On This Recording") }
+            item { HeroHeading("On This Recording") }
             item {
                 Shelf("people", people, key = { it.name }) { p ->
-                    Face(p.name, p.art, p.role, p.page?.let { to -> { act.open(to) } })
+                    Credit(p.name, p.art, p.role, p.page?.let { to -> { act.open(to) } })
                 }
             }
         }
@@ -518,7 +522,7 @@ fun ShowPage(
         actions = { if (feed != null) ShowMenu(title, feed, onUnfollow) },
     ) {
         item {
-            PageHeader(
+            PlayHeader(
                 cover = { Cover(title, show?.art ?: "", Space.header, Modifier.size(Space.header)) },
                 kind = if (id.startsWith("sermon/")) "Sermons" else "Podcast",
                 title = title,
@@ -769,7 +773,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
     val name = playlist?.name ?: "Playlist"
     PinnedPage(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
-            PageHeader(
+            PlayHeader(
                 cover = { Cover(name, "", Space.header, Modifier.size(Space.header)) },
                 kind = "Playlist",
                 title = name,

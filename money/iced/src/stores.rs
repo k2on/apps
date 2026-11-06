@@ -203,7 +203,7 @@ impl App {
                 .secure(secure)
                 .size(13)
                 .padding([6, 8])
-                .style(look::input)
+                .style(arkui::style::field)
         };
         if self.server.is_some() {
             c = c
@@ -275,7 +275,7 @@ impl App {
 }
 
 fn card<'a>(c: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
-    container(c).padding(16).width(Length::Fill).style(look::card).into()
+    container(c).padding(16).width(Length::Fill).style(arkui::style::card).into()
 }
 
 /// What is typed is left out: a password is said nowhere.

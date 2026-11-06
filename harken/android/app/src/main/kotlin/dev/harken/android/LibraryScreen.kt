@@ -30,8 +30,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkui.AccountFace
+import dev.arkui.Chip
 import dev.arkui.Cover
 import dev.arkui.Empty
 import dev.arkui.ListRow
@@ -114,20 +113,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             // with no outline.
             for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
                 val on = t == tab
-                FilterChip(
-                    selected = on,
-                    onClick = { onTab(t) },
-                    label = { Text(t.title) },
-                    shape = CircleShape,
-                    colors =
-                        FilterChipDefaults.filterChipColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            labelColor = MaterialTheme.colorScheme.onSurface,
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = Color.Transparent, selectedBorderColor = Color.Transparent),
-                )
+                Chip(t.title, selected = on, onClick = { onTab(t) })
             }
         }
         if (data.offline != null) Offline(data.offline)

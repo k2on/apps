@@ -1,10 +1,13 @@
 // The few drawings this library's own pieces draw — a row's menu, the
 // chevron at a row's end, a page's way back, a volume's mute, the account
-// sheet's rows — as `rust/arkui`'s Lucide
+// sheet's rows — and the plain ones any app reaches for (search, clear,
+// add, a tick, offline), as `rust/arkui`'s Lucide
 // glyphs (ISC; the licence is `rust/arkui/src/LICENSE.lucide`): the same
 // paths, stroked two units wide with butt caps and miter joins, so one
-// menu button is one shape on every client. Every other glyph is the
-// app's. Geometry only: each is drawn in a placeholder ink that `Icon`
+// menu button is one shape on every client. [ArkGlyphs.named] finds one
+// by its Lucide name, as `arkui::glyphs::named` does on the desktop and
+// `ArkGlyphs.symbol` maps the same names to SF Symbols on the iPhone. A
+// glyph only one app means anything by is the app's. Geometry only: each is drawn in a placeholder ink that `Icon`
 // replaces with the content colour.
 package dev.arkui
 
@@ -93,4 +96,53 @@ public object ArkGlyphs {
 
     /** Something wants a look: a circle with a mark (`circle-alert`). */
     public val Attention: ImageVector = glyph("circle-alert", circle(12f, 12f, 10f), "M12 8v4", "M12 16h.01")
+
+    /** Searching: a magnifier (`search`). */
+    public val Search: ImageVector = glyph("search", "m21 21-4.34-4.34", circle(11f, 11f, 8f))
+
+    /** Clearing or closing (`x`). */
+    public val Close: ImageVector = glyph("x", "M18 6 6 18", "m6 6 12 12")
+
+    /** Adding (`plus`). */
+    public val Plus: ImageVector = glyph("plus", "M5 12h14", "M12 5v14")
+
+    /** Taking away (`minus`). */
+    public val Minus: ImageVector = glyph("minus", "M5 12h14")
+
+    /** Done, or chosen (`check`). */
+    public val Tick: ImageVector = glyph("check", "M20 6 9 17l-5-5")
+
+    /** A box ticked (`circle-check`). */
+    public val Ticked: ImageVector = glyph("circle-check", circle(12f, 12f, 10f), "m16 9-5.5 5.5L8 12")
+
+    /** A box not ticked (`circle`). */
+    public val Untick: ImageVector = glyph("circle", circle(12f, 12f, 10f))
+
+    /** Opening downward (`chevron-down`). */
+    public val Down: ImageVector = glyph("chevron-down", "m6 9 6 6 6-6")
+
+    /** No network (`wifi-off`). */
+    public val Offline: ImageVector =
+        glyph(
+            "wifi-off",
+            "M12 20h.01",
+            "M8.5 16.429a5 5 0 0 1 7 0",
+            "M5 12.859a10 10 0 0 1 5.17-2.69",
+            "M19 12.859a10 10 0 0 0-2.007-1.523",
+            "M2 8.82a15 15 0 0 1 4.177-2.643",
+            "M22 8.82a15 15 0 0 0-11.288-3.764",
+            "m2 2 20 20",
+        )
+
+    /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
+    private val byName: Map<String, ImageVector> by lazy {
+        listOf(More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked, Untick, Down, Offline)
+            .associateBy { it.name } + ("ellipsis-vertical" to More)
+    }
+
+    /**
+     * The glyph Lucide calls [name] (`search`, `x`, `chevron-right`, `ellipsis-vertical`), if this
+     * library has it: the names docs/arkui-parts.md lists, the same on every toolkit.
+     */
+    public fun named(name: String): ImageVector? = byName[name]
 }

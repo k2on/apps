@@ -25,7 +25,7 @@ use money_domain::*;
 
 use crate::amount::money;
 use crate::view::{action, bold, dim, fill, link, quiet};
-use crate::{browser, look, App, Message, Modal, Page};
+use crate::{browser, App, Message, Modal, Page};
 
 /// What Settings does.
 #[derive(Debug, Clone)]
@@ -273,7 +273,7 @@ impl App {
         container(row![c.width(Length::Fill), close].align_y(Alignment::Center))
             .padding(14)
             .width(Length::Fill)
-            .style(look::card)
+            .style(arkui::style::card)
             .into()
     }
 
@@ -363,7 +363,7 @@ impl App {
         container(column![head, accounts].spacing(12))
             .padding(14)
             .width(Length::Fill)
-            .style(look::card)
+            .style(arkui::style::card)
             .into()
     }
 
@@ -404,7 +404,7 @@ impl App {
         .padding([5, 10]);
         let pick = match l.waiting {
             true => pick.style(style::action),
-            false => pick.style(look::choice(false)),
+            false => pick.style(arkui::style::chip(false)),
         };
         let mut choice = row![].spacing(8).align_y(Alignment::Center);
         if l.waiting {
@@ -417,7 +417,6 @@ impl App {
         container(row![about, choice].spacing(12).align_y(Alignment::Center))
             .padding([8, 10])
             .width(Length::Fill)
-            .style(look::group_card)
             .into()
     }
 

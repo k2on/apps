@@ -385,7 +385,7 @@ impl App {
                 .on_submit(Message::Receipt(Msg::Save))
                 .size(12)
                 .padding([3, 6])
-                .style(look::input)
+                .style(arkui::style::field)
         };
         let mut form = column![
             bold(
@@ -411,14 +411,14 @@ impl App {
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fill)
-                    .style(look::input),
+                    .style(arkui::style::field),
                 text_input("0.00", cost)
                     .on_input(move |v| Message::Receipt(Msg::Amount(i, v)))
                     .on_submit(Message::Receipt(Msg::Save))
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fixed(76.0))
-                    .style(look::input),
+                    .style(arkui::style::field),
             ]
             .spacing(8)
             .align_y(Alignment::Center);

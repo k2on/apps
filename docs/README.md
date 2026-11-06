@@ -13,3 +13,8 @@ a55b0e1:docs/plan-v4.md`, and likewise for the others.
 answers a touch on Android, the iPhone and the desktop, mapped onto
 arkui's shared springs, press, haptics and reduced motion in each toolkit,
 with the checklist a change to motion is reviewed against.
+
+`arkui-parts.md` lists ArkUI's generic parts — a page's header, a section's
+heading, a grouped card, a pill, a pager and the rest — by the one name and
+inputs each has in Compose, SwiftUI and iced. What each app draws that is
+its own is `spec/money-components.md` and `spec/harken-components.md`.

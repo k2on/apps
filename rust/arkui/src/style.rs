@@ -12,9 +12,10 @@
 //!
 //! Nothing below writes a colour down, which is the whole of what makes a dark
 //! theme restate all of it.
-use iced::widget::{button, container, rule, scrollable, slider, text};
+use iced::widget::{button, container, progress_bar, rule, scrollable, slider, text, text_input};
 use iced::{Background, Border, Color, Theme};
 
+use crate::parts::Tint;
 use crate::theme::of;
 
 /// How much of the text colour secondary text is: the least that still reads
@@ -383,6 +384,85 @@ pub fn on_row(theme: &Theme, _on_cursor: bool, accent: bool, dim: bool) -> Color
         palette.background.base.text.scale_alpha(DIM)
     } else {
         palette.background.base.text
+    }
+}
+
+/// A [`crate::parts::pill`]: a wash of its tint, the text in the tint itself
+/// (neutral's a little stronger), fully rounded at a figure's height — the
+/// same on the cursor's row as off it, which a tint reads on either way.
+pub fn pill(tint: Tint) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let c = tint.color(theme);
+        container::Style {
+            background: Some(Background::Color(c.scale_alpha(if tint == Tint::Neutral { 0.18 } else { 0.2 }))),
+            text_color: Some(match tint {
+                Tint::Neutral => of(theme).background.base.text.scale_alpha(0.75),
+                _ => c,
+            }),
+            border: Border {
+                radius: 10.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
+/// A card ([`crate::parts::group_card`], an inspector's box): the surface's
+/// step, rounded.
+pub fn card(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(surface_color(theme))),
+        text_color: Some(of(theme).background.base.text),
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// A field ([`crate::parts::search_field`], [`crate::parts::name_field`]):
+/// the page's ground with a hairline, the accent's when it has the keys.
+pub fn field(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let p = of(theme);
+    let edge = match status {
+        text_input::Status::Focused { .. } => p.primary.base.color,
+        text_input::Status::Hovered => p.background.base.text.scale_alpha(0.35),
+        _ => p.background.base.text.scale_alpha(0.2),
+    };
+    text_input::Style {
+        background: Background::Color(p.background.base.color),
+        border: Border {
+            radius: 5.0.into(),
+            width: 1.0,
+            color: edge,
+        },
+        icon: p.background.base.text.scale_alpha(0.6),
+        placeholder: p.background.base.text.scale_alpha(0.4),
+        value: p.background.base.text,
+        selection: p.primary.weak.color,
+    }
+}
+
+/// A [`crate::parts::chip`]: the chosen one's words in the accent, the rest
+/// in the text colour; no fill and no border on either.
+pub fn chip(chosen: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| match chosen {
+        true => action(theme, status),
+        false => quiet(theme, status),
+    }
+}
+
+/// A [`crate::parts::progress_bar`]: the tint's colour over a faint rail.
+pub fn progress(tint: Tint) -> impl Fn(&Theme) -> progress_bar::Style {
+    move |theme| progress_bar::Style {
+        background: Background::Color(of(theme).background.base.text.scale_alpha(0.1)),
+        bar: Background::Color(tint.color(theme)),
+        border: Border {
+            radius: 2.0.into(),
+            ..Border::default()
+        },
     }
 }
 

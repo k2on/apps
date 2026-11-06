@@ -69,12 +69,12 @@ import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
 import dev.arkui.MarkedAmount
-import dev.arkui.Meter
+import dev.arkui.ProgressBar
 import dev.arkui.Pill
 import dev.arkui.Space
 import dev.arkui.Stat
-import dev.arkui.Tone
-import dev.arkui.toneColors
+import dev.arkui.Tint
+import dev.arkui.tintColors
 import uniffi.money_domain.BudgetLine
 import uniffi.ark_format.formatMonthAlone
 
@@ -209,7 +209,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (l.target > 0) {
                 Spacer(Modifier.height(Space.s))
-                Meter(l.assigned.toFloat() / l.target, color = if (l.assigned >= l.target) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary)
+                ProgressBar(l.assigned.toFloat() / l.target, color = if (l.assigned >= l.target) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary)
             }
             val t = a.parse(target)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Space.s)) {
@@ -294,7 +294,7 @@ private fun CardBalance(l: BudgetLine) {
             Figure("Not covered", l.underfunded, color = if (l.underfunded > 0) c.tertiary else c.primary)
             if (l.debt > 0) {
                 Spacer(Modifier.height(Space.s))
-                Meter(l.available.toFloat() / l.debt, color = if (l.underfunded > 0) c.tertiary else c.primary)
+                ProgressBar(l.available.toFloat() / l.debt, color = if (l.underfunded > 0) c.tertiary else c.primary)
             }
             Spacer(Modifier.height(Space.m))
             when {
@@ -317,7 +317,7 @@ private fun CardBalance(l: BudgetLine) {
 /** A category that spent more on a card than it had: debt now, not next month's money. */
 @Composable
 private fun CreditOverspent(l: BudgetLine) {
-    val (container, on) = toneColors(Tone.Caution)
+    val (container, on) = tintColors(Tint.Caution)
     Card(
         colors = CardDefaults.cardColors(containerColor = container, contentColor = on),
         shape = MaterialTheme.shapes.large,

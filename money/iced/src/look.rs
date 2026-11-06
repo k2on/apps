@@ -1,10 +1,13 @@
-//! money's own looks, beside `arkui::style`'s: the fields a form is typed
-//! into, the pill an amount of money sits in, the box what is ready to
-//! assign is drawn in. Every colour asks [`arkui::theme::of`].
+//! money's own looks, beside `arkui::style`'s: what an amount says about
+//! the money ([`Tone`], drawn in arkui's [`Tint`]s by `arkui::style::pill`
+//! and `progress`), and the box what is ready to assign is drawn in. The
+//! fields, cards, chips and pills are arkui's (`arkui::style::field`,
+//! `card`, `chip`, `pill`). Every colour asks [`arkui::theme::of`].
 
+use arkui::parts::Tint;
 use arkui::theme::of;
-use iced::widget::{button, container, progress_bar, text_input};
-use iced::{Background, Border, Color, Theme};
+use iced::widget::container;
+use iced::{Background, Border, Theme};
 
 /// The text boxes a task focuses, by id.
 pub const ASSIGNED: &str = "assigned";
@@ -54,45 +57,29 @@ impl Tone {
         }
     }
 
-    fn color(self, theme: &Theme) -> Color {
-        let p = of(theme);
+    /// What arkui draws it in: nothing is neutral, money with a job
+    /// positive, short a caution, below nothing negative.
+    pub fn tint(self) -> Tint {
         match self {
-            Tone::Zero => p.background.base.text.scale_alpha(0.35),
-            Tone::Funded => p.success.base.color,
-            Tone::Short => p.warning.base.color,
-            Tone::Over => p.danger.base.color,
+            Tone::Zero => Tint::Neutral,
+            Tone::Funded => Tint::Positive,
+            Tone::Short => Tint::Caution,
+            Tone::Over => Tint::Negative,
+        }
+    }
+
+    /// A target's progress in this tone: money with a job and nothing yet
+    /// alike in the positive, as either is on its way.
+    pub fn bar(self) -> Tint {
+        match self {
+            Tone::Zero | Tone::Funded => Tint::Positive,
+            t => t.tint(),
         }
     }
 
     /// Text in this tone.
     pub fn text(self) -> impl Fn(&Theme) -> iced::widget::text::Style {
-        move |theme| iced::widget::text::Style {
-            color: Some(match self {
-                Tone::Zero => of(theme).background.base.text.scale_alpha(0.6),
-                t => t.color(theme),
-            }),
-        }
-    }
-}
-
-/// The pill an available amount is drawn in: a wash of its tone, the text
-/// in the tone itself, the same on the cursor's row as off it (the cursor
-/// is a faint wash, which a tone reads on either way).
-pub fn pill(tone: Tone, _lit: bool) -> impl Fn(&Theme) -> container::Style {
-    move |theme| {
-        let c = tone.color(theme);
-        container::Style {
-            background: Some(Background::Color(c.scale_alpha(if tone == Tone::Zero { 0.18 } else { 0.2 }))),
-            text_color: Some(match tone {
-                Tone::Zero => of(theme).background.base.text.scale_alpha(0.75),
-                _ => c,
-            }),
-            border: Border {
-                radius: 10.0.into(),
-                ..Border::default()
-            },
-            ..container::Style::default()
-        }
+        self.tint().text()
     }
 }
 
@@ -117,71 +104,4 @@ pub fn ready(cents: i64) -> impl Fn(&Theme) -> container::Style {
             ..container::Style::default()
         }
     }
-}
-
-/// A box of the inspector: the surface's step, rounded.
-pub fn card(theme: &Theme) -> container::Style {
-    let p = of(theme);
-    container::Style {
-        background: Some(Background::Color(arkui::style::surface_color(theme))),
-        text_color: Some(p.background.base.text),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
-    }
-}
-
-/// A field: the page's ground with a hairline, the accent's when it has the
-/// keys.
-pub fn input(theme: &Theme, status: text_input::Status) -> text_input::Style {
-    let p = of(theme);
-    let edge = match status {
-        text_input::Status::Focused { .. } => p.primary.base.color,
-        text_input::Status::Hovered => p.background.base.text.scale_alpha(0.35),
-        _ => p.background.base.text.scale_alpha(0.2),
-    };
-    text_input::Style {
-        background: Background::Color(p.background.base.color),
-        border: Border {
-            radius: 5.0.into(),
-            width: 1.0,
-            color: edge,
-        },
-        icon: p.background.base.text.scale_alpha(0.6),
-        placeholder: p.background.base.text.scale_alpha(0.4),
-        value: p.background.base.text,
-        selection: p.primary.weak.color,
-    }
-}
-
-/// A button one of a few is chosen in: the chosen one's words in the
-/// accent, the rest in the text colour; no fill and no border on either.
-pub fn choice(chosen: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |theme, status| match chosen {
-        true => arkui::style::action(theme, status),
-        false => arkui::style::quiet(theme, status),
-    }
-}
-
-/// A target's progress: the tone's colour over a faint rail.
-pub fn progress(tone: Tone) -> impl Fn(&Theme) -> progress_bar::Style {
-    move |theme| progress_bar::Style {
-        background: Background::Color(of(theme).background.base.text.scale_alpha(0.1)),
-        bar: Background::Color(match tone {
-            Tone::Zero | Tone::Funded => of(theme).success.base.color,
-            t => t.color(theme),
-        }),
-        border: Border {
-            radius: 2.0.into(),
-            ..Border::default()
-        },
-    }
-}
-
-/// A group's heading in the budget: its words in bold say what it is, on
-/// no ground of its own, as no row has one but the cursor's.
-pub fn group_card(_theme: &Theme) -> container::Style {
-    container::Style::default()
 }

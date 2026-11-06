@@ -65,12 +65,12 @@ class CatalogueTests {
      */
     @Test
     fun aFaceSaysWhoByItsInitials() {
-        assertEquals("A", Who.initials("Ada"))
-        assertEquals("JB", Who.initials("Johann Sebastian Bach"))
-        assertEquals("AL", Who.initials("  ada   lovelace "))
-        assertEquals("U", Who.initials("user-0123"))
-        assertEquals("", Who.initials(""))
-        assertEquals("\u00c9", Who.initials("\u00e9mile (\u2014)"))
+        assertEquals("A", dev.arkui.Faces.initials("Ada"))
+        assertEquals("JB", dev.arkui.Faces.initials("Johann Sebastian Bach"))
+        assertEquals("AL", dev.arkui.Faces.initials("  ada   lovelace "))
+        assertEquals("U", dev.arkui.Faces.initials("user-0123"))
+        assertEquals("", dev.arkui.Faces.initials(""))
+        assertEquals("\u00c9", dev.arkui.Faces.initials("\u00e9mile (\u2014)"))
     }
 
     @Test

@@ -281,17 +281,24 @@ public fun CoverCard(
 }
 
 /**
- * A row that opens something: its picture, its name, a line under it, and what stands at its end —
- * a chevron, unless the caller says otherwise.
+ * A row that opens something: its picture, its name (in the accent when [accent]), a line under
+ * it, and what stands at its end — a chevron, unless the caller says otherwise. In a [GroupCard]
+ * it is drawn as a grouped list's row: the card's inset, the body's type, the picture in a
+ * [GroupRow.LEAD] box.
  */
 @Composable
 public fun ListRow(
     onClick: () -> Unit,
     title: String,
-    under: String?,
+    under: String? = null,
     trailing: @Composable () -> Unit = { Chevron() },
+    accent: Boolean = false,
     picture: @Composable () -> Unit
 ) {
+    if (LocalInGroup.current) {
+        GroupListRow(onClick, title, under, accent, trailing, picture)
+        return
+    }
     Row(
         Modifier.fillMaxWidth()
             .pressable(onClick = onClick, press = Press.Highlight)
@@ -304,6 +311,7 @@ public fun ListRow(
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium,
+                color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis)
             if (under != null)
