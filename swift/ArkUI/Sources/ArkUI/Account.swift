@@ -13,7 +13,8 @@
 // with it, as the system's large title does: the title full size and bold
 // at the leading edge, the face at the trailing edge. It is one row for
 // every tab of every app — one top inset, one height, one font
-// (`AccountSizes.titleTop`, `titleLine`, `titleBottom`, `.largeTitle.bold()`)
+// (`AccountSizes.titleTop`, `titleLine`, `titleBottom`, `.largeTitle.bold()`),
+// and one gap under it to the page's first content (`titleBelow`)
 // — and `largeTitleBar` takes away whatever top margin the scroll view
 // under it would add (an inset grouped list's), so the title's baseline and
 // the face are in the same place on every tab; an app adds none. The bar is
@@ -44,6 +45,15 @@ public enum AccountSizes {
     public static let titleTop: CGFloat = 0
     public static let titleLine: CGFloat = 44
     public static let titleBottom: CGFloat = Space.s
+    /// From the row's end to the page's first content, on every tab of
+    /// every app, Android's too (`TabTitle.BELOW`): a section's own top
+    /// margin, the one a heading keeps above itself, so a card, a field, a
+    /// pager or a row of chips under the title sits where harken Home's
+    /// "Recently Added" does. A heading that comes first has it already;
+    /// anything else that comes first is padded by it, in the same section
+    /// as the title's row in a `List`, so the list's section spacing does not
+    /// add to it.
+    public static let titleBelow: CGFloat = Space.xl
     /// What a screen reader hears of the face, and of what its tap does.
     public static func label(_ name: String) -> String { "Signed in as \(name.isEmpty ? "?" : name)" }
     public static let hint = "Account and settings"

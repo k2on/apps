@@ -14,9 +14,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -179,11 +178,17 @@ fun Tile(icon: ImageVector, color: Color, side: Dp = 32.dp) {
 @Composable
 fun KindTile(kind: String, side: Dp = 32.dp) = Tile(Glyphs.account(kind), kindColor(kind), side)
 
-/** The month under a page's title, paged back and forth, the budget's and the insights' alike. */
+/**
+ * The month under a page's title, paged back and forth, the budget's and the insights' alike: the
+ * page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+ * The stepper's round buttons are 40 dp in Material's 48 dp touch target, so the row is drawn up
+ * by the Space.xs of touch over them — into the gap, which it does not take room from — and its
+ * circles' tops are where the iPhone's pager's are; what follows comes up with it.
+ */
 @Composable
 fun MonthPager(ledger: Ledger, modifier: Modifier = Modifier) {
     val book = LocalShell.current.book
-    Row(modifier.fillMaxWidth().padding(vertical = Space.s), horizontalArrangement = Arrangement.Center) {
+    Row(modifier.fillMaxWidth().offset(y = -Space.xs).padding(bottom = Space.s), horizontalArrangement = Arrangement.Center) {
         Stepper(
             label = Dates.month(ledger.month),
             onPrevious = { book.stepMonth(-1) },
@@ -193,7 +198,6 @@ fun MonthPager(ledger: Ledger, modifier: Modifier = Modifier) {
             order = ledger.month.filter { it.isDigit() }.toIntOrNull() ?: 0,
         )
     }
-    Spacer(Modifier.height(Space.xs))
 }
 
 /** A count in the accent's capsule, as a row's "3 to review" is. */

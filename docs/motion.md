@@ -451,8 +451,14 @@ gone under the bar the inline title rises into the bar's middle on
 under Reduce Motion), and goes back the same way (`largeTitleBar`). On
 Android it is `TabTitle` (`TabTitle.TOP`, `LINE`, `BOTTOM`) with its
 `account`, in harken's list and over money's page alike, and goes up with
-the page as it scrolls, scroll-linked, not animated. Tapped, either raises the
-account sheet (`AccountSheet`), the system's own sheet motion.
+the page as it scrolls, scroll-linked, not animated. Under the row, one gap to
+the page's first content on every tab of both apps (`TabTitle.BELOW`,
+`AccountSizes.titleBelow`, a section's `Space.xl`): a heading that comes
+first keeps it as its own top margin, and anything else that comes first (a
+card, a search field, a pager, the chips) is padded by it, in the title row's
+own section in an iPhone `List` so the list's section spacing does not add to
+it. Tapped, the face raises the account sheet (`AccountSheet`), the system's
+own sheet motion.
 
 **Materials follow the person's settings.** Reduce Transparency makes glass
 the solid container; Increase Contrast gives it a defined edge and stronger

@@ -87,7 +87,7 @@ fun AccountsScreen(ledger: Ledger) {
             }
         },
     ) { pad, _ ->
-        LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, bottom = pad.calculateBottomPadding() + 96.dp)) {
+        LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
             item(key = "worth") {
                 HeroCard("Net Worth", open.sumOf { it.balance }, Tone.Neutral, note = "Every open account, less what's owed")
             }

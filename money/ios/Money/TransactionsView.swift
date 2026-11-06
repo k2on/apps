@@ -29,11 +29,13 @@ struct TransactionsView: View {
         let all = Registers.search(model.register(nil) ?? [], needle)
         List {
             // The large title, and at the end of its line what the tab offers and the account's face.
-            LargeTitleRow("Transactions", fold: $fold, padded: false) {
-                AddTransactionButton()
-                AccountButton()
-            }
+            // In the first content's section, so the title's own gap is all
+            // there is between them (`AccountSizes.titleBelow`).
             Section {
+                LargeTitleRow("Transactions", fold: $fold, padded: false) {
+                    AddTransactionButton()
+                    AccountButton()
+                }
                 VStack(spacing: Space.m) {
                     SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
                     Picker("Showing", selection: $showing) {
@@ -43,8 +45,10 @@ struct TransactionsView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                .padding(.top, AccountSizes.titleBelow)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             switch showing {
             case .review: review(inbox)
@@ -139,33 +143,5 @@ struct TransactionsView: View {
                 DayHeader(day: day.day)
             }
         }
-    }
-}
-
-/// The search field as a row of the page: the glass, what it searches, and a
-/// way to empty it; the keyboard's key is Search.
-private struct SearchRow: View {
-    @Binding var text: String
-    let prompt: String
-
-    var body: some View {
-        HStack(spacing: Space.s) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.quiet)
-                .accessibilityHidden(true)
-            TextField(prompt, text: $text)
-                .submitLabel(.search)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet) }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Clear")
-            }
-        }
-        .padding(.horizontal, Space.m)
-        .frame(minHeight: 44)
-        .background(Color.containerHigh, in: Capsule())
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Search")
     }
 }

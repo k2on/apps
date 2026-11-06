@@ -63,7 +63,7 @@ fun InsightsScreen(ledger: Ledger) {
     val groups = ledger.byGroup(false).filter { (g, ls) -> g.id != Book.CARD_GROUP && ls.any { it.assigned != 0L || it.activity != 0L } }
 
     Page(title = "Insights") { pad, _ ->
-        LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, bottom = pad.calculateBottomPadding() + Space.xl)) {
+        LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xl)) {
             item(key = "month") { MonthPager(ledger) }
             item(key = "h-spending") { GroupHeading("Spending") }
             item(key = "spending") {
