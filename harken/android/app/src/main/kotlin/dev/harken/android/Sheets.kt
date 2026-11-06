@@ -10,12 +10,13 @@
 // address pasted.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,10 +28,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -48,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -57,12 +60,19 @@ import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.arkui.Cover
 import dev.arkui.SheetRow
+import dev.arkui.Springs
+import dev.arkui.reflowing
+import dev.arkui.Press
+import dev.arkui.pressable
 import dev.arkui.Space
 import dev.arkui.VolumeSlider
 import dev.arkui.quiet
 import dev.arkui.rememberTransientListState
 import dev.arkui.rememberTransientScrollState
 import kotlinx.coroutines.delay
+import uniffi.harken_domain.Playlist
+import dev.arkui.Feedback
+import dev.arkui.SensoryFeedback
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -107,18 +117,18 @@ fun TrackMenu(
             }
         }
         HorizontalDivider(Modifier.padding(vertical = Space.s), color = MaterialTheme.colorScheme.outlineVariant)
-        SheetRow(Glyphs.PlayNext, "Play next", actions::playNext)
-        SheetRow(Glyphs.Queue, "Add to queue", actions::addToQueue)
-        SheetRow(Glyphs.AddTo, "Add to playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
-        if (album != null && from != Page.ForAlbum(album.id)) SheetRow(Glyphs.Album, "Go to album", { actions.goTo(Page.ForAlbum(album.id)) })
-        if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to show", { actions.goTo(Page.ForShow(show.id)) })
+        SheetRow(Glyphs.PlayNext, "Play Next", actions::playNext)
+        SheetRow(Glyphs.Queue, "Add to Queue", actions::addToQueue)
+        SheetRow(Glyphs.AddTo, "Add to Playlist", actions::addTo, trailing = { Icon(Glyphs.Chevron, null, Modifier.size(18.dp)) })
+        if (album != null && from != Page.ForAlbum(album.id)) SheetRow(Glyphs.Album, "Go to Album", { actions.goTo(Page.ForAlbum(album.id)) })
+        if (show != null && from != Page.ForShow(show.id)) SheetRow(Glyphs.Show, "Go to Show", { actions.goTo(Page.ForShow(show.id)) })
         if (track.kind == "song" && track.creator.isNotEmpty() && from != Page.ForArtist(track.creator))
-            SheetRow(Glyphs.Artist, "Go to artist", { actions.goTo(Page.ForArtist(track.creator)) })
-        if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from this playlist", actions::remove)
+            SheetRow(Glyphs.Artist, "Go to Artist", { actions.goTo(Page.ForArtist(track.creator)) })
+        if (from is Page.ForPlaylist) SheetRow(Glyphs.Remove, "Remove from This Playlist", actions::remove)
         // An episode: played or not by hand, and each of its chapters to start from.
         if (track.kind != "song") {
             val played = listened?.finished == true
-            SheetRow(Glyphs.Show, if (played) "Mark as unplayed" else "Mark as played", { actions.markPlayed(!played) })
+            SheetRow(Glyphs.Show, if (played) "Mark as Unplayed" else "Mark as Played", { actions.markPlayed(!played) })
             for (c in chapters) SheetRow(Glyphs.Play, "${Media.clock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
         }
     }
@@ -137,9 +147,11 @@ fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggl
                 modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
             )
         }
-        item { SheetRow(Glyphs.Plus, "New playlist", onNew, emphasis = true) }
+        item { SheetRow(Glyphs.Plus, "New Playlist", onNew, emphasis = true) }
         items(playlists, key = { it.id.hex }) { p ->
             val ticked = on?.contains(p.id) == true
+            // A tick as the row is ticked or unticked: the iPhone's selection feedback.
+            SensoryFeedback(Feedback.Selection, ticked)
             SheetRow(
                 if (ticked) Glyphs.Ticked else Glyphs.Untick,
                 p.name,
@@ -155,12 +167,12 @@ fun AddToPlaylist(track: Track, playlists: List<Playlist>, on: Set<Id>?, onToggl
 fun NewPlaylistCard(name: String, problem: String?, adding: Boolean, onName: (String) -> Unit, onMake: () -> Unit, onCancel: () -> Unit) {
     Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation = 6.dp) {
         Column(Modifier.padding(Space.xl)) {
-            Text("New playlist", style = MaterialTheme.typography.headlineSmall)
+            Text("New Playlist", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(Space.l))
             NewPlaylist(name, problem, onName)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onCancel) { Text("Cancel") }
-                TextButton(onClick = onMake, enabled = name.isNotBlank() && problem == null) { Text(if (adding) "Make and add" else "Make it") }
+                TextButton(onClick = onMake, enabled = name.isNotBlank() && problem == null) { Text(if (adding) "Make and Add" else "Make It") }
             }
         }
     }
@@ -216,19 +228,59 @@ interface PickerActions {
  * beside and under it are their own targets.
  */
 @Composable
-fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions) {
+fun DevicesSheet(rows: List<DeviceRow>, cursor: Int, actions: PickerActions, onDone: (() -> Unit)? = null, grabber: Boolean = false) {
+    // Laid out as the iPhone's (Sheets.swift, `DevicesSheet`): its grabber, the title in the middle
+    // and Done at its end, and the devices together in one rounded group, the cursor's tinted.
     // Scrolled, for a house of speakers taller than the screen; a sheet's place is not kept.
     Column(Modifier.fillMaxWidth().verticalScroll(rememberTransientScrollState()).padding(bottom = Space.l)) {
-        Text("Playing on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s))
+        // Its own grabber only where nothing else draws one: the glass sheet the device chip grows
+        // into, not a bottom sheet, which has its own.
+        if (grabber)
+            Box(
+                Modifier.padding(top = Space.s)
+                    .align(Alignment.CenterHorizontally)
+                    .size(36.dp, 5.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+        Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = Space.s)) {
+            Text(
+                "Playing On",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            if (onDone != null)
+                TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterEnd)) {
+                    Text("Done", style = MaterialTheme.typography.titleMedium)
+                }
+        }
         if (rows.isEmpty())
             Text(
                 "Nothing else is listening. A device signed in as you appears here once it is open.",
                 style = quiet(MaterialTheme.typography.bodyMedium),
                 modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
             )
-        rows.forEachIndexed { i, r -> DeviceLine(r, at = i == cursor, actions) }
+        else
+            Column(
+                Modifier.padding(horizontal = Space.l, vertical = Space.s)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(DEVICE_GROUP_CORNER))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+            ) {
+                rows.forEachIndexed { i, r ->
+                    if (i > 0)
+                        HorizontalDivider(
+                            Modifier.padding(start = Space.l + 22.dp + Space.l),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                        )
+                    DeviceLine(r, at = i == cursor, actions)
+                }
+            }
     }
 }
+
+// The group's corners: the iPhone's inset lists'.
+private val DEVICE_GROUP_CORNER = 20.dp
 
 // One device: its kind, its name, what it cannot do, its join, a tick where the sound is — and
 // under it, where it has one, its volume.
@@ -246,11 +298,12 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
             r.me -> "this phone"
             else -> null
         }
-    Column(Modifier.fillMaxWidth().let { if (at) it.background(MaterialTheme.colorScheme.surfaceContainerHighest) else it }) {
+    // The cursor's row tinted with the accent, as the iPhone's, over the group whatever it is on.
+    Column(Modifier.fillMaxWidth().let { if (at) it.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)) else it }) {
         Row(
             Modifier.fillMaxWidth()
-                .let { if (r.takeable) it.clickable { actions.pick(r) } else it }
-                .padding(horizontal = Space.xl)
+                .let { if (r.takeable) it.pressable(onClick = { actions.pick(r) }, press = Press.Highlight) else it }
+                .padding(horizontal = Space.l)
                 .height(60.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -283,7 +336,7 @@ private fun DeviceLine(r: DeviceRow, at: Boolean, actions: PickerActions) {
                 { actions.level(r, it) },
                 actions::levelDone,
                 { actions.mute(r) },
-                Modifier.fillMaxWidth().padding(start = Space.xl + 22.dp + Space.l - 12.dp, end = Space.xl).padding(bottom = Space.xs),
+                Modifier.fillMaxWidth().padding(start = Space.l + 22.dp + Space.l - 12.dp, end = Space.l).padding(bottom = Space.xs),
                 about = r.name,
             )
         }
@@ -331,7 +384,7 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
     val rows = Directory.rows(query, found)
     Column(Modifier.fillMaxWidth()) {
         Text(
-            if (kind == "sermon") "Add sermons" else "Add a podcast",
+            if (kind == "sermon") "Follow Sermons" else "Follow a Podcast",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
         )
@@ -345,13 +398,15 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
             keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             modifier = Modifier.fillMaxWidth().padding(horizontal = Space.xl).focusRequester(focus),
         )
-        AnimatedVisibility(visible = said != null) {
+        // What the directory says fades in where it is said; the list under it makes room at once rather
+        // than every row being laid out again each frame of a growing gap.
+        AnimatedVisibility(visible = said != null, enter = fadeIn(Springs.fade()), exit = fadeOut(Springs.fade())) {
             Text(said.orEmpty(), style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.m))
         }
         LazyColumn(Modifier.fillMaxWidth(), state = rememberTransientListState(), contentPadding = PaddingValues(top = Space.s, bottom = Space.l)) {
             items(rows, key = { it.feed }) { s ->
                 // Each comes in, and goes, gently, as the answers for the words change under it.
-                FoundShow(s, Directory.following(s, feeds), onFollow = { onFollow(s.feed) }, modifier = Modifier.animateItem())
+                FoundShow(s, Directory.following(s, feeds), onFollow = { onFollow(s.feed) }, modifier = reflowing())
             }
         }
     }
@@ -361,6 +416,8 @@ fun FindShow(kind: String, feeds: List<Subscription>, onFollow: (String) -> Unit
 // followed, the tick.
 @Composable
 private fun FoundShow(s: Directory.Found, following: Boolean, onFollow: () -> Unit, modifier: Modifier = Modifier) {
+    // A success once the show is followed: when the library says so, not on the tap.
+    SensoryFeedback(Feedback.Success, following)
     Row(modifier.fillMaxWidth().padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
         Cover(s.title, s.art, 56.dp, Modifier.size(56.dp), corner = 6.dp)
         Spacer(Modifier.width(Space.m))
@@ -369,7 +426,7 @@ private fun FoundShow(s: Directory.Found, following: Boolean, onFollow: () -> Un
             if (s.author.isNotEmpty()) Text(s.author, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(Space.s))
-        Crossfade(following, label = "following") { on ->
+        Crossfade(following, animationSpec = Springs.fade(), label = "following") { on ->
             if (on) {
                 Row(Modifier.height(40.dp).padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Glyphs.Tick, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))

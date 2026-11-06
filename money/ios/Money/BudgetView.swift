@@ -33,6 +33,7 @@ import SwiftUI
 
 struct BudgetView: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     @Environment(\.present) private var present
     @AppStorage("budget.hidden") private var showHidden = false
     @State private var collapsed: Set<Id> = []
@@ -59,10 +60,12 @@ struct BudgetView: View {
         List {
             Section {
                 VStack(spacing: Space.l) {
+                    // A step changes the month at once; only its figures roll, as its
+                    // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                     Pager(model.monthName,
-                          home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move) { model.showThisMonth() } },
-                          back: { withAnimation(Springs.move) { model.stepMonth(-1) } },
-                          forward: { withAnimation(Springs.move) { model.stepMonth(1) } })
+                          home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
+                          back: { model.stepMonth(-1) },
+                          forward: { model.stepMonth(1) })
                     ready(s.summary)
                 }
                 .listRowInsets(EdgeInsets())
@@ -97,7 +100,7 @@ struct BudgetView: View {
             ToolbarItem(placement: .topBarLeading) { AccountButton() }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if editing {
-                    Button("Done") { withAnimation(Springs.move) { editing = false } }
+                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
                         .fontWeight(.semibold)
                 } else {
                     options
@@ -132,7 +135,7 @@ struct BudgetView: View {
             Section {
                 Button { present(.newCategory(group: nil)) } label: { Label("New Category", systemImage: "plus.circle") }
                 Button { typed = ""; naming = .newGroup } label: { Label("New Group", systemImage: "folder.badge.plus") }
-                Button { withAnimation(Springs.move) { editing = true } } label: { Label("Reorder Categories", systemImage: "arrow.up.arrow.down") }
+                Button { withAnimation(Springs.move.reduced(still)) { editing = true } } label: { Label("Reorder Categories", systemImage: "arrow.up.arrow.down") }
                 Toggle(isOn: $showHidden) { Label("Show Hidden Categories", systemImage: "eye") }
             }
         } label: {
@@ -150,7 +153,7 @@ struct BudgetView: View {
             HStack(spacing: Space.m) {
                 Image(systemName: "folder.fill").foregroundStyle(.tint)
                 Text(g.name).font(.headline).lineLimit(1)
-                if g.hidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.secondary) }
+                if g.hidden { Image(systemName: "eye.slash").font(.caption).foregroundStyle(.quiet) }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(g.name) group")
@@ -158,10 +161,10 @@ struct BudgetView: View {
             HStack {
                 if Cards.isPayment(l) { AccountMark(kind: "credit", side: 22) }
                 Text(l.name)
-                    .foregroundStyle(l.hidden ? Color.secondary : Color.primary)
+                    .foregroundStyle(l.hidden ? Color.quiet : Color.ink)
                     .lineLimit(1)
                 Spacer(minLength: Space.s)
-                Pill(cents: l.available, tint: Tone.of(l).tint)
+                Pill(cents: l.available, tint: Tone.of(l).tint).rolls(on: model.snapshot.month)
             }
             .padding(.leading, Space.xl + Space.s)
             .accessibilityElement(children: .ignore)
@@ -174,13 +177,13 @@ struct BudgetView: View {
     /// go of once the session agrees, or after a while if it never does.
     private func drop(_ groups: [GroupMonth], _ from: IndexSet, _ to: Int) {
         guard let f = from.first, let r = Arranging.drop(Arranging.rows(groups), from: f, to: to) else { return }
-        withAnimation(Springs.move) { ahead = Arranging.applied(r, to: groups) }
+        withAnimation(Springs.move.reduced(still)) { ahead = Arranging.applied(r, to: groups) }
         model.rearrange(r)
         drops += 1
         let mine = drops
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if drops == mine { withAnimation(Springs.move) { ahead = nil } }
+            if drops == mine { withAnimation(Springs.move.reduced(still)) { ahead = nil } }
         }
     }
 
@@ -198,7 +201,7 @@ struct BudgetView: View {
                     Button { model.autoAssign(.underfunded) } label: {
                         Pill(.caution) { Label("\(s.underfunded) underfunded", systemImage: "target") }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityHint("Assigns every underfunded category its target")
                 }
                 if s.overspent == 0 && s.underfunded == 0 && s.assigned > 0 {
@@ -220,11 +223,11 @@ struct BudgetView: View {
                 ForEach(g.lines) { l in
                     // A month its rule assigns offers neither: the domain
                     // refuses assigning it and moving money to or from it.
-                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l) }
+                    NavigationLink(value: Route.category(l.categoryId)) { CategoryRow(line: l, month: model.snapshot.month) }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if Ruled.editable(l) {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }
-                                    .tint(.money)
+                                    .tint(Color.accent)
                             }
                         }
                         .swipeActions(edge: .trailing) {
@@ -232,7 +235,7 @@ struct BudgetView: View {
                                 Button { present(.move(l.categoryId)) } label: {
                                     Label(l.available < 0 ? "Cover" : "Move", systemImage: "arrow.left.arrow.right")
                                 }
-                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.indigo)
+                                .tint(l.available < 0 ? Tone.of(l).tint.color : Color.chart[1])
                             }
                         }
                         .contextMenu { menu(l) }
@@ -243,7 +246,7 @@ struct BudgetView: View {
             }
         } header: {
             Button {
-                withAnimation(Springs.move) {
+                withAnimation(Springs.move.reduced(still)) {
                     if open { collapsed.insert(g.id) } else { collapsed.remove(g.id) }
                 }
             } label: {
@@ -260,10 +263,10 @@ struct BudgetView: View {
                         Text("\(CentsText.string(g.uncovered)) not covered")
                             .font(.subheadline.weight(.semibold))
                             .monospacedDigit()
-                            .foregroundStyle(Color.orange)
+                            .foregroundStyle(Color.caution)
                     } else {
-                        CentsText(g.available).font(.subheadline.weight(.semibold))
-                            .foregroundStyle(g.available < 0 ? Color.red : Color.secondary)
+                        CentsText(g.available).font(.subheadline.weight(.semibold)).rolls(on: model.snapshot.month)
+                            .foregroundStyle(g.available < 0 ? Color.error : Color.quiet)
                     }
                 }
                 .contentShape(Rectangle())
@@ -331,6 +334,8 @@ struct BudgetView: View {
 /// a category that spent more on a card than it had says so in amber.
 struct CategoryRow: View {
     let line: BudgetLine
+    /// The month its figures are of: they roll when it is stepped.
+    let month: String
 
     var body: some View {
         let tone = Tone.of(line)
@@ -340,16 +345,16 @@ struct CategoryRow: View {
             VStack(alignment: .leading, spacing: Space.xs + 2) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(line.name)
-                        .foregroundStyle(line.hidden ? Color.secondary : Color.primary)
+                        .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
                         .lineLimit(1)
                     Spacer(minLength: Space.s)
-                    Pill(cents: line.available, tint: tone.tint)
+                    Pill(cents: line.available, tint: tone.tint).rolls(on: month)
                 }
                 if card {
                     payment
                 } else if let f = funded(line) {
                     ProgressView(value: f)
-                        .tint(tone == .over ? Color.red : tone == .onCard || f < 1 ? Color.orange : Color.green)
+                        .tint(tone == .over ? Color.error : tone == .onCard || f < 1 ? Color.caution : Color.positive)
                         .scaleEffect(y: 0.8, anchor: .center)
                     HStack {
                         if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
@@ -358,7 +363,7 @@ struct CategoryRow: View {
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quiet)
                     .monospacedDigit()
                 } else if line.activity != 0 || line.assigned != 0 || line.ruled {
                     HStack {
@@ -368,13 +373,13 @@ struct CategoryRow: View {
                         if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
                     }
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quiet)
                     .monospacedDigit()
                 }
                 if !card && line.creditOverspent > 0 {
                     Label("\(CentsText.string(line.creditOverspent)) on card", systemImage: "creditcard")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.caution)
                         .monospacedDigit()
                 }
             }
@@ -391,21 +396,21 @@ struct CategoryRow: View {
     @ViewBuilder private var payment: some View {
         if let c = Cards.covered(line) {
             ProgressView(value: c)
-                .tint(c >= 1 ? Color.green : Color.orange)
+                .tint(c >= 1 ? Color.positive : Color.caution)
                 .scaleEffect(y: 0.8, anchor: .center)
             HStack {
                 switch Cards.word(line) {
-                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.orange)
-                case .covered?: Text("Covered").foregroundStyle(Color.green)
+                case let .short(x)?: Text("\(CentsText.string(x)) short").foregroundStyle(Color.caution)
+                case .covered?: Text("Covered").foregroundStyle(Color.positive)
                 default: EmptyView()
                 }
                 Spacer()
-                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.secondary)
+                Text("Owed \(CentsText.string(line.debt))").foregroundStyle(.quiet)
             }
             .font(.caption)
             .monospacedDigit()
         } else {
-            Text("Nothing owed").font(.caption).foregroundStyle(.secondary)
+            Text("Nothing owed").font(.caption).foregroundStyle(.quiet)
         }
     }
 

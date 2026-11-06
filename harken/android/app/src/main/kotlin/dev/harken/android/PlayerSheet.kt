@@ -6,18 +6,27 @@
 // (`FullFace`, leaving a slot for the cover), and the cover itself, which
 // the card draws as it travels between the two. A sideways drag on the bar
 // skips — left the next track, right the one before — and a tap opens it.
+// The cover travels as the full player draws it (`FullFace`): its corners,
+// its shadow, and a little smaller while paused, as the iPhone's player has
+// it. The bar is on glass, a capsule, as the iPhone's mini player is.
 // The tab bar slides away under it (HarkenApp.kt). How it moves, settles and
 // answers the back gesture is the card's, and `docs/plan-android.md` says
 // why.
 package dev.harken.android
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arkui.Cover
 import dev.arkui.ExpandingCard
+import dev.arkui.ExpandingCardSpec
 import dev.arkui.ExpandingCardState
+import dev.arkui.Springs
 import dev.arkui.rememberExpandingCard
+import dev.arkui.unlessReduced
 import kotlinx.coroutines.flow.StateFlow
 
 /** The player's card: how far up it is, and the drag that moves it (`ark-ui`'s). */
@@ -30,6 +39,9 @@ fun rememberPlayerSheet(): PlayerSheet = rememberExpandingCard()
 /** The bar's height: its row and the hairline under it. */
 val BAR = 58.dp
 
+/** The bar's shadow on glass, at rest. */
+val BAR_SHADOW = 6.dp
+
 /**
  * The player over the page and the tabs: the dim, and the card with its two faces and the art. `tabs`
  * is the tab bar's height, which the bar stands on.
@@ -38,6 +50,8 @@ val BAR = 58.dp
 fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, position: StateFlow<Long>, tabs: Dp, scrubbing: StateFlow<Long?> = nobody()) {
     val now = state.now ?: return
     val seed = now.album.ifEmpty { now.title }
+    val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
+    val spec = remember { ExpandingCardSpec(bigCorner = COVER_CORNER, bigShadow = COVER_SHADOW, glass = true, shadow = BAR_SHADOW) }
     ExpandingCard(
         sheet,
         stand = tabs,
@@ -48,5 +62,7 @@ fun PlayerCard(sheet: PlayerSheet, state: PlayerState, controls: Controls, posit
         onSwipeLeft = controls::next,
         onSwipeRight = controls::previous,
         openLabel = "Open the player",
+        spec = spec,
+        artScale = { scale },
     )
 }

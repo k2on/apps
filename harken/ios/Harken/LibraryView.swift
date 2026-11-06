@@ -3,8 +3,8 @@
 // something), and every song in the order it arrived — each opening the page
 // it stands for, zooming out of its cover (Android's `LibraryScreen.kt`) —
 // and the podcasts and the sermons, always there, so the first can be
-// followed. They are a segmented control in the glass of the navigation
-// bar's bottom; the playlists list is where a new one is made, and the
+// followed. They are a row of capsules under the large title that scrolls
+// sideways, as Android's chips are; the playlists list is where a new one is made, and the
 // domain's own checks decide whether a name will do; the + on Podcasts and
 // Sermons finds a show to follow (`FollowSheet`).
 import ArkUI
@@ -46,21 +46,22 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("Library")
+        // The filter row, inset under the navigation bar rather than a bar of
+        // its own (`safeAreaBar`), whose soft edge would wash out the large
+        // title over it. On the page's own colour, so a list scrolled up goes
+        // under it rather than through the capsules.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
-                SwiftUI.Picker("Show", selection: $tab) {
-                    // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
-                    ForEach(LibraryTab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, Space.page)
-                .padding(.vertical, Space.s)
+                // Podcasts and Sermons always, with none of the kind yet too: their + is where the first is followed.
+                LibraryChips(tab: $tab)
                 if let host = model.unreachable { Offline(host: host) }
             }
+            .background(Color.page)
         }
         .toolbar {
             // On Podcasts and Sermons the + finds a show to follow; on the rest it makes a playlist.
-            ToolbarItem(placement: .topBarLeading) {
+            // At the top right, as money's +: the top left is the account's face alone.
+            ToolbarItem(placement: .topBarTrailing) {
                 if let kind = tab.kind {
                     Button { present(.follow(kind: kind)) } label: { Image(systemName: "plus") }
                         .accessibilityLabel(kind == "sermon" ? "Follow sermons" : "Follow a podcast")
@@ -70,6 +71,39 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+}
+
+/// The Library's lists as a row of capsules that scrolls sideways, the one
+/// shown filled in the accent and the rest quiet: Android's chips, in the
+/// same order and words. Each is a button named by its list, which is what
+/// the screenshot driver taps.
+private struct LibraryChips: View {
+    @Binding var tab: LibraryTab
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Space.s) {
+                ForEach(LibraryTab.allCases) { t in
+                    let on = t == tab
+                    Button { tab = t } label: {
+                        Text(t.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(on ? Color.onAccent : Color.ink)
+                            .padding(.horizontal, Space.l)
+                            .frame(minHeight: 36)
+                            .background(Capsule().fill(on ? Color.accent : Color.containerHigh))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.press)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, Space.page)
+            .padding(.vertical, Space.s)
+        }
+        .scrollClipDisabled()
+        .animation(Springs.fade, value: tab)
     }
 }
 
@@ -83,12 +117,12 @@ private struct PlaylistsList: View {
         List {
             Button { present(.newPlaylist(then: nil)) } label: {
                 HStack(spacing: Space.l) {
-                    Image(systemName: "plus").font(.title2).foregroundStyle(Color.gold).frame(width: 56, height: 56)
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
+                    Image(systemName: "plus").font(.title2).foregroundStyle(Color.accentText).frame(width: 56, height: 56)
+                        .surface(in: RoundedRectangle(cornerRadius: Space.corner, style: .continuous))
                     Text("New Playlist").font(.headline)
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
             if model.playlists.isEmpty {
                 ContentUnavailableView("No playlists yet", systemImage: "music.note.list", description: Text("Make one, then put songs on it from any song's menu."))
                     .listRowSeparator(.hidden)
@@ -100,16 +134,17 @@ private struct PlaylistsList: View {
                         CoverView(seed: p.name, url: "", side: 56).frame(width: 56, height: 56).zoomSource(r, zoom)
                         VStack(alignment: .leading) {
                             Text(p.name).font(.headline).lineLimit(1)
-                            Text("Playlist").font(.subheadline).foregroundStyle(.secondary)
+                            Text("Playlist").font(.subheadline).foregroundStyle(.quiet)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                        Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.outline)
                     }
                 }
-                .foregroundStyle(.primary)
+                .foregroundStyle(.ink)
             }
         }
         .listStyle(.plain)
+        .scrollEdges()
     }
 }
 
@@ -133,14 +168,15 @@ private struct AlbumsGrid: View {
                                     .zoomSource(r, zoom)
                                     .padding(.bottom, Space.s - 2)
                                 Text(a.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text(a.playedBy).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(a.playedBy).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                     }
                 }
                 .padding(Space.page)
             }
+            .scrollEdges()
         }
     }
 }
@@ -187,16 +223,17 @@ private struct ShowsGrid: View {
                                         .zoomSource(r, zoom)
                                         .padding(.bottom, Space.s - 2)
                                     Text(s.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(s.author.isEmpty ? Spell.count(Int(s.episodes), "episode") : s.author).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.press)
                         }
                     }
                 }
                 .padding(Space.page)
-                .animation(Springs.move, value: unread.map { $0.url })
+                .motion(Springs.move, value: unread.map { $0.url })
             }
+            .scrollEdges()
         }
     }
 }
@@ -209,18 +246,18 @@ private struct UnreadFeed: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Image(systemName: feed.error.isEmpty ? "clock" : "exclamationmark.triangle").foregroundStyle(.secondary).frame(width: 24)
+            Image(systemName: feed.error.isEmpty ? "clock" : "exclamationmark.triangle").foregroundStyle(.quiet).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(feed.title.isEmpty ? feed.url : feed.title).font(.subheadline.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                Text(feed.error.isEmpty ? "Not read yet" : "Could not read it: \(feed.error)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                Text(feed.error.isEmpty ? "Not read yet" : "Could not read it: \(feed.error)").font(.caption).foregroundStyle(.quiet).lineLimit(3)
             }
             Spacer(minLength: 0)
             Button("Unfollow", role: .destructive) { model.unfollow(feed) }.buttonStyle(.borderless).font(.subheadline)
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .motionTransition(.opacity.combined(with: .move(edge: .top)))
     }
 }
 
@@ -251,6 +288,7 @@ private struct ArtistsList: View {
                 }
             }
             .listStyle(.plain)
+            .scrollEdges()
         }
     }
 
@@ -278,13 +316,13 @@ private struct PersonRow: View {
                 CoverView(seed: name, url: RowCover.url(model, art), side: 56, round: true).frame(width: 56, height: 56).zoomSource(to, zoom)
                 VStack(alignment: .leading) {
                     Text(name).font(.headline).lineLimit(1)
-                    Text(under).font(.subheadline).foregroundStyle(.secondary)
+                    Text(under).font(.subheadline).foregroundStyle(.quiet)
                 }
                 Spacer()
-                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.outline)
             }
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(.ink)
     }
 }
 
@@ -303,6 +341,7 @@ struct SongsList: View {
                          onPlay: { model.play(tracks, at: i, from: .songs) }) { RowCover(track: t) }
             }
             .listStyle(.plain)
+            .scrollEdges()
         }
     }
 }

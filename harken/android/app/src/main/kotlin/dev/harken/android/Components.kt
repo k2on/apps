@@ -9,7 +9,6 @@
 package dev.harken.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,7 +25,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -54,7 +52,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.arkui.ArkGlyphs
 import dev.arkui.Chevron
 import dev.arkui.Cover
 import dev.arkui.Glyph
@@ -67,6 +64,8 @@ import dev.arkui.Space
 import dev.arkui.Tapped
 import dev.arkui.quiet
 import dev.arkui.rememberHero
+import dev.arkui.pressable
+import dev.arkui.Press
 
 /** What a screen can ask for. Every one does nothing unless the app says otherwise. */
 interface Do {
@@ -135,7 +134,7 @@ fun TrackRow(
 ) {
     Recompositions.hit("TrackRow")
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = Space.page, end = Space.xs).height(ROW),
+        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(start = Space.page, end = Space.xs).height(ROW),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(Space.thumb), contentAlignment = Alignment.Center) { leading() }
@@ -213,7 +212,7 @@ fun PageHeader(
         // Where the art a page grew from lands.
         Box(LocalPageFrame.current?.art?.modifier ?: Modifier) { cover() }
         Spacer(Modifier.height(Space.l))
-        Text(kind.uppercase(), style = quiet(MaterialTheme.typography.labelMedium))
+        Text(kind, style = quiet(MaterialTheme.typography.labelMedium))
         Spacer(Modifier.height(Space.xs))
         Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         if (by != null) {
@@ -222,7 +221,7 @@ fun PageHeader(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
-                modifier = if (onBy != null) Modifier.clickable(onClick = onBy).padding(Space.xs) else Modifier.padding(Space.xs),
+                modifier = if (onBy != null) Modifier.pressable(onClick = onBy).padding(Space.xs) else Modifier.padding(Space.xs),
             )
         }
         Text(facts, style = quiet(MaterialTheme.typography.bodySmall), textAlign = TextAlign.Center)
@@ -290,13 +289,14 @@ fun bannerHeight(width: Dp): Dp = maxOf(width / BANNER_ASPECT, width * 0.82f).co
  * Somebody's banner, edge to edge and up to the top of the screen: their wide picture cropped to
  * fill, run up under the status bar (its page says [dev.arkui.UnderStatusBar]) and that
  * much taller, so what shows below the bar is the shape [bannerHeight] says; `kind` in small
- * capitals and `name` in bold on its lower edge over a shade that keeps them legible, a lighter
- * one under the bar's icons, and back over its top, below the bar. Until the picture arrives the
+ * type and `name` in bold on its lower edge over a shade that keeps them legible, and a lighter
+ * one under the bar's icons and the page's back (its [dev.arkui.PinnedBar], over the banner's
+ * top, below the status bar). Until the picture arrives the
  * derived square is drawn instead, so the name is already where it will be. A page grows out of a
  * portrait into it, the part under the bar included.
  */
 @Composable
-fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> Unit) {
+fun Banner(seed: String, art: String, kind: String, name: String) {
     val bar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val w = maxWidth
@@ -307,12 +307,9 @@ fun Banner(seed: String, art: String, kind: String, name: String, onBack: () -> 
             // And a little shade at the very top, under the bar's icons and back.
             Box(Modifier.fillMaxWidth().height(bar + BANNER_TOP_SHADE).background(Brush.verticalGradient(0f to Palette.Shade.copy(alpha = 0.35f), 1f to Palette.Clear)))
             Column(Modifier.align(Alignment.BottomStart).padding(start = Space.page, end = Space.page, bottom = Space.xl)) {
-                Text(kind.uppercase(), style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
+                Text(kind, style = MaterialTheme.typography.labelMedium, color = Palette.OnShade.copy(alpha = 0.85f))
                 Spacer(Modifier.height(Space.xs))
                 Text(name, style = MaterialTheme.typography.headlineLarge, color = Palette.OnShade)
-            }
-            Box(Modifier.padding(top = bar).padding(Space.xs).size(48.dp).clip(CircleShape).background(Palette.Shade).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
-                Icon(ArkGlyphs.Back, contentDescription = "Back", tint = Palette.OnShade, modifier = Modifier.size(24.dp))
             }
         }
     }
@@ -336,7 +333,7 @@ fun PlayPill(onPlay: () -> Unit, enabled: Boolean = true) {
 
 /**
  * The header a record's page opens with, as a catalogue sets one: the cover beside a line of small
- * capitals (`over`, whose it is), the title in bold, who played it in the accent, a small line
+ * type (`over`, whose it is), the title in bold, who played it in the accent, a small line
  * under (`small`), and Play and Shuffle. A line that goes somewhere opens it.
  */
 @Composable
@@ -361,13 +358,13 @@ fun CoverHeader(
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
             if (!over.isNullOrEmpty()) {
-                Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.clickable(onClick = onOver) else Modifier)
+                Text(over, style = quiet(MaterialTheme.typography.labelMedium), modifier = if (onOver != null) Modifier.pressable(onClick = onOver) else Modifier)
                 Spacer(Modifier.height(Space.xs))
             }
             Text(title, style = MaterialTheme.typography.headlineSmall)
             if (!by.isNullOrEmpty()) Text(by, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.xs))
             if (!small.isNullOrEmpty()) {
-                Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.clickable(onClick = onSmall) else Modifier))
+                Text(small, style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(top = Space.xs).then(if (onSmall != null) Modifier.pressable(onClick = onSmall) else Modifier))
             }
             if (onPlay != null) {
                 Spacer(Modifier.height(Space.m))
@@ -384,7 +381,7 @@ fun CoverHeader(
 
 /**
  * One thing set apart at the head of a section, the one to start with: its cover beside `label`
- * in small capitals, its title, its facts, and a Play. The cover and the title open it, the page
+ * in small type, its title, its facts, and a Play. The cover and the title open it, the page
  * growing out of the cover.
  */
 @Composable
@@ -392,11 +389,11 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
     val hero = rememberHero(6.dp)
     val open = hero.lifting(onOpen)
     Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, top = Space.l, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-        Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).clickable(onClick = open), corner = 6.dp)
+        Cover(seed, art, 112.dp, Modifier.size(112.dp).then(hero.modifier).pressable(onClick = open), corner = 6.dp)
         Spacer(Modifier.width(Space.l))
         Column(Modifier.weight(1f)) {
-            Text(label.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
-            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = open))
+            Text(label, style = quiet(MaterialTheme.typography.labelSmall))
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.pressable(onClick = open))
             if (facts.isNotEmpty()) Text(facts, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(Space.s))
             PlayPill(onPlay)
@@ -406,20 +403,20 @@ fun Featured(label: String, seed: String, art: String, title: String, facts: Str
 
 /**
  * One entry of a catalogue's listing over its hairline: a picture at its left when it has one,
- * a line of small capitals over its title (who it is by), a line under, a count at its right, and
+ * a line of small type over its title (who it is by), a line under, a count at its right, and
  * the chevron. The whole entry opens it.
  */
 @Composable
 fun Entry(title: String, over: String, under: String, count: String, onOpen: () -> Unit, picture: (@Composable (Modifier) -> Unit)? = null) {
     val hero = if (picture != null) rememberHero(4.dp) else null
-    Column(Modifier.fillMaxWidth().clickable(onClick = hero?.lifting(onOpen) ?: onOpen).padding(start = Space.page)) {
+    Column(Modifier.fillMaxWidth().pressable(onClick = hero?.lifting(onOpen) ?: onOpen, press = Press.Highlight).padding(start = Space.page)) {
         Row(Modifier.fillMaxWidth().padding(end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
             if (picture != null && hero != null) {
                 picture(hero.modifier)
                 Spacer(Modifier.width(Space.m))
             }
             Column(Modifier.weight(1f)) {
-                if (over.isNotEmpty()) Text(over.uppercase(), style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
+                if (over.isNotEmpty()) Text(over, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1)
                 Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (under.isNotEmpty()) Text(under, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -433,21 +430,21 @@ fun Entry(title: String, over: String, under: String, count: String, onOpen: () 
 /** The line under a section that opens the rest of it — "See All 40 Works" — in the accent. */
 @Composable
 fun MoreLine(label: String, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().pressable(onClick = onOpen, press = Press.Highlight).padding(start = Space.page, end = Space.m, top = Space.m, bottom = Space.m), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
         Chevron()
     }
 }
 
 /**
- * A work's heading on a record: its composer in small capitals over its title, and
+ * A work's heading on a record: its composer in small type over its title, and
  * how long the run of it under the heading lasts, where the tracks' lengths are.
  */
 @Composable
 fun WorkHeading(composer: String, work: String, ms: Long, first: Boolean) {
     Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs + 48.dp + Space.s, top = if (first) Space.s else Space.xl, bottom = Space.xs), verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
-            if (composer.isNotEmpty()) Text(composer.uppercase(), style = quiet(MaterialTheme.typography.labelSmall))
+            if (composer.isNotEmpty()) Text(composer, style = quiet(MaterialTheme.typography.labelSmall))
             Text(work, style = MaterialTheme.typography.titleMedium)
         }
         if (ms > 0) Text(Media.clock(ms), style = quiet(MaterialTheme.typography.bodySmall), modifier = Modifier.padding(start = Space.s))
@@ -464,7 +461,7 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
         for (terms in licences) Text(terms, style = quiet(MaterialTheme.typography.bodySmall))
         if (label.isNotEmpty()) {
             Spacer(Modifier.height(Space.l))
-            Text("RECORD LABEL", style = quiet(MaterialTheme.typography.labelSmall))
+            Text("Record Label", style = quiet(MaterialTheme.typography.labelSmall))
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
@@ -475,7 +472,7 @@ fun Foot(tracks: List<Track>, year: Long, label: String, licences: List<String> 
 fun Face(name: String, art: String, role: String, onOpen: (() -> Unit)?) {
     val hero = if (onOpen != null) rememberHero(Space.corner, round = true) else null
     Column(
-        Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.clickable(onClick = hero.lifting(onOpen)) else Modifier),
+        Modifier.width(104.dp).then(if (onOpen != null && hero != null) Modifier.pressable(onClick = hero.lifting(onOpen)) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Cover(name, art, 88.dp, Modifier.size(88.dp).then(hero?.modifier ?: Modifier), round = true)

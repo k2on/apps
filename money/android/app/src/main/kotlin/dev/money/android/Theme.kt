@@ -1,108 +1,55 @@
-// money's look: Material You (arkui's `MaterialYou`) — the wallpaper's
-// colours on Android 12 and later, and before that (and in every
-// screenshot) a scheme of money's own, a deep green, made the way Material's
-// tonal palettes are: one hue for the primary, a quieter one for the
-// secondary, a warm third for the tertiary, which is what "worth a look"
-// is drawn in. And how the screens write a day and a month: in the phone's
-// locale, as its own apps do.
+// money's look: Material You (arkui's `MaterialYou`) in arkui's theme
+// (arkui/theme.toml) — the neutrals every Ark app shares and money's accent,
+// the green, with the shared caution in the tertiary slot, which is what
+// "worth a look" is drawn in. The wallpaper's colours are there for asking
+// (`dynamic`), and off by default: money is green on every phone, as it is
+// on the iPhone and the desktop. And how the screens write a day and a
+// month: in the phone's locale, as its own apps do.
 package dev.money.android
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.os.ConfigurationCompat
+import dev.arkui.Accent
 import dev.arkui.Amounts
+import dev.arkui.ArkTheme
 import dev.arkui.LocalAmounts
+import dev.arkui.LocalArkTheme
 import dev.arkui.MaterialYou
+import dev.arkui.arkuiScheme
+import dev.arkui.expressiveTypography
+import dev.arkui.tracked
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 
-object Palette {
-    val Light: ColorScheme =
-        lightColorScheme(
-            primary = Color(0xFF1B6B4A),
-            onPrimary = Color(0xFFFFFFFF),
-            primaryContainer = Color(0xFFA6F2C8),
-            onPrimaryContainer = Color(0xFF002113),
-            secondary = Color(0xFF4E6356),
-            onSecondary = Color(0xFFFFFFFF),
-            secondaryContainer = Color(0xFFD0E8D7),
-            onSecondaryContainer = Color(0xFF0B1F15),
-            tertiary = Color(0xFF8A5100),
-            onTertiary = Color(0xFFFFFFFF),
-            tertiaryContainer = Color(0xFFFFDCBC),
-            onTertiaryContainer = Color(0xFF2C1600),
-            error = Color(0xFFBA1A1A),
-            onError = Color(0xFFFFFFFF),
-            errorContainer = Color(0xFFFFDAD6),
-            onErrorContainer = Color(0xFF410002),
-            background = Color(0xFFF6FBF4),
-            onBackground = Color(0xFF171D19),
-            surface = Color(0xFFF6FBF4),
-            onSurface = Color(0xFF171D19),
-            surfaceVariant = Color(0xFFDCE5DC),
-            onSurfaceVariant = Color(0xFF404943),
-            outline = Color(0xFF707972),
-            outlineVariant = Color(0xFFC0C9C1),
-            inversePrimary = Color(0xFF8BD5AD),
-            surfaceContainerLowest = Color(0xFFFFFFFF),
-            surfaceContainerLow = Color(0xFFF0F5EE),
-            surfaceContainer = Color(0xFFEAEFE8),
-            surfaceContainerHigh = Color(0xFFE5EAE3),
-            surfaceContainerHighest = Color(0xFFDFE4DD),
-        )
+/** money's type scale: arkui's expressive one, tracked for each size. */
+private val MoneyType = expressiveTypography().tracked()
 
-    val Dark: ColorScheme =
-        darkColorScheme(
-            primary = Color(0xFF8BD5AD),
-            onPrimary = Color(0xFF003824),
-            primaryContainer = Color(0xFF005236),
-            onPrimaryContainer = Color(0xFFA6F2C8),
-            secondary = Color(0xFFB4CCBB),
-            onSecondary = Color(0xFF203529),
-            secondaryContainer = Color(0xFF364B3F),
-            onSecondaryContainer = Color(0xFFD0E8D7),
-            tertiary = Color(0xFFFFB86E),
-            onTertiary = Color(0xFF4A2800),
-            tertiaryContainer = Color(0xFF693C00),
-            onTertiaryContainer = Color(0xFFFFDCBC),
-            error = Color(0xFFFFB4AB),
-            onError = Color(0xFF690005),
-            errorContainer = Color(0xFF93000A),
-            onErrorContainer = Color(0xFFFFDAD6),
-            background = Color(0xFF0F1511),
-            onBackground = Color(0xFFDFE4DD),
-            surface = Color(0xFF0F1511),
-            onSurface = Color(0xFFDFE4DD),
-            surfaceVariant = Color(0xFF404943),
-            onSurfaceVariant = Color(0xFFC0C9C1),
-            outline = Color(0xFF8A938B),
-            outlineVariant = Color(0xFF404943),
-            inversePrimary = Color(0xFF1B6B4A),
-            surfaceContainerLowest = Color(0xFF0A0F0C),
-            surfaceContainerLow = Color(0xFF171D19),
-            surfaceContainer = Color(0xFF1B211D),
-            surfaceContainerHigh = Color(0xFF252B27),
-            surfaceContainerHighest = Color(0xFF303632),
-        )
+/** The palette, both sides: arkui's, in the green. */
+object Palette {
+    val Light: ColorScheme = arkuiScheme(Accent.Green, dark = false)
+    val Dark: ColorScheme = arkuiScheme(Accent.Green, dark = true)
 }
 
-/** money's theme, and money written in the phone's locale under it. `dynamic` off draws money's own. */
+/**
+ * money's theme, its derived squares in the green, and money written in the phone's locale under
+ * it. `dynamic` draws the wallpaper's colours instead, on Android 12 and later.
+ */
 @Composable
-fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = true, content: @Composable () -> Unit) {
+fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
     val locale = ConfigurationCompat.getLocales(LocalConfiguration.current)[0] ?: Locale.getDefault()
     val amounts = remember(locale) { Amounts(locale) }
-    MaterialYou(light = Palette.Light, dark = Palette.Dark, darkTheme = dark, dynamic = dynamic) {
-        CompositionLocalProvider(LocalAmounts provides amounts, content = content)
+    // Material's expressive scale, tracked and led for each size as the iPhone's is (arkui's
+    // `tracked`): the big figures and titles tight, body text as drawn, captions a little open.
+    MaterialYou(light = Palette.Light, dark = Palette.Dark, darkTheme = dark, dynamic = dynamic, typography = MoneyType) {
+        CompositionLocalProvider(LocalAmounts provides amounts, LocalArkTheme provides ArkTheme(Accent.Green.art(dark)), content = content)
     }
 }
 

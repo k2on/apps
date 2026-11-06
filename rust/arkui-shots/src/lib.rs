@@ -45,6 +45,9 @@
 //!   the step when that is on the screen already.
 //! - `{"hover": "<text>"}` moves the pointer over the middle of that text,
 //!   as `click` finds it, and leaves it there: what a pointer does to it.
+//! - `{"scroll": "<text>", "by": <pixels>}` turns the wheel over that
+//!   text, `by` down (negative: up; 300 when not said): a page no key
+//!   scrolls.
 //! - `{"type": "<text>"}` types into what has the keys, and a key no
 //!   widget takes goes on to the app's own (the vim keys); `{"key":
 //!   "ctrl+k"}` presses one, with what is held (`press` spells them).
@@ -598,6 +601,21 @@ where
                 Some(at) => {
                     self.interact(Interaction::Mouse(Mouse::Move(Target::Point(at))));
                     self.pointed = true;
+                    self.settle(Duration::from_millis(300), Duration::from_secs(5));
+                }
+                None if optional => {}
+                None => return Err(format!("nothing on the screen says {label:?}")),
+            }
+        } else if let Some(label) = step["scroll"].as_str() {
+            // The wheel, `by` pixels down (up, negative) over that text: a
+            // page no key moves, scrolled as a hand would.
+            let by = step["by"].as_f64().unwrap_or(300.0) as f32;
+            match self.wait_for(label, false, if optional { OPTIONAL } else { PATIENCE }) {
+                Some(at) => {
+                    self.interact(Interaction::Mouse(Mouse::Move(Target::Point(at))));
+                    self.events(vec![Event::Mouse(mouse::Event::WheelScrolled {
+                        delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -by },
+                    })]);
                     self.settle(Duration::from_millis(300), Duration::from_secs(5));
                 }
                 None if optional => {}

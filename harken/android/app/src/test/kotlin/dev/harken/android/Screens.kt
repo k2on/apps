@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -223,6 +224,11 @@ class Screens {
         shot("water-music") {
             tab(Tab.Library) { AlbumPage(Demo.key(name), Demo.albums.first { it.id == Demo.key(name) }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle) }
         }
+        // Scrolled past its header: the cover and the title small in the bar, over a soft edge.
+        shot("water-music-scrolled") {
+            val list = remember { LazyListState(firstVisibleItemIndex = 4, firstVisibleItemScrollOffset = 24) }
+            tab(Tab.Library) { AlbumPage(Demo.key(name), Demo.albums.first { it.id == Demo.key(name) }, Demo.album(name), Demo.details, hornpipe.id.hex, Idle, list) }
+        }
         val seasons = "The Four Seasons"
         shot("four-seasons") { tab(Tab.Library) { AlbumPage(Demo.key(seasons), Demo.albums.first { it.id == Demo.key(seasons) }, Demo.album(seasons), Demo.details, null, Idle) } }
     }
@@ -323,6 +329,22 @@ class Screens {
                 val density = LocalDensity.current
                 Chrome(Tab.Home, player, Still, onTab = {}, position = at, sheet = remember { PlayerSheet.held(p, density) }) {
                     HomeScreen(HomeData(true, last, Demo.tracks, Demo.playlists, Demo.albums, null), Demo::albumOf, Idle)
+                }
+            }
+        }
+    }
+
+    // The device chip's glass grown into the picker, over the full player, as the iPhone's menus
+    // grow out of their buttons: open, while the browser plays; and held a quarter and half of the
+    // way, the chip's face going and the list coming in as the glass grows up from the chip.
+    @Test
+    fun d3_player_devices() {
+        val on = player.copy(on = Where("Browser", "computer", here = false))
+        val rows = Picker.rows(heard(session(Output.Device("s-web", false), playing = true)).listening!!, "s-phone")
+        for ((name, held) in listOf("open" to null, "p25" to 0.25f, "p50" to 0.5f)) {
+            shot(name) {
+                CompositionLocalProvider(LocalDeviceMenu provides DeviceMenu(true, rows, Picker.cursor(rows), object : PickerActions {}, held = held)) {
+                    FullPlayer(on, Still, at)
                 }
             }
         }

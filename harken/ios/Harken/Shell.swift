@@ -67,13 +67,16 @@ struct Shell: View {
     private func stack<Root: View>(_ t: Pane, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: path(t)) {
             root()
+                // What scrolls under the bars, the top's and the tab bar's
+                // with the mini player, fades into them softly, the system's
+                // own edge, on every scroll view of the tab.
+                .scrollEdges()
                 .toolbar {
-                    // The face is its own glass, as a person's picture is in the system's apps.
-                    ToolbarItem(placement: .topBarTrailing) { AccountMenu() }
-                        .sharedBackgroundVisibility(.hidden)
+                    // The face where money's is: on the bar's glass at the top left.
+                    ToolbarItem(placement: .topBarLeading) { AccountButton() }
                 }
                 .navigationDestination(for: Route.self) { r in
-                    Destination(route: r).zoomed(r, zoom)
+                    Destination(route: r).zoomed(r, zoom).scrollEdges()
                 }
         }
         .environment(\.open) { r in paths[t, default: []].append(r) }
@@ -94,6 +97,7 @@ struct SheetHost: ViewModifier {
             .environment(\.present) { s in present(s) }
             .sheet(item: $sheet) { s in
                 sheetView(s)
+                    .scrollEdges()
                     .environmentObject(model)
                     .environment(\.present) { next in present(next) }
             }

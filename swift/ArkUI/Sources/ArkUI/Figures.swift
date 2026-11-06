@@ -55,7 +55,7 @@ public struct MarkedCents: View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Image(systemName: mark)
                 .imageScale(.small)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             CentsText(cents)
         }
         .accessibilityElement(children: .ignore)
@@ -63,17 +63,18 @@ public struct MarkedCents: View {
     }
 }
 
-/// What a figure says about itself: the colour of its pill and its text.
+/// What a figure says about itself: the colour of its pill and its text, the
+/// theme's signals (arkui/theme.toml), each legible on the page.
 public enum Tint: Equatable, Sendable {
     case neutral, good, caution, bad, accent
 
     public var color: Color {
         switch self {
-        case .neutral: return .secondary
-        case .good: return .green
-        case .caution: return .orange
-        case .bad: return .red
-        case .accent: return .accentColor
+        case .neutral: return .quiet
+        case .good: return .positive
+        case .caution: return .caution
+        case .bad: return .error
+        case .accent: return .accentText
         }
     }
 }
@@ -92,10 +93,10 @@ public struct Pill<Content: View>: View {
         content
             .font(.subheadline.weight(.semibold))
             .monospacedDigit()
-            .foregroundStyle(tint == .neutral ? Color.secondary : tint.color)
+            .foregroundStyle(tint == .neutral ? Color.quiet : tint.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(tint == .neutral ? Color.secondary.opacity(0.12) : tint.color.opacity(0.16), in: Capsule())
+            .background(tint == .neutral ? Color.quiet.opacity(0.12) : tint.color.opacity(0.16), in: Capsule())
     }
 }
 
@@ -131,16 +132,15 @@ public struct HeroFigure<Footer: View>: View {
         let face = VStack(alignment: .leading, spacing: Space.xs) {
             Text(caption)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .foregroundStyle(.quiet)
             CentsText(cents)
-                .font(.system(size: 44, weight: .bold, design: .rounded))
-                .foregroundStyle(tint == .neutral ? Color.primary : tint.color)
+                .scaledFont(44, weight: .bold, design: .rounded)
+                .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
             if !note.isEmpty {
-                Text(note).font(.footnote).foregroundStyle(.secondary)
+                Text(note).font(.footnote).foregroundStyle(.quiet)
             }
             footer.padding(.top, Space.s)
         }
@@ -150,15 +150,15 @@ public struct HeroFigure<Footer: View>: View {
             LinearGradient(colors: [tint.color.opacity(0.22), tint.color.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .animation(Springs.move, value: cents)
+        .surface(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .motion(Springs.move, value: cents)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(caption)
         .accessibilityValue(CentsText.string(cents) + (note.isEmpty ? "" : ", " + note))
 
         if let action {
             Button(action: action) { face.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityAddTraits(.isButton)
         } else {
             face
@@ -184,7 +184,7 @@ public struct AmountEntry: View {
     @FocusState private var focused: Bool
     @State private var typed = ""
 
-    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .primary) {
+    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .ink) {
         _cents = cents
         self.prompt = prompt
         self.tint = tint
@@ -193,14 +193,14 @@ public struct AmountEntry: View {
     public var body: some View {
         VStack(spacing: Space.s) {
             CentsText(cents)
-                .font(.system(size: 56, weight: .bold, design: .rounded))
-                .foregroundStyle(cents == 0 ? Color.secondary : tint)
+                .scaledFont(56, weight: .bold, design: .rounded)
+                .foregroundStyle(cents == 0 ? Color.quiet : tint)
                 .contentTransition(.numericText(value: Double(cents)))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
-                .animation(Springs.move, value: cents)
+                .motion(Springs.move, value: cents)
             if !prompt.isEmpty {
-                Text(prompt).font(.footnote).foregroundStyle(.secondary)
+                Text(prompt).font(.footnote).foregroundStyle(.quiet)
             }
         }
         .frame(maxWidth: .infinity)
@@ -260,6 +260,9 @@ public struct Pager: View {
     let home: (() -> Void)?
     let homeLabel: String
     @State private var steps = 0
+    /// Which way the last step went: forward brings the next name in from
+    /// the right, back from the left; home, whose way is not known here, fades.
+    @State private var way: Edge? = nil
 
     /// `home`, when given, is offered as `homeLabel` ("Today").
     public init(_ title: String, homeLabel: String = "Today", home: (() -> Void)? = nil, back: @escaping () -> Void, forward: @escaping () -> Void) {
@@ -272,25 +275,61 @@ public struct Pager: View {
 
     public var body: some View {
         HStack(spacing: Space.s) {
-            Button { steps -= 1; back() } label: { Image(systemName: "chevron.left") }
+            Button { steps -= 1; go(.leading, back) } label: { Image(systemName: "chevron.left") }
                 .accessibilityLabel("Previous")
-            Text(title)
-                .font(.headline)
-                .contentTransition(.numericText(value: Double(steps)))
-                .frame(minWidth: 150)
-                .animation(Springs.move, value: title)
-            Button { steps += 1; forward() } label: { Image(systemName: "chevron.right") }
+            ZStack {
+                // A new name for each title, so a step slides the old one out
+                // and the new one in rather than changing one in place; a
+                // step taken mid-slide turns the spring where it is drawn.
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .id(title)
+                    .motionTransition(Self.slide(way))
+            }
+            .frame(minWidth: Self.width)
+            .clipped()
+            .motion(Springs.move, value: title)
+            Button { steps += 1; go(.trailing, forward) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel("Next")
             if let home {
-                Button(homeLabel, action: home)
+                Button(homeLabel) { steps += 1; go(nil, home) }
                     .font(.subheadline.weight(.semibold))
-                    .transition(.opacity.combined(with: .scale))
+                    .motionTransition(.enter)
             }
         }
         .buttonStyle(.glass)
+        // "Today" comes and goes with the step that leaves or reaches home.
+        .motion(Springs.size, value: home == nil)
         .sensoryFeedback(.selection, trigger: steps)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
+    }
+
+    /// A step `to` that side. The way is set before the step, so the name
+    /// that leaves is drawn knowing it as well as the one that comes
+    /// (docs/motion.md, Choreography): a view that goes takes the transition
+    /// it was last drawn with, so when the way turns, the step waits the one
+    /// frame it takes to draw the old name with the new way.
+    private func go(_ to: Edge?, _ step: @escaping () -> Void) {
+        if way == to { step() } else {
+            way = to
+            DispatchQueue.main.async(execute: step)
+        }
+    }
+
+    /// The least room the name has between the chevrons.
+    static let width: CGFloat = 150
+
+    /// The name coming in from `way`'s side and leaving by the other, as
+    /// Android's Stepper (`Transitions.stepped`): fading as it slides the
+    /// shared shift (`MotionTokens.shift`) of its width, enough to say which
+    /// way it went. With no way, a cross-fade.
+    static func slide(_ way: Edge?) -> AnyTransition {
+        guard let way else { return .opacity }
+        let by = CGFloat(MotionTokens.shift) * width * (way == .trailing ? 1 : -1)
+        return .asymmetric(insertion: .offset(x: by).combined(with: .opacity),
+                           removal: .offset(x: -by).combined(with: .opacity))
     }
 }
 #endif

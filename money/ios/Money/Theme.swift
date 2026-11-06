@@ -1,15 +1,11 @@
 // money's look on the phone, over ArkUI's (swift/ArkUI: the spacing, the
-// springs, the figures): the system's own colours, which follow light and
-// dark by themselves, and a green for money — the accent, `AccentColor` in
-// the asset catalog, the same two greens as here. Liquid Glass brings its
+// springs, the figures, the colours): arkui's theme (arkui/theme.toml) — the
+// neutrals every Ark app shares, as `.ink`, `.quiet` and the rest, and
+// money's accent, the green, which `MoneyApp` names (`Accent.use(.green)`)
+// and `AccentColor` in the asset catalog holds too. Liquid Glass brings its
 // own materials; what is here is only what a figure is tinted with.
 import ArkUI
 import SwiftUI
-
-extension Color {
-    /// The accent: a deep green on a white page, a brighter one on a dark one.
-    static let money = Color(light: 0x1E8E4E, dark: 0x3DD27A)
-}
 
 extension Tone {
     /// The figure's tint, as ArkUI's pill and hero draw it.
@@ -41,29 +37,49 @@ extension Summary {
     var tint: Tint { readyToAssign > 0 ? .good : readyToAssign < 0 ? .bad : .neutral }
 }
 
-/// An account's mark: its kind's symbol on a tinted rounded square, as Wallet's passes and Settings' rows draw one.
+/// An account's mark: its kind's symbol in its colour on a faint wash of
+/// that colour, a rounded square as Settings' tinted rows draw one. The
+/// colours are the theme's chart palette (arkui/theme.toml), which the
+/// Android app draws its marks in too.
 struct AccountMark: View {
     let kind: String
     var side: CGFloat = 32
 
     var body: some View {
-        Image(systemName: Accounts.symbol(kind))
-            .font(.system(size: side * 0.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: side, height: side)
-            .background(AccountMark.color(kind).gradient, in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
-            .accessibilityHidden(true)
+        Tile(symbol: Accounts.symbol(kind), color: AccountMark.color(kind), side: side)
     }
 
+    /// A kind's colour, by its place in the chart palette.
     static func color(_ kind: String) -> Color {
+        let c = Color.chart
         switch kind {
-        case "checking": return .blue
-        case "savings": return .green
-        case "cash": return .mint
-        case "credit": return .indigo
-        case "loan": return .orange
-        case "investment": return .purple
-        default: return .gray
+        case "checking": return c[1]
+        case "savings": return c[0]
+        case "cash": return c[5]
+        case "credit": return c[3]
+        case "loan": return c[2]
+        case "investment": return c[4]
+        default: return .quiet
+        }
+    }
+
+    /// A symbol in `color` on a wash of it: an account's mark, or All
+    /// Accounts'. It grows with the person's text size, as the row's words
+    /// beside it do, up to half as large again.
+    struct Tile: View {
+        let symbol: String
+        let color: Color
+        var side: CGFloat = 32
+        @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
+
+        var body: some View {
+            let side = self.side * min(grows, 1.5)
+            Image(systemName: symbol)
+                .font(.system(size: side * 0.5, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: side, height: side)
+                .background(color.opacity(0.16), in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
+                .accessibilityHidden(true)
         }
     }
 }

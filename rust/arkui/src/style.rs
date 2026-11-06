@@ -17,13 +17,17 @@ use iced::{Background, Border, Color, Theme};
 
 use crate::theme::of;
 
+/// How much of the text colour secondary text is: the least that still reads
+/// at 4.5:1 on either page (arkui/README.md), 0.6 being a shade under it on white.
+const DIM: f32 = 0.65;
+
 /// Secondary text: a clock, a count, a hint.
 ///
 /// In place of `text::secondary`, which reads iced's palette and so is a grey
 /// chosen against iced's background rather than the app's.
 pub fn dim(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(of(theme).background.base.text.scale_alpha(0.6)),
+        color: Some(of(theme).background.base.text.scale_alpha(DIM)),
     }
 }
 
@@ -82,6 +86,8 @@ pub fn seek(theme: &Theme, status: slider::Status) -> slider::Style {
 /// of the page's text, and the accent alone says it is the one to press.
 /// Pointing at it changes nothing about its colour; what a pointer does to
 /// a control is [`crate::button`]'s underline or [`quiet`]'s faint tint.
+/// Pressed, the moment the button goes down and not when it comes up, the
+/// faint ground of a pressed control is behind it ([`PRESS_ALPHA`]).
 pub fn action(theme: &Theme, status: button::Status) -> button::Style {
     let palette = of(theme);
     let text_color = match status {
@@ -89,20 +95,32 @@ pub fn action(theme: &Theme, status: button::Status) -> button::Style {
         _ => palette.primary.base.color,
     };
     button::Style {
-        background: None,
+        background: pressed(theme, status),
         text_color,
-        border: Border::default(),
+        border: Border {
+            radius: FOCUS_RADIUS.into(),
+            ..Border::default()
+        },
         ..button::Style::default()
     }
 }
 
+/// The ground behind a button held down: the text colour at
+/// [`PRESS_ALPHA`], from the moment it goes down — what a press does is
+/// seen while the hand is still on it, not only once it lets go.
+fn pressed(theme: &Theme, status: button::Status) -> Option<Background> {
+    matches!(status, button::Status::Pressed).then(|| Background::Color(of(theme).background.base.text.scale_alpha(PRESS_ALPHA)))
+}
+
 /// A button that reads as a label until it is pointed at: an icon, a word,
 /// the account at the end of a top bar. No border, and pointed at, only the
-/// faintest tint behind it ([`HOVER_ALPHA`]); its text keeps its colour.
+/// faintest tint behind it ([`HOVER_ALPHA`]), and held down, twice that
+/// ([`PRESS_ALPHA`]); its text keeps its colour.
 pub fn quiet(theme: &Theme, status: button::Status) -> button::Style {
     let palette = of(theme);
     let background = match status {
-        button::Status::Hovered | button::Status::Pressed => Some(Background::Color(palette.background.base.text.scale_alpha(HOVER_ALPHA))),
+        button::Status::Hovered => Some(Background::Color(palette.background.base.text.scale_alpha(HOVER_ALPHA))),
+        button::Status::Pressed => pressed(theme, status),
         button::Status::Active | button::Status::Disabled => None,
     };
     let text_color = match status {
@@ -122,16 +140,21 @@ pub fn quiet(theme: &Theme, status: button::Status) -> button::Style {
 
 /// A button that is only what it holds: no fill, no border, its text in the
 /// page's colour whatever the pointer does. A link's or a name's, whose
-/// pointer is the underline [`crate::button::underlined`] draws.
+/// pointer is the underline [`crate::button::underlined`] draws. Held
+/// down, it has a pressed control's faint ground behind it, as every
+/// button does ([`PRESS_ALPHA`]).
 pub fn bare(theme: &Theme, status: button::Status) -> button::Style {
     let palette = of(theme);
     button::Style {
-        background: None,
+        background: pressed(theme, status),
         text_color: match status {
             button::Status::Disabled => palette.background.base.text.scale_alpha(0.4),
             _ => palette.background.base.text,
         },
-        border: Border::default(),
+        border: Border {
+            radius: FOCUS_RADIUS.into(),
+            ..Border::default()
+        },
         ..button::Style::default()
     }
 }
@@ -140,6 +163,11 @@ pub fn bare(theme: &Theme, status: button::Status) -> button::Style {
 /// to say "this one", not so much that the pointer passing over a page
 /// lights it up as it goes.
 pub const HOVER_ALPHA: f32 = 0.05;
+
+/// How much of it a control held down is tinted with: twice the pointer's,
+/// so going down is seen as a change even under the pointer, and still
+/// only a wash.
+pub const PRESS_ALPHA: f32 = 0.10;
 
 /// How round the focus's ground is ([`focus`]).
 pub const FOCUS_RADIUS: f32 = 6.0;
@@ -223,10 +251,16 @@ pub fn hairline(theme: &Theme) -> rule::Style {
 pub fn page(theme: &Theme) -> container::Style {
     let palette = of(theme);
     container::Style {
-        background: Some(Background::Color(palette.background.base.color)),
+        background: Some(Background::Color(page_color(theme))),
         text_color: Some(palette.background.base.text),
         ..container::Style::default()
     }
+}
+
+/// The colour of a [`page`]'s ground: what a scroll edge over the page
+/// lays down ([`crate::edge`]).
+pub fn page_color(theme: &Theme) -> Color {
+    of(theme).background.base.color
 }
 
 /// How far a [`surface`] steps from the page toward the text colour.
@@ -328,13 +362,13 @@ pub fn entry_text(theme: &Theme, _lit: bool) -> Color {
 
 /// Text on a row that may be under the cursor: the same whether it is or
 /// not, the cursor being a wash under it ([`row`]). `accent` is the accent
-/// colour (the one playing, a ticked name) and `dim` is the text at 0.6.
+/// colour (the one playing, a ticked name) and `dim` is the text at [`DIM`].
 pub fn on_row(theme: &Theme, _on_cursor: bool, accent: bool, dim: bool) -> Color {
     let palette = of(theme);
     if accent {
         palette.primary.base.color
     } else if dim {
-        palette.background.base.text.scale_alpha(0.6)
+        palette.background.base.text.scale_alpha(DIM)
     } else {
         palette.background.base.text
     }

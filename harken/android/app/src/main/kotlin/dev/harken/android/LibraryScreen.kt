@@ -6,7 +6,6 @@
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkui.Cover
@@ -54,6 +55,7 @@ import dev.arkui.rememberDestinationGridState
 import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
 import dev.arkui.rememberHero
+import dev.arkui.pressable
 
 /** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
 enum class LibraryTab(val title: String, val kind: String? = null) {
@@ -94,7 +96,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
         val kind = tab.kind
         TabTitle("Library") {
             if (kind != null) {
-                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Add sermons" else "Add a podcast") }
+                IconButton(onClick = { act.findShow(kind) }) { Glyph(Glyphs.Plus, if (kind == "sermon") "Follow sermons" else "Follow a podcast") }
             } else {
                 IconButton(onClick = act::newPlaylist) { Glyph(Glyphs.Plus, "New playlist") }
             }
@@ -104,16 +106,23 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             // A library of pop has no works, so no Composers — unless it is the list already shown.
+            // Capsules, as the iPhone's: the one shown filled in the accent, the rest a quiet fill
+            // with no outline.
             for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
+                val on = t == tab
                 FilterChip(
-                    selected = t == tab,
+                    selected = on,
                     onClick = { onTab(t) },
                     label = { Text(t.title) },
+                    shape = CircleShape,
                     colors =
                         FilterChipDefaults.filterChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            labelColor = MaterialTheme.colorScheme.onSurface,
                             selectedContainerColor = MaterialTheme.colorScheme.primary,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
                         ),
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = Color.Transparent, selectedBorderColor = Color.Transparent),
                 )
             }
         }
@@ -153,8 +162,8 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         Empty(
             if (kind == "sermon") Glyphs.Pulpit else Glyphs.Show,
             if (kind == "sermon") "No sermons yet" else "No podcasts yet",
-            "Tap + to find one in Apple Podcasts, or paste its feed's address. The server downloads its newest episodes and keeps it up to date.",
-            action = if (kind == "sermon") "Add sermons" else "Add a podcast",
+            "Tap + to follow one: search Apple Podcasts, or paste its feed's address. A folder of it under ${kind}s/ on the server appears here too.",
+            action = if (kind == "sermon") "Follow Sermons" else "Follow a Podcast",
             onAction = { act.findShow(kind) },
         )
         return
@@ -176,7 +185,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
                 Column(Modifier.weight(1f)) {
                     Text(f.title.ifEmpty { f.url }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (f.error.isNotEmpty()) "Could not read it: ${f.error}" else "not read yet",
+                        if (f.error.isNotEmpty()) "Could not read it: ${f.error}" else "Not read yet",
                         style = quiet(MaterialTheme.typography.bodySmall),
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
@@ -187,7 +196,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
         }
         items(shows, key = { it.id }) { s ->
             val hero = rememberHero(Space.corner)
-            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {
+            Column(Modifier.pressable(onClick = hero.lifting { act.open(Page.ForShow(s.id)) })) {
                 Cover(s.title, s.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(s.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -204,7 +213,7 @@ private fun Playlists(playlists: List<Playlist>, act: Do) {
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         item {
-            ListRow(onClick = act::newPlaylist, title = "New playlist", under = null) {
+            ListRow(onClick = act::newPlaylist, title = "New Playlist", under = null) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(Space.corner), modifier = Modifier.size(56.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Glyphs.Plus, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -244,7 +253,7 @@ private fun Albums(albums: List<Album>, act: Do) {
     ) {
         items(albums, key = { it.id }) { a ->
             val hero = rememberHero(Space.corner)
-            Column(Modifier.clickable(onClick = hero.lifting { act.open(Page.ForAlbum(a.id)) })) {
+            Column(Modifier.pressable(onClick = hero.lifting { act.open(Page.ForAlbum(a.id)) })) {
                 Cover(a.name, a.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(a.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -3,39 +3,34 @@
 //! form. A menu or a picker is about a thing on the page and opens at it;
 //! this is about the page, so it takes the middle.
 //!
-//! **It moves as shadcn/ui's does**, without the blur: it fades in and
-//! grows from 95% of its size over [`TIMING`]'s 200 ms along CSS's `ease`,
-//! as the page dims over [`DIMMING`]'s 150 ms, and back the same way when
-//! it closes. An app holds a [`Shown`] for it, keeps a clock running while
-//! that is [`Shown::moving`], draws each frame from [`open`] and
-//! [`dimmed`], and stops drawing it once it is [`Shown::gone`].
+//! **It moves on a spring** ([`SPRING`]): it fades in and grows from 95% of
+//! its size, as shadcn/ui's does, the page dimming a little ahead of it,
+//! and back the same way when it closes — from wherever it had got to, so
+//! closed as it opens it turns back without a jump ([`crate::motion`]).
+//! Where the system asks for less motion it only fades. An app holds a
+//! [`Shown`] for it, keeps a clock running while that is
+//! [`Shown::moving`], draws each frame from [`open`] and [`dimmed`], and
+//! stops drawing it once it is [`Shown::gone`].
 //!
 //! A click on the dimmed page closes it and the wheel there is swallowed, as
 //! [`crate::layer::dimmed`] does for a picker. A click on the dialog itself,
 //! anywhere on it, is the dialog's: it is opaque to the pointer, so a click
 //! between its controls does not fall through to the page under it.
-use iced::time::{Duration, Instant};
+use iced::time::Instant;
 use iced::widget::{column, container, mouse_area, opaque, row, text, Space};
 use iced::{Alignment, Background, Border, Element, Length, Vector};
 
-use crate::motion::{self, Shown, Timing, EASE};
+use crate::motion::{self, Shown, Spring};
 use crate::theme::of;
 
-/// How long it takes to open and to close, and its curve: shadcn/ui's
-/// `duration-200`, on `animate-in`'s and `animate-out`'s `ease`.
-pub const TIMING: Timing = Timing {
-    opening: Duration::from_millis(200),
-    closing: Duration::from_millis(200),
-    ease: EASE,
-};
+/// What it opens and closes on: the shared move ([`motion::SMOOTH`]),
+/// critically damped, so it lands without a bounce — it was asked for, not
+/// thrown.
+pub const SPRING: Spring = motion::SMOOTH;
 
-/// The page's dimming under it: its overlay's, which has no duration of
-/// its own and so takes Tailwind's 150 ms.
-pub const DIMMING: Timing = Timing {
-    opening: Duration::from_millis(150),
-    closing: Duration::from_millis(150),
-    ease: EASE,
-};
+/// How far open it is when the page under it is all the way dimmed: the
+/// dimming leads, as shadcn/ui's overlay's 150 ms does its dialog's 200.
+pub const DIM_LEAD: f32 = 0.75;
 
 /// How small it starts and ends: `zoom-in-95`, `zoom-out-95`.
 pub const FROM: f32 = 0.95;
@@ -49,17 +44,19 @@ const RADIUS: f32 = 12.0;
 
 /// A dialog coming into view at `now`.
 pub fn shown(now: Instant) -> Shown {
-    Shown::new(TIMING, now)
+    Shown::new(SPRING, now)
 }
 
-/// How far open it is at `now`, 0 to 1, along its curve.
+/// How far open it is at `now`, 0 to 1, on its spring.
 pub fn open(shown: &Shown, now: Instant) -> f32 {
     shown.at(now)
 }
 
-/// How far the page under it is dimmed at `now`, 0 to 1.
+/// How far the page under something [`Shown`] is dimmed at `now`, 0 to 1:
+/// all the way once it is [`DIM_LEAD`] open. Worked out from how far open
+/// it is rather than on a spring of its own, so it turns back with it.
 pub fn dimmed(shown: &Shown, now: Instant) -> f32 {
-    shown.at_pace(DIMMING, now)
+    (shown.at(now) / DIM_LEAD).min(1.0)
 }
 
 /// The page under it, dimmed `dim` of the way: a click closes, the wheel
@@ -120,8 +117,13 @@ pub fn present<'a, M: 'a>(panel: impl Into<Element<'a, M>>, open: f32) -> Elemen
     // and under it is the page, whose click closes. Inside the move, so
     // "over it" is where it is drawn, not where it will be.
     let panel = opaque(panel);
+    // With less motion it only fades: at its size from the start.
+    let scale = match motion::reduced() {
+        true => 1.0,
+        false => FROM + (1.0 - FROM) * open,
+    };
     let drawn: Element<'a, M> = if open < 1.0 {
-        motion::transformed(panel, Vector::ZERO, FROM + (1.0 - FROM) * open, 1.0 - open, RADIUS)
+        motion::transformed(panel, Vector::ZERO, scale, 1.0 - open, RADIUS)
     } else {
         panel
     };
@@ -159,22 +161,29 @@ mod tests {
         assert_eq!(clicked(iced::Point::new(20.0, 20.0)), [M::Close]);
     }
 
-    /// It fades in and grows from 95% over 200 ms, the page dimming over
-    /// 150 ms, and is still once open; closed, it goes back the same way and
-    /// is then gone. Falsified by the page dimming at the dialog's pace: at
-    /// 150 ms it was not yet all the way dimmed.
+    /// It opens, the page all the way dimmed before it is all the way open,
+    /// and is still once open; closed, it goes back the same way and is
+    /// then gone; closed as it opens, it turns back from where it got to.
+    /// Falsified by the page dimmed at the dialog's own pace: when the page
+    /// was all the way dimmed, the dialog was all the way open.
     #[test]
-    fn it_opens_and_closes_as_shadcn_s_does() {
+    fn it_opens_and_closes_and_turns_back() {
+        let ms = std::time::Duration::from_millis;
         let at = Instant::now();
         let mut s = shown(at);
         assert_eq!(open(&s, at), 0.0);
-        assert_eq!(dimmed(&s, at + DIMMING.opening), 1.0);
-        assert!(open(&s, at + DIMMING.opening) < 1.0);
-        assert_eq!(open(&s, at + TIMING.opening), 1.0);
-        assert!(!s.moving(at + TIMING.opening + crate::motion::LAST_FRAME));
-        let closing = at + TIMING.opening;
-        s.hide(closing);
-        assert!(s.moving(closing + TIMING.closing / 2));
-        assert!(s.gone(closing + TIMING.closing));
+        let dim = (0..200).map(|n| at + ms(n * 5)).find(|&t| dimmed(&s, t) >= 1.0).expect("dimmed");
+        assert!(open(&s, dim) < 1.0, "the page dims ahead of the dialog");
+        let rest = at + ms(800);
+        assert_eq!(open(&s, rest), 1.0);
+        assert!(!s.moving(rest + crate::motion::LAST_FRAME));
+        s.hide(rest);
+        assert!(s.moving(rest + ms(100)));
+        assert!(s.gone(rest + ms(1000)));
+        let mut s = shown(at);
+        let part = open(&s, at + ms(60));
+        s.hide(at + ms(60));
+        assert!((open(&s, at + ms(60)) - part).abs() < 1e-3, "no jump");
+        assert!(s.gone(at + ms(1000)));
     }
 }

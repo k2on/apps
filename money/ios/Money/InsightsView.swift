@@ -20,10 +20,12 @@ struct InsightsView: View {
         let total = spending.reduce(0) { $0 + $1.spent }
         List {
             Section {
+                // A step changes the month at once; only its figures roll, as its
+                // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                 Pager(model.monthName,
-                      home: model.month == model.thisMonth ? nil : { withAnimation(Springs.move) { model.showThisMonth() } },
-                      back: { withAnimation(Springs.move) { model.stepMonth(-1) } },
-                      forward: { withAnimation(Springs.move) { model.stepMonth(1) } })
+                      home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
+                      back: { model.stepMonth(-1) },
+                      forward: { model.stepMonth(1) })
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
             }
@@ -39,8 +41,8 @@ struct InsightsView: View {
                             Circle().fill(InsightsView.palette[i % InsightsView.palette.count]).frame(width: 10, height: 10)
                             Text(g.group)
                             Spacer()
-                            Text(share(g.spent, total)).foregroundStyle(.secondary).monospacedDigit()
-                            CentsText(g.spent).frame(minWidth: 90, alignment: .trailing)
+                            Text(share(g.spent, total)).foregroundStyle(.quiet).monospacedDigit()
+                            CentsText(g.spent).rolls(on: model.snapshot.month).frame(minWidth: 90, alignment: .trailing)
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -48,10 +50,10 @@ struct InsightsView: View {
             }
             if let m = s.summary {
                 Section("The Month") {
-                    LabeledContent("Income") { CentsText(m.income).foregroundStyle(Color.green) }
-                    LabeledContent("Spent") { CentsText(-total) }
+                    LabeledContent("Income") { CentsText(m.income).foregroundStyle(Color.positive).rolls(on: model.snapshot.month) }
+                    LabeledContent("Spent") { CentsText(-total).rolls(on: model.snapshot.month) }
                     LabeledContent("Left Over") {
-                        CentsText(m.income - total).foregroundStyle(m.income - total < 0 ? Color.red : Color.primary)
+                        CentsText(m.income - total).foregroundStyle(m.income - total < 0 ? Color.error : Color.ink).rolls(on: model.snapshot.month)
                     }
                     .fontWeight(.semibold)
                     // Paying a card is not spending (what it bought was), so
@@ -60,7 +62,7 @@ struct InsightsView: View {
                     if s.lines.contains(where: Cards.isPayment) {
                         let short = Cards.uncovered(s.lines)
                         LabeledContent("Card Debt Not Covered") {
-                            CentsText(short).foregroundStyle(short > 0 ? Color.orange : Color.green)
+                            CentsText(short).foregroundStyle(short > 0 ? Color.caution : Color.positive).rolls(on: model.snapshot.month)
                         }
                     }
                 }
@@ -84,8 +86,9 @@ struct InsightsView: View {
         .toolbar { ToolbarItem(placement: .topBarLeading) { AccountButton() } }
     }
 
-    /// The groups' colours, in the order the most spent takes them.
-    static let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .yellow, .indigo, .red, .mint, .brown, .cyan]
+    /// The groups' colours, in the order the most spent takes them: the
+    /// theme's chart palette (arkui/theme.toml), the Android app's too.
+    static let palette: [Color] = Color.chart
 
     private func share(_ part: Int64, _ whole: Int64) -> String {
         guard whole > 0 else { return "" }
@@ -125,12 +128,12 @@ struct InsightsView: View {
                     VStack(spacing: 2) {
                         Text(sel?.group ?? "Spent")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quiet)
                         CentsText(sel?.spent ?? total)
                             .font(.title2.weight(.bold))
                             .contentTransition(.numericText())
                         if let g = sel {
-                            Text(share(g.spent, total)).font(.caption).foregroundStyle(.secondary)
+                            Text(share(g.spent, total)).font(.caption).foregroundStyle(.quiet)
                         }
                     }
                     .position(x: r.midX, y: r.midY)
@@ -138,7 +141,7 @@ struct InsightsView: View {
             }
         }
         .sensoryFeedback(.selection, trigger: sel?.groupId)
-        .animation(Springs.move, value: sel?.groupId)
+        .motion(Springs.move, value: sel?.groupId)
     }
 
     private func bars(_ groups: [GroupMonth]) -> some View {
@@ -154,7 +157,7 @@ struct InsightsView: View {
                     .cornerRadius(4)
             }
         }
-        .chartForegroundStyleScale(["Assigned": Color.money.opacity(0.45), "Spent": Color.money])
+        .chartForegroundStyleScale(["Assigned": Color.accent.opacity(0.45), "Spent": Color.accent])
         .chartXAxis {
             AxisMarks { v in
                 AxisGridLine()

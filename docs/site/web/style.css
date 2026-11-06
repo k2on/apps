@@ -136,6 +136,13 @@ table { border-collapse: collapse; font-size: 13px; }
 .pane.ios { display: none; }
 .mobile:has(#ios:checked) .pane.ios { display: block; }
 .mobile:has(#ios:checked) .pane.android { display: none; }
+/* Side by side: each shot both phones take, Android's beside iOS's, two
+   columns however narrow the page, so the two move in step before the eye. */
+.pane.both { display: none; }
+.mobile:has(#both:checked) .pane.both { display: block; }
+.mobile:has(#both:checked) .pane.android { display: none; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 270px)); gap: 24px; }
+.pair .capture { width: auto; }
 
 /* A capture in a frame of its device, at the device's aspect and corner
    (site.js sets --aspect, --corner and the cutout from the manifest). */

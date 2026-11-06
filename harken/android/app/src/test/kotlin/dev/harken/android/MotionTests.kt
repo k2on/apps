@@ -342,7 +342,7 @@ class MotionTests {
                     opening = curve({ motion.drawnAt }, 600)
                     shots.series = null
                     frames(200)
-                    opened = has(view, "ALBUM")
+                    opened = has(view, "Album")
 
                     // The edge swipe: the page shrinks toward the limit, with Home under it.
                     back.dispatchOnBackStarted(start)
@@ -354,11 +354,11 @@ class MotionTests {
                         if (r != 0.3f) shots.keep = "page-back-${(r * 100).toInt()}"
                         frame()
                     }
-                    drawnUnder = has(view, "Recently added")
+                    drawnUnder = has(view, "Recently Added")
                     back.dispatchOnBackCancelled()
                     frames(600)
                     afterCancel = motion.previewDrawn
-                    keptAfterCancel = has(view, "ALBUM")
+                    keptAfterCancel = has(view, "Album")
 
                     // Through: past the threshold, the page goes the rest of the way into its card.
                     back.dispatchOnBackStarted(start)
@@ -372,7 +372,7 @@ class MotionTests {
                     closedFully = shrink.any { it.second <= 0.01f }
                     frames(300)
                     shots.series = null
-                    gone = !has(view, "ALBUM") && has(view, "Recently added")
+                    gone = !has(view, "Album") && has(view, "Recently Added")
                 }
             },
             8_000L,
@@ -424,13 +424,13 @@ class MotionTests {
                     // Then from the top: the page previews under the finger, and far enough goes back.
                     drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.62f), 10) { pulled = maxOf(pulled, motion.previewDrawn) }
                     frames(700)
-                    gone = !has(view, "ALBUM")
+                    gone = !has(view, "Album")
                     // A little way, and let go: it springs back.
                     if (gone) click(view, "Goldberg Variations, BWV 988")
                     frames(600)
                     drag(view, Offset(w / 2, h * 0.3f), Offset(w / 2, h * 0.35f), 4) { smallPull = maxOf(smallPull, motion.previewDrawn) }
                     frames(600)
-                    kept = has(view, "ALBUM")
+                    kept = has(view, "Album")
                     restored = motion.previewDrawn
                 }
             },
@@ -457,7 +457,7 @@ class MotionTests {
                     motion.movingFrames = 0
                     click(view, "Library")
                     var n = 0
-                    while (has(view, "Recently added") && n < 10) {
+                    while (has(view, "Recently Added") && n < 10) {
                         frame()
                         n++
                     }
@@ -507,17 +507,17 @@ class MotionTests {
                 {
                     click(view, "Brandenburg Concertos")
                     frames(600)
-                    opened = has(view, "ALBUM")
+                    opened = has(view, "Album")
                     click(view, "Library")
                     frames(300)
-                    onLibrary = !has(view, "ALBUM") && lit(view, "Library")
+                    onLibrary = !has(view, "Album") && lit(view, "Library")
                     motion.movingFrames = 0
                     click(view, "Home")
                     frame()
-                    backOnFirstFrame = has(view, "ALBUM")
+                    backOnFirstFrame = has(view, "Album")
                     frames(600)
                     moving = motion.movingFrames
-                    stillThere = has(view, "ALBUM") && lit(view, "Home")
+                    stillThere = has(view, "Album") && lit(view, "Home")
                 }
             },
             4_000L,
@@ -543,7 +543,7 @@ class MotionTests {
                     click(view, "Home")
                     shrink = curve({ motion.drawnAt }, 700) { it <= 0f }
                     frames(300)
-                    atRoot = !has(view, "ALBUM") && has(view, "Recently added") && lit(view, "Home")
+                    atRoot = !has(view, "Album") && has(view, "Recently Added") && lit(view, "Home")
                 }
             },
             3_000L,
@@ -613,14 +613,14 @@ class MotionTests {
                         shots.keep = "tab-back-${(r * 100).toInt()}"
                         frame()
                     }
-                    homeUnder = has(view, "Recently added")
+                    homeUnder = has(view, "Recently Added")
                     shots.meta = { 1f - motion.tabDrawnScale }
                     shots.series = "tab-back-done"
                     back.onBackPressed()
                     gone = curve({ motion.tabDrawnScale }, 500) { !motion.tabBacking }
                     shots.series = null
                     frames(300)
-                    landed = lit(view, "Home") && has(view, "Recently added") && !motion.tabBacking
+                    landed = lit(view, "Home") && has(view, "Recently Added") && !motion.tabBacking
                 }
             },
             4_000L,
@@ -721,7 +721,7 @@ class MotionTests {
                     frames(300)
                     menu!!.goTo(Page.ForAlbum(Demo.key("Brandenburg Concertos")))
                     frames(700)
-                    opened = has(view, "ALBUM")
+                    opened = has(view, "Album")
                     back = backTo(view, b, results)
                 }
             },
@@ -756,7 +756,7 @@ class MotionTests {
                     menu!!.goTo(Page.ForArtist("George Frideric Handel"))
                     frames(700)
                     // Handel's one page: a composer's, its kicker his counts beside what he is.
-                    opened = all(root(view)).any { n -> texts(n).any { it.startsWith("COMPOSER") } }
+                    opened = all(root(view)).any { n -> texts(n).any { it.startsWith("Composer") } }
                     back = backTo(view, b, album)
                 }
             },
@@ -824,7 +824,7 @@ class MotionTests {
                     frames(300)
                     motion.rose = 0
                     shots.series = "rise"
-                    described(view, "Settings").first().config[SemanticsActions.OnClick].action!!.invoke()
+                    all(root(view)).first { n -> n.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it.startsWith("Signed in as") } }.config[SemanticsActions.OnClick].action!!.invoke()
                     frames(500)
                     shots.series = null
                     settings = motion.taken

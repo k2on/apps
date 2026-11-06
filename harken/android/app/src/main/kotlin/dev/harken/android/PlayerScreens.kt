@@ -13,7 +13,9 @@
 //
 // While the phone is part of the listening session the full player says
 // where the sound is (`PlayerState.on`): a chip beside the queue's, the
-// device's kind and name, that opens the picker; and the mini player says it
+// device's kind and name, whose glass grows into the picker over the player
+// (ark-ui's `GlassMorph`) as an iPhone's menu grows out of its button, and
+// shrinks back into the chip as it closes; and the mini player says it
 // under the title when the sound is somewhere else. The session has no
 // shuffle and no repeat, so neither toggle is drawn then.
 //
@@ -28,14 +30,16 @@
 // along by the same position flow, the one being said kept at the middle.
 package dev.harken.android
 
+import android.os.Build
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -69,13 +73,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,19 +94,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.arkui.Bar
 import dev.arkui.Cover
+import dev.arkui.Glass
+import dev.arkui.GlassContainer
+import dev.arkui.GlassMorph
 import dev.arkui.Glyph
+import dev.arkui.glass
 import dev.arkui.Recompositions
 import dev.arkui.ReorderableItem
 import dev.arkui.Space
+import dev.arkui.Tokens
+import dev.arkui.Springs
 import dev.arkui.VolumeSlider
 import dev.arkui.quiet
 import dev.arkui.rememberReorder
 import dev.arkui.rememberTransientListState
+import dev.arkui.unlessReduced
+import dev.arkui.reducedMotion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import dev.arkui.pressable
+import dev.arkui.Press
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -196,10 +213,10 @@ private fun seedOf(p: Playing): String = p.album.ifEmpty { p.title }
 fun MiniPlayer(state: PlayerState, controls: Controls, position: StateFlow<Long> = Start) {
     if (state.now == null) return
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(Space.corner),
-        shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clickable(onClick = controls::open),
+        color = Glass.fill(),
+        shape = CircleShape,
+        shadowElevation = BAR_SHADOW,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s, vertical = Space.xs).clip(CircleShape).pressable(onClick = controls::open),
     ) {
         MiniFace(state, controls, position)
     }
@@ -214,7 +231,7 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
     val now = state.now ?: return
     Recompositions.hit("MiniPlayer")
     Column(modifier) {
-        Row(Modifier.padding(start = Space.s, end = Space.xs).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = Space.s, end = Space.xs).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
             if (art) Cover(seedOf(now), now.art, 40.dp, Modifier.size(40.dp), corner = 4.dp) else Spacer(Modifier.size(40.dp))
             Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
@@ -250,7 +267,9 @@ fun MiniFace(state: PlayerState, controls: Controls, position: StateFlow<Long> =
 @Composable
 private fun Hairline(durationMs: Long, position: StateFlow<Long>) {
     val at by position.collectAsStateWithLifecycle()
-    BoxWithConstraints(Modifier.fillMaxWidth().height(2.dp).padding(horizontal = Space.s)) {
+    // Inside the bar, clear of its rounded corners, rounded at its ends: as the iPhone's, under
+    // the words rather than along the bar's very edge, where its corners cut it.
+    BoxWithConstraints(Modifier.padding(start = Space.l, end = Space.l, bottom = Space.xs).fillMaxWidth().height(2.dp).clip(CircleShape)) {
         // Counted here, where the position is read: a tick recomposes this and not even the
         // function around it.
         Recompositions.hit("Progress")
@@ -289,108 +308,160 @@ fun FullFace(
     scrubbing: StateFlow<Long?> = Nobody,
 ) {
     val now = state.now
-    Column(modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
-        Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = controls::close) { Glyph(Glyphs.Down, "Close the player") }
+    Box(modifier.fillMaxSize()) {
+        // Behind it all, the cover, blurred and faint, as the iPhone's player has it: read small, since
+        // it is only ever a wash. Android blurs from 12 (API 31); before that, no wash rather than a
+        // sharp cover behind the text.
+        if (now != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            Cover(seedOf(now), now.art, 64.dp, Modifier.fillMaxSize().blur(80.dp).alpha(backdrop()), corner = 0.dp)
+        // Its buttons and chips on glass, in one space, so the device chip's glass can grow into the
+        // picker over the whole player, as the iPhone's menus grow out of their buttons.
+        GlassContainer(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = Space.xl)) {
+            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                GlassButton(Glyphs.Down, "Close the player", controls::close)
+                Text(
+                    if (now?.album.isNullOrEmpty()) "Now Playing" else now!!.album,
+                    style = quiet(MaterialTheme.typography.labelLarge),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                GlassButton(Glyphs.More, "More", controls::more, enabled = now != null)
+            }
+            Spacer(Modifier.weight(0.5f))
+            // The card draws the cover in the slot as it travels (PlayerSheet.kt), as this one would:
+            // rounded, lifted, and a little smaller while paused.
+            if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
+            else if (now != null) {
+                val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
+                Cover(
+                    seedOf(now),
+                    now.art,
+                    360.dp,
+                    Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        shape = RoundedCornerShape(COVER_CORNER)
+                        clip = true
+                        shadowElevation = COVER_SHADOW.toPx()
+                    },
+                    corner = COVER_CORNER,
+                )
+            }
+            Spacer(Modifier.weight(0.5f))
+            // The title opens its album and the name its person's page, as the desktop's bar and the
+            // iPhone's player do.
+            val album = now?.let(controls::albumOf)
+            val artist = now?.artist.orEmpty()
             Text(
-                if (now?.album.isNullOrEmpty()) "Now playing" else now!!.album,
-                style = quiet(MaterialTheme.typography.labelLarge),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
+                now?.title ?: "Nothing playing",
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = if (album == null) Modifier else Modifier.pressable(onClick = { controls.goTo(album) }),
             )
-            IconButton(onClick = controls::more, enabled = now != null) { Glyph(Glyphs.More, "More") }
-        }
-        Spacer(Modifier.weight(0.5f))
-        if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
-        else if (now != null) Cover(seedOf(now), now.art, 360.dp, Modifier.fillMaxWidth().aspectRatio(1f), corner = 12.dp)
-        Spacer(Modifier.weight(0.5f))
-        // The title opens its album and the name its person's page, as the desktop's bar and the
-        // iPhone's player do.
-        val album = now?.let(controls::albumOf)
-        val artist = now?.artist.orEmpty()
-        Text(
-            now?.title ?: "Nothing playing",
-            style = MaterialTheme.typography.headlineSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = if (album == null) Modifier else Modifier.clickable { controls.goTo(album) },
-        )
-        Text(
-            artist,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            modifier = if (artist.isEmpty()) Modifier else Modifier.clickable { controls.goTo(Page.ForArtist(artist)) },
-        )
-        // The chapter it is in, for an episode that has them.
-        val chapters = LocalChapters.current
-        if (chapters.isNotEmpty()) ChapterLine(chapters, position)
-        Spacer(Modifier.height(Space.l))
-        Scrubber(state, position, scrubbing, controls)
-        // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
-        // and the transport keeps its place.
-        val alone = state.on == null
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
-            else Spacer(Modifier.size(48.dp))
-            // An episode skips back and on a few seconds; a song goes a track.
-            val jogs = controls.jogs()
-            if (jogs) IconButton(onClick = { controls.jog(-JOG_BACK) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipBack, "Back $JOG_BACK seconds", size = 28.dp) }
-            else IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
-            FilledIconButton(
-                onClick = controls::toggle,
-                modifier = Modifier.size(72.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
-            ) {
-                Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
-            }
-            if (jogs) IconButton(onClick = { controls.jog(JOG_FORWARD) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 28.dp) }
-            else IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
-            if (alone) Toggle(
-                if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
-                when (state.repeat) {
-                    Repeat.Off -> "Repeat is off"
-                    Repeat.All -> "Repeating the queue"
-                    Repeat.One -> "Repeating this song"
-                },
-                state.repeat != Repeat.Off,
-                controls::repeat,
+            Text(
+                artist,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                modifier = if (artist.isEmpty()) Modifier else Modifier.pressable(onClick = { controls.goTo(Page.ForArtist(artist)) }),
             )
-            else Spacer(Modifier.size(48.dp))
-        }
-        state.volume?.let { v ->
-            Spacer(Modifier.height(Space.s))
-            VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
-        }
-        Spacer(Modifier.height(Space.l))
-        val on = state.on
-        // An episode with a transcript has it beside the queue: named while there is room.
-        val lines = LocalTranscript.current.isNotEmpty()
-        if (on == null && !lines) Box(Modifier.align(Alignment.CenterHorizontally)) { QueueChip(state, controls) }
-        else
+            // The chapter it is in, for an episode that has them.
+            val chapters = LocalChapters.current
+            if (chapters.isNotEmpty()) ChapterLine(chapters, position)
+            Spacer(Modifier.height(Space.l))
+            Scrubber(state, position, scrubbing, controls)
+            // The session has no shuffle and no repeat: neither is drawn while the phone is part of it,
+            // and the transport keeps its place.
+            val alone = state.on == null
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                if (on != null) {
-                    DeviceChip(on, controls, Modifier.weight(1f, fill = false))
-                    Spacer(Modifier.width(Space.s))
+                if (alone) Toggle(Glyphs.Shuffle, if (state.shuffle) "Shuffle is on" else "Shuffle is off", state.shuffle, controls::shuffle)
+                else Spacer(Modifier.size(48.dp))
+                // An episode skips back and on a few seconds; a song goes a track.
+                val jogs = controls.jogs()
+                if (jogs) IconButton(onClick = { controls.jog(-JOG_BACK) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipBack, "Back $JOG_BACK seconds", size = 28.dp) }
+                else IconButton(onClick = controls::previous, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Previous, "Previous", size = 28.dp) }
+                FilledIconButton(
+                    onClick = controls::toggle,
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary),
+                ) {
+                    Glyph(if (state.playing) Glyphs.Pause else Glyphs.Play, if (state.playing) "Pause" else "Play", size = 30.dp)
                 }
-                if (lines) {
-                    TranscriptChip(controls, named = on == null)
-                    Spacer(Modifier.width(Space.s))
-                }
-                QueueChip(state, controls, Modifier.weight(1f, fill = false))
+                if (jogs) IconButton(onClick = { controls.jog(JOG_FORWARD) }, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.SkipForward, "Forward $JOG_FORWARD seconds", size = 28.dp) }
+                else IconButton(onClick = controls::next, modifier = Modifier.size(56.dp)) { Glyph(Glyphs.Next, "Next", size = 28.dp) }
+                if (alone) Toggle(
+                    if (state.repeat == Repeat.One) Glyphs.RepeatOne else Glyphs.Repeat,
+                    when (state.repeat) {
+                        Repeat.Off -> "Repeat is off"
+                        Repeat.All -> "Repeating the queue"
+                        Repeat.One -> "Repeating this song"
+                    },
+                    state.repeat != Repeat.Off,
+                    controls::repeat,
+                )
+                else Spacer(Modifier.size(48.dp))
             }
-        Spacer(Modifier.height(Space.l))
+            state.volume?.let { v ->
+                Spacer(Modifier.height(Space.s))
+                VolumeSlider(v.level, v.muted, controls::volume, controls::volumeDone, controls::mute, Modifier.fillMaxWidth(), about = state.on?.name ?: "this phone")
+            }
+            Spacer(Modifier.height(Space.l))
+            // Where it plays, what plays next, and an episode's transcript, in that order and centred,
+            // as the iPhone's player has them.
+            val on = state.on
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (on != null) DeviceChip(on, controls, Modifier.weight(1f, fill = false))
+                QueueChip(state, controls, Modifier.weight(1f, fill = false))
+                if (LocalTranscript.current.isNotEmpty()) TranscriptChip(controls)
+            }
+            Spacer(Modifier.height(Space.l))
+        }
+        }
     }
 }
+
+/** How much of its place the full player's cover takes: all of it playing, less paused. */
+fun coverScale(playing: Boolean): Float = if (playing) 1f else Springs.PAUSED_SCALE
+
+/** The full player's cover: its corners and its shadow, here and travelling (PlayerSheet.kt). */
+val COVER_CORNER = 16.dp
+val COVER_SHADOW = 16.dp
+
+/**
+ * How much of the cover shows through behind the full player: the theme's wash (arkui/theme.toml),
+ * faint enough that the title, the album and the gold read over a pale cover.
+ */
+@Composable
+private fun backdrop(): Float = Tokens.washOpacity(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f)
+
+// A glyph on a glass capsule: the full player's close and its more, as the iPhone's are.
+@Composable
+private fun GlassButton(icon: ImageVector, description: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Box(
+        Modifier.glass(id = description).size(width = 60.dp, height = 44.dp).clip(CircleShape).pressable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = description, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f), modifier = Modifier.size(22.dp))
+    }
+}
+
+/** A chip's room inside its glass: the iPhone's, about 44 tall. */
+private val ChipPadding = PaddingValues(horizontal = Space.l, vertical = Space.m)
 
 // What plays after this: the queue's sheet.
 @Composable
 private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier = Modifier) {
     Row(
-        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::queue).padding(horizontal = Space.l, vertical = Space.s),
+        modifier.glass(id = "queue").clip(CircleShape).pressable(onClick = controls::queue).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Glyph(Glyphs.Queue, null, size = 18.dp)
@@ -399,28 +470,58 @@ private fun QueueChip(state: PlayerState, controls: Controls, modifier: Modifier
     }
 }
 
-// What is being said, a line at a time: the transcript's sheet. Its glyph alone beside the device's chip.
+// What is being said, a line at a time: the transcript's sheet. Its glyph alone, after the queue's.
 @Composable
-private fun TranscriptChip(controls: Controls, named: Boolean) {
-    Row(
-        Modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::transcript).padding(horizontal = Space.l, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Glyph(Glyphs.Transcript, if (named) null else "Transcript", size = 18.dp)
-        if (named) {
-            Spacer(Modifier.width(Space.s))
-            Text("Transcript", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-        }
+private fun TranscriptChip(controls: Controls) {
+    Box(Modifier.glass(id = "transcript").clip(CircleShape).pressable(onClick = controls::transcript).padding(ChipPadding)) {
+        Glyph(Glyphs.Transcript, "Transcript", size = 18.dp)
     }
 }
 
+/**
+ * The device picker as the full player's device chip opens it: its rows, what they do, and whether
+ * it is open. `held` holds the chip's glass that much of the way to the picker: a screenshot's
+ * frame.
+ */
+class DeviceMenu(
+    val open: Boolean,
+    val rows: List<DeviceRow>,
+    val cursor: Int,
+    val actions: PickerActions,
+    val close: () -> Unit = {},
+    val held: Float? = null,
+)
+
+/** The picker the device chip opens; with none, the chip asks [Controls.devices] and opens nothing itself. */
+val LocalDeviceMenu = compositionLocalOf<DeviceMenu?> { null }
+
 // Where the sound is, and the way to move it: lit while it is this phone's — or nowhere, which is
-// where the next press plays.
+// where the next press plays. Its glass is the picker's: pressed, it grows into the list of devices
+// over the player and, closed, shrinks back into the chip, as the iPhone's menus do.
 @Composable
 private fun DeviceChip(on: Where, controls: Controls, modifier: Modifier = Modifier) {
+    val menu = LocalDeviceMenu.current
+    GlassMorph(
+        expanded = menu?.open == true,
+        onDismiss = { menu?.close?.invoke() },
+        modifier = modifier,
+        id = "device",
+        // As the iPhone's picker: a sheet floating over the player's foot, not a menu at the chip.
+        menuCorner = Glass.sheetCorner,
+        sheet = true,
+        held = menu?.held,
+        collapsed = { DeviceFace(on, controls) },
+    ) {
+        if (menu != null) DevicesSheet(menu.rows, menu.cursor, menu.actions, onDone = menu.close, grabber = true)
+    }
+}
+
+// The device chip's face: the device's kind and name.
+@Composable
+private fun DeviceFace(on: Where, controls: Controls) {
     val tint = if (on.here && !on.away) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     Row(
-        modifier.clip(RoundedCornerShape(50)).clickable(onClick = controls::devices).padding(horizontal = Space.l, vertical = Space.s),
+        Modifier.clip(CircleShape).pressable(onClick = controls::devices).padding(ChipPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyphs.device(on.kind, on.name), contentDescription = "Playing on", tint = tint, modifier = Modifier.size(18.dp))
@@ -440,23 +541,18 @@ private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: S
     var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
     val at = dragging ?: ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f)
-    Slider(
+    Bar(
         value = at,
-        onValueChange = {
+        onValue = {
             dragging = it
             controls.scrub((it * total).toLong())
         },
-        onValueChangeFinished = {
+        onDone = {
             dragging?.let { controls.seek((it * total).toLong()) }
             dragging = null
         },
         enabled = state.durationMs > 0,
-        colors =
-            SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.primary,
-                activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
-            ),
+        label = "Position",
     )
     val gone = (at * total).toLong()
     Row(Modifier.fillMaxWidth()) {
@@ -491,11 +587,11 @@ fun QueueSheet(state: PlayerState, controls: Controls) {
     val keys = remember(keyed) { keyed.map { it.first } }
     val drawn = reorder.order(keyed) { it.first }
     LazyColumn(Modifier.fillMaxWidth().padding(bottom = Space.xl), state = list) {
-        item { Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
+        item { Text("Now Playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s)) }
         state.now?.let { now -> item { QueueRow(now, current = true, onClick = {}) } }
         item {
             Text(
-                if (state.shuffle) "Up next, shuffled" else "Up next",
+                if (state.shuffle) "Up Next, Shuffled" else "Up Next",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = Space.xl, end = Space.xl, top = Space.l, bottom = Space.s),
             )
@@ -557,9 +653,11 @@ fun TranscriptSheet(
     LaunchedEffect(dragged) { if (dragged) following = false }
     // Following, the line being said is brought to the middle: at once as the sheet opens, gliding after.
     var placed by remember { mutableStateOf(false) }
+    // With motion reduced the line is put at the middle at once: a glide is travel the eye must follow.
+    val reduced = reducedMotion()
     LaunchedEffect(at, following, lines) {
         if (!following) return@LaunchedEffect
-        list.centre(at.coerceAtLeast(0), glide = placed)
+        list.centre(at.coerceAtLeast(0), glide = placed && !reduced)
         placed = true
     }
     // Left where the hand left it, it takes up following again once the line being said reaches the middle.
@@ -622,7 +720,7 @@ fun NameVoiceCard(line: Cue, people: List<OnEpisode>, onName: (String) -> Unit, 
                     p.name,
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (p.name == name) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Space.corner)).clickable { onName(p.name) }.padding(vertical = Space.m, horizontal = Space.s),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Space.corner)).pressable(onClick = { onName(p.name) }, press = Press.Highlight).padding(vertical = Space.m, horizontal = Space.s),
                 )
             }
             OutlinedTextField(
@@ -644,7 +742,7 @@ fun NameVoiceCard(line: Cue, people: List<OnEpisode>, onName: (String) -> Unit, 
 // Back to the line being said, while the transcript is not following it.
 @Composable
 private fun FollowAlong(shown: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    AnimatedVisibility(shown, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
+    AnimatedVisibility(shown, enter = fadeIn(Springs.fade()), exit = fadeOut(Springs.fade()), modifier = modifier) {
         FilledTonalButton(onClick = onClick) {
             Glyph(Glyphs.Follow, null, size = 16.dp)
             Spacer(Modifier.width(Space.s))
@@ -667,15 +765,17 @@ private fun TranscriptLine(line: Cue, speaker: String, said: Boolean, now: Boole
             said -> ink.copy(alpha = 0.3f)
             else -> ink.copy(alpha = 0.55f)
         },
+        // A fade, not a move: on arkui's quick spring for a colour changing in place.
+        Springs.colour(),
         label = "line",
     )
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).clickable(onClick = onClick).padding(horizontal = Space.l, vertical = Space.s)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.s).clip(RoundedCornerShape(Space.corner)).pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.s)) {
         if (speaker.isNotEmpty()) {
             // A voice told apart is named by tapping its name.
-            val named = if (line.voice.isEmpty()) Modifier else Modifier.clickable(onClick = onSpeaker)
-            Text(speaker.uppercase(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
+            val named = if (line.voice.isEmpty()) Modifier else Modifier.pressable(onClick = onSpeaker)
+            Text(speaker, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = Space.m, bottom = Space.xs).then(named))
         }
-        Text(line.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = colour)
+        Text(line.text, style = MaterialTheme.typography.titleLarge, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = colour)
     }
 }
 
@@ -695,12 +795,12 @@ private suspend fun LazyListState.centre(index: Int, glide: Boolean) {
     val info = layoutInfo
     val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
     val by = (item.offset + item.size / 2 - (info.viewportStartOffset + info.viewportEndOffset) / 2).toFloat()
-    if (glide) animateScrollBy(by, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow)) else scrollBy(by)
+    if (glide) animateScrollBy(by, Springs.move()) else scrollBy(by)
 }
 
 @Composable
 private fun QueueRow(p: Playing, current: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.xl, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
         Cover(seedOf(p), p.art, 40.dp, Modifier.size(40.dp), corner = 4.dp)
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {

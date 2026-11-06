@@ -85,7 +85,7 @@ impl App {
             }
         };
         let page = column![
-            container(text("Settings").size(28).font(hero::BOLD)).padding(Padding {
+            container(crate::view::page_title("Settings")).padding(Padding {
                 bottom: 4.0,
                 ..Padding::ZERO
             }),
@@ -99,9 +99,14 @@ impl App {
             account,
         ]
         .width(Length::Fill);
-        scrollable(container(page).padding(PAD).max_width(980))
-            .height(Length::Fill)
-            .style(style::bars)
-            .into()
+        scrollable(crate::view::under_face(
+            container(page).padding(PAD).max_width(980),
+            crate::view::page_ground,
+        ))
+        .id(crate::look::PAGE_TOP)
+        .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
+        .height(Length::Fill)
+        .style(style::bars)
+        .into()
     }
 }

@@ -95,6 +95,9 @@ record() {
 least() {
   case $1 in
     expanding-card) echo 45 ;;
+    # Three capsules sliding a short way on a quick spring: twenty-six to
+    # twenty-nine in a good one.
+    glass-merge) echo 24 ;;
     *) echo 30 ;;
   esac
 }

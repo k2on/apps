@@ -161,14 +161,26 @@ pub fn list_height<M>(groups: &[Group<M>]) -> f32 {
 }
 
 impl Command {
-    /// The box coming up at `now`, empty.
+    /// The box up at `now`, empty — at once, with no spring: it is opened
+    /// from the keyboard (Ctrl+K) many times a day, and what the keys open
+    /// is there on the frame the key goes down (docs/motion.md, the
+    /// frequency rule; Raycast's box has no animation either).
     pub fn new(now: Instant) -> Self {
+        let mut shown = dialog::shown(now);
+        shown.snap(now);
         Command {
             query: String::new(),
             at: 0,
-            shown: dialog::shown(now),
+            shown,
             scrolled: 0.0,
         }
+    }
+
+    /// The box closed at `now`, at once, as it opened: gone on the next
+    /// frame, whether a key or a click away closed it.
+    pub fn close(&mut self, now: Instant) {
+        self.shown.hide(now);
+        self.shown.snap(now);
     }
 
     /// What is typed is now `query`: the keys go back to the first row, at

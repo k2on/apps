@@ -36,6 +36,9 @@ struct HomeView: View {
             }
             .padding(.bottom, Space.xl)
         }
+        // On the scroll view itself, so the fade under the tab bar and the
+        // mini player is this one's, not only an environment value above it.
+        .scrollEdges()
         .navigationTitle("Home")
         .animation(Springs.fade, value: s.loaded)
     }
@@ -58,7 +61,7 @@ struct HomeView: View {
         Heading(title: "Your Playlists", action: "New") { present(.newPlaylist(then: nil)) }
         if s.playlists.isEmpty {
             Text("None yet. Make one, then put songs on it from any song's menu.")
-                .font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, Space.page)
+                .font(.subheadline).foregroundStyle(.quiet).padding(.horizontal, Space.page)
         } else {
             CoverShelf(items: s.playlists) { p in
                 CoverCard(seed: p.name, url: "", title: p.name, under: "Playlist", side: Space.shelf, opens: .page(.playlist(p.id))) {
@@ -89,16 +92,16 @@ private struct LastCard: View {
                 CoverView(seed: last.track.seed, url: last.track.art, side: 64).frame(width: 64, height: 64)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(last.track.title).font(.headline).lineLimit(1)
-                    Text(last.track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    Text(from).font(.caption).foregroundStyle(last.on != nil ? Color.gold : .secondary).lineLimit(1)
+                    Text(last.track.artist).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
+                    Text(from).font(.caption).foregroundStyle(last.on != nil ? Color.accentText : .quiet).lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "play.fill").font(.title3).frame(width: 44, height: 44)
-                    .glassEffect(.regular.tint(.gold).interactive(), in: Circle())
+                    .surface(in: Circle(), tint: Color.accent, interactive: true)
                     .accessibilityLabel("Play again")
             }
             .padding(Space.m)
-            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .surface(in: RoundedRectangle(cornerRadius: 20, style: .continuous), interactive: true)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Space.page)

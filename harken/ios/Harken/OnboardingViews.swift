@@ -13,18 +13,20 @@ struct OnboardingPage<Content: View>: View {
     let title: String
     let sentence: String
     @ViewBuilder let content: () -> Content
+    /// The mark grows with the person's text size, as the title under it does.
+    @ScaledMetric(relativeTo: .largeTitle) private var mark: CGFloat = 88
 
     var body: some View {
         ScrollView {
             VStack(spacing: Space.s) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(Color.gold)
-                    .frame(width: 88, height: 88)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .font(.system(size: mark / 2, weight: .semibold))
+                    .foregroundStyle(Color.accentText)
+                    .frame(width: mark, height: mark)
+                    .surface(in: RoundedRectangle(cornerRadius: mark * 3 / 11, style: .continuous))
                     .padding(.bottom, Space.l)
                 Text(title).font(.largeTitle.bold()).multilineTextAlignment(.center)
-                Text(sentence).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(sentence).font(.body).foregroundStyle(.quiet).multilineTextAlignment(.center)
                     .padding(.bottom, Space.xxl)
                 content()
             }
@@ -58,10 +60,10 @@ struct ServerScreen: View {
                     .onSubmit { model.send(.check) }
                     .disabled(checking)
                     .padding(Space.l)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
                 Text(error ?? "A name or an address, with a port if it has one.")
                     .font(.footnote)
-                    .foregroundStyle(error == nil ? Color.secondary : Color.red)
+                    .foregroundStyle(error == nil ? Color.quiet : Color.error)
                     .padding(.horizontal, Space.xs)
             }
             Button { model.send(.check) } label: {
@@ -72,7 +74,7 @@ struct ServerScreen: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
-            .tint(.gold)
+            .tint(Color.accent)
             .controlSize(.large)
             .disabled(checking || typed.trimmingCharacters(in: .whitespaces).isEmpty)
             .padding(.top, Space.l)
@@ -90,13 +92,13 @@ struct SignInScreen: View {
     var body: some View {
         OnboardingPage(title: "Sign In", sentence: "You'll sign in on \(Probe.display(server))'s own page, and come straight back here.") {
             if let e = error {
-                Text(e).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center).padding(.bottom, Space.l)
+                Text(e).font(.callout).foregroundStyle(.error).multilineTextAlignment(.center).padding(.bottom, Space.l)
             }
             switch phase {
             case .browser:
-                Label("Waiting for the sign-in…", systemImage: "safari").foregroundStyle(.secondary)
+                Label("Waiting for the sign-in…", systemImage: "safari").foregroundStyle(.quiet)
             case .exchanging:
-                HStack(spacing: Space.m) { ProgressView(); Text("Signing in…") }.foregroundStyle(.secondary)
+                HStack(spacing: Space.m) { ProgressView(); Text("Signing in…") }.foregroundStyle(.quiet)
             case .idle:
                 EmptyView()
             }
@@ -116,7 +118,7 @@ struct OpeningScreen: View {
     var body: some View {
         Group {
             if shown {
-                OnboardingPage(title: "Harken", sentence: "Getting your library from \(Probe.display(server))…") { ProgressView().tint(.gold) }
+                OnboardingPage(title: "Harken", sentence: "Getting your library from \(Probe.display(server))…") { ProgressView().tint(Color.accent) }
                     .transition(.opacity)
             } else {
                 Color.clear

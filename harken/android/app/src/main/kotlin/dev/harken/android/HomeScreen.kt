@@ -11,7 +11,6 @@
 package dev.harken.android
 
 import uniffi.harken_domain.Playlist
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,10 +45,12 @@ import dev.arkui.Recompositions
 import dev.arkui.ScrollsToTop
 import dev.arkui.Shelf
 import dev.arkui.Space
+import dev.arkui.Face
 import dev.arkui.TabTitle
 import dev.arkui.destinationKeepsAPlace
 import dev.arkui.quiet
 import dev.arkui.rememberDestinationListState
+import dev.arkui.pressable
 
 /**
  * What was played last, and the page it was started from, so Home can offer it back. `live` when it
@@ -112,7 +113,8 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     ScrollsToTop(list)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
-            TabTitle("Home") { IconButton(onClick = act::settings) { Avatar(data.who, 32.dp, "Settings") } }
+            // The face where money's is: in the bar above the title, opening Settings.
+            TabTitle("Home", bar = { IconButton(onClick = act::settings) { Face(data.who.name, data.who.picture) } })
         }
         if (data.offline != null) item { Offline(data.offline) }
         when {
@@ -131,7 +133,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
             else -> {
                 val last = data.last
                 if (last != null) {
-                    item { Heading("Last played") }
+                    item { Heading("Last Played") }
                     val from =
                         when (val f = last.from) {
                             is Page.ForAlbum -> data.albums.firstOrNull { it.id == f.id }?.let { "From ${it.name}" } ?: "From an album"
@@ -142,7 +144,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                         }
                     item { LastCard(last, last.on ?: from, onResume = { act.resume(last) }) }
                 }
-                item { Heading("Recently added", action = "All songs", onAction = { act.library(LibraryTab.Songs) }) }
+                item { Heading("Recently Added", action = "All Songs", onAction = { act.library(LibraryTab.Songs) }) }
                 item {
                     Shelf("recent", recent, key = { it.id.hex }) { t ->
                         val album = albumOf(t)
@@ -151,7 +153,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                         })
                     }
                 }
-                item { Heading("Your playlists", action = "New", onAction = act::newPlaylist) }
+                item { Heading("Your Playlists", action = "New", onAction = act::newPlaylist) }
                 if (data.playlists.isEmpty()) {
                     item {
                         Text(
@@ -168,7 +170,7 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
                     }
                 }
                 if (data.albums.isNotEmpty()) {
-                    item { Heading("Albums", action = "See all", onAction = { act.library(LibraryTab.Albums) }) }
+                    item { Heading("Albums", action = "See All", onAction = { act.library(LibraryTab.Albums) }) }
                     item {
                         Shelf("albums", data.albums, key = { it.id }) { a ->
                             CoverCard(a.name, a.art, a.name, a.creator, Space.shelf, onClick = { act.open(Page.ForAlbum(a.id)) }, opens = true)
@@ -181,13 +183,14 @@ fun HomeScreen(data: HomeData, albumOf: (Track) -> Album?, act: Do, placeholderD
     }
 }
 
-// What was played last, and the button that plays it again from there.
+// What was played last, and the button that plays it again from there: the iPhone's card, its
+// corners as round, and where it is playing, while it is, in the accent.
 @Composable
 private fun LastCard(last: LastPlayed, from: String, onResume: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page).clickable(onClick = onResume),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page).pressable(onClick = onResume),
     ) {
         Row(Modifier.padding(Space.m), verticalAlignment = Alignment.CenterVertically) {
             Cover(last.track.album.ifEmpty { last.track.title }, last.track.art, 64.dp, Modifier.size(64.dp))
@@ -195,7 +198,12 @@ private fun LastCard(last: LastPlayed, from: String, onResume: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(last.track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(last.track.artist, style = quiet(MaterialTheme.typography.bodyMedium), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(from, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    from,
+                    style = if (last.on != null) MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.primary) else quiet(MaterialTheme.typography.bodySmall),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             FilledIconButton(onClick = onResume) { Glyph(Glyphs.Play, "Play again", size = 18.dp) }
         }

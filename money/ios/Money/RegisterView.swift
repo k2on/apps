@@ -45,7 +45,7 @@ struct RegisterView: View {
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 if !t.approved {
                                     Button { model.approve([t.id]) } label: { Label("Approve", systemImage: "checkmark") }
-                                        .tint(.green)
+                                        .tint(Color.accent)
                                 }
                                 if t.cleared != .reconciled {
                                     Button {
@@ -54,7 +54,7 @@ struct RegisterView: View {
                                     } label: {
                                         Label(t.cleared == .uncleared ? "Clear" : "Unclear", systemImage: t.cleared == .uncleared ? "c.circle.fill" : "c.circle")
                                     }
-                                    .tint(.blue)
+                                    .tint(Color.chart[1])
                                 }
                             }
                             .swipeActions(edge: .trailing) {
@@ -114,7 +114,7 @@ struct RegisterView: View {
 
     private func figure(_ label: String, _ cents: Int64, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label(label, systemImage: symbol).font(.caption).foregroundStyle(.secondary)
+            Label(label, systemImage: symbol).font(.caption).foregroundStyle(.quiet)
             CentsText(cents).font(.subheadline.weight(.semibold))
         }
         .accessibilityElement(children: .combine)
@@ -146,7 +146,7 @@ struct TxnButton: View {
 
     var body: some View {
         Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
             .contextMenu {
                 Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
                 if !txn.transfer {
@@ -175,7 +175,7 @@ struct TxnRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: Space.m) {
             Circle()
-                .fill(txn.approved ? Color.clear : Color.money)
+                .fill(txn.approved ? Color.clear : Color.accent)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(txn.payee.isEmpty ? "No Payee" : txn.payee)
@@ -184,23 +184,23 @@ struct TxnRow: View {
                 HStack(spacing: Space.xs) {
                     if txn.transfer { Image(systemName: "arrow.left.arrow.right").font(.caption2) }
                     Text(txn.category)
-                        .foregroundStyle(Registers.needsCategory(txn) ? Color.orange : Color.secondary)
-                    if showAccount { Text("· \(txn.account)").foregroundStyle(.secondary) }
+                        .foregroundStyle(Registers.needsCategory(txn) ? Color.caution : Color.quiet)
+                    if showAccount { Text("· \(txn.account)").foregroundStyle(.quiet) }
                 }
                 .font(.caption)
                 .lineLimit(1)
                 if !txn.memo.isEmpty {
-                    Text(txn.memo).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                    Text(txn.memo).font(.caption).foregroundStyle(.quiet).lineLimit(1)
                 }
             }
             Spacer(minLength: Space.s)
             VStack(alignment: .trailing, spacing: 2) {
                 CentsText(txn.amount, signed: txn.amount > 0)
-                    .foregroundStyle(txn.amount > 0 ? Color.green : Color.primary)
+                    .foregroundStyle(txn.amount > 0 ? Color.positive : Color.ink)
                     .font(.body.weight(.medium))
                 HStack(spacing: Space.xs) {
                     // A receipt paid by it, or a photo of one taken for it.
-                    if Receipts.marked(txn) { Image(systemName: "receipt").foregroundStyle(.secondary) }
+                    if Receipts.marked(txn) { Image(systemName: "receipt").foregroundStyle(.quiet) }
                     cleared
                 }
             }
@@ -212,9 +212,9 @@ struct TxnRow: View {
 
     @ViewBuilder private var cleared: some View {
         switch txn.cleared {
-        case .uncleared: Image(systemName: "c.circle").foregroundStyle(.tertiary)
-        case .cleared: Image(systemName: "c.circle.fill").foregroundStyle(Color.money)
-        case .reconciled: Image(systemName: "lock.fill").foregroundStyle(.secondary)
+        case .uncleared: Image(systemName: "c.circle").foregroundStyle(.outline)
+        case .cleared: Image(systemName: "c.circle.fill").foregroundStyle(Color.accentText)
+        case .reconciled: Image(systemName: "lock.fill").foregroundStyle(.quiet)
         }
     }
 

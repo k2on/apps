@@ -20,7 +20,6 @@
 package dev.money.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,6 +77,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.pressable
+import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.SectionHeader
 import dev.arkui.Space
@@ -143,10 +144,10 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         Button(onClick = { book.connect() }, enabled = ask == null || !isOpen(ask)) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                            Text("Connect a bank")
+                            Text("Connect a Bank")
                         }
                         if (ledger.banks.isNotEmpty()) {
-                            OutlinedButton(onClick = { book.sync() }, enabled = !ledger.syncing) { Text("Sync now") }
+                            OutlinedButton(onClick = { book.sync() }, enabled = !ledger.syncing) { Text("Sync Now") }
                         }
                     }
             }
@@ -324,7 +325,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
                 }
             },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = if (l.waiting || l.ignored) Modifier else Modifier.clickable(onClickLabel = "Choose the account it feeds", onClick = onLink),
+        modifier = if (l.waiting || l.ignored) Modifier else Modifier.pressable(onClickLabel = "Choose the account it feeds", onClick = onLink, press = Press.Highlight),
     )
     if (l.waiting) {
         FlowRow(
@@ -333,7 +334,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
                 FilledTonalButton(onClick = { book.openLinked(l.plaidAccountId) }) {
                     Text("New ${kindName(l.opensAs).lowercase()} account")
                 }
-                OutlinedButton(onClick = onLink) { Text("Existing account") }
+                OutlinedButton(onClick = onLink) { Text("Existing Account") }
                 TextButton(onClick = { book.ignore(l.plaidAccountId, true) }) { Text("Ignore") }
             }
     }

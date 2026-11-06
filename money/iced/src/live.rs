@@ -130,7 +130,7 @@ pub fn waker(bell: &arkui::wake::Bell) -> ark_peer::Wake {
     }
 }
 
-/// The name a status line gives a login.
+/// The name Settings gives a login.
 pub fn who(login: &Login) -> String {
     match login.user.name.is_empty() {
         true => login.user.id.clone(),

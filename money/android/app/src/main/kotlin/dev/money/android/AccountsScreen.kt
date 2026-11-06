@@ -1,14 +1,15 @@
-// The household's accounts: what it is worth on top, as a large figure in a
-// tinted card, then the budget's accounts and the ones only tracked, each a
-// row with its kind's glyph, the bank that feeds it, how many of its
-// transactions want a look, and its balance. An account opens its register;
-// the banks are Settings' (SettingsScreen.kt); adding an account is a sheet.
-// Settings — the banks, the person and the server, and signing out — are
-// behind the face in the top bar, as Google's apps put them.
+// The household's accounts, laid out as the iPhone app lays them: what it is
+// worth on top, as the page's one large figure; All Accounts, every
+// account's transactions; then the budget's accounts, the ones only tracked
+// and the closed ones, each section under its name and its total, in a
+// rounded card of rows: the kind's mark, the name, the bank and last digits
+// that feed it (or its kind), how many of its transactions want a look, and
+// its balance. An account opens its register; the banks are Settings'
+// (SettingsScreen.kt); adding an account is a sheet. Settings — the banks,
+// the person and the server, and signing out — are behind the face in the
+// top bar, as Google's apps put them.
 package dev.money.android
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Badge
@@ -53,7 +53,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -62,11 +61,15 @@ import androidx.compose.ui.unit.dp
 import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
-import dev.arkui.SectionHeader
+import dev.arkui.Chevron
 import dev.arkui.Space
-import dev.arkui.Stat
+import dev.arkui.Tone
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.style.TextOverflow
 import org.json.JSONObject
 import uniffi.money_domain.AccountLine
+import dev.arkui.pressable
+import dev.arkui.Press
 
 @Composable
 fun AccountsScreen(ledger: Ledger) {
@@ -83,7 +86,7 @@ fun AccountsScreen(ledger: Ledger) {
         actions = {
             // The face opens Settings, badged while a bank wants somebody there.
             IconButton(onClick = shell.onSettings) {
-                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }) }
+                BadgedBox(badge = { if (ledger.banksWanting > 0) Badge() }) { Avatar(ledger.who.ifEmpty { "?" }, ledger.picture) }
             }
         },
         fab = {
@@ -92,100 +95,127 @@ fun AccountsScreen(ledger: Ledger) {
             }
         },
     ) { pad, _ ->
-        LazyColumn(contentPadding = PaddingValues(bottom = pad.calculateBottomPadding() + 96.dp)) {
+        LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, bottom = pad.calculateBottomPadding() + 96.dp)) {
             item(key = "worth") {
-                val worth = open.sumOf { it.balance }
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page),
-                ) {
-                    Column(Modifier.padding(Space.xl)) {
-                        Text("Net worth", style = MaterialTheme.typography.titleMedium)
-                        AmountText(
-                            worth,
-                            style = MaterialTheme.typography.displaySmall,
-                            modifier = Modifier.semantics { contentDescription = "Net worth, ${a.format(worth)}" })
-                        Spacer(Modifier.height(Space.m))
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.xl)) {
-                            Stat("In the budget") { AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.titleSmall) }
-                            Stat("Tracking") { AmountText(tracking.sumOf { it.balance }, style = MaterialTheme.typography.titleSmall) }
+                HeroCard("Net Worth", open.sumOf { it.balance }, Tone.Neutral, note = "Every open account, less what's owed")
+            }
+            item(key = "all") {
+                GroupCard(Modifier.padding(top = Space.xl)) {
+                    LinkRow(
+                        title = "All Accounts",
+                        onClick = { shell.onAccount(null) },
+                        leading = { Tile(Glyphs.Activity, MaterialTheme.colorScheme.onSurfaceVariant) },
+                        trailing = { AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    )
+                }
+            }
+            for ((name, rows) in listOf("Budget" to budget, "Tracking" to tracking, "Closed" to closed)) {
+                if (rows.isEmpty()) continue
+                item(key = "h-$name") {
+                    GroupHeading(name) { if (name != "Closed") HeadingTotal(rows.sumOf { it.balance }) }
+                }
+                item(key = "s-$name") {
+                    GroupCard {
+                        rows.forEachIndexed { i, acc ->
+                            if (i > 0) RowDivider(inset = Space.l + 32.dp + Space.m)
+                            AccountRow(acc, onClick = { shell.onAccount(acc.id) })
                         }
                     }
                 }
             }
-            if (budget.isNotEmpty()) {
-                item(key = "h-budget") { SectionHeader("Budget accounts") }
-                items(budget, key = { it.id.hex }) { AccountRow(it, onClick = { shell.onAccount(it.id) }) }
-            }
-            if (tracking.isNotEmpty()) {
-                item(key = "h-tracking") { SectionHeader("Tracking") }
-                items(tracking, key = { it.id.hex }) { AccountRow(it, onClick = { shell.onAccount(it.id) }) }
-            }
-            if (closed.isNotEmpty()) {
-                item(key = "h-closed") { SectionHeader("Closed") }
-                items(closed, key = { it.id.hex }) { AccountRow(it, onClick = { shell.onAccount(it.id) }) }
-            }
             item(key = "actions") {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.l),
-                    horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        FilledTonalButton(onClick = { adding = true }) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                            Text("Add account")
-                        }
-                        OutlinedButton(onClick = shell.onSettings) {
-                            Icon(Glyphs.Link, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                            Text(if (ledger.banks.isEmpty()) "Connect a bank" else "Banks")
-                        }
-                    }
+                GroupCard(Modifier.padding(top = Space.xl)) {
+                    LinkRow(
+                        title = if (ledger.banks.isEmpty()) "Connect a Bank" else "Bank Connections",
+                        onClick = shell.onSettings,
+                        leading = { Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    )
+                    RowDivider(inset = Space.l + 32.dp + Space.m)
+                    LinkRow(
+                        title = "Add Account",
+                        onClick = { adding = true },
+                        leading = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        chevron = false,
+                        accent = true,
+                    )
+                }
             }
         }
     }
     if (adding) AddAccountSheet(onDismiss = { adding = false })
 }
 
-@Composable
-fun Avatar(name: String) {
-    Box(
-        Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-        contentAlignment = Alignment.Center) {
-            Text(
-                name.take(1).uppercase(),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.semantics { contentDescription = "Signed in as $name" })
-        }
+/** What an account says under its name: the bank and its last digits when one feeds it, else its kind. */
+fun subtitleOf(acc: AccountLine): String {
+    val bank = acc.bank.replaceFirstChar { it.titlecase() }
+    return when {
+        acc.bank.isEmpty() -> kindName(acc.kind)
+        acc.mask.isEmpty() -> bank
+        else -> "$bank ••${acc.mask}"
+    }
 }
 
+/** An account in its section's card: its mark, its name and what feeds it, its count to review, its balance. */
 @Composable
 private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
-    val supporting =
-        listOfNotNull(
-                kindName(acc.kind),
-                acc.bank.takeIf { it.isNotEmpty() }?.let { b -> if (acc.mask.isNotEmpty()) "$b ••${acc.mask}" else b },
-                acc.unapproved.takeIf { it > 0 }?.let { "$it to review" },
-            )
-            .joinToString(" · ")
-    ListItem(
-        headlineContent = { Text(acc.name) },
-        supportingContent = { Text(supporting) },
-        leadingContent = {
-            Box(
-                Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center) {
-                    Icon(Glyphs.account(acc.kind), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-        },
-        trailingContent = {
-            AmountText(
-                acc.balance,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (acc.balance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-        },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClickLabel = "Open the register", onClick = onClick),
-    )
+    val a = LocalAmounts.current
+    Row(
+        Modifier.fillMaxWidth()
+            .pressable(onClickLabel = "Open the register", onClick = onClick, press = Press.Highlight)
+            .padding(horizontal = Space.l, vertical = Space.m)
+            .semantics(mergeDescendants = true) {
+                contentDescription =
+                    "${acc.name}, ${subtitleOf(acc)}, ${a.format(acc.balance)}" + if (acc.unapproved > 0) ", ${acc.unapproved} to review" else ""
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        KindTile(acc.kind)
+        Spacer(Modifier.width(Space.m))
+        Column(Modifier.weight(1f)) {
+            Text(acc.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitleOf(acc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        Spacer(Modifier.width(Space.s))
+        if (acc.unapproved > 0) {
+            CountBadge(acc.unapproved.toInt(), "${acc.unapproved} to review")
+            Spacer(Modifier.width(Space.s))
+        }
+        AmountText(
+            acc.balance,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (acc.balance < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.width(Space.xs))
+        Chevron()
+    }
+}
+
+/** A row of a card that opens something: what leads it, its name, what trails it, and a chevron. */
+@Composable
+private fun LinkRow(
+    title: String,
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit,
+    trailing: @Composable () -> Unit = {},
+    chevron: Boolean = true,
+    accent: Boolean = false,
+) {
+    Row(
+        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.m).height(32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
+        Spacer(Modifier.width(Space.m))
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f))
+        trailing()
+        if (chevron) {
+            Spacer(Modifier.width(Space.xs))
+            Chevron()
+        }
+    }
 }
 
 /** The kinds an account can be, in the order a sheet offers them. */
@@ -213,7 +243,7 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
         else book.check("accounts.open_account", JSONObject().put("name", name).put("kind", kind).put("on_budget", onBudget).put("balance", balance ?: 0L).put("date", "2000-01-01").toString())
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding().imePadding()) {
-            Text("Add an account", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text("Add Account", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(Space.l))
             OutlinedTextField(
                 value = name,
@@ -245,7 +275,7 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
                 error = if (cents == null) "That isn't an amount" else null,
                 modifier = Modifier.fillMaxWidth())
             ListItem(
-                headlineContent = { Text("In the budget") },
+                headlineContent = { Text("In the Budget") },
                 supportingContent = {
                     Text(if (onBudget) "What's spent from it comes out of categories" else "Tracked only: its balance counts toward net worth")
                 },
@@ -260,7 +290,7 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
                     }
                 },
                 enabled = name.isNotBlank() && why == null && balance != null,
-                modifier = Modifier.fillMaxWidth()) { Text("Add account") }
+                modifier = Modifier.fillMaxWidth()) { Text("Add Account") }
             Spacer(Modifier.height(Space.xl))
         }
     }

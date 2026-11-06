@@ -105,7 +105,7 @@ struct Shell: View {
         .toast($model.notice)
         // Plaid's page, as soon as the server answers with it, wherever the
         // person is; closed by its Done, or once the server is finished.
-        .safari(model.bankPage, tint: Color.money) { model.bankPageClosed() }
+        .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
     }
 
     private func present(_ s: Sheet) {
@@ -147,18 +147,25 @@ struct Shell: View {
     }
 }
 
-/// The toolbar's account button: who is using the budget, where, and the
-/// way out — marked when a bank wants somebody in Settings.
+/// The toolbar's account button: who is using the budget, as their face,
+/// opening Settings — where they are, and the way out — marked when a bank
+/// wants somebody there.
 struct AccountButton: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
         let wanting = Banks.wanting(model.snapshot.banks)
+        let who = model.who.isEmpty ? "?" : model.who
         NavigationLink(value: Route.settings) {
-            Image(systemName: wanting > 0 ? "person.crop.circle.badge.exclamationmark"
-                : model.isDemo ? "person.crop.circle.badge.questionmark" : "person.crop.circle")
+            Face(name: who, picture: model.picture)
+                .overlay(alignment: .topTrailing) {
+                    if wanting > 0 {
+                        Circle().fill(Color.error).frame(width: 9, height: 9).offset(x: 2, y: -2)
+                    }
+                }
         }
-        .accessibilityLabel("Account and settings")
+        .accessibilityLabel("Signed in as \(who)")
+        .accessibilityHint("Account and settings")
         .accessibilityValue(wanting > 0 ? "Banks need a look" : "")
     }
 }

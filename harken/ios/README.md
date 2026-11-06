@@ -122,7 +122,7 @@ most likely to want a fix, most likely first:
    through `@testable import Harken`; if the test host does not load, set
    `TEST_HOST`/`BUNDLE_LOADER` in `project.yml` (XcodeGen normally does).
 7. Small things a compiler finds at once: a ternary's colour type
-   (`Color.gold : .secondary`), `Slider(value:in:onEditingChanged:)`, a
+   (`Color.accentText : .quiet`), `Slider(value:in:onEditingChanged:)`, a
    `ForEach` over `enumerated()`, `UIDevice.current.name` (it is "iPhone"
    without an entitlement, which is the name other devices' pickers show).
 

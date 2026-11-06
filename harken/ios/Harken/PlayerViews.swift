@@ -5,7 +5,8 @@
 // (`on`). The position is counted from the state's clock as it is drawn
 // (`TimelineView`), so only the hairline and the scrubber move with it.
 // Android's `PlayerScreens.kt` and `PlayerSheet.kt`: a sideways drag on the
-// bar skips — left the next track, right the one before — and a tap opens
+// bar skips — left the next track, right the one before — and the words
+// spring back from where the finger left them at its speed; a tap opens
 // it; the full player says where the sound is and opens the picker, draws
 // the volume of whatever plays, and draws shuffle and repeat only alone,
 // since the session has neither.
@@ -18,6 +19,7 @@ struct MiniPlayer: View {
     let open: () -> Void
     @EnvironmentObject private var model: Model
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @Environment(\.reducesMotion) private var still
     @State private var swipe: CGFloat = 0
 
     var body: some View {
@@ -26,16 +28,27 @@ struct MiniPlayer: View {
         GeometryReader { geo in
             HStack(spacing: Space.m) {
                 if let now = s.now {
-                    CoverView(seed: now.seed, url: now.art, side: compact ? 28 : 36, corner: 6)
-                        .frame(width: compact ? 28 : 36, height: compact ? 28 : 36)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        if !compact {
-                            Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.gold : .secondary).lineLimit(1)
+                    // The cover and the words open the player, and give under
+                    // the finger as it lands (`.press`); the buttons beside
+                    // them are their own, so a tap on one does not open it.
+                    Button(action: open) {
+                        HStack(spacing: Space.m) {
+                            CoverView(seed: now.seed, url: now.art, side: compact ? 28 : 36, corner: 6)
+                                .frame(width: compact ? 28 : 36, height: compact ? 28 : 36)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(now.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                if !compact {
+                                    Text(s.under).font(.caption).foregroundStyle(s.on.map { !$0.here } == true ? Color.accentText : .quiet).lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .offset(x: swipe)
                         }
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .offset(x: swipe)
+                    .buttonStyle(.press)
+                    .accessibilityHint("Opens the player")
                     Button { model.toggle() } label: {
                         Image(systemName: s.playing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace)).frame(width: 32, height: 32)
                     }
@@ -44,33 +57,39 @@ struct MiniPlayer: View {
                         Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").frame(width: 32, height: 32) }
                             .accessibilityLabel("Forward 30 seconds")
                     } else if !compact {
-                        Button { model.next() } label: { Image(systemName: "forward.fill").frame(width: 32, height: 32) }
+                        Button { model.next() } label: { Image(systemName: "forward.end.fill").frame(width: 32, height: 32) }
                             .disabled(!s.hasNext)
                             .accessibilityLabel("Next")
                     }
                 } else {
-                    Image(systemName: "music.note").foregroundStyle(.secondary).frame(width: 36)
-                    Text("Not Playing").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "music.note").foregroundStyle(.quiet).frame(width: 36)
+                    Text("Not Playing").font(.subheadline).foregroundStyle(.quiet).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            // The buttons in the words' colour, not the tint: as Android's bar.
+            .foregroundStyle(.ink)
             .padding(.horizontal, Space.m)
             .frame(maxHeight: .infinity)
             .overlay(alignment: .bottom) { if s.now != nil && !compact { Hairline().padding(.horizontal, Space.l) } }
             .contentShape(Rectangle())
-            .onTapGesture { if s.now != nil { open() } }
-            // A sideways drag skips: far enough, or fast enough; then it springs back.
+            // A sideways drag skips: where it would come to rest, projected
+            // snappily (`Momentum.snappy`, as a reorder's drop is) since it
+            // decides an act rather than a place, past a share of the width,
+            // or let go as fast as a throw (`Springs.flick`); then it springs
+            // back, starting at the finger's speed, with the momentum's
+            // overshoot only when it was flicked.
             .gesture(DragGesture(minimumDistance: 12).onChanged { v in
                 if abs(v.translation.width) > abs(v.translation.height) { swipe = v.translation.width }
             }.onEnded { v in
                 let wide = Springs.wide * geo.size.width
-                let fast = v.predictedEndTranslation.width - v.translation.width
-                if swipe < -wide || fast < -Springs.flick * 0.25 { model.next() }
-                else if swipe > wide || fast > Springs.flick * 0.25 { model.previous() }
-                withAnimation(Springs.move) { swipe = 0 }
+                let rest = swipe + CGFloat(Momentum.project(Double(v.velocity.width), rate: Momentum.snappy))
+                if rest < -wide || v.velocity.width < -Springs.flick { model.next() }
+                else if rest > wide || v.velocity.width > Springs.flick { model.previous() }
+                let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.width), from: Double(swipe), to: 0)
+                withAnimation(back) { swipe = 0 }
             })
         }
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Open the player") { open() }
     }
 }
 
@@ -84,8 +103,8 @@ struct Hairline: View {
             let at = s.position(Int64(t.date.timeIntervalSince1970 * 1000))
             let done = s.durationMs > 0 ? min(max(Double(at) / Double(s.durationMs), 0), 1) : 0
             GeometryReader { g in
-                Capsule().fill(.quaternary)
-                    .overlay(alignment: .leading) { Capsule().fill(Color.gold).frame(width: g.size.width * done) }
+                Capsule().fill(Color.edge)
+                    .overlay(alignment: .leading) { Capsule().fill(Color.accent).frame(width: g.size.width * done) }
             }
             .frame(height: 2)
         }
@@ -101,23 +120,33 @@ struct FullPlayer: View {
     @EnvironmentObject private var model: Model
     @Environment(\.present) private var present
     @Environment(\.open) private var open
+    @Environment(\.colorScheme) private var scheme
     @Namespace private var glass
 
     var body: some View {
         let s = model.player
         let cues = s.now.flatMap { model.transcripts[Id($0.id)] } ?? []
-        VStack(spacing: Space.l) {
+        // Spaced as Android's player (PlayerScreens.kt, `FullFace`): room
+        // only where it is meant (after the title, above the volume and the
+        // chips), the rest the cover's, so the cover is the page's width as
+        // Android's is, not what is left once every gap has had its share.
+        VStack(spacing: 0) {
             HStack {
-                Button(action: close) { Image(systemName: "chevron.down") }
+                // Round, 44 points, as Android's: the glass a circle about its glyph.
+                Button(action: close) { Image(systemName: "chevron.down").frame(width: 24, height: 24) }
                     .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
                     .accessibilityLabel("Close the player")
                 Spacer()
                 Text(s.now.map { $0.album.isEmpty ? "Now Playing" : $0.album } ?? "Now Playing")
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
                 Spacer()
                 if let t = track {
-                    Menu { TrackActions(track: t, from: nil) } label: { Image(systemName: "ellipsis") }
+                    Menu { TrackActions(track: t, from: nil) } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
                         .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
                         .accessibilityLabel("More")
                 } else {
                     Color.clear.frame(width: 44, height: 44)
@@ -127,9 +156,13 @@ struct FullPlayer: View {
             if let now = s.now {
                 CoverView(seed: now.seed, url: now.art, side: 360, corner: 16)
                     .aspectRatio(1, contentMode: .fit)
+                    // The room first, as wide as the page if the height
+                    // allows, and the spacers what is left: otherwise the
+                    // three share it and the cover is a third of it.
+                    .layoutPriority(1)
                     .shadow(color: .black.opacity(0.25), radius: 24, y: 12)
-                    .scaleEffect(s.playing ? 1 : 0.9)
-                    .animation(Springs.move, value: s.playing)
+                    .motionScale(s.playing ? 1 : MotionTokens.pausedScale)
+                    .motion(Springs.move, value: s.playing)
             }
             Spacer(minLength: 0)
             // The title opens its album and the name its person's page, as
@@ -146,16 +179,18 @@ struct FullPlayer: View {
                     let show = model.shows.first { $0.title == a }
                     open(.page(show != nil && model.artist(named: a) == nil ? .show(show!.id) : .artist(a)))
                 } label: {
-                    Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.gold).lineLimit(1)
+                    Text(s.now?.artist ?? "").font(.title3).foregroundStyle(Color.accentText).lineLimit(1)
                 }
                 .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Scrubber()
+                .padding(.top, Space.l)
             Transport()
             if let v = s.volume {
                 VolumeSlider(level: v.level, muted: v.muted, about: s.on?.name ?? "this phone",
                              onLevel: { model.volume($0) }, onDone: { model.volumeDone() }, onMute: { model.mute() })
+                    .padding(.top, Space.s)
             }
             GlassEffectContainer(spacing: Space.s) {
                 HStack(spacing: Space.s) {
@@ -164,7 +199,7 @@ struct FullPlayer: View {
                             Label(on.label, systemImage: symbol(forDevice: on.kind, name: on.name)).lineLimit(1)
                         }
                         .buttonStyle(.glass)
-                        .tint(on.here && !on.away ? .gold : nil)
+                        .tint(on.here && !on.away ? Color.accent : nil)
                         .glassEffectID("device", in: glass)
                     }
                     Button { present(.queue) } label: {
@@ -182,29 +217,73 @@ struct FullPlayer: View {
                 }
                 .font(.subheadline.weight(.semibold))
             }
-            .animation(Springs.move, value: s.on != nil)
-            .animation(Springs.move, value: cues.isEmpty)
+            .padding(.top, Space.l)
+            .motion(Springs.move, value: s.on != nil)
+            .motion(Springs.move, value: cues.isEmpty)
         }
         .task(id: s.now?.id) { if let n = s.now { model.loadTranscript(Id(n.id)) } }
         .padding(.horizontal, Space.xl)
         .padding(.vertical, Space.s)
         .background {
             if let now = s.now {
+                // Square, as every cover, made big enough to cover the screen.
                 CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
+                    .aspectRatio(1, contentMode: .fill)
                     .blur(radius: 80)
-                    .opacity(0.45)
+                    // The theme's wash (arkui/theme.toml): faint enough that the
+                    // title, the album and the gold read over a pale cover.
+                    .opacity(Tokens.washOpacity(dark: scheme == .dark))
                     .ignoresSafeArea()
             }
         }
-        .gesture(DragGesture(minimumDistance: 40).onEnded { v in
-            if v.translation.height > 120 && abs(v.translation.width) < v.translation.height { close() }
-        })
+        .modifier(PullToClose(close: close))
     }
 
     /// The library's row for what plays, for its menu.
     private var track: LibraryEntry? {
         guard let id = model.player.now?.id else { return nil }
         return model.tracks.first { $0.id.hex == id }
+    }
+}
+
+/// The full player pulled down to close it. It follows the finger one to
+/// one — down as far as it is pulled, up rubber-banded (`Momentum.band`),
+/// there being nothing above it — and let go it closes, judged by where the
+/// pull would come to rest (`Momentum`), so a short flick closes it as a
+/// long drag does, and a drag that is going back up does not. Otherwise it
+/// springs back from where it was let go at the finger's speed
+/// (`Springs.released`); a pull caught again on its way back takes over at
+/// once. Its own view, so the pull's every frame redraws the offset and not
+/// the player.
+private struct PullToClose: ViewModifier {
+    let close: () -> Void
+    @Environment(\.reducesMotion) private var still
+    /// How far the player is drawn down by the finger.
+    @State private var pull: CGFloat = 0
+    /// How tall the player is: the room a pull up is rubber-banded in.
+    @State private var tall: CGFloat = 800
+    /// How far down a drag must be going to close the player: where it would come to rest.
+    static let closes: CGFloat = 120
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: pull)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tall = $0 }
+            .gesture(DragGesture(minimumDistance: 12).onChanged { v in
+                let y = v.translation.height
+                // Vertical once it is under way, so a sideways drag is not a pull.
+                guard pull != 0 || abs(y) > abs(v.translation.width) else { return }
+                pull = y >= 0 ? y : CGFloat(Momentum.band(Double(y), limit: Double(tall)))
+            }.onEnded { v in
+                let down = v.translation.height
+                let rest = down + CGFloat(Momentum.project(Double(v.velocity.height)))
+                if rest > Self.closes && v.velocity.height >= 0 && abs(v.translation.width) < down {
+                    close()
+                } else {
+                    let back = still ? Springs.calm : Springs.released(velocity: Double(v.velocity.height), from: Double(pull), to: 0)
+                    withAnimation(back) { pull = 0 }
+                }
+            })
     }
 }
 
@@ -224,26 +303,26 @@ struct Scrubber: View {
             VStack(spacing: 2) {
                 // The chapter it is in, for an episode that has them.
                 if let c = ChaptersEntry.at(chapters, Int64(at * total)), !c.title.isEmpty {
-                    Text(c.title).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Text(c.title).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
                 }
-                Slider(value: Binding(get: { min(max(at, 0), 1) }, set: { v in
+                // No handle (ArkUI's `Bar`), as Android's.
+                Bar(value: at, fill: Color.accent, enabled: s.durationMs > 0, onValue: { v in
                     dragging = v
                     model.scrub(Int64(v * total))
-                }), in: 0...1, onEditingChanged: { editing in
-                    if !editing, let d = dragging {
+                }, onDone: {
+                    if let d = dragging {
                         model.seek(Int64(d * total))
                         dragging = nil
                     }
                 })
-                .disabled(s.durationMs <= 0)
-                .tint(.gold)
+                .accessibilityLabel("Position")
                 HStack {
                     Text(Spell.clock(Int64(at * total)))
                     Spacer()
                     Text("-" + Spell.clock(max(s.durationMs - Int64(at * total), 0)))
                 }
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             }
         }
         .task(id: s.now?.id) { if let n = s.now { model.loadChapters([Id(n.id)]) } }
@@ -262,7 +341,7 @@ struct Transport: View {
             HStack {
                 if s.alone {
                     Button { model.toggleShuffle() } label: { Image(systemName: "shuffle") }
-                        .foregroundStyle(s.shuffle ? Color.gold : .secondary)
+                        .foregroundStyle(s.shuffle ? Color.accentText : .quiet)
                         .accessibilityLabel(s.shuffle ? "Shuffle is on" : "Shuffle is off")
                 } else {
                     Color.clear.frame(width: 44)
@@ -273,7 +352,8 @@ struct Transport: View {
                     Button { model.jog(-Model.jogBack) } label: { Image(systemName: "gobackward.15").font(.title) }
                         .accessibilityLabel("Back 15 seconds")
                 } else {
-                    Button { model.previous() } label: { Image(systemName: "backward.fill").font(.title) }
+                    // |◀ and ▶|, as Android's: a track back and on.
+                    Button { model.previous() } label: { Image(systemName: "backward.end.fill").font(.title) }
                         .accessibilityLabel("Previous")
                 }
                 Spacer()
@@ -285,26 +365,26 @@ struct Transport: View {
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .tint(.gold)
+                .tint(Color.accent)
                 .accessibilityLabel(s.playing ? "Pause" : "Play")
                 Spacer()
                 if model.jogs {
                     Button { model.jog(Model.jogForward) } label: { Image(systemName: "goforward.30").font(.title) }
                         .accessibilityLabel("Forward 30 seconds")
                 } else {
-                    Button { model.next() } label: { Image(systemName: "forward.fill").font(.title) }
+                    Button { model.next() } label: { Image(systemName: "forward.end.fill").font(.title) }
                         .accessibilityLabel("Next")
                 }
                 Spacer()
                 if s.alone {
                     Button { model.cycleRepeat() } label: { Image(systemName: s.repeatMode == .one ? "repeat.1" : "repeat") }
-                        .foregroundStyle(s.repeatMode != .off ? Color.gold : .secondary)
+                        .foregroundStyle(s.repeatMode != .off ? Color.accentText : .quiet)
                         .accessibilityLabel(s.repeatMode == .off ? "Repeat is off" : (s.repeatMode == .all ? "Repeating the queue" : "Repeating this song"))
                 } else {
                     Color.clear.frame(width: 44)
                 }
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(.ink)
         }
     }
 }
@@ -322,27 +402,25 @@ struct VolumeSlider: View {
     let onMute: () -> Void
     @State private var shown: Double = 0
     @State private var dragging = false
+    @Environment(\.reducesMotion) private var still
 
     var body: some View {
         HStack(spacing: Space.s) {
             Button(action: onMute) { Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").frame(width: 28) }
-                .foregroundStyle(muted ? .secondary : .primary)
+                .foregroundStyle(muted ? Color.quiet : Color.ink)
                 .accessibilityLabel(muted ? "Unmute \(about)" : "Mute \(about)")
-            Slider(value: Binding(get: { shown }, set: { v in
+            Bar(value: shown, fill: muted ? Color.quiet : Color.accent, onValue: { v in
                 dragging = true
                 shown = v
                 onLevel(Int((v * 100).rounded()))
-            }), in: 0...1, onEditingChanged: { editing in
-                if !editing {
-                    dragging = false
-                    onDone()
-                }
+            }, onDone: {
+                dragging = false
+                onDone()
             })
-            .tint(muted ? .secondary : .gold)
             .accessibilityLabel("Volume of \(about)")
         }
         .onAppear { shown = Double(level) / 100 }
-        .onChange(of: level) { _, l in if !dragging { withAnimation(Springs.move) { shown = Double(l) / 100 } } }
+        .onChange(of: level) { _, l in if !dragging { withAnimation(Springs.move.reduced(still)) { shown = Double(l) / 100 } } }
     }
 }
 
@@ -364,13 +442,14 @@ struct QueueSheet: View {
                     }
                     heading(s.shuffle ? "Up Next, Shuffled" : "Up Next").padding(.top, Space.m)
                     if s.upNext.isEmpty {
-                        Text("Nothing after this one.").foregroundStyle(.secondary).padding(.horizontal, Space.l)
+                        Text("Nothing after this one.").foregroundStyle(.quiet).padding(.horizontal, Space.l)
                     }
                     Reorderable(Self.keyed(s.upNext), key: \.key, onMove: { model.moveUpNext(from: $0, to: $1) }) { row, handle in
                         HStack(spacing: Space.s) {
-                            QueueRow(p: row.p, current: false)
-                                .contentShape(Rectangle())
-                                .onTapGesture { model.jump(row.p.index) }
+                            Button { model.jump(row.p.index) } label: {
+                                QueueRow(p: row.p, current: false).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.pressRow)
                             handle
                         }
                         .padding(.leading, Space.l)
@@ -420,6 +499,7 @@ struct QueueSheet: View {
 /// held asks who its voice is, where voices were told apart.
 struct TranscriptSheet: View {
     @EnvironmentObject private var model: Model
+    @Environment(\.reducesMotion) private var still
     /// The list keeps the line playing in its middle.
     @State private var following = true
     /// A finger is on the list, or it is still coasting from one.
@@ -467,7 +547,7 @@ struct TranscriptSheet: View {
                                 .scrollTargetLayout()
                                 .padding(.horizontal, Space.xl)
                                 .padding(.vertical, Space.xxl)
-                                .animation(Springs.move, value: at)
+                                .motion(Springs.move, value: at)
                             }
                             .onScrollPhaseChange { _, phase in
                                 handled = phase == .tracking || phase == .interacting || phase == .decelerating
@@ -480,24 +560,24 @@ struct TranscriptSheet: View {
                             .onChange(of: at) { before, now in
                                 if !following && !handled && TranscriptEntry.caughtUp(from: before, to: now, showing: showing) { following = true }
                                 guard following, let i = now else { return }
-                                withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) }
+                                withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(i, anchor: .center) }
                             }
                             .onAppear { if let i = at { proxy.scrollTo(i, anchor: .center) } }
                             .overlay(alignment: .bottom) {
                                 if !following {
                                     Button {
                                         following = true
-                                        if let i = at { withAnimation(.smooth) { proxy.scrollTo(i, anchor: .center) } }
+                                        if let i = at { withAnimation(Springs.move.reduced(still)) { proxy.scrollTo(i, anchor: .center) } }
                                     } label: {
                                         Label("Follow Along", systemImage: "waveform")
                                     }
                                     .buttonStyle(.glassProminent)
-                                    .tint(.gold)
+                                    .tint(Color.accent)
                                     .padding(.bottom, Space.l)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                    .motionTransition(.move(edge: .bottom).combined(with: .opacity))
                                 }
                             }
-                            .animation(Springs.move, value: following)
+                            .motion(Springs.move, value: following)
                         }
                     }
                 }
@@ -554,10 +634,12 @@ private struct TranscriptLine: View {
     let when: When
 
     var body: some View {
-        let ink: HierarchicalShapeStyle = when == .saying ? .primary : when == .coming ? .secondary : .tertiary
+        // What is said now in ink, what is coming quieter, and what was said as
+        // the disabled colour: gone by, not to be read again.
+        let ink: Color = when == .saying ? .ink : when == .coming ? .quiet : .disabled
         VStack(alignment: .leading, spacing: Space.xs) {
             if named {
-                Text(cue.speaker.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.gold)
+                Text(cue.speaker).font(.caption.weight(.semibold)).foregroundStyle(Color.accentText)
                     .opacity(when == .said ? 0.6 : 1)
             }
             Text(cue.text).font(.title3.weight(.semibold)).foregroundStyle(ink)
@@ -578,11 +660,11 @@ private struct QueueRow: View {
         HStack(spacing: Space.m) {
             CoverView(seed: p.seed, url: p.art, side: 40, corner: 4).frame(width: 40, height: 40)
             VStack(alignment: .leading) {
-                Text(p.title).foregroundStyle(current ? Color.gold : .primary).lineLimit(1)
-                Text(p.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(p.title).foregroundStyle(current ? Color.accentText : .ink).lineLimit(1)
+                Text(p.artist).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer()
-            if current { Image(systemName: "waveform").foregroundStyle(Color.gold).accessibilityLabel("Playing") }
+            if current { Image(systemName: "waveform").foregroundStyle(Color.accentText).accessibilityLabel("Playing") }
         }
     }
 }

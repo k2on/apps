@@ -15,7 +15,7 @@ import UIKit
 /// A person's banner: their wide picture across the page, cropped to fill,
 /// run up to the top of the screen under the status bar and that much
 /// taller, so what shows below the bar is the shape `shape(width:)` says;
-/// `kind` in small capitals and their name in bold on its lower edge,
+/// `kind` in small type and their name in bold on its lower edge,
 /// over a shade that keeps both legible on a white collar or a white wig,
 /// and a lighter one at its top under the bar and the back button. Until
 /// the picture arrives the ground is drawn, so the name is already where it
@@ -67,7 +67,7 @@ struct Banner: View {
             }
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))
+                    Text(kind).font(.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))
                     Text(name).font(.largeTitle.bold()).foregroundStyle(Color.white)
                         .lineLimit(3).minimumScaleFactor(0.6)
                 }
@@ -125,7 +125,7 @@ struct PlayShuffle: View {
 }
 
 /// The header a record's page opens with, as a catalogue sets one: the
-/// cover beside a line of small capitals (`over`, whose it is), the title in
+/// cover beside a line of small type (`over`, whose it is), the title in
 /// bold, who played it in the gold, a small line under (`small`) —
 /// each line that names somebody opening their page — and Play and Shuffle
 /// under it all.
@@ -147,10 +147,10 @@ struct RecordHeader<Cover: View>: View {
             HStack(alignment: .center, spacing: Space.l + 4) {
                 cover().frame(width: Space.record, height: Space.record)
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    if !over.isEmpty { Linked(words: over.uppercased(), font: .caption.weight(.semibold), color: .secondary, action: onOver) }
+                    if !over.isEmpty { Linked(words: over, font: .caption.weight(.semibold), color: .quiet, action: onOver) }
                     Text(title).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
-                    if !by.isEmpty { Linked(words: by, font: .headline, color: .gold, action: onBy) }
-                    if !small.isEmpty { Linked(words: small, font: .caption, color: .secondary, action: onSmall) }
+                    if !by.isEmpty { Linked(words: by, font: .headline, color: .accentText, action: onBy) }
+                    if !small.isEmpty { Linked(words: small, font: .caption, color: .quiet, action: onSmall) }
                 }
                 Spacer(minLength: 0)
             }
@@ -162,7 +162,7 @@ struct RecordHeader<Cover: View>: View {
 }
 
 /// One thing set apart at the head of a section, the one to start with: its
-/// cover beside `label` in small capitals, its title, its facts, and a Play
+/// cover beside `label` in small type, its title, its facts, and a Play
 /// on glass. The cover and the title open it, the cover zooming into its page.
 struct Featured: View {
     let label: String
@@ -180,21 +180,21 @@ struct Featured: View {
             Button { open(opens) } label: {
                 CoverView(seed: seed, url: url, side: 120, corner: 6).frame(width: 120, height: 120).zoomSource(opens, zoom)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(label.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.quiet)
                 Button { open(opens) } label: {
                     Text(title).font(.headline).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(.plain)
-                if !facts.isEmpty { Text(facts).font(.footnote).foregroundStyle(.secondary) }
+                if !facts.isEmpty { Text(facts).font(.footnote).foregroundStyle(.quiet) }
                 Button(action: onPlay) {
                     Image(systemName: "play.fill").font(.body.weight(.semibold)).frame(width: 36, height: 36)
                 }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
-                .tint(.gold)
+                .tint(Color.accent)
                 .padding(.top, Space.s)
                 .accessibilityLabel("Play \(title)")
             }
@@ -221,7 +221,7 @@ struct SectionHeading: View {
 }
 
 /// One entry of a catalogue's list, over its hairline: `picture` (a cover)
-/// at its left when it has one, a line of small capitals over its title
+/// at its left when it has one, a line of small type over its title
 /// (who it is by), a line under, a count at its right, and a chevron.
 struct EntryRow<Picture: View>: View {
     var over: String = ""
@@ -237,21 +237,22 @@ struct EntryRow<Picture: View>: View {
                 HStack(spacing: Space.m) {
                     picture()
                     VStack(alignment: .leading, spacing: 2) {
-                        if !over.isEmpty { Text(over.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
-                        Text(title).font(.body).foregroundStyle(.primary).multilineTextAlignment(.leading)
-                        if !under.isEmpty { Text(under).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
+                        if !over.isEmpty { Text(over).font(.caption2.weight(.semibold)).foregroundStyle(.quiet) }
+                        Text(title).font(.body).foregroundStyle(.ink).multilineTextAlignment(.leading)
+                        if !under.isEmpty { Text(under).font(.footnote).foregroundStyle(.quiet).lineLimit(2) }
                     }
                     Spacer(minLength: Space.s)
-                    if !count.isEmpty { Text(count).font(.subheadline).foregroundStyle(.secondary).monospacedDigit() }
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    if !count.isEmpty { Text(count).font(.subheadline).foregroundStyle(.quiet).monospacedDigit() }
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
                 }
                 .padding(.vertical, Space.m - 2)
                 Divider()
             }
+            // Inside the press, so a pressed row darkens the page's width.
+            .padding(.horizontal, Space.page)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Space.page)
+        .buttonStyle(.pressRow)
     }
 }
 
@@ -264,19 +265,19 @@ struct MoreRow: View {
     var body: some View {
         Button(action: action) {
             HStack {
-                Text(title).foregroundStyle(Color.gold)
+                Text(title).foregroundStyle(Color.accentText)
                 Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
             }
             .padding(.vertical, Space.m)
+            .padding(.horizontal, Space.page)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, Space.page)
+        .buttonStyle(.pressRow)
     }
 }
 
-/// A work's heading over its movements: its composer in small capitals over
+/// A work's heading over its movements: its composer in small type over
 /// its title, and how long the run of it lasts, in the column
 /// the tracks' lengths are in.
 struct WorkHeading: View {
@@ -288,11 +289,11 @@ struct WorkHeading: View {
     var body: some View {
         HStack(alignment: .lastTextBaseline, spacing: Space.m) {
             VStack(alignment: .leading, spacing: 2) {
-                if !composer.isEmpty { Text(composer.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                if !composer.isEmpty { Text(composer).font(.caption2.weight(.semibold)).foregroundStyle(.quiet) }
                 Text(work).font(.headline).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
         }
         // In from where a track's title starts; and short of where its menu
         // is, so the lengths line up.
@@ -354,14 +355,14 @@ struct RecordFoot: View {
             ForEach(Catalogue.licences(tracks.map { model.detail($0) }), id: \.self) { Text($0) }
             if !label.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("RECORD LABEL").font(.caption2.weight(.semibold))
-                    Text(label).font(.subheadline).foregroundStyle(Color.gold)
+                    Text("Record Label").font(.caption2.weight(.semibold))
+                    Text(label).font(.subheadline).foregroundStyle(Color.accentText)
                 }
                 .padding(.top, Space.m)
             }
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quiet)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Space.page)
         .padding(.top, Space.xl)

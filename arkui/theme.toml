@@ -1,0 +1,275 @@
+# The colours every Ark app is drawn in, for every platform it runs on: the
+# one place a colour is written down. `nix run .#update-theme` writes the
+# Kotlin (kotlin/arkui), the Swift (swift/ArkUI and each app's AccentColor)
+# and the Rust (rust/arkui) from it, `checks.theme` fails when what is
+# committed is not what it would write, and `checks.theme-contrast` fails
+# when a text colour here is not legible on a ground it is drawn on
+# (arkui/README.md).
+#
+# Every app shares the neutrals and the signals; an app differs only in its
+# accent. Names are roles, not hues: what a colour is for.
+
+# The neutrals, light. A white page and near-black ink, with greys that are
+# grey: no tint, so the one colour on a screen is the app's accent.
+[neutral.light]
+background = "#FFFFFF"         # the page
+surface = "#FFFFFF"            # a sheet, a card, a bar: a plane over the page
+container-lowest = "#FFFFFF"   # the steps a container takes off the page, faintest first
+container-low = "#F7F7F7"
+container = "#F2F2F2"
+container-high = "#ECECEC"
+container-highest = "#E5E5E5"
+glass = "#FFFFFF"              # the fill of a glass chip, menu and sheet
+outline = "#878787"            # the edge of a control: a field, an unchecked box (3:1)
+hairline = "#E3E3E3"           # a divider, a cover's edge
+ink = "#1C1C1C"                # text
+quiet = "#5E5E5E"              # secondary text: a subtitle, a count, a caption
+disabled = "#9E9E9E"           # what cannot be pressed; exempt from the contrast rule
+scrim = "#000000"              # what dims the page under a dialog
+inverse-surface = "#2E2E2E"    # a snackbar: the other side's surface
+inverse-ink = "#F2F2F2"
+
+# …and dark. Not black: a charcoal page that glass and sheets step up from.
+[neutral.dark]
+background = "#1C1C1C"
+surface = "#1C1C1C"
+container-lowest = "#161616"
+container-low = "#212121"
+container = "#262626"
+container-high = "#2E2E2E"
+container-highest = "#363636"
+glass = "#3A3A3A"
+outline = "#7A7A7A"
+hairline = "#333333"
+ink = "#E8E8E8"
+quiet = "#B0B0B0"
+disabled = "#6E6E6E"
+scrim = "#000000"
+inverse-surface = "#E8E8E8"
+inverse-ink = "#262626"
+
+# What a value says about itself, the same in every app: wrong, worth a
+# look, good. Each with what is written on it and a quiet container.
+[signal.light]
+error = "#B3261E"
+on-error = "#FFFFFF"
+error-container = "#F9DEDC"
+on-error-container = "#410E0B"
+caution = "#8A5100"
+on-caution = "#FFFFFF"
+caution-container = "#FFE3C4"
+on-caution-container = "#3A1F00"
+positive = "#186A3B"
+
+[signal.dark]
+error = "#F2B8B5"
+on-error = "#601410"
+error-container = "#5A1E1A"
+on-error-container = "#F9DEDC"
+caution = "#FFB86E"
+on-caution = "#3D2200"
+caution-container = "#5A3A12"
+on-caution-container = "#FFDCBC"
+positive = "#5FCF8E"
+
+# The behind of the full player: its cover, blurred, laid over the page at
+# this opacity. `cover` is a warm cream cover, the hardest kind for text
+# over it in the light theme, which the contrast check reads the player's
+# text on.
+[wash]
+cover = "#BA9F77"
+light = 0.25
+dark = 0.25
+
+# The derived squares: a gradient's two stops each, against the light page
+# and the dark one. Which one a name picks is `Art.pick` (FNV-1a over its
+# UTF-16), the same on every platform. Light ones stay pale enough that the
+# note drawn on them reads; dark ones fall to near the page.
+[art.neutral]
+light = [
+  ["#E4E4E6", "#BCBCC0"],
+  ["#DDE2EA", "#AEB8C6"],
+  ["#E6E1DC", "#C0B6AC"],
+]
+dark = [
+  ["#5A5A5E", "#18181A"],
+  ["#4E5866", "#14171B"],
+  ["#605850", "#1A1714"],
+]
+
+[art.gold]
+light = [
+  ["#E8D19A", "#C9A85F"],
+  ["#EFDCAE", "#D2B370"],
+  ["#E2D2AC", "#BFA671"],
+  ["#F0DFA8", "#CBAA5C"],
+  ["#E6D0A0", "#C3A05A"],
+  ["#F3E6BE", "#D6B877"],
+]
+dark = [
+  ["#7A5C15", "#201907"],
+  ["#8A6B22", "#1B1509"],
+  ["#6B5A2A", "#17140B"],
+  ["#8F7327", "#221B09"],
+  ["#5E4A18", "#141007"],
+  ["#A08137", "#261E08"],
+]
+
+[art.green]
+light = [
+  ["#CFE6D6", "#9CC7AC"],
+  ["#DCE6DF", "#B2C4B8"],
+  ["#E4E4E6", "#BCBCC0"],
+]
+dark = [
+  ["#2F6B47", "#101C15"],
+  ["#3E5E4A", "#141A16"],
+  ["#5A5A5E", "#18181A"],
+]
+
+# The colours a chart tells its parts apart by, in the order the parts take
+# them: the largest first. Hues that sit beside money's green rather than
+# fight it, none of them the error's red (a part is not wrong for being
+# large), each at 3:1 on every ground a chart is drawn on, as a mark has to
+# be. A marker over its colour's own faint wash (an account's tile) reads
+# too.
+[chart]
+light = ["#17734A", "#2F6DB5", "#A86A00", "#7A55C4", "#B8457E", "#0E7C7B"]
+dark = ["#5FD394", "#7FB2F0", "#F0B85A", "#B9A0F5", "#F29AC6", "#4FCDC9"]
+
+# The accents, one per app. Each says, for each side: the accent (a filled
+# button, a slider, a selected tab), what is written on it, the accent as
+# text (a link, the row playing), and a quiet container in the accent with
+# what is written on that. `art` is the derived squares it draws, and
+# `colorsets` the iPhone apps' AccentColor it is written into.
+
+# harken's gold. Bright leaf gold on the dark page; on white it deepens to
+# an old gold, since text in it has to read there.
+[accent.gold]
+colorsets = ["harken/ios/Harken/Assets.xcassets/AccentColor.colorset"]
+art = "gold"
+light.accent = "#7A5B10"
+light.on-accent = "#FFFFFF"
+light.accent-text = "#7A5B10"
+light.accent-container = "#F5EBCF"
+light.on-accent-container = "#4A3606"
+dark.accent = "#E9BB45"
+dark.on-accent = "#1C1C1C"
+dark.accent-text = "#E9BB45"
+dark.accent-container = "#4A3D1E"
+dark.on-accent-container = "#F3D99A"
+
+# money's green: a deep, fresh green on white, a lifted one on the dark page.
+[accent.green]
+colorsets = ["money/ios/Money/Assets.xcassets/AccentColor.colorset"]
+art = "green"
+light.accent = "#17734A"
+light.on-accent = "#FFFFFF"
+light.accent-text = "#17734A"
+light.accent-container = "#D5EEDF"
+light.on-accent-container = "#0B3B26"
+dark.accent = "#5FD394"
+dark.on-accent = "#0A2A1B"
+dark.accent-text = "#5FD394"
+dark.accent-container = "#1F4A34"
+dark.on-accent-container = "#BFECD2"
+
+# Nobody's: what arkui draws in until an app names its own (the showcase,
+# the docs, every test), the system blue.
+[accent.blue]
+colorsets = []
+art = "neutral"
+light.accent = "#005AD2"
+light.on-accent = "#FFFFFF"
+light.accent-text = "#005AD2"
+light.accent-container = "#DCE8FA"
+light.on-accent-container = "#06264F"
+dark.accent = "#6CB4FF"
+dark.on-accent = "#0A1F38"
+dark.accent-text = "#6CB4FF"
+dark.accent-container = "#1E3A5C"
+dark.on-accent-container = "#D2E6FF"
+
+# The contrast rule (checks.theme-contrast), WCAG 2's ratio. Each text role
+# on each ground at 4.5:1, each `on` pair at 4.5:1, and each `large` pair
+# (large text, icons, a control's edge) at 3:1. The accent colours are read
+# from every accent; the wash is the player's, over the page.
+[contrast]
+text = ["ink", "quiet", "accent", "accent-text", "error", "caution", "positive"]
+grounds = [
+  "background", "surface", "container-lowest", "container-low", "container",
+  "container-high", "container-highest", "glass",
+]
+# Read on the player's wash: the title, its album, the accent of what plays.
+wash = ["ink", "quiet", "accent-text"]
+on = [
+  ["on-accent", "accent"],
+  ["on-accent-container", "accent-container"],
+  ["accent-text", "accent-container"],
+  ["on-error", "error"],
+  ["on-error-container", "error-container"],
+  ["on-caution", "caution"],
+  ["on-caution-container", "caution-container"],
+  ["inverse-ink", "inverse-surface"],
+  ["quiet", "accent-container"],
+]
+# Every chart colour on every ground, at 3:1: a mark, not text.
+chart = [
+  "background", "surface", "container-lowest", "container-low", "container",
+  "container-high", "container-highest", "glass",
+]
+large = [
+  ["outline", "background"],
+  ["outline", "container"],
+]
+
+# How everything moves, for every platform: the one place a spring, a fade,
+# a flick or a press is written down (docs/motion.md says when each is
+# used). Kotlin takes the stiffness, Swift and Rust the response worked out
+# from it (2π/√stiffness), so the three move alike. No app writes a number
+# of its own: one it needs that is not here is added here.
+[motion]
+# The one stiffness every move rides: a page, the player, a sheet, a row.
+stiffness = 700.0
+# A move nothing threw: arrives and stops (Apple's default).
+move = 1.0
+# A move a flick threw: the flick's momentum spending itself.
+momentum = 0.8
+# How large a thing is and what of it shows: never past its size.
+size = 1.0
+# A fade, a hover, the gentle stand-in when motion is reduced: ~150 ms.
+fade-stiffness = 2500.0
+# Where a 0..1 progress counts as there: a twentieth of a pixel of a page.
+rest = 0.0005
+# Where a move in pixels counts as there.
+rest-px = 0.5
+# The most a settle may take, in ms: a critically damped settle is at
+# rest first, so it bounds only a release the tuning did not see.
+cap-ms = 450
+# A release at least this fast (dp, pt or logical px a second) was a flick.
+flick = 500.0
+# How quickly a projected release slows, per ms: iOS's normal rate, and its
+# fast one for a release that decides an act (a skip, going back).
+deceleration = 0.998
+snappy = 0.99
+# A back gesture's preview: at most this share of what it previews, and
+# this much of the gesture to come 63% of the way.
+preview = 0.1
+give = 0.12
+# A cover or a chip pressed: how small it gives.
+press = 0.97
+# The least a thing scales from when it enters: never from nothing.
+enter-scale = 0.95
+# A drag past its edge is drawn (x · d · c) / (d + c · |x|) past it, d the
+# room it is dragged in: Apple's rubber band, and this its c.
+rubber-band = 0.55
+# A row held to be dragged into another order: how large it lifts.
+lift = 1.02
+# How far a page or a step slides as it comes or goes, as a share of its
+# width: enough to say which way it went, not a trip across the screen.
+shift = 0.2
+# A cover while what it plays is paused: a step back, still plainly itself.
+paused-scale = 0.9
+# How far a thing that comes in where it stays rises as it comes (dp, pt or
+# logical px): a page's header, small, into its bar. A nudge, not a journey.
+rise = 8.0

@@ -140,7 +140,7 @@ class CatalogueTests {
     @Test
     fun anAlbumIsByWhoPlayedIt() {
         val by = Album("goldberg", "Goldberg", "Johann Sebastian Bach", "", 10, performer = "Kimiko Ishizaka", released = 2016)
-        assertEquals("Kimiko Ishizaka" to "JOHANN SEBASTIAN BACH · 2016", Catalogue.albumBy(by, by.creator))
+        assertEquals("Kimiko Ishizaka" to "Johann Sebastian Bach · 2016", Catalogue.albumBy(by, by.creator))
         assertEquals("Kimiko Ishizaka", by.by)
         val pop = Album("songs", "Songs", "A Band", "", 3, performer = "A Band")
         assertEquals("a pop record does not name its artist twice", "A Band" to "", Catalogue.albumBy(pop, pop.creator))

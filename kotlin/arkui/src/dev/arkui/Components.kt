@@ -8,7 +8,6 @@
 // without a phone.
 package dev.arkui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +29,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
@@ -90,20 +88,38 @@ public fun Heading(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        if (action != null) TextButton(onClick = onAction) { Text(action) }
+        // In the body's weight, as the iPhone's is: the heading carries the weight, not its action.
+        if (action != null) TextButton(onClick = onAction) { Text(action, style = MaterialTheme.typography.bodyLarge) }
     }
 }
 
-/** A tab's own title, large, with what it offers at the end. */
+/**
+ * A tab's own title, with what it offers at the end: the theme's largest headline, bold, so it reads
+ * as the iPhone's large title does. [bar] is what sits in the row above it, at its end — the
+ * account's face — where a large top app bar has its actions, so a tab drawn this way and one
+ * under Material's large bar put the face in the same place.
+ */
 @Composable
-public fun TabTitle(title: String, actions: @Composable RowScope.() -> Unit = {}) {
+public fun TabTitle(
+    title: String,
+    bar: (@Composable RowScope.() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    if (bar != null) {
+        Row(
+            Modifier.fillMaxWidth().height(64.dp).padding(end = Space.xs),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+            content = bar,
+        )
+    }
     Row(
         Modifier.fillMaxWidth()
             .padding(start = Space.page, end = Space.xs, top = Space.l, bottom = Space.xs)
-            .height(48.dp),
+            .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         actions()
     }
 }
@@ -143,10 +159,11 @@ public fun Empty(
         modifier.fillMaxWidth().padding(horizontal = Space.xxl, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // Quiet, not the accent: the words are what the empty list says, as on the iPhone.
         Icon(
             icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(40.dp))
         Spacer(Modifier.height(Space.l))
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
@@ -202,7 +219,7 @@ public fun CoverCard(
     val hero = if (opens) rememberHero(Space.corner, round = round) else null
     Column(
         Modifier.width(side)
-            .clickable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
+            .pressable(onClick = if (hero == null) onClick else hero.lifting(onClick))) {
             Cover(
                 seed,
                 art,
@@ -245,7 +262,7 @@ public fun ListRow(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .clickable(onClick = onClick)
+            .pressable(onClick = onClick, press = Press.Highlight)
             .padding(horizontal = Space.page, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -285,7 +302,7 @@ public fun SheetRow(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .clickable(onClick = onClick)
+            .pressable(onClick = onClick, press = Press.Highlight)
             .padding(horizontal = Space.xl)
             .height(52.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -359,8 +376,9 @@ public fun interface RowOrigin {
 }
 
 /**
- * A row's menu: the glyph in a 48 dp target, Material's minimum, with an unbounded ripple, and the
- * role and the label a screen reader says — "More for `about`", spelt only when one asks. What
+ * A row's menu: the glyph in a 48 dp target, Material's minimum, giving under the finger as
+ * everything tappable here does ([pressable]) rather than with Material's ripple, and the role and
+ * the label a screen reader says — "More for `about`", spelt only when one asks. What
  * `IconButton` is, less what a list pays for on every row entering it: a clip layer, a colour
  * lookup, and a layout to reach the minimum it could simply be.
  *
@@ -372,12 +390,7 @@ public fun MoreButton(about: String, origin: RowOrigin?, onMore: () -> Unit) {
     val at = MoreAt()
     Box(
         Modifier.size(48.dp)
-            .clickable(
-                interactionSource = null,
-                indication = ripple(bounded = false, radius = 20.dp),
-                role = Role.Button) {
-                    at.tap(origin, onMore)
-                }
+            .pressable(role = Role.Button, onClick = { at.tap(origin, onMore) })
             .then(MoreElement(about, at)),
         contentAlignment = Alignment.Center,
     ) {

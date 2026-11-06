@@ -25,12 +25,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.DropdownMenu
@@ -62,7 +61,8 @@ import dev.arkui.CoverCard
 import dev.arkui.Empty
 import dev.arkui.Glyph
 import dev.arkui.MoreButton
-import dev.arkui.PageBar
+import dev.arkui.PinnedBar
+import dev.arkui.PinnedPage
 import dev.arkui.Recompositions
 import dev.arkui.Shelf
 import dev.arkui.Space
@@ -70,6 +70,8 @@ import dev.arkui.UnderStatusBar
 import dev.arkui.quiet
 import dev.arkui.rememberDestinationListState
 import dev.arkui.rememberDestinationScrollState
+import dev.arkui.pressable
+import dev.arkui.Press
 
 private fun facts(vararg parts: String?): String = parts.filterNotNull().filter { it.isNotEmpty() }.joinToString(" · ")
 
@@ -137,15 +139,14 @@ private fun songUnder(t: Track, d: TrackDetail?, creator: String): String =
  * work headings, and its track numbers instead.
  */
 @Composable
-fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do) {
+fun AlbumPage(id: String, album: Album?, tracks: List<Track>, details: Map<Id, TrackDetail>, playing: String?, act: Do, list: LazyListState = rememberDestinationListState("album")) {
     Recompositions.hit("AlbumPage")
     val page = Page.ForAlbum(id)
     // Its name: its row's, or — the albums not caught up — what its tracks call it.
     val name = album?.name ?: tracks.firstNotNullOfOrNull { details[it.id]?.album } ?: ""
     val creator = album?.creator ?: tracks.firstOrNull()?.creator ?: ""
     val (by, small) = Catalogue.albumBy(album, creator)
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("album")) {
-        item { PageBar("", onBack = act::back) }
+    PinnedPage(list, name, act::back, art = { side -> Cover(name, album?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             CoverHeader(
                 seed = name,
@@ -232,9 +233,11 @@ fun ArtistPage(
             first != null && first.index == 0 && first.offset + first.size > bar.getTop(density)
         }
     }
-    LazyColumn(Modifier.fillMaxSize(), state = list) {
+    // Their face in the bar once their header has gone: the portrait, or the banner cropped round.
+    val face = listOf(artist?.art, composer?.art, person?.art, banner).firstOrNull { !it.isNullOrEmpty() }.orEmpty()
+    PinnedPage(list, name, act::back, art = { side -> Cover(name, face, side, Modifier.size(side), round = true) }, under = banner.isNotEmpty()) {
         if (banner.isNotEmpty()) {
-            item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name, onBack = act::back) }
+            item { Banner(name, banner, facts(kind, life.ifEmpty { counts }), name) }
             if (works.isEmpty() && tracks.isNotEmpty()) {
                 item {
                     Row(Modifier.padding(start = Space.page, end = Space.page, top = Space.l), verticalAlignment = Alignment.CenterVertically) {
@@ -244,7 +247,6 @@ fun ArtistPage(
                 }
             }
         } else {
-            item { PageBar("", onBack = act::back) }
             item {
                 CoverHeader(
                     seed = name,
@@ -329,7 +331,7 @@ private fun WebLink(link: String) {
     val uri = LocalUriHandler.current
     val host = link.substringAfter("://").substringBefore('/').removePrefix("www.").ifEmpty { link }
     Row(
-        Modifier.padding(horizontal = Space.page - Space.s).clip(RoundedCornerShape(50)).clickable { runCatching { uri.openUri(link) } }.padding(horizontal = Space.s, vertical = Space.s),
+        Modifier.padding(horizontal = Space.page - Space.s).clip(RoundedCornerShape(50)).pressable(onClick = { runCatching { uri.openUri(link) } }).padding(horizontal = Space.s, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
@@ -348,15 +350,14 @@ private fun WebLink(link: String) {
 fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, act: Do) {
     Recompositions.hit("WorkPage")
     val composer = work?.composer.orEmpty()
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("work")) {
-        item { PageBar("", onBack = act::back) }
+    PinnedPage(rememberDestinationListState("work"), work?.title.orEmpty(), act::back, art = null) {
         item {
             Column(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.l)) {
                 if (composer.isNotEmpty()) {
                     Text(
-                        composer.uppercase() + "  ›",
+                        composer + "  ›",
                         style = quiet(MaterialTheme.typography.labelLarge),
-                        modifier = Modifier.clickable { act.open(Page.ForArtist(composer)) }.padding(vertical = Space.xs),
+                        modifier = Modifier.pressable(onClick = { act.open(Page.ForArtist(composer)) }).padding(vertical = Space.xs),
                     )
                 }
                 Text(work?.title.orEmpty(), style = MaterialTheme.typography.headlineMedium)
@@ -367,7 +368,7 @@ fun WorkPage(id: String, work: WorkSummary?, recordings: List<RecordingsEntry>, 
         item { HorizontalDivider(Modifier.padding(horizontal = Space.page), color = MaterialTheme.colorScheme.outlineVariant) }
         if (recordings.isEmpty()) {
             item { Text("No recordings of it yet.", style = quiet(MaterialTheme.typography.bodyMedium), modifier = Modifier.padding(Space.page)) }
-            return@LazyColumn
+            return@PinnedPage
         }
         val first = recordings[0]
         item(key = "featured") {
@@ -419,13 +420,13 @@ fun RecordingPage(
     val composer = work?.composer.orEmpty()
     val who = take?.let(Catalogue::who).orEmpty()
     val year = take?.recorded ?: 0
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("recording")) {
-        item { PageBar("", onBack = act::back) }
+    val titled = Catalogue.recordingTitle(work, who)
+    PinnedPage(rememberDestinationListState("recording"), titled, act::back, art = { side -> Cover(id, take?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             CoverHeader(
                 seed = id,
                 art = take?.art ?: "",
-                title = Catalogue.recordingTitle(work, who),
+                title = titled,
                 over = composer,
                 onOver = if (composer.isNotEmpty()) ({ act.open(Page.ForArtist(composer)) }) else null,
                 by = who,
@@ -498,13 +499,18 @@ fun ShowPage(
     Recompositions.hit("ShowPage")
     val page = Page.ForShow(id)
     val title = show?.title ?: "Show"
-    // What "2 days ago" is counted from: the page's opening, not every frame.
+    // What "Today" is counted from: the page's opening, not every frame.
     val now = remember { System.currentTimeMillis() }
     // Each row's, found once rather than by every row as it scrolls in.
     val heardBy = remember(listened) { listened.groupBy { it.mediaId } }
     val guestsBy = remember(people) { people.mapValues { OnEpisode.guests(it.value) } }
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("show")) {
-        item { PageBar("", onBack = act::back) { if (feed != null) ShowMenu(title, feed, onUnfollow) } }
+    PinnedPage(
+        rememberDestinationListState("show"),
+        title,
+        act::back,
+        art = { side -> Cover(title, show?.art ?: "", side, Modifier.size(side), corner = PinnedBar.CORNER) },
+        actions = { if (feed != null) ShowMenu(title, feed, onUnfollow) },
+    ) {
         item {
             PageHeader(
                 cover = { Cover(title, show?.art ?: "", Space.header, Modifier.size(Space.header)) },
@@ -581,7 +587,7 @@ fun ShowPage(
         if (feed != null && feed.hasOlder) {
             item(key = "older") {
                 OutlinedButton(onClick = { onFetchOlder(feed, 20) }, modifier = Modifier.padding(start = Space.page, end = Space.page, top = Space.l)) {
-                    Text("Fetch ${minOf(feed.items - feed.keep, 20L)} older")
+                    Text("Fetch ${minOf(feed.items - feed.keep, 20L)} Older Episodes")
                 }
             }
         }
@@ -616,7 +622,7 @@ private fun Hosts(hosts: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
             Text("Hosted by", style = quiet(MaterialTheme.typography.labelLarge), maxLines = 1)
             for (h in hosts) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(50)).clickable { onOpen(h) }.padding(horizontal = Space.s, vertical = Space.xs),
+                    Modifier.clip(RoundedCornerShape(50)).pressable(onClick = { onOpen(h) }).padding(horizontal = Space.s, vertical = Space.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Cover(h.name, h.art, 24.dp, Modifier.size(24.dp), round = true)
@@ -635,7 +641,7 @@ private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     Box(Modifier.padding(top = Space.s)) {
         Row(
-            Modifier.clip(RoundedCornerShape(50)).clickable { if (guests.size == 1) onOpen(guests[0]) else choosing = true }.padding(vertical = Space.xs, horizontal = 2.dp),
+            Modifier.clip(RoundedCornerShape(50)).pressable(onClick = { if (guests.size == 1) onOpen(guests[0]) else choosing = true }).padding(vertical = Space.xs, horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val faces = guests.take(3)
@@ -671,13 +677,13 @@ private fun Guests(guests: List<OnEpisode>, onOpen: (OnEpisode) -> Unit) {
 }
 
 /**
- * One episode, as a podcast app lists them: when it came out, in small capitals; its title, bold;
+ * One episode, as a podcast app lists them: when it came out, in small type; its title, bold;
  * what it is about, a few lines of it; and under them its play and how much of it there is — its
  * length, the time left once begun, Played, or how its download to the server goes while the file
  * is not there yet — with anybody else's place beside it. Begun, a bar across the row says how far
  * in the listener is. Whoever else was on it (`guests`) is under what it is about, their faces and
  * their names, opening their page. The whole row plays it; its menu is at its top right. Off its
- * show's page, the small capitals name the `show` too.
+ * show's page, the small type name the `show` too.
  */
 @Composable
 fun EpisodeRow(
@@ -695,10 +701,10 @@ fun EpisodeRow(
     show: String = "",
 ) {
     Recompositions.hit("EpisodeRow")
-    val dated = facts(show.uppercase(), Episodes.dated(detail?.publishedMs ?: 0, now))
+    val dated = facts(show, Episodes.dated(detail?.publishedMs ?: 0, now))
     val about = detail?.description.orEmpty()
     val progress = Episodes.progress(track, mine)
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Column(Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight)) {
         Row(Modifier.fillMaxWidth().padding(start = Space.page, end = Space.xs, top = Space.m), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f).padding(top = Space.xs)) {
                 if (dated.isNotEmpty()) Text(dated, style = quiet(MaterialTheme.typography.labelSmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -755,8 +761,7 @@ fun PlaylistPage(id: Id, playlist: Playlist?, tracks: List<Track>, albumOf: (Tra
     Recompositions.hit("PlaylistPage")
     val page = Page.ForPlaylist(id)
     val name = playlist?.name ?: "Playlist"
-    LazyColumn(Modifier.fillMaxSize(), state = rememberDestinationListState("playlist")) {
-        item { PageBar("", onBack = act::back) }
+    PinnedPage(rememberDestinationListState("playlist"), name, act::back, art = { side -> Cover(name, "", side, Modifier.size(side), corner = PinnedBar.CORNER) }) {
         item {
             PageHeader(
                 cover = { Cover(name, "", Space.header, Modifier.size(Space.header)) },

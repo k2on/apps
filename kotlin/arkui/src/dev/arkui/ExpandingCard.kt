@@ -11,15 +11,22 @@
 // same shape, for the same reason: a bar and a sheet drawn as two things
 // show the seam between them, and what you drag up is not what arrives.
 //
-// `p` is the offset of an anchored drag, so the finger moves it, a release
-// settles it to the nearer end — or the end it was flung toward — on a
-// spring that starts at the release's speed and is done within 300 ms
-// however slowly it was let go (`Springs.settle`), a tap on the bar runs it
-// up along the same path, and the system's back gesture previews it down a
-// little way — no further, however far the finger goes (`Springs.preview`)
-// — and finishes or springs back. A sideways drag on the bar is the bar's
-// own, split from the vertical one by each detector's axis, and leaves `p`
-// alone. `p` is read in layout and drawing only: the card moving composes
+// `p` is the offset of an anchored drag, so the finger moves it 1:1, and a
+// release settles it to whichever end is nearest where the release was
+// going: the offset plus Apple's projection of the release's speed
+// (`Springs.nearest`), so a short flick up opens it and a long slow drag let
+// go below half closes it. The settle is a spring that starts at the
+// release's speed and is done within 450 ms however slowly it was let go,
+// critically damped unless the release was a flick (`Springs.settle`). A tap
+// on the bar runs it up along the same path, from rest, critically damped;
+// and the system's back gesture previews it down a little way — no further,
+// however far the finger goes (`Springs.preview`) — and finishes or springs
+// back. With motion reduced (`reducedMotion`), a tap or back does not carry
+// the card up or down at all: the card fades out, is at its other end, and
+// fades in, on `Springs.fade`; a drag still follows the finger, and settles
+// without the flick's bounce. A sideways drag on the bar is the bar's own,
+// split from the vertical one by each detector's axis, and leaves `p` alone;
+// whether it skips is projected too, at the snappier rate. `p` is read in layout and drawing only: the card moving composes
 // nothing, and what is behind it is not composed again at all.
 @file:OptIn(ExperimentalFoundationApi::class)
 
@@ -27,15 +34,16 @@ package dev.arkui
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DragScope
 import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.DraggableState
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.anchoredDraggable
-import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.snapTo
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,19 +99,107 @@ public class ExpandingCardState(
     density: Density,
     private val held: Float? = null,
 ) {
-    /** The anchored drag whose offset [p] is. */
+    private val density = density
+
+    /**
+     * The anchored drag whose offset [p] is. Its own settle is never asked for — a release is
+     * [release]'s, projected — so its thresholds and specs are only what it is made with.
+     */
     public val drag: AnchoredDraggableState<CardFace> =
         AnchoredDraggableState(
             initialValue = initial,
-            // The nearer end, unless the finger was moving: then the end it was moving toward.
             positionalThreshold = { distance -> distance * 0.5f },
-            velocityThreshold = { with(density) { 400.dp.toPx() } },
-            // Always the spring, from the release's own speed, and never longer than its cap: a
-            // slow release does not crawl to the end at the finger's pace, and a flick lands
-            // sooner.
+            velocityThreshold = { with(density) { Springs.FLICK.toPx() } },
             snapAnimationSpec = Springs.settle(),
             decayAnimationSpec = Springs.noDecay(),
         )
+
+    /** Whether motion is reduced where the card is: set as it is composed. */
+    internal var reduced = false
+
+    /**
+     * How much of the card shows: 1, but while reduced motion's cross-fade carries it between its
+     * ends.
+     */
+    internal var veil by mutableFloatStateOf(1f)
+
+    /**
+     * The finger's hold on [drag]: each move takes the drag's own lock, at the user's priority, so
+     * grabbing the card mid-settle stops the settle where it is drawn and the finger carries on
+     * from there; and each move is clamped to the ends, so the card never leaves them.
+     */
+    internal val finger: DraggableState =
+        object : DraggableState {
+            override suspend fun drag(
+                dragPriority: MutatePriority,
+                block: suspend DragScope.() -> Unit
+            ) =
+                this@ExpandingCardState.drag.anchoredDrag(dragPriority) { _ ->
+                    val scope = this
+                    object : DragScope {
+                            override fun dragBy(pixels: Float) {
+                                scope.dragTo(clamped(here() + pixels))
+                            }
+                        }
+                        .block()
+                }
+
+            override fun dispatchRawDelta(delta: Float) {
+                this@ExpandingCardState.drag.dispatchRawDelta(delta)
+            }
+        }
+
+    private fun here(): Float {
+        val o = drag.offset
+        return if (o.isNaN()) drag.anchors.positionOf(drag.currentValue) else o
+    }
+
+    private fun clamped(o: Float): Float {
+        val a = drag.anchors
+        if (a.size == 0) return o
+        return o.coerceIn(a.minAnchor(), a.maxAnchor())
+    }
+
+    /**
+     * Let go at `velocity` (pixels a second, down positive): to the end nearest where it was going
+     * ([Springs.nearest]), on the settle that speed picks, from that speed.
+     */
+    internal suspend fun release(velocity: Float) {
+        if (held != null || travel <= 0f) return
+        val to = Springs.nearest(here(), velocity, listOf(0f, travel))
+        glide(if (to == 0f) CardFace.Expanded else CardFace.Collapsed, velocity)
+    }
+
+    /**
+     * To `face` along the drag's path, from wherever it is drawn and as fast as it was going: a
+     * flick's release on the momentum spring, anything else critically damped. Overshoot past an
+     * end is not drawn — the card does not go above the screen or below the bar — so a flick's
+     * settle reads as arriving at speed, not as a wobble.
+     */
+    internal suspend fun glide(face: CardFace, velocity: Float = 0f) {
+        drag.anchoredDrag(face) { anchors, target ->
+            val to = anchors.positionOf(target)
+            animate(here(), to, velocity, Springs.settle(velocity, density, reduced)) { v, s ->
+                dragTo(v, s)
+            }
+        }
+    }
+
+    // Reduced motion's way between the ends: out, there, in — the card never travels.
+    private suspend fun cross(face: CardFace) {
+        try {
+            if (face == CardFace.Expanded) {
+                veil = 0f
+                drag.snapTo(face)
+                animate(0f, 1f, animationSpec = Springs.fade()) { v, _ -> veil = v }
+            } else {
+                animate(veil, 0f, animationSpec = Springs.fade()) { v, _ -> veil = v }
+                drag.snapTo(face)
+            }
+        } finally {
+            veil = 1f
+        }
+    }
 
     /**
      * How far the bar's top has to travel to reach the screen's: the drag's whole range, in pixels.
@@ -139,14 +235,19 @@ public class ExpandingCardState(
             })
     }
 
-    /** Up to the whole screen, along the drag's own path. */
+    /**
+     * Up to the whole screen, along the drag's own path, critically damped from rest; with motion
+     * reduced, a cross-fade to it.
+     */
     public suspend fun open() {
-        if (held == null) drag.animateTo(CardFace.Expanded)
+        if (held != null) return
+        if (reduced) cross(CardFace.Expanded) else glide(CardFace.Expanded)
     }
 
-    /** Down to the bar. */
+    /** Down to the bar, as [open] goes up. */
     public suspend fun close() {
-        if (held == null) drag.animateTo(CardFace.Collapsed)
+        if (held != null) return
+        if (reduced) cross(CardFace.Collapsed) else glide(CardFace.Collapsed)
     }
 
     public companion object {
@@ -205,18 +306,26 @@ public data class ExpandingCardSpec(
     /** The travelling piece's corner on the bar and expanded. */
     public val thumbCorner: Dp = 4.dp,
     public val bigCorner: Dp = 12.dp,
+    /** The travelling piece's shadow, expanded; none on the bar. */
+    public val bigShadow: Dp = 0.dp,
     /**
      * The expanded piece's margin from the screen's sides — it is the screen's width less two of
      * these, square — and where its top is guessed to be before the expanded face has said.
      */
     public val bigInset: Dp = Space.xl,
     public val bigTop: Dp = 104.dp,
-    /** A sideways drag let go faster than this many dp a second is a skip, however short. */
-    public val flick: Dp = 600.dp,
-    /** …or one pulled past this share of the bar's width. */
+    /**
+     * A sideways drag is a skip when where it was going — how far it was pulled, and the
+     * projection of its speed at [Springs.SNAPPY] — is past this share of the bar's width.
+     */
     public val wide: Float = 0.25f,
     /** How dark what is under the card gets, expanded. */
     public val dim: Float = 0.4f,
+    /**
+     * The bar on glass (Glass.kt), as the iPhone's mini player is: a capsule, its ends half its
+     * height, in glass's fill, rather than a card of [corner] in the scheme's high container.
+     */
+    public val glass: Boolean = false,
     /** The collapsed face is gone by this much of the way up. */
     public val collapsedOut: Float = 0.2f,
     /** The expanded face starts to come in this far up. */
@@ -235,13 +344,13 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
     val barH = with(d) { spec.bar.sumOf { it.roundToPx() }.toFloat() }
     val thumb = with(d) { spec.thumb.roundToPx().toFloat() }
     val thumbInset = with(d) { spec.thumbInset.roundToPx().toFloat() }
-    val corner = with(d) { spec.corner.toPx() }
+    val corner = if (spec.glass) barH / 2f else with(d) { spec.corner.toPx() }
     val shadow = with(d) { spec.shadow.toPx() }
     val lift = with(d) { spec.lift.toPx() }
     val artSmall = with(d) { spec.thumbCorner.toPx() }
     val artBig = with(d) { spec.bigCorner.toPx() }
+    val artShadow = with(d) { spec.bigShadow.toPx() }
     val guessTop = with(d) { spec.bigTop.toPx() }
-    val far = with(d) { spec.flick.toPx() }
 
     /** The card's size, as last measured: the screen's. */
     var w = 0f
@@ -276,7 +385,10 @@ private class Geometry(d: Density, spec: ExpandingCardSpec) {
  *   above the bar — collapsed, it takes no touch and no tick. Its first argument goes on the space
  *   it leaves for the travelling piece, which is told where that is.
  * - `traveler` is the piece both faces share, drawn by the card itself at the expanded size and
- *   scaled from the bar's [ExpandingCardSpec.thumb] to that space.
+ *   scaled from the bar's [ExpandingCardSpec.thumb] to that space. `artScale` is how much of that
+ *   space it takes expanded, about its centre (a cover a little smaller while paused); read as it
+ *   is drawn, so a change to it lays nothing out, and taken on as the card comes up, so the bar's
+ *   thumb is always whole.
  *
  * A tap on the bar calls `onOpen` (which is expected to [ExpandingCardState.open] it); a sideways
  * drag on the bar, far or fast enough, calls `onSwipeLeft` or `onSwipeRight`, and springs back. The
@@ -294,12 +406,15 @@ public fun ExpandingCard(
     onSwipeRight: () -> Unit = {},
     openLabel: String? = null,
     spec: ExpandingCardSpec = remember { ExpandingCardSpec() },
+    artScale: () -> Float = { 1f },
 ) {
     val sheet = state
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val g = remember(density, spec) { Geometry(density, spec) }
     val tabsPx = with(density) { stand.roundToPx().toFloat() }
+    val reduced = reducedMotion()
+    sheet.reduced = reduced
     // Read in composition only where they flip, never as the card moves: whether the expanded face
     // is there at all (collapsed, it is not composed, so it takes no touch and no tick), whether
     // the bar is at rest (a tap opens it, a sideways drag is the bar's), and which way it is
@@ -320,7 +435,9 @@ public fun ExpandingCard(
                 events.collect { e -> dragTo(sheet.travel * Springs.preview(e.progress)) }
             }
         } catch (e: CancellationException) {
-            scope.launch { sheet.open() }
+            // Back up from the preview: a spring back, as any release short of the end is, and
+            // not reduced motion's cross-fade — the card was never off the screen.
+            scope.launch { sheet.glide(CardFace.Expanded) }
             throw e
         }
         // Not in this handler's own coroutine: the settle turns the card toward the bar, which
@@ -329,7 +446,7 @@ public fun ExpandingCard(
     }
 
     val scrim = MaterialTheme.colorScheme.scrim
-    val card = MaterialTheme.colorScheme.surfaceContainerHigh
+    val card = if (spec.glass) Glass.fill() else MaterialTheme.colorScheme.surfaceContainerHigh
     val ground = MaterialTheme.colorScheme.background
     // Where the expanded face leaves room for the piece: read as the card is placed, just after the
     // face.
@@ -341,7 +458,7 @@ public fun ExpandingCard(
             content = {
                 Spacer(
                     Modifier.layoutId(DIM).drawBehind {
-                        drawRect(scrim, alpha = spec.dim * sheet.p)
+                        drawRect(scrim, alpha = spec.dim * sheet.p * sheet.veil)
                     })
                 Layout(
                     content = {
@@ -352,14 +469,17 @@ public fun ExpandingCard(
                                     Orientation.Horizontal,
                                     enabled = resting && !sheet.isHeld,
                                     onDragStopped = { v ->
-                                        // Far enough, or fast enough: left, or right.
+                                        // Where it was going, past a quarter of the bar: left,
+                                        // or right. Then home, from the release's speed.
                                         val wide = spec.wide * (g.w - 2 * g.s)
-                                        if (sheet.swipe < -wide || v < -g.far) onSwipeLeft()
-                                        else if (sheet.swipe > wide || v > g.far) onSwipeRight()
+                                        val to = sheet.swipe + Springs.project(v, Springs.SNAPPY)
+                                        if (to < -wide) onSwipeLeft()
+                                        else if (to > wide) onSwipeRight()
                                         animate(
                                             sheet.swipe,
                                             0f,
-                                            animationSpec = spring(Springs.MOVE, Springs.STIFFNESS),
+                                            v,
+                                            Springs.settle(v, density, reduced),
                                         ) { x, _ ->
                                             sheet.swipe = x
                                         }
@@ -395,13 +515,15 @@ public fun ExpandingCard(
                                 val p = sheet.p
                                 shape = RoundedCornerShape(lerp(g.corner, 0f, p))
                                 clip = true
+                                alpha = sheet.veil
                                 shadowElevation = lerp(g.shadow, 0f, p) + g.lift * 4f * p * (1f - p)
                             }
                             .drawBehind { drawRect(lerp(card, ground, sheet.p)) }
-                            .anchoredDraggable(
-                                sheet.drag,
+                            .draggable(
+                                sheet.finger,
                                 Orientation.Vertical,
                                 enabled = !sheet.isHeld,
+                                onDragStopped = { v -> sheet.release(v) },
                             )
                             // No ripple: the card answering a tap is the card coming up.
                             .clickable(
@@ -474,14 +596,18 @@ public fun ExpandingCard(
                                     lerp(from.bottom, to.bottom, p),
                                 )
                             a.placeWithLayer(0, 0) {
-                                val k = at.width / a.width
+                                // Its share of the space, taken on as it comes up, about the
+                                // space's centre.
+                                val q = 1f - (1f - artScale()) * p
+                                val k = at.width / a.width * q
                                 transformOrigin = TransformOrigin(0f, 0f)
                                 scaleX = k
                                 scaleY = k
-                                translationX = at.left + dx
-                                translationY = at.top + dy
+                                translationX = at.left + dx + at.width * (1f - q) / 2f
+                                translationY = at.top + dy + at.height * (1f - q) / 2f
                                 shape = RoundedCornerShape(lerp(g.artSmall, g.artBig, p) / k)
                                 clip = true
+                                shadowElevation = g.artShadow * p
                             }
                         }
                     }

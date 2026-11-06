@@ -46,12 +46,10 @@ import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -103,7 +101,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import dev.arkui.pressable
+import dev.arkui.Accent
 import dev.arkui.Space
+import dev.arkui.Springs
+import dev.arkui.reducedMotion
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -115,8 +117,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The overlay's blue, as Notes draws it. */
-private val Tint = Color(0xFF0A84FF)
+/** The overlay's colour: money's green as the dark side has it, bright enough to read over a camera's picture. */
+private val Tint = Accent.Green.colors(dark = true).accent
 
 /** The least sharpness (Vision.sharpness on the analysis frame) a page is taken at. */
 private const val SHARP = 60.0
@@ -150,7 +152,7 @@ fun Scanner(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     Column(Modifier.align(Alignment.Center).padding(Space.xl), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("money needs the camera to scan a receipt.", color = Color.White)
                         Spacer(Modifier.height(Space.l))
-                        Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow the camera") }
+                        Button(onClick = { ask.launch(Manifest.permission.CAMERA) }) { Text("Allow the Camera") }
                         TextButton(onClick = onDismiss) { Text("Not now", color = Color.White) }
                     }
                 else -> {}
@@ -176,6 +178,9 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
     var page by remember { mutableStateOf<ImageBitmap?>(null) }
     val flash = remember { Animatable(0f) }
     val away = remember { Animatable(0f) }
+    // With motion reduced the page fades where it is rather than shrinking into the corner, and the
+    // flash is a softer one: a jump in brightness is what reduced motion asks to be spared.
+    val reduced = reducedMotion()
     val camera =
         remember {
             PageCamera(
@@ -212,7 +217,12 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     failed = "The camera didn't take the picture"
                     return@launch
                 }
-                launch { flash.snapTo(0.9f); flash.animateTo(0f, tween(280)) }
+                // The flash dies away, and the page goes, on arkui's critically damped springs: a
+                // shutter is not a throw.
+                launch {
+                    flash.snapTo(if (reduced) 0.3f else 0.9f)
+                    flash.animateTo(0f, Springs.size())
+                }
                 val flat = withContext(Dispatchers.Default) { runCatching { flatPage(jpeg, quad, w, h, camera.turns) }.getOrNull() }
                 if (flat == null) {
                     taking = false
@@ -220,7 +230,7 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     return@launch
                 }
                 page = flat.first
-                away.animateTo(1f, tween(520))
+                away.animateTo(1f, if (reduced) Springs.fade() else Springs.move())
                 onPage(flat.second)
             }
         }
@@ -267,6 +277,10 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                     contentDescription = null,
                     modifier =
                         Modifier.fillMaxSize().padding(Space.xl).graphicsLayer {
+                            if (reduced) {
+                                alpha = 1f - t
+                                return@graphicsLayer
+                            }
                             val s = 1f - 0.8f * t
                             scaleX = s
                             scaleY = s
@@ -297,13 +311,14 @@ private fun Viewfinder(onPage: (ByteArray) -> Unit, onDismiss: () -> Unit) {
                 .systemBarsPadding()
                 .padding(bottom = Space.xl)
                 .size(76.dp)
+                // The whole shutter gives under the finger, its ring with it.
+                .pressable(enabled = !taking, onClickLabel = "Take the picture", onClick = { take() })
                 .clip(CircleShape)
                 .border(4.dp, Color.White, CircleShape)
                 .padding(8.dp)
                 .clip(CircleShape)
                 .background(if (taking) Color.Gray else Color.White)
-                .semantics { contentDescription = "Take the picture" }
-                .clickable(enabled = !taking, onClickLabel = "Take the picture") { take() })
+                .semantics { contentDescription = "Take the picture" })
     }
 }
 

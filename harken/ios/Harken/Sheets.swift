@@ -21,7 +21,7 @@ struct AddToPlaylistSheet: View {
         NavigationStack {
             List {
                 Button { present(.newPlaylist(then: track)) } label: { Label("New Playlist", systemImage: "plus") }
-                    .foregroundStyle(Color.gold)
+                    .foregroundStyle(Color.accentText)
                 ForEach(model.playlists) { p in
                     let ticked = on?.contains(p.id) == true
                     Button {
@@ -32,7 +32,7 @@ struct AddToPlaylistSheet: View {
                     } label: {
                         HStack {
                             Label(p.name, systemImage: ticked ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(ticked ? Color.gold : .primary)
+                                .foregroundStyle(ticked ? Color.accentText : .ink)
                             Spacer()
                         }
                     }
@@ -63,7 +63,7 @@ struct NewPlaylist: View {
                     TextField("Name", text: $name).focused($focused).submitLabel(.done).onSubmit(make)
                 } footer: {
                     if let p = problem, !name.isEmpty {
-                        Text(p.prefix(1).uppercased() + p.dropFirst()).foregroundStyle(.red)
+                        Text(p.prefix(1).uppercased() + p.dropFirst()).foregroundStyle(.error)
                     } else {
                         Text("A name you already use gets a number after it.")
                     }
@@ -107,7 +107,7 @@ struct DevicesSheet: View {
         NavigationStack {
             List {
                 if rows.isEmpty {
-                    Text("Nothing else is listening. A device signed in as you appears here once it is open.").foregroundStyle(.secondary)
+                    Text("Nothing else is listening. A device signed in as you appears here once it is open.").foregroundStyle(.quiet)
                 }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
                     DeviceLine(row: r, at: i == cursor) {
@@ -133,29 +133,37 @@ private struct DeviceLine: View {
         let lit = (row.ticked || row.group) && !row.away
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack(spacing: Space.l) {
-                Image(systemName: symbol(forDevice: row.kind, name: row.name)).frame(width: 24)
-                VStack(alignment: .leading) {
-                    Text(row.name).lineLimit(1)
-                    if let u = row.under { Text(u).font(.caption).foregroundStyle(.secondary) }
+                // The device is picked by its row, lit under the finger as it
+                // lands (`.pressRow`); joining it to the group is a button
+                // beside the row's, not in its label, so it does not pick too.
+                Button(action: pick) {
+                    HStack(spacing: Space.l) {
+                        Image(systemName: symbol(forDevice: row.kind, name: row.name)).frame(width: 24)
+                        VStack(alignment: .leading) {
+                            Text(row.name).lineLimit(1)
+                            if let u = row.under { Text(u).font(.caption).foregroundStyle(.quiet) }
+                        }
+                        Spacer()
+                        if row.group { Image(systemName: "waveform").accessibilityLabel("Playing") }
+                        else if row.ticked { Image(systemName: "checkmark").accessibilityLabel("Playing here") }
+                    }
+                    .contentShape(Rectangle())
                 }
-                Spacer()
+                .buttonStyle(.pressRow)
+                .disabled(!row.takeable)
                 if let join = row.join {
                     Button { model.join(row) } label: { Image(systemName: join ? "plus.circle" : "minus.circle") }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(join ? "Add \(row.name) to the group" : "Take \(row.name) out of the group")
                 }
-                if row.group { Image(systemName: "waveform").accessibilityLabel("Playing") }
-                else if row.ticked { Image(systemName: "checkmark").accessibilityLabel("Playing here") }
             }
-            .foregroundStyle(lit ? Color.gold : (row.takeable ? .primary : .secondary))
-            .contentShape(Rectangle())
-            .onTapGesture { if row.takeable { pick() } }
+            .foregroundStyle(lit ? Color.accentText : (row.takeable ? .ink : .quiet))
             if let v = row.volume {
                 VolumeSlider(level: v, muted: row.muted, about: row.name, onLevel: { model.level(row, $0) }, onDone: { model.volumeDone() }, onMute: { model.mute(row) })
                     .padding(.leading, 40)
             }
         }
-        .listRowBackground(at ? Color.gold.opacity(0.08) : nil)
+        .listRowBackground(at ? Color.accent.opacity(0.08) : nil)
     }
 }
 
@@ -246,7 +254,7 @@ struct FollowSheet: View {
         NavigationStack {
             List {
                 HStack(spacing: Space.s) {
-                    Image(systemName: feed ? "link" : "magnifyingglass").foregroundStyle(.secondary)
+                    Image(systemName: feed ? "link" : "magnifyingglass").foregroundStyle(.quiet)
                     TextField("Search Apple Podcasts, or paste a feed", text: $typed)
                         .focused($focused)
                         .textInputAutocapitalization(.never)
@@ -260,30 +268,33 @@ struct FollowSheet: View {
                     Text(kind == "sermon"
                          ? "Search for a church or a preacher, or paste the address of its sermons' feed."
                          : "Search for a podcast by its name or who makes it, or paste the address of its feed.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(.quiet)
                         .listRowSeparator(.hidden)
                 } else {
                     if answered != words {
                         HStack(spacing: Space.s) {
                             ProgressView()
-                            Text("Searching…").foregroundStyle(.secondary)
+                            Text("Searching…").foregroundStyle(.quiet)
                         }
                         .listRowSeparator(.hidden)
                         .transition(.opacity)
                     } else if let p = problem {
-                        Text(p).font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                        Text(p).font(.subheadline).foregroundStyle(.quiet).listRowSeparator(.hidden)
                     } else if found.isEmpty {
-                        Text("Nothing found for “\(words)”.").font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
+                        Text("Nothing found for “\(words)”.").font(.subheadline).foregroundStyle(.quiet).listRowSeparator(.hidden)
                     }
                     ForEach(found) { f in
                         OfferedRow(found: f, following: following.contains(f.feed)) { model.follow(kind, f.feed) }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            // Only a fade: an answer comes with every pause in the
+                            // typing, and rows rising each time would be the list
+                            // jumping under the words being typed.
+                            .motionTransition(.opacity)
                     }
                 }
             }
             .listStyle(.plain)
-            .animation(.snappy, value: found)
-            .animation(.snappy, value: answered)
+            .motion(Springs.fade, value: found)
+            .motion(Springs.fade, value: answered)
             .navigationTitle(kind == "sermon" ? "Follow Sermons" : "Follow a Podcast")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -329,23 +340,23 @@ private struct OfferedRow: View {
             CoverView(seed: found.title, url: found.art, side: 56).frame(width: 56, height: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(found.title).font(.headline).lineLimit(2)
-                if !found.author.isEmpty { Text(found.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+                if !found.author.isEmpty { Text(found.author).font(.subheadline).foregroundStyle(.quiet).lineLimit(1) }
             }
             Spacer(minLength: 0)
             if following {
                 Label("Following", systemImage: "checkmark")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.gold)
-                    .transition(.scale.combined(with: .opacity))
+                    .foregroundStyle(Color.accentText)
+                    .motionTransition(.enter)
             } else {
                 Button("Follow", action: follow)
                     .buttonStyle(.bordered)
                     .buttonBorderShape(.capsule)
-                    .tint(Color.gold)
-                    .transition(.scale.combined(with: .opacity))
+                    .tint(Color.accent)
+                    .motionTransition(.enter)
             }
         }
-        .animation(.snappy, value: following)
+        .motion(Springs.size, value: following)
         .sensoryFeedback(.success, trigger: following)
     }
 }

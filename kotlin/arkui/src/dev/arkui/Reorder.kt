@@ -40,10 +40,10 @@
 // dragged into is kept, so the row does not jump back on the way.
 package dev.arkui
 
+import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.VisibilityThreshold
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
@@ -68,12 +68,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
@@ -100,7 +98,7 @@ private val EDGE = 56.dp
 private val EDGE_SPEED = 12.dp
 
 /** How the rows that make way move: arkui's spring for where a thing is. */
-private val PLACEMENT: FiniteAnimationSpec<IntOffset> = spring(Springs.MOVE, Springs.STIFFNESS, IntOffset.VisibilityThreshold)
+private val PLACEMENT: FiniteAnimationSpec<IntOffset> = Springs.slide()
 
 /** Where a row was let go in a list of sections: under which header, and in front of what. */
 data class Landing<out K>(
@@ -167,7 +165,7 @@ fun <K> landing(order: List<K>, key: K, isHeader: (K) -> Boolean): Landing<K>? {
 class Reorder internal constructor(
     private val list: LazyListState,
     private val scope: CoroutineScope,
-    private val haptics: HapticFeedback,
+    private val view: View,
     private val density: Density,
     private val isHeader: ((Any) -> Boolean)?,
     private val fits: ((Any, Any?) -> Boolean)?,
@@ -244,7 +242,8 @@ class Reorder internal constructor(
         // list has it — after the rows before the reordered ones, one row a header — so it is still
         // in the list, under the finger.
         if (header(key)) list.requestScrollToItem(lead + keys.take(at).count { header(it) }, -held.offset)
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        // Picked up by a long press, and answered as one.
+        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         scope.launch { lift.animateTo(1f, Springs.size()) }
         scope.launch { edges(key) }
     }
@@ -300,7 +299,8 @@ class Reorder internal constructor(
                 .sortedByDescending { abs(it.offset - held.offset) }
                 .firstNotNullOfOrNull { o -> reordered(order, key, o.key, { header(it) }, { r, h -> fit(r, h) }) } ?: return
         drawn = next
-        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        // A tick for each place it passes: a choice stepping.
+        view.perform(Feedback.Selection)
     }
 
     // While `key` is held near an edge the list scrolls under it, and it passes what comes by.
@@ -382,10 +382,10 @@ private fun rememberDrag(
     onDrop: (key: Any, from: Int, after: List<Any>) -> Unit,
 ): Reorder {
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val density = LocalDensity.current
     val drop by rememberUpdatedState(onDrop)
-    return remember(list) { Reorder(list, scope, haptics, density, isHeader, fits, lead) { drop } }
+    return remember(list) { Reorder(list, scope, view, density, isHeader, fits, lead) { drop } }
 }
 
 /**

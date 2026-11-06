@@ -90,30 +90,38 @@ struct TrackRow<Leading: View>: View {
     var body: some View {
         let playing = model.playingId == track.id.hex
         HStack(spacing: Space.m) {
-            leading().frame(width: Space.thumb, height: Space.thumb)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(track.title).font(.body).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(1)
-                Text(under).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            // The row plays, lit under the finger as it lands (`.pressRow`).
+            // Its menu is beside the button, not in its label: a menu inside
+            // a button's label leaves both answering one touch, so a tap on
+            // the "…" could play the song as well as open the menu.
+            Button(action: onPlay) {
+                HStack(spacing: Space.m) {
+                    leading().frame(width: Space.thumb, height: Space.thumb)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title).font(.body).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(1)
+                        Text(under).font(.subheadline).foregroundStyle(.quiet).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    // Its file not on the server yet: how its download goes, in place of its length.
+                    Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+                }
+                .frame(minHeight: 64)
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 0)
-            // Its file not on the server yet: how its download goes, in place of its length.
-            Text(model.download(track.id)?.short ?? Spell.clock(track.durationMs)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            .buttonStyle(.pressRow)
             Menu { TrackActions(track: track, from: from) } label: {
                 Image(systemName: "ellipsis").frame(width: 32, height: 44).contentShape(Rectangle())
             }
             .accessibilityLabel("More for \(track.title)")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quiet)
         }
         .frame(minHeight: 64)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onPlay)
         .contextMenu { TrackActions(track: track, from: from) }
-        .accessibilityAddTraits(.isButton)
     }
 }
 
 /// An episode's row, as a podcast app has it: when it came out — and, away
-/// from its show's page, which show — in small capitals; its title, bold;
+/// from its show's page, which show — in small type; its title, bold;
 /// what it is about; who is on it besides its hosts, their faces and their
 /// names; and a play button that says how long it is, how much is left of
 /// it or that it is played — or, while its file is not on the server yet,
@@ -141,15 +149,19 @@ struct EpisodeRow: View {
         let begun = mine.map { !$0.finished && $0.positionMs > 0 && whole > 0 } ?? false
         let said = model.download(track.id)?.short ?? Spell.left(track.durationMs, mine)
         let day = (detail?.publishedMs ?? 0) > 0 ? Spell.day(detail!.publishedMs) : nil
-        let over = Spell.facts([show, day]).uppercased()
+        let over = Spell.facts([show, day])
         VStack(alignment: .leading, spacing: Space.xs) {
-            if !over.isEmpty {
-                Text(over).font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
+            // The words let a touch through to the row's button behind them.
+            Group {
+                if !over.isEmpty {
+                    Text(over).font(.caption.weight(.semibold)).foregroundStyle(.quiet).lineLimit(1)
+                }
+                Text(track.title).font(.headline).foregroundStyle(playing ? Color.accentText : Color.ink).lineLimit(2)
+                if let about = detail?.description, !about.isEmpty {
+                    Text(about).font(.subheadline).foregroundStyle(.quiet).lineLimit(3)
+                }
             }
-            Text(track.title).font(.headline).foregroundStyle(playing ? Color.gold : Color.primary).lineLimit(2)
-            if let about = detail?.description, !about.isEmpty {
-                Text(about).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
-            }
+            .allowsHitTesting(false)
             if !people.isEmpty {
                 PeopleLine(people: people, words: "with " + PeopleEntry.named(people))
                     .padding(.top, 2)
@@ -169,28 +181,38 @@ struct EpisodeRow: View {
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
-                .tint(Color.gold)
+                .tint(Color.accent)
                 .accessibilityLabel(said.isEmpty ? "Play \(track.title)" : "Play \(track.title), \(said)")
                 if !others.isEmpty {
-                    Text(others).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(others).font(.caption).foregroundStyle(.quiet).lineLimit(1).allowsHitTesting(false)
                 }
                 Spacer(minLength: 0)
                 Menu { TrackActions(track: track, from: from) } label: {
                     Image(systemName: "ellipsis").frame(width: 32, height: 32).contentShape(Rectangle())
                 }
                 .accessibilityLabel("More for \(track.title)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quiet)
             }
             .padding(.top, Space.xs)
             if begun, let m = mine {
                 ProgressView(value: Double(min(m.positionMs, whole)), total: Double(whole))
-                    .tint(Color.gold)
+                    .tint(Color.accent)
                     .accessibilityLabel("\(Spell.left(track.durationMs, m))")
+                    .allowsHitTesting(false)
             }
         }
         .padding(.vertical, Space.s)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onPlay)
+        // Tapped anywhere, it plays, and lights as the finger lands
+        // (`.pressRow`): the button is behind the row, not around it, so
+        // the play button, the people and the menu laid over it each take
+        // their own touch, and a tap on the "…" opens the menu without
+        // playing. Its play button says the same to VoiceOver, so this one
+        // is hidden from it.
+        .background {
+            Button(action: onPlay) { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.pressRow)
+                .accessibilityHidden(true)
+        }
         .contextMenu { TrackActions(track: track, from: from) }
         .accessibilityElement(children: .contain)
     }
@@ -216,7 +238,7 @@ struct PeopleLine: View {
                         .overlay { Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1.5) }
                 }
             }
-            Text(words).font(font).foregroundStyle(.secondary).lineLimit(1)
+            Text(words).font(font).foregroundStyle(.quiet).lineLimit(1)
         }
         .contentShape(Rectangle())
         if people.count == 1, let p = people.first {
@@ -307,9 +329,9 @@ struct TrackNumber: View {
 
     var body: some View {
         if playing {
-            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: true).foregroundStyle(Color.gold)
+            Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: true).foregroundStyle(Color.accentText)
         } else {
-            Text(n > 0 ? "\(n)" : "").foregroundStyle(.secondary).monospacedDigit()
+            Text(n > 0 ? "\(n)" : "").foregroundStyle(.quiet).monospacedDigit()
         }
     }
 }
@@ -324,7 +346,7 @@ struct Heading: View {
         HStack {
             Text(title).font(.title2.bold())
             Spacer()
-            if let a = action { Button(a, action: onAction).buttonStyle(.borderless).foregroundStyle(Color.gold) }
+            if let a = action { Button(a, action: onAction).buttonStyle(.borderless).foregroundStyle(Color.accentText) }
         }
         .padding(.horizontal, Space.page)
         .padding(.top, Space.xl)
@@ -372,12 +394,12 @@ struct CoverCard: View {
                 .frame(width: side, height: side)
                 .padding(.bottom, Space.s - 2)
                 Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                if !under.isEmpty { Text(under).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if !under.isEmpty { Text(under).font(.caption).foregroundStyle(.quiet).lineLimit(1) }
             }
             .frame(width: side, alignment: round ? .center : .leading)
             .multilineTextAlignment(round ? .center : .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
     }
 }
 
@@ -398,12 +420,12 @@ struct PageHeader<Cover: View>: View {
     var body: some View {
         VStack(spacing: Space.xs) {
             cover().padding(.top, Space.s).padding(.bottom, Space.l)
-            Text(kind.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(kind).font(.caption.weight(.semibold)).foregroundStyle(.quiet)
             Text(title).font(.title2.bold()).multilineTextAlignment(.center)
             if let by = by {
-                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.gold).disabled(onBy == nil)
+                Button(by) { onBy?() }.buttonStyle(.borderless).font(.headline).foregroundStyle(Color.accentText).disabled(onBy == nil)
             }
-            Text(facts).font(.footnote).foregroundStyle(.secondary)
+            Text(facts).font(.footnote).foregroundStyle(.quiet)
             GlassEffectContainer(spacing: Space.m) {
                 HStack(spacing: Space.m) {
                     Button(action: onPlay) { Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -430,13 +452,13 @@ struct Offline: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
-            Image(systemName: "icloud.slash").foregroundStyle(.secondary)
+            Image(systemName: "icloud.slash").foregroundStyle(.quiet)
             Text("Can't reach \(host). What's on this phone still plays, and your changes sync when it's back.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.quiet)
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, Space.page)
         .padding(.vertical, Space.s)
     }
@@ -445,7 +467,9 @@ struct Offline: View {
 /// Who is signed in, round, `side` across: their provider's picture once it
 /// has arrived — fetched and kept as a cover is (`Covers`) — over their
 /// initials on the name's own colour, as the desktop's account button draws
-/// them (`arkui::account::face`) and Android's `Avatar` does.
+/// them (`arkui::account::face`) and Android's `Avatar` does. It grows
+/// with the person's text size, its initials with it, up to half as large
+/// again, so it stays beside the words it is with.
 struct Avatar: View {
     let name: String
     let picture: String
@@ -453,8 +477,10 @@ struct Avatar: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.squares) private var squares
     @State private var image: UIImage? = nil
+    @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
 
     var body: some View {
+        let side = self.side * min(grows, 1.5)
         let set = squares.of(dark: scheme == .dark)
         let rgb = set[Art.pick(set.count, name)]
         ZStack {
@@ -492,8 +518,8 @@ struct Fetching: View {
     var body: some View {
         VStack(spacing: Space.l) {
             if shown {
-                Text("Getting your library from \(host)…").font(.subheadline).foregroundStyle(.secondary)
-                ProgressView().tint(.gold)
+                Text("Getting your library from \(host)…").font(.subheadline).foregroundStyle(.quiet)
+                ProgressView().tint(Color.accent)
             }
         }
         .frame(maxWidth: .infinity)
@@ -505,40 +531,20 @@ struct Fetching: View {
     }
 }
 
-/// The account at the top right of every tab, as the browser has it: who,
-/// as their picture, whether the link is up, Settings, signing out. Nobody
-/// goes offline by hand: the phone does by itself when the server cannot be
-/// reached, and says so.
-struct AccountMenu: View {
+/// The account at the top left of every tab, as money has it: who is
+/// listening, as their face, opening Settings — who they are, whether the
+/// link is up, and the way out. Nobody goes offline by hand: the phone does
+/// by itself when the server cannot be reached, and says so.
+struct AccountButton: View {
     @EnvironmentObject private var model: Model
-    @Environment(\.open) private var open
 
     var body: some View {
-        Menu {
-            if let l = model.login {
-                Section(Logins.name(l) + (l.email.isEmpty ? "" : " · " + l.email)) {
-                    Text(linkWords)
-                }
-            }
-            Button { open(.settings) } label: { Label("Settings", systemImage: "gearshape") }
-            Divider()
-            Button(role: .destructive) { model.signOut() } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
-        } label: {
-            Group {
-                if let l = model.login {
-                    Avatar(name: Logins.name(l), picture: l.picture, side: 32)
-                } else {
-                    Image(systemName: "person.crop.circle")
-                }
-            }
-            .accessibilityLabel("Account")
+        let who = model.login.map(Logins.name) ?? "?"
+        NavigationLink(value: Route.settings) {
+            Face(name: who, picture: model.login.map { Pictures.url(server: model.server, user: $0.user, picture: $0.picture) } ?? "")
         }
-    }
-
-    private var linkWords: String {
-        guard let st = model.snapshot.status else { return "Opening…" }
-        if st.linked { return "Connected to \(Probe.display(model.server))" }
-        return "Can't reach \(Probe.display(model.server)) right now"
+        .accessibilityLabel("Signed in as \(who)")
+        .accessibilityHint("Account and settings")
     }
 }
 

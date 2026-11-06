@@ -160,6 +160,8 @@ final class Model: ObservableObject {
     }
     /// What to call whoever is using the budget.
     var who: String { isDemo ? "Alex" : login.map(Logins.name) ?? "" }
+    /// Their picture, as this phone loads it (`Faces.url`); empty for none, and for the demo.
+    var picture: String { login.map { Faces.url(server: server, user: $0.user, picture: $0.picture) } ?? "" }
 
     /// Today, as the budget writes a day.
     var today: String { demoDay ?? moneyToday() }

@@ -34,6 +34,74 @@ const SIDEBAR_SCROLL: &str = "sidebar";
 type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 pub const PAD: f32 = 18.0;
+
+/// What scrolls from the window's top under the account's face, which
+/// floats at the top right: scrolled, it goes soft under the face's band
+/// rather than being drawn through it (`arkui::edge`), on `ground`, the
+/// colour of what it is on; at rest it is as it was. The inspector, the
+/// receipt beside the register, Settings and Reflect; the budget's and
+/// the register's lists start below their headings and never pass under it.
+pub(crate) fn under_face<'a>(content: impl Into<Element<'a, Message>>, ground: fn(&iced::Theme) -> iced::Color) -> Element<'a, Message> {
+    arkui::edge::faded(content, arkui::account::band(PAD), ground)
+}
+
+/// How far down Reflect or Settings is scrolled once its title, the
+/// page's first line, has gone off the top: the padding over it and its
+/// line (Reflect's is its arrows', 32 tall). Sooner, and the small title
+/// came while the large one was still there to read under the band.
+pub const TITLED: f32 = PAD + 32.0;
+
+impl App {
+    /// What the small header says on this page once its title has scrolled
+    /// away (`arkui::compact`): Reflect's and Settings' titles. The budget
+    /// and the registers keep their headings over their lists, so they
+    /// have none.
+    pub(crate) fn compact_title(&self) -> Option<String> {
+        match self.page {
+            Page::Reflect => Some(format!("Spending in {}", month_name(&self.peer.month))),
+            Page::Settings => Some("Settings".into()),
+            _ => None,
+        }
+    }
+
+    /// The small header, at the top of the page beside the face, while it
+    /// is in.
+    fn view_compact(&self) -> Option<Element<'_, Message>> {
+        let now = iced::time::Instant::now();
+        if !self.compact.showing(now) {
+            return None;
+        }
+        let title = self.compact_title()?;
+        let small = arkui::compact::view(None, &title, self.compact.at(now), Message::PageTop);
+        Some(
+            container(small)
+                .padding(Padding {
+                    top: PAD,
+                    left: SIDEBAR + 1.0 + PAD - 6.0,
+                    right: PAD + arkui::account::HEIGHT + PAD,
+                    bottom: 0.0,
+                })
+                .height(Length::Fixed(arkui::account::band(PAD)))
+                .align_y(Alignment::Center)
+                .into(),
+        )
+    }
+}
+
+/// The page's own ground, for [`under_face`] (`arkui::style::page_color`).
+pub(crate) use arkui::style::page_color as page_ground;
+
+/// A page's padding around a list that scrolls: on the top and the sides,
+/// and none under it, so the list runs down to the window's foot. With
+/// `PAD` under it too the list stopped short of the edge with its last
+/// visible row cut off mid-line over an empty strip; the padding under the
+/// last row is inside what scrolls instead, so that row scrolls clear.
+pub(crate) fn page_pad() -> Padding {
+    Padding {
+        bottom: 0.0,
+        ..Padding::new(PAD)
+    }
+}
 const MONEY_COL: f32 = 120.0;
 /// The goal's column, and the pill's.
 const GOAL_COL: f32 = 110.0;
@@ -43,6 +111,11 @@ const ROW_INSET: f32 = 12.0;
 
 pub(crate) fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).font(arkui::hero::BOLD)
+}
+
+/// A page's title, as harken draws its own ([`arkui::line::title`]).
+pub(crate) fn page_title<'a>(s: impl Into<String>) -> Element<'a, Message> {
+    arkui::line::title(s).into()
 }
 
 pub(crate) fn dim<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
@@ -116,6 +189,11 @@ impl App {
         };
         // A swipe's arrow over the page, not the sidebar.
         let page = self.history.view(page, iced::time::Instant::now());
+        // Nothing under the page: it runs to the window's foot. What the
+        // last thing done came to, and a search or a count as it is typed,
+        // are said for a moment in a pill laid over it (`arkui::toast`,
+        // below) — a line under it, kept there by a note that was nearly
+        // always there, cut off whatever the page had at its foot.
         // The sidebar is a surface, a step off the page's ground, with a
         // hairline where it meets the page, as harken's is.
         let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
@@ -134,20 +212,6 @@ impl App {
                     .on_scroll(|_| Message::Swallow),
             );
         }
-        // What the last thing done came to, in the page's corner — or what
-        // is half-typed: a count, a `c`, a `/search`.
-        let pending = self.keys.pending();
-        let note = if pending.is_empty() { self.note.clone() } else { pending };
-        if !note.is_empty() {
-            layers = layers.push(
-                container(dim(note, 11))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .padding([8, 14])
-                    .align_x(Alignment::End)
-                    .align_y(Alignment::End),
-            );
-        }
         // The account at the top right, over the page, as harken's: its menu
         // opens Settings and signs out.
         if let Some(account) = self.account() {
@@ -158,11 +222,16 @@ impl App {
                     .align_x(Alignment::End),
             );
         }
+        // The page's small header, once its title has scrolled away, in the
+        // band beside the face.
+        if let Some(small) = self.view_compact() {
+            layers = layers.push(small);
+        }
         // What the keys can do next, at the bottom right, over the page.
         if let Some(prefix) = self.which.showing() {
             let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
             if !entries.is_empty() {
-                layers = layers.push(arkui::which::view(prefix, &entries, 36.0));
+                layers = layers.push(arkui::which::view(prefix, &entries, arkui::toast::MARGIN));
             }
         }
         if let Some(m) = &self.modal {
@@ -201,6 +270,14 @@ impl App {
             layers = layers
                 .push(layer::backdrop(Message::CloseMenu, Message::Swallow))
                 .push(layer::pinned(menu::view(m, true, Message::MenuAt, Message::MenuActivate), m.origin));
+        }
+        // What the last thing done came to, or what is being typed: for a
+        // moment, at the foot of the window, over everything — a modal's
+        // refusal is said over the modal. It hears nothing, so what is
+        // under it still does.
+        let pending = self.keys.pending();
+        if let Some(words) = arkui::toast::says(&self.toast, &pending) {
+            layers = layers.push(arkui::toast::view(words, arkui::toast::MARGIN));
         }
         // The window's root: arkui's own needs of the platform.
         arkui::window::view(layers)
@@ -312,7 +389,7 @@ impl App {
         let this = month_of(&self.today);
         let mut month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            bold(month_name(&self.peer.month), 22),
+            page_title(month_name(&self.peer.month)),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -375,11 +452,11 @@ impl App {
         let heading = |label: &str, width: f32| right(text(label.to_string()).size(11).style(style::faint(0.55)).into(), width);
         let header = container(
             row![
-                text("CATEGORY").size(11).style(style::faint(0.55)).width(Length::Fill),
-                heading("ASSIGNED", MONEY_COL),
-                heading("ACTIVITY", MONEY_COL),
+                text("Category").size(11).style(style::faint(0.55)).width(Length::Fill),
+                heading("Assigned", MONEY_COL),
+                heading("Activity", MONEY_COL),
                 Space::new().width(Length::Fixed(GOAL_COL)),
-                heading("AVAILABLE", PILL_COL),
+                heading("Available", PILL_COL),
             ]
             .align_y(Alignment::Center),
         )
@@ -459,15 +536,18 @@ impl App {
                 header,
                 rule::horizontal(1).style(style::hairline),
                 new_group,
-                scrollable(body)
-                    .id(look::BUDGET)
-                    .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars)
+                scrollable(container(body).padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::BUDGET)
+                .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars)
             ],
         ]
         .spacing(12)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
 
         row![page, self.view_inspector()].into()
@@ -627,11 +707,15 @@ impl App {
             top: PAD + arkui::account::HEIGHT + 6.0,
             ..Padding::new(PAD)
         };
-        container(scrollable(body.spacing(12).padding(pad)).height(Length::Fill).style(style::bars))
-            .width(Length::Fixed(INSPECTOR))
-            .height(Length::Fill)
-            .style(style::surface)
-            .into()
+        container(
+            scrollable(under_face(body.spacing(12).padding(pad), style::surface_color))
+                .height(Length::Fill)
+                .style(style::bars),
+        )
+        .width(Length::Fixed(INSPECTOR))
+        .height(Length::Fill)
+        .style(style::surface)
+        .into()
     }
 
     pub(crate) fn figure<'a>(label: &str, cents: i64) -> Element<'a, Message> {
@@ -920,9 +1004,9 @@ impl App {
         // An account's name is renamed where it stands, as a category's is,
         // and so is a saved filter's.
         let title: Element<'_, Message> = match (ledger, account) {
-            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), bold(title, 22).into()),
-            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), bold(title, 22).into()),
-            _ => bold(title, 22).into(),
+            (Ledger::Account(id), _) => self.name_or_box(Naming::Account(id), page_title(title)),
+            (Ledger::Saved(id), _) => self.name_or_box(Naming::Filter(id), page_title(title)),
+            _ => page_title(title),
         };
         // What the conditions come to, beside the title: the bar under it is
         // as wide as its conditions, and the receipt's panel takes the rest.
@@ -977,15 +1061,15 @@ impl App {
         let w = |n: f32| Length::Fixed(n);
         let mut head = row![].align_y(Alignment::Center);
         if all {
-            head = head.push(table::heading("ACCOUNT", w(130.0)));
+            head = head.push(table::heading("Account", w(130.0)));
         }
         head = head
-            .push(table::heading("DATE", w(96.0)))
-            .push(table::heading("PAYEE", Length::FillPortion(3)))
-            .push(table::heading("CATEGORY", Length::FillPortion(3)))
-            .push(table::heading("MEMO", Length::FillPortion(2)))
-            .push(table::heading("OUTFLOW", w(100.0)))
-            .push(table::heading("INFLOW", w(100.0)))
+            .push(table::heading("Date", w(96.0)))
+            .push(table::heading("Payee", Length::FillPortion(3)))
+            .push(table::heading("Category", Length::FillPortion(3)))
+            .push(table::heading("Memo", Length::FillPortion(2)))
+            .push(table::heading("Outflow", w(100.0)))
+            .push(table::heading("Inflow", w(100.0)))
             .push(table::heading("", w(116.0)));
 
         let mut body: Column<'_, Message> = Column::new();
@@ -1017,15 +1101,18 @@ impl App {
             column![
                 table::row(head, false, false, false).height(Length::Fixed(LEDGER_HEAD)),
                 rule::horizontal(1).style(style::hairline),
-                scrollable(body)
-                    .id(look::REGISTER)
-                    .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
-                    .height(Length::Fill)
-                    .style(style::bars),
+                scrollable(body.padding(Padding {
+                    bottom: PAD,
+                    ..Padding::ZERO
+                }))
+                .id(look::REGISTER)
+                .on_scroll(|v| Message::RegisterScrolled(v.absolute_offset().y))
+                .height(Length::Fill)
+                .style(style::bars),
             ],
         ]
         .spacing(LEDGER_GAP)
-        .padding(PAD)
+        .padding(page_pad())
         .width(Length::Fill);
         // The selected transaction's receipt beside it, as the inspector is
         // beside the budget.
@@ -1369,7 +1456,7 @@ impl App {
         }
         let month = row![
             glyph_button(glyphs::BACK, Message::Month(-1)),
-            bold(format!("Spending in {}", month_name(&self.peer.month)), 22),
+            page_title(format!("Spending in {}", month_name(&self.peer.month))),
             glyph_button(glyphs::CHEVRON, Message::Month(1)),
         ]
         .spacing(6)
@@ -1387,10 +1474,17 @@ impl App {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
             tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
         }
-        column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
+        // All of it scrolls, its padding inside: a month of many categories
+        // is taller than the window, and was cut off at the foot.
+        let page = column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
             .spacing(16)
             .padding(PAD)
-            .width(Length::Fill)
+            .width(Length::Fill);
+        scrollable(under_face(page, page_ground))
+            .id(look::PAGE_TOP)
+            .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
+            .height(Length::Fill)
+            .style(style::bars)
             .into()
     }
 
@@ -1547,7 +1641,7 @@ impl App {
         c = c.push(bold(title, 16));
         if let (Choosing::Form, Some(f)) = (choosing, &self.form) {
             if f.editing.is_none() {
-                list = list.push(container(text("TRANSFER TO").size(10).style(style::faint(0.5))).padding([6, 10]));
+                list = list.push(container(text("Transfer to").size(10).style(style::faint(0.5))).padding([6, 10]));
                 for a in self.peer.accounts.rows.iter().filter(|a| !a.closed && Some(a.id) != f.account) {
                     list = list.push(option(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)));
                 }
@@ -1557,10 +1651,10 @@ impl App {
             Choosing::Move { .. } => Choice::Category(None),
             _ => Choice::Category(Some(ready_to_assign())),
         };
-        list = list.push(container(text("INFLOW").size(10).style(style::faint(0.5))).padding([6, 10]));
+        list = list.push(container(text("Inflow").size(10).style(style::faint(0.5))).padding([6, 10]));
         list = list.push(option("Ready to Assign".into(), Some(self.peer.summary().ready_to_assign), rta));
         for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
-            list = list.push(container(text(g.name.to_uppercase()).size(10).style(style::faint(0.5))).padding([6, 10]));
+            list = list.push(container(text(g.name.clone()).size(10).style(style::faint(0.5))).padding([6, 10]));
             for l in self
                 .peer
                 .lines

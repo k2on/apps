@@ -20,11 +20,6 @@
 package dev.money.android
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,6 +63,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import dev.arkdb.ffi.Id
+import dev.arkui.reducedMotion
+import dev.arkui.Transitions
 import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
@@ -96,14 +93,13 @@ fun CategorySheet(ledger: Ledger, category: Id, onDismiss: () -> Unit) {
     LaunchedEffect(l == null) { if (l == null && ledger.ready) onDismiss() }
     if (l == null) return
     var leaf by remember { mutableStateOf(Leaf.Story) }
+    val reduced = reducedMotion()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         AnimatedContent(
             targetState = leaf,
-            transitionSpec = {
-                val forward = targetState != Leaf.Story
-                val d = if (forward) 1 else -1
-                (slideInHorizontally { w -> d * w / 4 } + fadeIn()) togetherWith (slideOutHorizontally { w -> -d * w / 4 } + fadeOut())
-            },
+            // A leaf further in comes from the end, and back to the story from the start, on
+            // arkui's steps; with motion reduced, a cross-fade.
+            transitionSpec = { Transitions.stepped(forward = targetState != Leaf.Story, reduced = reduced) },
             label = "category-sheet",
         ) { now ->
             when (now) {
@@ -242,7 +238,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         if (l.available > 0 && assignable(l)) {
             OutlinedButton(onClick = onMove, modifier = Modifier.fillMaxWidth()) {
                 Icon(Glyphs.Move, contentDescription = null, modifier = Modifier.padding(end = Space.s))
-                Text("Move money")
+                Text("Move Money")
             }
         }
         Spacer(Modifier.height(Space.xl))

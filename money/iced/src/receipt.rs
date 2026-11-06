@@ -232,9 +232,12 @@ impl App {
             ..iced::Padding::new(crate::view::PAD)
         };
         container(
-            scrollable(column![head.spacing(2), body].spacing(12).padding(pad))
-                .height(Length::Fill)
-                .style(style::bars),
+            scrollable(crate::view::under_face(
+                column![head.spacing(2), body].spacing(12).padding(pad),
+                style::surface_color,
+            ))
+            .height(Length::Fill)
+            .style(style::bars),
         )
         .width(Length::Fixed(SIDE))
         .height(Length::Fill)
@@ -310,14 +313,15 @@ impl App {
     /// A receipt as its paper: the place and day, each item and what it
     /// cost (an item pressed is filed), and the total, monospace on white.
     fn view_paper<'a>(&'a self, r: &'a ReceiptLine, photo: Option<&'a PhotoLine>) -> Element<'a, Message> {
-        let ink = Color::from_rgb8(0x1a, 0x1a, 0x1a);
-        let faded = Color::from_rgb8(0x77, 0x77, 0x77);
-        // Each line its ink, and the paper its own: the theme's text colour is
-        // the page's, light on a dark one, which white paper would hide.
+        // Paper is white whatever the theme, so it is drawn in the light side's
+        // colours: the theme's text colour is the page's, light on a dark one,
+        // which white paper would hide.
+        let ink = arkui::tokens::light::INK;
+        let faded = arkui::tokens::light::QUIET;
         let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
-            container(mono(place_of(r).to_uppercase(), 15, ink)).center_x(Length::Fill),
+            container(mono(place_of(r), 15, ink)).center_x(Length::Fill),
             container(mono(r.date.clone(), 12, faded)).center_x(Length::Fill),
             rule(),
         ]
@@ -327,11 +331,7 @@ impl App {
                 Some(c) => self.peer.category_name(c).unwrap_or_else(|| i.category.clone()),
                 None => "file it".into(),
             };
-            let tint = if i.category_id.is_some() {
-                faded
-            } else {
-                Color::from_rgb8(0xb2, 0x5b, 0x00)
-            };
+            let tint = if i.category_id.is_some() { faded } else { arkui::tokens::light::CAUTION };
             let line = column![
                 row![mono(i.name.clone(), 12, ink).width(Length::Fill), mono(money(-i.amount), 12, ink)].spacing(8),
                 mono(
@@ -352,7 +352,7 @@ impl App {
         }
         paper = paper
             .push(rule())
-            .push(row![mono("TOTAL".into(), 13, ink).width(Length::Fill), mono(money(-r.total), 13, ink)]);
+            .push(row![mono("Total".into(), 13, ink).width(Length::Fill), mono(money(-r.total), 13, ink)]);
         if let Some(p) = photo.filter(|p| p.state != "sure") {
             paper = paper.push(container(mono(format!("read: {}", p.state), 10, faded)).center_x(Length::Fill));
         }
@@ -360,10 +360,10 @@ impl App {
             .padding(14)
             .width(Length::Fill)
             .style(move |_| container::Style {
-                background: Some(iced::Background::Color(Color::WHITE)),
+                background: Some(iced::Background::Color(arkui::tokens::light::SURFACE)),
                 text_color: Some(ink),
                 border: iced::Border {
-                    color: Color::from_rgb8(0xdd, 0xdd, 0xdd),
+                    color: arkui::tokens::light::HAIRLINE,
                     width: 1.0,
                     radius: 2.0.into(),
                 },

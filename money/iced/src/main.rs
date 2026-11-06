@@ -17,7 +17,7 @@
 //! None of the budget's arithmetic is here. Every figure on screen is a
 //! view of the domain (`money/domain`), kept up to date by the rows a
 //! change touched; every button is a mutation by name, and a refusal is
-//! the domain's own sentence, said in the page's corner.
+//! the domain's own sentence, said for a moment over the page.
 //!
 //! Most of what a window is lives in `arkui`: the palette and the rule that
 //! nothing writes a colour down, the table's cells and rows, the glyphs,
@@ -316,6 +316,10 @@ pub enum Message {
     RegisterScrolled(f32),
     /// The budget scrolled; and a page opened scrolled to where it was left.
     PageScrolled(f32),
+    /// Reflect or Settings was scrolled to this far down.
+    TopScrolled(f32),
+    /// The small header pressed: Reflect or Settings back to its top.
+    PageTop,
     ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
     /// scrolled, its keys, closed.
@@ -344,6 +348,8 @@ pub enum Message {
     Picture(arkui::images::Loaded),
     /// The which-key panel's delay went by for the prefix it was armed for.
     WhichDue(u64),
+    /// The note the toast was saying has had its time.
+    ToastDue(u64),
     /// Items' category: the dropdown, under the pointer.
     FileItems(Vec<ItemRef>),
     /// The form's transaction split: into two lines, or (none) back into one.
@@ -440,6 +446,14 @@ pub struct App {
     /// The which-key panel: what can follow a prefix half typed, or with
     /// `?` every key (`arkui::which`), read from [`KEYS`] and the grammar's.
     pub which: arkui::which::Which,
+    /// The note, said for a moment over the page's foot (`arkui::toast`).
+    pub toast: arkui::toast::Toast,
+    /// How far down Reflect or Settings is scrolled, as it last said.
+    pub top_y: f32,
+    /// Their small header, in the band once the page's title has scrolled
+    /// away (`arkui::compact`), and the page it is for.
+    pub compact: arkui::compact::Compact,
+    pub compact_for: Option<Page>,
 }
 
 impl App {
@@ -461,7 +475,10 @@ impl App {
             #[cfg(any(feature = "demo", test))]
             bank: seed::Bank::default(),
             server: None,
-            note: "a demo \u{2014} nothing here leaves this window".into(),
+            // Nothing to say until something is done: what a window is (a
+            // demo, who it is signed in as) is not news, and the toast is
+            // for news (`arkui::toast`).
+            note: String::new(),
             keys: money_keys(),
             anchor: None,
             search: String::new(),
@@ -488,6 +505,10 @@ impl App {
             photo: None,
             pictures: arkui::images::Images::new("money/pictures"),
             which: arkui::which::Which::new(),
+            toast: arkui::toast::Toast::new(),
+            top_y: 0.0,
+            compact: arkui::compact::Compact::new(iced::time::Instant::now()),
+            compact_for: None,
         };
         // A link the window was opened with, read before anything is drawn;
         // then where it is, as the history's first place.
@@ -529,9 +550,11 @@ impl App {
         if let Some(s) = &mut app.server {
             (s.logins, s.user) = (Some(logins), user);
         }
+        // Who is signed in is the account button's to show, all the time;
+        // a note says only what is news.
         app.note = match (&app.server.as_ref().and_then(|s| s.login.as_ref()), note.is_empty()) {
             (_, false) => note,
-            (Some(l), true) => format!("signed in as {}", live::who(l)),
+            (Some(_), true) => String::new(),
             (None, true) => "signing in\u{2026}".into(),
         };
         let task = match app.server.as_ref().is_some_and(|s| s.login.is_none()) {
@@ -594,7 +617,9 @@ impl App {
             logins.remember(&s.url, &login);
         }
         self.peer.client.login(ark_peer::who(&login), login.token.clone());
-        self.note = format!("signed in as {}", live::who(&login));
+        // The account button now shows who; the "signing in" said while
+        // it was on its way is over.
+        self.note.clear();
         s.login = Some(login);
         self.peer.refresh();
     }
@@ -668,6 +693,20 @@ impl App {
             }
         }
         self.history.sync(&self.place());
+        // Whatever the message came to is said for a moment over the page
+        // (`arkui::toast`), heard here once rather than wherever a note is
+        // written.
+        self.toast.heard(&self.note);
+        // The small header: for a new page, hidden at once; otherwise in or
+        // out as the page is scrolled past its title or back.
+        let now = iced::time::Instant::now();
+        if self.compact_for != Some(self.page) {
+            self.compact_for = Some(self.page);
+            self.compact.reset(now);
+            self.top_y = 0.0;
+        }
+        let after = self.compact_title().map(|_| view::TITLED);
+        self.compact.heard(self.top_y, after, false, now);
         // A page just opened is drawn before this comes back, so the scroll
         // lands on its list rather than the one it replaced.
         match self.scroll_due.take() {
@@ -732,6 +771,11 @@ impl App {
                 self.scroll_due = Some(self.history.arrive(&self.place()));
             }
             Message::PageScrolled(y) => self.history.scrolled(&self.place(), y),
+            Message::TopScrolled(y) => self.top_y = y,
+            Message::PageTop => {
+                self.top_y = 0.0;
+                return iced::widget::operation::scroll_to(look::PAGE_TOP, iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 });
+            }
             Message::ScrollPage(y) => {
                 let id = match self.page {
                     Page::Ledger(_) => {
@@ -1271,13 +1315,14 @@ impl App {
             Message::SignedIn(Err(e)) => self.note = format!("could not sign in: {e} \u{2014} reload to try again"),
             Message::Picture(done) => self.pictures.loaded(done),
             Message::WhichDue(key) => self.which.due(key),
+            Message::ToastDue(key) => self.toast.due(key),
         }
         Task::none()
     }
 
     /// "Sync". On a server it is an ask (`banks.sync`) the server's
     /// importer answers by asking the banks; what they have arrives as any
-    /// change does, and the note in the page's corner says what came of
+    /// change does, and the note said over the page says what came of
     /// it. In the demo the demo's bank stands in for Plaid, and the import
     /// is authored here, this peer holding the importer's role.
     fn sync(&mut self) {
@@ -1620,7 +1665,9 @@ impl App {
         let now = iced::time::Instant::now();
         match drag.drop(&self.sizes(), now) {
             outline::Dropped::Click(grab) => {
-                let double = self.last_click.is_some_and(|(g, at)| g == grab && now.duration_since(at) < DOUBLE_CLICK);
+                let double = self
+                    .last_click
+                    .is_some_and(|(g, at)| g == grab && now.duration_since(at) < arkui::button::DOUBLE_CLICK);
                 self.last_click = (!double).then_some((grab, now));
                 if let Grab::Row(n) = grab {
                     self.anchor = None;
@@ -1821,7 +1868,7 @@ impl App {
 
     /// How tall the register's list is on screen.
     fn register_view(&self) -> f32 {
-        (self.window.height - view::PAD * 2.0 - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+        (self.window.height - view::PAD - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
     }
 
     /// Scroll the register just far enough that row `i` is in sight.
@@ -1833,11 +1880,16 @@ impl App {
             0.0
         };
         let top = above + i as f32 * view::TXN_ROW;
+        // The last row is followed by the page's padding, inside what
+        // scrolls (`view::page_pad`): scrolled to it, the list goes to its
+        // end, so the row stands clear of the window's foot.
+        let last = i + 1 >= self.peer.register.rows.len();
+        let foot = if last { view::PAD } else { 0.0 };
         let seen = self.register_view();
         let y = if top < self.register_scroll {
             top
-        } else if top + view::TXN_ROW > self.register_scroll + seen {
-            top + view::TXN_ROW - seen
+        } else if top + view::TXN_ROW + foot > self.register_scroll + seen {
+            top + view::TXN_ROW + foot - seen
         } else {
             return Task::none();
         };
@@ -2365,8 +2417,12 @@ impl App {
         if self.dropdown.is_some() {
             subs.push(arkui::command::keys(true).map(Message::DropKey));
         }
-        if self.history.active() || self.drag.as_ref().is_some_and(|d| d.moving(now)) || self.settle.is_some_and(|s| s.moving(now)) {
-            subs.push(iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Frame));
+        if self.history.active()
+            || self.drag.as_ref().is_some_and(|d| d.moving(now))
+            || self.settle.is_some_and(|s| s.moving(now))
+            || self.compact.moving(now)
+        {
+            subs.push(arkui::motion::Clock::Frames.ticks().map(|()| Message::Frame));
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.
@@ -2376,6 +2432,9 @@ impl App {
                     .with(key)
                     .map(|(key, ())| Message::WhichDue(key)),
             );
+        }
+        if let Some(timer) = self.toast.timer() {
+            subs.push(timer.map(Message::ToastDue));
         }
         if let Some(s) = &self.server {
             subs.push(s.bell.subscription().map(|()| Message::Wake));
@@ -2437,6 +2496,8 @@ pub fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     panic_to_console();
     arkui::theme::install(palette::MONEY);
+    // Whether to move, asked of the system now rather than in a frame.
+    arkui::motion::reduced();
     let app = iced::application(App::boot, App::update, App::view)
         .subscription(App::subscription)
         .title(App::title)
@@ -2529,9 +2590,6 @@ fn money_keys() -> vim::Keys {
     keys.set_bindings(&MONEY_KEYS);
     keys
 }
-
-/// How soon a second click is a double click: AppKit's default.
-const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// How wide the category dropdown is.
 pub const DROP_WIDTH: f32 = 340.0;

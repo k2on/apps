@@ -30,10 +30,7 @@ struct AccountsView: View {
                             CentsText(rows.filter { !$0.closed && $0.onBudget }.reduce(0) { $0 + $1.balance })
                         }
                     } icon: {
-                        Image(systemName: "tray.full.fill")
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.gray.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        AccountMark.Tile(symbol: "tray.full.fill", color: .quiet)
                     }
                 }
             }
@@ -55,7 +52,10 @@ struct AccountsView: View {
                     HStack {
                         Text(shelf.kind.rawValue)
                         Spacer()
-                        if shelf.kind != .closed { CentsText(shelf.total) }
+                        // Below nothing in the error's red, as a group's total in the budget is.
+                        if shelf.kind != .closed {
+                            CentsText(shelf.total).foregroundStyle(shelf.total < 0 ? Color.error : Color.quiet)
+                        }
                     }
                 }
             }
@@ -100,20 +100,20 @@ struct AccountRow: View {
             AccountMark(kind: account.kind)
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.name).lineLimit(1)
-                Text(Accounts.subtitle(account)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(Accounts.subtitle(account)).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             if account.unapproved > 0 {
                 Text("\(account.unapproved)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.onAccent)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Color.money, in: Capsule())
+                    .background(Color.accent, in: Capsule())
                     .accessibilityLabel("\(account.unapproved) to review")
             }
             CentsText(account.balance)
-                .foregroundStyle(account.balance < 0 ? Color.red : Color.primary)
+                .foregroundStyle(account.balance < 0 ? Color.error : Color.ink)
         }
         .accessibilityElement(children: .combine)
     }

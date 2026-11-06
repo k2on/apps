@@ -151,7 +151,7 @@ object Catalogue {
      */
     fun albumBy(album: Album?, creator: String): Pair<String, String> {
         val performer = album?.performer?.takeIf { it.isNotEmpty() && it != creator }
-        val small = facts(if (performer != null) creator.uppercase() else null, album?.released?.takeIf { it > 0 }?.toString())
+        val small = facts(if (performer != null) creator else null, album?.released?.takeIf { it > 0 }?.toString())
         return (performer ?: creator) to small
     }
 }

@@ -6,7 +6,6 @@
 // says what choosing it answers.
 package dev.money.android
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -32,6 +31,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.pressable
+import dev.arkui.Press
 import dev.arkui.AmountText
 import dev.arkui.Pill
 import dev.arkui.Space
@@ -111,7 +112,7 @@ fun CategoryPicker(
                             headlineContent = { Text(a.name) },
                             leadingContent = { Icon(Glyphs.Transfer, contentDescription = null) },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier.clickable { onPick(Pick.Transfer(a.id)) },
+                            modifier = Modifier.pressable(onClick = { onPick(Pick.Transfer(a.id)) }, press = Press.Highlight),
                         )
                     }
                 }
@@ -150,7 +151,7 @@ private fun Option(name: String, available: Long?, onClick: () -> Unit) {
                 }
             } else null,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.pressable(onClick = onClick, press = Press.Highlight),
     )
 }
 
@@ -170,7 +171,7 @@ fun AccountPicker(accounts: List<AccountLine>, title: String, onPick: (AccountLi
                     leadingContent = { Icon(Glyphs.account(a.kind), contentDescription = null) },
                     trailingContent = { AmountText(a.balance, style = MaterialTheme.typography.labelLarge) },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { onPick(a) },
+                    modifier = Modifier.pressable(onClick = { onPick(a) }, press = Press.Highlight),
                 )
             }
         }

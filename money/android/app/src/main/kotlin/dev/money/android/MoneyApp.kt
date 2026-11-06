@@ -19,16 +19,6 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
@@ -78,6 +68,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
+import dev.arkui.LargeTitles
+import dev.arkui.SensoryFeedback
+import dev.arkui.Transitions
+import dev.arkui.reducedMotion
 import uniffi.money_domain.TxnLine
 
 /** The four tabs. */
@@ -94,7 +88,8 @@ class Shell(
     val snackbar: SnackbarHostState,
     val onAdd: (account: Id?) -> Unit,
     val onEdit: (TxnLine) -> Unit,
-    val onAccount: (Id) -> Unit,
+    /** An account's register, or every account's (All Accounts) for none. */
+    val onAccount: (Id?) -> Unit,
     val onSettings: () -> Unit,
     val onTab: (Tab) -> Unit,
     val onSignOut: () -> Unit,
@@ -110,6 +105,10 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var form by remember { mutableStateOf<TxnForm?>(null) }
     LaunchedEffect(book) { book.notes.collect { snackbar.showSnackbar(it) } }
+    // What the hand feels of a change the book has taken, on the frame it shows: the iPhone's
+    // `.sensoryFeedback` on the same events (`Book.felt`).
+    val felt by book.felt.collectAsStateWithLifecycle()
+    SensoryFeedback(felt.kind, felt.count)
     // Plaid's page, in a Custom Tab, the moment the server answers a connection asked for here.
     val context = LocalContext.current
     LaunchedEffect(book) {
@@ -126,7 +125,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
                 onEdit = { t -> form = formOf(t, book.state.value) },
-                onAccount = { id -> nav.navigate("register/${id.hex}") },
+                onAccount = { id -> nav.navigate("register/${id?.hex ?: ALL}") },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
@@ -136,6 +135,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val tab = Tab.entries.firstOrNull { it.route == route }
+    val reduced = reducedMotion()
 
     CompositionLocalProvider(LocalShell provides shell) {
         Scaffold(
@@ -143,8 +143,9 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
             bottomBar = {
                 AnimatedVisibility(
                     visible = tab != null || route == null,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut()) {
+                    // Up from the foot as a tab comes back, and down through it as a page covers it.
+                    enter = Transitions.riseIn(reduced),
+                    exit = Transitions.sinkOut(reduced)) {
                         NavigationBar {
                             for (t in Tab.entries) {
                                 val on = t == tab
@@ -168,17 +169,18 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 nav,
                 startDestination = Tab.Budget.route,
                 modifier = Modifier.padding(bottom = pad.calculateBottomPadding()),
-                enterTransition = { enter() },
-                exitTransition = { exit() },
-                popEnterTransition = { popEnter() },
-                popExitTransition = { popExit() },
+                enterTransition = { enter(reduced) },
+                exitTransition = { exit(reduced) },
+                popEnterTransition = { popEnter(reduced) },
+                popExitTransition = { popExit(reduced) },
             ) {
                 composable(Tab.Budget.route) { BudgetScreen(ledger) }
                 composable(Tab.Accounts.route) { AccountsScreen(ledger) }
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
                 composable("register/{account}") { e ->
-                    val id = Id(e.arguments?.getString("account").orEmpty())
+                    val hex = e.arguments?.getString("account").orEmpty()
+                    val id = if (hex == ALL) null else Id(hex)
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
                 composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
@@ -187,6 +189,9 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }
     }
 }
+
+/** The register route's account for All Accounts: every account's transactions. */
+private const val ALL = "all"
 
 /** A tab, kept where it was; the tab showing goes back to its top. */
 private fun NavHostController.go(t: Tab) {
@@ -199,26 +204,25 @@ private fun NavHostController.go(t: Tab) {
 
 private fun isTab(e: NavBackStackEntry): Boolean = Tab.entries.any { it.route == e.destination.route }
 
-// Between tabs, Material's fade through: the old page fades out quickly, the new one fades in
-// and grows the last few percent. Into a page and back out, the shared X axis: a short slide
-// with a fade, which the back gesture drives in reverse.
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.enter(): EnterTransition =
-    if (isTab(initialState) && isTab(targetState)) {
-        fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
-            scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.92f)
-    } else {
-        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } + fadeIn(tween(300))
-    }
+// Between tabs, nothing moves: a tab is a peer, switched too often for motion to read as anything
+// but lag, and is there at once, as harken's are. Into a page and back out, arkui's shared X axis
+// (`Transitions`): a short slide with a fade, which the back gesture drives in reverse, along the
+// same path it came in by — on its critically damped springs, so a navigation interrupted
+// part-way carries on from where it is. With motion reduced it is a quick cross-fade.
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.between(): Boolean =
+    isTab(initialState) && isTab(targetState)
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.exit(): ExitTransition =
-    if (isTab(initialState) && isTab(targetState)) fadeOut(tween(90))
-    else slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 5 } + fadeOut(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.enter(reduced: Boolean): EnterTransition =
+    if (between()) EnterTransition.None else Transitions.pushIn(reduced)
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(): EnterTransition =
-    slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 5 } + fadeIn(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.exit(reduced: Boolean): ExitTransition =
+    if (between()) ExitTransition.None else Transitions.pushOut(reduced)
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(): ExitTransition =
-    slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 5 } + fadeOut(tween(300))
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(reduced: Boolean): EnterTransition =
+    if (between()) EnterTransition.None else Transitions.popIn(reduced)
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(reduced: Boolean): ExitTransition =
+    if (between()) ExitTransition.None else Transitions.popOut(reduced)
 
 /** A new transaction: today, in `account` or the first open budget account, money going out. */
 fun newForm(l: Ledger, account: Id?): TxnForm =
@@ -280,19 +284,22 @@ fun Page(
             if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
-            LargeTopAppBar(
-                title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            // The expanded title at the iPhone's large title's weight; collapsed, Material's own.
+            LargeTitles {
+                LargeTopAppBar(
+                    title = { titleContent?.invoke() ?: Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
                         }
-                    }
-                },
-                actions = actions,
-                scrollBehavior = bar,
-                colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
-            )
+                    },
+                    actions = actions,
+                    scrollBehavior = bar,
+                    colors = TopAppBarDefaults.largeTopAppBarColors(scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
+                )
+            }
         },
         floatingActionButton = fab,
         snackbarHost = { SnackbarHost(shell.snackbar) },

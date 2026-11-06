@@ -48,13 +48,62 @@ class Device(context: Context) {
         private const val RECENT = 8
 
         /**
-         * What this phone is called in a device picker: the name its owner gave it in the system's
-         * settings ("Ana's Pixel"), else its model, else "Phone". Nothing is guessed beyond what the
-         * system says.
+         * What this phone is called in a device picker, as a person would call it ([DeviceName]):
+         * the name its owner gave it in the system's settings ("Ana's Pixel") or its Bluetooth name,
+         * else its maker and model ("Pixel 7"), else "Android Emulator" on an emulator.
          */
-        fun name(context: Context): String =
-            runCatching { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()?.takeIf { it.isNotBlank() }
-                ?: Build.MODEL?.takeIf { it.isNotBlank() }
-                ?: "Phone"
+        fun name(context: Context): String {
+            val cr = context.contentResolver
+            return DeviceName.of(
+                given =
+                    listOf(
+                        runCatching { Settings.Global.getString(cr, Settings.Global.DEVICE_NAME) }.getOrNull(),
+                        runCatching { Settings.Secure.getString(cr, "bluetooth_name") }.getOrNull(),
+                    ),
+                manufacturer = Build.MANUFACTURER,
+                model = Build.MODEL,
+                build = listOf(Build.FINGERPRINT, Build.PRODUCT, Build.HARDWARE),
+            )
+        }
     }
+}
+
+/**
+ * A phone's name as the iPhone's reads ("iPhone 17 Pro"), from what the system says of it. A name
+ * somebody gave it comes first, unless it is a build code nobody would call a phone by
+ * ("sdk_gphone64_x86_64"); then the maker and the model, the model alone where it already says the
+ * maker or is a Pixel; an emulator is "Android Emulator".
+ */
+object DeviceName {
+    private val CODES = listOf("sdk", "generic", "emulator", "gphone")
+
+    fun of(given: List<String?>, manufacturer: String?, model: String?, build: List<String?> = emptyList()): String {
+        given.map { it?.trim().orEmpty() }.firstOrNull { it.isNotEmpty() && !raw(it) }?.let { return it }
+        val m = model?.trim().orEmpty()
+        if (emulator(build + m) || (m.isNotEmpty() && raw(m) && CODES.any { m.lowercase().startsWith(it) })) return "Android Emulator"
+        val maker = manufacturer?.trim().orEmpty().let { capitalised(it) }
+        val named = tidied(m)
+        return when {
+            named.isEmpty() -> maker.ifEmpty { "Phone" }
+            named.startsWith("Pixel", ignoreCase = true) -> capitalised(named)
+            maker.isEmpty() || named.startsWith(maker, ignoreCase = true) -> capitalised(named)
+            else -> "$maker $named"
+        }
+    }
+
+    /** Whether `name` is a build code rather than a name: underscores, an emulator's prefix, or all one lower-case word. */
+    fun raw(name: String): Boolean {
+        val n = name.trim()
+        val low = n.lowercase()
+        return '_' in n || CODES.any { low.startsWith(it) } || (' ' !in n && n == low && n.any { it.isLetter() })
+    }
+
+    /** Whether the build says it is an emulator's. */
+    fun emulator(build: List<String?>): Boolean =
+        build.any { b -> b != null && b.lowercase().let { it.contains("emulator") || it.contains("generic") || it.startsWith("sdk") || it.contains("/sdk") || it.contains("sdk_") || it.contains("ranchu") || it.contains("goldfish") } }
+
+    // A build code's underscores as spaces.
+    private fun tidied(model: String): String = model.replace('_', ' ').replace(Regex("\\s+"), " ").trim()
+
+    private fun capitalised(s: String): String = s.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }

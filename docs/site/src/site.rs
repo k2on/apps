@@ -328,18 +328,62 @@ fn component(c: &Component, sizes: &Sizes) -> String {
             let _ = write!(out, "<p class=\"source\"><a href=\"{SOURCE}{path}\">{path}</a></p></section>");
         }
     }
+    // The shots both phones take, which can be shown side by side.
+    let both: Vec<&Shot> = match (&c.android, &c.ios) {
+        (Some(_), Some(_)) => c
+            .shots
+            .iter()
+            .filter(|s| s.phones.contains(&"android") && s.phones.contains(&"ios"))
+            .collect(),
+        _ => Vec::new(),
+    };
     out.push_str(
         "<section class=\"mobile\"><div class=\"mobile-head\"><h2>Mobile</h2><div class=\"switch\">\
          <input type=\"radio\" name=\"phone\" id=\"android\" value=\"android\" checked><label for=\"android\">Android</label>\
-         <input type=\"radio\" name=\"phone\" id=\"ios\" value=\"ios\"><label for=\"ios\">iOS</label></div></div>",
+         <input type=\"radio\" name=\"phone\" id=\"ios\" value=\"ios\"><label for=\"ios\">iOS</label>",
     );
+    if !both.is_empty() {
+        out.push_str("<input type=\"radio\" name=\"phone\" id=\"both\" value=\"both\"><label for=\"both\">Side by side</label>");
+    }
+    out.push_str("</div></div>");
     for (key, name, half) in [("android", "Android", c.android.as_ref()), ("ios", "iOS", c.ios.as_ref())] {
         let _ = write!(out, "<div class=\"pane {key}\">");
         out.push_str(&phone(c, key, name, half));
         out.push_str("</div>");
     }
+    if !both.is_empty() {
+        out.push_str("<div class=\"pane both\">");
+        for s in both {
+            out.push_str("<div class=\"captures pair\">");
+            for (key, name) in [("android", "Android"), ("ios", "iOS")] {
+                out.push_str(&capture(s, key, Some(name)));
+            }
+            out.push_str("</div>");
+        }
+        out.push_str("</div>");
+    }
     out.push_str("</section>");
     out
+}
+
+/// One phone's capture of a shot, in a frame of that device, which site.js
+/// fills from the manifest; `phone` names the phone in its caption, for
+/// captures of both side by side.
+fn capture(s: &Shot, key: &str, phone: Option<&str>) -> String {
+    let kind = match s.kind {
+        Kind::Screenshot => ("screenshot", "Screenshot"),
+        Kind::Recording => ("recording", "Recording"),
+    };
+    format!(
+        "<figure class=\"capture\" data-phone=\"{key}\" data-shot=\"{id}\" data-kind=\"{k}\">\
+         <div class=\"device\"><div class=\"screen\"><p>Asking for the latest capture…</p></div></div>\
+         <figcaption>{phone}{kind} · {what}</figcaption><small></small></figure>",
+        id = s.id,
+        k = kind.0,
+        phone = phone.map(|p| format!("{p} · ")).unwrap_or_default(),
+        kind = kind.1,
+        what = esc(s.what),
+    )
 }
 
 /// One picture of a component, in the page's theme and at its width.
@@ -369,20 +413,7 @@ fn phone(c: &Component, key: &str, name: &str, half: Option<&Mobile>) -> String 
     if !shots.is_empty() {
         out.push_str("<div class=\"captures\">");
         for s in shots {
-            let kind = match s.kind {
-                Kind::Screenshot => ("screenshot", "Screenshot"),
-                Kind::Recording => ("recording", "Recording"),
-            };
-            let _ = write!(
-                out,
-                "<figure class=\"capture\" data-phone=\"{key}\" data-shot=\"{id}\" data-kind=\"{k}\">\
-                 <div class=\"device\"><div class=\"screen\"><p>Asking for the latest capture…</p></div></div>\
-                 <figcaption>{kind} · {what}</figcaption><small></small></figure>",
-                id = s.id,
-                k = kind.0,
-                kind = kind.1,
-                what = esc(s.what),
-            );
+            out.push_str(&capture(s, key, None));
         }
         out.push_str("</div>");
     }

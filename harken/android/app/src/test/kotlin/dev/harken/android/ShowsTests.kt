@@ -291,17 +291,17 @@ class ShowsTests {
         assertEquals("queued", Episodes.left(bump, null, Download(bump.id, "queued", 0, 0, "")))
     }
 
-    /** When an episode came out, as its row says it: today, a few days ago, a day, a day of another year. */
+    /** When an episode came out, as its row says it: today, yesterday, a day, a day of another year. */
     @Test
     fun anEpisodeIsDatedAsAPodcastAppDatesIt() {
         val utc = java.time.ZoneOffset.UTC
         fun on(y: Int, m: Int, d: Int, hour: Int = 9): Long = java.time.ZonedDateTime.of(y, m, d, hour, 0, 0, 0, utc).toInstant().toEpochMilli()
         val now = on(2026, 10, 27, 12)
-        assertEquals("TODAY", Episodes.dated(on(2026, 10, 27, 1), now, utc))
-        assertEquals("YESTERDAY", Episodes.dated(on(2026, 10, 26, 23), now, utc))
-        assertEquals("2 DAYS AGO", Episodes.dated(on(2026, 10, 25), now, utc))
-        assertEquals("OCT 20", Episodes.dated(on(2026, 10, 20), now, utc))
-        assertEquals("DEC 31, 2025", Episodes.dated(on(2025, 12, 31), now, utc))
+        assertEquals("Today", Episodes.dated(on(2026, 10, 27, 1), now, utc))
+        assertEquals("Yesterday", Episodes.dated(on(2026, 10, 26, 23), now, utc))
+        assertEquals("Oct 25", Episodes.dated(on(2026, 10, 25), now, utc))
+        assertEquals("Oct 20", Episodes.dated(on(2026, 10, 20), now, utc))
+        assertEquals("Dec 31, 2025", Episodes.dated(on(2025, 12, 31), now, utc))
         assertEquals("nobody said", "", Episodes.dated(0, now, utc))
     }
 }

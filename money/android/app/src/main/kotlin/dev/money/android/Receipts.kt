@@ -17,7 +17,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,8 +81,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.arkdb.ffi.Id
+import dev.arkui.pressable
+import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
+import dev.arkui.Tokens
 import dev.money.android.gen.FileRef
 import dev.money.android.gen.ItemLine
 import dev.money.android.gen.PhotoLine
@@ -97,10 +99,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The paper's colours: a receipt is white whatever the phone's theme. */
-private val Paper = Color(0xFFFFFFFF)
-private val Ink = Color(0xFF1C1C1C)
-private val Faded = Color(0xFF6B6B6B)
+/** The paper's colours: a receipt is white whatever the phone's theme, so the light side's. */
+private val Paper = Tokens.Light.surface
+private val Ink = Tokens.Light.ink
+private val Faded = Tokens.Light.quiet
 
 private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 18.sp, color = Ink)
 
@@ -135,7 +137,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(vertical = Space.s)) {
                 TextButton(onClick = { typing = ReceiptDraft.of(r, ledger.items[r.id].orEmpty(), txn) }) { Text("Edit") }
                 if (photo != null) TextButton(onClick = { showing = photo.file }) { Text("Photo") }
-                if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take off") }
+                if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take Off") }
             }
         }
         for (p in reading) PhotoRow(p, onShow = { showing = p.file })
@@ -153,16 +155,16 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
                 leadingIcon = { Icon(Glyphs.Scan, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             AssistChip(
                 onClick = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                label = { Text("Choose photo") },
+                label = { Text("Choose Photo") },
                 leadingIcon = { Icon(Glyphs.Photo, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             AssistChip(
                 onClick = { typing = ReceiptDraft.blank(txn, date, amount) },
-                label = { Text("Type it") },
+                label = { Text("Type It") },
                 leadingIcon = { Icon(Glyphs.Write, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             if (ledger.unmatched.isNotEmpty()) {
                 AssistChip(
                     onClick = { attaching = true },
-                    label = { Text("Attach one") },
+                    label = { Text("Attach One") },
                     leadingIcon = { Icon(Glyphs.Receipt, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             }
         }
@@ -284,7 +286,7 @@ private fun PhotoRow(p: PhotoLine, onShow: () -> Unit) {
         headlineContent = { Text(if (p.state == "failed") "Photo" else "Photo of the receipt") },
         supportingContent = { Text(words) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClickLabel = "Show", onClick = onShow),
+        modifier = Modifier.pressable(onClickLabel = "Show", onClick = onShow, press = Press.Highlight),
     )
 }
 
@@ -334,7 +336,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
     val near = unmatched.sortedWith(compareBy({ abs(it.total - amount) }, { abs((Dates.millis(it.date) ?: 0) - (Dates.millis(date) ?: 0)) })).take(30)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Attach a receipt") },
+        title = { Text("Attach a Receipt") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 for (r in near) {
@@ -343,7 +345,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
                         supportingContent = { Text("${Dates.long(r.date)} · ${r.items} items") },
                         trailingContent = { Text(a.format(abs(r.total))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable(onClickLabel = "Attach") { onPick(r) },
+                        modifier = Modifier.pressable(onClickLabel = "Attach", onClick = { onPick(r) }, press = Press.Highlight),
                     )
                 }
             }
