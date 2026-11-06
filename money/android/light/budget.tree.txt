@@ -1,0 +1,58 @@
+    #content
+                  [button] pressable
+                    'Previous month'
+                    [button]
+                  'November 2026' [text]
+                  [button] pressable
+                    'Next month'
+                    [button]
+                    'Ready to Assign, $1,284.50, Give these dollars a job'
+                    'Ready to Assign' [text]
+                    '$1,284.50' [text]
+                    'Give these dollars a job' [text]
+                    [button] pressable
+                      '3 underfunded' [text]
+                  [button] pressable
+                    'Credit Card Payments' [text]
+                    '$310.44' [text]
+                    [button]
+                  [button] pressable
+                    'Chase Sapphire, $310.44 available. Covered: $310.44 owed'
+                    'Chase Sapphire' [text]
+                      '$310.44' [text]
+                    'Covered' [text]
+                    'Owed $310.44' [text]
+                  [button] pressable
+                    'Bills' [text]
+                    '$353.35' [text]
+                    [button]
+                  [button] pressable
+                    'Rent, $0.00 available. Spent $1,850.00 of $1,850.00'
+                    'Rent' [text]
+                      '$0.00' [text]
+                    '$1,850.00 of $1,850.00' [text]
+                    'Spent $1,850.00' [text]
+                  [button] pressable
+                    'Electric, $143.73 available. Funded'
+                    'Electric' [text]
+                      '$143.73' [text]
+                    '$120.00 of $120.00' [text]
+                  [button] pressable
+                    'Water, $54.62 available. Funded'
+                    'Water' [text]
+                'Budget' [text]
+                [button] pressable
+                  'Budget options'
+                  [button]
+                [button] pressable
+                  'Signed in as Alex'
+                  [button]
+                [button] pressable
+                  [button]
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
