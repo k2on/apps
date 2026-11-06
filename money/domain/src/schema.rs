@@ -449,8 +449,10 @@ pub struct Filter {
     pub accounts: Vec<Id<Account>>,
     /// Only accounts on the budget.
     pub on_budget: bool,
-    /// What the payee or the bank's own line for it holds, any case; blank
-    /// is anything.
+    /// What it holds, any case: its payee, the bank's own line for it, its
+    /// memo, its category's name, its account's (and a transfer's other
+    /// account's), or its amount as written (`-$12.50`); blank is anything
+    /// (`crate::filters::Words`).
     pub text: String,
     /// The categories; none is any. `None` among them is "no category".
     pub categories: Vec<Option<Id<Category>>>,

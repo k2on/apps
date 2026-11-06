@@ -137,9 +137,7 @@ fn the_receipts_are_records() {
 }
 
 /// A search is the core's filter over a register: payee or the bank's own
-/// words, any case; told when it moves, as any view is. Falsified by a
-/// search matching the memo: "coffee" found the seed's lunch whose memo
-/// says it.
+/// words, any case; told when it moves, as any view is.
 #[test]
 fn a_search_is_the_cores_filter() {
     let s = session();
@@ -165,4 +163,34 @@ fn a_search_is_the_cores_filter() {
     });
     assert!(s.search(Some(first), "whole".into()).iter().all(|t| t.account_id == first));
     assert!(s.version(q) > 0);
+}
+
+/// A search finds what a phone's register shows: the category, the
+/// account, the memo and the amount as written, as well as the payee.
+/// Falsified by the filter's text reading the payee and the bank's words
+/// alone: a search for a category's name found nothing.
+#[test]
+fn a_search_finds_every_field_a_register_shows() {
+    let s = session();
+    let _all = s.hold(MoneyView::Register { account: None });
+    let rows = s.register(None);
+    let find = |text: &str| {
+        let _h = s.hold(MoneyView::Search {
+            account: None,
+            text: text.into(),
+        });
+        s.search(None, text.into())
+    };
+    let grocery = rows.iter().find(|t| t.category == "Groceries").expect("the seed buys groceries");
+    let by_category = find("groceries");
+    assert!(by_category.iter().any(|t| t.id == grocery.id), "{by_category:?}");
+    let by_account = find(&grocery.account.to_uppercase());
+    assert!(by_account.iter().any(|t| t.id == grocery.id));
+    let written = ark_format::amount(grocery.amount, &ark_format::NumberStyle::us());
+    let by_amount = find(&written);
+    assert!(by_amount.iter().any(|t| t.id == grocery.id), "{written}");
+    if let Some(m) = rows.iter().find(|t| !t.memo.trim().is_empty()) {
+        assert!(find(m.memo.trim()).iter().any(|t| t.id == m.id), "the memo {:?}", m.memo);
+    }
+    assert!(find("no such thing anywhere").is_empty());
 }

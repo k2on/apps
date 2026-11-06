@@ -21,7 +21,7 @@ struct RegisterView: View {
 
     var body: some View {
         let a = model.snapshot.account(account)
-        // A search is the core's (`MoneyView.search`: payee or the bank's own words), held while typed.
+        // A search is the core's (`MoneyView.search`: payee, the bank's words, memo, category, account or amount), held while typed.
         let searched = needle.trimmingCharacters(in: .whitespaces)
         let all = model.register(account) ?? []
         let rows = searched.isEmpty ? all : model.search(account, searched) ?? []

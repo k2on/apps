@@ -1,6 +1,8 @@
 //! Filters: which transactions, said as conditions every one of which a
 //! transaction meets — the accounts (none is every one; or only those on
-//! the budget), text its payee or the bank's line holds, its categories
+//! the budget), text it holds ([`Words`]: its payee, the bank's line, its
+//! memo, its category, its account, the other account of a transfer, or
+//! its amount as written), its categories
 //! ("no category" among them), which way the money went, transfers or not,
 //! only what needs a look, and dates.
 //!
@@ -25,6 +27,24 @@ use crate::dates::{first_day, is_day, last_day};
 use crate::schema::*;
 use crate::transactions::txn_line;
 use crate::types::*;
+
+/// What a filter's text is looked for in, beside the transaction's own
+/// payee, bank's line and memo: the names a register shows with it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Words<'a> {
+    /// Its account's name.
+    pub account: &'a str,
+    /// The other account's, for a transfer.
+    pub other: &'a str,
+    /// Its category's name.
+    pub category: &'a str,
+}
+
+/// How an amount is written where a filter's text looks for it: as the
+/// United States writes money (`-$1,234.56`), what the phones searched by.
+fn written(cents: i64) -> String {
+    ark_format::amount(cents, &ark_format::NumberStyle::us())
+}
 
 impl Filter {
     /// Every transaction: "All Accounts".
@@ -88,16 +108,34 @@ impl Filter {
     /// category. The only matcher there is ([`Filter::holds`] is it, given
     /// those two).
     pub fn matches(&self, db: &Db<Money>, t: &Txn) -> bool {
-        let on_budget = db.account.get(t.account_id).is_some_and(|a| a.on_budget);
-        // Whether it needs a category is read only when it is asked.
+        let account = db.account.get(t.account_id);
+        let on_budget = account.as_ref().is_some_and(|a| a.on_budget);
+        // Whether it needs a category is read only when it is asked, and
+        // the names only when there is text to look for.
         let needs_category = self.needs_look && t.approved && needs_category(db, t, on_budget);
-        self.holds(t, on_budget, needs_category)
+        if self.text.trim().is_empty() {
+            return self.holds(t, on_budget, needs_category);
+        }
+        let other = t.transfer_account.and_then(|a| db.account.get(a));
+        let category = t.category_id.and_then(|c| db.category.get(c));
+        let words = Words {
+            account: account.as_ref().map_or("", |a| a.name.as_str()),
+            other: other.as_ref().map_or("", |a| a.name.as_str()),
+            category: category.as_ref().map_or("", |c| c.name.as_str()),
+        };
+        self.holds_with(t, on_budget, needs_category, words)
     }
 
     /// [`Filter::matches`], given whether `t`'s account is on the budget
     /// and whether `t` needs a category (an on-budget transaction for no
-    /// category that is not a transfer).
+    /// category that is not a transfer), its text looked for in what the
+    /// transaction holds itself (no names).
     pub fn holds(&self, t: &Txn, on_budget: bool, needs_category: bool) -> bool {
+        self.holds_with(t, on_budget, needs_category, Words::default())
+    }
+
+    /// [`Filter::holds`], the text looked for in `words` too.
+    pub fn holds_with(&self, t: &Txn, on_budget: bool, needs_category: bool, words: Words) -> bool {
         if !self.accounts.is_empty() && !self.accounts.contains(&t.account_id) {
             return false;
         }
@@ -125,7 +163,17 @@ impl Filter {
             return false;
         }
         let want = self.text.trim().to_lowercase();
-        want.is_empty() || t.payee.to_lowercase().contains(&want) || t.imported_payee.to_lowercase().contains(&want)
+        if want.is_empty() {
+            return true;
+        }
+        let has = |s: &str| !s.is_empty() && s.to_lowercase().contains(&want);
+        has(&t.payee)
+            || has(&t.imported_payee)
+            || has(&t.memo)
+            || has(words.account)
+            || has(words.other)
+            || has(words.category)
+            || has(&written(t.amount))
     }
 
     /// The days it reads, at most, as a range of the date index: from its
@@ -467,19 +515,57 @@ mod tests {
             ..all.clone()
         };
         assert!(on.holds(&t, true, false) && !on.holds(&t, false, false));
-        // Text: the payee or the bank's line, any case.
+        // Text: the payee, the bank's line, the memo, the names a register
+        // shows with it, and the amount as written, any case.
+        let words = Words {
+            account: "Checking",
+            other: "Savings",
+            category: "Groceries",
+        };
+        let memo = Txn {
+            memo: "for the party".into(),
+            ..t.clone()
+        };
         for (text, hit) in [
             ("acme", true),
             ("PAYROLL", true),
             ("dir dep", true),
             (" corp ", true),
+            ("party", true),
+            ("checking", true),
+            ("SAVINGS", true),
+            ("grocer", true),
             ("side gig", false),
         ] {
             let f = Filter {
                 text: text.into(),
                 ..all.clone()
             };
-            assert_eq!(f.holds(&t, true, false), hit, "{text:?}");
+            assert_eq!(f.holds_with(&memo, true, false, words), hit, "{text:?}");
+        }
+        // The names are only where they are given.
+        let f = Filter {
+            text: "groceries".into(),
+            ..all.clone()
+        };
+        assert!(!f.holds(&t, true, false));
+        // The amount as the United States writes it.
+        let ten = Txn {
+            amount: -123_450,
+            ..t.clone()
+        };
+        for (text, hit) in [
+            ("1,234.50", true),
+            ("$1,234", true),
+            ("-$1,234.50", true),
+            ("1234.50", false),
+            ("99", false),
+        ] {
+            let f = Filter {
+                text: text.into(),
+                ..all.clone()
+            };
+            assert_eq!(f.holds(&ten, true, false), hit, "{text:?}");
         }
         // Categories, "no category" among them.
         let cats = |c: Vec<Option<Id<Category>>>| Filter {

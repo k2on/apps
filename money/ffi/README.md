@@ -49,7 +49,7 @@ domain's sentence for its first failed refinement, before it is sent.
 draw, each named by a `MoneyView` — `accounts`, `groups`, `budget(month)`,
 `inbox`, `register(account)`, `payees`, `banks`, `linked`, `asks`,
 `photos`, `receipts`, `paid(txn)`, `items(receipt)`, `search(account,
-text)` (the core's filter: payee or the bank's own words) — and what a page is
+text)` (the core's filter: payee, the bank's words, memo, category, account or amount) — and what a page is
 made of is the domain's (`money_domain::MoneyView`): a month's budget is
 its lines, its summary, its spending and its formulas on every platform.
 `session.hold(view)` holds one while a screen shows it (a `Holding`, let

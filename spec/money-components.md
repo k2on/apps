@@ -45,7 +45,7 @@ short and on a card, negative for overspent.
 | TransactionSheet | `Draft` (`newDraft`, `TxnLine.draft()`, `withPayee`, `withCategory`, `withTransfer`, `problem()`, `toChange()`), `suggestPayees` |
 | BankRow / AskRow / LinkedRow | `BankLine.title()`, `status(now)`; `AskLine.said(now)`, `closes(now)`, `isOpen()`; `askShown`; `LinkedLine.title()`, `kindWords()`, `opensWords()`; `linkableAccounts`, `bankAccounts` |
 | PaperReceipt | `storeName`, `ItemLine.quantityWords()`; attach from `unmatchedReceipts(receipts, amount, day)` |
-| Register search | the core's view `MoneyView.search(account, text)` (payee or the bank's own words) |
+| Register search | the core's view `MoneyView.search(account, text)` (payee, the bank's words, memo, category, account, or the amount as written) |
 
 Not yet one component in all three shells: the composables and views are
 still each shell's own layout of these readings (the names in the table at
