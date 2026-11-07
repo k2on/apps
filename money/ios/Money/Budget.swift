@@ -20,6 +20,7 @@ extension BankLine: Identifiable { public var id: String { name } }
 extension PayeeLine: Identifiable { public var id: String { name } }
 extension AskLine: Identifiable {}
 extension LinkedLine: Identifiable { public var id: String { plaidAccountId } }
+extension AccountShelf: Identifiable { public var id: Shelving { shelving } }
 
 // MARK: the month, by group
 
