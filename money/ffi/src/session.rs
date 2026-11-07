@@ -78,6 +78,7 @@ impl MoneyView {
                 text,
                 ..Filter::default()
             },
+            search: true,
             ..Filtered::default()
         }
     }

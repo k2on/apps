@@ -92,7 +92,14 @@ pub fn filtered(ledger: Ledger, adhoc: &Filter) -> Filtered {
         Ledger::Saved(id) => (Some(id), Filter::all()),
         Ledger::Adhoc => (None, adhoc.clone()),
     };
-    Filtered { saved, filter, month: None }
+    // The window's own conditions are its search box's: read wider, as a search is.
+    let search = matches!(ledger, Ledger::Adhoc);
+    Filtered {
+        saved,
+        filter,
+        month: None,
+        search,
+    }
 }
 
 /// What needs a look, as the window's inbox reads it.

@@ -712,6 +712,11 @@ pub struct Filtered {
     #[ark(check = "is_month_or_now", why = "a month, as 2026-10")]
     #[serde(default)]
     pub month: Option<String>,
+    /// A search box's register, not saved: its text looked for in every
+    /// field a register shows ([`crate::filters::Filter::finds`]). A saved
+    /// filter's register, total and formulas never are.
+    #[serde(default)]
+    pub search: bool,
 }
 
 // * The views' rows

@@ -655,6 +655,7 @@ fn a_split_transaction_needs_a_look_only_while_a_line_has_no_category() {
             saved: None,
             filter: Filter::needs_a_look(),
             month: None,
+            search: false,
         };
         b.list::<TxnLine>("filtered", &f).into_iter().map(|t| t.id).collect()
     };
