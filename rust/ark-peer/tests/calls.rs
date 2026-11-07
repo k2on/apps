@@ -96,7 +96,7 @@ fn a_call_is_never_kept_to_send_later() {
     );
 }
 
-/// The server's thread runs each call on a thread of its own and answers
+/// The server's thread runs each call off its own and answers
 /// the connection: a refusal is said as one, and a function it has not is
 /// refused by name.
 #[test]
@@ -166,4 +166,47 @@ fn a_call_goes_out_as_it_is_made() {
     });
     assert!(answered);
     hub.stop();
+}
+
+/// However many calls come, the server runs [`ark_peer::handle::CALLS`] at
+/// once and the rest wait their turn: a client cannot have it start a
+/// thread a call. Falsified by a thread a call: every call ran at once.
+#[test]
+fn calls_wait_their_turn_on_a_few_threads() {
+    use std::sync::Mutex;
+    let (ran, running) = mpsc::channel();
+    let (gate, open) = mpsc::channel::<()>();
+    let open = Arc::new(Mutex::new(open));
+    let mut server = hub();
+    let wait: Call = Arc::new(move |_, _| {
+        ran.send(()).unwrap();
+        open.lock().unwrap().recv().map(|_| vec![]).map_err(|e| e.to_string())
+    });
+    server.calls.insert("wait".into(), wait);
+    let handle = Handle::spawn(Authority::serve(server, Box::new(Memory::default()), 0).unwrap());
+    let (tx, rx) = mpsc::channel();
+    let c = handle.connect(dev("alice@phone").unwrap(), Box::new(move |b| tx.send(b).is_ok()));
+    let n = ark_peer::handle::CALLS + 2;
+    for id in 0..n as u64 {
+        let input = vec![];
+        handle.frame(
+            c,
+            Frame::Call {
+                id,
+                name: "wait".into(),
+                input,
+            }
+            .enc(),
+        );
+    }
+    for _ in 0..ark_peer::handle::CALLS {
+        running.recv_timeout(Duration::from_secs(5)).expect("a call runs");
+    }
+    assert!(running.recv_timeout(Duration::from_millis(200)).is_err(), "no more run at once");
+    for _ in 0..n {
+        gate.send(()).unwrap();
+    }
+    let answered = (0..n).filter(|_| rx.recv_timeout(Duration::from_secs(5)).is_ok()).count();
+    assert_eq!(answered, n, "every call answered in its turn");
+    handle.stop();
 }

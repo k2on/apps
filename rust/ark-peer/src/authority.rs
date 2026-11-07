@@ -83,8 +83,8 @@ pub struct ServerConfig {
 
 /// One of a server's [`ServerConfig::calls`]: given the caller, verified
 /// as its connection is, and the call's input; what it gives back, or why
-/// not. It runs on a thread of its own ([`crate::Handle`]), so it may take
-/// its time.
+/// not. It runs off the log's thread, on one of the few a server keeps
+/// for its calls ([`crate::handle::CALLS`]), so it may take its time.
 pub type Call = Arc<dyn Fn(&Ctx, &[u8]) -> Result<Vec<u8>, String> + Send + Sync>;
 
 impl ServerConfig {

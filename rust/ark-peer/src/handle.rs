@@ -154,6 +154,7 @@ impl Inner<Peer> {
 fn absorb(said: &mut Pumped, p: &Pumped) {
     said.opened |= p.opened;
     said.moved |= p.moved;
+    said.shown |= p.shown;
     said.frames[0] += p.frames[0];
     said.frames[1] += p.frames[1];
     said.closed.extend(p.closed.iter().cloned());
@@ -393,7 +394,7 @@ fn drive<P: Driven>(inner: std::sync::Weak<Inner<P>>, rx: std::sync::mpsc::Recei
 #[cfg(not(target_arch = "wasm32"))]
 mod serving {
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-    use std::sync::mpsc::{channel, Receiver, TryRecvError};
+    use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
     use std::sync::{Arc, Mutex};
 
     use ark::log::Seq;
@@ -409,14 +410,43 @@ mod serving {
 
     type Job = Box<dyn FnOnce(&mut Authority) -> Vec<Deliver> + Send>;
 
+    /// How many calls a server runs at once, each on a thread of the few it
+    /// keeps for them: the rest wait their turn, so no client has it start
+    /// a thread.
+    pub const CALLS: usize = 4;
+
     /// What a server's handle keeps beside it: what its connections said,
-    /// in order, not yet taken in; the next one's number; and its watch
-    /// and when it last looked.
+    /// in order, not yet taken in; the next one's number; its watch and
+    /// when it last looked; and its calls' threads, once one is made.
     #[derive(Default)]
     pub struct Queue {
         jobs: Arc<Mutex<Vec<Job>>>,
         next: AtomicU64,
         watch: Mutex<(Option<Watch>, i64)>,
+        calls: std::sync::OnceLock<Sender<Box<dyn FnOnce() + Send>>>,
+    }
+
+    impl Queue {
+        /// The calls' threads, [`CALLS`] of them, made at the first call;
+        /// they end with the queue.
+        fn calls(&self) -> &Sender<Box<dyn FnOnce() + Send>> {
+            self.calls.get_or_init(|| {
+                let (tx, rx) = channel::<Box<dyn FnOnce() + Send>>();
+                let rx = Arc::new(Mutex::new(rx));
+                for _ in 0..CALLS {
+                    let rx = rx.clone();
+                    let named = std::thread::Builder::new().name("ark-call".into());
+                    let _ = named.spawn(move || loop {
+                        let next = held(&rx).recv();
+                        match next {
+                            Ok(call) => call(),
+                            Err(_) => return,
+                        }
+                    });
+                }
+                tx
+            })
+        }
     }
 
     impl Authority {
@@ -460,7 +490,7 @@ mod serving {
         }
 
         /// What the connections said, taken in, what is written delivered,
-        /// the calls made run on threads of their own, and the watch told
+        /// the calls made run on the calls' threads, and the watch told
         /// what changed and, each second, the clock: the sessions it names
         /// have their connections closed.
         fn serve(&self, p: &mut Authority) {
@@ -477,16 +507,16 @@ mod serving {
                     out.extend(p.reply(c, id, Err(format!("this server has no function {}", call.name))));
                     continue;
                 };
-                // Its own thread: a call may take its time (another
+                // Off this thread: a call may take its time (another
                 // service's sign-in) and the log does not wait for it.
                 let (jobs, ring) = (Arc::downgrade(&q.jobs), self.inner.ring.clone());
-                std::thread::spawn(move || {
+                let _ = q.calls().send(Box::new(move || {
                     let answer = f(&call.who, &call.input);
                     if let Some(jobs) = jobs.upgrade() {
                         held(&jobs).push(Box::new(move |p| p.reply(c, id, answer)));
                         ring();
                     }
-                });
+                }));
             }
             p.deliver(out);
             let mut watch = held(&q.watch);
@@ -633,7 +663,7 @@ mod serving {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use serving::{Authenticate, Queue};
+pub use serving::{Authenticate, Queue, CALLS};
 
 /// The pump in a browser: a run as soon as the page is free whenever the
 /// connection or the app rings and while what arrived is not all taken in,
