@@ -92,11 +92,11 @@ final class SessionTests: XCTestCase {
     /// A refusal is the domain's sentence, said once.
     func testARefusalIsSaidInTheDomainsWords() {
         let s = Seen()
-        s.write(.openAccount(value: OpenAccount(name: "  ", kind: "checking", onBudget: true, balance: 0, date: Fx.today)))
+        s.write(.openAccount(value: OpenAccount(name: "  ", kind: .checking, onBudget: true, balance: 0, date: Fx.today)))
         XCTAssertEqual(s.notices.count, 1)
         XCTAssertEqual(s.notices.first.map { $0.hasPrefix("Couldn't do it: ") }, true)
         XCTAssertTrue(s.notices.first?.contains("an account needs a name") ?? false)
-        s.write(.openAccount(value: OpenAccount(name: "Travel Fund", kind: "savings", onBudget: true, balance: 50_000, date: Fx.today)))
+        s.write(.openAccount(value: OpenAccount(name: "Travel Fund", kind: .savings, onBudget: true, balance: 50_000, date: Fx.today)))
         XCTAssertEqual(s.account("Travel Fund")?.balance, 50_000)
         XCTAssertEqual(s.notices.count, 1)
         XCTAssertEqual(s.failures, [])
