@@ -3,7 +3,6 @@
 //! WebSocket, as a desktop or a phone is.
 #![allow(dead_code)]
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use ark::format::Encode;
@@ -14,7 +13,6 @@ use ark_auth::{Account, Login};
 use ark_peer::Memory;
 use harken_server::domain::host::{Kind, Listening};
 use harken_server::domain::Device;
-use harken_server::hosted::Hosted;
 use harken_server::{start, Config, Server};
 
 pub fn runtime() -> tokio::runtime::Runtime {
@@ -24,10 +22,9 @@ pub fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-/// harken's module, assembled once.
-pub fn hosted() -> &'static Hosted {
-    static H: OnceLock<Hosted> = OnceLock::new();
-    H.get_or_init(Hosted::harken)
+/// harken's domain, assembled once.
+pub fn domain() -> std::sync::Arc<ark::Domain> {
+    harken_domain::shared()
 }
 
 /// Reconnect fast: a test has no thirty seconds to spare.
@@ -87,11 +84,11 @@ pub fn open(who: Ctx, device: Option<(Kind, &str, bool)>) -> Peer {
         .to_bytes()
     });
     let config = ark_peer::Config {
-        live: device.is_some().then(|| hosted().domain.clone()),
+        live: device.is_some().then(domain),
         device,
-        ephemeral: [hosted().func("listening.scrub")].into(),
+        ephemeral: ["listening.scrub".to_string()].into(),
         every_ms: RELAY_MS,
-        ..ark_peer::Config::of(hosted().domain.clone())
+        ..ark_peer::Config::of(domain())
     };
     let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()));
     client.link.backoff = QUICK;

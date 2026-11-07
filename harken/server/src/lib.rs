@@ -18,7 +18,6 @@
 //!   (`harken/domain/src/listening.rs`), sequenced by the hub's volatile
 //!   authority, and needs nothing of this crate;
 //! - [`domain`]: the domain crate, as this crate calls it;
-//! - [`hosted`]: the domain the hub runs, harken's own, as this build compiled it;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
 //!
@@ -40,7 +39,6 @@ pub mod chapters;
 pub mod covers;
 pub mod domain;
 pub mod feeds;
-pub mod hosted;
 pub mod library;
 pub mod speaker;
 pub mod sync;
@@ -55,7 +53,6 @@ use ark_auth::Account;
 use ark_peer::Running;
 
 use assistant::ha;
-use hosted::Hosted;
 use library::Scanner;
 
 /// The phone's URL scheme: a login may always send its code back there.
@@ -257,7 +254,6 @@ const HOUSE: &str = "the house's speakers";
 pub struct Server {
     pub running: Running,
     pub auth: Arc<Auth>,
-    pub hosted: Hosted,
     pub scanner: Option<Scanner>,
     pub house: Option<ha::Assistant>,
 }
@@ -288,7 +284,7 @@ impl Server {
 /// Build the server from `config`, listen, and start the scanner and the
 /// bridge beside it.
 pub async fn start(config: Config) -> Result<Server> {
-    let hosted = Hosted::harken();
+    let domain = harken_domain::shared();
     // A sign-in is a row of the log, its token signed with a key kept in
     // the data directory (`ark_auth::server`). `docs/plan-auth.md` The
     // roles the configuration grants; the scanner's own `library` is its
@@ -300,10 +296,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // A person's Favorites, made once, here, at their first sign-in.
     let auth = Arc::new(auth.welcome("playlists.welcome"));
     let public_url = config.public_url();
-    let mut server = config.server(
-        harken_player::config::hub(&hosted.domain, None),
-        auth.clone(),
-    );
+    let mut server = config.server(harken_player::config::hub(&domain, None), auth.clone());
     if config.keepalive != ark_peer::settings::KEEPALIVE {
         tracing::info!(
             "the sync socket pings every {}ms and gives up after 3 unanswered",
@@ -375,7 +368,7 @@ pub async fn start(config: Config) -> Result<Server> {
                 Box::new(ark_peer::Memory::default()),
             )
         });
-        ha::start(house, hub.clone(), hosted.clone(), sign_in)
+        ha::start(house, hub.clone(), domain.clone(), sign_in)
     });
 
     // The scanner signs in like everything else, as the account `library`.
@@ -410,7 +403,6 @@ pub async fn start(config: Config) -> Result<Server> {
     Ok(Server {
         running,
         auth,
-        hosted,
         scanner,
         house,
     })

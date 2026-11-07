@@ -13,7 +13,6 @@ use ark_auth::server::{Auth, Mode};
 use ark_auth::{Grant, SignIn};
 use common::*;
 use harken_server::domain::{CreatePlaylist, Playlist};
-use harken_server::hosted::Hosted;
 
 /// Pump `p` until its link is turned away, or `secs` pass.
 fn turned_away(p: &mut Peer, secs: u64) -> bool {
@@ -94,7 +93,7 @@ fn an_expired_session_is_closed_and_turned_away() {
         Auth::new::<harken_server::domain::Harken>(Mode::Dev, "http://127.0.0.1", b"key")
             .with_ttl(1_500),
     );
-    let config = harken_player::config::hub(&Hosted::harken().domain, Some(100));
+    let config = harken_player::config::hub(&harken_domain::shared(), Some(100));
     let running = rt
         .block_on(
             ark_peer::Server::new(config)

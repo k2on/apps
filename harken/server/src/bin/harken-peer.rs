@@ -30,7 +30,7 @@
 //! the connection, whatever this says.
 //!
 //! It runs harken's domain as this build compiled it
-//! (`harken_server::hosted`), and reads a function's arguments by its
+//! (`harken_domain::shared`), and reads a function's arguments by its
 //! input's own checks (`Headless::args`).
 //!
 //! `--auth-patience-ms` bounds each sign-in request — its connection and
@@ -105,7 +105,6 @@ use ark_auth::client::Patience;
 use ark_auth::Login;
 use ark_peer::{Config, Files, Peer};
 use harken_server::domain::host::Listening;
-use harken_server::hosted::Hosted;
 use serde_json::{json, Map, Value};
 
 const USAGE: &str =
@@ -435,7 +434,7 @@ struct Headless {
     /// The peer, driven by its own thread (`ark_ffi::Peer`): its link
     /// pumped whenever it rings, a command answered meanwhile.
     peer: Arc<ark_ffi::Peer>,
-    hosted: Hosted,
+    domain: Arc<ark::Domain>,
     dir: PathBuf,
     server: Option<String>,
     token: Option<String>,
@@ -461,7 +460,7 @@ const CHUNK: usize = 32;
 const LOOK: Duration = Duration::from_millis(2);
 
 impl Headless {
-    fn open(f: &Flags, hosted: Hosted) -> Result<Headless, String> {
+    fn open(f: &Flags, domain: Arc<ark::Domain>) -> Result<Headless, String> {
         std::fs::create_dir_all(&f.dir).map_err(|e| format!("{}: {e}", f.dir.display()))?;
         let login = match (&f.server, f.alone) {
             (Some(server), false) => {
@@ -490,9 +489,9 @@ impl Headless {
         let config = match &f.device {
             Some(d) => {
                 let said = harken_player::config::device(d.can_play, &d.kind, &d.name);
-                harken_player::config::peer(&hosted.domain, said, 250)
+                harken_player::config::peer(&domain, said, 250)
             }
-            None => Config::of(hosted.domain.clone()),
+            None => Config::of(domain.clone()),
         };
         let disk = Files::new(f.dir.join("replica"))
             .map_err(|e| format!("opening {}: {e}", f.dir.display()))?;
@@ -517,7 +516,7 @@ impl Headless {
         })));
         let h = Headless {
             peer,
-            hosted,
+            domain,
             dir: f.dir.clone(),
             server: f.server.clone(),
             token: login.map(|l| l.token),
@@ -547,7 +546,6 @@ impl Headless {
     /// here when the input's own checks would refuse it.
     fn args(&self, name: &str, v: &Value) -> Result<String, String> {
         let f = self
-            .hosted
             .domain
             .get(name)
             .ok_or_else(|| format!("harken-peer knows no function {name}"))?;
@@ -832,7 +830,7 @@ impl Headless {
                 let Some(ephemeral) = ephemeral else {
                     return Answer::refused("this peer is no device (--device)");
                 };
-                if self.hosted.get(&name).is_none() {
+                if self.domain.get(&name).is_none() {
                     return Answer::refused(format!("no transition {name}"));
                 }
                 match self.args(&name, &input).and_then(|a| {
@@ -945,7 +943,7 @@ fn reauthor(client: &mut Peer, who: Ctx) {
 }
 
 fn run(f: Flags) -> Result<(), String> {
-    let mut h = Headless::open(&f, Hosted::harken())?;
+    let mut h = Headless::open(&f, harken_domain::shared())?;
     let mut out = std::io::stdout().lock();
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
@@ -1006,9 +1004,8 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    fn harken() -> Hosted {
-        static H: std::sync::OnceLock<Hosted> = std::sync::OnceLock::new();
-        H.get_or_init(Hosted::harken).clone()
+    fn harken() -> Arc<ark::Domain> {
+        harken_domain::shared()
     }
 
     fn line(h: &mut Headless, cmd: &str) -> Value {

@@ -2965,7 +2965,7 @@ pub mod ha {
     use ark_peer::{Authority, Handle};
 
     use super::{input, listening, playing, Act, Playing, Speaker, Speakers, GROUPING, VOLUME_SET};
-    use crate::hosted::Hosted;
+    use ark::Domain;
 
     /// How many of a handed queue's tracks are pushed at a speaker on one
     /// pass of the bridge. The first track goes at once, with its seek; the
@@ -3074,7 +3074,7 @@ pub mod ha {
     pub fn start(
         config: Config,
         hub: Handle<Authority>,
-        hosted: Hosted,
+        domain: Arc<Domain>,
         sign_in: SignIn,
     ) -> Assistant {
         let stop = Arc::new(AtomicBool::new(false));
@@ -3089,7 +3089,7 @@ pub mod ha {
                     .lowering(config.lower.clone());
                 let house = House::new(&config);
                 let entities = config.players.iter().map(|(e, _)| e.clone()).collect();
-                let mut wires = Wires::new(hub, hosted, entities, waker, sign_in);
+                let mut wires = Wires::new(hub, domain, entities, waker, sign_in);
                 run(&config, &house, &mut bridge, &mut wires, &woken, &flag);
             })
             .ok();
@@ -3179,7 +3179,7 @@ pub mod ha {
     /// The speakers and their connections to the hub.
     struct Wires {
         hub: Handle<Authority>,
-        hosted: Hosted,
+        domain: Arc<Domain>,
         /// The entities offered.
         entities: Vec<String>,
         /// Each speaker in each session it has stood in, by (account,
@@ -3208,14 +3208,14 @@ pub mod ha {
     impl Wires {
         fn new(
             hub: Handle<Authority>,
-            hosted: Hosted,
+            domain: Arc<Domain>,
             entities: Vec<String>,
             waker: Sender<()>,
             sign_in: SignIn,
         ) -> Wires {
             Wires {
                 hub,
-                hosted,
+                domain,
                 entities,
                 speakers: HashMap::new(),
                 standing: HashSet::new(),
@@ -3254,7 +3254,7 @@ pub mod ha {
         /// device does.
         fn stand(&mut self, user: &str, entity: &str, name: &str) {
             let k = (user.to_string(), entity.to_string());
-            let (hub, domain, waker) = (&self.hub, &self.hosted.domain, self.waker.clone());
+            let (hub, domain, waker) = (&self.hub, &self.domain, self.waker.clone());
             let peer = self.speakers.entry(k.clone()).or_insert_with(|| {
                 let said = Device {
                     can_play: true,
@@ -3983,10 +3983,10 @@ pub mod ha {
         use crate::domain::Scrub;
         const KITCHEN: &str = "media_player.kitchen";
         const STUDY: &str = "media_player.study";
-        let hosted = Hosted::harken();
+        let domain = harken_domain::shared();
         let hub = Handle::spawn(
             ark_peer::Authority::serve(
-                harken_player::config::hub(&hosted.domain, Some(1_000)),
+                harken_player::config::hub(&domain, Some(1_000)),
                 Box::new(ark_peer::Memory::default()),
                 now_ms(),
             )
@@ -3994,7 +3994,7 @@ pub mod ha {
         );
         let entities = vec![KITCHEN.into(), STUDY.into()];
         let no = Arc::new(|_: &str| Err("no sign-ins here".to_string()));
-        let mut w = Wires::new(hub, hosted, entities, channel().0, no);
+        let mut w = Wires::new(hub, domain, entities, channel().0, no);
         // Read and heard, as the thread does, until max's speakers agree.
         let settled = |w: &mut Wires| {
             let deadline = Instant::now() + Duration::from_secs(5);

@@ -29,7 +29,6 @@ use ark::peer::Ctx;
 use ark::store::{Change, Store};
 use ark_peer::{Authority, Config, Files};
 use arkdb::sim::{Net, Op};
-use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
 
 use super::proxy::{Proxy, Upstream};
@@ -54,10 +53,9 @@ pub const AUTH_PATIENCE_MS: u64 = 2_000;
 /// How long a condition is waited for before a scenario fails.
 pub const PATIENCE: Duration = Duration::from_secs(60);
 
-/// harken's module, assembled once.
-pub fn hosted() -> &'static Hosted {
-    static H: std::sync::OnceLock<Hosted> = std::sync::OnceLock::new();
-    H.get_or_init(Hosted::harken)
+/// harken's domain, assembled once.
+pub fn domain() -> std::sync::Arc<ark::Domain> {
+    harken_domain::shared()
 }
 
 /// Poll `ok` until it holds or `within` passes; whether it held.
@@ -114,15 +112,11 @@ impl Log {
             }
         }
         let disk = Box::new(Files::new(copy.path()).unwrap());
-        let mut p = Authority::serve(
-            harken_player::config::hub(&hosted().domain, Some(10_000)),
-            disk,
-            0,
-        )
-        .unwrap();
+        let mut p =
+            Authority::serve(harken_player::config::hub(&domain(), Some(10_000)), disk, 0).unwrap();
         let state = std::mem::replace(
             &mut p.log.store,
-            Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
+            Store::new(domain().schema.clone(), ark::schema::Space::Durable),
         );
         Some(Log {
             base: state.log().base_seq(),
@@ -163,7 +157,7 @@ impl Log {
 /// The function an entry names, by its binding's last part.
 pub fn function(e: &Logged) -> String {
     let n = &e.entry.func;
-    match hosted().domain.fns.contains_key(n) {
+    match domain().fns.contains_key(n) {
         true => n.rsplit('.').next().unwrap_or(n).to_string(),
         false => format!("#{n}"),
     }
@@ -892,7 +886,7 @@ pub struct Seeder {
 
 impl Seeder {
     fn new(dir: &Path) -> Seeder {
-        let config = harken_player::config::hub(&hosted().domain, Some(10_000));
+        let config = harken_player::config::hub(&domain(), Some(10_000));
         let mut net = Net::of(config.clone(), vec![], 0);
         net.hub =
             Authority::serve(config, Box::new(Files::new(dir.join("log")).unwrap()), 0).unwrap();
@@ -910,12 +904,12 @@ impl Seeder {
             Some(i) => *i,
             None => {
                 let who = Ctx::who(user, format!("seeded-{user}"), vec!["library".into()]);
-                let i = self.net.add(who, Config::of(hosted().domain.clone()));
+                let i = self.net.add(who, Config::of(domain()));
                 *self.users.entry(user.into()).or_insert(i)
             }
         };
         self.net
-            .run(&Op::Mutate(i, hosted().func(name), input.to_bytes()));
+            .run(&Op::Mutate(i, name.to_string(), input.to_bytes()));
         self.net.deliver();
         let c = &self.net.clients[&i];
         assert!(c.log.pending().is_empty(), "seeding {name}: still pending");
@@ -1104,7 +1098,7 @@ impl Fleet {
             let log = self.server.log_on_disk().unwrap_or_else(|| Log {
                 base: 0,
                 entries: vec![],
-                state: Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
+                state: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
             });
             let head = log.head_seq();
             let hash = log.hash();

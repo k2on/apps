@@ -216,7 +216,7 @@ fn the_health_says_the_head_and_who_is_connected() {
     assert!(lines.contains(&"horizon 0"), "{h}");
     assert!(lines.contains(&"room alice peers 2"), "{h}");
     assert!(
-        lines.contains(&format!("domain {} current", ark_peer::version(&hosted().domain)).as_str()),
+        lines.contains(&format!("domain {} current", ark_peer::version(&domain())).as_str()),
         "{h}"
     );
     rt.block_on(server.stop());
