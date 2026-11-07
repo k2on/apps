@@ -2,17 +2,15 @@
 //! bridge (`ark-ffi`) with money's domain linked in. The apps load this one
 //! shared library, open their replica with [`money_open`] — or the demo's
 //! household with [`money_demo`] — and call every function of the domain by
-//! name through it, typed by what `arkdb gen` writes from the domain. The
-//! views a budget is drawn from (accounts, the month's lines and summary, a
-//! register, what needs a look, payees, banks, spending) hand over UniFFI's
-//! records, no JSON per row (`money_domain`'s `ffi` feature).
+//! name through it, typed by what `arkdb gen` writes from the domain: a
+//! view's rows cross as their bytes, which the generated types read.
 //!
 //! Signing in is the bridge's, as harken's phones do it: the server's page
 //! (`login_url`, redirecting to `money://auth`), the code exchanged
 //! (`exchange`), the peer told (`Peer::login`) and dialled
 //! (`Peer::connect`). A refusal is a value wherever the app can ask before
-//! it acts (`Peer::check`) or after (`Peer::outcome`, `take_refusals`);
-//! [`money_send`] is a mutation whose own refusal is one too. A [`Hall`] is
+//! it acts (`Peer::check`) or after (`Peer::outcome`, `take_refusals`),
+//! and a mutation's own is the `Refusal` it throws. A [`Hall`] is
 //! a money server in the same process, over memory, that devices dial
 //! without a socket: what the apps' tests sync through.
 
@@ -50,25 +48,6 @@ pub fn money_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusa
 #[uniffi::export]
 pub fn money_domain() -> String {
     ark_peer::version(&money_domain::shared())
-}
-
-/// What became of a mutation as the device sent it: its intent, whose
-/// standing the app then follows, or the domain's own sentence for why not.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum Sent {
-    Intent { id: String },
-    Refused { why: String },
-}
-
-/// The function `name` on its input's JSON, as `Peer::mutate` does it, its
-/// refusal a value: what a form's button calls when it says the sentence
-/// under the field rather than catching.
-#[uniffi::export]
-pub fn money_send(peer: Arc<Peer>, name: String, input: String) -> Sent {
-    match peer.mutate(name, input) {
-        Ok(id) => Sent::Intent { id },
-        Err(Refusal::Refused { why }) => Sent::Refused { why },
-    }
 }
 
 /// Today, as the budget writes a day (`2026-10-26`), in UTC as the domain

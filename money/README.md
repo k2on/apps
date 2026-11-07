@@ -159,8 +159,8 @@ clears. Nothing of the sign-in comes to the server. A browser signed out is
 said so in Settings' last sync. The banks' own first pull is Plaid's
 history (`plaid.history`), set when a bank is connected.
 
-**A paper receipt is read from its photo** (`server/src/paper.rs`, the call
-`stores.read_receipt`), with no model doing the reading. `receipt-ocr`
+**A paper receipt is read from its photo** (`server/src/paper.rs`, the job
+`receipt_photo`), with no model doing the reading. `receipt-ocr`
 (`MONEY_RECEIPT_OCR`, the module's `ocr.package`; RapidOCR on PaddleOCR's
 PP-OCRv5 models) gives what it sees at three sizes of its text detector, and
 rules read each into lines, items with their quantity and weight lines,

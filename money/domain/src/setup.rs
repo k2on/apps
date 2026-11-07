@@ -77,23 +77,6 @@ pub struct CostcoState {
 
 // * A paper receipt, read
 
-/// A photo of a paper receipt read into its items: a [`ReceiptPhoto`],
-/// answered with a [`PaperReceipt`]. Nothing is kept; the device files what
-/// was read, as a person checked it, with `add_receipts`.
-pub const READ_RECEIPT: &str = "stores.read_receipt";
-
-/// The photo, its bytes (JPEG, PNG or HEIC) as base64.
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReceiptPhoto {
-    pub image: String,
-}
-
-impl std::fmt::Debug for ReceiptPhoto {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "ReceiptPhoto({} bytes of base64)", self.image.len())
-    }
-}
-
 /// What was read of a receipt: its lines and its totals, in cents, and how
 /// far to trust them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

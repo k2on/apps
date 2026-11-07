@@ -226,7 +226,6 @@ pub async fn start(config: Config) -> Result<Server> {
             data: config.data.clone(),
             amazon_program: stores.amazon.is_some(),
             costco: stores.costco.clone(),
-            ocr: stores.ocr.clone(),
             importer: importer_slot.clone(),
         }),
         ..ServerConfig::of(money_domain::shared())

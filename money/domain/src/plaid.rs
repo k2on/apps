@@ -669,17 +669,7 @@ fn upsert(
     }
     // Typed in by hand before the bank told of it: the same amount, in the
     // same account, within a few days, not yet the bank's.
-    let lo = (account.id, add_days(&u.date, -MATCH_DAYS));
-    let hi = (account.id, add_days(&u.date, MATCH_DAYS + 1));
-    let typed = db
-        .txn
-        .by(Txn::ACCOUNT_ID_DATE)
-        .between(lo, hi)
-        .all()
-        .into_iter()
-        .filter(|t| t.imported_id.is_none() && t.amount == u.amount && t.cleared != Cleared::Reconciled)
-        .min_by_key(|t| days_between(&t.date, &u.date).abs());
-    if let Some(t) = typed {
+    if let Some(t) = nearest(db, account, u, |t| t.imported_id.is_none()) {
         db.txn.update(Txn {
             imported_id: Some(u.transaction_id.clone()),
             imported_payee: u.imported_payee.clone(),
@@ -727,6 +717,16 @@ fn upsert(
     Ok(())
 }
 
+/// The transaction of `u`'s amount in `account` nearest its date, within
+/// [`MATCH_DAYS`] and not reconciled, of those `pick` takes.
+fn nearest(db: &Db<Money>, account: &Account, u: &BankTxn, pick: impl Fn(&Txn) -> bool) -> Option<Txn> {
+    let lo = (account.id, add_days(&u.date, -MATCH_DAYS));
+    let hi = (account.id, add_days(&u.date, MATCH_DAYS + 1));
+    (db.txn.by(Txn::ACCOUNT_ID_DATE).between(lo, hi).all().into_iter())
+        .filter(|t| t.amount == u.amount && t.cleared != Cleared::Reconciled && pick(t))
+        .min_by_key(|t| days_between(&t.date, &u.date).abs())
+}
+
 /// The copy of `u` another connection imported into `account` — the same
 /// amount, within [`MATCH_DAYS`], not yet matched by one of this bank's —
 /// made this bank's: it takes this bank's id and the bank's facts, and
@@ -734,13 +734,8 @@ fn upsert(
 /// `pending` (what is dated before this bank took the account over).
 /// Whether there was one.
 fn seam(db: &mut Db<Money>, bank: &str, account: &Account, u: &BankTxn, pending: bool, counts: &mut Counts) -> Result<bool, String> {
-    let lo = (account.id, add_days(&u.date, -MATCH_DAYS));
-    let hi = (account.id, add_days(&u.date, MATCH_DAYS + 1));
-    let theirs = (db.txn.by(Txn::ACCOUNT_ID_DATE).between(lo, hi).all().into_iter())
-        .filter(|t| t.imported_id.is_some() && t.imported_by != bank && t.amount == u.amount)
-        .filter(|t| t.cleared != Cleared::Reconciled && (!pending || t.cleared == Cleared::Uncleared))
-        .min_by_key(|t| days_between(&t.date, &u.date).abs());
-    let Some(t) = theirs else { return Ok(false) };
+    let theirs = |t: &Txn| t.imported_id.is_some() && t.imported_by != bank && (!pending || t.cleared == Cleared::Uncleared);
+    let Some(t) = nearest(db, account, u, theirs) else { return Ok(false) };
     db.txn.update(Txn {
         imported_id: Some(u.transaction_id.clone()),
         imported_by: bank.into(),
