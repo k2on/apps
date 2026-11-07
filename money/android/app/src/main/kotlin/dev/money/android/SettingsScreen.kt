@@ -100,7 +100,7 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
     var disconnecting by remember { mutableStateOf<BankLine?>(null) }
     // The ask put away, by its id's hex.
     var dismissed by rememberSaveable { mutableStateOf<String?>(null) }
-    val now = rememberNow(ticking = ledger.asks.firstOrNull()?.let(::isOpen) == true)
+    val now = rememberNow(ticking = ledger.asks.firstOrNull()?.isOpen() == true)
     val ask = askShown(ledger.asks, dismissed?.let { Id(it) }, now)
 
     Page(title = "Settings", onBack = onBack) { pad, _ ->
