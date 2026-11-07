@@ -322,7 +322,7 @@ impl Peer {
             self.ship();
         }
         self.flush();
-        p.shown |= !self.told.updates.is_empty() || std::mem::take(&mut self.transfers.arrived);
+        p.shown |= !self.news.updates.is_empty() || std::mem::take(&mut self.transfers.arrived);
         p
     }
 

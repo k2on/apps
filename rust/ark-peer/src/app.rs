@@ -90,9 +90,10 @@ pub enum Outcome {
     Refused(String),
 }
 
-/// What became of a device's own intents, and what its views did.
+/// What a device has to tell its app: what became of its own intents,
+/// what its views did, and what its server answered its calls.
 #[derive(Default)]
-pub(crate) struct Told {
+pub(crate) struct News {
     /// What the authority said of each intent on the log, and the
     /// refusals of each space not yet taken.
     outcomes: BTreeMap<EntryId, Outcome>,
@@ -108,7 +109,7 @@ pub(crate) struct Told {
     replies: BTreeMap<u64, Result<Vec<u8>, String>>,
 }
 
-impl Told {
+impl News {
     /// A call sent: its id.
     pub fn asked(&mut self) -> u64 {
         self.calls += 1;
@@ -215,7 +216,7 @@ impl Peer {
         let (space, f, id) = self.intent(f.name())?;
         if let Err(why) = self.author(space, &f, F::bytes(input), now) {
             // Said here, as the answer; not again among the refusals.
-            self.told.refused[space as usize].retain(|(r, _)| *r != id);
+            self.news.refused[space as usize].retain(|(r, _)| *r != id);
             return Err(why);
         }
         self.flush();
@@ -234,13 +235,13 @@ impl Peer {
 
     /// What a view did since it was last asked: its patches, in order.
     pub fn update(&mut self, view: usize) -> Vec<Patch> {
-        self.told.updates.remove(&view).unwrap_or_default()
+        self.news.updates.remove(&view).unwrap_or_default()
     }
 
     /// How many patches its views were ever told: a count taken before
     /// says whether any moved since.
     pub fn moves(&self) -> u64 {
-        self.told.moves
+        self.news.moves
     }
 
     /// What became of the intent `id` on the log: none for one this run
@@ -249,19 +250,19 @@ impl Peer {
         if self.log.pending().iter().any(|p| p.entry.id == *id) {
             return Some(Outcome::Pending);
         }
-        self.told.outcomes.get(id).cloned()
+        self.news.outcomes.get(id).cloned()
     }
 
     /// What the authority of `space` refused of this device's intents since
     /// the last ask: each one's id, and why.
     pub fn take_refusals(&mut self, space: Space) -> Vec<(EntryId, String)> {
-        std::mem::take(&mut self.told.refused[space as usize])
+        std::mem::take(&mut self.news.refused[space as usize])
     }
 
     /// What the server answered a call ([`Peer::request`]), once it has:
     /// what its function gave back, or why not. Taken, so it is told once.
     pub fn take_reply(&mut self, id: u64) -> Option<Result<Vec<u8>, String>> {
-        self.told.replies.remove(&id)
+        self.news.replies.remove(&id)
     }
 
     pub fn pending_len(&self) -> usize {

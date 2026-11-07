@@ -358,8 +358,8 @@ pub struct Peer {
     /// job, a view's reader) is a child of what it answered.
     span: Option<Span>,
     woke: [Option<Span>; 2],
-    /// What became of its own intents, and what its views did.
-    told: app::Told,
+    /// What it has to tell its app ([`app::News`]).
+    news: app::News,
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
@@ -424,7 +424,7 @@ impl Peer {
             relayed: None,
             span: None,
             woke: [None, None],
-            told: app::Told::default(),
+            news: app::News::default(),
             runners: vec![],
             missed: None,
             driven: None,
@@ -481,8 +481,8 @@ impl Peer {
                 }
                 Output::Settled(id, r) => {
                     match &r {
-                        Err(why) => self.told.refused(space, id, why),
-                        Ok(()) => self.told.confirmed(space, id),
+                        Err(why) => self.news.refused(space, id, why),
+                        Ok(()) => self.news.confirmed(space, id),
                     }
                     verdict.get_or_insert(r);
                 }
@@ -554,12 +554,12 @@ impl Peer {
         for (&i, w) in self.views.iter_mut().filter(|(_, w)| w.space == space) {
             let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
-                Some(Ok(patches)) => self.told.patched(i, patches),
+                Some(Ok(patches)) => self.news.patched(i, patches),
                 _ => {
                     let old = w.view.as_ref().map_or(0, |v| v.rows().len());
                     w.view = domain.as_ref().and_then(|d| d.watch(store, &w.ctx, &w.name, &w.input).ok());
                     let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
-                    self.told.patched(i, watched::again(old, rows));
+                    self.news.patched(i, watched::again(old, rows));
                 }
             }
         }
@@ -664,7 +664,7 @@ impl Peer {
         self.linked = false;
         self.frames.clear();
         // A call is answered on the connection it went out on, or never.
-        self.told.unanswered("the connection to the server closed before it answered");
+        self.news.unanswered("the connection to the server closed before it answered");
     }
 
     /// A call of one of its server's own functions ([`ServerConfig::calls`]),
@@ -674,7 +674,7 @@ impl Peer {
         if !self.linked {
             return Err("not connected to the server".into());
         }
-        let id = self.told.asked();
+        let id = self.news.asked();
         self.call(id, name, input);
         // Out now, as a change is: nobody pumps for an answer not yet asked.
         self.flush();
@@ -690,7 +690,7 @@ impl Peer {
         let f = Frame::dec(&bytes).ok()?;
         let said = (f.space(), matches!(f, Frame::Part { .. }));
         match f {
-            Frame::Reply { id, reply } => self.told.replied(id, reply),
+            Frame::Reply { id, reply } => self.news.replied(id, reply),
             f if f.is_file() => self.file_told(f),
             f if f.space() == Space::Durable && self.config.live_only => {}
             f => drop(self.step(f.space(), Input::Frame { from: None, frame: f })),
@@ -816,7 +816,7 @@ impl Peer {
             w.view = m.and_then(|m| m.domain.watch(&m.store, &ctx, &w.name, &w.input).ok());
             w.ctx = ctx.clone();
             let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
-            self.told.patched(i, watched::again(old, rows));
+            self.news.patched(i, watched::again(old, rows));
         }
     }
 
@@ -824,7 +824,7 @@ impl Peer {
     /// number is not given to another.
     pub fn unwatch(&mut self, view: usize) {
         self.views.remove(&view);
-        self.told.updates.remove(&view);
+        self.news.updates.remove(&view);
     }
 
     /// What this peer said of itself since, out of the outbox and to its
