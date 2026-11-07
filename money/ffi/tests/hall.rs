@@ -4,8 +4,9 @@
 //! importer's is the server's.
 
 use ark::format::Encode;
+use ark_ffi::Hall;
 use money_domain::{AccountLine, TxnLine};
-use money_ffi::Hall;
+use money_ffi::config;
 
 fn dir() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
@@ -21,10 +22,10 @@ fn read<T: Encode>(rows: Vec<Vec<u8>>) -> Vec<T> {
 #[test]
 fn a_household_shares_one_budget() {
     let (a, b, c) = (dir(), dir(), dir());
-    let hall = Hall::new();
+    let hall = Hall::new(config());
     let path = |d: &tempfile::TempDir| d.path().to_str().unwrap().to_string();
-    let alex = hall.device(path(&a), "alex".into(), "phone".into(), vec![]).unwrap();
-    let sam = hall.device(path(&b), "sam".into(), "phone".into(), vec![]).unwrap();
+    let alex = hall.device(config(), &path(&a), "alex".into(), "phone".into(), vec![]).unwrap();
+    let sam = hall.device(config(), &path(&b), "sam".into(), "phone".into(), vec![]).unwrap();
     alex.mutate("budget.setup".into(), "null".into()).unwrap();
     let open = r#"{"name":"Checking","kind":"checking","on_budget":true,"balance":50000,"date":"2026-10-01"}"#;
     alex.mutate("accounts.open_account".into(), open.into()).unwrap();
@@ -48,7 +49,9 @@ fn a_household_shares_one_budget() {
 
     let import = r#"{"bank":"chase","institution":"Chase","cursor":"c1","accounts":[],"upserts":[],"removed":[],"choose":false,"from_start":false,"institution_id":null}"#;
     assert!(alex.mutate("banks.import".into(), import.into()).is_err(), "only the importer imports");
-    let importer = hall.device(path(&c), "importer".into(), "plaid".into(), vec!["bank".into()]).unwrap();
+    let importer = hall
+        .device(config(), &path(&c), "importer".into(), "plaid".into(), vec!["bank".into()])
+        .unwrap();
     let id = importer.mutate("banks.import".into(), import.into()).unwrap();
     hall.carry();
     assert!(importer.outcome(id).is_some_and(|o| !o.pending && o.refused.is_none()));

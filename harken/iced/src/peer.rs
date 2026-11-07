@@ -178,7 +178,18 @@ fn library_of(playlist: Id) -> On<LibraryEntry> {
 impl Peer {
     /// Every list the window starts on, hydrated once; everything after this
     /// is maintained.
-    pub fn open(mut client: Replica) -> Peer {
+    pub fn open(client: Replica) -> Peer {
+        Peer::driven(client, Handle::spawn)
+    }
+
+    /// [`Peer::open`]'s, pumped by the window's own updates and not a
+    /// thread's: a test says when what arrived is taken in.
+    #[cfg(test)]
+    pub fn by_hand(client: Replica) -> Peer {
+        Peer::driven(client, Handle::by_hand)
+    }
+
+    fn driven(mut client: Replica, drive: fn(Replica) -> Handle) -> Peer {
         let c = &mut client;
         let playlists = Watched::open(c, playlists::PLAYLISTS.on(&()));
         let playlist = playlists.rows.first().map_or(NONE, |p: &Playlist| p.id);
@@ -205,7 +216,7 @@ impl Peer {
         let seen = client.state();
         let details = views.details.rows.iter().map(|t| (t.media_id, t.clone())).collect();
         let mut peer = Peer {
-            client: Handle::spawn(client),
+            client: drive(client),
             views,
             playlist,
             source: Source::Library,
@@ -1012,8 +1023,7 @@ mod tests {
         use ark_peer::{Authority as Hub, Config};
         let mut client = crate::client::memory(crate::client::nobody(), None);
         client.set_roles([crate::domain::LIBRARY]);
-        let mut peer = Peer::open(client);
-        peer.client.by_hand();
+        let mut peer = Peer::by_hand(client);
         peer.ensure_playlist();
         for (t, f) in [("Air", "a"), ("Glue", "b"), ("Opal", "c")] {
             peer.client

@@ -24,10 +24,11 @@ Three ways in, each an `ark_ffi::Peer`:
   the window's does: a pending coffee and a fill-up, then the coffee posted
   with its tip and an order, then nothing new. Its `note` is what the
   demo says of it.
-- **`Hall()`** — a money server in the process, over memory:
-  `hall.device(dir, user, session, roles)` is a phone dialling it,
-  `hall.carry()` delivers everything said. What the apps' tests sync two
-  phones through (`roles: ["bank"]` is the importer).
+- In Rust, **`ark_ffi::Hall::new(money_ffi::config())`** is a money
+  server in the process, over memory: `hall.device(config(), dir, user,
+  session, roles)` is a phone dialling it, `hall.carry()` delivers
+  everything said. What this crate's tests sync two phones through
+  (`roles: ["bank"]` is the importer).
 
 Over a peer, the domain is called through the typed Swift and Kotlin
 `arkdb gen` writes (`Money(peer:)` / `Money(peer)`), never edited:
@@ -63,11 +64,9 @@ a `StateFlow` on Android. Nothing runs on a clock.
 
 **Refusals are values.** A form asks first: `peer.check(name, json)` is
 the domain's own sentence for the first refinement the input fails ("an
-account needs a name"), or none. `moneySend(peer, name, json)` sends a
-mutation and answers `Sent.intent(id)` or `Sent.refused(why)` rather than
-throwing (the generated methods throw `Refusal`, whose `why` is the same
-sentence). After it is sent, `peer.standing(id)` is pending, confirmed or
-rejected with why; `peer.takeRejections()` is what the server refused since
+account needs a name"), or none. A mutation sent answers its intent's id
+or throws `Refusal`, whose `why` is the same sentence. After it is sent,
+`peer.standing(id)` is pending, confirmed or rejected with why; `peer.takeRejections()` is what the server refused since
 the last ask; `peer.status()` is the link, what is pending, and `denied`
 when the server turned the login away.
 

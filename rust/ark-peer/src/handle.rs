@@ -36,7 +36,6 @@
 //! which go to its server (`crate::observe`): slow work is in the server's
 //! events whichever thread did it.
 
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::peer::Ctx;
@@ -100,11 +99,10 @@ struct Inner<P: Driven> {
     /// The app's, rung when a pump moved anything.
     told: Mutex<Option<Wake>>,
     /// The thread's own: rung by the connection, by an app done with the
-    /// peer, by a server's connections.
+    /// peer, by a server's connections. Pumped by hand, nothing.
     ring: Wake,
-    /// Pumped by the app ([`Handle::pump`]) from now on, and not by the
-    /// thread: a test that says when what arrived is taken in.
-    by_hand: AtomicBool,
+    /// Pumped by the app alone ([`Handle::by_hand`]), on no thread.
+    by_hand: bool,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     beside: P::Beside,
     /// In a browser, the page's timers.
@@ -113,6 +111,20 @@ struct Inner<P: Driven> {
 }
 
 impl<P: Driven> Inner<P> {
+    fn new(peer: P, ring: Wake, by_hand: bool) -> Inner<P> {
+        let (said, told, beside) = Default::default();
+        Inner {
+            peer: Mutex::new(peer),
+            said,
+            told,
+            ring,
+            by_hand,
+            beside,
+            #[cfg(target_arch = "wasm32")]
+            page: Default::default(),
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, P> {
         held(&self.peer)
     }
@@ -177,11 +189,8 @@ impl Driven for Peer {
         Peer::deadline(self)
     }
 
-    /// Pumped by hand, the app is told what rang, and pumps itself; its own
-    /// clock is its deadlines.
-    fn turn(h: &Handle<Peer>, rang: bool) -> bool {
-        let by_hand = h.inner.by_hand.load(Relaxed);
-        if by_hand && rang || !by_hand && h.inner.pump().shown {
+    fn turn(h: &Handle<Peer>, _: bool) -> bool {
+        if h.inner.pump().shown {
             h.inner.tell();
         }
         true
@@ -249,10 +258,7 @@ impl<P: Driven> std::ops::DerefMut for Locked<'_, P> {
 impl<P: Driven> Drop for Locked<'_, P> {
     fn drop(&mut self) {
         HELD.with(|h| h.borrow_mut().retain(|p| *p != self.held));
-        // Pumped by hand, what the app had it say goes with its next pump.
-        if !self.inner.by_hand.load(Relaxed) {
-            (self.inner.ring)();
-        }
+        (self.inner.ring)();
     }
 }
 
@@ -285,18 +291,7 @@ impl<P: Driven> Handle<P> {
             #[cfg(target_arch = "wasm32")]
             let ring = page::ring(me.clone());
             peer.spawned(&ring, Weak(me.clone()));
-            let (said, told, beside) = Default::default();
-            let (peer, by_hand) = (Mutex::new(peer), Default::default());
-            Inner {
-                peer,
-                said,
-                told,
-                ring,
-                by_hand,
-                beside,
-                #[cfg(target_arch = "wasm32")]
-                page: Default::default(),
-            }
+            Inner::new(peer, ring, false)
         });
         #[cfg(not(target_arch = "wasm32"))]
         if let Some((weak, rx)) = thread {
@@ -337,24 +332,30 @@ impl Handle<Peer> {
         *held(&self.inner.told) = Some(w);
     }
 
+    /// `peer` pumped by the app alone ([`Handle::pump`]), on no thread: a
+    /// test that says when what arrived is taken in. What the connection
+    /// rings is the app's waker rung; what the app had it say goes with its
+    /// next pump, and so do its jobs' runs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn by_hand(mut peer: Peer) -> Handle<Peer> {
+        let inner = Arc::new_cyclic(|me: &std::sync::Weak<Inner<Peer>>| {
+            let me = me.clone();
+            peer.set_waker(Arc::new(move || me.upgrade().map_or((), |i| i.tell())));
+            Inner::new(peer, Arc::new(|| ()), true)
+        });
+        Handle { inner }
+    }
+
     /// When the app must pump: pumped by hand, at the peer's deadline;
     /// otherwise never — the thread keeps the peer's deadlines itself.
     pub fn deadline(&self) -> Option<u64> {
-        match self.inner.by_hand.load(Relaxed) {
-            true => self.inner.lock().deadline(),
-            false => None,
-        }
-    }
-
-    /// Pumped by [`Handle::pump`] from now on, never by the thread.
-    pub fn by_hand(&self) {
-        self.inner.by_hand.store(true, Relaxed);
+        self.inner.by_hand.then(|| self.inner.lock().deadline()).flatten()
     }
 
     /// What was taken in since the app last asked: by the thread, or —
     /// pumped by hand — by a pump now.
     pub fn pump(&self) -> Pumped {
-        if self.inner.by_hand.load(Relaxed) {
+        if self.inner.by_hand {
             self.inner.pump();
         }
         std::mem::take(&mut *held(&self.inner.said))
@@ -709,9 +710,6 @@ mod page {
     fn drive<P: Driven>(inner: &Weak<Inner<P>>) {
         let Some(i) = inner.upgrade() else { return };
         i.page.asked.store(false, Ordering::Relaxed);
-        if i.by_hand.load(Ordering::Relaxed) {
-            return i.tell();
-        }
         P::turn(&Handle { inner: i.clone() }, true);
         let (now, due) = (crate::monotonic_ms(), i.lock().deadline());
         match due {

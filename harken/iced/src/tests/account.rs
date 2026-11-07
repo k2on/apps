@@ -210,7 +210,7 @@ fn settings_resyncs_the_library_for_the_library_alone() {
     assert!(app.resync.as_deref().unwrap_or("").starts_with("Asked"), "{:?}", app.resync);
 
     // Somebody without the library's role.
-    let plain = super::hand(crate::peer::Peer::open(crate::client::memory(super::who("bob"), Some("dev"))));
+    let plain = crate::peer::Peer::by_hand(crate::client::memory(super::who("bob"), Some("dev")));
     let mut app = App::with_peer(plain, "http://127.0.0.1:9".into(), Some(login("bob")));
     let _ = app.update(Message::Select(Source::Settings));
     let _ = app.update(Message::Resync);

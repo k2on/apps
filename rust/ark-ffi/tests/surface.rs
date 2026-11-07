@@ -181,10 +181,10 @@ fn a_device_reopens_from_its_disk() {
 fn a_denied_login_is_said() {
     let hub = server();
     let d = tempfile::tempdir().unwrap();
-    let p = device(&d, "phone", Some(login("alice@phone")));
     // Pumped by hand, so the next denial is not taken in before the
     // status is read.
-    p.by_hand();
+    let c = arkdb::room::device(config(), "phone", 10);
+    let p = Peer::by_hand(c, d.path().to_str().unwrap(), Some(login("alice@phone"))).unwrap();
     p.connect_with("", hub.dialer(Arc::new(|_: &str| None)));
     until("denied", || {
         p.pump();

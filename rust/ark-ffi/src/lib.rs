@@ -35,6 +35,9 @@ use ark_peer::{Config, Files, Patch};
 
 uniffi::setup_scaffolding!();
 
+mod hall;
+pub use hall::Hall;
+
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
 pub enum Refusal {
@@ -73,6 +76,13 @@ pub struct Login {
     pub picture: String,
 }
 
+impl Login {
+    /// Who it is, and its token.
+    fn who(self) -> (Ctx, String) {
+        (Ctx::who(self.user, self.session, self.roles), self.token)
+    }
+}
+
 impl From<ark_auth::Login> for Login {
     fn from(l: ark_auth::Login) -> Login {
         Login {
@@ -85,12 +95,6 @@ impl From<ark_auth::Login> for Login {
             expires_ms: l.expires_ms,
             picture: l.user.picture,
         }
-    }
-}
-
-impl Login {
-    fn who(&self) -> Ctx {
-        Ctx::who(self.user.clone(), self.session.clone(), self.roles.clone())
     }
 }
 
@@ -242,6 +246,12 @@ impl Shared {
     }
 }
 
+/// The device `dir` holds, as [`Peer::open`] opens it.
+fn opened(config: Config, dir: &str, login: Option<(Ctx, String)>) -> Result<ark_peer::Peer, Refusal> {
+    let disk = Files::new(dir).map_err(|e| format!("{dir}: {e}"))?;
+    Ok(ark_peer::Peer::open_as(config, Box::new(disk), login))
+}
+
 /// A device's peer: the app kit of `ark-peer` over a domain, on a disk.
 #[derive(uniffi::Object)]
 pub struct Peer {
@@ -253,28 +263,37 @@ impl Peer {
     /// signed in on it — or, given a login, as that login — with its driver
     /// started. What an app's own crate calls with its domain.
     pub fn open(config: Config, dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
-        let disk = Files::new(dir).map_err(|e| format!("{dir}: {e}"))?;
-        let login = login.map(|l| (l.who(), l.token));
-        Peer::of(ark_peer::Peer::open_as(config, Box::new(disk), login))
+        Peer::of(opened(config, dir, login.map(Login::who))?)
+    }
+
+    /// [`Peer::open`]'s, pumped by hand ([`Peer::pump`]) on no thread of
+    /// its own: a test's, which says when what arrived is taken in.
+    pub fn by_hand(config: Config, dir: &str, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
+        Ok(Peer::held(Handle::by_hand(opened(config, dir, login.map(Login::who))?)))
     }
 
     /// A peer opened by its host its own way — as a login it keeps itself,
     /// its link tuned — driven from now on as [`Peer::open`]'s is.
     pub fn of(peer: ark_peer::Peer) -> Result<Arc<Peer>, Refusal> {
-        // What this device does goes to its server (docs/plan-observe.md).
-        let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
-        let shared = Arc::new(Shared {
-            peer: Handle::spawn(peer),
-            state: Mutex::default(),
-            listener: Mutex::new(None),
-        });
-        let weak = Arc::downgrade(&shared);
-        shared.peer.set_waker(Arc::new(move || {
+        let p = Peer::held(Handle::spawn(peer));
+        let weak = Arc::downgrade(&p.shared);
+        p.shared.peer.set_waker(Arc::new(move || {
             if let Some(s) = weak.upgrade() {
                 s.pump();
             }
         }));
-        Ok(Arc::new(Peer { shared }))
+        Ok(p)
+    }
+
+    fn held(peer: Handle) -> Arc<Peer> {
+        // What this device does goes to its server (docs/plan-observe.md).
+        let _ = ark_peer::observe::install(ark_peer::observe::Sink::Outbox);
+        let shared = Arc::new(Shared {
+            peer,
+            state: Mutex::default(),
+            listener: Mutex::new(None),
+        });
+        Arc::new(Peer { shared })
     }
 
     /// `f` on the peer itself, its views settled after: what an app's crate
@@ -286,12 +305,6 @@ impl Peer {
     /// [`Peer::connect`] through `dial`: a test's in-process server.
     pub fn connect_with(&self, url: &str, dial: impl Dial + 'static) {
         self.shared.act(|s| s.peer.connect_with(url, dial));
-    }
-
-    /// Pumped by hand from now on — [`Peer::pump`], and never by its own
-    /// thread — so that a test says when what arrived is taken in.
-    pub fn by_hand(&self) {
-        self.shared.peer.by_hand();
     }
 
     /// What the connection said taken in now, and what the peer has to say
@@ -453,7 +466,8 @@ impl Peer {
     pub fn login(&self, login: Login) {
         self.shared.act(|s| {
             s.state.denied = None;
-            s.peer.login(login.who(), login.token)
+            let (who, token) = login.who();
+            s.peer.login(who, token)
         });
     }
 

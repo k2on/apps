@@ -82,7 +82,7 @@ fn joined(can_play: bool, hub: &ark_peer::Handle<ark_peer::Authority>) -> App {
     client.set_roles([crate::domain::LIBRARY]);
     library(&mut client);
     client.connect_with("hub", dial(hub));
-    let mut app = App::with_peer(super::hand(crate::peer::Peer::open(client)), String::new(), None);
+    let mut app = App::with_peer(crate::peer::Peer::by_hand(client), String::new(), None);
     app.listening.open("me-device");
     app
 }

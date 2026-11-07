@@ -10,9 +10,7 @@
 //! (`exchange`), the peer told (`Peer::login`) and dialled
 //! (`Peer::connect`). A refusal is a value wherever the app can ask before
 //! it acts (`Peer::check`) or after (`Peer::outcome`, `take_refusals`),
-//! and a mutation's own is the `Refusal` it throws. A [`Hall`] is
-//! a money server in the same process, over memory, that devices dial
-//! without a socket: what the apps' tests sync through.
+//! and a mutation's own is the `Refusal` it throws.
 
 use std::sync::Arc;
 
@@ -22,11 +20,9 @@ use ark_peer::Config;
 uniffi::setup_scaffolding!();
 
 mod demo;
-mod hall;
 #[cfg(feature = "page")]
 mod page;
 pub use demo::{money_demo, DemoBank, DemoSync};
-pub use hall::Hall;
 #[cfg(feature = "page")]
 pub use page::money_page_corners;
 

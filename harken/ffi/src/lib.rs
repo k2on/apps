@@ -8,11 +8,10 @@
 //! `harken-server` runs, over memory — that devices dial without a socket:
 //! what the apps' tests sync through.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::Arc;
 
-use ark::peer::Ctx;
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{now_ms, Authority, Config, Handle, Memory};
+use ark_peer::Config;
 use harken_domain::host::{self, Listening};
 use serde_json::json;
 
@@ -70,83 +69,38 @@ pub fn harken_media_url(server: String, file: String) -> String {
     host::url(&server, &file)
 }
 
-/// A harken server in this process: the hub `harken-server` runs — the log
-/// and the listening session, `on_join`, `on_leave` and `on_restore` the
-/// domain's — over memory, which devices dial without a socket. Its devices
-/// are pumped by hand ([`Hall::carry`]), so a test says when what was said
-/// has been answered.
-/// Who a hall's token, `user/session`, is.
-fn token(t: &str) -> Option<Ctx> {
-    let (actor, session) = t.split_once('/')?;
-    Some(Ctx::who(actor, session, vec![]))
-}
-
+/// A harken server in this process ([`ark_ffi::Hall`]): the hub
+/// `harken-server` runs — the log and the listening session, `on_join`,
+/// `on_leave` and `on_restore` the domain's — over memory, which devices
+/// dial without a socket. Its devices are pumped by hand ([`Hall::carry`]),
+/// so a test says when what was said has been answered.
 #[derive(uniffi::Object)]
-pub struct Hall {
-    hub: Handle<Authority>,
-    devices: Mutex<Vec<Weak<Peer>>>,
-}
+pub struct Hall(ark_ffi::Hall);
 
 #[uniffi::export]
 impl Hall {
     #[uniffi::constructor]
     pub fn new() -> Arc<Hall> {
-        let c = harken_player::config::hub(&harken_domain::shared(), None);
-        let hub = Handle::spawn(Authority::serve(c, Box::new(Memory::default()), now_ms()).expect("an empty log reads"));
-        Arc::new(Hall {
-            hub,
-            devices: Mutex::default(),
-        })
+        Arc::new(Hall(ark_ffi::Hall::new(harken_player::config::hub(&harken_domain::shared(), None))))
     }
 
     /// A device on the disk at `dir`, signed in as `user` on the session
     /// `session` — which is the device's id in the listening session —
     /// saying `device` (a `Device`'s JSON), dialling this hall.
     pub fn device(&self, dir: String, user: String, session: String, device: String) -> Result<Arc<Peer>, Refusal> {
-        let login = Login {
-            token: format!("{user}/{session}"),
-            session,
-            user,
-            name: String::new(),
-            email: String::new(),
-            roles: vec![],
-            expires_ms: 0,
-            picture: String::new(),
-        };
-        let p = Peer::open(config(said(&device)?), &dir, Some(login))?;
-        p.by_hand();
-        p.connect_with("hall", self.hub.dialer(Arc::new(token)));
-        self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));
-        self.carry();
-        Ok(p)
+        self.0.device(config(said(&device)?), &dir, user, session, vec![])
     }
 
     /// `user`'s listening session as the hall holds it, as
     /// [`harken_listening`] says a device's.
     pub fn listening(&self, user: String) -> String {
-        let l = self.hub.with(move |p| p.live.as_ref().map(|l| Listening::of(&l.store, &user)));
+        let l = self.0.hub.with(move |p| p.live.as_ref().map(|l| Listening::of(&l.store, &user)));
         listening_json(&l.flatten().unwrap_or_default())
     }
 
     /// Everything every device said answered and taken in, until nobody
     /// has anything more to say.
     pub fn carry(&self) {
-        let devices: Vec<Arc<Peer>> = self
-            .devices
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .filter_map(Weak::upgrade)
-            .collect();
-        let mut still = 0;
-        for _ in 0..64 {
-            // Whatever the hub had, answered: its thread runs this after.
-            let _ = self.hub.with(|_| ());
-            let moved = devices.iter().fold(false, |m, p| p.pump() | m);
-            still = if moved { 0 } else { still + 1 };
-            if still == 2 {
-                return;
-            }
-        }
+        self.0.carry()
     }
 }

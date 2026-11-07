@@ -140,7 +140,8 @@ fn views_at(copies: usize) {
     eprintln!("{:>14} {:>6} {:>10}", "query", "rows", "hydrate");
     for (name, input) in &queries {
         let started = Instant::now();
-        let v = client.view(name, input).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (v, made) = client.view(name, input);
+        made.unwrap_or_else(|e| panic!("{name}: {e}"));
         let took = started.elapsed();
         eprintln!("{name:>14} {:>6} {took:>10.1?}", client.rows(v).unwrap_or_default().len());
     }
@@ -276,7 +277,7 @@ fn bench_real() {
     }
     let t = Instant::now();
     let replica = crate::client::open(Box::new(disk), None, crate::listening::device());
-    let mut app = crate::App::with_peer(super::hand(crate::peer::Peer::open(replica)), String::new(), None);
+    let mut app = crate::App::with_peer(crate::peer::Peer::by_hand(replica), String::new(), None);
     eprintln!("opened in {:.1?}: {} songs", t.elapsed(), app.peer.rows().len());
     let mut frame = Frame::new(&app);
     eprintln!("{:>22} {:>9} {:>9} {:>9} {:>9} {:>9}", "", "update", "view", "layout", "draw", "frame");
