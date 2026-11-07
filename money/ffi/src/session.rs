@@ -60,8 +60,9 @@ pub enum MoneyView {
         receipt: String,
     },
     /// The transactions a search finds — in one account's register, or
-    /// (none) every account's: those whose payee or whose bank's own words
-    /// hold `text`, the core's one matcher (`Filter`).
+    /// (none) every account's: those whose payee, bank's words, memo,
+    /// category, account or amount as written hold `text`, the core's one
+    /// matcher (`Filter`).
     Search {
         account: Option<RowId>,
         text: String,
@@ -77,6 +78,7 @@ impl MoneyView {
                 text,
                 ..Filter::default()
             },
+            search: true,
             ..Filtered::default()
         }
     }

@@ -450,7 +450,7 @@ pub struct Filter {
     /// Only accounts on the budget.
     pub on_budget: bool,
     /// What the payee or the bank's own line for it holds, any case; blank
-    /// is anything.
+    /// is anything. A search box reads it wider (`Filtered::search`).
     pub text: String,
     /// The categories; none is any. `None` among them is "no category".
     pub categories: Vec<Option<Id<Category>>>,

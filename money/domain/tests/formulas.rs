@@ -552,3 +552,59 @@ fn the_rule_table_stays_and_assigns_nothing() {
     assert!(h.b.rows::<Rule>("rule").is_empty());
     assert_eq!(h.giving("2026-10").assigned, 0);
 }
+
+/// A saved filter and a formula over it read the payee and the bank's line
+/// alone, whatever a search box reads: an account, a memo and a category
+/// naming the text add nothing to its total nor to the formula's month,
+/// while a search for the same text finds them. Falsified by the saved
+/// filter reading as wide as a search: the total and the giving grew.
+#[test]
+fn a_saved_filter_and_its_formula_read_the_payee_alone() {
+    let mut h = house();
+    october(&mut h);
+    let acme = h.filter("ACME paychecks", income("acme", &[]));
+    h.formula(Some("2026-10"), &[(acme, "10%")]).unwrap();
+    let saved = Filtered {
+        saved: Some(acme),
+        ..Filtered::default()
+    };
+    let total = |h: &House, f: &Filtered| h.b.list::<FilterTotal>("filtered_total", f).pop().unwrap_or_default();
+    let (before, giving) = (total(&h, &saved), h.giving("2026-10").assigned);
+    assert_eq!(giving, 35_000);
+    // Money in that names ACME only where a register shows it beside the payee.
+    let named = h.b.account("ACME Savings", "savings", 0);
+    h.paid(named, "2026-10-05", "Transfer In", 40_000);
+    let side = h.b.group("Side");
+    let refunds = h.b.category(side, "ACME Refunds");
+    let checking = h.checking;
+    h.b.spend(checking, "2026-10-06", "Refund", Some(refunds), 7_000);
+    let memo = AddTransaction {
+        account_id: checking,
+        date: "2026-10-07".into(),
+        payee: "Bonus".into(),
+        category_id: Some(ready_to_assign()),
+        memo: "from acme".into(),
+        amount: 9_000,
+        ..AddTransaction::default()
+    };
+    h.b.run("add_transaction", &memo).unwrap();
+    assert_eq!(total(&h, &saved), before, "the saved filter's total");
+    assert_eq!(h.giving("2026-10").assigned, giving, "the formula's month");
+    // A search box's register for the same text finds every one of them.
+    let search = Filtered {
+        filter: income("acme", &[]),
+        search: true,
+        ..Filtered::default()
+    };
+    let found: Vec<String> = h.b.list::<TxnLine>("filtered", &search).into_iter().map(|t| t.payee).collect();
+    for p in ["Transfer In", "Refund", "Bonus"] {
+        assert!(found.iter().any(|f| f == p), "{p}: {found:?}");
+    }
+    // A search of a saved filter is the saved filter: read as one.
+    let as_saved = Filtered {
+        saved: Some(acme),
+        search: true,
+        ..Filtered::default()
+    };
+    assert_eq!(total(&h, &as_saved), before);
+}

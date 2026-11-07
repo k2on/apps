@@ -11,6 +11,12 @@
 //! ([`Filter::account`]) — the phones' `register` and `inbox`, a saved
 //! filter's total, and a formula's terms ([`crate::formulas`]) all ask it.
 //!
+//! **A search** ([`Filtered::search`], the register's search box on every
+//! client) looks for its text wider ([`Filter::finds`]): in the memo, the
+//! category's and the accounts' names and the amount as written too. Only
+//! a search not saved does: a saved filter, its total and every formula
+//! over it read the payee and the bank's line alone, as they always have.
+//!
 //! **Saved filters** are named, ordered, and kept ([`SavedFilter`]): the
 //! sidebar lists them with what they add up to ([`saved`]), and a formula
 //! sums one month by month. A filter a formula sums is not deleted: the
@@ -25,6 +31,25 @@ use crate::dates::{first_day, is_day, last_day};
 use crate::schema::*;
 use crate::transactions::txn_line;
 use crate::types::*;
+
+/// What a search's text is looked for in ([`Filter::finds`]), beside the
+/// transaction's own payee, bank's line, memo and amount: the names a
+/// register shows with it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Words<'a> {
+    /// Its account's name.
+    pub account: &'a str,
+    /// The other account's, for a transfer.
+    pub other: &'a str,
+    /// Its category's name.
+    pub category: &'a str,
+}
+
+/// How an amount is written where a filter's text looks for it: as the
+/// United States writes money (`-$1,234.56`), what the phones searched by.
+fn written(cents: i64) -> String {
+    ark_format::amount(cents, &ark_format::NumberStyle::us())
+}
 
 impl Filter {
     /// Every transaction: "All Accounts".
@@ -94,10 +119,59 @@ impl Filter {
         self.holds(t, on_budget, needs_category)
     }
 
+    /// [`Filter::matches`] as a search reads it: its text looked for
+    /// wider, in every field a register shows ([`Filter::holds_with`]).
+    /// The register's search box's alone ([`Filtered::search`]); never a
+    /// saved filter's, nor a formula's.
+    pub fn finds(&self, db: &Db<Money>, t: &Txn) -> bool {
+        let account = db.account.get(t.account_id);
+        let on_budget = account.as_ref().is_some_and(|a| a.on_budget);
+        let needs_category = self.needs_look && t.approved && needs_category(db, t, on_budget);
+        if self.text.trim().is_empty() {
+            return self.holds(t, on_budget, needs_category);
+        }
+        let other = t.transfer_account.and_then(|a| db.account.get(a));
+        let category = t.category_id.and_then(|c| db.category.get(c));
+        let words = Words {
+            account: account.as_ref().map_or("", |a| a.name.as_str()),
+            other: other.as_ref().map_or("", |a| a.name.as_str()),
+            category: category.as_ref().map_or("", |c| c.name.as_str()),
+        };
+        self.holds_with(t, on_budget, needs_category, words)
+    }
+
     /// [`Filter::matches`], given whether `t`'s account is on the budget
     /// and whether `t` needs a category (an on-budget transaction for no
-    /// category that is not a transfer).
+    /// category that is not a transfer): its text in the payee or the
+    /// bank's line.
     pub fn holds(&self, t: &Txn, on_budget: bool, needs_category: bool) -> bool {
+        let want = self.text.trim().to_lowercase();
+        self.meets(t, on_budget, needs_category)
+            && (want.is_empty() || t.payee.to_lowercase().contains(&want) || t.imported_payee.to_lowercase().contains(&want))
+    }
+
+    /// [`Filter::finds`], given the names: its text in the payee, the
+    /// bank's line, the memo, `words` or the amount as written.
+    pub fn holds_with(&self, t: &Txn, on_budget: bool, needs_category: bool, words: Words) -> bool {
+        if !self.meets(t, on_budget, needs_category) {
+            return false;
+        }
+        let want = self.text.trim().to_lowercase();
+        if want.is_empty() {
+            return true;
+        }
+        let has = |s: &str| !s.is_empty() && s.to_lowercase().contains(&want);
+        has(&t.payee)
+            || has(&t.imported_payee)
+            || has(&t.memo)
+            || has(words.account)
+            || has(words.other)
+            || has(words.category)
+            || has(&written(t.amount))
+    }
+
+    /// Every condition but the text.
+    fn meets(&self, t: &Txn, on_budget: bool, needs_category: bool) -> bool {
         if !self.accounts.is_empty() && !self.accounts.contains(&t.account_id) {
             return false;
         }
@@ -124,8 +198,7 @@ impl Filter {
         if self.needs_look && t.approved && !needs_category {
             return false;
         }
-        let want = self.text.trim().to_lowercase();
-        want.is_empty() || t.payee.to_lowercase().contains(&want) || t.imported_payee.to_lowercase().contains(&want)
+        true
     }
 
     /// The days it reads, at most, as a range of the date index: from its
@@ -381,6 +454,12 @@ pub fn saved(_: &Ctx, _: &Db<Money>, _: ()) -> Result<Plan<FilterLine>, Refusal>
     Ok(scan::<Money, SavedFilter>().map_with(filter_line).sort(|l| (l.pos, l.id)))
 }
 
+/// Whether a register is a search's ([`Filtered::search`]), its text read
+/// wider: never a saved filter's.
+fn searched(input: &Filtered) -> bool {
+    input.search && input.saved.is_none()
+}
+
 /// The conditions a register for `input` reads: a saved filter's (none
 /// when it is gone), or those said; within the month, when one is said.
 pub fn conditions(db: &Db<Money>, input: &Filtered) -> Option<Filter> {
@@ -400,8 +479,9 @@ pub fn conditions(db: &Db<Money>, input: &Filtered) -> Option<Filter> {
 #[view("transactions.filtered")]
 pub fn filtered(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<TxnLine>, Refusal> {
     let f = conditions(db, &input);
+    let search = searched(&input);
     Ok(scan::<Money, Txn>()
-        .filter_with(move |db, t| f.as_ref().is_some_and(|f| f.matches(db, t)))
+        .filter_with(move |db, t| f.as_ref().is_some_and(|f| if search { f.finds(db, t) } else { f.matches(db, t) }))
         .map_with(txn_line)
         .sort(|l| (Desc(l.date.clone()), Desc(l.created_ms), l.id)))
 }
@@ -411,8 +491,9 @@ pub fn filtered(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<TxnLine
 #[view("transactions.filtered_total")]
 pub fn filtered_total(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<FilterTotal>, Refusal> {
     let f = conditions(db, &input);
+    let search = searched(&input);
     Ok(scan::<Money, Txn>()
-        .filter_with(move |db, t| f.as_ref().is_some_and(|f| f.matches(db, t)))
+        .filter_with(move |db, t| f.as_ref().is_some_and(|f| if search { f.finds(db, t) } else { f.matches(db, t) }))
         .group(
             |_| 0i64,
             |_, _, txns| {
@@ -467,19 +548,65 @@ mod tests {
             ..all.clone()
         };
         assert!(on.holds(&t, true, false) && !on.holds(&t, false, false));
-        // Text: the payee or the bank's line, any case.
+        // A search's text: the payee, the bank's line, the memo, the names
+        // a register shows with it, and the amount as written, any case.
+        let words = Words {
+            account: "Checking",
+            other: "Savings",
+            category: "Groceries",
+        };
+        let memo = Txn {
+            memo: "for the party".into(),
+            ..t.clone()
+        };
         for (text, hit) in [
             ("acme", true),
             ("PAYROLL", true),
             ("dir dep", true),
             (" corp ", true),
+            ("party", true),
+            ("checking", true),
+            ("SAVINGS", true),
+            ("grocer", true),
             ("side gig", false),
         ] {
             let f = Filter {
                 text: text.into(),
                 ..all.clone()
             };
-            assert_eq!(f.holds(&t, true, false), hit, "{text:?}");
+            assert_eq!(f.holds_with(&memo, true, false, words), hit, "{text:?}");
+        }
+        // A filter's own text (saved, a formula's) reads the payee and the
+        // bank's line alone: never the memo, the names or the amount.
+        for text in ["party", "checking", "grocer", "$"] {
+            let f = Filter {
+                text: text.into(),
+                ..all.clone()
+            };
+            assert!(!f.holds(&memo, true, false), "{text:?}");
+        }
+        assert!(Filter {
+            text: "acme".into(),
+            ..all.clone()
+        }
+        .holds(&memo, true, false));
+        // The amount as the United States writes it.
+        let ten = Txn {
+            amount: -123_450,
+            ..t.clone()
+        };
+        for (text, hit) in [
+            ("1,234.50", true),
+            ("$1,234", true),
+            ("-$1,234.50", true),
+            ("1234.50", false),
+            ("99", false),
+        ] {
+            let f = Filter {
+                text: text.into(),
+                ..all.clone()
+            };
+            assert_eq!(f.holds_with(&ten, true, false, Words::default()), hit, "{text:?}");
         }
         // Categories, "no category" among them.
         let cats = |c: Vec<Option<Id<Category>>>| Filter {
