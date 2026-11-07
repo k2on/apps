@@ -325,12 +325,6 @@ impl Domain {
         crate::json::to_text(self.func(name)?.output.as_ref().unwrap_or(&Type::Unit), bytes)
     }
 
-    /// A row of a table of the schema, as JSON.
-    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
-        let (_, t) = self.schema.table(table).ok_or_else(|| format!("no table {table}"))?;
-        crate::json::to_text(&t.row_type(), bytes)
-    }
-
     /// A view of a function, kept over `store`.
     pub fn watch(&self, store: &Store, ctx: &Ctx, name: &str, input: &[u8]) -> Result<Box<dyn Maintained>, String> {
         let f = self.get(name).ok_or_else(|| format!("no function {name}"))?;

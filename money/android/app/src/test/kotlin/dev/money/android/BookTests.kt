@@ -18,7 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import uniffi.money_domain.Cleared
+import dev.money.android.gen.Cleared
 
 const val TODAY = "2026-10-26"
 
@@ -136,7 +136,7 @@ class BookTests {
         book.save(form)
         val t = l.register(acc.id).first { it.payee == "Corner Shop" }
         assertEquals(-1_234L, t.amount)
-        assertEquals(Cleared.UNCLEARED, t.cleared)
+        assertEquals(Cleared.Uncleared, t.cleared)
         assertEquals(acc.balance - 1_234, l.account(acc.id)!!.balance)
 
         book.save(formOf(t, l).copy(amount = -2_000, memo = "and milk"))
@@ -145,7 +145,7 @@ class BookTests {
         assertEquals("and milk", edited.memo)
 
         book.setCleared(t.id, true)
-        assertEquals(Cleared.CLEARED, l.register(acc.id).first { it.id == t.id }.cleared)
+        assertEquals(Cleared.Cleared, l.register(acc.id).first { it.id == t.id }.cleared)
 
         book.delete(listOf(t.id))
         assertNull(l.register(acc.id).firstOrNull { it.id == t.id })
@@ -165,7 +165,7 @@ class BookTests {
         book.holdRegister(acc.id)
         book.reconcile(acc.id, acc.cleared)
         val rows = l.register(acc.id)
-        assertTrue(rows.filter { it.cleared != Cleared.UNCLEARED }.all { it.cleared == Cleared.RECONCILED })
+        assertTrue(rows.filter { it.cleared != Cleared.Uncleared }.all { it.cleared == Cleared.Reconciled })
         // A bank that says otherwise: the difference is an adjustment, and the balance agrees.
         book.reconcile(acc.id, acc.cleared + 777)
         assertEquals(acc.cleared + 777, l.account(acc.id)!!.cleared)

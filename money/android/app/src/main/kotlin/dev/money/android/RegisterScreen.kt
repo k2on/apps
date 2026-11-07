@@ -63,8 +63,8 @@ import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import dev.arkui.Stat
 import dev.arkui.SwipeToAct
-import uniffi.money_domain.Cleared
-import uniffi.money_domain.TxnLine
+import dev.money.android.gen.Cleared
+import dev.money.android.gen.TxnLine
 
 @Composable
 fun RegisterScreen(ledger: Ledger, account: Id, onBack: () -> Unit) {
@@ -217,9 +217,9 @@ fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Mo
                         "${t.payee}, ${a.signed(t.amount)}, ${t.category}" + (if (!t.approved) ", new" else "") +
                             (if (t.receipt.isNotEmpty() || t.photos > 0) ", has a receipt" else "") +
                             when (t.cleared) {
-                                Cleared.RECONCILED -> ", reconciled"
-                                Cleared.CLEARED -> ", cleared"
-                                Cleared.UNCLEARED -> ", uncleared"
+                                Cleared.Reconciled -> ", reconciled"
+                                Cleared.Cleared -> ", cleared"
+                                Cleared.Uncleared -> ", uncleared"
                             }
                 },
         )
@@ -236,14 +236,14 @@ fun TxnRow(t: TxnLine, showAccount: Boolean, swipe: Boolean = true, modifier: Mo
 private fun ClearedMark(t: TxnLine) {
     val book = LocalShell.current.book
     when (t.cleared) {
-        Cleared.RECONCILED ->
+        Cleared.Reconciled ->
             Icon(
                 Glyphs.Locked,
                 contentDescription = "Reconciled",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(12.dp).size(20.dp))
         else -> {
-            val on = t.cleared == Cleared.CLEARED
+            val on = t.cleared == Cleared.Cleared
             IconButton(
                 onClick = { book.setCleared(t.id, !on) },
                 modifier = Modifier.semantics { stateDescription = if (on) "Cleared" else "Uncleared" }) {

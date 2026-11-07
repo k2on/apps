@@ -29,7 +29,7 @@ extension Playlist: Identifiable {}
 /// An album is known by its key — its folder and its slugged name
 /// (`music/Vivaldi/The Four Seasons/the-four-seasons`) — so two records of
 /// one title are two albums; its name is only what is drawn.
-extension AlbumsEntry: Identifiable, Hashable {
+extension AlbumsEntry: Identifiable {
     public func hash(into h: inout Hasher) { h.combine(id) }
 
     /// The album `track` is on, by its details: the album's own row, found by
@@ -47,7 +47,7 @@ extension AlbumsEntry {
     var playedBy: String { performer.isEmpty ? creator : performer }
 }
 
-extension ArtistsEntry: Identifiable, Hashable {
+extension ArtistsEntry: Identifiable {
     public var id: String { name }
     public func hash(into h: inout Hasher) { h.combine(name) }
 }
@@ -58,7 +58,7 @@ extension ComposersEntry: Identifiable {
 
 extension WorkSummary: Identifiable {}
 
-extension ShowsEntry: Identifiable, Hashable {
+extension ShowsEntry: Identifiable {
     public func hash(into h: inout Hasher) { h.combine(id) }
 
     /// The show an episode is of: the one of its kind its creator names;

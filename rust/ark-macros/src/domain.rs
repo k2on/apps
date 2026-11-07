@@ -11,7 +11,7 @@ use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Expr, Fields, Ident, LitStr, Token, Type};
 
-pub(crate) fn err<T>(span: Span, msg: &str) -> syn::Result<T> {
+fn err<T>(span: Span, msg: &str) -> syn::Result<T> {
     Err(syn::Error::new(span, msg))
 }
 
@@ -95,8 +95,7 @@ fn fields_of(input: &DeriveInput) -> syn::Result<&syn::FieldsNamed> {
 }
 
 /// `Describe` for a struct (a record of its fields) or an enum (a sum of
-/// its variants, each a record of its fields); and its twin, when it asks
-/// for one (`crate::ffi`).
+/// its variants, each a record of its fields).
 fn describe(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let label = name.to_string();
@@ -123,15 +122,12 @@ fn describe(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
         Data::Union(_) => return err(name.span(), "a union describes nothing"),
     };
-    let twin = crate::ffi::twin(input)?;
     Ok(quote! {
         impl ::ark::row::Describe for #name {
             fn describe() -> ::ark::row::Type {
                 #body
             }
         }
-
-        #twin
     })
 }
 
@@ -223,7 +219,6 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
                     }
                 }
             }
-            Item::Flag(f) if f == "ffi" || f == "ffi_view" => {}
             Item::Is(n, Expr::Lit(l)) if n == "table" => match &l.lit {
                 syn::Lit::Str(s) => table = s.value(),
                 _ => return err(n.span(), "table = \"name\""),
@@ -232,7 +227,7 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
             _ => {
                 return err(
                     name.span(),
-                    "#[ark(..)] on a row: table = \"..\", volatile, owner = field, unfed, index(..), unique(..), ffi, ffi_view",
+                    "#[ark(..)] on a row: table = \"..\", volatile, owner = field, unfed, index(..), unique(..)",
                 )
             }
         }

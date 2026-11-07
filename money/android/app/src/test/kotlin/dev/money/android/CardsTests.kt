@@ -15,8 +15,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import uniffi.money_domain.AccountLine
-import uniffi.money_domain.BudgetLine
+import dev.money.android.gen.AccountLine
+import dev.money.android.gen.BudgetLine
 
 class CardsTests {
     private lateinit var book: Book

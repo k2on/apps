@@ -5,7 +5,7 @@
 // sermons, always there, whose + finds a show to follow (`FindShow`, Sheets.kt).
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.android.gen.Playlist
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement

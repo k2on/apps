@@ -5,50 +5,39 @@ package dev.money.android.gen
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Peer
+import dev.arkdb.ffi.Reader
 import dev.arkdb.ffi.View
 import org.json.JSONObject
-import uniffi.money_domain.AccountLine
-import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
-import uniffi.money_domain.BankLine
-import uniffi.money_domain.BudgetLine
-import uniffi.money_domain.Cleared
-import uniffi.money_domain.GroupLine
-import uniffi.money_domain.LinkedLine
-import uniffi.money_domain.PayeeLine
-import uniffi.money_domain.SpendingLine
-import uniffi.money_domain.Summary
-import uniffi.money_domain.TxnLine
-import uniffi.money_domain.AccountLineView
-import uniffi.money_domain.AskLineView
-import uniffi.money_domain.BankLineView
-import uniffi.money_domain.BudgetLineView
-import uniffi.money_domain.GroupLineView
-import uniffi.money_domain.LinkedLineView
-import uniffi.money_domain.PayeeLineView
-import uniffi.money_domain.SpendingLineView
-import uniffi.money_domain.SummaryView
-import uniffi.money_domain.TxnLineView
 
 /** The record `Account`. */
 data class Account(val id: Id, val name: String, val kind: String, val onBudget: Boolean, val closed: Boolean, val pos: Long, val note: String, val createdMs: Long, val userId: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"kind\":" + J.q(kind) + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"closed\":" + closed.toString() + "," + "\"pos\":" + pos.toString() + "," + "\"note\":" + J.q(note) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Account = Account(r.id(), r.text(), r.text(), r.bool(), r.bool(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Account = (j as JSONObject).let { o -> Account(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.text(o.opt("kind")), J.bool(o.opt("on_budget")), J.bool(o.opt("closed")), J.int(o.opt("pos")), J.text(o.opt("note")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
     }
 }
 
-/** The record `AccountLine` (UniFFI's): its JSON, for the functions called by name. */
-fun AccountLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"kind\":" + J.q(kind) + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"closed\":" + closed.toString() + "," + "\"pos\":" + pos.toString() + "," + "\"balance\":" + balance.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"uncleared\":" + uncleared.toString() + "," + "\"bank\":" + J.q(bank) + "," + "\"mask\":" + J.q(mask) + "," + "\"bank_balance\":" + J.wopt(bankBalance) { v0 -> v0.toString() } + "," + "\"unapproved\":" + unapproved.toString() + "}"
+/** The record `AccountLine`. */
+data class AccountLine(val id: Id, val name: String, val kind: String, val onBudget: Boolean, val closed: Boolean, val pos: Long, val balance: Long, val cleared: Long, val uncleared: Long, val bank: String, val mask: String, val bankBalance: Long?, val unapproved: Long) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"kind\":" + J.q(kind) + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"closed\":" + closed.toString() + "," + "\"pos\":" + pos.toString() + "," + "\"balance\":" + balance.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"uncleared\":" + uncleared.toString() + "," + "\"bank\":" + J.q(bank) + "," + "\"mask\":" + J.q(mask) + "," + "\"bank_balance\":" + J.wopt(bankBalance) { v0 -> v0.toString() } + "," + "\"unapproved\":" + unapproved.toString() + "}"
 
-fun AccountLine.Companion.of(j: Any?): AccountLine = (j as JSONObject).let { o -> AccountLine(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.text(o.opt("kind")), J.bool(o.opt("on_budget")), J.bool(o.opt("closed")), J.int(o.opt("pos")), J.int(o.opt("balance")), J.int(o.opt("cleared")), J.int(o.opt("uncleared")), J.text(o.opt("bank")), J.text(o.opt("mask")), J.opt(o.opt("bank_balance")) { v0 -> J.int(v0) }, J.int(o.opt("unapproved"))) }
+    companion object {
+        fun read(r: Reader): AccountLine = AccountLine(r.id(), r.text(), r.text(), r.bool(), r.bool(), r.int(), r.int(), r.int(), r.int(), r.text(), r.text(), r.opt { r0 -> r0.int() }, r.int())
+
+        fun of(j: Any?): AccountLine = (j as JSONObject).let { o -> AccountLine(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.text(o.opt("kind")), J.bool(o.opt("on_budget")), J.bool(o.opt("closed")), J.int(o.opt("pos")), J.int(o.opt("balance")), J.int(o.opt("cleared")), J.int(o.opt("uncleared")), J.text(o.opt("bank")), J.text(o.opt("mask")), J.opt(o.opt("bank_balance")) { v0 -> J.int(v0) }, J.int(o.opt("unapproved"))) }
+    }
+}
 
 /** The record `AddCategory`. */
 data class AddCategory(val groupId: Id, val name: String) {
     fun json(): String = "{" + "\"group_id\":" + J.q(groupId.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): AddCategory = AddCategory(r.id(), r.text())
+
         fun of(j: Any?): AddCategory = (j as JSONObject).let { o -> AddCategory(Id(J.text(o.opt("group_id"))), J.text(o.opt("name"))) }
     }
 }
@@ -58,6 +47,8 @@ data class AddGroup(val name: String) {
     fun json(): String = "{" + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): AddGroup = AddGroup(r.text())
+
         fun of(j: Any?): AddGroup = (j as JSONObject).let { o -> AddGroup(J.text(o.opt("name"))) }
     }
 }
@@ -67,6 +58,8 @@ data class AddPhoto(val file: FileRef, val txnId: Id? = null) {
     fun json(): String = "{" + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): AddPhoto = AddPhoto(FileRef.read(r), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): AddPhoto = (j as JSONObject).let { o -> AddPhoto(FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -76,6 +69,8 @@ data class AddSplit(val accountId: Id, val date: String, val payee: String, val 
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"lines\":" + J.wlist(lines) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): AddSplit = AddSplit(r.id(), r.text(), r.text(), r.text(), r.int(), r.bool(), r.list { r0 -> SplitPart.read(r0) })
+
         fun of(j: Any?): AddSplit = (j as JSONObject).let { o -> AddSplit(Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.text(o.opt("memo")), J.int(o.opt("amount")), J.bool(o.opt("cleared")), J.list(o.opt("lines")) { v0 -> SplitPart.of(v0) }) }
     }
 }
@@ -85,6 +80,8 @@ data class AddSubcategory(val parentId: Id, val name: String) {
     fun json(): String = "{" + "\"parent_id\":" + J.q(parentId.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): AddSubcategory = AddSubcategory(r.id(), r.text())
+
         fun of(j: Any?): AddSubcategory = (j as JSONObject).let { o -> AddSubcategory(Id(J.text(o.opt("parent_id"))), J.text(o.opt("name"))) }
     }
 }
@@ -94,6 +91,8 @@ data class AddTransaction(val accountId: Id, val date: String, val payee: String
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.toString() + "," + "\"transfer_to\":" + J.wopt(transferTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): AddTransaction = AddTransaction(r.id(), r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.bool(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): AddTransaction = (j as JSONObject).let { o -> AddTransaction(Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), J.bool(o.opt("cleared")), J.opt(o.opt("transfer_to")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -103,33 +102,69 @@ data class Answer(val id: Id, val state: AskState, val bank: String, val institu
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"state\":" + state.json() + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Answer = Answer(r.id(), AskState.read(r), r.text(), r.text(), r.text(), r.text(), r.int())
+
         fun of(j: Any?): Answer = (j as JSONObject).let { o -> Answer(Id(J.text(o.opt("id"))), AskState.of(o.opt("state")), J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms"))) }
     }
 }
 
-/** The record `AskLine` (UniFFI's): its JSON, for the functions called by name. */
-fun AskLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"what\":" + J.q(what) + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"state\":" + state.json() + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"asked_ms\":" + askedMs.toString() + "," + "\"answered_ms\":" + answeredMs.toString() + "}"
+/** The record `AskLine`. */
+data class AskLine(val id: Id, val what: String, val bank: String, val institution: String, val state: AskState, val url: String, val message: String, val expiresMs: Long, val askedMs: Long, val answeredMs: Long) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"what\":" + J.q(what) + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"state\":" + state.json() + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"asked_ms\":" + askedMs.toString() + "," + "\"answered_ms\":" + answeredMs.toString() + "}"
 
-fun AskLine.Companion.of(j: Any?): AskLine = (j as JSONObject).let { o -> AskLine(Id(J.text(o.opt("id"))), J.text(o.opt("what")), J.text(o.opt("bank")), J.text(o.opt("institution")), AskState.of(o.opt("state")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms")), J.int(o.opt("asked_ms")), J.int(o.opt("answered_ms"))) }
+    companion object {
+        fun read(r: Reader): AskLine = AskLine(r.id(), r.text(), r.text(), r.text(), AskState.read(r), r.text(), r.text(), r.int(), r.int(), r.int())
 
-/** The sum `AskState` (UniFFI's enum): its JSON, for the functions called by name. */
-fun AskState.json(): String =
-    when (this) {
-        AskState.ASKED -> "\"Asked\""
-        AskState.WAITING -> "\"Waiting\""
-        AskState.DONE -> "\"Done\""
-        AskState.FAILED -> "\"Failed\""
-        AskState.EXPIRED -> "\"Expired\""
+        fun of(j: Any?): AskLine = (j as JSONObject).let { o -> AskLine(Id(J.text(o.opt("id"))), J.text(o.opt("what")), J.text(o.opt("bank")), J.text(o.opt("institution")), AskState.of(o.opt("state")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms")), J.int(o.opt("asked_ms")), J.int(o.opt("answered_ms"))) }
+    }
+}
+
+/** The sum `AskState`. */
+sealed class AskState {
+    abstract fun json(): String
+
+    data object Asked : AskState() {
+        override fun json(): String = "\"Asked\""
     }
 
-fun AskState.Companion.of(j: Any?): AskState = J.sum(j) { t, _ ->
-    when (t) {
-        "Asked" -> AskState.ASKED
-        "Waiting" -> AskState.WAITING
-        "Done" -> AskState.DONE
-        "Failed" -> AskState.FAILED
-        "Expired" -> AskState.EXPIRED
-        else -> throw IllegalArgumentException("AskState: no variant $t")
+    data object Waiting : AskState() {
+        override fun json(): String = "\"Waiting\""
+    }
+
+    data object Done : AskState() {
+        override fun json(): String = "\"Done\""
+    }
+
+    data object Failed : AskState() {
+        override fun json(): String = "\"Failed\""
+    }
+
+    data object Expired : AskState() {
+        override fun json(): String = "\"Expired\""
+    }
+
+    companion object {
+        fun read(r: Reader): AskState =
+            when (val v = r.variant()) {
+                0 -> Asked
+                1 -> Waiting
+                2 -> Done
+                3 -> Failed
+                4 -> Expired
+                else -> throw IllegalArgumentException("AskState: no variant $v")
+            }
+
+        fun of(j: Any?): AskState =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Asked" -> Asked
+                    "Waiting" -> Waiting
+                    "Done" -> Done
+                    "Failed" -> Failed
+                    "Expired" -> Expired
+                    else -> throw IllegalArgumentException("AskState: no variant $t")
+                }
+            }
     }
 }
 
@@ -138,6 +173,8 @@ data class Asked(val userId: String, val askedMs: Long) {
     fun json(): String = "{" + "\"user_id\":" + J.q(userId) + "," + "\"asked_ms\":" + askedMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Asked = Asked(r.text(), r.int())
+
         fun of(j: Any?): Asked = (j as JSONObject).let { o -> Asked(J.text(o.opt("user_id")), J.int(o.opt("asked_ms"))) }
     }
 }
@@ -147,6 +184,8 @@ data class Asking(val id: Id, val state: JobInt) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Asking = Asking(r.id(), JobInt.read(r))
+
         fun of(j: Any?): Asking = (j as JSONObject).let { o -> Asking(Id(J.text(o.opt("id"))), JobInt.of(o.opt("state"))) }
     }
 }
@@ -156,6 +195,8 @@ data class AskingCancel(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): AskingCancel = AskingCancel(r.id())
+
         fun of(j: Any?): AskingCancel = (j as JSONObject).let { o -> AskingCancel(Id(J.text(o.opt("id")))) }
     }
 }
@@ -165,6 +206,8 @@ data class AskingClaim(val id: Id, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): AskingClaim = AskingClaim(r.id(), r.text())
+
         fun of(j: Any?): AskingClaim = (j as JSONObject).let { o -> AskingClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
     }
 }
@@ -174,6 +217,8 @@ data class AskingFinish(val id: Id, val by: String, val outcome: AskingOutcome, 
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): AskingFinish = AskingFinish(r.id(), r.text(), AskingOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): AskingFinish = (j as JSONObject).let { o -> AskingFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), AskingOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -191,13 +236,21 @@ sealed class AskingOutcome {
     }
 
     companion object {
-        fun of(j: Any?): AskingOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(J.int(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("AskingOutcome: no variant $t")
+        fun read(r: Reader): AskingOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(r.int())
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("AskingOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): AskingOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(J.int(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("AskingOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -206,6 +259,8 @@ data class Assign(val month: String, val categoryId: Id, val amount: Long) {
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"amount\":" + amount.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Assign = Assign(r.text(), r.id(), r.int())
+
         fun of(j: Any?): Assign = (j as JSONObject).let { o -> Assign(J.text(o.opt("month")), Id(J.text(o.opt("category_id"))), J.int(o.opt("amount"))) }
     }
 }
@@ -215,6 +270,8 @@ data class Assigned(val month: String, val categoryId: Id, val amount: Long, val
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"amount\":" + amount.toString() + "," + "\"at_ms\":" + atMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Assigned = Assigned(r.text(), r.id(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): Assigned = (j as JSONObject).let { o -> Assigned(J.text(o.opt("month")), Id(J.text(o.opt("category_id"))), J.int(o.opt("amount")), J.int(o.opt("at_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -236,14 +293,23 @@ sealed class Auto {
     }
 
     companion object {
-        fun of(j: Any?): Auto = J.sum(j) { t, o ->
-            when (t) {
-                "LastMonth" -> LastMonth
-                "Underfunded" -> Underfunded
-                "Reset" -> Reset
-                else -> throw IllegalArgumentException("Auto: no variant $t")
+        fun read(r: Reader): Auto =
+            when (val v = r.variant()) {
+                0 -> LastMonth
+                1 -> Underfunded
+                2 -> Reset
+                else -> throw IllegalArgumentException("Auto: no variant $v")
             }
-        }
+
+        fun of(j: Any?): Auto =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "LastMonth" -> LastMonth
+                    "Underfunded" -> Underfunded
+                    "Reset" -> Reset
+                    else -> throw IllegalArgumentException("Auto: no variant $t")
+                }
+            }
     }
 }
 
@@ -252,6 +318,8 @@ data class AutoAssign(val month: String, val how: Auto, val only: List<Id>) {
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"how\":" + how.json() + "," + "\"only\":" + J.wlist(only) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): AutoAssign = AutoAssign(r.text(), Auto.read(r), r.list { r0 -> r0.id() })
+
         fun of(j: Any?): AutoAssign = (j as JSONObject).let { o -> AutoAssign(J.text(o.opt("month")), Auto.of(o.opt("how")), J.list(o.opt("only")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -261,6 +329,8 @@ data class Bank(val name: String, val institution: String, val cursor: String, v
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"repull\":" + repull.toString() + "," + "\"institution_id\":" + J.q(institutionId) + "," + "\"fresh\":" + fresh.toString() + "," + "\"adding\":" + adding.toString() + "," + "\"replaced_by\":" + J.q(replacedBy) + "}"
 
     companion object {
+        fun read(r: Reader): Bank = Bank(r.text(), r.text(), r.text(), r.int(), r.int(), r.int(), r.int(), r.int(), r.text(), r.text(), r.text(), r.int(), r.bool(), r.text(), r.bool(), r.bool(), r.text())
+
         fun of(j: Any?): Bank = (j as JSONObject).let { o -> Bank(J.text(o.opt("name")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.text(o.opt("user_id")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("repull")), J.text(o.opt("institution_id")), J.bool(o.opt("fresh")), J.bool(o.opt("adding")), J.text(o.opt("replaced_by"))) }
     }
 }
@@ -270,6 +340,8 @@ data class BankAccount(val plaidAccountId: String, val name: String, val mask: S
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"subtype\":" + J.q(subtype) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"called\":" + J.q(called) + "," + "\"ignored\":" + ignored.toString() + "}"
 
     companion object {
+        fun read(r: Reader): BankAccount = BankAccount(r.text(), r.text(), r.text(), r.text(), r.text(), r.opt { r0 -> r0.int() }, r.text(), r.bool())
+
         fun of(j: Any?): BankAccount = (j as JSONObject).let { o -> BankAccount(J.text(o.opt("plaid_account_id")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.text(o.opt("subtype")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.text(o.opt("called")), J.bool(o.opt("ignored"))) }
     }
 }
@@ -279,6 +351,8 @@ data class BankAsk(val id: Id, val what: String, val bank: String, val instituti
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"what\":" + J.q(what) + "," + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"state\":" + state.json() + "," + "\"url\":" + J.q(url) + "," + "\"message\":" + J.q(message) + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"asked_ms\":" + askedMs.toString() + "," + "\"answered_ms\":" + answeredMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): BankAsk = BankAsk(r.id(), r.text(), r.text(), r.text(), AskState.read(r), r.text(), r.text(), r.int(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): BankAsk = (j as JSONObject).let { o -> BankAsk(Id(J.text(o.opt("id"))), J.text(o.opt("what")), J.text(o.opt("bank")), J.text(o.opt("institution")), AskState.of(o.opt("state")), J.text(o.opt("url")), J.text(o.opt("message")), J.int(o.opt("expires_ms")), J.int(o.opt("asked_ms")), J.int(o.opt("answered_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -288,20 +362,30 @@ data class BankFailed(val bank: String, val institution: String, val errorCode: 
     fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "}"
 
     companion object {
+        fun read(r: Reader): BankFailed = BankFailed(r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): BankFailed = (j as JSONObject).let { o -> BankFailed(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("error_code")), J.text(o.opt("error"))) }
     }
 }
 
-/** The record `BankLine` (UniFFI's): its JSON, for the functions called by name. */
-fun BankLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"accounts\":" + accounts.toString() + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"needs_login\":" + needsLogin.toString() + "," + "\"waiting\":" + waiting.toString() + "}"
+/** The record `BankLine`. */
+data class BankLine(val name: String, val institution: String, val syncedMs: Long, val added: Long, val updated: Long, val deleted: Long, val locked: Long, val accounts: Long, val errorCode: String, val error: String, val failedMs: Long, val needsLogin: Boolean, val waiting: Long) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"institution\":" + J.q(institution) + "," + "\"synced_ms\":" + syncedMs.toString() + "," + "\"added\":" + added.toString() + "," + "\"updated\":" + updated.toString() + "," + "\"deleted\":" + deleted.toString() + "," + "\"locked\":" + locked.toString() + "," + "\"accounts\":" + accounts.toString() + "," + "\"error_code\":" + J.q(errorCode) + "," + "\"error\":" + J.q(error) + "," + "\"failed_ms\":" + failedMs.toString() + "," + "\"needs_login\":" + needsLogin.toString() + "," + "\"waiting\":" + waiting.toString() + "}"
 
-fun BankLine.Companion.of(j: Any?): BankLine = (j as JSONObject).let { o -> BankLine(J.text(o.opt("name")), J.text(o.opt("institution")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.int(o.opt("accounts")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("needs_login")), J.int(o.opt("waiting"))) }
+    companion object {
+        fun read(r: Reader): BankLine = BankLine(r.text(), r.text(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.text(), r.text(), r.int(), r.bool(), r.int())
+
+        fun of(j: Any?): BankLine = (j as JSONObject).let { o -> BankLine(J.text(o.opt("name")), J.text(o.opt("institution")), J.int(o.opt("synced_ms")), J.int(o.opt("added")), J.int(o.opt("updated")), J.int(o.opt("deleted")), J.int(o.opt("locked")), J.int(o.opt("accounts")), J.text(o.opt("error_code")), J.text(o.opt("error")), J.int(o.opt("failed_ms")), J.bool(o.opt("needs_login")), J.int(o.opt("waiting"))) }
+    }
+}
 
 /** The record `BankName`. */
 data class BankName(val bank: String) {
     fun json(): String = "{" + "\"bank\":" + J.q(bank) + "}"
 
     companion object {
+        fun read(r: Reader): BankName = BankName(r.text())
+
         fun of(j: Any?): BankName = (j as JSONObject).let { o -> BankName(J.text(o.opt("bank"))) }
     }
 }
@@ -311,6 +395,8 @@ data class BankRemoved(val transactionId: String, val plaidAccountId: String) {
     fun json(): String = "{" + "\"transaction_id\":" + J.q(transactionId) + "," + "\"plaid_account_id\":" + J.q(plaidAccountId) + "}"
 
     companion object {
+        fun read(r: Reader): BankRemoved = BankRemoved(r.text(), r.text())
+
         fun of(j: Any?): BankRemoved = (j as JSONObject).let { o -> BankRemoved(J.text(o.opt("transaction_id")), J.text(o.opt("plaid_account_id"))) }
     }
 }
@@ -320,20 +406,30 @@ data class BankTxn(val transactionId: String, val plaidAccountId: String, val pe
     fun json(): String = "{" + "\"transaction_id\":" + J.q(transactionId) + "," + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"pending_transaction_id\":" + J.wopt(pendingTransactionId) { v0 -> J.q(v0) } + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"payee\":" + J.q(payee) + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"pending\":" + pending.toString() + "}"
 
     companion object {
+        fun read(r: Reader): BankTxn = BankTxn(r.text(), r.text(), r.opt { r0 -> r0.text() }, r.text(), r.int(), r.text(), r.text(), r.bool())
+
         fun of(j: Any?): BankTxn = (j as JSONObject).let { o -> BankTxn(J.text(o.opt("transaction_id")), J.text(o.opt("plaid_account_id")), J.opt(o.opt("pending_transaction_id")) { v0 -> J.text(v0) }, J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("payee")), J.text(o.opt("imported_payee")), J.bool(o.opt("pending"))) }
     }
 }
 
-/** The record `BudgetLine` (UniFFI's): its JSON, for the functions called by name. */
-fun BudgetLine.json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"group_pos\":" + groupPos.toString() + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"target\":" + target.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"carried\":" + carried.toString() + "," + "\"assigned_last_month\":" + assignedLastMonth.toString() + "," + "\"spent_last_month\":" + spentLastMonth.toString() + "," + "\"average_spent\":" + averageSpent.toString() + "," + "\"card\":" + J.wopt(card) { v0 -> J.q(v0.hex) } + "," + "\"debt\":" + debt.toString() + "," + "\"underfunded\":" + underfunded.toString() + "," + "\"credit_overspent\":" + creditOverspent.toString() + "," + "\"rule\":" + J.q(rule) + "," + "\"ruled\":" + ruled.toString() + "}"
+/** The record `BudgetLine`. */
+data class BudgetLine(val categoryId: Id, val groupId: Id, val group: String, val groupPos: Long, val name: String, val pos: Long, val hidden: Boolean, val target: Long, val assigned: Long, val activity: Long, val available: Long, val carried: Long, val assignedLastMonth: Long, val spentLastMonth: Long, val averageSpent: Long, val card: Id?, val debt: Long, val underfunded: Long, val creditOverspent: Long, val rule: String, val ruled: Boolean) {
+    fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"group_pos\":" + groupPos.toString() + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"target\":" + target.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"carried\":" + carried.toString() + "," + "\"assigned_last_month\":" + assignedLastMonth.toString() + "," + "\"spent_last_month\":" + spentLastMonth.toString() + "," + "\"average_spent\":" + averageSpent.toString() + "," + "\"card\":" + J.wopt(card) { v0 -> J.q(v0.hex) } + "," + "\"debt\":" + debt.toString() + "," + "\"underfunded\":" + underfunded.toString() + "," + "\"credit_overspent\":" + creditOverspent.toString() + "," + "\"rule\":" + J.q(rule) + "," + "\"ruled\":" + ruled.toString() + "}"
 
-fun BudgetLine.Companion.of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent")), J.opt(o.opt("card")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("debt")), J.int(o.opt("underfunded")), J.int(o.opt("credit_overspent")), J.text(o.opt("rule")), J.bool(o.opt("ruled"))) }
+    companion object {
+        fun read(r: Reader): BudgetLine = BudgetLine(r.id(), r.id(), r.text(), r.int(), r.text(), r.int(), r.bool(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.opt { r0 -> r0.id() }, r.int(), r.int(), r.int(), r.text(), r.bool())
+
+        fun of(j: Any?): BudgetLine = (j as JSONObject).let { o -> BudgetLine(Id(J.text(o.opt("category_id"))), Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("group_pos")), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.int(o.opt("target")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("carried")), J.int(o.opt("assigned_last_month")), J.int(o.opt("spent_last_month")), J.int(o.opt("average_spent")), J.opt(o.opt("card")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("debt")), J.int(o.opt("underfunded")), J.int(o.opt("credit_overspent")), J.text(o.opt("rule")), J.bool(o.opt("ruled"))) }
+    }
+}
 
 /** The record `CandidateLine`. */
 data class CandidateLine(val txnId: Id, val date: String, val payee: String, val account: String, val amount: Long, val offBy: Long, val days: Long) {
     fun json(): String = "{" + "\"txn_id\":" + J.q(txnId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"account\":" + J.q(account) + "," + "\"amount\":" + amount.toString() + "," + "\"off_by\":" + offBy.toString() + "," + "\"days\":" + days.toString() + "}"
 
     companion object {
+        fun read(r: Reader): CandidateLine = CandidateLine(r.id(), r.text(), r.text(), r.text(), r.int(), r.int(), r.int())
+
         fun of(j: Any?): CandidateLine = (j as JSONObject).let { o -> CandidateLine(Id(J.text(o.opt("txn_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.text(o.opt("account")), J.int(o.opt("amount")), J.int(o.opt("off_by")), J.int(o.opt("days"))) }
     }
 }
@@ -343,6 +439,8 @@ data class Categorize(val ids: List<Id>, val categoryId: Id? = null) {
     fun json(): String = "{" + "\"ids\":" + J.wlist(ids) { v0 -> J.q(v0.hex) } + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): Categorize = Categorize(r.list { r0 -> r0.id() }, r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): Categorize = (j as JSONObject).let { o -> Categorize(J.list(o.opt("ids")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -352,6 +450,8 @@ data class Category(val id: Id, val parentId: Id?, val name: String, val pos: Lo
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"parent_id\":" + J.wopt(parentId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"income\":" + income.toString() + "," + "\"target\":" + target.toString() + "," + "\"note\":" + J.q(note) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Category = Category(r.id(), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.bool(), r.bool(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Category = (j as JSONObject).let { o -> Category(Id(J.text(o.opt("id"))), J.opt(o.opt("parent_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden")), J.bool(o.opt("income")), J.int(o.opt("target")), J.text(o.opt("note")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -361,6 +461,8 @@ data class CategoryNode(val id: Id, val parentId: Id?, val name: String, val pat
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"parent_id\":" + J.wopt(parentId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"path\":" + J.q(path) + "," + "\"depth\":" + depth.toString() + "," + "\"hidden\":" + hidden.toString() + "," + "\"income\":" + income.toString() + "," + "\"order\":" + J.q(order) + "}"
 
     companion object {
+        fun read(r: Reader): CategoryNode = CategoryNode(r.id(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.int(), r.bool(), r.bool(), r.text())
+
         fun of(j: Any?): CategoryNode = (j as JSONObject).let { o -> CategoryNode(Id(J.text(o.opt("id"))), J.opt(o.opt("parent_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("path")), J.int(o.opt("depth")), J.bool(o.opt("hidden")), J.bool(o.opt("income")), J.text(o.opt("order"))) }
     }
 }
@@ -370,6 +472,8 @@ data class ChangeFilter(val id: Id, val filter: Filter) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"filter\":" + filter.json() + "}"
 
     companion object {
+        fun read(r: Reader): ChangeFilter = ChangeFilter(r.id(), Filter.read(r))
+
         fun of(j: Any?): ChangeFilter = (j as JSONObject).let { o -> ChangeFilter(Id(J.text(o.opt("id"))), Filter.of(o.opt("filter"))) }
     }
 }
@@ -379,6 +483,8 @@ data class Charge(val id: String, val receiptId: String, val date: String, val a
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"receipt_id\":" + J.q(receiptId) + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"card\":" + J.q(card) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Charge = Charge(r.text(), r.text(), r.text(), r.int(), r.text(), r.opt { r0 -> r0.id() }, r.text())
+
         fun of(j: Any?): Charge = (j as JSONObject).let { o -> Charge(J.text(o.opt("id")), J.text(o.opt("receipt_id")), J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("card")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("user_id"))) }
     }
 }
@@ -388,6 +494,8 @@ data class ChargeImport(val store: String, val charges: List<StoreCharge>) {
     fun json(): String = "{" + "\"store\":" + J.q(store) + "," + "\"charges\":" + J.wlist(charges) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): ChargeImport = ChargeImport(r.text(), r.list { r0 -> StoreCharge.read(r0) })
+
         fun of(j: Any?): ChargeImport = (j as JSONObject).let { o -> ChargeImport(J.text(o.opt("store")), J.list(o.opt("charges")) { v0 -> StoreCharge.of(v0) }) }
     }
 }
@@ -397,6 +505,8 @@ data class ChargeLine(val id: String, val receiptId: String, val date: String, v
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"receipt_id\":" + J.q(receiptId) + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"card\":" + J.q(card) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"payee\":" + J.q(payee) + "," + "\"account\":" + J.q(account) + "}"
 
     companion object {
+        fun read(r: Reader): ChargeLine = ChargeLine(r.text(), r.text(), r.text(), r.int(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.text())
+
         fun of(j: Any?): ChargeLine = (j as JSONObject).let { o -> ChargeLine(J.text(o.opt("id")), J.text(o.opt("receipt_id")), J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("card")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("payee")), J.text(o.opt("account"))) }
     }
 }
@@ -406,6 +516,8 @@ data class ClassifyItems(val items: List<ItemRef>, val categoryId: Id? = null) {
     fun json(): String = "{" + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): ClassifyItems = ClassifyItems(r.list { r0 -> ItemRef.read(r0) }, r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): ClassifyItems = (j as JSONObject).let { o -> ClassifyItems(J.list(o.opt("items")) { v0 -> ItemRef.of(v0) }, J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -415,24 +527,46 @@ data class ClearFormula(val categoryId: Id, val from: String? = null) {
     fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): ClearFormula = ClearFormula(r.id(), r.opt { r0 -> r0.text() })
+
         fun of(j: Any?): ClearFormula = (j as JSONObject).let { o -> ClearFormula(Id(J.text(o.opt("category_id"))), J.opt(o.opt("from")) { v0 -> J.text(v0) }) }
     }
 }
 
-/** The sum `Cleared` (UniFFI's enum): its JSON, for the functions called by name. */
-fun Cleared.json(): String =
-    when (this) {
-        Cleared.UNCLEARED -> "\"Uncleared\""
-        Cleared.CLEARED -> "\"Cleared\""
-        Cleared.RECONCILED -> "\"Reconciled\""
+/** The sum `Cleared`. */
+sealed class Cleared {
+    abstract fun json(): String
+
+    data object Uncleared : dev.money.android.gen.Cleared() {
+        override fun json(): String = "\"Uncleared\""
     }
 
-fun Cleared.Companion.of(j: Any?): Cleared = J.sum(j) { t, _ ->
-    when (t) {
-        "Uncleared" -> Cleared.UNCLEARED
-        "Cleared" -> Cleared.CLEARED
-        "Reconciled" -> Cleared.RECONCILED
-        else -> throw IllegalArgumentException("Cleared: no variant $t")
+    data object Cleared : dev.money.android.gen.Cleared() {
+        override fun json(): String = "\"Cleared\""
+    }
+
+    data object Reconciled : dev.money.android.gen.Cleared() {
+        override fun json(): String = "\"Reconciled\""
+    }
+
+    companion object {
+        fun read(r: Reader): dev.money.android.gen.Cleared =
+            when (val v = r.variant()) {
+                0 -> Uncleared
+                1 -> Cleared
+                2 -> Reconciled
+                else -> throw IllegalArgumentException("Cleared: no variant $v")
+            }
+
+        fun of(j: Any?): dev.money.android.gen.Cleared =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Uncleared" -> Uncleared
+                    "Cleared" -> Cleared
+                    "Reconciled" -> Reconciled
+                    else -> throw IllegalArgumentException("Cleared: no variant $t")
+                }
+            }
     }
 }
 
@@ -441,6 +575,8 @@ data class CloseAccount(val id: Id, val closed: Boolean) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"closed\":" + closed.toString() + "}"
 
     companion object {
+        fun read(r: Reader): CloseAccount = CloseAccount(r.id(), r.bool())
+
         fun of(j: Any?): CloseAccount = (j as JSONObject).let { o -> CloseAccount(Id(J.text(o.opt("id"))), J.bool(o.opt("closed"))) }
     }
 }
@@ -450,6 +586,8 @@ data class DeleteCategory(val id: Id, val moveTo: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): DeleteCategory = DeleteCategory(r.id(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): DeleteCategory = (j as JSONObject).let { o -> DeleteCategory(Id(J.text(o.opt("id"))), J.opt(o.opt("move_to")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -459,6 +597,8 @@ data class DeleteGroup(val id: Id, val moveTo: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"move_to\":" + J.wopt(moveTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): DeleteGroup = DeleteGroup(r.id(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): DeleteGroup = (j as JSONObject).let { o -> DeleteGroup(Id(J.text(o.opt("id"))), J.opt(o.opt("move_to")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -480,14 +620,23 @@ sealed class Direction {
     }
 
     companion object {
-        fun of(j: Any?): Direction = J.sum(j) { t, o ->
-            when (t) {
-                "Either" -> Either
-                "In" -> In
-                "Out" -> Out
-                else -> throw IllegalArgumentException("Direction: no variant $t")
+        fun read(r: Reader): Direction =
+            when (val v = r.variant()) {
+                0 -> Either
+                1 -> In
+                2 -> Out
+                else -> throw IllegalArgumentException("Direction: no variant $v")
             }
-        }
+
+        fun of(j: Any?): Direction =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Either" -> Either
+                    "In" -> In
+                    "Out" -> Out
+                    else -> throw IllegalArgumentException("Direction: no variant $t")
+                }
+            }
     }
 }
 
@@ -496,6 +645,8 @@ data class EditTransaction(val id: Id, val date: String, val payee: String, val 
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"transfer_to\":" + J.wopt(transferTo) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): EditTransaction = EditTransaction(r.id(), r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): EditTransaction = (j as JSONObject).let { o -> EditTransaction(Id(J.text(o.opt("id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), J.opt(o.opt("transfer_to")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -505,6 +656,8 @@ data class FileRef(val hash: String, val size: Long, val media: String) {
     fun json(): String = "{" + "\"hash\":" + J.q(hash) + "," + "\"size\":" + size.toString() + "," + "\"media\":" + J.q(media) + "}"
 
     companion object {
+        fun read(r: Reader): FileRef = FileRef(r.text(), r.int(), r.text())
+
         fun of(j: Any?): FileRef = (j as JSONObject).let { o -> FileRef(J.text(o.opt("hash")), J.int(o.opt("size")), J.text(o.opt("media"))) }
     }
 }
@@ -514,6 +667,8 @@ data class Filter(val accounts: List<Id>, val onBudget: Boolean, val text: Strin
     fun json(): String = "{" + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"text\":" + J.q(text) + "," + "\"categories\":" + J.wlist(categories) { v0 -> J.wopt(v0) { v1 -> J.q(v1.hex) } } + "," + "\"direction\":" + direction.json() + "," + "\"no_transfers\":" + noTransfers.toString() + "," + "\"needs_look\":" + needsLook.toString() + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "," + "\"through\":" + J.wopt(through) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): Filter = Filter(r.list { r0 -> r0.id() }, r.bool(), r.text(), r.list { r0 -> r0.opt { r1 -> r1.id() } }, Direction.read(r), r.bool(), r.bool(), r.opt { r0 -> r0.text() }, r.opt { r0 -> r0.text() })
+
         fun of(j: Any?): Filter = (j as JSONObject).let { o -> Filter(J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.bool(o.opt("on_budget")), J.text(o.opt("text")), J.list(o.opt("categories")) { v0 -> J.opt(v0) { v1 -> Id(J.text(v1)) } }, Direction.of(o.opt("direction")), J.bool(o.opt("no_transfers")), J.bool(o.opt("needs_look")), J.opt(o.opt("from")) { v0 -> J.text(v0) }, J.opt(o.opt("through")) { v0 -> J.text(v0) }) }
     }
 }
@@ -523,6 +678,8 @@ data class FilterId(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): FilterId = FilterId(r.id())
+
         fun of(j: Any?): FilterId = (j as JSONObject).let { o -> FilterId(Id(J.text(o.opt("id")))) }
     }
 }
@@ -532,6 +689,8 @@ data class FilterLine(val id: Id, val name: String, val pos: Long, val filter: F
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"filter\":" + filter.json() + "," + "\"said\":" + J.q(said) + "," + "\"count\":" + count.toString() + "," + "\"total\":" + total.toString() + "," + "\"used_by\":" + J.wlist(usedBy) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): FilterLine = FilterLine(r.id(), r.text(), r.int(), Filter.read(r), r.text(), r.int(), r.int(), r.list { r0 -> r0.text() })
+
         fun of(j: Any?): FilterLine = (j as JSONObject).let { o -> FilterLine(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), Filter.of(o.opt("filter")), J.text(o.opt("said")), J.int(o.opt("count")), J.int(o.opt("total")), J.list(o.opt("used_by")) { v0 -> J.text(v0) }) }
     }
 }
@@ -541,6 +700,8 @@ data class FilterTotal(val count: Long, val total: Long, val inflow: Long, val o
     fun json(): String = "{" + "\"count\":" + count.toString() + "," + "\"total\":" + total.toString() + "," + "\"inflow\":" + inflow.toString() + "," + "\"outflow\":" + outflow.toString() + "}"
 
     companion object {
+        fun read(r: Reader): FilterTotal = FilterTotal(r.int(), r.int(), r.int(), r.int())
+
         fun of(j: Any?): FilterTotal = (j as JSONObject).let { o -> FilterTotal(J.int(o.opt("count")), J.int(o.opt("total")), J.int(o.opt("inflow")), J.int(o.opt("outflow"))) }
     }
 }
@@ -550,6 +711,8 @@ data class Filtered(val saved: Id?, val filter: Filter, val month: String? = nul
     fun json(): String = "{" + "\"saved\":" + J.wopt(saved) { v0 -> J.q(v0.hex) } + "," + "\"filter\":" + filter.json() + "," + "\"month\":" + J.wopt(month) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): Filtered = Filtered(r.opt { r0 -> r0.id() }, Filter.read(r), r.opt { r0 -> r0.text() })
+
         fun of(j: Any?): Filtered = (j as JSONObject).let { o -> Filtered(J.opt(o.opt("saved")) { v0 -> Id(J.text(v0)) }, Filter.of(o.opt("filter")), J.opt(o.opt("month")) { v0 -> J.text(v0) }) }
     }
 }
@@ -559,6 +722,8 @@ data class Formula(val from: String, val categoryId: Id, val manual: Boolean, va
     fun json(): String = "{" + "\"from\":" + J.q(from) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"manual\":" + manual.toString() + "," + "\"terms\":" + J.wlist(terms) { v0 -> v0.json() } + "," + "\"said\":" + J.q(said) + "," + "\"at_ms\":" + atMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Formula = Formula(r.text(), r.id(), r.bool(), r.list { r0 -> Term.read(r0) }, r.text(), r.int(), r.text())
+
         fun of(j: Any?): Formula = (j as JSONObject).let { o -> Formula(J.text(o.opt("from")), Id(J.text(o.opt("category_id"))), J.bool(o.opt("manual")), J.list(o.opt("terms")) { v0 -> Term.of(v0) }, J.text(o.opt("said")), J.int(o.opt("at_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -568,6 +733,8 @@ data class FormulaLine(val categoryId: Id, val from: String, val terms: List<Ter
     fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.q(from) + "," + "\"terms\":" + J.wlist(terms) { v0 -> v0.json() } + "," + "\"text\":" + J.q(text) + "," + "\"amount\":" + amount.toString() + "}"
 
     companion object {
+        fun read(r: Reader): FormulaLine = FormulaLine(r.id(), r.text(), r.list { r0 -> TermLine.read(r0) }, r.text(), r.int())
+
         fun of(j: Any?): FormulaLine = (j as JSONObject).let { o -> FormulaLine(Id(J.text(o.opt("category_id"))), J.text(o.opt("from")), J.list(o.opt("terms")) { v0 -> TermLine.of(v0) }, J.text(o.opt("text")), J.int(o.opt("amount"))) }
     }
 }
@@ -577,6 +744,8 @@ data class FormulaPreview(val month: String, val terms: List<TermLine>, val text
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"terms\":" + J.wlist(terms) { v0 -> v0.json() } + "," + "\"text\":" + J.q(text) + "," + "\"amount\":" + amount.toString() + "}"
 
     companion object {
+        fun read(r: Reader): FormulaPreview = FormulaPreview(r.text(), r.list { r0 -> TermLine.read(r0) }, r.text(), r.int())
+
         fun of(j: Any?): FormulaPreview = (j as JSONObject).let { o -> FormulaPreview(J.text(o.opt("month")), J.list(o.opt("terms")) { v0 -> TermLine.of(v0) }, J.text(o.opt("text")), J.int(o.opt("amount"))) }
     }
 }
@@ -586,20 +755,30 @@ data class Grant(val user: String, val role: String) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): Grant = Grant(r.text(), r.text())
+
         fun of(j: Any?): Grant = (j as JSONObject).let { o -> Grant(J.text(o.opt("user")), J.text(o.opt("role"))) }
     }
 }
 
-/** The record `GroupLine` (UniFFI's): its JSON, for the functions called by name. */
-fun GroupLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "}"
+/** The record `GroupLine`. */
+data class GroupLine(val id: Id, val name: String, val pos: Long, val hidden: Boolean) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"hidden\":" + hidden.toString() + "}"
 
-fun GroupLine.Companion.of(j: Any?): GroupLine = (j as JSONObject).let { o -> GroupLine(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden"))) }
+    companion object {
+        fun read(r: Reader): GroupLine = GroupLine(r.id(), r.text(), r.int(), r.bool())
+
+        fun of(j: Any?): GroupLine = (j as JSONObject).let { o -> GroupLine(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.bool(o.opt("hidden"))) }
+    }
+}
 
 /** The record `HideCategory`. */
 data class HideCategory(val id: Id, val hidden: Boolean) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"hidden\":" + hidden.toString() + "}"
 
     companion object {
+        fun read(r: Reader): HideCategory = HideCategory(r.id(), r.bool())
+
         fun of(j: Any?): HideCategory = (j as JSONObject).let { o -> HideCategory(Id(J.text(o.opt("id"))), J.bool(o.opt("hidden"))) }
     }
 }
@@ -609,6 +788,8 @@ data class HideGroup(val id: Id, val hidden: Boolean) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"hidden\":" + hidden.toString() + "}"
 
     companion object {
+        fun read(r: Reader): HideGroup = HideGroup(r.id(), r.bool())
+
         fun of(j: Any?): HideGroup = (j as JSONObject).let { o -> HideGroup(Id(J.text(o.opt("id"))), J.bool(o.opt("hidden"))) }
     }
 }
@@ -618,6 +799,8 @@ data class IgnoreLinked(val plaidAccountId: String, val ignored: Boolean) {
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"ignored\":" + ignored.toString() + "}"
 
     companion object {
+        fun read(r: Reader): IgnoreLinked = IgnoreLinked(r.text(), r.bool())
+
         fun of(j: Any?): IgnoreLinked = (j as JSONObject).let { o -> IgnoreLinked(J.text(o.opt("plaid_account_id")), J.bool(o.opt("ignored"))) }
     }
 }
@@ -627,6 +810,8 @@ data class Import(val bank: String, val institution: String, val cursor: String,
     fun json(): String = "{" + "\"bank\":" + J.q(bank) + "," + "\"institution\":" + J.q(institution) + "," + "\"cursor\":" + J.q(cursor) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> v0.json() } + "," + "\"upserts\":" + J.wlist(upserts) { v0 -> v0.json() } + "," + "\"removed\":" + J.wlist(removed) { v0 -> v0.json() } + "," + "\"choose\":" + choose.toString() + "," + "\"from_start\":" + fromStart.toString() + "," + "\"institution_id\":" + J.wopt(institutionId) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): Import = Import(r.text(), r.text(), r.text(), r.list { r0 -> BankAccount.read(r0) }, r.list { r0 -> BankTxn.read(r0) }, r.list { r0 -> BankRemoved.read(r0) }, r.bool(), r.bool(), r.opt { r0 -> r0.text() })
+
         fun of(j: Any?): Import = (j as JSONObject).let { o -> Import(J.text(o.opt("bank")), J.text(o.opt("institution")), J.text(o.opt("cursor")), J.list(o.opt("accounts")) { v0 -> BankAccount.of(v0) }, J.list(o.opt("upserts")) { v0 -> BankTxn.of(v0) }, J.list(o.opt("removed")) { v0 -> BankRemoved.of(v0) }, J.bool(o.opt("choose")), J.bool(o.opt("from_start")), J.opt(o.opt("institution_id")) { v0 -> J.text(v0) }) }
     }
 }
@@ -636,6 +821,8 @@ data class Item(val receiptId: String, val line: Long, val name: String, val sku
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "," + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"same\":" + J.q(same) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): Item = Item(r.text(), r.int(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): Item = (j as JSONObject).let { o -> Item(J.text(o.opt("receipt_id")), J.int(o.opt("line")), J.text(o.opt("name")), J.text(o.opt("sku")), J.text(o.opt("same")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -645,6 +832,8 @@ data class ItemLine(val receiptId: String, val line: Long, val store: String, va
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "," + "\"unit_price\":" + unitPrice.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "}"
 
     companion object {
+        fun read(r: Reader): ItemLine = ItemLine(r.text(), r.int(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.int(), r.opt { r0 -> r0.id() }, r.text())
+
         fun of(j: Any?): ItemLine = (j as JSONObject).let { o -> ItemLine(J.text(o.opt("receipt_id")), J.int(o.opt("line")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.text(o.opt("name")), J.text(o.opt("sku")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount")), J.int(o.opt("unit_price")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category"))) }
     }
 }
@@ -654,6 +843,8 @@ data class ItemRef(val receiptId: String, val line: Long) {
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"line\":" + line.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ItemRef = ItemRef(r.text(), r.int())
+
         fun of(j: Any?): ItemRef = (j as JSONObject).let { o -> ItemRef(J.text(o.opt("receipt_id")), J.int(o.opt("line"))) }
     }
 }
@@ -663,6 +854,8 @@ data class ItemsIn(val categoryId: Id? = null) {
     fun json(): String = "{" + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): ItemsIn = ItemsIn(r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): ItemsIn = (j as JSONObject).let { o -> ItemsIn(J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -692,16 +885,27 @@ sealed class JobInt {
     }
 
     companion object {
-        fun of(j: Any?): JobInt = J.sum(j) { t, o ->
-            when (t) {
-                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
-                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
-                "Done" -> Done(J.int(o!!.opt("value")))
-                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
-                "Cancelled" -> Cancelled
-                else -> throw IllegalArgumentException("JobInt: no variant $t")
+        fun read(r: Reader): JobInt =
+            when (val v = r.variant()) {
+                0 -> Pending(r.int())
+                1 -> Claimed(r.text(), r.int())
+                2 -> Done(r.int())
+                3 -> Failed(r.text(), r.int())
+                4 -> Cancelled
+                else -> throw IllegalArgumentException("JobInt: no variant $v")
             }
-        }
+
+        fun of(j: Any?): JobInt =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                    "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                    "Done" -> Done(J.int(o!!.opt("value")))
+                    "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                    "Cancelled" -> Cancelled
+                    else -> throw IllegalArgumentException("JobInt: no variant $t")
+                }
+            }
     }
 }
 
@@ -730,16 +934,27 @@ sealed class JobPhotoRead {
     }
 
     companion object {
-        fun of(j: Any?): JobPhotoRead = J.sum(j) { t, o ->
-            when (t) {
-                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
-                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
-                "Done" -> Done(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
-                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
-                "Cancelled" -> Cancelled
-                else -> throw IllegalArgumentException("JobPhotoRead: no variant $t")
+        fun read(r: Reader): JobPhotoRead =
+            when (val v = r.variant()) {
+                0 -> Pending(r.int())
+                1 -> Claimed(r.text(), r.int())
+                2 -> Done(dev.money.android.gen.PhotoRead.read(r))
+                3 -> Failed(r.text(), r.int())
+                4 -> Cancelled
+                else -> throw IllegalArgumentException("JobPhotoRead: no variant $v")
             }
-        }
+
+        fun of(j: Any?): JobPhotoRead =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                    "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                    "Done" -> Done(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
+                    "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                    "Cancelled" -> Cancelled
+                    else -> throw IllegalArgumentException("JobPhotoRead: no variant $t")
+                }
+            }
     }
 }
 
@@ -748,6 +963,8 @@ data class LinkAccount(val plaidAccountId: String, val accountId: Id) {
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"account_id\":" + J.q(accountId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): LinkAccount = LinkAccount(r.text(), r.id())
+
         fun of(j: Any?): LinkAccount = (j as JSONObject).let { o -> LinkAccount(J.text(o.opt("plaid_account_id")), Id(J.text(o.opt("account_id")))) }
     }
 }
@@ -757,20 +974,30 @@ data class Linked(val plaidAccountId: String, val bank: String, val accountId: I
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"seen\":" + J.q(seen) + "," + "\"since\":" + J.q(since) + "," + "\"opening\":" + opening.toString() + "," + "\"seam\":" + seam.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Linked = Linked(r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.text(), r.opt { r0 -> r0.int() }, r.bool(), r.text(), r.text(), r.text(), r.bool(), r.bool())
+
         fun of(j: Any?): Linked = (j as JSONObject).let { o -> Linked(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.text(o.opt("seen")), J.text(o.opt("since")), J.bool(o.opt("opening")), J.bool(o.opt("seam"))) }
     }
 }
 
-/** The record `LinkedLine` (UniFFI's): its JSON, for the functions called by name. */
-fun LinkedLine.json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"waiting\":" + waiting.toString() + "," + "\"opens_as\":" + J.q(opensAs) + "}"
+/** The record `LinkedLine`. */
+data class LinkedLine(val plaidAccountId: String, val bank: String, val accountId: Id?, val account: String, val name: String, val mask: String, val kind: String, val balance: Long?, val ignored: Boolean, val subtype: String, val waiting: Boolean, val opensAs: String) {
+    fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"bank\":" + J.q(bank) + "," + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "," + "\"account\":" + J.q(account) + "," + "\"name\":" + J.q(name) + "," + "\"mask\":" + J.q(mask) + "," + "\"kind\":" + J.q(kind) + "," + "\"balance\":" + J.wopt(balance) { v0 -> v0.toString() } + "," + "\"ignored\":" + ignored.toString() + "," + "\"subtype\":" + J.q(subtype) + "," + "\"waiting\":" + waiting.toString() + "," + "\"opens_as\":" + J.q(opensAs) + "}"
 
-fun LinkedLine.Companion.of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.bool(o.opt("waiting")), J.text(o.opt("opens_as"))) }
+    companion object {
+        fun read(r: Reader): LinkedLine = LinkedLine(r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.text(), r.text(), r.opt { r0 -> r0.int() }, r.bool(), r.text(), r.bool(), r.text())
+
+        fun of(j: Any?): LinkedLine = (j as JSONObject).let { o -> LinkedLine(J.text(o.opt("plaid_account_id")), J.text(o.opt("bank")), J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("account")), J.text(o.opt("name")), J.text(o.opt("mask")), J.text(o.opt("kind")), J.opt(o.opt("balance")) { v0 -> J.int(v0) }, J.bool(o.opt("ignored")), J.text(o.opt("subtype")), J.bool(o.opt("waiting")), J.text(o.opt("opens_as"))) }
+    }
+}
 
 /** The record `MatchReceipt`. */
 data class MatchReceipt(val receiptId: String, val txnId: Id? = null) {
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): MatchReceipt = MatchReceipt(r.text(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): MatchReceipt = (j as JSONObject).let { o -> MatchReceipt(J.text(o.opt("receipt_id")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -780,6 +1007,8 @@ data class Month(val month: String) {
     fun json(): String = "{" + "\"month\":" + J.q(month) + "}"
 
     companion object {
+        fun read(r: Reader): Month = Month(r.text())
+
         fun of(j: Any?): Month = (j as JSONObject).let { o -> Month(J.text(o.opt("month"))) }
     }
 }
@@ -789,6 +1018,8 @@ data class MoveCategory(val id: Id, val groupId: Id, val before: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"group_id\":" + J.q(groupId.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): MoveCategory = MoveCategory(r.id(), r.id(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): MoveCategory = (j as JSONObject).let { o -> MoveCategory(Id(J.text(o.opt("id"))), Id(J.text(o.opt("group_id"))), J.opt(o.opt("before")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -798,6 +1029,8 @@ data class MoveFilter(val id: Id, val before: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): MoveFilter = MoveFilter(r.id(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): MoveFilter = (j as JSONObject).let { o -> MoveFilter(Id(J.text(o.opt("id"))), J.opt(o.opt("before")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -807,6 +1040,8 @@ data class MoveGroup(val id: Id, val before: Id? = null) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"before\":" + J.wopt(before) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): MoveGroup = MoveGroup(r.id(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): MoveGroup = (j as JSONObject).let { o -> MoveGroup(Id(J.text(o.opt("id"))), J.opt(o.opt("before")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -816,6 +1051,8 @@ data class MoveMoney(val month: String, val from: Id?, val to: Id?, val amount: 
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0.hex) } + "," + "\"to\":" + J.wopt(to) { v0 -> J.q(v0.hex) } + "," + "\"amount\":" + amount.toString() + "}"
 
     companion object {
+        fun read(r: Reader): MoveMoney = MoveMoney(r.text(), r.opt { r0 -> r0.id() }, r.opt { r0 -> r0.id() }, r.int())
+
         fun of(j: Any?): MoveMoney = (j as JSONObject).let { o -> MoveMoney(J.text(o.opt("month")), J.opt(o.opt("from")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("to")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("amount"))) }
     }
 }
@@ -825,6 +1062,8 @@ data class OneReceipt(val receiptId: String) {
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "}"
 
     companion object {
+        fun read(r: Reader): OneReceipt = OneReceipt(r.text())
+
         fun of(j: Any?): OneReceipt = (j as JSONObject).let { o -> OneReceipt(J.text(o.opt("receipt_id"))) }
     }
 }
@@ -834,6 +1073,8 @@ data class OneTxn(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): OneTxn = OneTxn(r.id())
+
         fun of(j: Any?): OneTxn = (j as JSONObject).let { o -> OneTxn(Id(J.text(o.opt("id")))) }
     }
 }
@@ -843,6 +1084,8 @@ data class OpenAccount(val name: String, val kind: String, val onBudget: Boolean
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"kind\":" + J.q(kind) + "," + "\"on_budget\":" + onBudget.toString() + "," + "\"balance\":" + balance.toString() + "," + "\"date\":" + J.q(date) + "}"
 
     companion object {
+        fun read(r: Reader): OpenAccount = OpenAccount(r.text(), r.text(), r.bool(), r.int(), r.text())
+
         fun of(j: Any?): OpenAccount = (j as JSONObject).let { o -> OpenAccount(J.text(o.opt("name")), J.text(o.opt("kind")), J.bool(o.opt("on_budget")), J.int(o.opt("balance")), J.text(o.opt("date"))) }
     }
 }
@@ -852,6 +1095,8 @@ data class OpenLinked(val plaidAccountId: String, val name: String) {
     fun json(): String = "{" + "\"plaid_account_id\":" + J.q(plaidAccountId) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): OpenLinked = OpenLinked(r.text(), r.text())
+
         fun of(j: Any?): OpenLinked = (j as JSONObject).let { o -> OpenLinked(J.text(o.opt("plaid_account_id")), J.text(o.opt("name"))) }
     }
 }
@@ -861,6 +1106,8 @@ data class PaidFor(val receiptId: String, val chargeId: String? = null) {
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"charge_id\":" + J.wopt(chargeId) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): PaidFor = PaidFor(r.text(), r.opt { r0 -> r0.text() })
+
         fun of(j: Any?): PaidFor = (j as JSONObject).let { o -> PaidFor(J.text(o.opt("receipt_id")), J.opt(o.opt("charge_id")) { v0 -> J.text(v0) }) }
     }
 }
@@ -870,20 +1117,30 @@ data class PayCharge(val chargeId: String, val txnId: Id? = null) {
     fun json(): String = "{" + "\"charge_id\":" + J.q(chargeId) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): PayCharge = PayCharge(r.text(), r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): PayCharge = (j as JSONObject).let { o -> PayCharge(J.text(o.opt("charge_id")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
 
-/** The record `PayeeLine` (UniFFI's): its JSON, for the functions called by name. */
-fun PayeeLine.json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":" + count.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
+/** The record `PayeeLine`. */
+data class PayeeLine(val name: String, val count: Long, val categoryId: Id? = null) {
+    fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"count\":" + count.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "}"
 
-fun PayeeLine.Companion.of(j: Any?): PayeeLine = (j as JSONObject).let { o -> PayeeLine(J.text(o.opt("name")), J.int(o.opt("count")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+    companion object {
+        fun read(r: Reader): PayeeLine = PayeeLine(r.text(), r.int(), r.opt { r0 -> r0.id() })
+
+        fun of(j: Any?): PayeeLine = (j as JSONObject).let { o -> PayeeLine(J.text(o.opt("name")), J.int(o.opt("count")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }) }
+    }
+}
 
 /** The record `Photo`. */
 data class Photo(val id: Id, val file: FileRef, val txnId: Id?, val takenMs: Long, val userId: String, val state: JobPhotoRead) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"taken_ms\":" + takenMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Photo = Photo(r.id(), FileRef.read(r), r.opt { r0 -> r0.id() }, r.int(), r.text(), JobPhotoRead.read(r))
+
         fun of(j: Any?): Photo = (j as JSONObject).let { o -> Photo(Id(J.text(o.opt("id"))), FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("taken_ms")), J.text(o.opt("user_id")), JobPhotoRead.of(o.opt("state"))) }
     }
 }
@@ -893,6 +1150,8 @@ data class PhotoCancel(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): PhotoCancel = PhotoCancel(r.id())
+
         fun of(j: Any?): PhotoCancel = (j as JSONObject).let { o -> PhotoCancel(Id(J.text(o.opt("id")))) }
     }
 }
@@ -902,6 +1161,8 @@ data class PhotoClaim(val id: Id, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): PhotoClaim = PhotoClaim(r.id(), r.text())
+
         fun of(j: Any?): PhotoClaim = (j as JSONObject).let { o -> PhotoClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
     }
 }
@@ -911,6 +1172,8 @@ data class PhotoFinish(val id: Id, val by: String, val outcome: PhotoOutcome, va
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): PhotoFinish = PhotoFinish(r.id(), r.text(), PhotoOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): PhotoFinish = (j as JSONObject).let { o -> PhotoFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), PhotoOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -920,6 +1183,8 @@ data class PhotoLine(val id: Id, val file: FileRef, val txnId: Id?, val receiptI
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"file\":" + file.json() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"receipt_id\":" + J.q(receiptId) + "," + "\"taken_ms\":" + takenMs.toString() + "," + "\"state\":" + J.q(state) + "," + "\"why\":" + J.q(why) + "}"
 
     companion object {
+        fun read(r: Reader): PhotoLine = PhotoLine(r.id(), FileRef.read(r), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): PhotoLine = (j as JSONObject).let { o -> PhotoLine(Id(J.text(o.opt("id"))), FileRef.of(o.opt("file")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("receipt_id")), J.int(o.opt("taken_ms")), J.text(o.opt("state")), J.text(o.opt("why"))) }
     }
 }
@@ -937,13 +1202,21 @@ sealed class PhotoOutcome {
     }
 
     companion object {
-        fun of(j: Any?): PhotoOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("PhotoOutcome: no variant $t")
+        fun read(r: Reader): PhotoOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(dev.money.android.gen.PhotoRead.read(r))
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("PhotoOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): PhotoOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(dev.money.android.gen.PhotoRead.of(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("PhotoOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -952,6 +1225,8 @@ data class PhotoRead(val receiptId: String, val state: String, val changed: List
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"state\":" + J.q(state) + "," + "\"changed\":" + J.wlist(changed) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): PhotoRead = PhotoRead(r.text(), r.text(), r.list { r0 -> r0.text() })
+
         fun of(j: Any?): PhotoRead = (j as JSONObject).let { o -> PhotoRead(J.text(o.opt("receipt_id")), J.text(o.opt("state")), J.list(o.opt("changed")) { v0 -> J.text(v0) }) }
     }
 }
@@ -961,6 +1236,8 @@ data class PreviewFormula(val month: String, val terms: List<Term>) {
     fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"terms\":" + J.wlist(terms) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): PreviewFormula = PreviewFormula(r.text(), r.list { r0 -> Term.read(r0) })
+
         fun of(j: Any?): PreviewFormula = (j as JSONObject).let { o -> PreviewFormula(J.text(o.opt("month")), J.list(o.opt("terms")) { v0 -> Term.of(v0) }) }
     }
 }
@@ -970,6 +1247,8 @@ data class Receipt(val id: String, val store: String, val date: String, val plac
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"imported_ms\":" + importedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Receipt = Receipt(r.text(), r.text(), r.text(), r.text(), r.int(), r.opt { r0 -> r0.id() }, r.int(), r.text())
+
         fun of(j: Any?): Receipt = (j as JSONObject).let { o -> Receipt(J.text(o.opt("id")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("imported_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -979,6 +1258,8 @@ data class ReceiptImport(val store: String, val receipts: List<StoreReceipt>) {
     fun json(): String = "{" + "\"store\":" + J.q(store) + "," + "\"receipts\":" + J.wlist(receipts) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): ReceiptImport = ReceiptImport(r.text(), r.list { r0 -> StoreReceipt.read(r0) })
+
         fun of(j: Any?): ReceiptImport = (j as JSONObject).let { o -> ReceiptImport(J.text(o.opt("store")), J.list(o.opt("receipts")) { v0 -> StoreReceipt.of(v0) }) }
     }
 }
@@ -988,6 +1269,8 @@ data class ReceiptLine(val id: String, val store: String, val date: String, val 
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"store\":" + J.q(store) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"items\":" + items.toString() + "," + "\"filed\":" + filed.toString() + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"payee\":" + J.q(payee) + "," + "\"account\":" + J.q(account) + "," + "\"charges\":" + charges.toString() + "," + "\"charged\":" + charged.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ReceiptLine = ReceiptLine(r.text(), r.text(), r.text(), r.text(), r.int(), r.int(), r.int(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): ReceiptLine = (j as JSONObject).let { o -> ReceiptLine(J.text(o.opt("id")), J.text(o.opt("store")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.int(o.opt("items")), J.int(o.opt("filed")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("payee")), J.text(o.opt("account")), J.int(o.opt("charges")), J.int(o.opt("charged"))) }
     }
 }
@@ -997,6 +1280,8 @@ data class Reconcile(val accountId: Id, val balance: Long, val date: String) {
     fun json(): String = "{" + "\"account_id\":" + J.q(accountId.hex) + "," + "\"balance\":" + balance.toString() + "," + "\"date\":" + J.q(date) + "}"
 
     companion object {
+        fun read(r: Reader): Reconcile = Reconcile(r.id(), r.int(), r.text())
+
         fun of(j: Any?): Reconcile = (j as JSONObject).let { o -> Reconcile(Id(J.text(o.opt("account_id"))), J.int(o.opt("balance")), J.text(o.opt("date"))) }
     }
 }
@@ -1006,6 +1291,8 @@ data class Register(val accountId: Id? = null) {
     fun json(): String = "{" + "\"account_id\":" + J.wopt(accountId) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): Register = Register(r.opt { r0 -> r0.id() })
+
         fun of(j: Any?): Register = (j as JSONObject).let { o -> Register(J.opt(o.opt("account_id")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -1015,6 +1302,8 @@ data class RenameAccount(val id: Id, val name: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): RenameAccount = RenameAccount(r.id(), r.text())
+
         fun of(j: Any?): RenameAccount = (j as JSONObject).let { o -> RenameAccount(Id(J.text(o.opt("id"))), J.text(o.opt("name"))) }
     }
 }
@@ -1024,6 +1313,8 @@ data class RenameCategory(val id: Id, val name: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): RenameCategory = RenameCategory(r.id(), r.text())
+
         fun of(j: Any?): RenameCategory = (j as JSONObject).let { o -> RenameCategory(Id(J.text(o.opt("id"))), J.text(o.opt("name"))) }
     }
 }
@@ -1033,6 +1324,8 @@ data class RenameFilter(val id: Id, val name: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): RenameFilter = RenameFilter(r.id(), r.text())
+
         fun of(j: Any?): RenameFilter = (j as JSONObject).let { o -> RenameFilter(Id(J.text(o.opt("id"))), J.text(o.opt("name"))) }
     }
 }
@@ -1042,6 +1335,8 @@ data class RenameGroup(val id: Id, val name: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): RenameGroup = RenameGroup(r.id(), r.text())
+
         fun of(j: Any?): RenameGroup = (j as JSONObject).let { o -> RenameGroup(Id(J.text(o.opt("id"))), J.text(o.opt("name"))) }
     }
 }
@@ -1051,6 +1346,8 @@ data class Revoke(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): Revoke = Revoke(r.text())
+
         fun of(j: Any?): Revoke = (j as JSONObject).let { o -> Revoke(J.text(o.opt("id"))) }
     }
 }
@@ -1060,6 +1357,8 @@ data class Role(val user: String, val role: String) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): Role = Role(r.text(), r.text())
+
         fun of(j: Any?): Role = (j as JSONObject).let { o -> Role(J.text(o.opt("user")), J.text(o.opt("role"))) }
     }
 }
@@ -1069,6 +1368,8 @@ data class Rule(val from: String, val categoryId: Id, val manual: Boolean, val m
     fun json(): String = "{" + "\"from\":" + J.q(from) + "," + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"manual\":" + manual.toString() + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "," + "\"at_ms\":" + atMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Rule = Rule(r.text(), r.id(), r.bool(), r.text(), r.list { r0 -> r0.id() }, r.int(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): Rule = (j as JSONObject).let { o -> Rule(J.text(o.opt("from")), Id(J.text(o.opt("category_id"))), J.bool(o.opt("manual")), J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per")), J.int(o.opt("at_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -1078,6 +1379,8 @@ data class SaveFilter(val name: String, val filter: Filter) {
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"filter\":" + filter.json() + "}"
 
     companion object {
+        fun read(r: Reader): SaveFilter = SaveFilter(r.text(), Filter.read(r))
+
         fun of(j: Any?): SaveFilter = (j as JSONObject).let { o -> SaveFilter(J.text(o.opt("name")), Filter.of(o.opt("filter"))) }
     }
 }
@@ -1087,6 +1390,8 @@ data class SavedFilter(val id: Id, val name: String, val pos: Long, val filter: 
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"filter\":" + filter.json() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): SavedFilter = SavedFilter(r.id(), r.text(), r.int(), Filter.read(r), r.int(), r.text())
+
         fun of(j: Any?): SavedFilter = (j as JSONObject).let { o -> SavedFilter(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), Filter.of(o.opt("filter")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -1096,6 +1401,8 @@ data class SetCleared(val id: Id, val cleared: Boolean) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"cleared\":" + cleared.toString() + "}"
 
     companion object {
+        fun read(r: Reader): SetCleared = SetCleared(r.id(), r.bool())
+
         fun of(j: Any?): SetCleared = (j as JSONObject).let { o -> SetCleared(Id(J.text(o.opt("id"))), J.bool(o.opt("cleared"))) }
     }
 }
@@ -1105,6 +1412,8 @@ data class SetFormula(val categoryId: Id, val from: String?, val terms: List<Ter
     fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "," + "\"terms\":" + J.wlist(terms) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): SetFormula = SetFormula(r.id(), r.opt { r0 -> r0.text() }, r.list { r0 -> Term.read(r0) })
+
         fun of(j: Any?): SetFormula = (j as JSONObject).let { o -> SetFormula(Id(J.text(o.opt("category_id"))), J.opt(o.opt("from")) { v0 -> J.text(v0) }, J.list(o.opt("terms")) { v0 -> Term.of(v0) }) }
     }
 }
@@ -1114,6 +1423,8 @@ data class SetRule(val categoryId: Id, val from: String?, val matching: String, 
     fun json(): String = "{" + "\"category_id\":" + J.q(categoryId.hex) + "," + "\"from\":" + J.wopt(from) { v0 -> J.q(v0) } + "," + "\"matching\":" + J.q(matching) + "," + "\"accounts\":" + J.wlist(accounts) { v0 -> J.q(v0.hex) } + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "}"
 
     companion object {
+        fun read(r: Reader): SetRule = SetRule(r.id(), r.opt { r0 -> r0.text() }, r.text(), r.list { r0 -> r0.id() }, r.int(), r.int())
+
         fun of(j: Any?): SetRule = (j as JSONObject).let { o -> SetRule(Id(J.text(o.opt("category_id"))), J.opt(o.opt("from")) { v0 -> J.text(v0) }, J.text(o.opt("matching")), J.list(o.opt("accounts")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("times")), J.int(o.opt("per"))) }
     }
 }
@@ -1123,6 +1434,8 @@ data class SetTarget(val id: Id, val target: Long) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"target\":" + target.toString() + "}"
 
     companion object {
+        fun read(r: Reader): SetTarget = SetTarget(r.id(), r.int())
+
         fun of(j: Any?): SetTarget = (j as JSONObject).let { o -> SetTarget(Id(J.text(o.opt("id"))), J.int(o.opt("target"))) }
     }
 }
@@ -1132,20 +1445,30 @@ data class SignIn(val id: String, val user: String, val name: String, val email:
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "," + "\"picture\":" + J.q(picture) + "}"
 
     companion object {
+        fun read(r: Reader): SignIn = SignIn(r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.int(), r.bool(), r.list { r0 -> r0.text() }, r.text())
+
         fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }, J.text(o.opt("picture"))) }
     }
 }
 
-/** The record `SpendingLine` (UniFFI's): its JSON, for the functions called by name. */
-fun SpendingLine.json(): String = "{" + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"pos\":" + pos.toString() + "," + "\"spent\":" + spent.toString() + "}"
+/** The record `SpendingLine`. */
+data class SpendingLine(val groupId: Id, val group: String, val pos: Long, val spent: Long) {
+    fun json(): String = "{" + "\"group_id\":" + J.q(groupId.hex) + "," + "\"group\":" + J.q(group) + "," + "\"pos\":" + pos.toString() + "," + "\"spent\":" + spent.toString() + "}"
 
-fun SpendingLine.Companion.of(j: Any?): SpendingLine = (j as JSONObject).let { o -> SpendingLine(Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("pos")), J.int(o.opt("spent"))) }
+    companion object {
+        fun read(r: Reader): SpendingLine = SpendingLine(r.id(), r.text(), r.int(), r.int())
+
+        fun of(j: Any?): SpendingLine = (j as JSONObject).let { o -> SpendingLine(Id(J.text(o.opt("group_id"))), J.text(o.opt("group")), J.int(o.opt("pos")), J.int(o.opt("spent"))) }
+    }
+}
 
 /** The record `Split`. */
 data class Split(val txnId: Id, val line: Long, val categoryId: Id?, val date: String, val amount: Long, val memo: String) {
     fun json(): String = "{" + "\"txn_id\":" + J.q(txnId.hex) + "," + "\"line\":" + line.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
 
     companion object {
+        fun read(r: Reader): Split = Split(r.id(), r.int(), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.text())
+
         fun of(j: Any?): Split = (j as JSONObject).let { o -> Split(Id(J.text(o.opt("txn_id"))), J.int(o.opt("line")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("memo"))) }
     }
 }
@@ -1155,6 +1478,8 @@ data class SplitLine(val txnId: Id, val line: Long, val categoryId: Id?, val cat
     fun json(): String = "{" + "\"txn_id\":" + J.q(txnId.hex) + "," + "\"line\":" + line.toString() + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
 
     companion object {
+        fun read(r: Reader): SplitLine = SplitLine(r.id(), r.int(), r.opt { r0 -> r0.id() }, r.text(), r.int(), r.text())
+
         fun of(j: Any?): SplitLine = (j as JSONObject).let { o -> SplitLine(Id(J.text(o.opt("txn_id"))), J.int(o.opt("line")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.int(o.opt("amount")), J.text(o.opt("memo"))) }
     }
 }
@@ -1164,6 +1489,8 @@ data class SplitPart(val categoryId: Id?, val amount: Long, val memo: String) {
     fun json(): String = "{" + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"amount\":" + amount.toString() + "," + "\"memo\":" + J.q(memo) + "}"
 
     companion object {
+        fun read(r: Reader): SplitPart = SplitPart(r.opt { r0 -> r0.id() }, r.int(), r.text())
+
         fun of(j: Any?): SplitPart = (j as JSONObject).let { o -> SplitPart(J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.int(o.opt("amount")), J.text(o.opt("memo"))) }
     }
 }
@@ -1173,6 +1500,8 @@ data class SplitTxn(val id: Id, val lines: List<SplitPart>) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"lines\":" + J.wlist(lines) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): SplitTxn = SplitTxn(r.id(), r.list { r0 -> SplitPart.read(r0) })
+
         fun of(j: Any?): SplitTxn = (j as JSONObject).let { o -> SplitTxn(Id(J.text(o.opt("id"))), J.list(o.opt("lines")) { v0 -> SplitPart.of(v0) }) }
     }
 }
@@ -1182,6 +1511,8 @@ data class StoreCharge(val orderId: String, val date: String, val amount: Long, 
     fun json(): String = "{" + "\"order_id\":" + J.q(orderId) + "," + "\"date\":" + J.q(date) + "," + "\"amount\":" + amount.toString() + "," + "\"card\":" + J.q(card) + "}"
 
     companion object {
+        fun read(r: Reader): StoreCharge = StoreCharge(r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): StoreCharge = (j as JSONObject).let { o -> StoreCharge(J.text(o.opt("order_id")), J.text(o.opt("date")), J.int(o.opt("amount")), J.text(o.opt("card"))) }
     }
 }
@@ -1191,6 +1522,8 @@ data class StoreItem(val name: String, val sku: String, val quantity: Long, val 
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"sku\":" + J.q(sku) + "," + "\"quantity\":" + quantity.toString() + "," + "\"unit\":" + J.q(unit) + "," + "\"amount\":" + amount.toString() + "}"
 
     companion object {
+        fun read(r: Reader): StoreItem = StoreItem(r.text(), r.text(), r.int(), r.text(), r.int())
+
         fun of(j: Any?): StoreItem = (j as JSONObject).let { o -> StoreItem(J.text(o.opt("name")), J.text(o.opt("sku")), J.int(o.opt("quantity")), J.text(o.opt("unit")), J.int(o.opt("amount"))) }
     }
 }
@@ -1200,20 +1533,30 @@ data class StoreReceipt(val orderId: String, val date: String, val place: String
     fun json(): String = "{" + "\"order_id\":" + J.q(orderId) + "," + "\"date\":" + J.q(date) + "," + "\"place\":" + J.q(place) + "," + "\"total\":" + total.toString() + "," + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): StoreReceipt = StoreReceipt(r.text(), r.text(), r.text(), r.int(), r.list { r0 -> StoreItem.read(r0) })
+
         fun of(j: Any?): StoreReceipt = (j as JSONObject).let { o -> StoreReceipt(J.text(o.opt("order_id")), J.text(o.opt("date")), J.text(o.opt("place")), J.int(o.opt("total")), J.list(o.opt("items")) { v0 -> StoreItem.of(v0) }) }
     }
 }
 
-/** The record `Summary` (UniFFI's): its JSON, for the functions called by name. */
-fun Summary.json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"ready_to_assign\":" + readyToAssign.toString() + "," + "\"income\":" + income.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"overspent_last_month\":" + overspentLastMonth.toString() + "," + "\"overspent\":" + overspent.toString() + "," + "\"underfunded\":" + underfunded.toString() + "}"
+/** The record `Summary`. */
+data class Summary(val month: String, val readyToAssign: Long, val income: Long, val assigned: Long, val activity: Long, val available: Long, val overspentLastMonth: Long, val overspent: Long, val underfunded: Long) {
+    fun json(): String = "{" + "\"month\":" + J.q(month) + "," + "\"ready_to_assign\":" + readyToAssign.toString() + "," + "\"income\":" + income.toString() + "," + "\"assigned\":" + assigned.toString() + "," + "\"activity\":" + activity.toString() + "," + "\"available\":" + available.toString() + "," + "\"overspent_last_month\":" + overspentLastMonth.toString() + "," + "\"overspent\":" + overspent.toString() + "," + "\"underfunded\":" + underfunded.toString() + "}"
 
-fun Summary.Companion.of(j: Any?): Summary = (j as JSONObject).let { o -> Summary(J.text(o.opt("month")), J.int(o.opt("ready_to_assign")), J.int(o.opt("income")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("overspent_last_month")), J.int(o.opt("overspent")), J.int(o.opt("underfunded"))) }
+    companion object {
+        fun read(r: Reader): Summary = Summary(r.text(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int(), r.int())
+
+        fun of(j: Any?): Summary = (j as JSONObject).let { o -> Summary(J.text(o.opt("month")), J.int(o.opt("ready_to_assign")), J.int(o.opt("income")), J.int(o.opt("assigned")), J.int(o.opt("activity")), J.int(o.opt("available")), J.int(o.opt("overspent_last_month")), J.int(o.opt("overspent")), J.int(o.opt("underfunded"))) }
+    }
+}
 
 /** The record `Syncing`. */
 data class Syncing(val id: String, val state: JobInt) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Syncing = Syncing(r.text(), JobInt.read(r))
+
         fun of(j: Any?): Syncing = (j as JSONObject).let { o -> Syncing(J.text(o.opt("id")), JobInt.of(o.opt("state"))) }
     }
 }
@@ -1223,6 +1566,8 @@ data class SyncingCancel(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): SyncingCancel = SyncingCancel(r.text())
+
         fun of(j: Any?): SyncingCancel = (j as JSONObject).let { o -> SyncingCancel(J.text(o.opt("id"))) }
     }
 }
@@ -1232,6 +1577,8 @@ data class SyncingClaim(val id: String, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): SyncingClaim = SyncingClaim(r.text(), r.text())
+
         fun of(j: Any?): SyncingClaim = (j as JSONObject).let { o -> SyncingClaim(J.text(o.opt("id")), J.text(o.opt("by"))) }
     }
 }
@@ -1241,6 +1588,8 @@ data class SyncingFinish(val id: String, val by: String, val outcome: SyncingOut
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): SyncingFinish = SyncingFinish(r.text(), r.text(), SyncingOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): SyncingFinish = (j as JSONObject).let { o -> SyncingFinish(J.text(o.opt("id")), J.text(o.opt("by")), SyncingOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -1258,13 +1607,21 @@ sealed class SyncingOutcome {
     }
 
     companion object {
-        fun of(j: Any?): SyncingOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(J.int(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("SyncingOutcome: no variant $t")
+        fun read(r: Reader): SyncingOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(r.int())
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("SyncingOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): SyncingOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(J.int(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("SyncingOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -1273,6 +1630,8 @@ data class Term(val filterId: Id, val times: Long, val per: Long) {
     fun json(): String = "{" + "\"filter_id\":" + J.q(filterId.hex) + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Term = Term(r.id(), r.int(), r.int())
+
         fun of(j: Any?): Term = (j as JSONObject).let { o -> Term(Id(J.text(o.opt("filter_id"))), J.int(o.opt("times")), J.int(o.opt("per"))) }
     }
 }
@@ -1282,6 +1641,8 @@ data class TermLine(val filterId: Id, val name: String, val times: Long, val per
     fun json(): String = "{" + "\"filter_id\":" + J.q(filterId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"times\":" + times.toString() + "," + "\"per\":" + per.toString() + "," + "\"count\":" + count.toString() + "," + "\"sum\":" + sum.toString() + "}"
 
     companion object {
+        fun read(r: Reader): TermLine = TermLine(r.id(), r.text(), r.int(), r.int(), r.int(), r.int())
+
         fun of(j: Any?): TermLine = (j as JSONObject).let { o -> TermLine(Id(J.text(o.opt("filter_id"))), J.text(o.opt("name")), J.int(o.opt("times")), J.int(o.opt("per")), J.int(o.opt("count")), J.int(o.opt("sum"))) }
     }
 }
@@ -1291,20 +1652,30 @@ data class Txn(val id: Id, val accountId: Id, val date: String, val payee: Strin
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer_account\":" + J.wopt(transferAccount) { v0 -> J.q(v0.hex) } + "," + "\"transfer_id\":" + J.wopt(transferId) { v0 -> J.q(v0.hex) } + "," + "\"imported_id\":" + J.wopt(importedId) { v0 -> J.q(v0) } + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"imported_by\":" + J.q(importedBy) + "," + "\"split\":" + split.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Txn = Txn(r.id(), r.id(), r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.int(), Cleared.read(r), r.bool(), r.opt { r0 -> r0.id() }, r.opt { r0 -> r0.id() }, r.opt { r0 -> r0.text() }, r.text(), r.int(), r.text(), r.text(), r.bool())
+
         fun of(j: Any?): Txn = (j as JSONObject).let { o -> Txn(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.opt(o.opt("transfer_account")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("transfer_id")) { v0 -> Id(J.text(v0)) }, J.opt(o.opt("imported_id")) { v0 -> J.text(v0) }, J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.text(o.opt("imported_by")), J.bool(o.opt("split"))) }
     }
 }
 
-/** The record `TxnLine` (UniFFI's): its JSON, for the functions called by name. */
-fun TxnLine.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"account\":" + J.q(account) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"group\":" + J.q(group) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer\":" + transfer.toString() + "," + "\"imported\":" + imported.toString() + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"receipt\":" + J.q(receipt) + "," + "\"photos\":" + photos.toString() + "}"
+/** The record `TxnLine`. */
+data class TxnLine(val id: Id, val accountId: Id, val account: String, val date: String, val payee: String, val categoryId: Id?, val category: String, val group: String, val memo: String, val amount: Long, val cleared: Cleared, val approved: Boolean, val transfer: Boolean, val imported: Boolean, val importedPayee: String, val createdMs: Long, val userId: String, val receipt: String, val photos: Long) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"account_id\":" + J.q(accountId.hex) + "," + "\"account\":" + J.q(account) + "," + "\"date\":" + J.q(date) + "," + "\"payee\":" + J.q(payee) + "," + "\"category_id\":" + J.wopt(categoryId) { v0 -> J.q(v0.hex) } + "," + "\"category\":" + J.q(category) + "," + "\"group\":" + J.q(group) + "," + "\"memo\":" + J.q(memo) + "," + "\"amount\":" + amount.toString() + "," + "\"cleared\":" + cleared.json() + "," + "\"approved\":" + approved.toString() + "," + "\"transfer\":" + transfer.toString() + "," + "\"imported\":" + imported.toString() + "," + "\"imported_payee\":" + J.q(importedPayee) + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"receipt\":" + J.q(receipt) + "," + "\"photos\":" + photos.toString() + "}"
 
-fun TxnLine.Companion.of(j: Any?): TxnLine = (j as JSONObject).let { o -> TxnLine(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("account")), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.text(o.opt("group")), J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.bool(o.opt("transfer")), J.bool(o.opt("imported")), J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.text(o.opt("receipt")), J.int(o.opt("photos"))) }
+    companion object {
+        fun read(r: Reader): TxnLine = TxnLine(r.id(), r.id(), r.text(), r.text(), r.text(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.text(), r.int(), Cleared.read(r), r.bool(), r.bool(), r.bool(), r.text(), r.int(), r.text(), r.text(), r.int())
+
+        fun of(j: Any?): TxnLine = (j as JSONObject).let { o -> TxnLine(Id(J.text(o.opt("id"))), Id(J.text(o.opt("account_id"))), J.text(o.opt("account")), J.text(o.opt("date")), J.text(o.opt("payee")), J.opt(o.opt("category_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("category")), J.text(o.opt("group")), J.text(o.opt("memo")), J.int(o.opt("amount")), Cleared.of(o.opt("cleared")), J.bool(o.opt("approved")), J.bool(o.opt("transfer")), J.bool(o.opt("imported")), J.text(o.opt("imported_payee")), J.int(o.opt("created_ms")), J.text(o.opt("user_id")), J.text(o.opt("receipt")), J.int(o.opt("photos"))) }
+    }
+}
 
 /** The record `Txns`. */
 data class Txns(val ids: List<Id>) {
     fun json(): String = "{" + "\"ids\":" + J.wlist(ids) { v0 -> J.q(v0.hex) } + "}"
 
     companion object {
+        fun read(r: Reader): Txns = Txns(r.list { r0 -> r0.id() })
+
         fun of(j: Any?): Txns = (j as JSONObject).let { o -> Txns(J.list(o.opt("ids")) { v0 -> Id(J.text(v0)) }) }
     }
 }
@@ -1314,14 +1685,16 @@ data class WriteReceipt(val receiptId: String, val txnId: Id?, val place: String
     fun json(): String = "{" + "\"receipt_id\":" + J.q(receiptId) + "," + "\"txn_id\":" + J.wopt(txnId) { v0 -> J.q(v0.hex) } + "," + "\"place\":" + J.q(place) + "," + "\"date\":" + J.q(date) + "," + "\"total\":" + J.wopt(total) { v0 -> v0.toString() } + "," + "\"items\":" + J.wlist(items) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): WriteReceipt = WriteReceipt(r.text(), r.opt { r0 -> r0.id() }, r.text(), r.text(), r.opt { r0 -> r0.int() }, r.list { r0 -> StoreItem.read(r0) })
+
         fun of(j: Any?): WriteReceipt = (j as JSONObject).let { o -> WriteReceipt(J.text(o.opt("receipt_id")), J.opt(o.opt("txn_id")) { v0 -> Id(J.text(v0)) }, J.text(o.opt("place")), J.text(o.opt("date")), J.opt(o.opt("total")) { v0 -> J.int(v0) }, J.list(o.opt("items")) { v0 -> StoreItem.of(v0) }) }
     }
 }
 
 /** The domain's functions, each called by its name through [peer]. */
 class Money(val peer: Peer) {
-    /** `accounts.accounts`, kept, its rows UniFFI's. */
-    fun accounts(): View<AccountLine> = typed(AccountLineView(peer, "accounts.accounts", "null"))
+    /** `accounts.accounts`, kept. */
+    fun accounts(): View<AccountLine> = View(peer.view("accounts.accounts", "null")) { r -> AccountLine.read(r) }
 
     /** `accounts.close_account`: its intent's id. */
     fun closeAccount(input: CloseAccount): String = peer.mutate("accounts.close_account", input.json())
@@ -1339,7 +1712,7 @@ class Money(val peer: Peer) {
     fun askingClaim(input: AskingClaim): String = peer.mutate("asking.claim", input.json())
 
     /** `asking.due`, kept. */
-    fun askingDue(): View<Asking> = View(peer.view("asking.due", "null")) { j -> Asking.of(j) }
+    fun askingDue(): View<Asking> = View(peer.view("asking.due", "null")) { r -> Asking.read(r) }
 
     /** `asking.finish`: its intent's id. */
     fun askingFinish(input: AskingFinish): String = peer.mutate("asking.finish", input.json())
@@ -1350,11 +1723,11 @@ class Money(val peer: Peer) {
     /** `banks.answer`: its intent's id. */
     fun answer(input: Answer): String = peer.mutate("banks.answer", input.json())
 
-    /** `banks.asks`, kept, its rows UniFFI's. */
-    fun asks(): View<AskLine> = typed(AskLineView(peer, "banks.asks", "null"))
+    /** `banks.asks`, kept. */
+    fun asks(): View<AskLine> = View(peer.view("banks.asks", "null")) { r -> AskLine.read(r) }
 
-    /** `banks.banks`, kept, its rows UniFFI's. */
-    fun banks(): View<BankLine> = typed(BankLineView(peer, "banks.banks", "null"))
+    /** `banks.banks`, kept. */
+    fun banks(): View<BankLine> = View(peer.view("banks.banks", "null")) { r -> BankLine.read(r) }
 
     /** `banks.connect`: its intent's id. */
     fun connect(): String = peer.mutate("banks.connect", "null")
@@ -1374,8 +1747,8 @@ class Money(val peer: Peer) {
     /** `banks.link`: its intent's id. */
     fun link(input: LinkAccount): String = peer.mutate("banks.link", input.json())
 
-    /** `banks.linked`, kept, its rows UniFFI's. */
-    fun linked(): View<LinkedLine> = typed(LinkedLineView(peer, "banks.linked", "null"))
+    /** `banks.linked`, kept. */
+    fun linked(): View<LinkedLine> = View(peer.view("banks.linked", "null")) { r -> LinkedLine.read(r) }
 
     /** `banks.open`: its intent's id. */
     fun open(input: OpenLinked): String = peer.mutate("banks.open", input.json())
@@ -1395,11 +1768,11 @@ class Money(val peer: Peer) {
     /** `budget.auto_assign`: its intent's id. */
     fun autoAssign(input: AutoAssign): String = peer.mutate("budget.auto_assign", input.json())
 
-    /** `budget.groups`, kept, its rows UniFFI's. */
-    fun groups(): View<GroupLine> = typed(GroupLineView(peer, "budget.groups", "null"))
+    /** `budget.groups`, kept. */
+    fun groups(): View<GroupLine> = View(peer.view("budget.groups", "null")) { r -> GroupLine.read(r) }
 
-    /** `budget.month`, kept, its rows UniFFI's. */
-    fun month(input: Month): View<BudgetLine> = typed(BudgetLineView(peer, "budget.month", input.json()))
+    /** `budget.month`, kept. */
+    fun month(input: Month): View<BudgetLine> = View(peer.view("budget.month", input.json())) { r -> BudgetLine.read(r) }
 
     /** `budget.move_money`: its intent's id. */
     fun moveMoney(input: MoveMoney): String = peer.mutate("budget.move_money", input.json())
@@ -1407,11 +1780,11 @@ class Money(val peer: Peer) {
     /** `budget.setup`: its intent's id. */
     fun setup(): String = peer.mutate("budget.setup", "null")
 
-    /** `budget.spending`, kept, its rows UniFFI's. */
-    fun spending(input: Month): View<SpendingLine> = typed(SpendingLineView(peer, "budget.spending", input.json()))
+    /** `budget.spending`, kept. */
+    fun spending(input: Month): View<SpendingLine> = View(peer.view("budget.spending", input.json())) { r -> SpendingLine.read(r) }
 
-    /** `budget.summary`, kept, its rows UniFFI's. */
-    fun summary(input: Month): View<Summary> = typed(SummaryView(peer, "budget.summary", input.json()))
+    /** `budget.summary`, kept. */
+    fun summary(input: Month): View<Summary> = View(peer.view("budget.summary", input.json())) { r -> Summary.read(r) }
 
     /** `categories.add_category`: its intent's id. */
     fun addCategory(input: AddCategory): String = peer.mutate("categories.add_category", input.json())
@@ -1432,7 +1805,7 @@ class Money(val peer: Peer) {
     fun deleteGroup(input: DeleteGroup): String = peer.mutate("categories.delete_group", input.json())
 
     /** `categories.formulas`, kept. */
-    fun formulas(input: Month): View<FormulaLine> = View(peer.view("categories.formulas", input.json())) { j -> FormulaLine.of(j) }
+    fun formulas(input: Month): View<FormulaLine> = View(peer.view("categories.formulas", input.json())) { r -> FormulaLine.read(r) }
 
     /** `categories.hide_category`: its intent's id. */
     fun hideCategory(input: HideCategory): String = peer.mutate("categories.hide_category", input.json())
@@ -1447,7 +1820,7 @@ class Money(val peer: Peer) {
     fun moveGroup(input: MoveGroup): String = peer.mutate("categories.move_group", input.json())
 
     /** `categories.preview_formula`, kept. */
-    fun previewFormula(input: PreviewFormula): View<FormulaPreview> = View(peer.view("categories.preview_formula", input.json())) { j -> FormulaPreview.of(j) }
+    fun previewFormula(input: PreviewFormula): View<FormulaPreview> = View(peer.view("categories.preview_formula", input.json())) { r -> FormulaPreview.read(r) }
 
     /** `categories.rename_category`: its intent's id. */
     fun renameCategory(input: RenameCategory): String = peer.mutate("categories.rename_category", input.json())
@@ -1465,7 +1838,7 @@ class Money(val peer: Peer) {
     fun setTarget(input: SetTarget): String = peer.mutate("categories.set_target", input.json())
 
     /** `categories.tree`, kept. */
-    fun tree(): View<CategoryNode> = View(peer.view("categories.tree", "null")) { j -> CategoryNode.of(j) }
+    fun tree(): View<CategoryNode> = View(peer.view("categories.tree", "null")) { r -> CategoryNode.read(r) }
 
     /** `filters.change_filter`: its intent's id. */
     fun changeFilter(input: ChangeFilter): String = peer.mutate("filters.change_filter", input.json())
@@ -1483,7 +1856,7 @@ class Money(val peer: Peer) {
     fun saveFilter(input: SaveFilter): String = peer.mutate("filters.save_filter", input.json())
 
     /** `filters.saved`, kept. */
-    fun saved(): View<FilterLine> = View(peer.view("filters.saved", "null")) { j -> FilterLine.of(j) }
+    fun saved(): View<FilterLine> = View(peer.view("filters.saved", "null")) { r -> FilterLine.read(r) }
 
     /** `photo.cancel`: its intent's id. */
     fun photoCancel(input: PhotoCancel): String = peer.mutate("photo.cancel", input.json())
@@ -1492,7 +1865,7 @@ class Money(val peer: Peer) {
     fun photoClaim(input: PhotoClaim): String = peer.mutate("photo.claim", input.json())
 
     /** `photo.due`, kept. */
-    fun photoDue(): View<Photo> = View(peer.view("photo.due", "null")) { j -> Photo.of(j) }
+    fun photoDue(): View<Photo> = View(peer.view("photo.due", "null")) { r -> Photo.read(r) }
 
     /** `photo.finish`: its intent's id. */
     fun photoFinish(input: PhotoFinish): String = peer.mutate("photo.finish", input.json())
@@ -1507,19 +1880,19 @@ class Money(val peer: Peer) {
     fun addReceipts(input: ReceiptImport): String = peer.mutate("receipts.add_receipts", input.json())
 
     /** `receipts.candidates`, kept. */
-    fun candidates(input: PaidFor): View<CandidateLine> = View(peer.view("receipts.candidates", input.json())) { j -> CandidateLine.of(j) }
+    fun candidates(input: PaidFor): View<CandidateLine> = View(peer.view("receipts.candidates", input.json())) { r -> CandidateLine.read(r) }
 
     /** `receipts.charges`, kept. */
-    fun charges(input: OneReceipt): View<ChargeLine> = View(peer.view("receipts.charges", input.json())) { j -> ChargeLine.of(j) }
+    fun charges(input: OneReceipt): View<ChargeLine> = View(peer.view("receipts.charges", input.json())) { r -> ChargeLine.read(r) }
 
     /** `receipts.file_items`: its intent's id. */
     fun fileItems(input: ClassifyItems): String = peer.mutate("receipts.file_items", input.json())
 
     /** `receipts.for_txn`, kept. */
-    fun forTxn(input: OneTxn): View<ReceiptLine> = View(peer.view("receipts.for_txn", input.json())) { j -> ReceiptLine.of(j) }
+    fun forTxn(input: OneTxn): View<ReceiptLine> = View(peer.view("receipts.for_txn", input.json())) { r -> ReceiptLine.read(r) }
 
     /** `receipts.items`, kept. */
-    fun items(input: ItemsIn): View<ItemLine> = View(peer.view("receipts.items", input.json())) { j -> ItemLine.of(j) }
+    fun items(input: ItemsIn): View<ItemLine> = View(peer.view("receipts.items", input.json())) { r -> ItemLine.read(r) }
 
     /** `receipts.pay`: its intent's id. */
     fun pay(input: MatchReceipt): String = peer.mutate("receipts.pay", input.json())
@@ -1528,13 +1901,13 @@ class Money(val peer: Peer) {
     fun payCharge(input: PayCharge): String = peer.mutate("receipts.pay_charge", input.json())
 
     /** `receipts.photos`, kept. */
-    fun photos(): View<PhotoLine> = View(peer.view("receipts.photos", "null")) { j -> PhotoLine.of(j) }
+    fun photos(): View<PhotoLine> = View(peer.view("receipts.photos", "null")) { r -> PhotoLine.read(r) }
 
     /** `receipts.receipt_items`, kept. */
-    fun receiptItems(input: OneReceipt): View<ItemLine> = View(peer.view("receipts.receipt_items", input.json())) { j -> ItemLine.of(j) }
+    fun receiptItems(input: OneReceipt): View<ItemLine> = View(peer.view("receipts.receipt_items", input.json())) { r -> ItemLine.read(r) }
 
     /** `receipts.receipts`, kept. */
-    fun receipts(): View<ReceiptLine> = View(peer.view("receipts.receipts", "null")) { j -> ReceiptLine.of(j) }
+    fun receipts(): View<ReceiptLine> = View(peer.view("receipts.receipts", "null")) { r -> ReceiptLine.read(r) }
 
     /** `receipts.write_receipt`: its intent's id. */
     fun writeReceipt(input: WriteReceipt): String = peer.mutate("receipts.write_receipt", input.json())
@@ -1546,7 +1919,7 @@ class Money(val peer: Peer) {
     fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
 
     /** `session.mine`, kept. */
-    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
+    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { r -> SignIn.read(r) }
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
@@ -1561,7 +1934,7 @@ class Money(val peer: Peer) {
     fun syncingClaim(input: SyncingClaim): String = peer.mutate("syncing.claim", input.json())
 
     /** `syncing.due`, kept. */
-    fun syncingDue(): View<Syncing> = View(peer.view("syncing.due", "null")) { j -> Syncing.of(j) }
+    fun syncingDue(): View<Syncing> = View(peer.view("syncing.due", "null")) { r -> Syncing.read(r) }
 
     /** `syncing.finish`: its intent's id. */
     fun syncingFinish(input: SyncingFinish): String = peer.mutate("syncing.finish", input.json())
@@ -1584,23 +1957,23 @@ class Money(val peer: Peer) {
     /** `transactions.edit_transaction`: its intent's id. */
     fun editTransaction(input: EditTransaction): String = peer.mutate("transactions.edit_transaction", input.json())
 
-    /** `transactions.filtered`, kept, its rows UniFFI's. */
-    fun filtered(input: Filtered): View<TxnLine> = typed(TxnLineView(peer, "transactions.filtered", input.json()))
+    /** `transactions.filtered`, kept. */
+    fun filtered(input: Filtered): View<TxnLine> = View(peer.view("transactions.filtered", input.json())) { r -> TxnLine.read(r) }
 
     /** `transactions.filtered_total`, kept. */
-    fun filteredTotal(input: Filtered): View<FilterTotal> = View(peer.view("transactions.filtered_total", input.json())) { j -> FilterTotal.of(j) }
+    fun filteredTotal(input: Filtered): View<FilterTotal> = View(peer.view("transactions.filtered_total", input.json())) { r -> FilterTotal.read(r) }
 
-    /** `transactions.inbox`, kept, its rows UniFFI's. */
-    fun inbox(): View<TxnLine> = typed(TxnLineView(peer, "transactions.inbox", "null"))
+    /** `transactions.inbox`, kept. */
+    fun inbox(): View<TxnLine> = View(peer.view("transactions.inbox", "null")) { r -> TxnLine.read(r) }
 
-    /** `transactions.payees`, kept, its rows UniFFI's. */
-    fun payees(): View<PayeeLine> = typed(PayeeLineView(peer, "transactions.payees", "null"))
+    /** `transactions.payees`, kept. */
+    fun payees(): View<PayeeLine> = View(peer.view("transactions.payees", "null")) { r -> PayeeLine.read(r) }
 
     /** `transactions.reconcile`: its intent's id. */
     fun reconcile(input: Reconcile): String = peer.mutate("transactions.reconcile", input.json())
 
-    /** `transactions.register`, kept, its rows UniFFI's. */
-    fun register(input: Register): View<TxnLine> = typed(TxnLineView(peer, "transactions.register", input.json()))
+    /** `transactions.register`, kept. */
+    fun register(input: Register): View<TxnLine> = View(peer.view("transactions.register", input.json())) { r -> TxnLine.read(r) }
 
     /** `transactions.set_cleared`: its intent's id. */
     fun setCleared(input: SetCleared): String = peer.mutate("transactions.set_cleared", input.json())
@@ -1609,25 +1982,5 @@ class Money(val peer: Peer) {
     fun split(input: SplitTxn): String = peer.mutate("transactions.split", input.json())
 
     /** `transactions.splits`, kept. */
-    fun splits(input: OneTxn): View<SplitLine> = View(peer.view("transactions.splits", input.json())) { j -> SplitLine.of(j) }
-
-    private fun typed(v: AccountLineView): View<AccountLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: AskLineView): View<AskLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: BankLineView): View<BankLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: BudgetLineView): View<BudgetLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: GroupLineView): View<GroupLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: LinkedLineView): View<LinkedLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: PayeeLineView): View<PayeeLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: SpendingLineView): View<SpendingLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: SummaryView): View<Summary> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: TxnLineView): View<TxnLine> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
+    fun splits(input: OneTxn): View<SplitLine> = View(peer.view("transactions.splits", input.json())) { r -> SplitLine.read(r) }
 }

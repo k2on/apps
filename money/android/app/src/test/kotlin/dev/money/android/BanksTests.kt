@@ -19,9 +19,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
-import uniffi.money_domain.BankLine
+import dev.money.android.gen.AskLine
+import dev.money.android.gen.AskState
+import dev.money.android.gen.BankLine
 
 class BanksTests {
     private fun id(n: Int) = Id("%032x".format(n))
@@ -45,35 +45,35 @@ class BanksTests {
     @Test fun anAskIsFollowedUntilItsPageArrives() {
         assertEquals(Follow.Wait, follow(emptyList(), null))
         // The newest there was before it: not this one's answer.
-        assertEquals(Follow.Wait, follow(listOf(ask(1, AskState.WAITING, url = "https://old")), id(1)))
-        assertEquals(Follow.Wait, follow(listOf(ask(2, AskState.ASKED), ask(1, AskState.DONE)), id(1)))
-        assertEquals(Follow.Wait, follow(listOf(ask(2, AskState.WAITING)), id(1)))
-        assertEquals(Follow.Open("https://plaid/page"), follow(listOf(ask(2, AskState.WAITING, url = "https://plaid/page")), id(1)))
-        assertEquals(Follow.Open("https://plaid/page"), follow(listOf(ask(2, AskState.WAITING, url = "https://plaid/page")), null))
-        for (s in listOf(AskState.DONE, AskState.FAILED, AskState.EXPIRED)) assertEquals(Follow.Over, follow(listOf(ask(2, s)), id(1)))
+        assertEquals(Follow.Wait, follow(listOf(ask(1, AskState.Waiting, url = "https://old")), id(1)))
+        assertEquals(Follow.Wait, follow(listOf(ask(2, AskState.Asked), ask(1, AskState.Done)), id(1)))
+        assertEquals(Follow.Wait, follow(listOf(ask(2, AskState.Waiting)), id(1)))
+        assertEquals(Follow.Open("https://plaid/page"), follow(listOf(ask(2, AskState.Waiting, url = "https://plaid/page")), id(1)))
+        assertEquals(Follow.Open("https://plaid/page"), follow(listOf(ask(2, AskState.Waiting, url = "https://plaid/page")), null))
+        for (s in listOf(AskState.Done, AskState.Failed, AskState.Expired)) assertEquals(Follow.Over, follow(listOf(ask(2, s)), id(1)))
     }
 
     @Test fun anAskIsShownWhileOpenAndAWhileAfter() {
         val now = 10_000_000L
-        assertNotNull(askShown(listOf(ask(1, AskState.ASKED)), null, now))
-        assertNotNull(askShown(listOf(ask(1, AskState.WAITING)), null, now))
-        assertNotNull(askShown(listOf(ask(1, AskState.DONE, answeredMs = now - 60_000)), null, now))
-        assertNull("answered long ago", askShown(listOf(ask(1, AskState.DONE, answeredMs = now - ASK_SHOWN_MS - 1)), null, now))
-        assertNull("put away", askShown(listOf(ask(1, AskState.FAILED, answeredMs = now)), id(1), now))
+        assertNotNull(askShown(listOf(ask(1, AskState.Asked)), null, now))
+        assertNotNull(askShown(listOf(ask(1, AskState.Waiting)), null, now))
+        assertNotNull(askShown(listOf(ask(1, AskState.Done, answeredMs = now - 60_000)), null, now))
+        assertNull("answered long ago", askShown(listOf(ask(1, AskState.Done, answeredMs = now - ASK_SHOWN_MS - 1)), null, now))
+        assertNull("put away", askShown(listOf(ask(1, AskState.Failed, answeredMs = now)), id(1), now))
         assertNull(askShown(emptyList(), null, now))
     }
 
     @Test fun anAskIsSaidInASentence() {
         val asked = 1_000_000L
-        assertEquals("Asking the server for Plaid's page…", askSays(ask(1, AskState.ASKED), asked + 1_000))
-        assertEquals("The server hasn't answered yet. Does it have Plaid's keys?", askSays(ask(1, AskState.ASKED), asked + ASK_SLOW_MS + 1))
-        assertEquals("Asking the server to disconnect Ally Bank…", askSays(ask(1, AskState.ASKED, what = "disconnect", institution = "Ally Bank"), asked))
-        assertTrue(askSays(ask(1, AskState.WAITING), asked).startsWith("Log in to your bank on Plaid's page"))
-        assertEquals("Connected Ally Bank. Choose below what each of its accounts feeds.", askSays(ask(1, AskState.DONE, institution = "Ally Bank"), asked))
-        assertEquals("Logged in to the bank again.", askSays(ask(1, AskState.DONE, what = "reconnect"), asked))
-        assertEquals("Couldn't connect the bank: Plaid said no", askSays(ask(1, AskState.FAILED, message = "Plaid said no"), asked))
-        assertEquals("Plaid's page expired before the login was finished.", askSays(ask(1, AskState.EXPIRED), asked))
-        assertEquals("Nobody logged in", askSays(ask(1, AskState.EXPIRED, message = "Nobody logged in"), asked))
+        assertEquals("Asking the server for Plaid's page…", askSays(ask(1, AskState.Asked), asked + 1_000))
+        assertEquals("The server hasn't answered yet. Does it have Plaid's keys?", askSays(ask(1, AskState.Asked), asked + ASK_SLOW_MS + 1))
+        assertEquals("Asking the server to disconnect Ally Bank…", askSays(ask(1, AskState.Asked, what = "disconnect", institution = "Ally Bank"), asked))
+        assertTrue(askSays(ask(1, AskState.Waiting), asked).startsWith("Log in to your bank on Plaid's page"))
+        assertEquals("Connected Ally Bank. Choose below what each of its accounts feeds.", askSays(ask(1, AskState.Done, institution = "Ally Bank"), asked))
+        assertEquals("Logged in to the bank again.", askSays(ask(1, AskState.Done, what = "reconnect"), asked))
+        assertEquals("Couldn't connect the bank: Plaid said no", askSays(ask(1, AskState.Failed, message = "Plaid said no"), asked))
+        assertEquals("Plaid's page expired before the login was finished.", askSays(ask(1, AskState.Expired), asked))
+        assertEquals("Nobody logged in", askSays(ask(1, AskState.Expired, message = "Nobody logged in"), asked))
     }
 
     @Test fun aBanksStatusSaysWhatItWants() {
@@ -110,16 +110,16 @@ class BanksTests {
         try {
             book.connect()
             val asked = book.state.value.asks.first()
-            assertEquals(AskState.ASKED, asked.state)
+            assertEquals(AskState.Asked, asked.state)
             assertEquals("connect", asked.what)
             assertTrue(book.opened.isEmpty())
-            answer(book, asked, AskState.WAITING, url = "https://hosted.plaid.com/link/abc")
+            answer(book, asked, AskState.Waiting, url = "https://hosted.plaid.com/link/abc")
             assertEquals(listOf("https://hosted.plaid.com/link/abc"), book.opened)
             // The server finishes on its own: done, the bank is known at once, and nothing opens again.
-            answer(book, asked, AskState.DONE, bank = "ally", institution = "Ally Bank")
+            answer(book, asked, AskState.Done, bank = "ally", institution = "Ally Bank")
             assertEquals(1, book.opened.size)
             val done = book.state.value.asks.first()
-            assertEquals(AskState.DONE, done.state)
+            assertEquals(AskState.Done, done.state)
             assertTrue(book.state.value.banks.any { it.name == "ally" && bankName(it) == "Ally Bank" })
             assertEquals("Connected Ally Bank. Choose below what each of its accounts feeds.", askSays(done, 0))
             // Asked again, the first's answer is not the second's.
@@ -127,7 +127,7 @@ class BanksTests {
             assertEquals(1, book.opened.size)
             val again = book.state.value.asks.first()
             assertTrue(again.id != asked.id)
-            answer(book, again, AskState.FAILED, message = "Plaid has no keys")
+            answer(book, again, AskState.Failed, message = "Plaid has no keys")
             assertEquals(1, book.opened.size)
         } finally {
             book.close()
@@ -147,9 +147,9 @@ class BanksTests {
             val asked = book.state.value.asks.first()
             assertEquals("reconnect", asked.what)
             assertEquals(chase.name, asked.bank)
-            answer(book, asked, AskState.WAITING, url = "https://hosted.plaid.com/link/update")
+            answer(book, asked, AskState.Waiting, url = "https://hosted.plaid.com/link/update")
             assertEquals(listOf("https://hosted.plaid.com/link/update"), book.opened)
-            answer(book, asked, AskState.DONE)
+            answer(book, asked, AskState.Done)
             assertFalse(book.state.value.banks.first { it.name == chase.name }.needsLogin)
         } finally {
             book.close()
@@ -166,7 +166,7 @@ class BanksTests {
             assertEquals("Asked the server to disconnect the bank", book.said.last())
             val asked = book.state.value.asks.first()
             assertEquals("disconnect", asked.what)
-            answer(book, asked, AskState.DONE)
+            answer(book, asked, AskState.Done)
             assertTrue(book.state.value.banks.none { it.name == chase.name })
             assertTrue(book.state.value.linked.none { it.bank == chase.name })
             for (a in fed) assertNotNull(book.state.value.account(a))

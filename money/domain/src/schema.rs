@@ -218,7 +218,6 @@ pub struct Linked {
 
 /// Where an ask about a bank connection stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
 pub enum AskState {
     /// Nobody has answered it yet: the server's importer will.
     #[default]

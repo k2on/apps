@@ -8,9 +8,8 @@
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
-//! its scope. [`domain`] registers every function by its name. Behind a
-//! feature: the rows the phones read typed as UniFFI records (`ffi`, for
-//! `money/ffi`). The demo's household is beside the app, not in it: `money/seed`.
+//! its scope. [`domain`] registers every function by its name. The demo's
+//! household is beside the app, not in it: `money/seed`.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
@@ -41,9 +40,6 @@ pub mod stores;
 pub mod transactions;
 pub mod transfers;
 pub mod types;
-
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
 
 pub use ark::row::Id;
 pub use schema::*;

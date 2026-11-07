@@ -6,7 +6,6 @@
 use proc_macro::TokenStream;
 
 mod domain;
-mod ffi;
 
 /// What a derive or an attribute wrote, or its error as `compile_error!`.
 fn out(r: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
@@ -37,8 +36,6 @@ pub fn input(input: TokenStream) -> TokenStream {
 }
 
 /// `#[derive(Describe)]`: what a struct or an enum is, as `ark::row::Type`.
-/// `#[ark(ffi_view)]` on a view's row type (any of these derives) adds its
-/// UniFFI twin and view object, `#[ark(ffi)]` the twin alone (`ffi.rs`).
 #[proc_macro_derive(Describe, attributes(ark))]
 pub fn describe(input: TokenStream) -> TokenStream {
     out(domain::describe_derive(syn::parse_macro_input!(input as syn::DeriveInput)))

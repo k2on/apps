@@ -3,7 +3,7 @@
 import Foundation
 
 /// The record `Active`.
-public struct Active: Equatable {
+public struct Active: Hashable {
     public var at: Int64
     public var clock: Clock
     public var from: String
@@ -11,6 +11,8 @@ public struct Active: Equatable {
     public var queue: [Track]
 
     public init(at: Int64, clock: Clock, from: String, output: Output, queue: [Track]) { self.at = at; self.clock = clock; self.from = from; self.output = output; self.queue = queue; }
+
+    public init(_ r: Reader) { self.init(at: r.int(), clock: Clock(r), from: r.text(), output: Output(r), queue: r.list { r0 in Track(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -21,10 +23,12 @@ public struct Active: Equatable {
 }
 
 /// The record `AddAllToPlaylist`.
-public struct AddAllToPlaylist: Equatable {
+public struct AddAllToPlaylist: Hashable {
     public var playlistId: Id
 
     public init(playlistId: Id) { self.playlistId = playlistId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -35,7 +39,7 @@ public struct AddAllToPlaylist: Equatable {
 }
 
 /// The record `AddEpisode`.
-public struct AddEpisode: Equatable {
+public struct AddEpisode: Hashable {
     public var show: String
     public var title: String
     public var durationMs: Int64
@@ -50,6 +54,8 @@ public struct AddEpisode: Equatable {
 
     public init(show: String, title: String, durationMs: Int64, file: String, guid: String, publishedMs: Int64, description: String, source: String, art: String, season: Int64, number: Int64) { self.show = show; self.title = title; self.durationMs = durationMs; self.file = file; self.guid = guid; self.publishedMs = publishedMs; self.description = description; self.source = source; self.art = art; self.season = season; self.number = number; }
 
+    public init(_ r: Reader) { self.init(show: r.text(), title: r.text(), durationMs: r.int(), file: r.text(), guid: r.text(), publishedMs: r.int(), description: r.text(), source: r.text(), art: r.text(), season: r.int(), number: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(show: J.text(o["show"]), title: J.text(o["title"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), guid: J.text(o["guid"]), publishedMs: J.int(o["published_ms"]), description: J.text(o["description"]), source: J.text(o["source"]), art: J.text(o["art"]), season: J.int(o["season"]), number: J.int(o["number"]))
@@ -59,7 +65,7 @@ public struct AddEpisode: Equatable {
 }
 
 /// The record `AddShow`.
-public struct AddShow: Equatable {
+public struct AddShow: Hashable {
     public var kind: String
     public var title: String
     public var author: String
@@ -70,6 +76,8 @@ public struct AddShow: Equatable {
 
     public init(kind: String, title: String, author: String, description: String, art: String, feed: String, link: String) { self.kind = kind; self.title = title; self.author = author; self.description = description; self.art = art; self.feed = feed; self.link = link; }
 
+    public init(_ r: Reader) { self.init(kind: r.text(), title: r.text(), author: r.text(), description: r.text(), art: r.text(), feed: r.text(), link: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(kind: J.text(o["kind"]), title: J.text(o["title"]), author: J.text(o["author"]), description: J.text(o["description"]), art: J.text(o["art"]), feed: J.text(o["feed"]), link: J.text(o["link"]))
@@ -79,7 +87,7 @@ public struct AddShow: Equatable {
 }
 
 /// The record `AddSong`.
-public struct AddSong: Equatable {
+public struct AddSong: Hashable {
     public var title: String
     public var artist: String
     public var album: String
@@ -101,6 +109,8 @@ public struct AddSong: Equatable {
 
     public init(title: String, artist: String, album: String, durationMs: Int64, file: String, track: Int64, part: String, catalogue: String, performer: String, bpm: Int64, albumArt: String, artistArt: String, disc: Int64, workTitle: String, movementNo: Int64, artistBanner: String, released: Int64, folder: String) { self.title = title; self.artist = artist; self.album = album; self.durationMs = durationMs; self.file = file; self.track = track; self.part = part; self.catalogue = catalogue; self.performer = performer; self.bpm = bpm; self.albumArt = albumArt; self.artistArt = artistArt; self.disc = disc; self.workTitle = workTitle; self.movementNo = movementNo; self.artistBanner = artistBanner; self.released = released; self.folder = folder; }
 
+    public init(_ r: Reader) { self.init(title: r.text(), artist: r.text(), album: r.text(), durationMs: r.int(), file: r.text(), track: r.int(), part: r.text(), catalogue: r.text(), performer: r.text(), bpm: r.int(), albumArt: r.text(), artistArt: r.text(), disc: r.int(), workTitle: r.text(), movementNo: r.int(), artistBanner: r.text(), released: r.int(), folder: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(title: J.text(o["title"]), artist: J.text(o["artist"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), track: J.int(o["track"]), part: J.text(o["part"]), catalogue: J.text(o["catalogue"]), performer: J.text(o["performer"]), bpm: J.int(o["bpm"]), albumArt: J.text(o["album_art"]), artistArt: J.text(o["artist_art"]), disc: J.int(o["disc"]), workTitle: J.text(o["work_title"]), movementNo: J.int(o["movement_no"]), artistBanner: J.text(o["artist_banner"]), released: J.int(o["released"]), folder: J.text(o["folder"]))
@@ -110,11 +120,13 @@ public struct AddSong: Equatable {
 }
 
 /// The record `AddToPlaylist`.
-public struct AddToPlaylist: Equatable {
+public struct AddToPlaylist: Hashable {
     public var playlistId: Id
     public var mediaId: Id
 
     public init(playlistId: Id, mediaId: Id) { self.playlistId = playlistId; self.mediaId = mediaId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), mediaId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -125,10 +137,12 @@ public struct AddToPlaylist: Equatable {
 }
 
 /// The record `Advance`.
-public struct Advance: Equatable {
+public struct Advance: Hashable {
     public var fromTrack: Int64
 
     public init(fromTrack: Int64) { self.fromTrack = fromTrack; }
+
+    public init(_ r: Reader) { self.init(fromTrack: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -139,7 +153,7 @@ public struct Advance: Equatable {
 }
 
 /// The record `Album`.
-public struct Album: Equatable {
+public struct Album: Hashable {
     public var id: String
     public var name: String
     public var label: String
@@ -150,6 +164,8 @@ public struct Album: Equatable {
 
     public init(id: String, name: String, label: String, released: Int64, art: String, addedMs: Int64, userId: String) { self.id = id; self.name = name; self.label = label; self.released = released; self.art = art; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), name: r.text(), label: r.text(), released: r.int(), art: r.text(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), name: J.text(o["name"]), label: J.text(o["label"]), released: J.int(o["released"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -159,10 +175,12 @@ public struct Album: Equatable {
 }
 
 /// The record `AlbumCredits`.
-public struct AlbumCredits: Equatable {
+public struct AlbumCredits: Hashable {
     public var id: String
 
     public init(id: String) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -173,11 +191,13 @@ public struct AlbumCredits: Equatable {
 }
 
 /// The record `AlbumInput`.
-public struct AlbumInput: Equatable {
+public struct AlbumInput: Hashable {
     public var playlistId: Id
     public var id: String
 
     public init(playlistId: Id, id: String) { self.playlistId = playlistId; self.id = id; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -188,7 +208,7 @@ public struct AlbumInput: Equatable {
 }
 
 /// The record `AlbumsEntry`.
-public struct AlbumsEntry: Equatable {
+public struct AlbumsEntry: Hashable {
     public var art: String
     public var creator: String
     public var id: String
@@ -200,6 +220,8 @@ public struct AlbumsEntry: Equatable {
 
     public init(art: String, creator: String, id: String, label: String, name: String, performer: String, released: Int64, tracks: Int64) { self.art = art; self.creator = creator; self.id = id; self.label = label; self.name = name; self.performer = performer; self.released = released; self.tracks = tracks; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), creator: r.text(), id: r.text(), label: r.text(), name: r.text(), performer: r.text(), released: r.int(), tracks: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), creator: J.text(o["creator"]), id: J.text(o["id"]), label: J.text(o["label"]), name: J.text(o["name"]), performer: J.text(o["performer"]), released: J.int(o["released"]), tracks: J.int(o["tracks"]))
@@ -209,13 +231,15 @@ public struct AlbumsEntry: Equatable {
 }
 
 /// The record `Appearance`.
-public struct Appearance: Equatable {
+public struct Appearance: Hashable {
     public var mediaId: Id
     public var personName: String
     public var role: String
     public var pos: Int64
 
     public init(mediaId: Id, personName: String, role: String, pos: Int64) { self.mediaId = mediaId; self.personName = personName; self.role = role; self.pos = pos; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), personName: r.text(), role: r.text(), pos: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -226,11 +250,13 @@ public struct Appearance: Equatable {
 }
 
 /// The record `Artist`.
-public struct Artist: Equatable {
+public struct Artist: Hashable {
     public var playlistId: Id
     public var name: String
 
     public init(playlistId: Id, name: String) { self.playlistId = playlistId; self.name = name; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -241,7 +267,7 @@ public struct Artist: Equatable {
 }
 
 /// The record `ArtistsEntry`.
-public struct ArtistsEntry: Equatable {
+public struct ArtistsEntry: Hashable {
     public var art: String
     public var banner: String
     public var born: Int64
@@ -252,6 +278,8 @@ public struct ArtistsEntry: Equatable {
 
     public init(art: String, banner: String, born: Int64, description: String, died: Int64, name: String, tracks: Int64) { self.art = art; self.banner = banner; self.born = born; self.description = description; self.died = died; self.name = name; self.tracks = tracks; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), banner: r.text(), born: r.int(), description: r.text(), died: r.int(), name: r.text(), tracks: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), description: J.text(o["description"]), died: J.int(o["died"]), name: J.text(o["name"]), tracks: J.int(o["tracks"]))
@@ -261,10 +289,12 @@ public struct ArtistsEntry: Equatable {
 }
 
 /// The record `At`.
-public struct At: Equatable {
+public struct At: Hashable {
     public var atMs: Int64
 
     public init(atMs: Int64) { self.atMs = atMs; }
+
+    public init(_ r: Reader) { self.init(atMs: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -275,7 +305,7 @@ public struct At: Equatable {
 }
 
 /// The record `Chapter`.
-public struct Chapter: Equatable {
+public struct Chapter: Hashable {
     public var mediaId: Id
     public var startMs: Int64
     public var title: String
@@ -283,6 +313,8 @@ public struct Chapter: Equatable {
     public var image: String
 
     public init(mediaId: Id, startMs: Int64, title: String, url: String, image: String) { self.mediaId = mediaId; self.startMs = startMs; self.title = title; self.url = url; self.image = image; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), startMs: r.int(), title: r.text(), url: r.text(), image: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -293,13 +325,15 @@ public struct Chapter: Equatable {
 }
 
 /// The record `ChapterAt`.
-public struct ChapterAt: Equatable {
+public struct ChapterAt: Hashable {
     public var startMs: Int64
     public var title: String
     public var url: String
     public var image: String
 
     public init(startMs: Int64, title: String, url: String, image: String) { self.startMs = startMs; self.title = title; self.url = url; self.image = image; }
+
+    public init(_ r: Reader) { self.init(startMs: r.int(), title: r.text(), url: r.text(), image: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -310,13 +344,15 @@ public struct ChapterAt: Equatable {
 }
 
 /// The record `ChaptersEntry`.
-public struct ChaptersEntry: Equatable {
+public struct ChaptersEntry: Hashable {
     public var image: String
     public var startMs: Int64
     public var title: String
     public var url: String
 
     public init(image: String, startMs: Int64, title: String, url: String) { self.image = image; self.startMs = startMs; self.title = title; self.url = url; }
+
+    public init(_ r: Reader) { self.init(image: r.text(), startMs: r.int(), title: r.text(), url: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -327,9 +363,17 @@ public struct ChaptersEntry: Equatable {
 }
 
 /// The sum `Clock`.
-public indirect enum Clock: Equatable {
+public indirect enum Clock: Hashable {
     case paused(atMs: Int64)
     case playing(atMs: Int64, since: Int64)
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .paused(atMs: r.int())
+        case 1: self = .playing(atMs: r.int(), since: r.int())
+        case let v: fatalError("Clock: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -349,7 +393,7 @@ public indirect enum Clock: Equatable {
 }
 
 /// The record `ComposersEntry`.
-public struct ComposersEntry: Equatable {
+public struct ComposersEntry: Hashable {
     public var art: String
     public var banner: String
     public var born: Int64
@@ -362,6 +406,8 @@ public struct ComposersEntry: Equatable {
 
     public init(art: String, banner: String, born: Int64, description: String, died: Int64, name: String, sortName: String, tracks: Int64, works: Int64) { self.art = art; self.banner = banner; self.born = born; self.description = description; self.died = died; self.name = name; self.sortName = sortName; self.tracks = tracks; self.works = works; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), banner: r.text(), born: r.int(), description: r.text(), died: r.int(), name: r.text(), sortName: r.text(), tracks: r.int(), works: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), banner: J.text(o["banner"]), born: J.int(o["born"]), description: J.text(o["description"]), died: J.int(o["died"]), name: J.text(o["name"]), sortName: J.text(o["sort_name"]), tracks: J.int(o["tracks"]), works: J.int(o["works"]))
@@ -371,10 +417,12 @@ public struct ComposersEntry: Equatable {
 }
 
 /// The record `CreatePlaylist`.
-public struct CreatePlaylist: Equatable {
+public struct CreatePlaylist: Hashable {
     public var name: String
 
     public init(name: String) { self.name = name; }
+
+    public init(_ r: Reader) { self.init(name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -385,7 +433,7 @@ public struct CreatePlaylist: Equatable {
 }
 
 /// The record `Credit`.
-public struct Credit: Equatable {
+public struct Credit: Hashable {
     public var recordingId: String
     public var personName: String
     public var role: String
@@ -396,6 +444,8 @@ public struct Credit: Equatable {
 
     public init(recordingId: String, personName: String, role: String, instrument: String, pos: Int64, addedMs: Int64, userId: String) { self.recordingId = recordingId; self.personName = personName; self.role = role; self.instrument = instrument; self.pos = pos; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(recordingId: r.text(), personName: r.text(), role: r.text(), instrument: r.text(), pos: r.int(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(recordingId: J.text(o["recording_id"]), personName: J.text(o["person_name"]), role: J.text(o["role"]), instrument: J.text(o["instrument"]), pos: J.int(o["pos"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -405,7 +455,7 @@ public struct Credit: Equatable {
 }
 
 /// The record `CreditRecording`.
-public struct CreditRecording: Equatable {
+public struct CreditRecording: Hashable {
     public var recordingId: String
     public var personName: String
     public var role: String
@@ -413,6 +463,8 @@ public struct CreditRecording: Equatable {
     public var pos: Int64
 
     public init(recordingId: String, personName: String, role: String, instrument: String, pos: Int64) { self.recordingId = recordingId; self.personName = personName; self.role = role; self.instrument = instrument; self.pos = pos; }
+
+    public init(_ r: Reader) { self.init(recordingId: r.text(), personName: r.text(), role: r.text(), instrument: r.text(), pos: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -423,10 +475,12 @@ public struct CreditRecording: Equatable {
 }
 
 /// The record `Credits`.
-public struct Credits: Equatable {
+public struct Credits: Hashable {
     public var recordingId: String
 
     public init(recordingId: String) { self.recordingId = recordingId; }
+
+    public init(_ r: Reader) { self.init(recordingId: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -437,13 +491,15 @@ public struct Credits: Equatable {
 }
 
 /// The record `CreditsEntry`.
-public struct CreditsEntry: Equatable {
+public struct CreditsEntry: Hashable {
     public var instrument: String
     public var name: String
     public var pos: Int64
     public var role: String
 
     public init(instrument: String, name: String, pos: Int64, role: String) { self.instrument = instrument; self.name = name; self.pos = pos; self.role = role; }
+
+    public init(_ r: Reader) { self.init(instrument: r.text(), name: r.text(), pos: r.int(), role: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -454,7 +510,7 @@ public struct CreditsEntry: Equatable {
 }
 
 /// The record `Cue`.
-public struct Cue: Equatable {
+public struct Cue: Hashable {
     public var mediaId: Id
     public var startMs: Int64
     public var endMs: Int64
@@ -462,6 +518,8 @@ public struct Cue: Equatable {
     public var text: String
 
     public init(mediaId: Id, startMs: Int64, endMs: Int64, speaker: String, text: String) { self.mediaId = mediaId; self.startMs = startMs; self.endMs = endMs; self.speaker = speaker; self.text = text; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), startMs: r.int(), endMs: r.int(), speaker: r.text(), text: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -472,13 +530,15 @@ public struct Cue: Equatable {
 }
 
 /// The record `CueAt`.
-public struct CueAt: Equatable {
+public struct CueAt: Hashable {
     public var startMs: Int64
     public var endMs: Int64
     public var speaker: String
     public var text: String
 
     public init(startMs: Int64, endMs: Int64, speaker: String, text: String) { self.startMs = startMs; self.endMs = endMs; self.speaker = speaker; self.text = text; }
+
+    public init(_ r: Reader) { self.init(startMs: r.int(), endMs: r.int(), speaker: r.text(), text: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -489,7 +549,7 @@ public struct CueAt: Equatable {
 }
 
 /// The record `DescribePerson`.
-public struct DescribePerson: Equatable {
+public struct DescribePerson: Hashable {
     public var name: String
     public var sortName: String
     public var born: Int64
@@ -500,6 +560,8 @@ public struct DescribePerson: Equatable {
 
     public init(name: String, sortName: String, born: Int64, died: Int64, art: String, banner: String, description: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.banner = banner; self.description = description; }
 
+    public init(_ r: Reader) { self.init(name: r.text(), sortName: r.text(), born: r.int(), died: r.int(), art: r.text(), banner: r.text(), description: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), banner: J.text(o["banner"]), description: J.text(o["description"]))
@@ -509,7 +571,7 @@ public struct DescribePerson: Equatable {
 }
 
 /// The record `DescribeRecording`.
-public struct DescribeRecording: Equatable {
+public struct DescribeRecording: Hashable {
     public var id: String
     public var recorded: Int64
     public var venue: String
@@ -518,6 +580,8 @@ public struct DescribeRecording: Equatable {
     public var art: String
 
     public init(id: String, recorded: Int64, venue: String, label: String, licence: String, art: String) { self.id = id; self.recorded = recorded; self.venue = venue; self.label = label; self.licence = licence; self.art = art; }
+
+    public init(_ r: Reader) { self.init(id: r.text(), recorded: r.int(), venue: r.text(), label: r.text(), licence: r.text(), art: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -528,7 +592,7 @@ public struct DescribeRecording: Equatable {
 }
 
 /// The record `DescribeWork`.
-public struct DescribeWork: Equatable {
+public struct DescribeWork: Hashable {
     public var id: String
     public var opus: String
     public var keySig: String
@@ -540,6 +604,8 @@ public struct DescribeWork: Equatable {
 
     public init(id: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String, description: String) { self.id = id; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; self.description = description; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), opus: r.text(), keySig: r.text(), form: r.text(), period: r.text(), composed: r.int(), art: r.text(), description: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]), description: J.text(o["description"]))
@@ -549,7 +615,7 @@ public struct DescribeWork: Equatable {
 }
 
 /// The record `Device`.
-public struct Device: Equatable {
+public struct Device: Hashable {
     public var canPlay: Bool
     public var id: String
     public var kind: String
@@ -557,6 +623,8 @@ public struct Device: Equatable {
     public var user: String
 
     public init(canPlay: Bool, id: String, kind: String, name: String, user: String) { self.canPlay = canPlay; self.id = id; self.kind = kind; self.name = name; self.user = user; }
+
+    public init(_ r: Reader) { self.init(canPlay: r.bool(), id: r.text(), kind: r.text(), name: r.text(), user: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -567,7 +635,7 @@ public struct Device: Equatable {
 }
 
 /// The record `Download`.
-public struct Download: Equatable {
+public struct Download: Hashable {
     public var mediaId: Id
     public var source: String
     public var state: String
@@ -578,6 +646,8 @@ public struct Download: Equatable {
 
     public init(mediaId: Id, source: String, state: String, bytes: Int64, total: Int64, error: String, askedMs: Int64) { self.mediaId = mediaId; self.source = source; self.state = state; self.bytes = bytes; self.total = total; self.error = error; self.askedMs = askedMs; }
 
+    public init(_ r: Reader) { self.init(mediaId: r.id(), source: r.text(), state: r.text(), bytes: r.int(), total: r.int(), error: r.text(), askedMs: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(mediaId: Id(J.text(o["media_id"])), source: J.text(o["source"]), state: J.text(o["state"]), bytes: J.int(o["bytes"]), total: J.int(o["total"]), error: J.text(o["error"]), askedMs: J.int(o["asked_ms"]))
@@ -587,7 +657,7 @@ public struct Download: Equatable {
 }
 
 /// The record `DownloadProgress`.
-public struct DownloadProgress: Equatable {
+public struct DownloadProgress: Hashable {
     public var file: String
     public var state: String
     public var bytes: Int64
@@ -595,6 +665,8 @@ public struct DownloadProgress: Equatable {
     public var error: String
 
     public init(file: String, state: String, bytes: Int64, total: Int64, error: String) { self.file = file; self.state = state; self.bytes = bytes; self.total = total; self.error = error; }
+
+    public init(_ r: Reader) { self.init(file: r.text(), state: r.text(), bytes: r.int(), total: r.int(), error: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -605,10 +677,12 @@ public struct DownloadProgress: Equatable {
 }
 
 /// The record `Downloaded`.
-public struct Downloaded: Equatable {
+public struct Downloaded: Hashable {
     public var file: String
 
     public init(file: String) { self.file = file; }
+
+    public init(_ r: Reader) { self.init(file: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -619,7 +693,7 @@ public struct Downloaded: Equatable {
 }
 
 /// The record `DownloadsEntry`.
-public struct DownloadsEntry: Equatable {
+public struct DownloadsEntry: Hashable {
     public var bytes: Int64
     public var error: String
     public var mediaId: Id
@@ -628,6 +702,8 @@ public struct DownloadsEntry: Equatable {
     public var total: Int64
 
     public init(bytes: Int64, error: String, mediaId: Id, state: String, title: String, total: Int64) { self.bytes = bytes; self.error = error; self.mediaId = mediaId; self.state = state; self.title = title; self.total = total; }
+
+    public init(_ r: Reader) { self.init(bytes: r.int(), error: r.text(), mediaId: r.id(), state: r.text(), title: r.text(), total: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -638,11 +714,13 @@ public struct DownloadsEntry: Equatable {
 }
 
 /// The record `Enqueue`.
-public struct Enqueue: Equatable {
+public struct Enqueue: Hashable {
     public var next: Bool
     public var tracks: [Track]
 
     public init(next: Bool, tracks: [Track]) { self.next = next; self.tracks = tracks; }
+
+    public init(_ r: Reader) { self.init(next: r.bool(), tracks: r.list { r0 in Track(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -653,7 +731,7 @@ public struct Enqueue: Equatable {
 }
 
 /// The record `Episode`.
-public struct Episode: Equatable {
+public struct Episode: Hashable {
     public var mediaId: Id
     public var showId: String
     public var guid: String
@@ -666,6 +744,8 @@ public struct Episode: Equatable {
 
     public init(mediaId: Id, showId: String, guid: String, publishedMs: Int64, description: String, source: String, art: String, season: Int64, number: Int64) { self.mediaId = mediaId; self.showId = showId; self.guid = guid; self.publishedMs = publishedMs; self.description = description; self.source = source; self.art = art; self.season = season; self.number = number; }
 
+    public init(_ r: Reader) { self.init(mediaId: r.id(), showId: r.text(), guid: r.text(), publishedMs: r.int(), description: r.text(), source: r.text(), art: r.text(), season: r.int(), number: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(mediaId: Id(J.text(o["media_id"])), showId: J.text(o["show_id"]), guid: J.text(o["guid"]), publishedMs: J.int(o["published_ms"]), description: J.text(o["description"]), source: J.text(o["source"]), art: J.text(o["art"]), season: J.int(o["season"]), number: J.int(o["number"]))
@@ -675,7 +755,7 @@ public struct Episode: Equatable {
 }
 
 /// The record `EpisodeDetailsEntry`.
-public struct EpisodeDetailsEntry: Equatable {
+public struct EpisodeDetailsEntry: Hashable {
     public var art: String
     public var description: String
     public var mediaId: Id
@@ -687,6 +767,8 @@ public struct EpisodeDetailsEntry: Equatable {
 
     public init(art: String, description: String, mediaId: Id, number: Int64, publishedMs: Int64, season: Int64, show: String, showId: String) { self.art = art; self.description = description; self.mediaId = mediaId; self.number = number; self.publishedMs = publishedMs; self.season = season; self.show = show; self.showId = showId; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), description: r.text(), mediaId: r.id(), number: r.int(), publishedMs: r.int(), season: r.int(), show: r.text(), showId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), description: J.text(o["description"]), mediaId: Id(J.text(o["media_id"])), number: J.int(o["number"]), publishedMs: J.int(o["published_ms"]), season: J.int(o["season"]), show: J.text(o["show"]), showId: J.text(o["show_id"]))
@@ -696,10 +778,12 @@ public struct EpisodeDetailsEntry: Equatable {
 }
 
 /// The record `EpisodeInput`.
-public struct EpisodeInput: Equatable {
+public struct EpisodeInput: Hashable {
     public var mediaId: Id
 
     public init(mediaId: Id) { self.mediaId = mediaId; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -710,13 +794,15 @@ public struct EpisodeInput: Equatable {
 }
 
 /// The record `Equip`.
-public struct Equip: Equatable {
+public struct Equip: Hashable {
     public var canVolume: Bool
     public var family: String?
     public var muted: Bool
     public var volume: Int64
 
     public init(canVolume: Bool, family: String?, muted: Bool, volume: Int64) { self.canVolume = canVolume; self.family = family; self.muted = muted; self.volume = volume; }
+
+    public init(_ r: Reader) { self.init(canVolume: r.bool(), family: r.opt { r0 in r0.text() }, muted: r.bool(), volume: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -727,13 +813,15 @@ public struct Equip: Equatable {
 }
 
 /// The record `FeedRead`.
-public struct FeedRead: Equatable {
+public struct FeedRead: Hashable {
     public var url: String
     public var title: String
     public var items: Int64
     public var error: String
 
     public init(url: String, title: String, items: Int64, error: String) { self.url = url; self.title = title; self.items = items; self.error = error; }
+
+    public init(_ r: Reader) { self.init(url: r.text(), title: r.text(), items: r.int(), error: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -744,11 +832,13 @@ public struct FeedRead: Equatable {
 }
 
 /// The record `Fetch`.
-public struct Fetch: Equatable {
+public struct Fetch: Hashable {
     public var mediaId: Id
     public var state: JobInt
 
     public init(mediaId: Id, state: JobInt) { self.mediaId = mediaId; self.state = state; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), state: JobInt(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -759,10 +849,12 @@ public struct Fetch: Equatable {
 }
 
 /// The record `FetchCancel`.
-public struct FetchCancel: Equatable {
+public struct FetchCancel: Hashable {
     public var id: Id
 
     public init(id: Id) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -773,11 +865,13 @@ public struct FetchCancel: Equatable {
 }
 
 /// The record `FetchClaim`.
-public struct FetchClaim: Equatable {
+public struct FetchClaim: Hashable {
     public var id: Id
     public var by: String
 
     public init(id: Id, by: String) { self.id = id; self.by = by; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -788,13 +882,15 @@ public struct FetchClaim: Equatable {
 }
 
 /// The record `FetchFinish`.
-public struct FetchFinish: Equatable {
+public struct FetchFinish: Hashable {
     public var id: Id
     public var by: String
     public var outcome: FetchOutcome
     public var againMs: Int64?
 
     public init(id: Id, by: String, outcome: FetchOutcome, againMs: Int64? = nil) { self.id = id; self.by = by; self.outcome = outcome; self.againMs = againMs; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text(), outcome: FetchOutcome(r), againMs: r.opt { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -805,11 +901,13 @@ public struct FetchFinish: Equatable {
 }
 
 /// The record `FetchOlder`.
-public struct FetchOlder: Equatable {
+public struct FetchOlder: Hashable {
     public var url: String
     public var more: Int64
 
     public init(url: String, more: Int64) { self.url = url; self.more = more; }
+
+    public init(_ r: Reader) { self.init(url: r.text(), more: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -820,9 +918,17 @@ public struct FetchOlder: Equatable {
 }
 
 /// The sum `FetchOutcome`.
-public indirect enum FetchOutcome: Equatable {
+public indirect enum FetchOutcome: Hashable {
     case ok(value: Int64)
     case err(why: String)
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .ok(value: r.int())
+        case 1: self = .err(why: r.text())
+        case let v: fatalError("FetchOutcome: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -842,11 +948,13 @@ public indirect enum FetchOutcome: Equatable {
 }
 
 /// The record `Grant`.
-public struct Grant: Equatable {
+public struct Grant: Hashable {
     public var user: String
     public var role: String
 
     public init(user: String, role: String) { self.user = user; self.role = role; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), role: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -857,10 +965,12 @@ public struct Grant: Equatable {
 }
 
 /// The record `GroupMute`.
-public struct GroupMute: Equatable {
+public struct GroupMute: Hashable {
     public var muted: Bool
 
     public init(muted: Bool) { self.muted = muted; }
+
+    public init(_ r: Reader) { self.init(muted: r.bool()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -871,10 +981,12 @@ public struct GroupMute: Equatable {
 }
 
 /// The record `GroupNudge`.
-public struct GroupNudge: Equatable {
+public struct GroupNudge: Hashable {
     public var delta: Int64
 
     public init(delta: Int64) { self.delta = delta; }
+
+    public init(_ r: Reader) { self.init(delta: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -885,10 +997,12 @@ public struct GroupNudge: Equatable {
 }
 
 /// The record `GroupVolume`.
-public struct GroupVolume: Equatable {
+public struct GroupVolume: Hashable {
     public var level: Int64
 
     public init(level: Int64) { self.level = level; }
+
+    public init(_ r: Reader) { self.init(level: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -899,10 +1013,12 @@ public struct GroupVolume: Equatable {
 }
 
 /// The record `Hear`.
-public struct Hear: Equatable {
+public struct Hear: Hashable {
     public var file: String
 
     public init(file: String) { self.file = file; }
+
+    public init(_ r: Reader) { self.init(file: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -913,11 +1029,13 @@ public struct Hear: Equatable {
 }
 
 /// The record `Hearing`.
-public struct Hearing: Equatable {
+public struct Hearing: Hashable {
     public var mediaId: Id
     public var state: JobInt
 
     public init(mediaId: Id, state: JobInt) { self.mediaId = mediaId; self.state = state; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), state: JobInt(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -928,10 +1046,12 @@ public struct Hearing: Equatable {
 }
 
 /// The record `HearingCancel`.
-public struct HearingCancel: Equatable {
+public struct HearingCancel: Hashable {
     public var id: Id
 
     public init(id: Id) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -942,11 +1062,13 @@ public struct HearingCancel: Equatable {
 }
 
 /// The record `HearingClaim`.
-public struct HearingClaim: Equatable {
+public struct HearingClaim: Hashable {
     public var id: Id
     public var by: String
 
     public init(id: Id, by: String) { self.id = id; self.by = by; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -957,13 +1079,15 @@ public struct HearingClaim: Equatable {
 }
 
 /// The record `HearingFinish`.
-public struct HearingFinish: Equatable {
+public struct HearingFinish: Hashable {
     public var id: Id
     public var by: String
     public var outcome: HearingOutcome
     public var againMs: Int64?
 
     public init(id: Id, by: String, outcome: HearingOutcome, againMs: Int64? = nil) { self.id = id; self.by = by; self.outcome = outcome; self.againMs = againMs; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text(), outcome: HearingOutcome(r), againMs: r.opt { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -974,9 +1098,17 @@ public struct HearingFinish: Equatable {
 }
 
 /// The sum `HearingOutcome`.
-public indirect enum HearingOutcome: Equatable {
+public indirect enum HearingOutcome: Hashable {
     case ok(value: Int64)
     case err(why: String)
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .ok(value: r.int())
+        case 1: self = .err(why: r.text())
+        case let v: fatalError("HearingOutcome: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -996,12 +1128,23 @@ public indirect enum HearingOutcome: Equatable {
 }
 
 /// The sum `JobInt`.
-public indirect enum JobInt: Equatable {
+public indirect enum JobInt: Hashable {
     case pending(dueMs: Int64)
     case claimed(by: String, atMs: Int64)
     case done(value: Int64)
     case failed(why: String, retryMs: Int64)
     case cancelled
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .pending(dueMs: r.int())
+        case 1: self = .claimed(by: r.text(), atMs: r.int())
+        case 2: self = .done(value: r.int())
+        case 3: self = .failed(why: r.text(), retryMs: r.int())
+        case 4: self = .cancelled
+        case let v: fatalError("JobInt: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -1027,12 +1170,23 @@ public indirect enum JobInt: Equatable {
 }
 
 /// The sum `JobLooked`.
-public indirect enum JobLooked: Equatable {
+public indirect enum JobLooked: Hashable {
     case pending(dueMs: Int64)
     case claimed(by: String, atMs: Int64)
     case done(value: Looked)
     case failed(why: String, retryMs: Int64)
     case cancelled
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .pending(dueMs: r.int())
+        case 1: self = .claimed(by: r.text(), atMs: r.int())
+        case 2: self = .done(value: Looked(r))
+        case 3: self = .failed(why: r.text(), retryMs: r.int())
+        case 4: self = .cancelled
+        case let v: fatalError("JobLooked: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -1058,10 +1212,12 @@ public indirect enum JobLooked: Equatable {
 }
 
 /// The record `Jump`.
-public struct Jump: Equatable {
+public struct Jump: Hashable {
     public var index: Int64
 
     public init(index: Int64) { self.index = index; }
+
+    public init(_ r: Reader) { self.init(index: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1072,10 +1228,12 @@ public struct Jump: Equatable {
 }
 
 /// The record `Library`.
-public struct Library: Equatable {
+public struct Library: Hashable {
     public var playlistId: Id
 
     public init(playlistId: Id) { self.playlistId = playlistId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1085,8 +1243,23 @@ public struct Library: Equatable {
     public var json: String { J.obj(["\"playlist_id\":" + J.q(playlistId.hex)]) }
 }
 
-/// The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name.
-extension LibraryEntry {
+/// The record `LibraryEntry`.
+public struct LibraryEntry: Hashable {
+    public var addedMs: Int64
+    public var creator: String
+    public var durationMs: Int64
+    public var file: String
+    public var id: Id
+    public var kind: String
+    public var playlistPos: Int64?
+    public var pos: Int64
+    public var title: String
+    public var userId: String
+
+    public init(addedMs: Int64, creator: String, durationMs: Int64, file: String, id: Id, kind: String, playlistPos: Int64?, pos: Int64, title: String, userId: String) { self.addedMs = addedMs; self.creator = creator; self.durationMs = durationMs; self.file = file; self.id = id; self.kind = kind; self.playlistPos = playlistPos; self.pos = pos; self.title = title; self.userId = userId; }
+
+    public init(_ r: Reader) { self.init(addedMs: r.int(), creator: r.text(), durationMs: r.int(), file: r.text(), id: r.id(), kind: r.text(), playlistPos: r.opt { r0 in r0.int() }, pos: r.int(), title: r.text(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(addedMs: J.int(o["added_ms"]), creator: J.text(o["creator"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), id: Id(J.text(o["id"])), kind: J.text(o["kind"]), playlistPos: J.opt(o["playlist_pos"]) { v0 in J.int(v0) }, pos: J.int(o["pos"]), title: J.text(o["title"]), userId: J.text(o["user_id"]))
@@ -1096,11 +1269,13 @@ extension LibraryEntry {
 }
 
 /// The record `Listening`.
-public struct Listening: Equatable {
+public struct Listening: Hashable {
     public var user: String
     public var session: Session
 
     public init(user: String, session: Session) { self.user = user; self.session = session; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), session: Session(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1111,12 +1286,14 @@ public struct Listening: Equatable {
 }
 
 /// The record `ListeningDevice`.
-public struct ListeningDevice: Equatable {
+public struct ListeningDevice: Hashable {
     public var user: String
     public var device: String
     public var present: Present
 
     public init(user: String, device: String, present: Present) { self.user = user; self.device = device; self.present = present; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), device: r.text(), present: Present(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1127,12 +1304,14 @@ public struct ListeningDevice: Equatable {
 }
 
 /// The record `ListeningScrub`.
-public struct ListeningScrub: Equatable {
+public struct ListeningScrub: Hashable {
     public var user: String
     public var device: String
     public var atMs: Int64
 
     public init(user: String, device: String, atMs: Int64) { self.user = user; self.device = device; self.atMs = atMs; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), device: r.text(), atMs: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1143,12 +1322,14 @@ public struct ListeningScrub: Equatable {
 }
 
 /// The record `Look`.
-public struct Look: Equatable {
+public struct Look: Hashable {
     public var id: Id
     public var paths: [String]
     public var state: JobLooked
 
     public init(id: Id, paths: [String], state: JobLooked) { self.id = id; self.paths = paths; self.state = state; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), paths: r.list { r0 in r0.text() }, state: JobLooked(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1159,10 +1340,12 @@ public struct Look: Equatable {
 }
 
 /// The record `LookAt`.
-public struct LookAt: Equatable {
+public struct LookAt: Hashable {
     public var paths: [String]
 
     public init(paths: [String]) { self.paths = paths; }
+
+    public init(_ r: Reader) { self.init(paths: r.list { r0 in r0.text() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1173,10 +1356,12 @@ public struct LookAt: Equatable {
 }
 
 /// The record `LookCancel`.
-public struct LookCancel: Equatable {
+public struct LookCancel: Hashable {
     public var id: Id
 
     public init(id: Id) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1187,11 +1372,13 @@ public struct LookCancel: Equatable {
 }
 
 /// The record `LookClaim`.
-public struct LookClaim: Equatable {
+public struct LookClaim: Hashable {
     public var id: Id
     public var by: String
 
     public init(id: Id, by: String) { self.id = id; self.by = by; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1202,13 +1389,15 @@ public struct LookClaim: Equatable {
 }
 
 /// The record `LookFinish`.
-public struct LookFinish: Equatable {
+public struct LookFinish: Hashable {
     public var id: Id
     public var by: String
     public var outcome: LookOutcome
     public var againMs: Int64?
 
     public init(id: Id, by: String, outcome: LookOutcome, againMs: Int64? = nil) { self.id = id; self.by = by; self.outcome = outcome; self.againMs = againMs; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), by: r.text(), outcome: LookOutcome(r), againMs: r.opt { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1219,9 +1408,17 @@ public struct LookFinish: Equatable {
 }
 
 /// The sum `LookOutcome`.
-public indirect enum LookOutcome: Equatable {
+public indirect enum LookOutcome: Hashable {
     case ok(value: Looked)
     case err(why: String)
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .ok(value: Looked(r))
+        case 1: self = .err(why: r.text())
+        case let v: fatalError("LookOutcome: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -1241,11 +1438,13 @@ public indirect enum LookOutcome: Equatable {
 }
 
 /// The record `Looked`.
-public struct Looked: Equatable {
+public struct Looked: Hashable {
     public var read: Int64
     public var authored: Int64
 
     public init(read: Int64, authored: Int64) { self.read = read; self.authored = authored; }
+
+    public init(_ r: Reader) { self.init(read: r.int(), authored: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1256,12 +1455,14 @@ public struct Looked: Equatable {
 }
 
 /// The record `MarkPlayed`.
-public struct MarkPlayed: Equatable {
+public struct MarkPlayed: Hashable {
     public var mediaId: Id
     public var finished: Bool
     public var name: String
 
     public init(mediaId: Id, finished: Bool, name: String) { self.mediaId = mediaId; self.finished = finished; self.name = name; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), finished: r.bool(), name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1272,7 +1473,7 @@ public struct MarkPlayed: Equatable {
 }
 
 /// The record `Media`.
-public struct Media: Equatable {
+public struct Media: Hashable {
     public var id: Id
     public var kind: String
     public var title: String
@@ -1285,6 +1486,8 @@ public struct Media: Equatable {
 
     public init(id: Id, kind: String, title: String, creator: String, durationMs: Int64, file: String, pos: Int64, addedMs: Int64, userId: String) { self.id = id; self.kind = kind; self.title = title; self.creator = creator; self.durationMs = durationMs; self.file = file; self.pos = pos; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(id: r.id(), kind: r.text(), title: r.text(), creator: r.text(), durationMs: r.int(), file: r.text(), pos: r.int(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), kind: J.text(o["kind"]), title: J.text(o["title"]), creator: J.text(o["creator"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), pos: J.int(o["pos"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -1294,10 +1497,12 @@ public struct Media: Equatable {
 }
 
 /// The record `Member`.
-public struct Member: Equatable {
+public struct Member: Hashable {
     public var device: String
 
     public init(device: String) { self.device = device; }
+
+    public init(_ r: Reader) { self.init(device: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1308,11 +1513,13 @@ public struct Member: Equatable {
 }
 
 /// The record `Move`.
-public struct Move: Equatable {
+public struct Move: Hashable {
     public var from: Int64
     public var to: Int64
 
     public init(from: Int64, to: Int64) { self.from = from; self.to = to; }
+
+    public init(_ r: Reader) { self.init(from: r.int(), to: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1323,7 +1530,7 @@ public struct Move: Equatable {
 }
 
 /// The record `Movement`.
-public struct Movement: Equatable {
+public struct Movement: Hashable {
     public var id: String
     public var workId: String
     public var no: Int64
@@ -1334,6 +1541,8 @@ public struct Movement: Equatable {
 
     public init(id: String, workId: String, no: Int64, title: String, part: String, addedMs: Int64, userId: String) { self.id = id; self.workId = workId; self.no = no; self.title = title; self.part = part; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), workId: r.text(), no: r.int(), title: r.text(), part: r.text(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), workId: J.text(o["work_id"]), no: J.int(o["no"]), title: J.text(o["title"]), part: J.text(o["part"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -1343,12 +1552,14 @@ public struct Movement: Equatable {
 }
 
 /// The record `NameVoice`.
-public struct NameVoice: Equatable {
+public struct NameVoice: Hashable {
     public var mediaId: Id
     public var voice: String
     public var name: String
 
     public init(mediaId: Id, voice: String, name: String) { self.mediaId = mediaId; self.voice = voice; self.name = name; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), voice: r.text(), name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1359,11 +1570,13 @@ public struct NameVoice: Equatable {
 }
 
 /// The record `NudgeVolume`.
-public struct NudgeVolume: Equatable {
+public struct NudgeVolume: Hashable {
     public var delta: Int64
     public var device: String
 
     public init(delta: Int64, device: String) { self.delta = delta; self.device = device; }
+
+    public init(_ r: Reader) { self.init(delta: r.int(), device: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1374,10 +1587,19 @@ public struct NudgeVolume: Equatable {
 }
 
 /// The sum `Output`.
-public indirect enum Output: Equatable {
+public indirect enum Output: Hashable {
     case away(id: String, name: String)
     case device(id: String, moving: Bool)
     case nowhere
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .away(id: r.text(), name: r.text())
+        case 1: self = .device(id: r.text(), moving: r.bool())
+        case 2: self = .nowhere
+        case let v: fatalError("Output: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -1399,13 +1621,15 @@ public indirect enum Output: Equatable {
 }
 
 /// The record `PeopleEntry`.
-public struct PeopleEntry: Equatable {
+public struct PeopleEntry: Hashable {
     public var art: String
     public var link: String
     public var name: String
     public var role: String
 
     public init(art: String, link: String, name: String, role: String) { self.art = art; self.link = link; self.name = name; self.role = role; }
+
+    public init(_ r: Reader) { self.init(art: r.text(), link: r.text(), name: r.text(), role: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1416,7 +1640,7 @@ public struct PeopleEntry: Equatable {
 }
 
 /// The record `Person`.
-public struct Person: Equatable {
+public struct Person: Hashable {
     public var name: String
     public var sortName: String
     public var born: Int64
@@ -1430,6 +1654,8 @@ public struct Person: Equatable {
 
     public init(name: String, sortName: String, born: Int64, died: Int64, art: String, addedMs: Int64, userId: String, banner: String, description: String, link: String) { self.name = name; self.sortName = sortName; self.born = born; self.died = died; self.art = art; self.addedMs = addedMs; self.userId = userId; self.banner = banner; self.description = description; self.link = link; }
 
+    public init(_ r: Reader) { self.init(name: r.text(), sortName: r.text(), born: r.int(), died: r.int(), art: r.text(), addedMs: r.int(), userId: r.text(), banner: r.text(), description: r.text(), link: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(name: J.text(o["name"]), sortName: J.text(o["sort_name"]), born: J.int(o["born"]), died: J.int(o["died"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), banner: J.text(o["banner"]), description: J.text(o["description"]), link: J.text(o["link"]))
@@ -1439,13 +1665,15 @@ public struct Person: Equatable {
 }
 
 /// The record `PersonOn`.
-public struct PersonOn: Equatable {
+public struct PersonOn: Hashable {
     public var name: String
     public var role: String
     public var link: String
     public var art: String
 
     public init(name: String, role: String, link: String, art: String) { self.name = name; self.role = role; self.link = link; self.art = art; }
+
+    public init(_ r: Reader) { self.init(name: r.text(), role: r.text(), link: r.text(), art: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1456,7 +1684,7 @@ public struct PersonOn: Equatable {
 }
 
 /// The record `Play`.
-public struct Play: Equatable {
+public struct Play: Hashable {
     public var id: Id
     public var userId: String
     public var track: String
@@ -1470,6 +1698,8 @@ public struct Play: Equatable {
 
     public init(id: Id, userId: String, track: String, title: String, creator: String, album: String, durationMs: Int64, file: String, playedMs: Int64, from: String) { self.id = id; self.userId = userId; self.track = track; self.title = title; self.creator = creator; self.album = album; self.durationMs = durationMs; self.file = file; self.playedMs = playedMs; self.from = from; }
 
+    public init(_ r: Reader) { self.init(id: r.id(), userId: r.text(), track: r.text(), title: r.text(), creator: r.text(), album: r.text(), durationMs: r.int(), file: r.text(), playedMs: r.int(), from: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), userId: J.text(o["user_id"]), track: J.text(o["track"]), title: J.text(o["title"]), creator: J.text(o["creator"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), playedMs: J.int(o["played_ms"]), from: J.text(o["from"]))
@@ -1478,8 +1708,18 @@ public struct Play: Equatable {
     public var json: String { J.obj(["\"id\":" + J.q(id.hex), "\"user_id\":" + J.q(userId), "\"track\":" + J.q(track), "\"title\":" + J.q(title), "\"creator\":" + J.q(creator), "\"album\":" + J.q(album), "\"duration_ms\":" + String(durationMs), "\"file\":" + J.q(file), "\"played_ms\":" + String(playedMs), "\"from\":" + J.q(from)]) }
 }
 
-/// The record `Playlist` (UniFFI's): its JSON, for the functions called by name.
-extension Playlist {
+/// The record `Playlist`.
+public struct Playlist: Hashable {
+    public var id: Id
+    public var name: String
+    public var pos: Int64
+    public var createdMs: Int64
+    public var userId: String
+
+    public init(id: Id, name: String, pos: Int64, createdMs: Int64, userId: String) { self.id = id; self.name = name; self.pos = pos; self.createdMs = createdMs; self.userId = userId; }
+
+    public init(_ r: Reader) { self.init(id: r.id(), name: r.text(), pos: r.int(), createdMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: Id(J.text(o["id"])), name: J.text(o["name"]), pos: J.int(o["pos"]), createdMs: J.int(o["created_ms"]), userId: J.text(o["user_id"]))
@@ -1489,10 +1729,12 @@ extension Playlist {
 }
 
 /// The record `PlaylistInput`.
-public struct PlaylistInput: Equatable {
+public struct PlaylistInput: Hashable {
     public var playlistId: Id
 
     public init(playlistId: Id) { self.playlistId = playlistId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1503,7 +1745,7 @@ public struct PlaylistInput: Equatable {
 }
 
 /// The record `PlaylistItem`.
-public struct PlaylistItem: Equatable {
+public struct PlaylistItem: Hashable {
     public var playlistId: Id
     public var mediaId: Id
     public var pos: Int64
@@ -1511,6 +1753,8 @@ public struct PlaylistItem: Equatable {
     public var userId: String
 
     public init(playlistId: Id, mediaId: Id, pos: Int64, addedMs: Int64, userId: String) { self.playlistId = playlistId; self.mediaId = mediaId; self.pos = pos; self.addedMs = addedMs; self.userId = userId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), mediaId: r.id(), pos: r.int(), addedMs: r.int(), userId: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1521,10 +1765,12 @@ public struct PlaylistItem: Equatable {
 }
 
 /// The record `PlaylistsOf`.
-public struct PlaylistsOf: Equatable {
+public struct PlaylistsOf: Hashable {
     public var mediaId: Id
 
     public init(mediaId: Id) { self.mediaId = mediaId; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1535,7 +1781,7 @@ public struct PlaylistsOf: Equatable {
 }
 
 /// The record `Present`.
-public struct Present: Equatable {
+public struct Present: Hashable {
     public var canPlay: Bool
     public var canVolume: Bool
     public var family: String?
@@ -1549,6 +1795,8 @@ public struct Present: Equatable {
 
     public init(canPlay: Bool, canVolume: Bool, family: String?, follows: String?, id: String, kind: String, muted: Bool, name: String, user: String, volume: Int64) { self.canPlay = canPlay; self.canVolume = canVolume; self.family = family; self.follows = follows; self.id = id; self.kind = kind; self.muted = muted; self.name = name; self.user = user; self.volume = volume; }
 
+    public init(_ r: Reader) { self.init(canPlay: r.bool(), canVolume: r.bool(), family: r.opt { r0 in r0.text() }, follows: r.opt { r0 in r0.text() }, id: r.text(), kind: r.text(), muted: r.bool(), name: r.text(), user: r.text(), volume: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(canPlay: J.bool(o["can_play"]), canVolume: J.bool(o["can_volume"]), family: J.opt(o["family"]) { v0 in J.text(v0) }, follows: J.opt(o["follows"]) { v0 in J.text(v0) }, id: J.text(o["id"]), kind: J.text(o["kind"]), muted: J.bool(o["muted"]), name: J.text(o["name"]), user: J.text(o["user"]), volume: J.int(o["volume"]))
@@ -1558,7 +1806,7 @@ public struct Present: Equatable {
 }
 
 /// The record `Progress`.
-public struct Progress: Equatable {
+public struct Progress: Hashable {
     public var userId: String
     public var mediaId: Id
     public var positionMs: Int64
@@ -1569,6 +1817,8 @@ public struct Progress: Equatable {
 
     public init(userId: String, mediaId: Id, positionMs: Int64, durationMs: Int64, finished: Bool, name: String, updatedMs: Int64) { self.userId = userId; self.mediaId = mediaId; self.positionMs = positionMs; self.durationMs = durationMs; self.finished = finished; self.name = name; self.updatedMs = updatedMs; }
 
+    public init(_ r: Reader) { self.init(userId: r.text(), mediaId: r.id(), positionMs: r.int(), durationMs: r.int(), finished: r.bool(), name: r.text(), updatedMs: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(userId: J.text(o["user_id"]), mediaId: Id(J.text(o["media_id"])), positionMs: J.int(o["position_ms"]), durationMs: J.int(o["duration_ms"]), finished: J.bool(o["finished"]), name: J.text(o["name"]), updatedMs: J.int(o["updated_ms"]))
@@ -1578,7 +1828,7 @@ public struct Progress: Equatable {
 }
 
 /// The record `ProgressEntry`.
-public struct ProgressEntry: Equatable {
+public struct ProgressEntry: Hashable {
     public var durationMs: Int64
     public var finished: Bool
     public var mediaId: Id
@@ -1589,6 +1839,8 @@ public struct ProgressEntry: Equatable {
 
     public init(durationMs: Int64, finished: Bool, mediaId: Id, name: String, positionMs: Int64, updatedMs: Int64, userId: String) { self.durationMs = durationMs; self.finished = finished; self.mediaId = mediaId; self.name = name; self.positionMs = positionMs; self.updatedMs = updatedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(durationMs: r.int(), finished: r.bool(), mediaId: r.id(), name: r.text(), positionMs: r.int(), updatedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(durationMs: J.int(o["duration_ms"]), finished: J.bool(o["finished"]), mediaId: Id(J.text(o["media_id"])), name: J.text(o["name"]), positionMs: J.int(o["position_ms"]), updatedMs: J.int(o["updated_ms"]), userId: J.text(o["user_id"]))
@@ -1598,11 +1850,13 @@ public struct ProgressEntry: Equatable {
 }
 
 /// The record `QueueDownload`.
-public struct QueueDownload: Equatable {
+public struct QueueDownload: Hashable {
     public var file: String
     public var source: String
 
     public init(file: String, source: String) { self.file = file; self.source = source; }
+
+    public init(_ r: Reader) { self.init(file: r.text(), source: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1613,10 +1867,12 @@ public struct QueueDownload: Equatable {
 }
 
 /// The record `Read`.
-public struct Read: Equatable {
+public struct Read: Hashable {
     public var url: String
 
     public init(url: String) { self.url = url; }
+
+    public init(_ r: Reader) { self.init(url: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1627,7 +1883,7 @@ public struct Read: Equatable {
 }
 
 /// The record `RecordPlay`.
-public struct RecordPlay: Equatable {
+public struct RecordPlay: Hashable {
     public var track: Id
     public var title: String
     public var creator: String
@@ -1638,6 +1894,8 @@ public struct RecordPlay: Equatable {
 
     public init(track: Id, title: String, creator: String, album: String, durationMs: Int64, file: String, from: String) { self.track = track; self.title = title; self.creator = creator; self.album = album; self.durationMs = durationMs; self.file = file; self.from = from; }
 
+    public init(_ r: Reader) { self.init(track: r.id(), title: r.text(), creator: r.text(), album: r.text(), durationMs: r.int(), file: r.text(), from: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(track: Id(J.text(o["track"])), title: J.text(o["title"]), creator: J.text(o["creator"]), album: J.text(o["album"]), durationMs: J.int(o["duration_ms"]), file: J.text(o["file"]), from: J.text(o["from"]))
@@ -1647,7 +1905,7 @@ public struct RecordPlay: Equatable {
 }
 
 /// The record `Recording`.
-public struct Recording: Equatable {
+public struct Recording: Hashable {
     public var id: String
     public var workId: String?
     public var recorded: Int64
@@ -1660,6 +1918,8 @@ public struct Recording: Equatable {
 
     public init(id: String, workId: String?, recorded: Int64, venue: String, label: String, licence: String, art: String, addedMs: Int64, userId: String) { self.id = id; self.workId = workId; self.recorded = recorded; self.venue = venue; self.label = label; self.licence = licence; self.art = art; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), workId: r.opt { r0 in r0.text() }, recorded: r.int(), venue: r.text(), label: r.text(), licence: r.text(), art: r.text(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), workId: J.opt(o["work_id"]) { v0 in J.text(v0) }, recorded: J.int(o["recorded"]), venue: J.text(o["venue"]), label: J.text(o["label"]), licence: J.text(o["licence"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -1669,11 +1929,13 @@ public struct Recording: Equatable {
 }
 
 /// The record `RecordingInput`.
-public struct RecordingInput: Equatable {
+public struct RecordingInput: Hashable {
     public var playlistId: Id
     public var id: String
 
     public init(playlistId: Id, id: String) { self.playlistId = playlistId; self.id = id; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1684,10 +1946,12 @@ public struct RecordingInput: Equatable {
 }
 
 /// The record `Recordings`.
-public struct Recordings: Equatable {
+public struct Recordings: Hashable {
     public var workId: String
 
     public init(workId: String) { self.workId = workId; }
+
+    public init(_ r: Reader) { self.init(workId: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1698,7 +1962,7 @@ public struct Recordings: Equatable {
 }
 
 /// The record `RecordingsEntry`.
-public struct RecordingsEntry: Equatable {
+public struct RecordingsEntry: Hashable {
     public var art: String
     public var durationMs: Int64
     public var id: String
@@ -1710,6 +1974,8 @@ public struct RecordingsEntry: Equatable {
 
     public init(art: String, durationMs: Int64, id: String, label: String, licence: String, performers: String, recorded: Int64, tracks: Int64) { self.art = art; self.durationMs = durationMs; self.id = id; self.label = label; self.licence = licence; self.performers = performers; self.recorded = recorded; self.tracks = tracks; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), durationMs: r.int(), id: r.text(), label: r.text(), licence: r.text(), performers: r.text(), recorded: r.int(), tracks: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), durationMs: J.int(o["duration_ms"]), id: J.text(o["id"]), label: J.text(o["label"]), licence: J.text(o["licence"]), performers: J.text(o["performers"]), recorded: J.int(o["recorded"]), tracks: J.int(o["tracks"]))
@@ -1719,10 +1985,12 @@ public struct RecordingsEntry: Equatable {
 }
 
 /// The record `Remove`.
-public struct Remove: Equatable {
+public struct Remove: Hashable {
     public var index: Int64
 
     public init(index: Int64) { self.index = index; }
+
+    public init(_ r: Reader) { self.init(index: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1733,11 +2001,13 @@ public struct Remove: Equatable {
 }
 
 /// The record `RemoveFromPlaylist`.
-public struct RemoveFromPlaylist: Equatable {
+public struct RemoveFromPlaylist: Hashable {
     public var playlistId: Id
     public var mediaId: Id
 
     public init(playlistId: Id, mediaId: Id) { self.playlistId = playlistId; self.mediaId = mediaId; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), mediaId: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1748,10 +2018,12 @@ public struct RemoveFromPlaylist: Equatable {
 }
 
 /// The record `RemoveMedia`.
-public struct RemoveMedia: Equatable {
+public struct RemoveMedia: Hashable {
     public var id: Id
 
     public init(id: Id) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.id()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1762,11 +2034,13 @@ public struct RemoveMedia: Equatable {
 }
 
 /// The record `Report`.
-public struct Report: Equatable {
+public struct Report: Hashable {
     public var atMs: Int64
     public var since: Int64
 
     public init(atMs: Int64, since: Int64) { self.atMs = atMs; self.since = since; }
+
+    public init(_ r: Reader) { self.init(atMs: r.int(), since: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1777,10 +2051,12 @@ public struct Report: Equatable {
 }
 
 /// The record `ReportGroup`.
-public struct ReportGroup: Equatable {
+public struct ReportGroup: Hashable {
     public var members: [String]
 
     public init(members: [String]) { self.members = members; }
+
+    public init(_ r: Reader) { self.init(members: r.list { r0 in r0.text() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1791,13 +2067,15 @@ public struct ReportGroup: Equatable {
 }
 
 /// The record `ReportProgress`.
-public struct ReportProgress: Equatable {
+public struct ReportProgress: Hashable {
     public var mediaId: Id
     public var positionMs: Int64
     public var durationMs: Int64
     public var name: String
 
     public init(mediaId: Id, positionMs: Int64, durationMs: Int64, name: String) { self.mediaId = mediaId; self.positionMs = positionMs; self.durationMs = durationMs; self.name = name; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), positionMs: r.int(), durationMs: r.int(), name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1808,11 +2086,13 @@ public struct ReportProgress: Equatable {
 }
 
 /// The record `ReportVolume`.
-public struct ReportVolume: Equatable {
+public struct ReportVolume: Hashable {
     public var level: Int64
     public var muted: Bool
 
     public init(level: Int64, muted: Bool) { self.level = level; self.muted = muted; }
+
+    public init(_ r: Reader) { self.init(level: r.int(), muted: r.bool()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1823,10 +2103,12 @@ public struct ReportVolume: Equatable {
 }
 
 /// The record `Revoke`.
-public struct Revoke: Equatable {
+public struct Revoke: Hashable {
     public var id: String
 
     public init(id: String) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1837,11 +2119,13 @@ public struct Revoke: Equatable {
 }
 
 /// The record `Role`.
-public struct Role: Equatable {
+public struct Role: Hashable {
     public var user: String
     public var role: String
 
     public init(user: String, role: String) { self.user = user; self.role = role; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), role: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1852,10 +2136,12 @@ public struct Role: Equatable {
 }
 
 /// The record `Scrub`.
-public struct Scrub: Equatable {
+public struct Scrub: Hashable {
     public var atMs: Int64?
 
     public init(atMs: Int64? = nil) { self.atMs = atMs; }
+
+    public init(_ r: Reader) { self.init(atMs: r.opt { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1866,11 +2152,13 @@ public struct Scrub: Equatable {
 }
 
 /// The record `Search`.
-public struct Search: Equatable {
+public struct Search: Hashable {
     public var playlistId: Id
     public var needle: String
 
     public init(playlistId: Id, needle: String) { self.playlistId = playlistId; self.needle = needle; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), needle: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1881,10 +2169,12 @@ public struct Search: Equatable {
 }
 
 /// The record `Seek`.
-public struct Seek: Equatable {
+public struct Seek: Hashable {
     public var ms: Int64
 
     public init(ms: Int64) { self.ms = ms; }
+
+    public init(_ r: Reader) { self.init(ms: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1895,9 +2185,17 @@ public struct Seek: Equatable {
 }
 
 /// The sum `Session`.
-public indirect enum Session: Equatable {
+public indirect enum Session: Hashable {
     case active(active: Active)
     case idle
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .active(active: Active(r))
+        case 1: self = .idle
+        case let v: fatalError("Session: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -1917,11 +2215,13 @@ public indirect enum Session: Equatable {
 }
 
 /// The record `SetChapters`.
-public struct SetChapters: Equatable {
+public struct SetChapters: Hashable {
     public var file: String
     public var chapters: [ChapterAt]
 
     public init(file: String, chapters: [ChapterAt]) { self.file = file; self.chapters = chapters; }
+
+    public init(_ r: Reader) { self.init(file: r.text(), chapters: r.list { r0 in ChapterAt(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1932,11 +2232,13 @@ public struct SetChapters: Equatable {
 }
 
 /// The record `SetMute`.
-public struct SetMute: Equatable {
+public struct SetMute: Hashable {
     public var device: String
     public var muted: Bool
 
     public init(device: String, muted: Bool) { self.device = device; self.muted = muted; }
+
+    public init(_ r: Reader) { self.init(device: r.text(), muted: r.bool()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1947,11 +2249,13 @@ public struct SetMute: Equatable {
 }
 
 /// The record `SetPeople`.
-public struct SetPeople: Equatable {
+public struct SetPeople: Hashable {
     public var file: String
     public var people: [PersonOn]
 
     public init(file: String, people: [PersonOn]) { self.file = file; self.people = people; }
+
+    public init(_ r: Reader) { self.init(file: r.text(), people: r.list { r0 in PersonOn(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1962,12 +2266,14 @@ public struct SetPeople: Equatable {
 }
 
 /// The record `SetTranscript`.
-public struct SetTranscript: Equatable {
+public struct SetTranscript: Hashable {
     public var file: String
     public var cues: [CueAt]
     public var voices: [VoiceAt]
 
     public init(file: String, cues: [CueAt], voices: [VoiceAt]) { self.file = file; self.cues = cues; self.voices = voices; }
+
+    public init(_ r: Reader) { self.init(file: r.text(), cues: r.list { r0 in CueAt(r0) }, voices: r.list { r0 in VoiceAt(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1978,11 +2284,13 @@ public struct SetTranscript: Equatable {
 }
 
 /// The record `SetVolume`.
-public struct SetVolume: Equatable {
+public struct SetVolume: Hashable {
     public var device: String
     public var level: Int64
 
     public init(device: String, level: Int64) { self.device = device; self.level = level; }
+
+    public init(_ r: Reader) { self.init(device: r.text(), level: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -1993,7 +2301,7 @@ public struct SetVolume: Equatable {
 }
 
 /// The record `Show`.
-public struct Show: Equatable {
+public struct Show: Hashable {
     public var id: String
     public var kind: String
     public var title: String
@@ -2007,6 +2315,8 @@ public struct Show: Equatable {
 
     public init(id: String, kind: String, title: String, author: String, description: String, art: String, feed: String, link: String, addedMs: Int64, userId: String) { self.id = id; self.kind = kind; self.title = title; self.author = author; self.description = description; self.art = art; self.feed = feed; self.link = link; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), kind: r.text(), title: r.text(), author: r.text(), description: r.text(), art: r.text(), feed: r.text(), link: r.text(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), kind: J.text(o["kind"]), title: J.text(o["title"]), author: J.text(o["author"]), description: J.text(o["description"]), art: J.text(o["art"]), feed: J.text(o["feed"]), link: J.text(o["link"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -2016,11 +2326,13 @@ public struct Show: Equatable {
 }
 
 /// The record `ShowInput`.
-public struct ShowInput: Equatable {
+public struct ShowInput: Hashable {
     public var playlistId: Id
     public var id: String
 
     public init(playlistId: Id, id: String) { self.playlistId = playlistId; self.id = id; }
+
+    public init(_ r: Reader) { self.init(playlistId: r.id(), id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2031,7 +2343,7 @@ public struct ShowInput: Equatable {
 }
 
 /// The record `ShowPeopleEntry`.
-public struct ShowPeopleEntry: Equatable {
+public struct ShowPeopleEntry: Hashable {
     public var art: String
     public var link: String
     public var mediaId: Id
@@ -2039,6 +2351,8 @@ public struct ShowPeopleEntry: Equatable {
     public var role: String
 
     public init(art: String, link: String, mediaId: Id, name: String, role: String) { self.art = art; self.link = link; self.mediaId = mediaId; self.name = name; self.role = role; }
+
+    public init(_ r: Reader) { self.init(art: r.text(), link: r.text(), mediaId: r.id(), name: r.text(), role: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2049,7 +2363,7 @@ public struct ShowPeopleEntry: Equatable {
 }
 
 /// The record `ShowsEntry`.
-public struct ShowsEntry: Equatable {
+public struct ShowsEntry: Hashable {
     public var art: String
     public var author: String
     public var description: String
@@ -2063,6 +2377,8 @@ public struct ShowsEntry: Equatable {
 
     public init(art: String, author: String, description: String, episodes: Int64, feed: String, id: String, kind: String, link: String, newestMs: Int64, title: String) { self.art = art; self.author = author; self.description = description; self.episodes = episodes; self.feed = feed; self.id = id; self.kind = kind; self.link = link; self.newestMs = newestMs; self.title = title; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), author: r.text(), description: r.text(), episodes: r.int(), feed: r.text(), id: r.text(), kind: r.text(), link: r.text(), newestMs: r.int(), title: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), author: J.text(o["author"]), description: J.text(o["description"]), episodes: J.int(o["episodes"]), feed: J.text(o["feed"]), id: J.text(o["id"]), kind: J.text(o["kind"]), link: J.text(o["link"]), newestMs: J.int(o["newest_ms"]), title: J.text(o["title"]))
@@ -2072,7 +2388,7 @@ public struct ShowsEntry: Equatable {
 }
 
 /// The record `SignIn`.
-public struct SignIn: Equatable {
+public struct SignIn: Hashable {
     public var id: String
     public var user: String
     public var name: String
@@ -2086,6 +2402,8 @@ public struct SignIn: Equatable {
 
     public init(id: String, user: String, name: String, email: String, device: String, issuedMs: Int64, expiresMs: Int64, revoked: Bool, roles: [String], picture: String) { self.id = id; self.user = user; self.name = name; self.email = email; self.device = device; self.issuedMs = issuedMs; self.expiresMs = expiresMs; self.revoked = revoked; self.roles = roles; self.picture = picture; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), user: r.text(), name: r.text(), email: r.text(), device: r.text(), issuedMs: r.int(), expiresMs: r.int(), revoked: r.bool(), roles: r.list { r0 in r0.text() }, picture: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), user: J.text(o["user"]), name: J.text(o["name"]), email: J.text(o["email"]), device: J.text(o["device"]), issuedMs: J.int(o["issued_ms"]), expiresMs: J.int(o["expires_ms"]), revoked: J.bool(o["revoked"]), roles: J.list(o["roles"]) { v0 in J.text(v0) }, picture: J.text(o["picture"]))
@@ -2095,10 +2413,12 @@ public struct SignIn: Equatable {
 }
 
 /// The record `Skip`.
-public struct Skip: Equatable {
+public struct Skip: Hashable {
     public var by: Int64
 
     public init(by: Int64) { self.by = by; }
+
+    public init(_ r: Reader) { self.init(by: r.int()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2109,7 +2429,7 @@ public struct Skip: Equatable {
 }
 
 /// The record `Song`.
-public struct Song: Equatable {
+public struct Song: Hashable {
     public var mediaId: Id
     public var albumId: String?
     public var disc: Int64
@@ -2120,6 +2440,8 @@ public struct Song: Equatable {
 
     public init(mediaId: Id, albumId: String?, disc: Int64, track: Int64, recordingId: String, movementId: String?, bpm: Int64) { self.mediaId = mediaId; self.albumId = albumId; self.disc = disc; self.track = track; self.recordingId = recordingId; self.movementId = movementId; self.bpm = bpm; }
 
+    public init(_ r: Reader) { self.init(mediaId: r.id(), albumId: r.opt { r0 in r0.text() }, disc: r.int(), track: r.int(), recordingId: r.text(), movementId: r.opt { r0 in r0.text() }, bpm: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(mediaId: Id(J.text(o["media_id"])), albumId: J.opt(o["album_id"]) { v0 in J.text(v0) }, disc: J.int(o["disc"]), track: J.int(o["track"]), recordingId: J.text(o["recording_id"]), movementId: J.opt(o["movement_id"]) { v0 in J.text(v0) }, bpm: J.int(o["bpm"]))
@@ -2129,11 +2451,13 @@ public struct Song: Equatable {
 }
 
 /// The record `Source`.
-public struct Source: Equatable {
+public struct Source: Hashable {
     public var url: String
     public var state: JobInt
 
     public init(url: String, state: JobInt) { self.url = url; self.state = state; }
+
+    public init(_ r: Reader) { self.init(url: r.text(), state: JobInt(r)) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2144,10 +2468,12 @@ public struct Source: Equatable {
 }
 
 /// The record `SourceCancel`.
-public struct SourceCancel: Equatable {
+public struct SourceCancel: Hashable {
     public var id: String
 
     public init(id: String) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2158,11 +2484,13 @@ public struct SourceCancel: Equatable {
 }
 
 /// The record `SourceClaim`.
-public struct SourceClaim: Equatable {
+public struct SourceClaim: Hashable {
     public var id: String
     public var by: String
 
     public init(id: String, by: String) { self.id = id; self.by = by; }
+
+    public init(_ r: Reader) { self.init(id: r.text(), by: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2173,13 +2501,15 @@ public struct SourceClaim: Equatable {
 }
 
 /// The record `SourceFinish`.
-public struct SourceFinish: Equatable {
+public struct SourceFinish: Hashable {
     public var id: String
     public var by: String
     public var outcome: SourceOutcome
     public var againMs: Int64?
 
     public init(id: String, by: String, outcome: SourceOutcome, againMs: Int64? = nil) { self.id = id; self.by = by; self.outcome = outcome; self.againMs = againMs; }
+
+    public init(_ r: Reader) { self.init(id: r.text(), by: r.text(), outcome: SourceOutcome(r), againMs: r.opt { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2190,9 +2520,17 @@ public struct SourceFinish: Equatable {
 }
 
 /// The sum `SourceOutcome`.
-public indirect enum SourceOutcome: Equatable {
+public indirect enum SourceOutcome: Hashable {
     case ok(value: Int64)
     case err(why: String)
+
+    public init(_ r: Reader) {
+        switch r.variant() {
+        case 0: self = .ok(value: r.int())
+        case 1: self = .err(why: r.text())
+        case let v: fatalError("SourceOutcome: no variant \(v)")
+        }
+    }
 
     public init(json j: Any?) {
         let (t, o) = J.sum(j)
@@ -2212,13 +2550,15 @@ public indirect enum SourceOutcome: Equatable {
 }
 
 /// The record `Start`.
-public struct Start: Equatable {
+public struct Start: Hashable {
     public var at: Int64
     public var from: String
     public var position: Int64
     public var queue: [Track]
 
     public init(at: Int64, from: String, position: Int64, queue: [Track]) { self.at = at; self.from = from; self.position = position; self.queue = queue; }
+
+    public init(_ r: Reader) { self.init(at: r.int(), from: r.text(), position: r.int(), queue: r.list { r0 in Track(r0) }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2229,11 +2569,13 @@ public struct Start: Equatable {
 }
 
 /// The record `Subscribe`.
-public struct Subscribe: Equatable {
+public struct Subscribe: Hashable {
     public var kind: String
     public var url: String
 
     public init(kind: String, url: String) { self.kind = kind; self.url = url; }
+
+    public init(_ r: Reader) { self.init(kind: r.text(), url: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2244,7 +2586,7 @@ public struct Subscribe: Equatable {
 }
 
 /// The record `Subscription`.
-public struct Subscription: Equatable {
+public struct Subscription: Hashable {
     public var url: String
     public var kind: String
     public var keep: Int64
@@ -2256,6 +2598,8 @@ public struct Subscription: Equatable {
 
     public init(url: String, kind: String, keep: Int64, title: String, items: Int64, error: String, addedMs: Int64, userId: String) { self.url = url; self.kind = kind; self.keep = keep; self.title = title; self.items = items; self.error = error; self.addedMs = addedMs; self.userId = userId; }
 
+    public init(_ r: Reader) { self.init(url: r.text(), kind: r.text(), keep: r.int(), title: r.text(), items: r.int(), error: r.text(), addedMs: r.int(), userId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(url: J.text(o["url"]), kind: J.text(o["kind"]), keep: J.int(o["keep"]), title: J.text(o["title"]), items: J.int(o["items"]), error: J.text(o["error"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]))
@@ -2265,7 +2609,7 @@ public struct Subscription: Equatable {
 }
 
 /// The record `SubscriptionsEntry`.
-public struct SubscriptionsEntry: Equatable {
+public struct SubscriptionsEntry: Hashable {
     public var addedMs: Int64
     public var episodes: Int64
     public var error: String
@@ -2278,6 +2622,8 @@ public struct SubscriptionsEntry: Equatable {
 
     public init(addedMs: Int64, episodes: Int64, error: String, items: Int64, keep: Int64, kind: String, showId: String, title: String, url: String) { self.addedMs = addedMs; self.episodes = episodes; self.error = error; self.items = items; self.keep = keep; self.kind = kind; self.showId = showId; self.title = title; self.url = url; }
 
+    public init(_ r: Reader) { self.init(addedMs: r.int(), episodes: r.int(), error: r.text(), items: r.int(), keep: r.int(), kind: r.text(), showId: r.text(), title: r.text(), url: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(addedMs: J.int(o["added_ms"]), episodes: J.int(o["episodes"]), error: J.text(o["error"]), items: J.int(o["items"]), keep: J.int(o["keep"]), kind: J.text(o["kind"]), showId: J.text(o["show_id"]), title: J.text(o["title"]), url: J.text(o["url"]))
@@ -2287,7 +2633,7 @@ public struct SubscriptionsEntry: Equatable {
 }
 
 /// The record `Track`.
-public struct Track: Equatable {
+public struct Track: Hashable {
     public var album: String
     public var creator: String
     public var durationMs: Int64
@@ -2296,6 +2642,8 @@ public struct Track: Equatable {
     public var title: String
 
     public init(album: String, creator: String, durationMs: Int64, file: String, id: Id, title: String) { self.album = album; self.creator = creator; self.durationMs = durationMs; self.file = file; self.id = id; self.title = title; }
+
+    public init(_ r: Reader) { self.init(album: r.text(), creator: r.text(), durationMs: r.int(), file: r.text(), id: r.id(), title: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2306,7 +2654,7 @@ public struct Track: Equatable {
 }
 
 /// The record `TrackDetailsEntry`.
-public struct TrackDetailsEntry: Equatable {
+public struct TrackDetailsEntry: Hashable {
     public var album: String
     public var albumId: String
     public var bpm: Int64
@@ -2322,6 +2670,8 @@ public struct TrackDetailsEntry: Equatable {
 
     public init(album: String, albumId: String, bpm: Int64, catalogue: String, composer: String, licence: String, mediaId: Id, part: String, performer: String, track: Int64, work: String, workId: String) { self.album = album; self.albumId = albumId; self.bpm = bpm; self.catalogue = catalogue; self.composer = composer; self.licence = licence; self.mediaId = mediaId; self.part = part; self.performer = performer; self.track = track; self.work = work; self.workId = workId; }
 
+    public init(_ r: Reader) { self.init(album: r.text(), albumId: r.text(), bpm: r.int(), catalogue: r.text(), composer: r.text(), licence: r.text(), mediaId: r.id(), part: r.text(), performer: r.text(), track: r.int(), work: r.text(), workId: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(album: J.text(o["album"]), albumId: J.text(o["album_id"]), bpm: J.int(o["bpm"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), licence: J.text(o["licence"]), mediaId: Id(J.text(o["media_id"])), part: J.text(o["part"]), performer: J.text(o["performer"]), track: J.int(o["track"]), work: J.text(o["work"]), workId: J.text(o["work_id"]))
@@ -2331,7 +2681,7 @@ public struct TrackDetailsEntry: Equatable {
 }
 
 /// The record `TranscriptEntry`.
-public struct TranscriptEntry: Equatable {
+public struct TranscriptEntry: Hashable {
     public var endMs: Int64
     public var speaker: String
     public var startMs: Int64
@@ -2339,6 +2689,8 @@ public struct TranscriptEntry: Equatable {
     public var voice: String
 
     public init(endMs: Int64, speaker: String, startMs: Int64, text: String, voice: String) { self.endMs = endMs; self.speaker = speaker; self.startMs = startMs; self.text = text; self.voice = voice; }
+
+    public init(_ r: Reader) { self.init(endMs: r.int(), speaker: r.text(), startMs: r.int(), text: r.text(), voice: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2349,10 +2701,12 @@ public struct TranscriptEntry: Equatable {
 }
 
 /// The record `Transfer`.
-public struct Transfer: Equatable {
+public struct Transfer: Hashable {
     public var to: String
 
     public init(to: String) { self.to = to; }
+
+    public init(_ r: Reader) { self.init(to: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2363,10 +2717,12 @@ public struct Transfer: Equatable {
 }
 
 /// The record `Unsubscribe`.
-public struct Unsubscribe: Equatable {
+public struct Unsubscribe: Hashable {
     public var url: String
 
     public init(url: String) { self.url = url; }
+
+    public init(_ r: Reader) { self.init(url: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2377,12 +2733,14 @@ public struct Unsubscribe: Equatable {
 }
 
 /// The record `Voice`.
-public struct Voice: Equatable {
+public struct Voice: Hashable {
     public var mediaId: Id
     public var name: String
     public var print: [Int64]
 
     public init(mediaId: Id, name: String, print: [Int64]) { self.mediaId = mediaId; self.name = name; self.print = print; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), name: r.text(), print: r.list { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2393,11 +2751,13 @@ public struct Voice: Equatable {
 }
 
 /// The record `VoiceAt`.
-public struct VoiceAt: Equatable {
+public struct VoiceAt: Hashable {
     public var name: String
     public var print: [Int64]
 
     public init(name: String, print: [Int64]) { self.name = name; self.print = print; }
+
+    public init(_ r: Reader) { self.init(name: r.text(), print: r.list { r0 in r0.int() }) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2408,12 +2768,14 @@ public struct VoiceAt: Equatable {
 }
 
 /// The record `VoiceName`.
-public struct VoiceName: Equatable {
+public struct VoiceName: Hashable {
     public var mediaId: Id
     public var voice: String
     public var personName: String
 
     public init(mediaId: Id, voice: String, personName: String) { self.mediaId = mediaId; self.voice = voice; self.personName = personName; }
+
+    public init(_ r: Reader) { self.init(mediaId: r.id(), voice: r.text(), personName: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2424,11 +2786,13 @@ public struct VoiceName: Equatable {
 }
 
 /// The record `Welcome`.
-public struct Welcome: Equatable {
+public struct Welcome: Hashable {
     public var user: String
     public var name: String
 
     public init(user: String, name: String) { self.user = user; self.name = name; }
+
+    public init(_ r: Reader) { self.init(user: r.text(), name: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2439,7 +2803,7 @@ public struct Welcome: Equatable {
 }
 
 /// The record `Work`.
-public struct Work: Equatable {
+public struct Work: Hashable {
     public var id: String
     public var composer: String
     public var title: String
@@ -2456,6 +2820,8 @@ public struct Work: Equatable {
 
     public init(id: String, composer: String, title: String, catalogue: String, opus: String, keySig: String, form: String, period: String, composed: Int64, art: String, addedMs: Int64, userId: String, description: String) { self.id = id; self.composer = composer; self.title = title; self.catalogue = catalogue; self.opus = opus; self.keySig = keySig; self.form = form; self.period = period; self.composed = composed; self.art = art; self.addedMs = addedMs; self.userId = userId; self.description = description; }
 
+    public init(_ r: Reader) { self.init(id: r.text(), composer: r.text(), title: r.text(), catalogue: r.text(), opus: r.text(), keySig: r.text(), form: r.text(), period: r.text(), composed: r.int(), art: r.text(), addedMs: r.int(), userId: r.text(), description: r.text()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(id: J.text(o["id"]), composer: J.text(o["composer"]), title: J.text(o["title"]), catalogue: J.text(o["catalogue"]), opus: J.text(o["opus"]), keySig: J.text(o["key_sig"]), form: J.text(o["form"]), period: J.text(o["period"]), composed: J.int(o["composed"]), art: J.text(o["art"]), addedMs: J.int(o["added_ms"]), userId: J.text(o["user_id"]), description: J.text(o["description"]))
@@ -2465,10 +2831,12 @@ public struct Work: Equatable {
 }
 
 /// The record `WorkInput`.
-public struct WorkInput: Equatable {
+public struct WorkInput: Hashable {
     public var id: String
 
     public init(id: String) { self.id = id; }
+
+    public init(_ r: Reader) { self.init(id: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2479,7 +2847,7 @@ public struct WorkInput: Equatable {
 }
 
 /// The record `WorkSummary`.
-public struct WorkSummary: Equatable {
+public struct WorkSummary: Hashable {
     public var art: String
     public var catalogue: String
     public var composer: String
@@ -2493,6 +2861,8 @@ public struct WorkSummary: Equatable {
 
     public init(art: String, catalogue: String, composer: String, description: String, form: String, id: String, period: String, recordings: Int64, title: String, tracks: Int64) { self.art = art; self.catalogue = catalogue; self.composer = composer; self.description = description; self.form = form; self.id = id; self.period = period; self.recordings = recordings; self.title = title; self.tracks = tracks; }
 
+    public init(_ r: Reader) { self.init(art: r.text(), catalogue: r.text(), composer: r.text(), description: r.text(), form: r.text(), id: r.text(), period: r.text(), recordings: r.int(), title: r.text(), tracks: r.int()) }
+
     public init(json j: Any?) {
         let o = j as! [String: Any]
         self.init(art: J.text(o["art"]), catalogue: J.text(o["catalogue"]), composer: J.text(o["composer"]), description: J.text(o["description"]), form: J.text(o["form"]), id: J.text(o["id"]), period: J.text(o["period"]), recordings: J.int(o["recordings"]), title: J.text(o["title"]), tracks: J.int(o["tracks"]))
@@ -2502,10 +2872,12 @@ public struct WorkSummary: Equatable {
 }
 
 /// The record `Works`.
-public struct Works: Equatable {
+public struct Works: Hashable {
     public var composer: String
 
     public init(composer: String) { self.composer = composer; }
+
+    public init(_ r: Reader) { self.init(composer: r.text()) }
 
     public init(json j: Any?) {
         let o = j as! [String: Any]
@@ -2528,7 +2900,7 @@ public struct Harken {
     @discardableResult public func fetchClaim(_ input: FetchClaim) throws -> String { try peer.mutate(name: "fetch.claim", input: input.json) }
 
     /// `fetch.due`, kept.
-    public func fetchDue() throws -> LiveView<Fetch> { LiveView(try peer.view(name: "fetch.due", input: "null")) { j in Fetch(json: j) } }
+    public func fetchDue() throws -> LiveView<Fetch> { LiveView(try peer.view(name: "fetch.due", input: "null")) { r in Fetch(r) } }
 
     /// `fetch.finish`: its intent's id.
     @discardableResult public func fetchFinish(_ input: FetchFinish) throws -> String { try peer.mutate(name: "fetch.finish", input: input.json) }
@@ -2540,7 +2912,7 @@ public struct Harken {
     @discardableResult public func hearingClaim(_ input: HearingClaim) throws -> String { try peer.mutate(name: "hearing.claim", input: input.json) }
 
     /// `hearing.due`, kept.
-    public func hearingDue() throws -> LiveView<Hearing> { LiveView(try peer.view(name: "hearing.due", input: "null")) { j in Hearing(json: j) } }
+    public func hearingDue() throws -> LiveView<Hearing> { LiveView(try peer.view(name: "hearing.due", input: "null")) { r in Hearing(r) } }
 
     /// `hearing.finish`: its intent's id.
     @discardableResult public func hearingFinish(_ input: HearingFinish) throws -> String { try peer.mutate(name: "hearing.finish", input: input.json) }
@@ -2557,35 +2929,35 @@ public struct Harken {
     /// `library.add_song`: its intent's id.
     @discardableResult public func addSong(_ input: AddSong) throws -> String { try peer.mutate(name: "library.add_song", input: input.json) }
 
-    /// `library.album`, kept, its rows UniFFI's.
-    public func album(_ input: AlbumInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.album", input: input.json)) }
+    /// `library.album`, kept.
+    public func album(_ input: AlbumInput) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.album", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.album_credits`, kept.
-    public func albumCredits(_ input: AlbumCredits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.album_credits", input: input.json)) { j in CreditsEntry(json: j) } }
+    public func albumCredits(_ input: AlbumCredits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.album_credits", input: input.json)) { r in CreditsEntry(r) } }
 
     /// `library.albums`, kept.
-    public func albums() throws -> LiveView<AlbumsEntry> { LiveView(try peer.view(name: "library.albums", input: "null")) { j in AlbumsEntry(json: j) } }
+    public func albums() throws -> LiveView<AlbumsEntry> { LiveView(try peer.view(name: "library.albums", input: "null")) { r in AlbumsEntry(r) } }
 
-    /// `library.appearances`, kept, its rows UniFFI's.
-    public func appearances(_ input: Artist) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.appearances", input: input.json)) }
+    /// `library.appearances`, kept.
+    public func appearances(_ input: Artist) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.appearances", input: input.json)) { r in LibraryEntry(r) } }
 
-    /// `library.artist`, kept, its rows UniFFI's.
-    public func artist(_ input: Artist) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.artist", input: input.json)) }
+    /// `library.artist`, kept.
+    public func artist(_ input: Artist) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.artist", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.artists`, kept.
-    public func artists() throws -> LiveView<ArtistsEntry> { LiveView(try peer.view(name: "library.artists", input: "null")) { j in ArtistsEntry(json: j) } }
+    public func artists() throws -> LiveView<ArtistsEntry> { LiveView(try peer.view(name: "library.artists", input: "null")) { r in ArtistsEntry(r) } }
 
     /// `library.chapters`, kept.
-    public func chapters(_ input: EpisodeInput) throws -> LiveView<ChaptersEntry> { LiveView(try peer.view(name: "library.chapters", input: input.json)) { j in ChaptersEntry(json: j) } }
+    public func chapters(_ input: EpisodeInput) throws -> LiveView<ChaptersEntry> { LiveView(try peer.view(name: "library.chapters", input: input.json)) { r in ChaptersEntry(r) } }
 
     /// `library.composers`, kept.
-    public func composers() throws -> LiveView<ComposersEntry> { LiveView(try peer.view(name: "library.composers", input: "null")) { j in ComposersEntry(json: j) } }
+    public func composers() throws -> LiveView<ComposersEntry> { LiveView(try peer.view(name: "library.composers", input: "null")) { r in ComposersEntry(r) } }
 
     /// `library.credit_recording`: its intent's id.
     @discardableResult public func creditRecording(_ input: CreditRecording) throws -> String { try peer.mutate(name: "library.credit_recording", input: input.json) }
 
     /// `library.credits`, kept.
-    public func credits(_ input: Credits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.credits", input: input.json)) { j in CreditsEntry(json: j) } }
+    public func credits(_ input: Credits) throws -> LiveView<CreditsEntry> { LiveView(try peer.view(name: "library.credits", input: input.json)) { r in CreditsEntry(r) } }
 
     /// `library.describe_person`: its intent's id.
     @discardableResult public func describePerson(_ input: DescribePerson) throws -> String { try peer.mutate(name: "library.describe_person", input: input.json) }
@@ -2603,10 +2975,10 @@ public struct Harken {
     @discardableResult public func downloaded(_ input: Downloaded) throws -> String { try peer.mutate(name: "library.downloaded", input: input.json) }
 
     /// `library.downloads`, kept.
-    public func downloads() throws -> LiveView<DownloadsEntry> { LiveView(try peer.view(name: "library.downloads", input: "null")) { j in DownloadsEntry(json: j) } }
+    public func downloads() throws -> LiveView<DownloadsEntry> { LiveView(try peer.view(name: "library.downloads", input: "null")) { r in DownloadsEntry(r) } }
 
     /// `library.episode_details`, kept.
-    public func episodeDetails(_ input: ShowInput) throws -> LiveView<EpisodeDetailsEntry> { LiveView(try peer.view(name: "library.episode_details", input: input.json)) { j in EpisodeDetailsEntry(json: j) } }
+    public func episodeDetails(_ input: ShowInput) throws -> LiveView<EpisodeDetailsEntry> { LiveView(try peer.view(name: "library.episode_details", input: input.json)) { r in EpisodeDetailsEntry(r) } }
 
     /// `library.feed_read`: its intent's id.
     @discardableResult public func feedRead(_ input: FeedRead) throws -> String { try peer.mutate(name: "library.feed_read", input: input.json) }
@@ -2614,8 +2986,8 @@ public struct Harken {
     /// `library.fetch_older`: its intent's id.
     @discardableResult public func fetchOlder(_ input: FetchOlder) throws -> String { try peer.mutate(name: "library.fetch_older", input: input.json) }
 
-    /// `library.library`, kept, its rows UniFFI's.
-    public func library(_ input: Library) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.library", input: input.json)) }
+    /// `library.library`, kept.
+    public func library(_ input: Library) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.library", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.look`: its intent's id.
     @discardableResult public func look(_ input: LookAt) throws -> String { try peer.mutate(name: "library.look", input: input.json) }
@@ -2624,22 +2996,22 @@ public struct Harken {
     @discardableResult public func markPlayed(_ input: MarkPlayed) throws -> String { try peer.mutate(name: "library.mark_played", input: input.json) }
 
     /// `library.my_progress`, kept.
-    public func myProgress() throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.my_progress", input: "null")) { j in ProgressEntry(json: j) } }
+    public func myProgress() throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.my_progress", input: "null")) { r in ProgressEntry(r) } }
 
     /// `library.name_voice`: its intent's id.
     @discardableResult public func nameVoice(_ input: NameVoice) throws -> String { try peer.mutate(name: "library.name_voice", input: input.json) }
 
     /// `library.people`, kept.
-    public func people(_ input: EpisodeInput) throws -> LiveView<PeopleEntry> { LiveView(try peer.view(name: "library.people", input: input.json)) { j in PeopleEntry(json: j) } }
+    public func people(_ input: EpisodeInput) throws -> LiveView<PeopleEntry> { LiveView(try peer.view(name: "library.people", input: input.json)) { r in PeopleEntry(r) } }
 
     /// `library.queue_download`: its intent's id.
     @discardableResult public func queueDownload(_ input: QueueDownload) throws -> String { try peer.mutate(name: "library.queue_download", input: input.json) }
 
-    /// `library.recording`, kept, its rows UniFFI's.
-    public func recording(_ input: RecordingInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.recording", input: input.json)) }
+    /// `library.recording`, kept.
+    public func recording(_ input: RecordingInput) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.recording", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.recordings`, kept.
-    public func recordings(_ input: Recordings) throws -> LiveView<RecordingsEntry> { LiveView(try peer.view(name: "library.recordings", input: input.json)) { j in RecordingsEntry(json: j) } }
+    public func recordings(_ input: Recordings) throws -> LiveView<RecordingsEntry> { LiveView(try peer.view(name: "library.recordings", input: input.json)) { r in RecordingsEntry(r) } }
 
     /// `library.remove_media`: its intent's id.
     @discardableResult public func removeMedia(_ input: RemoveMedia) throws -> String { try peer.mutate(name: "library.remove_media", input: input.json) }
@@ -2647,8 +3019,8 @@ public struct Harken {
     /// `library.report_progress`: its intent's id.
     @discardableResult public func reportProgress(_ input: ReportProgress) throws -> String { try peer.mutate(name: "library.report_progress", input: input.json) }
 
-    /// `library.search`, kept, its rows UniFFI's.
-    public func search(_ input: Search) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.search", input: input.json)) }
+    /// `library.search`, kept.
+    public func search(_ input: Search) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.search", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.set_chapters`: its intent's id.
     @discardableResult public func setChapters(_ input: SetChapters) throws -> String { try peer.mutate(name: "library.set_chapters", input: input.json) }
@@ -2659,38 +3031,38 @@ public struct Harken {
     /// `library.set_transcript`: its intent's id.
     @discardableResult public func setTranscript(_ input: SetTranscript) throws -> String { try peer.mutate(name: "library.set_transcript", input: input.json) }
 
-    /// `library.show`, kept, its rows UniFFI's.
-    public func show(_ input: ShowInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "library.show", input: input.json)) }
+    /// `library.show`, kept.
+    public func show(_ input: ShowInput) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "library.show", input: input.json)) { r in LibraryEntry(r) } }
 
     /// `library.show_people`, kept.
-    public func showPeople(_ input: ShowInput) throws -> LiveView<ShowPeopleEntry> { LiveView(try peer.view(name: "library.show_people", input: input.json)) { j in ShowPeopleEntry(json: j) } }
+    public func showPeople(_ input: ShowInput) throws -> LiveView<ShowPeopleEntry> { LiveView(try peer.view(name: "library.show_people", input: input.json)) { r in ShowPeopleEntry(r) } }
 
     /// `library.show_progress`, kept.
-    public func showProgress(_ input: ShowInput) throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.show_progress", input: input.json)) { j in ProgressEntry(json: j) } }
+    public func showProgress(_ input: ShowInput) throws -> LiveView<ProgressEntry> { LiveView(try peer.view(name: "library.show_progress", input: input.json)) { r in ProgressEntry(r) } }
 
     /// `library.shows`, kept.
-    public func shows() throws -> LiveView<ShowsEntry> { LiveView(try peer.view(name: "library.shows", input: "null")) { j in ShowsEntry(json: j) } }
+    public func shows() throws -> LiveView<ShowsEntry> { LiveView(try peer.view(name: "library.shows", input: "null")) { r in ShowsEntry(r) } }
 
     /// `library.subscribe`: its intent's id.
     @discardableResult public func subscribe(_ input: Subscribe) throws -> String { try peer.mutate(name: "library.subscribe", input: input.json) }
 
     /// `library.subscriptions`, kept.
-    public func subscriptions() throws -> LiveView<SubscriptionsEntry> { LiveView(try peer.view(name: "library.subscriptions", input: "null")) { j in SubscriptionsEntry(json: j) } }
+    public func subscriptions() throws -> LiveView<SubscriptionsEntry> { LiveView(try peer.view(name: "library.subscriptions", input: "null")) { r in SubscriptionsEntry(r) } }
 
     /// `library.track_details`, kept.
-    public func trackDetails() throws -> LiveView<TrackDetailsEntry> { LiveView(try peer.view(name: "library.track_details", input: "null")) { j in TrackDetailsEntry(json: j) } }
+    public func trackDetails() throws -> LiveView<TrackDetailsEntry> { LiveView(try peer.view(name: "library.track_details", input: "null")) { r in TrackDetailsEntry(r) } }
 
     /// `library.transcript`, kept.
-    public func transcript(_ input: EpisodeInput) throws -> LiveView<TranscriptEntry> { LiveView(try peer.view(name: "library.transcript", input: input.json)) { j in TranscriptEntry(json: j) } }
+    public func transcript(_ input: EpisodeInput) throws -> LiveView<TranscriptEntry> { LiveView(try peer.view(name: "library.transcript", input: input.json)) { r in TranscriptEntry(r) } }
 
     /// `library.unsubscribe`: its intent's id.
     @discardableResult public func unsubscribe(_ input: Unsubscribe) throws -> String { try peer.mutate(name: "library.unsubscribe", input: input.json) }
 
     /// `library.work`, kept.
-    public func work(_ input: WorkInput) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.work", input: input.json)) { j in WorkSummary(json: j) } }
+    public func work(_ input: WorkInput) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.work", input: input.json)) { r in WorkSummary(r) } }
 
     /// `library.works`, kept.
-    public func works(_ input: Works) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.works", input: input.json)) { j in WorkSummary(json: j) } }
+    public func works(_ input: Works) throws -> LiveView<WorkSummary> { LiveView(try peer.view(name: "library.works", input: input.json)) { r in WorkSummary(r) } }
 
     /// `listening.advance`, on the live space.
     public func advance(_ input: Advance) throws { _ = try peer.mutate(name: "listening.advance", input: input.json) }
@@ -2711,7 +3083,7 @@ public struct Harken {
     public func jump(_ input: Jump) throws { _ = try peer.mutate(name: "listening.jump", input: input.json) }
 
     /// `listening.last_played`, kept.
-    public func lastPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.last_played", input: "null")) { j in Play(json: j) } }
+    public func lastPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.last_played", input: "null")) { r in Play(r) } }
 
     /// `listening.move`, on the live space.
     public func move(_ input: Move) throws { _ = try peer.mutate(name: "listening.move", input: input.json) }
@@ -2738,7 +3110,7 @@ public struct Harken {
     public func play() throws { _ = try peer.mutate(name: "listening.play", input: "null") }
 
     /// `listening.recently_played`, kept.
-    public func recentlyPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.recently_played", input: "null")) { j in Play(json: j) } }
+    public func recentlyPlayed() throws -> LiveView<Play> { LiveView(try peer.view(name: "listening.recently_played", input: "null")) { r in Play(r) } }
 
     /// `listening.record_play`: its intent's id.
     @discardableResult public func recordPlay(_ input: RecordPlay) throws -> String { try peer.mutate(name: "listening.record_play", input: input.json) }
@@ -2804,7 +3176,7 @@ public struct Harken {
     @discardableResult public func lookClaim(_ input: LookClaim) throws -> String { try peer.mutate(name: "look.claim", input: input.json) }
 
     /// `look.due`, kept.
-    public func lookDue() throws -> LiveView<Look> { LiveView(try peer.view(name: "look.due", input: "null")) { j in Look(json: j) } }
+    public func lookDue() throws -> LiveView<Look> { LiveView(try peer.view(name: "look.due", input: "null")) { r in Look(r) } }
 
     /// `look.finish`: its intent's id.
     @discardableResult public func lookFinish(_ input: LookFinish) throws -> String { try peer.mutate(name: "look.finish", input: input.json) }
@@ -2818,14 +3190,14 @@ public struct Harken {
     /// `playlists.create_playlist`: its intent's id.
     @discardableResult public func createPlaylist(_ input: CreatePlaylist) throws -> String { try peer.mutate(name: "playlists.create_playlist", input: input.json) }
 
-    /// `playlists.playlist`, kept, its rows UniFFI's.
-    public func playlist(_ input: PlaylistInput) throws -> LiveView<LibraryEntry> { typed(try LibraryEntryView(peer: peer, name: "playlists.playlist", input: input.json)) }
+    /// `playlists.playlist`, kept.
+    public func playlist(_ input: PlaylistInput) throws -> LiveView<LibraryEntry> { LiveView(try peer.view(name: "playlists.playlist", input: input.json)) { r in LibraryEntry(r) } }
 
-    /// `playlists.playlists`, kept, its rows UniFFI's.
-    public func playlists() throws -> LiveView<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists", input: "null")) }
+    /// `playlists.playlists`, kept.
+    public func playlists() throws -> LiveView<Playlist> { LiveView(try peer.view(name: "playlists.playlists", input: "null")) { r in Playlist(r) } }
 
-    /// `playlists.playlists_of`, kept, its rows UniFFI's.
-    public func playlistsOf(_ input: PlaylistsOf) throws -> LiveView<Playlist> { typed(try PlaylistView(peer: peer, name: "playlists.playlists_of", input: input.json)) }
+    /// `playlists.playlists_of`, kept.
+    public func playlistsOf(_ input: PlaylistsOf) throws -> LiveView<Playlist> { LiveView(try peer.view(name: "playlists.playlists_of", input: input.json)) { r in Playlist(r) } }
 
     /// `playlists.remove_from_playlist`: its intent's id.
     @discardableResult public func removeFromPlaylist(_ input: RemoveFromPlaylist) throws -> String { try peer.mutate(name: "playlists.remove_from_playlist", input: input.json) }
@@ -2840,7 +3212,7 @@ public struct Harken {
     @discardableResult public func roleRevoke(_ input: Grant) throws -> String { try peer.mutate(name: "role.revoke", input: input.json) }
 
     /// `session.mine`, kept.
-    public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { j in SignIn(json: j) } }
+    public func mine() throws -> LiveView<SignIn> { LiveView(try peer.view(name: "session.mine", input: "null")) { r in SignIn(r) } }
 
     /// `session.revoke`: its intent's id.
     @discardableResult public func sessionRevoke(_ input: Revoke) throws -> String { try peer.mutate(name: "session.revoke", input: input.json) }
@@ -2852,7 +3224,7 @@ public struct Harken {
     @discardableResult public func sourceClaim(_ input: SourceClaim) throws -> String { try peer.mutate(name: "source.claim", input: input.json) }
 
     /// `source.due`, kept.
-    public func sourceDue() throws -> LiveView<Source> { LiveView(try peer.view(name: "source.due", input: "null")) { j in Source(json: j) } }
+    public func sourceDue() throws -> LiveView<Source> { LiveView(try peer.view(name: "source.due", input: "null")) { r in Source(r) } }
 
     /// `source.finish`: its intent's id.
     @discardableResult public func sourceFinish(_ input: SourceFinish) throws -> String { try peer.mutate(name: "source.finish", input: input.json) }
@@ -2860,16 +3232,12 @@ public struct Harken {
     /// `source.read`: its intent's id.
     @discardableResult public func read(_ input: Read) throws -> String { try peer.mutate(name: "source.read", input: input.json) }
 
-    private func typed(_ v: LibraryEntryView) -> LiveView<LibraryEntry> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
-
-    private func typed(_ v: PlaylistView) -> LiveView<Playlist> { LiveView.typed(rows: v.rows, take: { let t = v.take(); return (t.ops, t.rows) }) }
-
     /// The live table `listening`, as this device holds it.
-    public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(json: J.parse($0)) } }
+    public func liveListening() -> [Listening] { peer.liveRows(table: "listening").map { Listening(Reader($0)) } }
 
     /// The live table `listening_device`, as this device holds it.
-    public func liveListeningDevice() -> [ListeningDevice] { peer.liveRows(table: "listening_device").map { ListeningDevice(json: J.parse($0)) } }
+    public func liveListeningDevice() -> [ListeningDevice] { peer.liveRows(table: "listening_device").map { ListeningDevice(Reader($0)) } }
 
     /// The live table `listening_scrub`, as this device holds it.
-    public func liveListeningScrub() -> [ListeningScrub] { peer.liveRows(table: "listening_scrub").map { ListeningScrub(json: J.parse($0)) } }
+    public func liveListeningScrub() -> [ListeningScrub] { peer.liveRows(table: "listening_scrub").map { ListeningScrub(Reader($0)) } }
 }

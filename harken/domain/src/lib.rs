@@ -37,9 +37,6 @@ pub mod schema;
 pub mod shows;
 pub mod types;
 
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
-
 pub use ark::row::Id;
 pub use schema::*;
 pub use types::*;

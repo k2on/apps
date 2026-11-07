@@ -864,11 +864,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "serde_json";
-            packageId = "serde_json";
-            features = [ "raw_value" ];
-          }
-          {
             name = "tracing";
             packageId = "tracing";
             usesDefaultFeatures = false;
@@ -889,6 +884,11 @@ rec {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+            features = [ "raw_value" ];
           }
           {
             name = "tempfile";
@@ -6993,11 +6993,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -7006,12 +7001,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
           }
         ];
         devDependencies = [
@@ -7025,10 +7014,7 @@ rec {
             packageId = "arkdb";
           }
         ];
-        features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "harken-ffi" = rec {
         crateName = "harken-ffi";
@@ -7053,7 +7039,6 @@ rec {
           {
             name = "harken-domain";
             packageId = "harken-domain";
-            features = [ "ffi" ];
           }
           {
             name = "harken-player";
@@ -11036,11 +11021,6 @@ rec {
             usesDefaultFeatures = false;
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -11050,12 +11030,6 @@ rec {
             packageId = "serde_json";
             features = [ "raw_value" ];
           }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
         ];
         devDependencies = [
           {
@@ -11064,10 +11038,7 @@ rec {
             usesDefaultFeatures = false;
           }
         ];
-        features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "money-ffi" = rec {
         crateName = "money-ffi";
@@ -11092,7 +11063,6 @@ rec {
           {
             name = "money-domain";
             packageId = "money-domain";
-            features = [ "ffi" ];
           }
           {
             name = "money-seed";

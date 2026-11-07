@@ -5,18 +5,17 @@ package dev.harken.android.gen
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Peer
+import dev.arkdb.ffi.Reader
 import dev.arkdb.ffi.View
 import org.json.JSONObject
-import uniffi.harken_domain.LibraryEntry
-import uniffi.harken_domain.Playlist
-import uniffi.harken_domain.LibraryEntryView
-import uniffi.harken_domain.PlaylistView
 
 /** The record `Active`. */
 data class Active(val at: Long, val clock: Clock, val from: String, val output: Output, val queue: List<Track>) {
     fun json(): String = "{" + "\"at\":" + at.toString() + "," + "\"clock\":" + clock.json() + "," + "\"from\":" + J.q(from) + "," + "\"output\":" + output.json() + "," + "\"queue\":" + J.wlist(queue) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): Active = Active(r.int(), Clock.read(r), r.text(), Output.read(r), r.list { r0 -> Track.read(r0) })
+
         fun of(j: Any?): Active = (j as JSONObject).let { o -> Active(J.int(o.opt("at")), Clock.of(o.opt("clock")), J.text(o.opt("from")), Output.of(o.opt("output")), J.list(o.opt("queue")) { v0 -> Track.of(v0) }) }
     }
 }
@@ -26,6 +25,8 @@ data class AddAllToPlaylist(val playlistId: Id) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): AddAllToPlaylist = AddAllToPlaylist(r.id())
+
         fun of(j: Any?): AddAllToPlaylist = (j as JSONObject).let { o -> AddAllToPlaylist(Id(J.text(o.opt("playlist_id")))) }
     }
 }
@@ -35,6 +36,8 @@ data class AddEpisode(val show: String, val title: String, val durationMs: Long,
     fun json(): String = "{" + "\"show\":" + J.q(show) + "," + "\"title\":" + J.q(title) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"guid\":" + J.q(guid) + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"description\":" + J.q(description) + "," + "\"source\":" + J.q(source) + "," + "\"art\":" + J.q(art) + "," + "\"season\":" + season.toString() + "," + "\"number\":" + number.toString() + "}"
 
     companion object {
+        fun read(r: Reader): AddEpisode = AddEpisode(r.text(), r.text(), r.int(), r.text(), r.text(), r.int(), r.text(), r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): AddEpisode = (j as JSONObject).let { o -> AddEpisode(J.text(o.opt("show")), J.text(o.opt("title")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.text(o.opt("guid")), J.int(o.opt("published_ms")), J.text(o.opt("description")), J.text(o.opt("source")), J.text(o.opt("art")), J.int(o.opt("season")), J.int(o.opt("number"))) }
     }
 }
@@ -44,6 +47,8 @@ data class AddShow(val kind: String, val title: String, val author: String, val 
     fun json(): String = "{" + "\"kind\":" + J.q(kind) + "," + "\"title\":" + J.q(title) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"art\":" + J.q(art) + "," + "\"feed\":" + J.q(feed) + "," + "\"link\":" + J.q(link) + "}"
 
     companion object {
+        fun read(r: Reader): AddShow = AddShow(r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): AddShow = (j as JSONObject).let { o -> AddShow(J.text(o.opt("kind")), J.text(o.opt("title")), J.text(o.opt("author")), J.text(o.opt("description")), J.text(o.opt("art")), J.text(o.opt("feed")), J.text(o.opt("link"))) }
     }
 }
@@ -53,6 +58,8 @@ data class AddSong(val title: String, val artist: String, val album: String, val
     fun json(): String = "{" + "\"title\":" + J.q(title) + "," + "\"artist\":" + J.q(artist) + "," + "\"album\":" + J.q(album) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"track\":" + track.toString() + "," + "\"part\":" + J.q(part) + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"performer\":" + J.q(performer) + "," + "\"bpm\":" + bpm.toString() + "," + "\"album_art\":" + J.q(albumArt) + "," + "\"artist_art\":" + J.q(artistArt) + "," + "\"disc\":" + disc.toString() + "," + "\"work_title\":" + J.q(workTitle) + "," + "\"movement_no\":" + movementNo.toString() + "," + "\"artist_banner\":" + J.q(artistBanner) + "," + "\"released\":" + released.toString() + "," + "\"folder\":" + J.q(folder) + "}"
 
     companion object {
+        fun read(r: Reader): AddSong = AddSong(r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.text(), r.text(), r.int(), r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): AddSong = (j as JSONObject).let { o -> AddSong(J.text(o.opt("title")), J.text(o.opt("artist")), J.text(o.opt("album")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.int(o.opt("track")), J.text(o.opt("part")), J.text(o.opt("catalogue")), J.text(o.opt("performer")), J.int(o.opt("bpm")), J.text(o.opt("album_art")), J.text(o.opt("artist_art")), J.int(o.opt("disc")), J.text(o.opt("work_title")), J.int(o.opt("movement_no")), J.text(o.opt("artist_banner")), J.int(o.opt("released")), J.text(o.opt("folder"))) }
     }
 }
@@ -62,6 +69,8 @@ data class AddToPlaylist(val playlistId: Id, val mediaId: Id) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"media_id\":" + J.q(mediaId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): AddToPlaylist = AddToPlaylist(r.id(), r.id())
+
         fun of(j: Any?): AddToPlaylist = (j as JSONObject).let { o -> AddToPlaylist(Id(J.text(o.opt("playlist_id"))), Id(J.text(o.opt("media_id")))) }
     }
 }
@@ -71,6 +80,8 @@ data class Advance(val fromTrack: Long) {
     fun json(): String = "{" + "\"from_track\":" + fromTrack.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Advance = Advance(r.int())
+
         fun of(j: Any?): Advance = (j as JSONObject).let { o -> Advance(J.int(o.opt("from_track"))) }
     }
 }
@@ -80,6 +91,8 @@ data class Album(val id: String, val name: String, val label: String, val releas
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"name\":" + J.q(name) + "," + "\"label\":" + J.q(label) + "," + "\"released\":" + released.toString() + "," + "\"art\":" + J.q(art) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Album = Album(r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Album = (j as JSONObject).let { o -> Album(J.text(o.opt("id")), J.text(o.opt("name")), J.text(o.opt("label")), J.int(o.opt("released")), J.text(o.opt("art")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -89,6 +102,8 @@ data class AlbumCredits(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): AlbumCredits = AlbumCredits(r.text())
+
         fun of(j: Any?): AlbumCredits = (j as JSONObject).let { o -> AlbumCredits(J.text(o.opt("id"))) }
     }
 }
@@ -98,6 +113,8 @@ data class AlbumInput(val playlistId: Id, val id: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): AlbumInput = AlbumInput(r.id(), r.text())
+
         fun of(j: Any?): AlbumInput = (j as JSONObject).let { o -> AlbumInput(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("id"))) }
     }
 }
@@ -107,6 +124,8 @@ data class AlbumsEntry(val art: String, val creator: String, val id: String, val
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"creator\":" + J.q(creator) + "," + "\"id\":" + J.q(id) + "," + "\"label\":" + J.q(label) + "," + "\"name\":" + J.q(name) + "," + "\"performer\":" + J.q(performer) + "," + "\"released\":" + released.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
+        fun read(r: Reader): AlbumsEntry = AlbumsEntry(r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): AlbumsEntry = (j as JSONObject).let { o -> AlbumsEntry(J.text(o.opt("art")), J.text(o.opt("creator")), J.text(o.opt("id")), J.text(o.opt("label")), J.text(o.opt("name")), J.text(o.opt("performer")), J.int(o.opt("released")), J.int(o.opt("tracks"))) }
     }
 }
@@ -116,6 +135,8 @@ data class Appearance(val mediaId: Id, val personName: String, val role: String,
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"person_name\":" + J.q(personName) + "," + "\"role\":" + J.q(role) + "," + "\"pos\":" + pos.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Appearance = Appearance(r.id(), r.text(), r.text(), r.int())
+
         fun of(j: Any?): Appearance = (j as JSONObject).let { o -> Appearance(Id(J.text(o.opt("media_id"))), J.text(o.opt("person_name")), J.text(o.opt("role")), J.int(o.opt("pos"))) }
     }
 }
@@ -125,6 +146,8 @@ data class Artist(val playlistId: Id, val name: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): Artist = Artist(r.id(), r.text())
+
         fun of(j: Any?): Artist = (j as JSONObject).let { o -> Artist(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("name"))) }
     }
 }
@@ -134,6 +157,8 @@ data class ArtistsEntry(val art: String, val banner: String, val born: Long, val
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"banner\":" + J.q(banner) + "," + "\"born\":" + born.toString() + "," + "\"description\":" + J.q(description) + "," + "\"died\":" + died.toString() + "," + "\"name\":" + J.q(name) + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ArtistsEntry = ArtistsEntry(r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.int())
+
         fun of(j: Any?): ArtistsEntry = (j as JSONObject).let { o -> ArtistsEntry(J.text(o.opt("art")), J.text(o.opt("banner")), J.int(o.opt("born")), J.text(o.opt("description")), J.int(o.opt("died")), J.text(o.opt("name")), J.int(o.opt("tracks"))) }
     }
 }
@@ -143,6 +168,8 @@ data class At(val atMs: Long) {
     fun json(): String = "{" + "\"at_ms\":" + atMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): At = At(r.int())
+
         fun of(j: Any?): At = (j as JSONObject).let { o -> At(J.int(o.opt("at_ms"))) }
     }
 }
@@ -152,6 +179,8 @@ data class Chapter(val mediaId: Id, val startMs: Long, val title: String, val ur
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"start_ms\":" + startMs.toString() + "," + "\"title\":" + J.q(title) + "," + "\"url\":" + J.q(url) + "," + "\"image\":" + J.q(image) + "}"
 
     companion object {
+        fun read(r: Reader): Chapter = Chapter(r.id(), r.int(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): Chapter = (j as JSONObject).let { o -> Chapter(Id(J.text(o.opt("media_id"))), J.int(o.opt("start_ms")), J.text(o.opt("title")), J.text(o.opt("url")), J.text(o.opt("image"))) }
     }
 }
@@ -161,6 +190,8 @@ data class ChapterAt(val startMs: Long, val title: String, val url: String, val 
     fun json(): String = "{" + "\"start_ms\":" + startMs.toString() + "," + "\"title\":" + J.q(title) + "," + "\"url\":" + J.q(url) + "," + "\"image\":" + J.q(image) + "}"
 
     companion object {
+        fun read(r: Reader): ChapterAt = ChapterAt(r.int(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): ChapterAt = (j as JSONObject).let { o -> ChapterAt(J.int(o.opt("start_ms")), J.text(o.opt("title")), J.text(o.opt("url")), J.text(o.opt("image"))) }
     }
 }
@@ -170,6 +201,8 @@ data class ChaptersEntry(val image: String, val startMs: Long, val title: String
     fun json(): String = "{" + "\"image\":" + J.q(image) + "," + "\"start_ms\":" + startMs.toString() + "," + "\"title\":" + J.q(title) + "," + "\"url\":" + J.q(url) + "}"
 
     companion object {
+        fun read(r: Reader): ChaptersEntry = ChaptersEntry(r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): ChaptersEntry = (j as JSONObject).let { o -> ChaptersEntry(J.text(o.opt("image")), J.int(o.opt("start_ms")), J.text(o.opt("title")), J.text(o.opt("url"))) }
     }
 }
@@ -187,13 +220,21 @@ sealed class Clock {
     }
 
     companion object {
-        fun of(j: Any?): Clock = J.sum(j) { t, o ->
-            when (t) {
-                "Paused" -> Paused(J.int(o!!.opt("at_ms")))
-                "Playing" -> Playing(J.int(o!!.opt("at_ms")), J.int(o!!.opt("since")))
-                else -> throw IllegalArgumentException("Clock: no variant $t")
+        fun read(r: Reader): Clock =
+            when (val v = r.variant()) {
+                0 -> Paused(r.int())
+                1 -> Playing(r.int(), r.int())
+                else -> throw IllegalArgumentException("Clock: no variant $v")
             }
-        }
+
+        fun of(j: Any?): Clock =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Paused" -> Paused(J.int(o!!.opt("at_ms")))
+                    "Playing" -> Playing(J.int(o!!.opt("at_ms")), J.int(o!!.opt("since")))
+                    else -> throw IllegalArgumentException("Clock: no variant $t")
+                }
+            }
     }
 }
 
@@ -202,6 +243,8 @@ data class ComposersEntry(val art: String, val banner: String, val born: Long, v
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"banner\":" + J.q(banner) + "," + "\"born\":" + born.toString() + "," + "\"description\":" + J.q(description) + "," + "\"died\":" + died.toString() + "," + "\"name\":" + J.q(name) + "," + "\"sort_name\":" + J.q(sortName) + "," + "\"tracks\":" + tracks.toString() + "," + "\"works\":" + works.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ComposersEntry = ComposersEntry(r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): ComposersEntry = (j as JSONObject).let { o -> ComposersEntry(J.text(o.opt("art")), J.text(o.opt("banner")), J.int(o.opt("born")), J.text(o.opt("description")), J.int(o.opt("died")), J.text(o.opt("name")), J.text(o.opt("sort_name")), J.int(o.opt("tracks")), J.int(o.opt("works"))) }
     }
 }
@@ -211,6 +254,8 @@ data class CreatePlaylist(val name: String) {
     fun json(): String = "{" + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): CreatePlaylist = CreatePlaylist(r.text())
+
         fun of(j: Any?): CreatePlaylist = (j as JSONObject).let { o -> CreatePlaylist(J.text(o.opt("name"))) }
     }
 }
@@ -220,6 +265,8 @@ data class Credit(val recordingId: String, val personName: String, val role: Str
     fun json(): String = "{" + "\"recording_id\":" + J.q(recordingId) + "," + "\"person_name\":" + J.q(personName) + "," + "\"role\":" + J.q(role) + "," + "\"instrument\":" + J.q(instrument) + "," + "\"pos\":" + pos.toString() + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Credit = Credit(r.text(), r.text(), r.text(), r.text(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): Credit = (j as JSONObject).let { o -> Credit(J.text(o.opt("recording_id")), J.text(o.opt("person_name")), J.text(o.opt("role")), J.text(o.opt("instrument")), J.int(o.opt("pos")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -229,6 +276,8 @@ data class CreditRecording(val recordingId: String, val personName: String, val 
     fun json(): String = "{" + "\"recording_id\":" + J.q(recordingId) + "," + "\"person_name\":" + J.q(personName) + "," + "\"role\":" + J.q(role) + "," + "\"instrument\":" + J.q(instrument) + "," + "\"pos\":" + pos.toString() + "}"
 
     companion object {
+        fun read(r: Reader): CreditRecording = CreditRecording(r.text(), r.text(), r.text(), r.text(), r.int())
+
         fun of(j: Any?): CreditRecording = (j as JSONObject).let { o -> CreditRecording(J.text(o.opt("recording_id")), J.text(o.opt("person_name")), J.text(o.opt("role")), J.text(o.opt("instrument")), J.int(o.opt("pos"))) }
     }
 }
@@ -238,6 +287,8 @@ data class Credits(val recordingId: String) {
     fun json(): String = "{" + "\"recording_id\":" + J.q(recordingId) + "}"
 
     companion object {
+        fun read(r: Reader): Credits = Credits(r.text())
+
         fun of(j: Any?): Credits = (j as JSONObject).let { o -> Credits(J.text(o.opt("recording_id"))) }
     }
 }
@@ -247,6 +298,8 @@ data class CreditsEntry(val instrument: String, val name: String, val pos: Long,
     fun json(): String = "{" + "\"instrument\":" + J.q(instrument) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): CreditsEntry = CreditsEntry(r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): CreditsEntry = (j as JSONObject).let { o -> CreditsEntry(J.text(o.opt("instrument")), J.text(o.opt("name")), J.int(o.opt("pos")), J.text(o.opt("role"))) }
     }
 }
@@ -256,6 +309,8 @@ data class Cue(val mediaId: Id, val startMs: Long, val endMs: Long, val speaker:
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"start_ms\":" + startMs.toString() + "," + "\"end_ms\":" + endMs.toString() + "," + "\"speaker\":" + J.q(speaker) + "," + "\"text\":" + J.q(text) + "}"
 
     companion object {
+        fun read(r: Reader): Cue = Cue(r.id(), r.int(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): Cue = (j as JSONObject).let { o -> Cue(Id(J.text(o.opt("media_id"))), J.int(o.opt("start_ms")), J.int(o.opt("end_ms")), J.text(o.opt("speaker")), J.text(o.opt("text"))) }
     }
 }
@@ -265,6 +320,8 @@ data class CueAt(val startMs: Long, val endMs: Long, val speaker: String, val te
     fun json(): String = "{" + "\"start_ms\":" + startMs.toString() + "," + "\"end_ms\":" + endMs.toString() + "," + "\"speaker\":" + J.q(speaker) + "," + "\"text\":" + J.q(text) + "}"
 
     companion object {
+        fun read(r: Reader): CueAt = CueAt(r.int(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): CueAt = (j as JSONObject).let { o -> CueAt(J.int(o.opt("start_ms")), J.int(o.opt("end_ms")), J.text(o.opt("speaker")), J.text(o.opt("text"))) }
     }
 }
@@ -274,6 +331,8 @@ data class DescribePerson(val name: String, val sortName: String, val born: Long
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"sort_name\":" + J.q(sortName) + "," + "\"born\":" + born.toString() + "," + "\"died\":" + died.toString() + "," + "\"art\":" + J.q(art) + "," + "\"banner\":" + J.q(banner) + "," + "\"description\":" + J.q(description) + "}"
 
     companion object {
+        fun read(r: Reader): DescribePerson = DescribePerson(r.text(), r.text(), r.int(), r.int(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): DescribePerson = (j as JSONObject).let { o -> DescribePerson(J.text(o.opt("name")), J.text(o.opt("sort_name")), J.int(o.opt("born")), J.int(o.opt("died")), J.text(o.opt("art")), J.text(o.opt("banner")), J.text(o.opt("description"))) }
     }
 }
@@ -283,6 +342,8 @@ data class DescribeRecording(val id: String, val recorded: Long, val venue: Stri
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"recorded\":" + recorded.toString() + "," + "\"venue\":" + J.q(venue) + "," + "\"label\":" + J.q(label) + "," + "\"licence\":" + J.q(licence) + "," + "\"art\":" + J.q(art) + "}"
 
     companion object {
+        fun read(r: Reader): DescribeRecording = DescribeRecording(r.text(), r.int(), r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): DescribeRecording = (j as JSONObject).let { o -> DescribeRecording(J.text(o.opt("id")), J.int(o.opt("recorded")), J.text(o.opt("venue")), J.text(o.opt("label")), J.text(o.opt("licence")), J.text(o.opt("art"))) }
     }
 }
@@ -292,6 +353,8 @@ data class DescribeWork(val id: String, val opus: String, val keySig: String, va
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"opus\":" + J.q(opus) + "," + "\"key_sig\":" + J.q(keySig) + "," + "\"form\":" + J.q(form) + "," + "\"period\":" + J.q(period) + "," + "\"composed\":" + composed.toString() + "," + "\"art\":" + J.q(art) + "," + "\"description\":" + J.q(description) + "}"
 
     companion object {
+        fun read(r: Reader): DescribeWork = DescribeWork(r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): DescribeWork = (j as JSONObject).let { o -> DescribeWork(J.text(o.opt("id")), J.text(o.opt("opus")), J.text(o.opt("key_sig")), J.text(o.opt("form")), J.text(o.opt("period")), J.int(o.opt("composed")), J.text(o.opt("art")), J.text(o.opt("description"))) }
     }
 }
@@ -301,6 +364,8 @@ data class Device(val canPlay: Boolean, val id: String, val kind: String, val na
     fun json(): String = "{" + "\"can_play\":" + canPlay.toString() + "," + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"name\":" + J.q(name) + "," + "\"user\":" + J.q(user) + "}"
 
     companion object {
+        fun read(r: Reader): Device = Device(r.bool(), r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): Device = (j as JSONObject).let { o -> Device(J.bool(o.opt("can_play")), J.text(o.opt("id")), J.text(o.opt("kind")), J.text(o.opt("name")), J.text(o.opt("user"))) }
     }
 }
@@ -310,6 +375,8 @@ data class Download(val mediaId: Id, val source: String, val state: String, val 
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"source\":" + J.q(source) + "," + "\"state\":" + J.q(state) + "," + "\"bytes\":" + bytes.toString() + "," + "\"total\":" + total.toString() + "," + "\"error\":" + J.q(error) + "," + "\"asked_ms\":" + askedMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Download = Download(r.id(), r.text(), r.text(), r.int(), r.int(), r.text(), r.int())
+
         fun of(j: Any?): Download = (j as JSONObject).let { o -> Download(Id(J.text(o.opt("media_id"))), J.text(o.opt("source")), J.text(o.opt("state")), J.int(o.opt("bytes")), J.int(o.opt("total")), J.text(o.opt("error")), J.int(o.opt("asked_ms"))) }
     }
 }
@@ -319,6 +386,8 @@ data class DownloadProgress(val file: String, val state: String, val bytes: Long
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"state\":" + J.q(state) + "," + "\"bytes\":" + bytes.toString() + "," + "\"total\":" + total.toString() + "," + "\"error\":" + J.q(error) + "}"
 
     companion object {
+        fun read(r: Reader): DownloadProgress = DownloadProgress(r.text(), r.text(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): DownloadProgress = (j as JSONObject).let { o -> DownloadProgress(J.text(o.opt("file")), J.text(o.opt("state")), J.int(o.opt("bytes")), J.int(o.opt("total")), J.text(o.opt("error"))) }
     }
 }
@@ -328,6 +397,8 @@ data class Downloaded(val file: String) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "}"
 
     companion object {
+        fun read(r: Reader): Downloaded = Downloaded(r.text())
+
         fun of(j: Any?): Downloaded = (j as JSONObject).let { o -> Downloaded(J.text(o.opt("file"))) }
     }
 }
@@ -337,6 +408,8 @@ data class DownloadsEntry(val bytes: Long, val error: String, val mediaId: Id, v
     fun json(): String = "{" + "\"bytes\":" + bytes.toString() + "," + "\"error\":" + J.q(error) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + J.q(state) + "," + "\"title\":" + J.q(title) + "," + "\"total\":" + total.toString() + "}"
 
     companion object {
+        fun read(r: Reader): DownloadsEntry = DownloadsEntry(r.int(), r.text(), r.id(), r.text(), r.text(), r.int())
+
         fun of(j: Any?): DownloadsEntry = (j as JSONObject).let { o -> DownloadsEntry(J.int(o.opt("bytes")), J.text(o.opt("error")), Id(J.text(o.opt("media_id"))), J.text(o.opt("state")), J.text(o.opt("title")), J.int(o.opt("total"))) }
     }
 }
@@ -346,6 +419,8 @@ data class Enqueue(val next: Boolean, val tracks: List<Track>) {
     fun json(): String = "{" + "\"next\":" + next.toString() + "," + "\"tracks\":" + J.wlist(tracks) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): Enqueue = Enqueue(r.bool(), r.list { r0 -> Track.read(r0) })
+
         fun of(j: Any?): Enqueue = (j as JSONObject).let { o -> Enqueue(J.bool(o.opt("next")), J.list(o.opt("tracks")) { v0 -> Track.of(v0) }) }
     }
 }
@@ -355,6 +430,8 @@ data class Episode(val mediaId: Id, val showId: String, val guid: String, val pu
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"show_id\":" + J.q(showId) + "," + "\"guid\":" + J.q(guid) + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"description\":" + J.q(description) + "," + "\"source\":" + J.q(source) + "," + "\"art\":" + J.q(art) + "," + "\"season\":" + season.toString() + "," + "\"number\":" + number.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Episode = Episode(r.id(), r.text(), r.text(), r.int(), r.text(), r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): Episode = (j as JSONObject).let { o -> Episode(Id(J.text(o.opt("media_id"))), J.text(o.opt("show_id")), J.text(o.opt("guid")), J.int(o.opt("published_ms")), J.text(o.opt("description")), J.text(o.opt("source")), J.text(o.opt("art")), J.int(o.opt("season")), J.int(o.opt("number"))) }
     }
 }
@@ -364,6 +441,8 @@ data class EpisodeDetailsEntry(val art: String, val description: String, val med
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"description\":" + J.q(description) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"number\":" + number.toString() + "," + "\"published_ms\":" + publishedMs.toString() + "," + "\"season\":" + season.toString() + "," + "\"show\":" + J.q(show) + "," + "\"show_id\":" + J.q(showId) + "}"
 
     companion object {
+        fun read(r: Reader): EpisodeDetailsEntry = EpisodeDetailsEntry(r.text(), r.text(), r.id(), r.int(), r.int(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): EpisodeDetailsEntry = (j as JSONObject).let { o -> EpisodeDetailsEntry(J.text(o.opt("art")), J.text(o.opt("description")), Id(J.text(o.opt("media_id"))), J.int(o.opt("number")), J.int(o.opt("published_ms")), J.int(o.opt("season")), J.text(o.opt("show")), J.text(o.opt("show_id"))) }
     }
 }
@@ -373,6 +452,8 @@ data class EpisodeInput(val mediaId: Id) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): EpisodeInput = EpisodeInput(r.id())
+
         fun of(j: Any?): EpisodeInput = (j as JSONObject).let { o -> EpisodeInput(Id(J.text(o.opt("media_id")))) }
     }
 }
@@ -382,6 +463,8 @@ data class Equip(val canVolume: Boolean, val family: String?, val muted: Boolean
     fun json(): String = "{" + "\"can_volume\":" + canVolume.toString() + "," + "\"family\":" + J.wopt(family) { v0 -> J.q(v0) } + "," + "\"muted\":" + muted.toString() + "," + "\"volume\":" + volume.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Equip = Equip(r.bool(), r.opt { r0 -> r0.text() }, r.bool(), r.int())
+
         fun of(j: Any?): Equip = (j as JSONObject).let { o -> Equip(J.bool(o.opt("can_volume")), J.opt(o.opt("family")) { v0 -> J.text(v0) }, J.bool(o.opt("muted")), J.int(o.opt("volume"))) }
     }
 }
@@ -391,6 +474,8 @@ data class FeedRead(val url: String, val title: String, val items: Long, val err
     fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"title\":" + J.q(title) + "," + "\"items\":" + items.toString() + "," + "\"error\":" + J.q(error) + "}"
 
     companion object {
+        fun read(r: Reader): FeedRead = FeedRead(r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): FeedRead = (j as JSONObject).let { o -> FeedRead(J.text(o.opt("url")), J.text(o.opt("title")), J.int(o.opt("items")), J.text(o.opt("error"))) }
     }
 }
@@ -400,6 +485,8 @@ data class Fetch(val mediaId: Id, val state: JobInt) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Fetch = Fetch(r.id(), JobInt.read(r))
+
         fun of(j: Any?): Fetch = (j as JSONObject).let { o -> Fetch(Id(J.text(o.opt("media_id"))), JobInt.of(o.opt("state"))) }
     }
 }
@@ -409,6 +496,8 @@ data class FetchCancel(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): FetchCancel = FetchCancel(r.id())
+
         fun of(j: Any?): FetchCancel = (j as JSONObject).let { o -> FetchCancel(Id(J.text(o.opt("id")))) }
     }
 }
@@ -418,6 +507,8 @@ data class FetchClaim(val id: Id, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): FetchClaim = FetchClaim(r.id(), r.text())
+
         fun of(j: Any?): FetchClaim = (j as JSONObject).let { o -> FetchClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
     }
 }
@@ -427,6 +518,8 @@ data class FetchFinish(val id: Id, val by: String, val outcome: FetchOutcome, va
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): FetchFinish = FetchFinish(r.id(), r.text(), FetchOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): FetchFinish = (j as JSONObject).let { o -> FetchFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), FetchOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -436,6 +529,8 @@ data class FetchOlder(val url: String, val more: Long) {
     fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"more\":" + more.toString() + "}"
 
     companion object {
+        fun read(r: Reader): FetchOlder = FetchOlder(r.text(), r.int())
+
         fun of(j: Any?): FetchOlder = (j as JSONObject).let { o -> FetchOlder(J.text(o.opt("url")), J.int(o.opt("more"))) }
     }
 }
@@ -453,13 +548,21 @@ sealed class FetchOutcome {
     }
 
     companion object {
-        fun of(j: Any?): FetchOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(J.int(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("FetchOutcome: no variant $t")
+        fun read(r: Reader): FetchOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(r.int())
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("FetchOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): FetchOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(J.int(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("FetchOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -468,6 +571,8 @@ data class Grant(val user: String, val role: String) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): Grant = Grant(r.text(), r.text())
+
         fun of(j: Any?): Grant = (j as JSONObject).let { o -> Grant(J.text(o.opt("user")), J.text(o.opt("role"))) }
     }
 }
@@ -477,6 +582,8 @@ data class GroupMute(val muted: Boolean) {
     fun json(): String = "{" + "\"muted\":" + muted.toString() + "}"
 
     companion object {
+        fun read(r: Reader): GroupMute = GroupMute(r.bool())
+
         fun of(j: Any?): GroupMute = (j as JSONObject).let { o -> GroupMute(J.bool(o.opt("muted"))) }
     }
 }
@@ -486,6 +593,8 @@ data class GroupNudge(val delta: Long) {
     fun json(): String = "{" + "\"delta\":" + delta.toString() + "}"
 
     companion object {
+        fun read(r: Reader): GroupNudge = GroupNudge(r.int())
+
         fun of(j: Any?): GroupNudge = (j as JSONObject).let { o -> GroupNudge(J.int(o.opt("delta"))) }
     }
 }
@@ -495,6 +604,8 @@ data class GroupVolume(val level: Long) {
     fun json(): String = "{" + "\"level\":" + level.toString() + "}"
 
     companion object {
+        fun read(r: Reader): GroupVolume = GroupVolume(r.int())
+
         fun of(j: Any?): GroupVolume = (j as JSONObject).let { o -> GroupVolume(J.int(o.opt("level"))) }
     }
 }
@@ -504,6 +615,8 @@ data class Hear(val file: String) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "}"
 
     companion object {
+        fun read(r: Reader): Hear = Hear(r.text())
+
         fun of(j: Any?): Hear = (j as JSONObject).let { o -> Hear(J.text(o.opt("file"))) }
     }
 }
@@ -513,6 +626,8 @@ data class Hearing(val mediaId: Id, val state: JobInt) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Hearing = Hearing(r.id(), JobInt.read(r))
+
         fun of(j: Any?): Hearing = (j as JSONObject).let { o -> Hearing(Id(J.text(o.opt("media_id"))), JobInt.of(o.opt("state"))) }
     }
 }
@@ -522,6 +637,8 @@ data class HearingCancel(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): HearingCancel = HearingCancel(r.id())
+
         fun of(j: Any?): HearingCancel = (j as JSONObject).let { o -> HearingCancel(Id(J.text(o.opt("id")))) }
     }
 }
@@ -531,6 +648,8 @@ data class HearingClaim(val id: Id, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): HearingClaim = HearingClaim(r.id(), r.text())
+
         fun of(j: Any?): HearingClaim = (j as JSONObject).let { o -> HearingClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
     }
 }
@@ -540,6 +659,8 @@ data class HearingFinish(val id: Id, val by: String, val outcome: HearingOutcome
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): HearingFinish = HearingFinish(r.id(), r.text(), HearingOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): HearingFinish = (j as JSONObject).let { o -> HearingFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), HearingOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -557,13 +678,21 @@ sealed class HearingOutcome {
     }
 
     companion object {
-        fun of(j: Any?): HearingOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(J.int(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("HearingOutcome: no variant $t")
+        fun read(r: Reader): HearingOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(r.int())
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("HearingOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): HearingOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(J.int(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("HearingOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -592,16 +721,27 @@ sealed class JobInt {
     }
 
     companion object {
-        fun of(j: Any?): JobInt = J.sum(j) { t, o ->
-            when (t) {
-                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
-                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
-                "Done" -> Done(J.int(o!!.opt("value")))
-                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
-                "Cancelled" -> Cancelled
-                else -> throw IllegalArgumentException("JobInt: no variant $t")
+        fun read(r: Reader): JobInt =
+            when (val v = r.variant()) {
+                0 -> Pending(r.int())
+                1 -> Claimed(r.text(), r.int())
+                2 -> Done(r.int())
+                3 -> Failed(r.text(), r.int())
+                4 -> Cancelled
+                else -> throw IllegalArgumentException("JobInt: no variant $v")
             }
-        }
+
+        fun of(j: Any?): JobInt =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                    "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                    "Done" -> Done(J.int(o!!.opt("value")))
+                    "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                    "Cancelled" -> Cancelled
+                    else -> throw IllegalArgumentException("JobInt: no variant $t")
+                }
+            }
     }
 }
 
@@ -630,16 +770,27 @@ sealed class JobLooked {
     }
 
     companion object {
-        fun of(j: Any?): JobLooked = J.sum(j) { t, o ->
-            when (t) {
-                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
-                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
-                "Done" -> Done(dev.harken.android.gen.Looked.of(o!!.opt("value")))
-                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
-                "Cancelled" -> Cancelled
-                else -> throw IllegalArgumentException("JobLooked: no variant $t")
+        fun read(r: Reader): JobLooked =
+            when (val v = r.variant()) {
+                0 -> Pending(r.int())
+                1 -> Claimed(r.text(), r.int())
+                2 -> Done(dev.harken.android.gen.Looked.read(r))
+                3 -> Failed(r.text(), r.int())
+                4 -> Cancelled
+                else -> throw IllegalArgumentException("JobLooked: no variant $v")
             }
-        }
+
+        fun of(j: Any?): JobLooked =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                    "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                    "Done" -> Done(dev.harken.android.gen.Looked.of(o!!.opt("value")))
+                    "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                    "Cancelled" -> Cancelled
+                    else -> throw IllegalArgumentException("JobLooked: no variant $t")
+                }
+            }
     }
 }
 
@@ -648,6 +799,8 @@ data class Jump(val index: Long) {
     fun json(): String = "{" + "\"index\":" + index.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Jump = Jump(r.int())
+
         fun of(j: Any?): Jump = (j as JSONObject).let { o -> Jump(J.int(o.opt("index"))) }
     }
 }
@@ -657,20 +810,30 @@ data class Library(val playlistId: Id) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): Library = Library(r.id())
+
         fun of(j: Any?): Library = (j as JSONObject).let { o -> Library(Id(J.text(o.opt("playlist_id")))) }
     }
 }
 
-/** The record `LibraryEntry` (UniFFI's): its JSON, for the functions called by name. */
-fun LibraryEntry.json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `LibraryEntry`. */
+data class LibraryEntry(val addedMs: Long, val creator: String, val durationMs: Long, val file: String, val id: Id, val kind: String, val playlistPos: Long?, val pos: Long, val title: String, val userId: String) {
+    fun json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"playlist_pos\":" + J.wopt(playlistPos) { v0 -> v0.toString() } + "," + "\"pos\":" + pos.toString() + "," + "\"title\":" + J.q(title) + "," + "\"user_id\":" + J.q(userId) + "}"
 
-fun LibraryEntry.Companion.of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
+    companion object {
+        fun read(r: Reader): LibraryEntry = LibraryEntry(r.int(), r.text(), r.int(), r.text(), r.id(), r.text(), r.opt { r0 -> r0.int() }, r.int(), r.text(), r.text())
+
+        fun of(j: Any?): LibraryEntry = (j as JSONObject).let { o -> LibraryEntry(J.int(o.opt("added_ms")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.opt(o.opt("playlist_pos")) { v0 -> J.int(v0) }, J.int(o.opt("pos")), J.text(o.opt("title")), J.text(o.opt("user_id"))) }
+    }
+}
 
 /** The record `Listening`. */
 data class Listening(val user: String, val session: Session) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"session\":" + session.json() + "}"
 
     companion object {
+        fun read(r: Reader): Listening = Listening(r.text(), Session.read(r))
+
         fun of(j: Any?): Listening = (j as JSONObject).let { o -> Listening(J.text(o.opt("user")), Session.of(o.opt("session"))) }
     }
 }
@@ -680,6 +843,8 @@ data class ListeningDevice(val user: String, val device: String, val present: Pr
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"device\":" + J.q(device) + "," + "\"present\":" + present.json() + "}"
 
     companion object {
+        fun read(r: Reader): ListeningDevice = ListeningDevice(r.text(), r.text(), Present.read(r))
+
         fun of(j: Any?): ListeningDevice = (j as JSONObject).let { o -> ListeningDevice(J.text(o.opt("user")), J.text(o.opt("device")), Present.of(o.opt("present"))) }
     }
 }
@@ -689,6 +854,8 @@ data class ListeningScrub(val user: String, val device: String, val atMs: Long) 
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"device\":" + J.q(device) + "," + "\"at_ms\":" + atMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ListeningScrub = ListeningScrub(r.text(), r.text(), r.int())
+
         fun of(j: Any?): ListeningScrub = (j as JSONObject).let { o -> ListeningScrub(J.text(o.opt("user")), J.text(o.opt("device")), J.int(o.opt("at_ms"))) }
     }
 }
@@ -698,6 +865,8 @@ data class Look(val id: Id, val paths: List<String>, val state: JobLooked) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Look = Look(r.id(), r.list { r0 -> r0.text() }, JobLooked.read(r))
+
         fun of(j: Any?): Look = (j as JSONObject).let { o -> Look(Id(J.text(o.opt("id"))), J.list(o.opt("paths")) { v0 -> J.text(v0) }, JobLooked.of(o.opt("state"))) }
     }
 }
@@ -707,6 +876,8 @@ data class LookAt(val paths: List<String>) {
     fun json(): String = "{" + "\"paths\":" + J.wlist(paths) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): LookAt = LookAt(r.list { r0 -> r0.text() })
+
         fun of(j: Any?): LookAt = (j as JSONObject).let { o -> LookAt(J.list(o.opt("paths")) { v0 -> J.text(v0) }) }
     }
 }
@@ -716,6 +887,8 @@ data class LookCancel(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): LookCancel = LookCancel(r.id())
+
         fun of(j: Any?): LookCancel = (j as JSONObject).let { o -> LookCancel(Id(J.text(o.opt("id")))) }
     }
 }
@@ -725,6 +898,8 @@ data class LookClaim(val id: Id, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): LookClaim = LookClaim(r.id(), r.text())
+
         fun of(j: Any?): LookClaim = (j as JSONObject).let { o -> LookClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
     }
 }
@@ -734,6 +909,8 @@ data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome, val 
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): LookFinish = LookFinish(r.id(), r.text(), LookOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -751,13 +928,21 @@ sealed class LookOutcome {
     }
 
     companion object {
-        fun of(j: Any?): LookOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(dev.harken.android.gen.Looked.of(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("LookOutcome: no variant $t")
+        fun read(r: Reader): LookOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(dev.harken.android.gen.Looked.read(r))
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("LookOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): LookOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(dev.harken.android.gen.Looked.of(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("LookOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -766,6 +951,8 @@ data class Looked(val read: Long, val authored: Long) {
     fun json(): String = "{" + "\"read\":" + read.toString() + "," + "\"authored\":" + authored.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Looked = Looked(r.int(), r.int())
+
         fun of(j: Any?): Looked = (j as JSONObject).let { o -> Looked(J.int(o.opt("read")), J.int(o.opt("authored"))) }
     }
 }
@@ -775,6 +962,8 @@ data class MarkPlayed(val mediaId: Id, val finished: Boolean, val name: String) 
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"finished\":" + finished.toString() + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): MarkPlayed = MarkPlayed(r.id(), r.bool(), r.text())
+
         fun of(j: Any?): MarkPlayed = (j as JSONObject).let { o -> MarkPlayed(Id(J.text(o.opt("media_id"))), J.bool(o.opt("finished")), J.text(o.opt("name"))) }
     }
 }
@@ -784,6 +973,8 @@ data class Media(val id: Id, val kind: String, val title: String, val creator: S
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"kind\":" + J.q(kind) + "," + "\"title\":" + J.q(title) + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"pos\":" + pos.toString() + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Media = Media(r.id(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): Media = (j as JSONObject).let { o -> Media(Id(J.text(o.opt("id"))), J.text(o.opt("kind")), J.text(o.opt("title")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.int(o.opt("pos")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -793,6 +984,8 @@ data class Member(val device: String) {
     fun json(): String = "{" + "\"device\":" + J.q(device) + "}"
 
     companion object {
+        fun read(r: Reader): Member = Member(r.text())
+
         fun of(j: Any?): Member = (j as JSONObject).let { o -> Member(J.text(o.opt("device"))) }
     }
 }
@@ -802,6 +995,8 @@ data class Move(val from: Long, val to: Long) {
     fun json(): String = "{" + "\"from\":" + from.toString() + "," + "\"to\":" + to.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Move = Move(r.int(), r.int())
+
         fun of(j: Any?): Move = (j as JSONObject).let { o -> Move(J.int(o.opt("from")), J.int(o.opt("to"))) }
     }
 }
@@ -811,6 +1006,8 @@ data class Movement(val id: String, val workId: String, val no: Long, val title:
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"work_id\":" + J.q(workId) + "," + "\"no\":" + no.toString() + "," + "\"title\":" + J.q(title) + "," + "\"part\":" + J.q(part) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Movement = Movement(r.text(), r.text(), r.int(), r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Movement = (j as JSONObject).let { o -> Movement(J.text(o.opt("id")), J.text(o.opt("work_id")), J.int(o.opt("no")), J.text(o.opt("title")), J.text(o.opt("part")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -820,6 +1017,8 @@ data class NameVoice(val mediaId: Id, val voice: String, val name: String) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"voice\":" + J.q(voice) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): NameVoice = NameVoice(r.id(), r.text(), r.text())
+
         fun of(j: Any?): NameVoice = (j as JSONObject).let { o -> NameVoice(Id(J.text(o.opt("media_id"))), J.text(o.opt("voice")), J.text(o.opt("name"))) }
     }
 }
@@ -829,6 +1028,8 @@ data class NudgeVolume(val delta: Long, val device: String) {
     fun json(): String = "{" + "\"delta\":" + delta.toString() + "," + "\"device\":" + J.q(device) + "}"
 
     companion object {
+        fun read(r: Reader): NudgeVolume = NudgeVolume(r.int(), r.text())
+
         fun of(j: Any?): NudgeVolume = (j as JSONObject).let { o -> NudgeVolume(J.int(o.opt("delta")), J.text(o.opt("device"))) }
     }
 }
@@ -850,14 +1051,23 @@ sealed class Output {
     }
 
     companion object {
-        fun of(j: Any?): Output = J.sum(j) { t, o ->
-            when (t) {
-                "Away" -> Away(J.text(o!!.opt("id")), J.text(o!!.opt("name")))
-                "Device" -> Device(J.text(o!!.opt("id")), J.bool(o!!.opt("moving")))
-                "Nowhere" -> Nowhere
-                else -> throw IllegalArgumentException("Output: no variant $t")
+        fun read(r: Reader): Output =
+            when (val v = r.variant()) {
+                0 -> Away(r.text(), r.text())
+                1 -> Device(r.text(), r.bool())
+                2 -> Nowhere
+                else -> throw IllegalArgumentException("Output: no variant $v")
             }
-        }
+
+        fun of(j: Any?): Output =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Away" -> Away(J.text(o!!.opt("id")), J.text(o!!.opt("name")))
+                    "Device" -> Device(J.text(o!!.opt("id")), J.bool(o!!.opt("moving")))
+                    "Nowhere" -> Nowhere
+                    else -> throw IllegalArgumentException("Output: no variant $t")
+                }
+            }
     }
 }
 
@@ -866,6 +1076,8 @@ data class PeopleEntry(val art: String, val link: String, val name: String, val 
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"link\":" + J.q(link) + "," + "\"name\":" + J.q(name) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): PeopleEntry = PeopleEntry(r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): PeopleEntry = (j as JSONObject).let { o -> PeopleEntry(J.text(o.opt("art")), J.text(o.opt("link")), J.text(o.opt("name")), J.text(o.opt("role"))) }
     }
 }
@@ -875,6 +1087,8 @@ data class Person(val name: String, val sortName: String, val born: Long, val di
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"sort_name\":" + J.q(sortName) + "," + "\"born\":" + born.toString() + "," + "\"died\":" + died.toString() + "," + "\"art\":" + J.q(art) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"banner\":" + J.q(banner) + "," + "\"description\":" + J.q(description) + "," + "\"link\":" + J.q(link) + "}"
 
     companion object {
+        fun read(r: Reader): Person = Person(r.text(), r.text(), r.int(), r.int(), r.text(), r.int(), r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): Person = (j as JSONObject).let { o -> Person(J.text(o.opt("name")), J.text(o.opt("sort_name")), J.int(o.opt("born")), J.int(o.opt("died")), J.text(o.opt("art")), J.int(o.opt("added_ms")), J.text(o.opt("user_id")), J.text(o.opt("banner")), J.text(o.opt("description")), J.text(o.opt("link"))) }
     }
 }
@@ -884,6 +1098,8 @@ data class PersonOn(val name: String, val role: String, val link: String, val ar
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"role\":" + J.q(role) + "," + "\"link\":" + J.q(link) + "," + "\"art\":" + J.q(art) + "}"
 
     companion object {
+        fun read(r: Reader): PersonOn = PersonOn(r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): PersonOn = (j as JSONObject).let { o -> PersonOn(J.text(o.opt("name")), J.text(o.opt("role")), J.text(o.opt("link")), J.text(o.opt("art"))) }
     }
 }
@@ -893,20 +1109,30 @@ data class Play(val id: Id, val userId: String, val track: String, val title: St
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"user_id\":" + J.q(userId) + "," + "\"track\":" + J.q(track) + "," + "\"title\":" + J.q(title) + "," + "\"creator\":" + J.q(creator) + "," + "\"album\":" + J.q(album) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"played_ms\":" + playedMs.toString() + "," + "\"from\":" + J.q(from) + "}"
 
     companion object {
+        fun read(r: Reader): Play = Play(r.id(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Play = (j as JSONObject).let { o -> Play(Id(J.text(o.opt("id"))), J.text(o.opt("user_id")), J.text(o.opt("track")), J.text(o.opt("title")), J.text(o.opt("creator")), J.text(o.opt("album")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.int(o.opt("played_ms")), J.text(o.opt("from"))) }
     }
 }
 
-/** The record `Playlist` (UniFFI's): its JSON, for the functions called by name. */
-fun Playlist.json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
+/** The record `Playlist`. */
+data class Playlist(val id: Id, val name: String, val pos: Long, val createdMs: Long, val userId: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"name\":" + J.q(name) + "," + "\"pos\":" + pos.toString() + "," + "\"created_ms\":" + createdMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
-fun Playlist.Companion.of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+    companion object {
+        fun read(r: Reader): Playlist = Playlist(r.id(), r.text(), r.int(), r.int(), r.text())
+
+        fun of(j: Any?): Playlist = (j as JSONObject).let { o -> Playlist(Id(J.text(o.opt("id"))), J.text(o.opt("name")), J.int(o.opt("pos")), J.int(o.opt("created_ms")), J.text(o.opt("user_id"))) }
+    }
+}
 
 /** The record `PlaylistInput`. */
 data class PlaylistInput(val playlistId: Id) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): PlaylistInput = PlaylistInput(r.id())
+
         fun of(j: Any?): PlaylistInput = (j as JSONObject).let { o -> PlaylistInput(Id(J.text(o.opt("playlist_id")))) }
     }
 }
@@ -916,6 +1142,8 @@ data class PlaylistItem(val playlistId: Id, val mediaId: Id, val pos: Long, val 
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"pos\":" + pos.toString() + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): PlaylistItem = PlaylistItem(r.id(), r.id(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): PlaylistItem = (j as JSONObject).let { o -> PlaylistItem(Id(J.text(o.opt("playlist_id"))), Id(J.text(o.opt("media_id"))), J.int(o.opt("pos")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -925,6 +1153,8 @@ data class PlaylistsOf(val mediaId: Id) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): PlaylistsOf = PlaylistsOf(r.id())
+
         fun of(j: Any?): PlaylistsOf = (j as JSONObject).let { o -> PlaylistsOf(Id(J.text(o.opt("media_id")))) }
     }
 }
@@ -934,6 +1164,8 @@ data class Present(val canPlay: Boolean, val canVolume: Boolean, val family: Str
     fun json(): String = "{" + "\"can_play\":" + canPlay.toString() + "," + "\"can_volume\":" + canVolume.toString() + "," + "\"family\":" + J.wopt(family) { v0 -> J.q(v0) } + "," + "\"follows\":" + J.wopt(follows) { v0 -> J.q(v0) } + "," + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"muted\":" + muted.toString() + "," + "\"name\":" + J.q(name) + "," + "\"user\":" + J.q(user) + "," + "\"volume\":" + volume.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Present = Present(r.bool(), r.bool(), r.opt { r0 -> r0.text() }, r.opt { r0 -> r0.text() }, r.text(), r.text(), r.bool(), r.text(), r.text(), r.int())
+
         fun of(j: Any?): Present = (j as JSONObject).let { o -> Present(J.bool(o.opt("can_play")), J.bool(o.opt("can_volume")), J.opt(o.opt("family")) { v0 -> J.text(v0) }, J.opt(o.opt("follows")) { v0 -> J.text(v0) }, J.text(o.opt("id")), J.text(o.opt("kind")), J.bool(o.opt("muted")), J.text(o.opt("name")), J.text(o.opt("user")), J.int(o.opt("volume"))) }
     }
 }
@@ -943,6 +1175,8 @@ data class Progress(val userId: String, val mediaId: Id, val positionMs: Long, v
     fun json(): String = "{" + "\"user_id\":" + J.q(userId) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"position_ms\":" + positionMs.toString() + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"finished\":" + finished.toString() + "," + "\"name\":" + J.q(name) + "," + "\"updated_ms\":" + updatedMs.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Progress = Progress(r.text(), r.id(), r.int(), r.int(), r.bool(), r.text(), r.int())
+
         fun of(j: Any?): Progress = (j as JSONObject).let { o -> Progress(J.text(o.opt("user_id")), Id(J.text(o.opt("media_id"))), J.int(o.opt("position_ms")), J.int(o.opt("duration_ms")), J.bool(o.opt("finished")), J.text(o.opt("name")), J.int(o.opt("updated_ms"))) }
     }
 }
@@ -952,6 +1186,8 @@ data class ProgressEntry(val durationMs: Long, val finished: Boolean, val mediaI
     fun json(): String = "{" + "\"duration_ms\":" + durationMs.toString() + "," + "\"finished\":" + finished.toString() + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"position_ms\":" + positionMs.toString() + "," + "\"updated_ms\":" + updatedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): ProgressEntry = ProgressEntry(r.int(), r.bool(), r.id(), r.text(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): ProgressEntry = (j as JSONObject).let { o -> ProgressEntry(J.int(o.opt("duration_ms")), J.bool(o.opt("finished")), Id(J.text(o.opt("media_id"))), J.text(o.opt("name")), J.int(o.opt("position_ms")), J.int(o.opt("updated_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -961,6 +1197,8 @@ data class QueueDownload(val file: String, val source: String) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"source\":" + J.q(source) + "}"
 
     companion object {
+        fun read(r: Reader): QueueDownload = QueueDownload(r.text(), r.text())
+
         fun of(j: Any?): QueueDownload = (j as JSONObject).let { o -> QueueDownload(J.text(o.opt("file")), J.text(o.opt("source"))) }
     }
 }
@@ -970,6 +1208,8 @@ data class Read(val url: String) {
     fun json(): String = "{" + "\"url\":" + J.q(url) + "}"
 
     companion object {
+        fun read(r: Reader): Read = Read(r.text())
+
         fun of(j: Any?): Read = (j as JSONObject).let { o -> Read(J.text(o.opt("url"))) }
     }
 }
@@ -979,6 +1219,8 @@ data class RecordPlay(val track: Id, val title: String, val creator: String, val
     fun json(): String = "{" + "\"track\":" + J.q(track.hex) + "," + "\"title\":" + J.q(title) + "," + "\"creator\":" + J.q(creator) + "," + "\"album\":" + J.q(album) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"from\":" + J.q(from) + "}"
 
     companion object {
+        fun read(r: Reader): RecordPlay = RecordPlay(r.id(), r.text(), r.text(), r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): RecordPlay = (j as JSONObject).let { o -> RecordPlay(Id(J.text(o.opt("track"))), J.text(o.opt("title")), J.text(o.opt("creator")), J.text(o.opt("album")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), J.text(o.opt("from"))) }
     }
 }
@@ -988,6 +1230,8 @@ data class Recording(val id: String, val workId: String?, val recorded: Long, va
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"work_id\":" + J.wopt(workId) { v0 -> J.q(v0) } + "," + "\"recorded\":" + recorded.toString() + "," + "\"venue\":" + J.q(venue) + "," + "\"label\":" + J.q(label) + "," + "\"licence\":" + J.q(licence) + "," + "\"art\":" + J.q(art) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Recording = Recording(r.text(), r.opt { r0 -> r0.text() }, r.int(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Recording = (j as JSONObject).let { o -> Recording(J.text(o.opt("id")), J.opt(o.opt("work_id")) { v0 -> J.text(v0) }, J.int(o.opt("recorded")), J.text(o.opt("venue")), J.text(o.opt("label")), J.text(o.opt("licence")), J.text(o.opt("art")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -997,6 +1241,8 @@ data class RecordingInput(val playlistId: Id, val id: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): RecordingInput = RecordingInput(r.id(), r.text())
+
         fun of(j: Any?): RecordingInput = (j as JSONObject).let { o -> RecordingInput(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("id"))) }
     }
 }
@@ -1006,6 +1252,8 @@ data class Recordings(val workId: String) {
     fun json(): String = "{" + "\"work_id\":" + J.q(workId) + "}"
 
     companion object {
+        fun read(r: Reader): Recordings = Recordings(r.text())
+
         fun of(j: Any?): Recordings = (j as JSONObject).let { o -> Recordings(J.text(o.opt("work_id"))) }
     }
 }
@@ -1015,6 +1263,8 @@ data class RecordingsEntry(val art: String, val durationMs: Long, val id: String
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"id\":" + J.q(id) + "," + "\"label\":" + J.q(label) + "," + "\"licence\":" + J.q(licence) + "," + "\"performers\":" + J.q(performers) + "," + "\"recorded\":" + recorded.toString() + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
+        fun read(r: Reader): RecordingsEntry = RecordingsEntry(r.text(), r.int(), r.text(), r.text(), r.text(), r.text(), r.int(), r.int())
+
         fun of(j: Any?): RecordingsEntry = (j as JSONObject).let { o -> RecordingsEntry(J.text(o.opt("art")), J.int(o.opt("duration_ms")), J.text(o.opt("id")), J.text(o.opt("label")), J.text(o.opt("licence")), J.text(o.opt("performers")), J.int(o.opt("recorded")), J.int(o.opt("tracks"))) }
     }
 }
@@ -1024,6 +1274,8 @@ data class Remove(val index: Long) {
     fun json(): String = "{" + "\"index\":" + index.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Remove = Remove(r.int())
+
         fun of(j: Any?): Remove = (j as JSONObject).let { o -> Remove(J.int(o.opt("index"))) }
     }
 }
@@ -1033,6 +1285,8 @@ data class RemoveFromPlaylist(val playlistId: Id, val mediaId: Id) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"media_id\":" + J.q(mediaId.hex) + "}"
 
     companion object {
+        fun read(r: Reader): RemoveFromPlaylist = RemoveFromPlaylist(r.id(), r.id())
+
         fun of(j: Any?): RemoveFromPlaylist = (j as JSONObject).let { o -> RemoveFromPlaylist(Id(J.text(o.opt("playlist_id"))), Id(J.text(o.opt("media_id")))) }
     }
 }
@@ -1042,6 +1296,8 @@ data class RemoveMedia(val id: Id) {
     fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
 
     companion object {
+        fun read(r: Reader): RemoveMedia = RemoveMedia(r.id())
+
         fun of(j: Any?): RemoveMedia = (j as JSONObject).let { o -> RemoveMedia(Id(J.text(o.opt("id")))) }
     }
 }
@@ -1051,6 +1307,8 @@ data class Report(val atMs: Long, val since: Long) {
     fun json(): String = "{" + "\"at_ms\":" + atMs.toString() + "," + "\"since\":" + since.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Report = Report(r.int(), r.int())
+
         fun of(j: Any?): Report = (j as JSONObject).let { o -> Report(J.int(o.opt("at_ms")), J.int(o.opt("since"))) }
     }
 }
@@ -1060,6 +1318,8 @@ data class ReportGroup(val members: List<String>) {
     fun json(): String = "{" + "\"members\":" + J.wlist(members) { v0 -> J.q(v0) } + "}"
 
     companion object {
+        fun read(r: Reader): ReportGroup = ReportGroup(r.list { r0 -> r0.text() })
+
         fun of(j: Any?): ReportGroup = (j as JSONObject).let { o -> ReportGroup(J.list(o.opt("members")) { v0 -> J.text(v0) }) }
     }
 }
@@ -1069,6 +1329,8 @@ data class ReportProgress(val mediaId: Id, val positionMs: Long, val durationMs:
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"position_ms\":" + positionMs.toString() + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): ReportProgress = ReportProgress(r.id(), r.int(), r.int(), r.text())
+
         fun of(j: Any?): ReportProgress = (j as JSONObject).let { o -> ReportProgress(Id(J.text(o.opt("media_id"))), J.int(o.opt("position_ms")), J.int(o.opt("duration_ms")), J.text(o.opt("name"))) }
     }
 }
@@ -1078,6 +1340,8 @@ data class ReportVolume(val level: Long, val muted: Boolean) {
     fun json(): String = "{" + "\"level\":" + level.toString() + "," + "\"muted\":" + muted.toString() + "}"
 
     companion object {
+        fun read(r: Reader): ReportVolume = ReportVolume(r.int(), r.bool())
+
         fun of(j: Any?): ReportVolume = (j as JSONObject).let { o -> ReportVolume(J.int(o.opt("level")), J.bool(o.opt("muted"))) }
     }
 }
@@ -1087,6 +1351,8 @@ data class Revoke(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): Revoke = Revoke(r.text())
+
         fun of(j: Any?): Revoke = (j as JSONObject).let { o -> Revoke(J.text(o.opt("id"))) }
     }
 }
@@ -1096,6 +1362,8 @@ data class Role(val user: String, val role: String) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): Role = Role(r.text(), r.text())
+
         fun of(j: Any?): Role = (j as JSONObject).let { o -> Role(J.text(o.opt("user")), J.text(o.opt("role"))) }
     }
 }
@@ -1105,6 +1373,8 @@ data class Scrub(val atMs: Long? = null) {
     fun json(): String = "{" + "\"at_ms\":" + J.wopt(atMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): Scrub = Scrub(r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): Scrub = (j as JSONObject).let { o -> Scrub(J.opt(o.opt("at_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -1114,6 +1384,8 @@ data class Search(val playlistId: Id, val needle: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"needle\":" + J.q(needle) + "}"
 
     companion object {
+        fun read(r: Reader): Search = Search(r.id(), r.text())
+
         fun of(j: Any?): Search = (j as JSONObject).let { o -> Search(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("needle"))) }
     }
 }
@@ -1123,6 +1395,8 @@ data class Seek(val ms: Long) {
     fun json(): String = "{" + "\"ms\":" + ms.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Seek = Seek(r.int())
+
         fun of(j: Any?): Seek = (j as JSONObject).let { o -> Seek(J.int(o.opt("ms"))) }
     }
 }
@@ -1140,13 +1414,21 @@ sealed class Session {
     }
 
     companion object {
-        fun of(j: Any?): Session = J.sum(j) { t, o ->
-            when (t) {
-                "Active" -> Active(dev.harken.android.gen.Active.of(o!!.opt("active")))
-                "Idle" -> Idle
-                else -> throw IllegalArgumentException("Session: no variant $t")
+        fun read(r: Reader): Session =
+            when (val v = r.variant()) {
+                0 -> Active(dev.harken.android.gen.Active.read(r))
+                1 -> Idle
+                else -> throw IllegalArgumentException("Session: no variant $v")
             }
-        }
+
+        fun of(j: Any?): Session =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Active" -> Active(dev.harken.android.gen.Active.of(o!!.opt("active")))
+                    "Idle" -> Idle
+                    else -> throw IllegalArgumentException("Session: no variant $t")
+                }
+            }
     }
 }
 
@@ -1155,6 +1437,8 @@ data class SetChapters(val file: String, val chapters: List<ChapterAt>) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"chapters\":" + J.wlist(chapters) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): SetChapters = SetChapters(r.text(), r.list { r0 -> ChapterAt.read(r0) })
+
         fun of(j: Any?): SetChapters = (j as JSONObject).let { o -> SetChapters(J.text(o.opt("file")), J.list(o.opt("chapters")) { v0 -> ChapterAt.of(v0) }) }
     }
 }
@@ -1164,6 +1448,8 @@ data class SetMute(val device: String, val muted: Boolean) {
     fun json(): String = "{" + "\"device\":" + J.q(device) + "," + "\"muted\":" + muted.toString() + "}"
 
     companion object {
+        fun read(r: Reader): SetMute = SetMute(r.text(), r.bool())
+
         fun of(j: Any?): SetMute = (j as JSONObject).let { o -> SetMute(J.text(o.opt("device")), J.bool(o.opt("muted"))) }
     }
 }
@@ -1173,6 +1459,8 @@ data class SetPeople(val file: String, val people: List<PersonOn>) {
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"people\":" + J.wlist(people) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): SetPeople = SetPeople(r.text(), r.list { r0 -> PersonOn.read(r0) })
+
         fun of(j: Any?): SetPeople = (j as JSONObject).let { o -> SetPeople(J.text(o.opt("file")), J.list(o.opt("people")) { v0 -> PersonOn.of(v0) }) }
     }
 }
@@ -1182,6 +1470,8 @@ data class SetTranscript(val file: String, val cues: List<CueAt>, val voices: Li
     fun json(): String = "{" + "\"file\":" + J.q(file) + "," + "\"cues\":" + J.wlist(cues) { v0 -> v0.json() } + "," + "\"voices\":" + J.wlist(voices) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): SetTranscript = SetTranscript(r.text(), r.list { r0 -> CueAt.read(r0) }, r.list { r0 -> VoiceAt.read(r0) })
+
         fun of(j: Any?): SetTranscript = (j as JSONObject).let { o -> SetTranscript(J.text(o.opt("file")), J.list(o.opt("cues")) { v0 -> CueAt.of(v0) }, J.list(o.opt("voices")) { v0 -> VoiceAt.of(v0) }) }
     }
 }
@@ -1191,6 +1481,8 @@ data class SetVolume(val device: String, val level: Long) {
     fun json(): String = "{" + "\"device\":" + J.q(device) + "," + "\"level\":" + level.toString() + "}"
 
     companion object {
+        fun read(r: Reader): SetVolume = SetVolume(r.text(), r.int())
+
         fun of(j: Any?): SetVolume = (j as JSONObject).let { o -> SetVolume(J.text(o.opt("device")), J.int(o.opt("level"))) }
     }
 }
@@ -1200,6 +1492,8 @@ data class Show(val id: String, val kind: String, val title: String, val author:
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"title\":" + J.q(title) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"art\":" + J.q(art) + "," + "\"feed\":" + J.q(feed) + "," + "\"link\":" + J.q(link) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Show = Show(r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Show = (j as JSONObject).let { o -> Show(J.text(o.opt("id")), J.text(o.opt("kind")), J.text(o.opt("title")), J.text(o.opt("author")), J.text(o.opt("description")), J.text(o.opt("art")), J.text(o.opt("feed")), J.text(o.opt("link")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -1209,6 +1503,8 @@ data class ShowInput(val playlistId: Id, val id: String) {
     fun json(): String = "{" + "\"playlist_id\":" + J.q(playlistId.hex) + "," + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): ShowInput = ShowInput(r.id(), r.text())
+
         fun of(j: Any?): ShowInput = (j as JSONObject).let { o -> ShowInput(Id(J.text(o.opt("playlist_id"))), J.text(o.opt("id"))) }
     }
 }
@@ -1218,6 +1514,8 @@ data class ShowPeopleEntry(val art: String, val link: String, val mediaId: Id, v
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"link\":" + J.q(link) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"role\":" + J.q(role) + "}"
 
     companion object {
+        fun read(r: Reader): ShowPeopleEntry = ShowPeopleEntry(r.text(), r.text(), r.id(), r.text(), r.text())
+
         fun of(j: Any?): ShowPeopleEntry = (j as JSONObject).let { o -> ShowPeopleEntry(J.text(o.opt("art")), J.text(o.opt("link")), Id(J.text(o.opt("media_id"))), J.text(o.opt("name")), J.text(o.opt("role"))) }
     }
 }
@@ -1227,6 +1525,8 @@ data class ShowsEntry(val art: String, val author: String, val description: Stri
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"author\":" + J.q(author) + "," + "\"description\":" + J.q(description) + "," + "\"episodes\":" + episodes.toString() + "," + "\"feed\":" + J.q(feed) + "," + "\"id\":" + J.q(id) + "," + "\"kind\":" + J.q(kind) + "," + "\"link\":" + J.q(link) + "," + "\"newest_ms\":" + newestMs.toString() + "," + "\"title\":" + J.q(title) + "}"
 
     companion object {
+        fun read(r: Reader): ShowsEntry = ShowsEntry(r.text(), r.text(), r.text(), r.int(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): ShowsEntry = (j as JSONObject).let { o -> ShowsEntry(J.text(o.opt("art")), J.text(o.opt("author")), J.text(o.opt("description")), J.int(o.opt("episodes")), J.text(o.opt("feed")), J.text(o.opt("id")), J.text(o.opt("kind")), J.text(o.opt("link")), J.int(o.opt("newest_ms")), J.text(o.opt("title"))) }
     }
 }
@@ -1236,6 +1536,8 @@ data class SignIn(val id: String, val user: String, val name: String, val email:
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "," + "\"email\":" + J.q(email) + "," + "\"device\":" + J.q(device) + "," + "\"issued_ms\":" + issuedMs.toString() + "," + "\"expires_ms\":" + expiresMs.toString() + "," + "\"revoked\":" + revoked.toString() + "," + "\"roles\":" + J.wlist(roles) { v0 -> J.q(v0) } + "," + "\"picture\":" + J.q(picture) + "}"
 
     companion object {
+        fun read(r: Reader): SignIn = SignIn(r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.int(), r.bool(), r.list { r0 -> r0.text() }, r.text())
+
         fun of(j: Any?): SignIn = (j as JSONObject).let { o -> SignIn(J.text(o.opt("id")), J.text(o.opt("user")), J.text(o.opt("name")), J.text(o.opt("email")), J.text(o.opt("device")), J.int(o.opt("issued_ms")), J.int(o.opt("expires_ms")), J.bool(o.opt("revoked")), J.list(o.opt("roles")) { v0 -> J.text(v0) }, J.text(o.opt("picture"))) }
     }
 }
@@ -1245,6 +1547,8 @@ data class Skip(val by: Long) {
     fun json(): String = "{" + "\"by\":" + by.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Skip = Skip(r.int())
+
         fun of(j: Any?): Skip = (j as JSONObject).let { o -> Skip(J.int(o.opt("by"))) }
     }
 }
@@ -1254,6 +1558,8 @@ data class Song(val mediaId: Id, val albumId: String?, val disc: Long, val track
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"album_id\":" + J.wopt(albumId) { v0 -> J.q(v0) } + "," + "\"disc\":" + disc.toString() + "," + "\"track\":" + track.toString() + "," + "\"recording_id\":" + J.q(recordingId) + "," + "\"movement_id\":" + J.wopt(movementId) { v0 -> J.q(v0) } + "," + "\"bpm\":" + bpm.toString() + "}"
 
     companion object {
+        fun read(r: Reader): Song = Song(r.id(), r.opt { r0 -> r0.text() }, r.int(), r.int(), r.text(), r.opt { r0 -> r0.text() }, r.int())
+
         fun of(j: Any?): Song = (j as JSONObject).let { o -> Song(Id(J.text(o.opt("media_id"))), J.opt(o.opt("album_id")) { v0 -> J.text(v0) }, J.int(o.opt("disc")), J.int(o.opt("track")), J.text(o.opt("recording_id")), J.opt(o.opt("movement_id")) { v0 -> J.text(v0) }, J.int(o.opt("bpm"))) }
     }
 }
@@ -1263,6 +1569,8 @@ data class Source(val url: String, val state: JobInt) {
     fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"state\":" + state.json() + "}"
 
     companion object {
+        fun read(r: Reader): Source = Source(r.text(), JobInt.read(r))
+
         fun of(j: Any?): Source = (j as JSONObject).let { o -> Source(J.text(o.opt("url")), JobInt.of(o.opt("state"))) }
     }
 }
@@ -1272,6 +1580,8 @@ data class SourceCancel(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): SourceCancel = SourceCancel(r.text())
+
         fun of(j: Any?): SourceCancel = (j as JSONObject).let { o -> SourceCancel(J.text(o.opt("id"))) }
     }
 }
@@ -1281,6 +1591,8 @@ data class SourceClaim(val id: String, val by: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "}"
 
     companion object {
+        fun read(r: Reader): SourceClaim = SourceClaim(r.text(), r.text())
+
         fun of(j: Any?): SourceClaim = (j as JSONObject).let { o -> SourceClaim(J.text(o.opt("id")), J.text(o.opt("by"))) }
     }
 }
@@ -1290,6 +1602,8 @@ data class SourceFinish(val id: String, val by: String, val outcome: SourceOutco
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): SourceFinish = SourceFinish(r.text(), r.text(), SourceOutcome.read(r), r.opt { r0 -> r0.int() })
+
         fun of(j: Any?): SourceFinish = (j as JSONObject).let { o -> SourceFinish(J.text(o.opt("id")), J.text(o.opt("by")), SourceOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
@@ -1307,13 +1621,21 @@ sealed class SourceOutcome {
     }
 
     companion object {
-        fun of(j: Any?): SourceOutcome = J.sum(j) { t, o ->
-            when (t) {
-                "Ok" -> Ok(J.int(o!!.opt("value")))
-                "Err" -> Err(J.text(o!!.opt("why")))
-                else -> throw IllegalArgumentException("SourceOutcome: no variant $t")
+        fun read(r: Reader): SourceOutcome =
+            when (val v = r.variant()) {
+                0 -> Ok(r.int())
+                1 -> Err(r.text())
+                else -> throw IllegalArgumentException("SourceOutcome: no variant $v")
             }
-        }
+
+        fun of(j: Any?): SourceOutcome =
+            J.sum(j) { t, o ->
+                when (t) {
+                    "Ok" -> Ok(J.int(o!!.opt("value")))
+                    "Err" -> Err(J.text(o!!.opt("why")))
+                    else -> throw IllegalArgumentException("SourceOutcome: no variant $t")
+                }
+            }
     }
 }
 
@@ -1322,6 +1644,8 @@ data class Start(val at: Long, val from: String, val position: Long, val queue: 
     fun json(): String = "{" + "\"at\":" + at.toString() + "," + "\"from\":" + J.q(from) + "," + "\"position\":" + position.toString() + "," + "\"queue\":" + J.wlist(queue) { v0 -> v0.json() } + "}"
 
     companion object {
+        fun read(r: Reader): Start = Start(r.int(), r.text(), r.int(), r.list { r0 -> Track.read(r0) })
+
         fun of(j: Any?): Start = (j as JSONObject).let { o -> Start(J.int(o.opt("at")), J.text(o.opt("from")), J.int(o.opt("position")), J.list(o.opt("queue")) { v0 -> Track.of(v0) }) }
     }
 }
@@ -1331,6 +1655,8 @@ data class Subscribe(val kind: String, val url: String) {
     fun json(): String = "{" + "\"kind\":" + J.q(kind) + "," + "\"url\":" + J.q(url) + "}"
 
     companion object {
+        fun read(r: Reader): Subscribe = Subscribe(r.text(), r.text())
+
         fun of(j: Any?): Subscribe = (j as JSONObject).let { o -> Subscribe(J.text(o.opt("kind")), J.text(o.opt("url"))) }
     }
 }
@@ -1340,6 +1666,8 @@ data class Subscription(val url: String, val kind: String, val keep: Long, val t
     fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"kind\":" + J.q(kind) + "," + "\"keep\":" + keep.toString() + "," + "\"title\":" + J.q(title) + "," + "\"items\":" + items.toString() + "," + "\"error\":" + J.q(error) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "}"
 
     companion object {
+        fun read(r: Reader): Subscription = Subscription(r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.int(), r.text())
+
         fun of(j: Any?): Subscription = (j as JSONObject).let { o -> Subscription(J.text(o.opt("url")), J.text(o.opt("kind")), J.int(o.opt("keep")), J.text(o.opt("title")), J.int(o.opt("items")), J.text(o.opt("error")), J.int(o.opt("added_ms")), J.text(o.opt("user_id"))) }
     }
 }
@@ -1349,6 +1677,8 @@ data class SubscriptionsEntry(val addedMs: Long, val episodes: Long, val error: 
     fun json(): String = "{" + "\"added_ms\":" + addedMs.toString() + "," + "\"episodes\":" + episodes.toString() + "," + "\"error\":" + J.q(error) + "," + "\"items\":" + items.toString() + "," + "\"keep\":" + keep.toString() + "," + "\"kind\":" + J.q(kind) + "," + "\"show_id\":" + J.q(showId) + "," + "\"title\":" + J.q(title) + "," + "\"url\":" + J.q(url) + "}"
 
     companion object {
+        fun read(r: Reader): SubscriptionsEntry = SubscriptionsEntry(r.int(), r.int(), r.text(), r.int(), r.int(), r.text(), r.text(), r.text(), r.text())
+
         fun of(j: Any?): SubscriptionsEntry = (j as JSONObject).let { o -> SubscriptionsEntry(J.int(o.opt("added_ms")), J.int(o.opt("episodes")), J.text(o.opt("error")), J.int(o.opt("items")), J.int(o.opt("keep")), J.text(o.opt("kind")), J.text(o.opt("show_id")), J.text(o.opt("title")), J.text(o.opt("url"))) }
     }
 }
@@ -1358,6 +1688,8 @@ data class Track(val album: String, val creator: String, val durationMs: Long, v
     fun json(): String = "{" + "\"album\":" + J.q(album) + "," + "\"creator\":" + J.q(creator) + "," + "\"duration_ms\":" + durationMs.toString() + "," + "\"file\":" + J.q(file) + "," + "\"id\":" + J.q(id.hex) + "," + "\"title\":" + J.q(title) + "}"
 
     companion object {
+        fun read(r: Reader): Track = Track(r.text(), r.text(), r.int(), r.text(), r.id(), r.text())
+
         fun of(j: Any?): Track = (j as JSONObject).let { o -> Track(J.text(o.opt("album")), J.text(o.opt("creator")), J.int(o.opt("duration_ms")), J.text(o.opt("file")), Id(J.text(o.opt("id"))), J.text(o.opt("title"))) }
     }
 }
@@ -1367,6 +1699,8 @@ data class TrackDetailsEntry(val album: String, val albumId: String, val bpm: Lo
     fun json(): String = "{" + "\"album\":" + J.q(album) + "," + "\"album_id\":" + J.q(albumId) + "," + "\"bpm\":" + bpm.toString() + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"composer\":" + J.q(composer) + "," + "\"licence\":" + J.q(licence) + "," + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"part\":" + J.q(part) + "," + "\"performer\":" + J.q(performer) + "," + "\"track\":" + track.toString() + "," + "\"work\":" + J.q(work) + "," + "\"work_id\":" + J.q(workId) + "}"
 
     companion object {
+        fun read(r: Reader): TrackDetailsEntry = TrackDetailsEntry(r.text(), r.text(), r.int(), r.text(), r.text(), r.text(), r.id(), r.text(), r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): TrackDetailsEntry = (j as JSONObject).let { o -> TrackDetailsEntry(J.text(o.opt("album")), J.text(o.opt("album_id")), J.int(o.opt("bpm")), J.text(o.opt("catalogue")), J.text(o.opt("composer")), J.text(o.opt("licence")), Id(J.text(o.opt("media_id"))), J.text(o.opt("part")), J.text(o.opt("performer")), J.int(o.opt("track")), J.text(o.opt("work")), J.text(o.opt("work_id"))) }
     }
 }
@@ -1376,6 +1710,8 @@ data class TranscriptEntry(val endMs: Long, val speaker: String, val startMs: Lo
     fun json(): String = "{" + "\"end_ms\":" + endMs.toString() + "," + "\"speaker\":" + J.q(speaker) + "," + "\"start_ms\":" + startMs.toString() + "," + "\"text\":" + J.q(text) + "," + "\"voice\":" + J.q(voice) + "}"
 
     companion object {
+        fun read(r: Reader): TranscriptEntry = TranscriptEntry(r.int(), r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): TranscriptEntry = (j as JSONObject).let { o -> TranscriptEntry(J.int(o.opt("end_ms")), J.text(o.opt("speaker")), J.int(o.opt("start_ms")), J.text(o.opt("text")), J.text(o.opt("voice"))) }
     }
 }
@@ -1385,6 +1721,8 @@ data class Transfer(val to: String) {
     fun json(): String = "{" + "\"to\":" + J.q(to) + "}"
 
     companion object {
+        fun read(r: Reader): Transfer = Transfer(r.text())
+
         fun of(j: Any?): Transfer = (j as JSONObject).let { o -> Transfer(J.text(o.opt("to"))) }
     }
 }
@@ -1394,6 +1732,8 @@ data class Unsubscribe(val url: String) {
     fun json(): String = "{" + "\"url\":" + J.q(url) + "}"
 
     companion object {
+        fun read(r: Reader): Unsubscribe = Unsubscribe(r.text())
+
         fun of(j: Any?): Unsubscribe = (j as JSONObject).let { o -> Unsubscribe(J.text(o.opt("url"))) }
     }
 }
@@ -1403,6 +1743,8 @@ data class Voice(val mediaId: Id, val name: String, val print: List<Long>) {
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"name\":" + J.q(name) + "," + "\"print\":" + J.wlist(print) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): Voice = Voice(r.id(), r.text(), r.list { r0 -> r0.int() })
+
         fun of(j: Any?): Voice = (j as JSONObject).let { o -> Voice(Id(J.text(o.opt("media_id"))), J.text(o.opt("name")), J.list(o.opt("print")) { v0 -> J.int(v0) }) }
     }
 }
@@ -1412,6 +1754,8 @@ data class VoiceAt(val name: String, val print: List<Long>) {
     fun json(): String = "{" + "\"name\":" + J.q(name) + "," + "\"print\":" + J.wlist(print) { v0 -> v0.toString() } + "}"
 
     companion object {
+        fun read(r: Reader): VoiceAt = VoiceAt(r.text(), r.list { r0 -> r0.int() })
+
         fun of(j: Any?): VoiceAt = (j as JSONObject).let { o -> VoiceAt(J.text(o.opt("name")), J.list(o.opt("print")) { v0 -> J.int(v0) }) }
     }
 }
@@ -1421,6 +1765,8 @@ data class VoiceName(val mediaId: Id, val voice: String, val personName: String)
     fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"voice\":" + J.q(voice) + "," + "\"person_name\":" + J.q(personName) + "}"
 
     companion object {
+        fun read(r: Reader): VoiceName = VoiceName(r.id(), r.text(), r.text())
+
         fun of(j: Any?): VoiceName = (j as JSONObject).let { o -> VoiceName(Id(J.text(o.opt("media_id"))), J.text(o.opt("voice")), J.text(o.opt("person_name"))) }
     }
 }
@@ -1430,6 +1776,8 @@ data class Welcome(val user: String, val name: String) {
     fun json(): String = "{" + "\"user\":" + J.q(user) + "," + "\"name\":" + J.q(name) + "}"
 
     companion object {
+        fun read(r: Reader): Welcome = Welcome(r.text(), r.text())
+
         fun of(j: Any?): Welcome = (j as JSONObject).let { o -> Welcome(J.text(o.opt("user")), J.text(o.opt("name"))) }
     }
 }
@@ -1439,6 +1787,8 @@ data class Work(val id: String, val composer: String, val title: String, val cat
     fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"composer\":" + J.q(composer) + "," + "\"title\":" + J.q(title) + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"opus\":" + J.q(opus) + "," + "\"key_sig\":" + J.q(keySig) + "," + "\"form\":" + J.q(form) + "," + "\"period\":" + J.q(period) + "," + "\"composed\":" + composed.toString() + "," + "\"art\":" + J.q(art) + "," + "\"added_ms\":" + addedMs.toString() + "," + "\"user_id\":" + J.q(userId) + "," + "\"description\":" + J.q(description) + "}"
 
     companion object {
+        fun read(r: Reader): Work = Work(r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int(), r.text(), r.text())
+
         fun of(j: Any?): Work = (j as JSONObject).let { o -> Work(J.text(o.opt("id")), J.text(o.opt("composer")), J.text(o.opt("title")), J.text(o.opt("catalogue")), J.text(o.opt("opus")), J.text(o.opt("key_sig")), J.text(o.opt("form")), J.text(o.opt("period")), J.int(o.opt("composed")), J.text(o.opt("art")), J.int(o.opt("added_ms")), J.text(o.opt("user_id")), J.text(o.opt("description"))) }
     }
 }
@@ -1448,6 +1798,8 @@ data class WorkInput(val id: String) {
     fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
 
     companion object {
+        fun read(r: Reader): WorkInput = WorkInput(r.text())
+
         fun of(j: Any?): WorkInput = (j as JSONObject).let { o -> WorkInput(J.text(o.opt("id"))) }
     }
 }
@@ -1457,6 +1809,8 @@ data class WorkSummary(val art: String, val catalogue: String, val composer: Str
     fun json(): String = "{" + "\"art\":" + J.q(art) + "," + "\"catalogue\":" + J.q(catalogue) + "," + "\"composer\":" + J.q(composer) + "," + "\"description\":" + J.q(description) + "," + "\"form\":" + J.q(form) + "," + "\"id\":" + J.q(id) + "," + "\"period\":" + J.q(period) + "," + "\"recordings\":" + recordings.toString() + "," + "\"title\":" + J.q(title) + "," + "\"tracks\":" + tracks.toString() + "}"
 
     companion object {
+        fun read(r: Reader): WorkSummary = WorkSummary(r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.text(), r.int(), r.text(), r.int())
+
         fun of(j: Any?): WorkSummary = (j as JSONObject).let { o -> WorkSummary(J.text(o.opt("art")), J.text(o.opt("catalogue")), J.text(o.opt("composer")), J.text(o.opt("description")), J.text(o.opt("form")), J.text(o.opt("id")), J.text(o.opt("period")), J.int(o.opt("recordings")), J.text(o.opt("title")), J.int(o.opt("tracks"))) }
     }
 }
@@ -1466,6 +1820,8 @@ data class Works(val composer: String) {
     fun json(): String = "{" + "\"composer\":" + J.q(composer) + "}"
 
     companion object {
+        fun read(r: Reader): Works = Works(r.text())
+
         fun of(j: Any?): Works = (j as JSONObject).let { o -> Works(J.text(o.opt("composer"))) }
     }
 }
@@ -1479,7 +1835,7 @@ class Harken(val peer: Peer) {
     fun fetchClaim(input: FetchClaim): String = peer.mutate("fetch.claim", input.json())
 
     /** `fetch.due`, kept. */
-    fun fetchDue(): View<Fetch> = View(peer.view("fetch.due", "null")) { j -> Fetch.of(j) }
+    fun fetchDue(): View<Fetch> = View(peer.view("fetch.due", "null")) { r -> Fetch.read(r) }
 
     /** `fetch.finish`: its intent's id. */
     fun fetchFinish(input: FetchFinish): String = peer.mutate("fetch.finish", input.json())
@@ -1491,7 +1847,7 @@ class Harken(val peer: Peer) {
     fun hearingClaim(input: HearingClaim): String = peer.mutate("hearing.claim", input.json())
 
     /** `hearing.due`, kept. */
-    fun hearingDue(): View<Hearing> = View(peer.view("hearing.due", "null")) { j -> Hearing.of(j) }
+    fun hearingDue(): View<Hearing> = View(peer.view("hearing.due", "null")) { r -> Hearing.read(r) }
 
     /** `hearing.finish`: its intent's id. */
     fun hearingFinish(input: HearingFinish): String = peer.mutate("hearing.finish", input.json())
@@ -1508,35 +1864,35 @@ class Harken(val peer: Peer) {
     /** `library.add_song`: its intent's id. */
     fun addSong(input: AddSong): String = peer.mutate("library.add_song", input.json())
 
-    /** `library.album`, kept, its rows UniFFI's. */
-    fun album(input: AlbumInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.album", input.json()))
+    /** `library.album`, kept. */
+    fun album(input: AlbumInput): View<LibraryEntry> = View(peer.view("library.album", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.album_credits`, kept. */
-    fun albumCredits(input: AlbumCredits): View<CreditsEntry> = View(peer.view("library.album_credits", input.json())) { j -> CreditsEntry.of(j) }
+    fun albumCredits(input: AlbumCredits): View<CreditsEntry> = View(peer.view("library.album_credits", input.json())) { r -> CreditsEntry.read(r) }
 
     /** `library.albums`, kept. */
-    fun albums(): View<AlbumsEntry> = View(peer.view("library.albums", "null")) { j -> AlbumsEntry.of(j) }
+    fun albums(): View<AlbumsEntry> = View(peer.view("library.albums", "null")) { r -> AlbumsEntry.read(r) }
 
-    /** `library.appearances`, kept, its rows UniFFI's. */
-    fun appearances(input: Artist): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.appearances", input.json()))
+    /** `library.appearances`, kept. */
+    fun appearances(input: Artist): View<LibraryEntry> = View(peer.view("library.appearances", input.json())) { r -> LibraryEntry.read(r) }
 
-    /** `library.artist`, kept, its rows UniFFI's. */
-    fun artist(input: Artist): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.artist", input.json()))
+    /** `library.artist`, kept. */
+    fun artist(input: Artist): View<LibraryEntry> = View(peer.view("library.artist", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.artists`, kept. */
-    fun artists(): View<ArtistsEntry> = View(peer.view("library.artists", "null")) { j -> ArtistsEntry.of(j) }
+    fun artists(): View<ArtistsEntry> = View(peer.view("library.artists", "null")) { r -> ArtistsEntry.read(r) }
 
     /** `library.chapters`, kept. */
-    fun chapters(input: EpisodeInput): View<ChaptersEntry> = View(peer.view("library.chapters", input.json())) { j -> ChaptersEntry.of(j) }
+    fun chapters(input: EpisodeInput): View<ChaptersEntry> = View(peer.view("library.chapters", input.json())) { r -> ChaptersEntry.read(r) }
 
     /** `library.composers`, kept. */
-    fun composers(): View<ComposersEntry> = View(peer.view("library.composers", "null")) { j -> ComposersEntry.of(j) }
+    fun composers(): View<ComposersEntry> = View(peer.view("library.composers", "null")) { r -> ComposersEntry.read(r) }
 
     /** `library.credit_recording`: its intent's id. */
     fun creditRecording(input: CreditRecording): String = peer.mutate("library.credit_recording", input.json())
 
     /** `library.credits`, kept. */
-    fun credits(input: Credits): View<CreditsEntry> = View(peer.view("library.credits", input.json())) { j -> CreditsEntry.of(j) }
+    fun credits(input: Credits): View<CreditsEntry> = View(peer.view("library.credits", input.json())) { r -> CreditsEntry.read(r) }
 
     /** `library.describe_person`: its intent's id. */
     fun describePerson(input: DescribePerson): String = peer.mutate("library.describe_person", input.json())
@@ -1554,10 +1910,10 @@ class Harken(val peer: Peer) {
     fun downloaded(input: Downloaded): String = peer.mutate("library.downloaded", input.json())
 
     /** `library.downloads`, kept. */
-    fun downloads(): View<DownloadsEntry> = View(peer.view("library.downloads", "null")) { j -> DownloadsEntry.of(j) }
+    fun downloads(): View<DownloadsEntry> = View(peer.view("library.downloads", "null")) { r -> DownloadsEntry.read(r) }
 
     /** `library.episode_details`, kept. */
-    fun episodeDetails(input: ShowInput): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", input.json())) { j -> EpisodeDetailsEntry.of(j) }
+    fun episodeDetails(input: ShowInput): View<EpisodeDetailsEntry> = View(peer.view("library.episode_details", input.json())) { r -> EpisodeDetailsEntry.read(r) }
 
     /** `library.feed_read`: its intent's id. */
     fun feedRead(input: FeedRead): String = peer.mutate("library.feed_read", input.json())
@@ -1565,8 +1921,8 @@ class Harken(val peer: Peer) {
     /** `library.fetch_older`: its intent's id. */
     fun fetchOlder(input: FetchOlder): String = peer.mutate("library.fetch_older", input.json())
 
-    /** `library.library`, kept, its rows UniFFI's. */
-    fun library(input: Library): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.library", input.json()))
+    /** `library.library`, kept. */
+    fun library(input: Library): View<LibraryEntry> = View(peer.view("library.library", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.look`: its intent's id. */
     fun look(input: LookAt): String = peer.mutate("library.look", input.json())
@@ -1575,22 +1931,22 @@ class Harken(val peer: Peer) {
     fun markPlayed(input: MarkPlayed): String = peer.mutate("library.mark_played", input.json())
 
     /** `library.my_progress`, kept. */
-    fun myProgress(): View<ProgressEntry> = View(peer.view("library.my_progress", "null")) { j -> ProgressEntry.of(j) }
+    fun myProgress(): View<ProgressEntry> = View(peer.view("library.my_progress", "null")) { r -> ProgressEntry.read(r) }
 
     /** `library.name_voice`: its intent's id. */
     fun nameVoice(input: NameVoice): String = peer.mutate("library.name_voice", input.json())
 
     /** `library.people`, kept. */
-    fun people(input: EpisodeInput): View<PeopleEntry> = View(peer.view("library.people", input.json())) { j -> PeopleEntry.of(j) }
+    fun people(input: EpisodeInput): View<PeopleEntry> = View(peer.view("library.people", input.json())) { r -> PeopleEntry.read(r) }
 
     /** `library.queue_download`: its intent's id. */
     fun queueDownload(input: QueueDownload): String = peer.mutate("library.queue_download", input.json())
 
-    /** `library.recording`, kept, its rows UniFFI's. */
-    fun recording(input: RecordingInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.recording", input.json()))
+    /** `library.recording`, kept. */
+    fun recording(input: RecordingInput): View<LibraryEntry> = View(peer.view("library.recording", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.recordings`, kept. */
-    fun recordings(input: Recordings): View<RecordingsEntry> = View(peer.view("library.recordings", input.json())) { j -> RecordingsEntry.of(j) }
+    fun recordings(input: Recordings): View<RecordingsEntry> = View(peer.view("library.recordings", input.json())) { r -> RecordingsEntry.read(r) }
 
     /** `library.remove_media`: its intent's id. */
     fun removeMedia(input: RemoveMedia): String = peer.mutate("library.remove_media", input.json())
@@ -1598,8 +1954,8 @@ class Harken(val peer: Peer) {
     /** `library.report_progress`: its intent's id. */
     fun reportProgress(input: ReportProgress): String = peer.mutate("library.report_progress", input.json())
 
-    /** `library.search`, kept, its rows UniFFI's. */
-    fun search(input: Search): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.search", input.json()))
+    /** `library.search`, kept. */
+    fun search(input: Search): View<LibraryEntry> = View(peer.view("library.search", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.set_chapters`: its intent's id. */
     fun setChapters(input: SetChapters): String = peer.mutate("library.set_chapters", input.json())
@@ -1610,38 +1966,38 @@ class Harken(val peer: Peer) {
     /** `library.set_transcript`: its intent's id. */
     fun setTranscript(input: SetTranscript): String = peer.mutate("library.set_transcript", input.json())
 
-    /** `library.show`, kept, its rows UniFFI's. */
-    fun show(input: ShowInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "library.show", input.json()))
+    /** `library.show`, kept. */
+    fun show(input: ShowInput): View<LibraryEntry> = View(peer.view("library.show", input.json())) { r -> LibraryEntry.read(r) }
 
     /** `library.show_people`, kept. */
-    fun showPeople(input: ShowInput): View<ShowPeopleEntry> = View(peer.view("library.show_people", input.json())) { j -> ShowPeopleEntry.of(j) }
+    fun showPeople(input: ShowInput): View<ShowPeopleEntry> = View(peer.view("library.show_people", input.json())) { r -> ShowPeopleEntry.read(r) }
 
     /** `library.show_progress`, kept. */
-    fun showProgress(input: ShowInput): View<ProgressEntry> = View(peer.view("library.show_progress", input.json())) { j -> ProgressEntry.of(j) }
+    fun showProgress(input: ShowInput): View<ProgressEntry> = View(peer.view("library.show_progress", input.json())) { r -> ProgressEntry.read(r) }
 
     /** `library.shows`, kept. */
-    fun shows(): View<ShowsEntry> = View(peer.view("library.shows", "null")) { j -> ShowsEntry.of(j) }
+    fun shows(): View<ShowsEntry> = View(peer.view("library.shows", "null")) { r -> ShowsEntry.read(r) }
 
     /** `library.subscribe`: its intent's id. */
     fun subscribe(input: Subscribe): String = peer.mutate("library.subscribe", input.json())
 
     /** `library.subscriptions`, kept. */
-    fun subscriptions(): View<SubscriptionsEntry> = View(peer.view("library.subscriptions", "null")) { j -> SubscriptionsEntry.of(j) }
+    fun subscriptions(): View<SubscriptionsEntry> = View(peer.view("library.subscriptions", "null")) { r -> SubscriptionsEntry.read(r) }
 
     /** `library.track_details`, kept. */
-    fun trackDetails(): View<TrackDetailsEntry> = View(peer.view("library.track_details", "null")) { j -> TrackDetailsEntry.of(j) }
+    fun trackDetails(): View<TrackDetailsEntry> = View(peer.view("library.track_details", "null")) { r -> TrackDetailsEntry.read(r) }
 
     /** `library.transcript`, kept. */
-    fun transcript(input: EpisodeInput): View<TranscriptEntry> = View(peer.view("library.transcript", input.json())) { j -> TranscriptEntry.of(j) }
+    fun transcript(input: EpisodeInput): View<TranscriptEntry> = View(peer.view("library.transcript", input.json())) { r -> TranscriptEntry.read(r) }
 
     /** `library.unsubscribe`: its intent's id. */
     fun unsubscribe(input: Unsubscribe): String = peer.mutate("library.unsubscribe", input.json())
 
     /** `library.work`, kept. */
-    fun work(input: WorkInput): View<WorkSummary> = View(peer.view("library.work", input.json())) { j -> WorkSummary.of(j) }
+    fun work(input: WorkInput): View<WorkSummary> = View(peer.view("library.work", input.json())) { r -> WorkSummary.read(r) }
 
     /** `library.works`, kept. */
-    fun works(input: Works): View<WorkSummary> = View(peer.view("library.works", input.json())) { j -> WorkSummary.of(j) }
+    fun works(input: Works): View<WorkSummary> = View(peer.view("library.works", input.json())) { r -> WorkSummary.read(r) }
 
     /** `listening.advance`, on the live space. */
     fun advance(input: Advance) { peer.mutate("listening.advance", input.json()) }
@@ -1662,7 +2018,7 @@ class Harken(val peer: Peer) {
     fun jump(input: Jump) { peer.mutate("listening.jump", input.json()) }
 
     /** `listening.last_played`, kept. */
-    fun lastPlayed(): View<Play> = View(peer.view("listening.last_played", "null")) { j -> Play.of(j) }
+    fun lastPlayed(): View<Play> = View(peer.view("listening.last_played", "null")) { r -> Play.read(r) }
 
     /** `listening.move`, on the live space. */
     fun move(input: Move) { peer.mutate("listening.move", input.json()) }
@@ -1689,7 +2045,7 @@ class Harken(val peer: Peer) {
     fun play() { peer.mutate("listening.play", "null") }
 
     /** `listening.recently_played`, kept. */
-    fun recentlyPlayed(): View<Play> = View(peer.view("listening.recently_played", "null")) { j -> Play.of(j) }
+    fun recentlyPlayed(): View<Play> = View(peer.view("listening.recently_played", "null")) { r -> Play.read(r) }
 
     /** `listening.record_play`: its intent's id. */
     fun recordPlay(input: RecordPlay): String = peer.mutate("listening.record_play", input.json())
@@ -1755,7 +2111,7 @@ class Harken(val peer: Peer) {
     fun lookClaim(input: LookClaim): String = peer.mutate("look.claim", input.json())
 
     /** `look.due`, kept. */
-    fun lookDue(): View<Look> = View(peer.view("look.due", "null")) { j -> Look.of(j) }
+    fun lookDue(): View<Look> = View(peer.view("look.due", "null")) { r -> Look.read(r) }
 
     /** `look.finish`: its intent's id. */
     fun lookFinish(input: LookFinish): String = peer.mutate("look.finish", input.json())
@@ -1769,14 +2125,14 @@ class Harken(val peer: Peer) {
     /** `playlists.create_playlist`: its intent's id. */
     fun createPlaylist(input: CreatePlaylist): String = peer.mutate("playlists.create_playlist", input.json())
 
-    /** `playlists.playlist`, kept, its rows UniFFI's. */
-    fun playlist(input: PlaylistInput): View<LibraryEntry> = typed(LibraryEntryView(peer, "playlists.playlist", input.json()))
+    /** `playlists.playlist`, kept. */
+    fun playlist(input: PlaylistInput): View<LibraryEntry> = View(peer.view("playlists.playlist", input.json())) { r -> LibraryEntry.read(r) }
 
-    /** `playlists.playlists`, kept, its rows UniFFI's. */
-    fun playlists(): View<Playlist> = typed(PlaylistView(peer, "playlists.playlists", "null"))
+    /** `playlists.playlists`, kept. */
+    fun playlists(): View<Playlist> = View(peer.view("playlists.playlists", "null")) { r -> Playlist.read(r) }
 
-    /** `playlists.playlists_of`, kept, its rows UniFFI's. */
-    fun playlistsOf(input: PlaylistsOf): View<Playlist> = typed(PlaylistView(peer, "playlists.playlists_of", input.json()))
+    /** `playlists.playlists_of`, kept. */
+    fun playlistsOf(input: PlaylistsOf): View<Playlist> = View(peer.view("playlists.playlists_of", input.json())) { r -> Playlist.read(r) }
 
     /** `playlists.remove_from_playlist`: its intent's id. */
     fun removeFromPlaylist(input: RemoveFromPlaylist): String = peer.mutate("playlists.remove_from_playlist", input.json())
@@ -1791,7 +2147,7 @@ class Harken(val peer: Peer) {
     fun roleRevoke(input: Grant): String = peer.mutate("role.revoke", input.json())
 
     /** `session.mine`, kept. */
-    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { j -> SignIn.of(j) }
+    fun mine(): View<SignIn> = View(peer.view("session.mine", "null")) { r -> SignIn.read(r) }
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
@@ -1803,7 +2159,7 @@ class Harken(val peer: Peer) {
     fun sourceClaim(input: SourceClaim): String = peer.mutate("source.claim", input.json())
 
     /** `source.due`, kept. */
-    fun sourceDue(): View<Source> = View(peer.view("source.due", "null")) { j -> Source.of(j) }
+    fun sourceDue(): View<Source> = View(peer.view("source.due", "null")) { r -> Source.read(r) }
 
     /** `source.finish`: its intent's id. */
     fun sourceFinish(input: SourceFinish): String = peer.mutate("source.finish", input.json())
@@ -1811,16 +2167,12 @@ class Harken(val peer: Peer) {
     /** `source.read`: its intent's id. */
     fun read(input: Read): String = peer.mutate("source.read", input.json())
 
-    private fun typed(v: LibraryEntryView): View<LibraryEntry> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
-    private fun typed(v: PlaylistView): View<Playlist> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
-
     /** The live table `listening`, as this device holds it. */
-    fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.of(J.parse(it)) }
+    fun liveListening(): List<Listening> = peer.liveRows("listening").map { Listening.read(Reader(it)) }
 
     /** The live table `listening_device`, as this device holds it. */
-    fun liveListeningDevice(): List<ListeningDevice> = peer.liveRows("listening_device").map { ListeningDevice.of(J.parse(it)) }
+    fun liveListeningDevice(): List<ListeningDevice> = peer.liveRows("listening_device").map { ListeningDevice.read(Reader(it)) }
 
     /** The live table `listening_scrub`, as this device holds it. */
-    fun liveListeningScrub(): List<ListeningScrub> = peer.liveRows("listening_scrub").map { ListeningScrub.of(J.parse(it)) }
+    fun liveListeningScrub(): List<ListeningScrub> = peer.liveRows("listening_scrub").map { ListeningScrub.read(Reader(it)) }
 }

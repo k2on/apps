@@ -14,10 +14,10 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import uniffi.money_domain.AccountLine
-import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
-import uniffi.money_domain.BankLine
+import dev.money.android.gen.AccountLine
+import dev.money.android.gen.AskLine
+import dev.money.android.gen.AskState
+import dev.money.android.gen.BankLine
 
 /** What to do about an ask this phone made, once the asks have moved. */
 sealed interface Follow {
@@ -39,9 +39,9 @@ fun follow(asks: List<AskLine>, after: Id?): Follow {
     val a = asks.firstOrNull() ?: return Follow.Wait
     if (a.id == after) return Follow.Wait
     return when (a.state) {
-        AskState.ASKED -> Follow.Wait
-        AskState.WAITING -> if (a.url.isNotEmpty()) Follow.Open(a.url) else Follow.Wait
-        AskState.DONE, AskState.FAILED, AskState.EXPIRED -> Follow.Over
+        AskState.Asked -> Follow.Wait
+        AskState.Waiting -> if (a.url.isNotEmpty()) Follow.Open(a.url) else Follow.Wait
+        AskState.Done, AskState.Failed, AskState.Expired -> Follow.Over
     }
 }
 
@@ -52,7 +52,7 @@ const val ASK_SHOWN_MS: Long = 15 * 60 * 1000
 const val ASK_SLOW_MS: Long = 30_000
 
 /** Whether an ask is still open: unanswered, or its page waiting for a login. */
-fun isOpen(a: AskLine): Boolean = a.state == AskState.ASKED || a.state == AskState.WAITING
+fun isOpen(a: AskLine): Boolean = a.state == AskState.Asked || a.state == AskState.Waiting
 
 /**
  * The ask Settings tells of: the newest of this person's while it is open or lately answered,
@@ -74,21 +74,21 @@ private fun askName(a: AskLine): String = a.institution.ifEmpty { a.bank }.ifEmp
 fun askSays(a: AskLine, now: Long): String {
     val name = askName(a)
     return when (a.state) {
-        AskState.ASKED ->
+        AskState.Asked ->
             when {
                 now - a.askedMs > ASK_SLOW_MS -> "The server hasn't answered yet. Does it have Plaid's keys?"
                 a.what == "disconnect" -> "Asking the server to disconnect $name…"
                 else -> "Asking the server for Plaid's page…"
             }
-        AskState.WAITING -> "Log in to your bank on Plaid's page. This follows along, and finishes on its own."
-        AskState.DONE ->
+        AskState.Waiting -> "Log in to your bank on Plaid's page. This follows along, and finishes on its own."
+        AskState.Done ->
             when (a.what) {
                 "connect" -> "Connected $name. Choose below what each of its accounts feeds."
                 "reconnect" -> "Logged in to $name again."
                 else -> "Disconnected $name. Its accounts here stay, kept by hand from now on."
             }
-        AskState.FAILED -> "Couldn't ${a.what} $name: ${a.message}"
-        AskState.EXPIRED -> a.message.ifEmpty { "Plaid's page expired before the login was finished." }
+        AskState.Failed -> "Couldn't ${a.what} $name: ${a.message}"
+        AskState.Expired -> a.message.ifEmpty { "Plaid's page expired before the login was finished." }
     }
 }
 

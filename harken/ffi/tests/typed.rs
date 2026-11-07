@@ -1,14 +1,19 @@
 //! Typed views (`docs/plan-v5.md`, Landed: typed views): harken's view
-//! rows through UniFFI as the domain's own types — a view object per row
-//! type (`PlaylistView`, `LibraryEntryView`) made by name with its input's
-//! JSON, its rows and patches read with no JSON — and the twins of the
-//! types a row may hold (nested sums, options, lists, ids).
+//! rows through the bridge as their bytes in the value format, which read
+//! as the domain's own types — what the phones' generated code reads them
+//! as — made by name with the input's JSON, with no JSON per row.
 
 use std::sync::Arc;
 
-use ark_ffi::{Login, Op, Peer, Refusal, RowId, Twin};
-use harken_domain::{LibraryEntryView, PlaylistView};
+use ark::format::Encode;
+use ark_ffi::{Login, Op, Peer};
+use harken_domain::{LibraryEntry, Playlist};
 use harken_ffi::harken_open;
+
+/// Rows as `T`, from their bytes.
+fn read<T: Encode>(rows: &[Vec<u8>]) -> Vec<T> {
+    rows.iter().map(|r| T::from_bytes(r).unwrap()).collect()
+}
 
 /// A peer alone whose person holds the library's role, so that it can add
 /// a song.
@@ -28,99 +33,38 @@ fn librarian(dir: &tempfile::TempDir) -> Arc<Peer> {
 }
 
 /// The playlists and a playlist's contents, read typed while the old path
-/// writes. Falsified by the view object's `take` handing over no rows (`rows:
-/// vec![]`): the insert came with no playlist; and by `view_typed` not
-/// comparing a view's rows with its type: `library.albums` was opened as
-/// `LibraryEntry` rows.
+/// writes. Falsified by `take` handing over no rows (`rows: vec![]`): the
+/// insert came with no playlist.
 #[test]
 fn a_views_rows_are_the_domains_own_types() {
     let dir = tempfile::tempdir().unwrap();
     let p = librarian(&dir);
-    let lists = PlaylistView::new(p.clone(), "playlists.playlists".into(), "null".into()).unwrap();
+    let lists = p.view("playlists.playlists".into(), "null".into()).unwrap();
     p.mutate("playlists.create_playlist".into(), r#"{"name":"Mix"}"#.into()).unwrap();
     let taken = lists.take();
     assert_eq!(taken.ops, vec![Op::Insert { at: 0 }]);
-    assert_eq!(taken.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Mix"]);
+    let made: Vec<Playlist> = read(&taken.rows);
+    assert_eq!(made.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Mix"]);
     assert_eq!(lists.take().ops, vec![]);
-    assert_eq!(lists.rows()[0].user_id, "u");
+    let playlist = read::<Playlist>(&lists.rows())[0].clone();
+    assert_eq!(playlist.user_id, "u");
 
     let song = r#"{"title":"Air","artist":"Bach","album":"","duration_ms":1000,"file":"air.flac","track":1,"part":"","catalogue":"","performer":"","bpm":0,"album_art":"","artist_art":"","disc":1,"work_title":"","movement_no":0,"artist_banner":"","released":0,"folder":""}"#;
     p.mutate("library.add_song".into(), song.into()).unwrap();
-    let RowId(playlist) = lists.rows()[0].id;
-    let input = format!(r#"{{"playlist_id":"{}"}}"#, ark::hash::hex(&playlist));
-    let library = LibraryEntryView::new(p.clone(), "library.library".into(), input.clone()).unwrap();
-    let media = ark::hash::hex(&library.rows()[0].id.0);
-    let on = LibraryEntryView::new(p.clone(), "playlists.playlist".into(), input).unwrap();
+    let input = format!(r#"{{"playlist_id":"{}"}}"#, ark::hash::hex(&playlist.id.0));
+    let library = p.view("library.library".into(), input.clone()).unwrap();
+    let media = ark::hash::hex(&read::<LibraryEntry>(&library.rows())[0].id.0);
+    let on = p.view("playlists.playlist".into(), input).unwrap();
     assert!(on.rows().is_empty());
-    let add = format!(r#"{{"playlist_id":"{}","media_id":"{media}"}}"#, ark::hash::hex(&playlist));
+    let add = format!(r#"{{"playlist_id":"{}","media_id":"{media}"}}"#, ark::hash::hex(&playlist.id.0));
     p.mutate("playlists.add_to_playlist".into(), add).unwrap();
-    let rows = on.rows();
+    let rows: Vec<LibraryEntry> = read(&on.rows());
     assert_eq!((rows[0].title.as_str(), rows[0].playlist_pos), ("Air", Some(1)));
     assert_eq!(ark::hash::hex(&rows[0].id.0), media, "an id crosses as its sixteen bytes");
     let taken = library.take();
     assert_eq!(taken.ops, vec![Op::Update { at: 0 }]);
-    assert_eq!(taken.rows[0].playlist_pos, Some(1), "the library marks what is on the playlist");
-
-    let wrong = LibraryEntryView::new(p.clone(), "library.albums".into(), "null".into());
-    assert!(matches!(wrong, Err(Refusal::Refused { why }) if why.contains("rows are not")));
-    let missing = PlaylistView::new(p.clone(), "playlists.nothing".into(), "null".into());
+    let marked: Vec<LibraryEntry> = read(&taken.rows);
+    assert_eq!(marked[0].playlist_pos, Some(1), "the library marks what is on the playlist");
+    let missing = p.view("playlists.nothing".into(), "null".into());
     assert!(missing.is_err(), "no such view");
-}
-
-/// UniFFI's tag for this test's own twins: what `setup_scaffolding!` would
-/// define, which this test cannot call beside the library's own.
-pub struct UniFfiTag;
-
-mod nested {
-    use ark::prelude::*;
-    use harken_domain::Media;
-
-    #[derive(Clone, Debug, PartialEq, Describe)]
-    #[ark(ffi)]
-    pub struct Inner {
-        pub at: Option<i64>,
-        pub ids: Vec<Id<Media>>,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Describe)]
-    #[ark(ffi)]
-    pub enum Outer {
-        Has { inner: Inner, tags: Vec<Option<String>> },
-        Wraps(Inner),
-        Nothing,
-    }
-}
-
-/// Falsified by the enum twin dropping a lone unnamed field (its
-/// `value` left out): `Wraps` was not a record of its value.
-#[test]
-fn nested_sums_options_lists_and_ids_have_twins() {
-    use nested::{Inner, InnerFfi, Outer, OuterFfi};
-    let inner = Inner {
-        at: Some(3),
-        ids: vec![ark::row::Id::new([7; 16])],
-    };
-    let all = [
-        Outer::Has {
-            inner: inner.clone(),
-            tags: vec![Some("a".into()), None],
-        },
-        Outer::Wraps(inner.clone()),
-        Outer::Nothing,
-    ];
-    let twin = || InnerFfi {
-        at: Some(3),
-        ids: vec![RowId([7; 16])],
-    };
-    let twins = [
-        OuterFfi::Has {
-            inner: twin(),
-            tags: vec![Some("a".into()), None],
-        },
-        OuterFfi::Wraps { value: twin() },
-        OuterFfi::Nothing {},
-    ];
-    for (o, t) in all.into_iter().zip(twins) {
-        assert_eq!(<Outer as Twin<crate::UniFfiTag>>::ffi(o), t, "Wraps is a record of its value");
-    }
 }

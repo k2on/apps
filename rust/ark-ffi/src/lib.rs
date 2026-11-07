@@ -1,5 +1,6 @@
 //! A device's peer for an app written in another language (`docs/plan-v5.md`
-//! §1.16, N3): `ark-peer`'s app kit through UniFFI, every value as its JSON.
+//! §1.16, N3): `ark-peer`'s app kit through UniFFI, an input as its JSON and
+//! a view's row as its bytes.
 //!
 //! The kit is domain-agnostic: an app's own Rust crate links its domain in
 //! and opens a [`Peer`] over it ([`Peer::open`]; harken's is `harken/ffi`,
@@ -11,17 +12,18 @@
 //! rows). With no server (`connect` never called) it is a replica whose
 //! intents stay pending, kept on its disk until it has one.
 //! The typed Kotlin and Swift over these names is generated from the domain
-//! (`arkdb gen`), types only; a view whose row type has a twin is read
-//! typed instead, its rows UniFFI's records ([`typed`]).
+//! (`arkdb gen`), types only: what a view's rows are read as. A row crosses
+//! as its bytes in the value format (`ark::format`), never as JSON, and the
+//! generated code reads each as its type.
 //!
 //! **It drives itself.** A peer has a thread of its own that pumps its link
 //! whenever the connection rings or a dial is due, and keeps its views up:
 //! each [`ViewHandle`] gathers its patches ([`ViewTaken`]) until taken, and
 //! the app's [`Listener`] is told whenever anything moved — a frame came, a
 //! view was patched — on whatever thread moved it; the app then takes its
-//! views and asks `status` on its own. A view that could not be kept up is
-//! made again by itself, and says so as its patches: its rows removed and
-//! inserted.
+//! views and asks `status` on its own. A view is the peer's own, by its
+//! number: one that could not be kept up, or a login came, is made again by
+//! the peer, and says so as its patches: its rows removed and inserted.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -32,9 +34,6 @@ use ark_peer::link::Dial;
 use ark_peer::{Config, Files, Patch};
 
 uniffi::setup_scaffolding!();
-
-pub mod typed;
-pub use typed::{Op, RowId, Twin, Typed};
 
 /// Why something was not done, as a sentence: what a form shows.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
@@ -95,13 +94,22 @@ impl Login {
     }
 }
 
+/// One change to a view's rows; an insert's and an update's row is the
+/// next of the rows taken with it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum Op {
+    Insert { at: u64 },
+    Remove { at: u64 },
+    Update { at: u64 },
+}
+
 /// What a view did since it was last taken — its changes ([`Op`]), none
-/// when it did nothing — and the rows that came with them, each its JSON
-/// (§1.10): a typed view's `<T>Taken`, by name.
+/// when it did nothing — and the rows that came with them, each its bytes
+/// (§1.10).
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ViewTaken {
     pub ops: Vec<Op>,
-    pub rows: Vec<String>,
+    pub rows: Vec<Vec<u8>>,
 }
 
 /// What has become of the intent `id` (as [`Peer::mutate`] gave it):
@@ -234,11 +242,6 @@ impl Shared {
     }
 }
 
-/// A value's JSON, or what went wrong reading it (which a test sees).
-fn text(json: Result<String, String>) -> String {
-    json.unwrap_or_else(|why| format!("{{\"error\":{}}}", serde_json::Value::String(why)))
-}
-
 /// A device's peer: the app kit of `ark-peer` over a domain, on a disk.
 #[derive(uniffi::Object)]
 pub struct Peer {
@@ -295,19 +298,6 @@ impl Peer {
     /// sent: whether anything moved.
     pub fn pump(&self) -> bool {
         self.shared.pump()
-    }
-
-    /// A maintained view of `name` on its input's bytes, or its refusal.
-    pub(crate) fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
-        let view = self.shared.act(|s| {
-            let (view, made) = s.peer.view(&name, &args);
-            made.map(|_| view).inspect_err(|_| s.peer.unwatch(view))
-        })?;
-        Ok(Arc::new(ViewHandle {
-            shared: self.shared.clone(),
-            view,
-            name,
-        }))
     }
 }
 
@@ -408,17 +398,24 @@ impl Peer {
         Ok(s.peer.answer_json(&name, &answer)?)
     }
 
-    /// A maintained view of the function `name` on its input's JSON.
+    /// A maintained view of the function `name` on its input's JSON, or
+    /// its refusal.
     pub fn view(&self, name: String, input: String) -> Result<Arc<ViewHandle>, Refusal> {
-        let args = self.shared.lock().peer.input_json(&name, &input)?;
-        self.view_bytes(name, args)
+        let view = self.shared.act(|s| {
+            let input = s.peer.input_json(&name, &input)?;
+            let (view, made) = s.peer.view(&name, &input);
+            made.map(|_| view).inspect_err(|_| s.peer.unwatch(view))
+        })?;
+        let shared = self.shared.clone();
+        Ok(Arc::new(ViewHandle { shared, view }))
     }
 
-    /// The rows of the live space's `table` this device holds, as JSON.
-    pub fn live_rows(&self, table: String) -> Vec<String> {
+    /// The rows of the live space's `table` this device holds, each its
+    /// bytes.
+    pub fn live_rows(&self, table: String) -> Vec<Vec<u8>> {
         let s = self.shared.lock();
         let Some(live) = &s.peer.live else { return vec![] };
-        live.store.rows(&table).map(|r| text(s.peer.row_json(&table, r))).collect()
+        live.store.rows(&table).map(<[u8]>::to_vec).collect()
     }
 
     pub fn status(&self) -> Status {
@@ -491,38 +488,18 @@ impl Peer {
 pub struct ViewHandle {
     shared: Arc<Shared>,
     view: usize,
-    name: String,
 }
 
 #[uniffi::export]
 impl ViewHandle {
-    /// Its rows as they stand, each its JSON.
-    pub fn rows(&self) -> Vec<String> {
-        self.json(self.rows_bytes())
-    }
-
-    /// What it did since last taken, and the rows that came with it.
-    pub fn take(&self) -> ViewTaken {
-        let (ops, rows) = self.take_bytes();
-        ViewTaken { ops, rows: self.json(rows) }
-    }
-}
-
-impl ViewHandle {
-    /// Rows of this view, each its JSON.
-    fn json(&self, rows: Vec<Vec<u8>>) -> Vec<String> {
-        let s = self.shared.lock();
-        rows.iter().map(|r| text(s.peer.element_json(&self.name, r))).collect()
-    }
-
     /// Its rows as they stand, each its bytes.
-    pub(crate) fn rows_bytes(&self) -> Vec<Vec<u8>> {
+    pub fn rows(&self) -> Vec<Vec<u8>> {
         self.shared.lock().peer.rows(self.view).unwrap_or_default()
     }
 
     /// What it did since last taken, and the rows that came with it, each
     /// its bytes: each insert's and update's, in order.
-    pub(crate) fn take_bytes(&self) -> (Vec<Op>, Vec<Vec<u8>>) {
+    pub fn take(&self) -> ViewTaken {
         let (mut ops, mut rows) = (vec![], vec![]);
         for p in self.shared.lock().peer.update(self.view) {
             ops.push(match p {
@@ -537,7 +514,7 @@ impl ViewHandle {
                 }
             });
         }
-        (ops, rows)
+        ViewTaken { ops, rows }
     }
 }
 

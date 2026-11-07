@@ -1,18 +1,17 @@
 //! A domain's types and stubs in Kotlin and Swift (§1.16, N3): what an app
 //! over the bridge (`ark-ffi`) calls its domain with, **types only** — a
 //! data class or struct per record and row, a sealed class or enum per sum,
-//! each read from and written as the JSON the kernel's serde reads and
-//! writes (struct fields in declaration order, sums externally tagged), and
-//! a stub per function calling it by name: a mutator's `mutate` (giving
-//! its intent's id, or nothing on the live space), a view's handle typed.
-//! Nothing of a function's body is ever generated. What the generated code
-//! stands on — `Id`, `View` and JSON — is the bridge's own typed half,
-//! written once (`rust/ark-ffi/kotlin/Typed.kt`, `rust/ark-ffi/swift/Typed.swift`).
-//!
-//! A type UniFFI declares — a view's row with its twin (`#[ark(ffi_view)]`,
-//! `ark_ffi::typed`) — is not declared again: only its JSON is written, as
-//! extensions, and a view of its rows is read typed, through its view
-//! object (`<T>View`), with no JSON per row ([`Walked::typed`]).
+//! each read from its bytes in the value format (`ark::format`: fields in
+//! declaration order, a sum its variant's index), which is how a view's
+//! rows cross, and written as the JSON the kernel's serde writes, which is
+//! how an input crosses (and read from it, which is how an app's own JSON
+//! is read); and a stub per function calling it by name: a
+//! mutator's `mutate` (giving its intent's id, or nothing on the live
+//! space), a view's handle typed. Nothing of a function's body is ever
+//! generated. What the generated code stands on — `Id`, `View`, the
+//! value format's `Reader` and JSON — is the bridge's own typed
+//! half, written once (`rust/ark-ffi/kotlin/Typed.kt`,
+//! `rust/ark-ffi/swift/Typed.swift`).
 //!
 //! A domain is walked as it registers itself: its schema — every table a
 //! row type, named as the table — and every function's name, kind, space,
@@ -21,7 +20,7 @@
 pub mod kotlin;
 pub mod swift;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use ark::domain::{Domain, Function, Kind};
@@ -35,30 +34,6 @@ pub struct Walked {
     pub types: BTreeMap<String, Type>,
     pub fns: Vec<Stub>,
     pub live: Vec<(String, String)>,
-    /// The types UniFFI declares, and its Kotlin package.
-    pub typed: BTreeSet<String>,
-    pub typed_package: String,
-}
-
-impl Walked {
-    /// `names` declared by UniFFI in the Kotlin package `package`, each
-    /// that is a view's row with its view object.
-    pub fn typed(mut self, package: &str, names: &[&str]) -> Walked {
-        self.typed = names.iter().map(|n| n.to_string()).collect();
-        self.typed_package = package.into();
-        self
-    }
-
-    /// The typed row types some view reads.
-    fn typed_views(&self) -> BTreeSet<&str> {
-        self.fns
-            .iter()
-            .filter_map(|f| match (&f.kind, &f.output) {
-                (Kind::View, Some(Type::Record(n, _))) if self.typed.contains(n) => Some(n.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
 }
 
 /// One function, as a stub calls it: its name, the method's, its kind,
@@ -88,8 +63,8 @@ pub fn camel(s: &str, upper: bool) -> String {
 }
 
 /// What a stub is written from: its method `m`, parameter `p`, function
-/// `name`, input as JSON `arg`, answer's type `t` and the answer read `rd`,
-/// a typed view's row type `r`.
+/// `name`, input as JSON `arg`, answer's type `t` and a row read from `r`,
+/// `rd`.
 pub struct Hole<'a> {
     pub m: &'a str,
     pub p: &'a str,
@@ -97,7 +72,6 @@ pub struct Hole<'a> {
     pub arg: &'a str,
     pub t: &'a str,
     pub rd: &'a str,
-    pub r: &'a str,
 }
 
 /// What the two generators spell differently, as a table: the walk over
@@ -112,20 +86,19 @@ pub struct Lang {
     pub unit_value: &'static str,
     pub arrow: &'static str,
     /// A list of a type; an `Int` or a `Bool` as JSON; a named type read
-    /// off a tree; a record or sum as JSON; a stub's parameter of a type.
+    /// from a reader, and off a JSON tree; a record or sum as JSON; a
+    /// stub's parameter of a type.
     pub list: fn(&str) -> String,
     pub show: fn(&str) -> String,
     pub read: fn(&str, &str) -> String,
+    pub of: fn(&str, &str) -> String,
     pub write: fn(&str) -> String,
     pub param: fn(&str) -> String,
     /// The stubs, by kind (a mutator of the live space's `live`).
     pub mutator: fn(&Hole) -> String,
     pub live: fn(&Hole) -> String,
-    pub typed_view: fn(&Hole) -> String,
     pub view: fn(&Hole) -> String,
-    /// The adapter of a typed view of a row type; a live table's rows
-    /// (`table`, `row`, the method).
-    pub typed: fn(&str) -> String,
+    /// A live table's rows (`table`, `row`, the method).
     pub live_table: fn(&str, &str, &str) -> String,
 }
 
@@ -155,8 +128,26 @@ impl Lang {
         }
     }
 
-    /// An expression reading `e`, a JSON tree, as `t`.
-    pub fn rd(&self, t: &Type, e: &str, name: &dyn Fn(&str) -> String, d: usize) -> String {
+    /// An expression reading a `t` from `r`, a reader of the value format.
+    pub fn rd(&self, t: &Type, r: &str, name: &dyn Fn(&str) -> String, d: usize) -> String {
+        let a = self.arrow;
+        match t {
+            Type::Int => format!("{r}.int()"),
+            Type::Text => format!("{r}.text()"),
+            Type::Bytes => format!("{r}.hex()"),
+            Type::Bool => format!("{r}.bool()"),
+            Type::Unit => self.unit_value.into(),
+            Type::Id(_) => format!("{r}.id()"),
+            Type::Option(x) => format!("{r}.opt {{ r{d} {a} {} }}", self.rd(x, &format!("r{d}"), name, d + 1)),
+            Type::List(x) => format!("{r}.list {{ r{d} {a} {} }}", self.rd(x, &format!("r{d}"), name, d + 1)),
+            Type::Record(n, _) | Type::Sum(n, _) => (self.read)(&name(n), r),
+            Type::Tuple(_) => unreachable!("walked"),
+        }
+    }
+
+    /// An expression reading `e`, a JSON tree, as `t`: what the app's own
+    /// JSON (harken's listening session, its player's) is read with.
+    pub fn rj(&self, t: &Type, e: &str, name: &dyn Fn(&str) -> String, d: usize) -> String {
         let a = self.arrow;
         match t {
             Type::Int => format!("J.int({e})"),
@@ -164,9 +155,9 @@ impl Lang {
             Type::Bool => format!("J.bool({e})"),
             Type::Unit => self.unit_value.into(),
             Type::Id(_) => format!("Id(J.text({e}))"),
-            Type::Option(x) => format!("J.opt({e}) {{ v{d} {a} {} }}", self.rd(x, &format!("v{d}"), name, d + 1)),
-            Type::List(x) => format!("J.list({e}) {{ v{d} {a} {} }}", self.rd(x, &format!("v{d}"), name, d + 1)),
-            Type::Record(n, _) | Type::Sum(n, _) => (self.read)(&name(n), e),
+            Type::Option(x) => format!("J.opt({e}) {{ v{d} {a} {} }}", self.rj(x, &format!("v{d}"), name, d + 1)),
+            Type::List(x) => format!("J.list({e}) {{ v{d} {a} {} }}", self.rj(x, &format!("v{d}"), name, d + 1)),
+            Type::Record(n, _) | Type::Sum(n, _) => (self.of)(&name(n), e),
             Type::Tuple(_) => unreachable!("walked"),
         }
     }
@@ -187,11 +178,9 @@ impl Lang {
     }
 
     /// The domain's functions, each a stub calling it by name, then the
-    /// typed views' adapters and the live tables, after `out`; the class or
-    /// struct they are in closed.
+    /// live tables, after `out`; the class or struct they are in closed.
     pub fn stubs(&self, mut out: String, w: &Walked) -> String {
         let bare = |n: &str| n.to_string();
-        let views = w.typed_views();
         for f in &w.fns {
             let (p, arg) = match &f.input {
                 Type::Unit => (String::new(), "\"null\"".to_string()),
@@ -207,23 +196,18 @@ impl Lang {
                 arg: &arg,
                 t: "",
                 rd: "",
-                r: "",
             };
             let line = match (f.kind, &f.output) {
                 (Kind::Mutator, _) if f.space == Space::Volatile => (self.live)(&h),
                 (Kind::Mutator, _) => (self.mutator)(&h),
-                (Kind::View, Some(Type::Record(r, _))) if views.contains(r.as_str()) => (self.typed_view)(&Hole { r, ..h }),
                 (Kind::View, Some(o)) => (self.view)(&Hole {
                     t: &self.ty(o, &bare),
-                    rd: &self.rd(o, "j", &bare, 0),
+                    rd: &self.rd(o, "r", &bare, 0),
                     ..h
                 }),
                 _ => continue,
             };
             let _ = writeln!(out, "    {line}\n");
-        }
-        for r in &views {
-            let _ = writeln!(out, "    {}\n", (self.typed)(r));
         }
         for (table, row) in &w.live {
             let _ = writeln!(out, "    {}\n", (self.live_table)(table, row, &camel(&format!("live_{table}"), false)));
@@ -293,8 +277,6 @@ pub fn walk(name: &str, d: &Domain) -> Walked {
         types,
         fns: stubs,
         live,
-        typed: BTreeSet::new(),
-        typed_package: String::new(),
     }
 }
 

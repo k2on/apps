@@ -1,8 +1,9 @@
 // The typed half of the bridge (`docs/plan-v5.md` §1.16, N3), beside the
 // bindings UniFFI writes: what the Kotlin `arkdb gen` writes for a domain
-// stands on — a row id, a view's rows read as their type with what it did
-// (from their JSON, or a typed view's records as UniFFI hands them over),
-// and JSON as the kernel reads and writes it (Android's `org.json`).
+// stands on — a row id, a value read from its bytes in the kernel's format
+// (how a view's rows cross), a view's rows read as their type with what it
+// did, and JSON as the kernel reads and writes it (how an input crosses,
+// and the app's own JSON is read: Android's `org.json`).
 package dev.arkdb.ffi
 
 import org.json.JSONArray
@@ -17,47 +18,71 @@ value class Id(val hex: String) {
     }
 }
 
+private const val HEX = "0123456789abcdef"
+
+/**
+ * A value read from its bytes in the kernel's value format (`ark::format`, postcard): an integer
+ * zigzagged into a varint, text and bytes after their length, a list after its count, an option
+ * after a 0 or a 1, a sum's variant as its index, a record's fields in order.
+ */
+class Reader(private val b: ByteArray) {
+    private var at = 0
+
+    private fun byte(): Int = b[at++].toInt() and 0xff
+
+    private fun varint(): Long {
+        var v = 0L
+        var shift = 0
+        while (true) {
+            val x = byte()
+            v = v or ((x and 0x7f).toLong() shl shift)
+            if (x < 0x80) return v
+            shift += 7
+        }
+    }
+
+    private fun bytes(): ByteArray = varint().toInt().let { n -> b.copyOfRange(at, at + n).also { at += n } }
+
+    fun variant(): Int = varint().toInt()
+
+    fun int(): Long = varint().let { (it ushr 1) xor -(it and 1) }
+
+    fun bool(): Boolean = byte() != 0
+
+    fun text(): String = String(bytes(), Charsets.UTF_8)
+
+    fun hex(): String = buildString { for (x in bytes()) append(HEX[(x.toInt() shr 4) and 0xf]).append(HEX[x.toInt() and 0xf]) }
+
+    fun id(): Id = Id(hex())
+
+    fun <T> opt(f: (Reader) -> T): T? = if (byte() == 0) null else f(this)
+
+    fun <T> list(f: (Reader) -> T): List<T> = List(varint().toInt()) { f(this) }
+}
+
 /**
  * A view's rows read as `T`, and what it did since last taken (its [Op]s and the rows that came
- * with them): each row its JSON read by `read` over a [ViewHandle], or — a typed view — rows UniFFI
- * hands over as they are ([typed]). A view made again says so as its changes: its rows removed
- * and inserted.
+ * with them): each row its bytes read by `read`. A view made again says so as its changes: its
+ * rows removed and inserted.
  */
-class View<T> private constructor(
-    private val rowsOf: () -> List<T>,
-    private val takeOf: () -> Update<T>,
-    private val closeOf: () -> Unit,
-) : AutoCloseable {
-    constructor(handle: ViewHandle, read: (Any?) -> T) : this(
-        { handle.rows().map { read(J.parse(it)) } },
-        { handle.take().let { t -> taken(t.ops, t.rows.map { read(J.parse(it)) }) } },
-        handle::close,
-    )
+class View<T>(private val handle: ViewHandle, private val read: (Reader) -> T) : AutoCloseable {
+    fun rows(): List<T> = handle.rows().map { read(Reader(it)) }
 
-    fun rows(): List<T> = rowsOf()
-
-    fun take(): Update<T> = takeOf()
-
-    override fun close() = closeOf()
-
-    companion object {
-        /** A domain's typed view object (`<T>View`): its rows, and what it did with the rows that came with it. */
-        fun <T> typed(rows: () -> List<T>, take: () -> Pair<List<Op>, List<T>>, close: () -> Unit): View<T> =
-            View(rows, { take().let { (ops, came) -> taken(ops, came) } }, close)
-
-        /** What a view did, `came` the rows that came with it: each insert's and update's. */
-        private fun <T> taken(ops: List<Op>, came: List<T>): Update<T> =
-            if (ops.isEmpty()) Update.Unchanged
-            else came.iterator().let { r ->
-                Update.Patched(ops.map { o ->
+    fun take(): Update<T> =
+        handle.take().let { t ->
+            if (t.ops.isEmpty()) Update.Unchanged
+            else t.rows.iterator().let { r ->
+                Update.Patched(t.ops.map { o ->
                     when (o) {
-                        is Op.Insert -> Change.Insert(o.at.toInt(), r.next())
+                        is Op.Insert -> Change.Insert(o.at.toInt(), read(Reader(r.next())))
                         is Op.Remove -> Change.Remove(o.at.toInt())
-                        is Op.Update -> Change.Update(o.at.toInt(), r.next())
+                        is Op.Update -> Change.Update(o.at.toInt(), read(Reader(r.next())))
                     }
                 })
             }
-    }
+        }
+
+    override fun close() = handle.close()
 }
 
 sealed class Update<out T> {

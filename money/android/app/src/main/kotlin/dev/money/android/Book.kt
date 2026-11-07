@@ -78,17 +78,17 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.money_domain.AccountLine
-import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
-import uniffi.money_domain.BankLine
-import uniffi.money_domain.BudgetLine
-import uniffi.money_domain.GroupLine
-import uniffi.money_domain.LinkedLine
-import uniffi.money_domain.PayeeLine
-import uniffi.money_domain.SpendingLine
-import uniffi.money_domain.Summary
-import uniffi.money_domain.TxnLine
+import dev.money.android.gen.AccountLine
+import dev.money.android.gen.AskLine
+import dev.money.android.gen.AskState
+import dev.money.android.gen.BankLine
+import dev.money.android.gen.BudgetLine
+import dev.money.android.gen.GroupLine
+import dev.money.android.gen.LinkedLine
+import dev.money.android.gen.PayeeLine
+import dev.money.android.gen.SpendingLine
+import dev.money.android.gen.Summary
+import dev.money.android.gen.TxnLine
 
 /** The link to the server, in what a screen says of it. */
 data class Link(

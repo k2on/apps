@@ -78,7 +78,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
-import uniffi.money_domain.TxnLine
+import dev.money.android.gen.TxnLine
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector) {
@@ -238,7 +238,7 @@ fun formOf(t: TxnLine, l: Ledger): TxnForm =
         transferTo = if (t.transfer) l.accounts.firstOrNull { "Transfer : ${it.name}" == t.payee }?.id else null,
         memo = t.memo,
         amount = t.amount,
-        cleared = t.cleared != uniffi.money_domain.Cleared.UNCLEARED,
+        cleared = t.cleared != dev.money.android.gen.Cleared.Uncleared,
         by = t.userId,
         bankSaid = bankSaid(t),
         receipt = t.receipt,

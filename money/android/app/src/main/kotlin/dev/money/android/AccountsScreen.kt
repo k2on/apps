@@ -66,7 +66,7 @@ import dev.arkui.SectionHeader
 import dev.arkui.Space
 import dev.arkui.Stat
 import org.json.JSONObject
-import uniffi.money_domain.AccountLine
+import dev.money.android.gen.AccountLine
 
 @Composable
 fun AccountsScreen(ledger: Ledger) {

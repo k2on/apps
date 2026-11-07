@@ -2,7 +2,8 @@
 //! up and an account opened by name, seen in a typed view, and a refusal
 //! said as a value.
 
-use money_domain::AccountLineView;
+use ark::format::Encode;
+use money_domain::AccountLine;
 use money_ffi::{money_domain, money_open, money_send, Sent};
 
 /// Falsified by `config` registering the module alone (no domain): there
@@ -13,7 +14,7 @@ fn money_opens_and_is_called_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let p = money_open(dir.path().to_str().unwrap().into(), None).unwrap();
     p.mutate("budget.setup".into(), "null".into()).unwrap();
-    let accounts = AccountLineView::new(p.clone(), "accounts.accounts".into(), "null".into()).unwrap();
+    let accounts = p.view("accounts.accounts".into(), "null".into()).unwrap();
     assert!(accounts.rows().is_empty());
     let open = r#"{"name":"Checking","kind":"checking","on_budget":true,"balance":120000,"date":"2026-10-01"}"#;
     let Sent::Intent { id } = money_send(p.clone(), "accounts.open_account".into(), open.into()) else {
@@ -24,7 +25,8 @@ fn money_opens_and_is_called_by_name() {
     let t = accounts.take();
     assert!(!t.ops.is_empty(), "{t:?}");
     assert_eq!(t.rows.len(), 1);
-    assert_eq!((t.rows[0].name.as_str(), t.rows[0].balance), ("Checking", 120_000));
+    let opened = AccountLine::from_bytes(&t.rows[0]).unwrap();
+    assert_eq!((opened.name.as_str(), opened.balance), ("Checking", 120_000));
 
     let nameless = r#"{"name":" ","kind":"checking","on_budget":true,"balance":0,"date":"2026-10-01"}"#;
     assert_eq!(

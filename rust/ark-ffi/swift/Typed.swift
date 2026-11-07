@@ -1,8 +1,9 @@
 // The typed half of the bridge (`docs/plan-v5.md` §1.16, N3), beside the
 // bindings UniFFI writes: what the Swift `arkdb gen` writes for a domain
-// stands on — a row id, a view's rows read as their type with what it did
-// (from their JSON, or a typed view's records as UniFFI hands them over),
-// and JSON as the kernel reads and writes it.
+// stands on — a row id, a value read from its bytes in the kernel's format
+// (how a view's rows cross), a view's rows read as their type with what it
+// did, and JSON as the kernel reads and writes it (how an input crosses,
+// and the app's own JSON is read).
 import Foundation
 
 /// A row id: its sixteen bytes in hex.
@@ -12,50 +13,68 @@ public struct Id: Hashable {
     public static let none = Id(String(repeating: "0", count: 32))
 }
 
+/// A value read from its bytes in the kernel's value format (`ark::format`,
+/// postcard): an integer zigzagged into a varint, text and bytes after their
+/// length, a list after its count, an option after a 0 or a 1, a sum's
+/// variant as its index, a record's fields in order.
+public final class Reader {
+    private let b: Data
+    private var at: Int
+
+    public init(_ b: Data) { self.b = b; at = b.startIndex }
+
+    private func byte() -> UInt8 { defer { at += 1 }; return b[at] }
+
+    private func varint() -> UInt64 {
+        var v: UInt64 = 0
+        var shift: UInt64 = 0
+        while true {
+            let x = byte()
+            v |= UInt64(x & 0x7f) << shift
+            if x < 0x80 { return v }
+            shift += 7
+        }
+    }
+
+    private func bytes() -> Data {
+        let n = Int(varint())
+        defer { at += n }
+        return b[at..<at + n]
+    }
+
+    public func variant() -> Int { Int(varint()) }
+    public func int() -> Int64 { let v = varint(); return Int64(bitPattern: v >> 1) ^ -Int64(bitPattern: v & 1) }
+    public func bool() -> Bool { byte() != 0 }
+    public func text() -> String { String(decoding: bytes(), as: UTF8.self) }
+    public func hex() -> String { bytes().map { String(format: "%02x", $0) }.joined() }
+    public func id() -> Id { Id(hex()) }
+    public func opt<T>(_ f: (Reader) -> T) -> T? { byte() == 0 ? nil : f(self) }
+    public func list<T>(_ f: (Reader) -> T) -> [T] { (0..<Int(varint())).map { _ in f(self) } }
+}
+
 /// A view's rows read as `T`, and what it did since last taken (its `Op`s
-/// and the rows that came with them): each row its JSON read by `read` over
-/// a `ViewHandle`, or — a typed view — rows UniFFI hands over as they are
-/// (`typed`). A view made again says so as its changes: its rows removed
-/// and inserted.
+/// and the rows that came with them): each row its bytes read by `read`. A
+/// view made again says so as its changes: its rows removed and inserted.
 public final class LiveView<T> {
-    let rowsOf: () -> [T]
-    let takeOf: () -> Update<T>
+    let handle: ViewHandle
+    let read: (Reader) -> T
 
-    init(rows: @escaping () -> [T], take: @escaping () -> Update<T>) { rowsOf = rows; takeOf = take }
+    public init(_ handle: ViewHandle, _ read: @escaping (Reader) -> T) { self.handle = handle; self.read = read }
 
-    public convenience init(_ handle: ViewHandle, _ read: @escaping (Any?) -> T) {
-        self.init(rows: { handle.rows().map { read(J.parse($0)) } }, take: {
-            let t = handle.take()
-            return LiveView.taken(t.ops, t.rows.map { read(J.parse($0)) })
-        })
-    }
+    public func rows() -> [T] { handle.rows().map { read(Reader($0)) } }
 
-    /// A domain's typed view object (`<T>View`): its rows, and what it did
-    /// with the rows that came with it.
-    public static func typed(rows: @escaping () -> [T], take: @escaping () -> ([Op], [T])) -> LiveView<T> {
-        LiveView(rows: rows, take: {
-            let (ops, came) = take()
-            return taken(ops, came)
-        })
-    }
-
-    /// What a view did, `came` the rows that came with it: each insert's
-    /// and update's.
-    static func taken(_ ops: [Op], _ came: [T]) -> Update<T> {
-        if ops.isEmpty { return .unchanged }
-        var r = came.makeIterator()
-        return .patched(ops.map { o -> Change<T> in
+    public func take() -> Update<T> {
+        let t = handle.take()
+        if t.ops.isEmpty { return .unchanged }
+        var r = t.rows.makeIterator()
+        return .patched(t.ops.map { o -> Change<T> in
             switch o {
-            case let .insert(at): return .insert(at: Int(at), row: r.next()!)
+            case let .insert(at): return .insert(at: Int(at), row: read(Reader(r.next()!)))
             case let .remove(at): return .remove(at: Int(at))
-            case let .update(at): return .update(at: Int(at), row: r.next()!)
+            case let .update(at): return .update(at: Int(at), row: read(Reader(r.next()!)))
             }
         })
     }
-
-    public func rows() -> [T] { rowsOf() }
-
-    public func take() -> Update<T> { takeOf() }
 }
 
 public enum Update<T> {

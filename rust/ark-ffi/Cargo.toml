@@ -3,13 +3,12 @@ name = "ark-ffi"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "ArkDB's peer for an app in another language (docs/plan-v5.md §1.16, N3): ark-peer's app kit through UniFFI, values as JSON. A domain is linked in by the app's own crate (harken/ffi)."
+description = "ArkDB's peer for an app in another language (docs/plan-v5.md §1.16, N3): ark-peer's app kit through UniFFI, inputs as JSON and rows as their bytes. A domain is linked in by the app's own crate (harken/ffi)."
 
 [dependencies]
 ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer", default-features = false }
 ark-auth = { path = "../ark-auth", default-features = false }
-serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
@@ -28,6 +27,7 @@ path = "src/bin/uniffi-bindgen.rs"
 required-features = ["bindgen"]
 
 [dev-dependencies]
+serde_json = { workspace = true }
 arkdb = { path = "../arkdb" }
 tempfile = "3"
 serde = { workspace = true }

@@ -78,7 +78,7 @@ import dev.arkui.Space
 import dev.arkui.Stat
 import dev.arkui.Tone
 import dev.arkui.toneColors
-import uniffi.money_domain.BudgetLine
+import dev.money.android.gen.BudgetLine
 
 /** Which page of the sheet is showing. */
 private enum class Leaf {

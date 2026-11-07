@@ -49,7 +49,7 @@ import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
 import dev.arkui.Space
 import dev.arkui.SwipeToAct
-import uniffi.money_domain.TxnLine
+import dev.money.android.gen.TxnLine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -362,21 +362,6 @@ impl Core {
         d.answer_json(&f.name, bytes)
     }
 
-    /// One row of a view of `name`, as JSON.
-    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, f) = self.found(name)?;
-        d.element_json(&f.name, bytes)
-    }
-
-    /// A row of a table of either space, as JSON.
-    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
-        let d = self
-            .domains()
-            .find(|d| d.schema.table(table).is_some())
-            .ok_or_else(|| format!("no table {table}"))?;
-        d.row_json(table, bytes)
-    }
-
     /// A view's answer over the optimistic state, as this login reads it.
     pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
         let bytes = self.ask(name, &input.to_bytes())?;

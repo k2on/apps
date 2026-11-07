@@ -2212,12 +2212,10 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
- "ark-ffi",
  "ark-peer",
  "arkdb",
  "serde",
  "serde_json",
- "uniffi",
 ]
 
 [[package]]
@@ -3528,11 +3526,9 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
- "ark-ffi",
  "ark-peer",
  "serde",
  "serde_json",
- "uniffi",
 ]
 
 [[package]]

@@ -1225,7 +1225,6 @@
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
                   grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/dev/money/ffi/money_ffi.kt"
-                  grep -q "class TxnLineView" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
                   grep -q "func moneyDemo" "$TMPDIR/money/swift/money_ffi.swift"
                 '';
                 # The bindings it wrote: harken's, which the iOS type-check

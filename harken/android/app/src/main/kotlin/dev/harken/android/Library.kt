@@ -36,7 +36,7 @@ import dev.harken.android.gen.RecordingsEntry
 import dev.harken.android.gen.WorkInput
 import dev.harken.android.gen.WorkSummary
 import dev.harken.android.gen.Works
-import uniffi.harken_domain.Playlist
+import dev.harken.android.gen.Playlist
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap

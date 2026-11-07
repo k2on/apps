@@ -48,9 +48,9 @@ let lines = try m.month(Month(month: "2026-10"))       // LiveView<BudgetLine>
 try m.assign(Assign(month: "2026-10", categoryId: id, amount: 25_000))   // its intent's id
 ```
 
-**Views are typed and kept.** The views a budget is drawn from hand over
-UniFFI's own records (`uniffi.money_domain` on Android; the same module
-on iOS), no JSON per row: `accounts` (`AccountLine`), `groups`
+**Views are typed and kept.** A view's rows cross as their bytes in the
+value format, which the generated types read (`read`, `init(_ r:
+Reader)`), no JSON per row: `accounts` (`AccountLine`), `groups`
 (`GroupLine`), `month` (`BudgetLine`), `summary` (`Summary`, one row),
 `spending` (`SpendingLine`), `register` and `inbox` (`TxnLine`),
 `payees` (`PayeeLine`), `banks` (`BankLine`), `linked` (`LinkedLine`, each of a

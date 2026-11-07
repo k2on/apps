@@ -17,31 +17,11 @@ fn held(path: &str, now: String) {
     assert!(was == now, "{path} is not what the domain generates now; ARK_WRITE_GEN=1 writes it");
 }
 
-/// The view rows the domain hands UniFFI (`#[ark(ffi_view)]`), and what
-/// they hold (`#[ark(ffi)]`): of these the generator writes only their
-/// JSON, and their views are read typed.
-const TYPED: &[&str] = &[
-    "AccountLine",
-    "AskLine",
-    "AskState",
-    "BankLine",
-    "BudgetLine",
-    "Cleared",
-    "GroupLine",
-    "LinkedLine",
-    "PayeeLine",
-    "SpendingLine",
-    "Summary",
-    "TxnLine",
-];
-
 /// Falsified by a field added to `AddTransaction` (`note: String`): both
-/// files differed from what was generated; and by `TxnLine` left out of
-/// `TYPED`: the Swift declared `TxnLine` again and read the register as
-/// JSON.
+/// files differed from what was generated.
 #[test]
 fn the_phones_types_are_the_domains() {
-    let w = walk("money", &money_domain::domain()).typed("uniffi.money_domain", TYPED);
+    let w = walk("money", &money_domain::domain());
     held(KOTLIN, kotlin::write(&w, "dev.money.android.gen"));
     held(SWIFT, swift::write(&w));
 }

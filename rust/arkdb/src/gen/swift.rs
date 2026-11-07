@@ -1,8 +1,7 @@
 //! A domain in Swift: a struct per record and row, an enum per sum, each
-//! read from the JSON tree `JSONSerialization` parses (`init(json:)`) and
-//! written as the kernel's JSON (`json`); the stubs over the bridge's
-//! module (`ark_ffi`). Of a type UniFFI declares, its JSON as an extension,
-//! and its views typed.
+//! read from its bytes in the value format (`init(_ r: Reader)`) or off the
+//! JSON tree `JSONSerialization` parses (`init(json:)`), and written as the
+//! kernel's JSON (`json`); the stubs over the bridge's module (`ark_ffi`).
 
 use std::fmt::Write;
 
@@ -20,7 +19,8 @@ const LANG: Lang = Lang {
     arrow: "in",
     list: |t| format!("[{t}]"),
     show: |e| format!("String({e})"),
-    read: |n, e| format!("{n}(json: {e})"),
+    read: |n, r| format!("{n}({r})"),
+    of: |n, e| format!("{n}(json: {e})"),
     write: |e| format!("{e}.json"),
     param: |t| format!("_ input: {t}"),
     mutator: |Hole { m, p, name, arg, .. }| {
@@ -29,15 +29,11 @@ const LANG: Lang = Lang {
     live: |Hole { m, p, name, arg, .. }| {
         format!("/// `{name}`, on the live space.\n    public func {m}({p}) throws {{ _ = try peer.mutate(name: \"{name}\", input: {arg}) }}")
     },
-    typed_view: |Hole { m, p, name, arg, r, .. }| {
-        format!("/// `{name}`, kept, its rows UniFFI's.\n    public func {m}({p}) throws -> LiveView<{r}> {{ typed(try {r}View(peer: peer, name: \"{name}\", input: {arg})) }}")
-    },
     view: |Hole { m, p, name, arg, t, rd, .. }| {
-        format!("/// `{name}`, kept.\n    public func {m}({p}) throws -> LiveView<{t}> {{ LiveView(try peer.view(name: \"{name}\", input: {arg})) {{ j in {rd} }} }}")
+        format!("/// `{name}`, kept.\n    public func {m}({p}) throws -> LiveView<{t}> {{ LiveView(try peer.view(name: \"{name}\", input: {arg})) {{ r in {rd} }} }}")
     },
-    typed: |r| format!("private func typed(_ v: {r}View) -> LiveView<{r}> {{ LiveView.typed(rows: v.rows, take: {{ let t = v.take(); return (t.ops, t.rows) }}) }}"),
     live_table: |table, row, m| {
-        format!("/// The live table `{table}`, as this device holds it.\n    public func {m}() -> [{row}] {{ peer.liveRows(table: \"{table}\").map {{ {row}(json: J.parse($0)) }} }}")
+        format!("/// The live table `{table}`, as this device holds it.\n    public func {m}() -> [{row}] {{ peer.liveRows(table: \"{table}\").map {{ {row}(Reader($0)) }} }}")
     },
 };
 
@@ -45,8 +41,8 @@ fn ty(t: &Type) -> String {
     LANG.ty(t, &|n| n.to_string())
 }
 
-fn rd(t: &Type, e: &str, d: usize) -> String {
-    LANG.rd(t, e, &|n| n.to_string(), d)
+fn rd(t: &Type) -> String {
+    LANG.rd(t, "r", &|n| n.to_string(), 0)
 }
 
 /// The JSON object of `fields`, each its variable.
@@ -58,52 +54,47 @@ fn object(fields: &[(String, Type)]) -> String {
     format!("J.obj([{}])", parts.join(", "))
 }
 
-fn labelled(fields: &[(String, Type)], o: &str) -> String {
-    let arg = |(n, t): &(String, Type)| format!("{}: {}", LANG.ident(n), rd(t, &format!("{o}[\"{n}\"]"), 0));
+/// Each field read from `r`, in order, by its label.
+fn labelled(fields: &[(String, Type)]) -> String {
+    let arg = |(n, t): &(String, Type)| format!("{}: {}", LANG.ident(n), rd(t));
     fields.iter().map(arg).collect::<Vec<_>>().join(", ")
 }
 
-/// A type's opening: its declaration, or — for one UniFFI declares — an
-/// extension of it with its JSON, for the functions called by name.
-fn opening(out: &mut String, what: &str, n: &str, decl: &str, typed: bool) {
-    match typed {
-        true => drop(writeln!(
-            out,
-            "\n/// The {what} `{n}` (UniFFI's): its JSON, for the functions called by name.\nextension {n} {{"
-        )),
-        false => drop(writeln!(out, "\n/// The {what} `{n}`.\n{decl} {{")),
-    }
+/// Each field read off the JSON object `o`, by its label.
+fn json_labelled(fields: &[(String, Type)], o: &str) -> String {
+    let rj = |t: &Type, e: &str| LANG.rj(t, e, &|n| n.to_string(), 0);
+    let arg = |(n, t): &(String, Type)| format!("{}: {}", LANG.ident(n), rj(t, &format!("{o}[\"{n}\"]")));
+    fields.iter().map(arg).collect::<Vec<_>>().join(", ")
 }
 
-fn record(out: &mut String, n: &str, fields: &[(String, Type)], typed: bool) {
-    opening(out, "record", n, &format!("public struct {n}: Equatable"), typed);
-    if !typed {
-        for (f, t) in fields {
-            let _ = writeln!(out, "    public var {}: {}", LANG.ident(f), ty(t));
-        }
-        // Trailing optional fields default to nil, as a missing one reads
-        // (`super::optional_from`).
-        let from = super::optional_from(fields);
-        let ps: Vec<String> = fields
-            .iter()
-            .enumerate()
-            .map(|(i, (f, t))| format!("{}: {}{}", LANG.ident(f), ty(t), if i >= from { " = nil" } else { "" }))
-            .collect();
-        let sets: String = fields.iter().map(|(f, _)| format!(" self.{0} = {0};", LANG.ident(f))).collect();
-        let _ = writeln!(out, "\n    public init({}) {{{sets} }}\n", ps.join(", "));
+fn record(out: &mut String, n: &str, fields: &[(String, Type)]) {
+    let _ = writeln!(out, "\n/// The record `{n}`.\npublic struct {n}: Hashable {{");
+    for (f, t) in fields {
+        let _ = writeln!(out, "    public var {}: {}", LANG.ident(f), ty(t));
     }
+    // Trailing optional fields default to nil, as a missing one reads
+    // (`super::optional_from`).
+    let from = super::optional_from(fields);
+    let ps: Vec<String> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, (f, t))| format!("{}: {}{}", LANG.ident(f), ty(t), if i >= from { " = nil" } else { "" }))
+        .collect();
+    let sets: String = fields.iter().map(|(f, _)| format!(" self.{0} = {0};", LANG.ident(f))).collect();
+    let _ = writeln!(out, "\n    public init({}) {{{sets} }}\n", ps.join(", "));
+    let _ = writeln!(out, "    public init(_ r: Reader) {{ self.init({}) }}\n", labelled(fields));
     let _ = writeln!(
         out,
         "    public init(json j: Any?) {{\n        let o = j as! [String: Any]\n        self.init({})\n    }}\n",
-        labelled(fields, "o")
+        json_labelled(fields, "o")
     );
     let _ = writeln!(out, "    public var json: String {{ {} }}\n}}", object(fields));
 }
 
-fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], typed: bool) {
-    opening(out, "sum", n, &format!("public indirect enum {n}: Equatable"), typed);
+fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)]) {
+    let _ = writeln!(out, "\n/// The sum `{n}`.\npublic indirect enum {n}: Hashable {{");
     let case = |v: &str| LANG.ident(&camel(v, false));
-    for (v, fs) in variants.iter().filter(|_| !typed) {
+    for (v, fs) in variants {
         let ps: Vec<String> = fs.iter().map(|(f, t)| format!("{}: {}", LANG.ident(f), ty(t))).collect();
         let _ = writeln!(
             out,
@@ -112,16 +103,20 @@ fn sum(out: &mut String, n: &str, variants: &[(String, Vec<(String, Type)>)], ty
             if fs.is_empty() { String::new() } else { format!("({})", ps.join(", ")) }
         );
     }
+    let _ = writeln!(out, "\n    public init(_ r: Reader) {{\n        switch r.variant() {{");
+    for (i, (v, fs)) in variants.iter().enumerate() {
+        let made = if fs.is_empty() { String::new() } else { format!("({})", labelled(fs)) };
+        let _ = writeln!(out, "        case {i}: self = .{}{made}", case(v));
+    }
     let _ = writeln!(
         out,
-        "{}    public init(json j: Any?) {{\n        let (t, o) = J.sum(j)\n        switch t {{",
-        if typed { "" } else { "\n" }
+        "        case let v: fatalError(\"{n}: no variant \\(v)\")\n        }}\n    }}\n\n    public init(json j: Any?) {{\n        let (t, o) = J.sum(j)\n        switch t {{"
     );
     for (v, fs) in variants {
         let made = if fs.is_empty() {
             String::new()
         } else {
-            format!("({})", labelled(fs, "o!"))
+            format!("({})", json_labelled(fs, "o!"))
         };
         let _ = writeln!(out, "        case \"{v}\": self = .{}{made}", case(v));
     }
@@ -152,8 +147,8 @@ pub fn write(w: &Walked) -> String {
     let mut out = format!("// Generated by `arkdb gen swift` from the domain {}: its types and its functions by name, over\n// the bridge (ark_ffi). Never edit; regenerate.\nimport Foundation\n", w.name);
     for (n, t) in &w.types {
         match t {
-            Type::Record(_, fs) => record(&mut out, n, fs, w.typed.contains(n)),
-            Type::Sum(_, vs) => sum(&mut out, n, vs, w.typed.contains(n)),
+            Type::Record(_, fs) => record(&mut out, n, fs),
+            Type::Sum(_, vs) => sum(&mut out, n, vs),
             _ => unreachable!("named"),
         }
     }

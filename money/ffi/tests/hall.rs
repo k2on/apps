@@ -3,7 +3,8 @@
 //! bank import from anybody but the importer is refused, and the
 //! importer's is the server's.
 
-use money_domain::{AccountLineView, TxnLineView};
+use ark::format::Encode;
+use money_domain::{AccountLine, TxnLine};
 use money_ffi::Hall;
 
 fn dir() -> tempfile::TempDir {
@@ -12,6 +13,11 @@ fn dir() -> tempfile::TempDir {
 
 /// Falsified by the hall's token dropping its roles: the importer's
 /// import was rejected as the household's was.
+/// A view's rows, each read as `T` from its bytes.
+fn read<T: Encode>(rows: Vec<Vec<u8>>) -> Vec<T> {
+    rows.iter().map(|r| T::from_bytes(r).unwrap()).collect()
+}
+
 #[test]
 fn a_household_shares_one_budget() {
     let (a, b, c) = (dir(), dir(), dir());
@@ -23,13 +29,11 @@ fn a_household_shares_one_budget() {
     let open = r#"{"name":"Checking","kind":"checking","on_budget":true,"balance":50000,"date":"2026-10-01"}"#;
     alex.mutate("accounts.open_account".into(), open.into()).unwrap();
     hall.carry();
-    let accounts = AccountLineView::new(sam.clone(), "accounts.accounts".into(), "null".into())
-        .unwrap()
-        .rows();
+    let accounts: Vec<AccountLine> = read(sam.view("accounts.accounts".into(), "null".into()).unwrap().rows());
     assert_eq!(accounts.len(), 1, "sam sees alex's account");
     let checking = accounts[0].id;
 
-    let register = TxnLineView::new(alex.clone(), "transactions.register".into(), r#"{"account_id":null}"#.into()).unwrap();
+    let register = alex.view("transactions.register".into(), r#"{"account_id":null}"#.into()).unwrap();
     let before = register.rows().len();
     let coffee = format!(
         r#"{{"account_id":"{}","date":"2026-10-02","payee":"Blue Bottle","category_id":null,"memo":"","amount":-650,"cleared":false,"transfer_to":null}}"#,
@@ -38,7 +42,7 @@ fn a_household_shares_one_budget() {
     let id = sam.mutate("transactions.add_transaction".into(), coffee).unwrap();
     hall.carry();
     assert!(sam.outcome(id).is_some_and(|o| !o.pending && o.refused.is_none()));
-    let rows = register.rows();
+    let rows: Vec<TxnLine> = read(register.rows());
     assert_eq!(rows.len(), before + 1);
     assert!(rows.iter().any(|t| t.payee == "Blue Bottle" && t.user_id == "sam"));
 

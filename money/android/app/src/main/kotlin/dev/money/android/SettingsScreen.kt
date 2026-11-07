@@ -84,10 +84,10 @@ import dev.arkui.Space
 import dev.arkui.Tone
 import dev.arkui.toneColors
 import kotlinx.coroutines.delay
-import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
-import uniffi.money_domain.BankLine
-import uniffi.money_domain.LinkedLine
+import dev.money.android.gen.AskLine
+import dev.money.android.gen.AskState
+import dev.money.android.gen.BankLine
+import dev.money.android.gen.LinkedLine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -213,8 +213,8 @@ private fun rememberNow(ticking: Boolean): Long {
 private fun AskCard(a: AskLine, now: Long, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val tone =
         when (a.state) {
-            AskState.FAILED, AskState.EXPIRED -> Tone.Negative
-            AskState.DONE -> Tone.Positive
+            AskState.Failed, AskState.Expired -> Tone.Negative
+            AskState.Done -> Tone.Positive
             else -> Tone.Neutral
         }
     val (container, on) = toneColors(tone)
@@ -227,12 +227,12 @@ private fun AskCard(a: AskLine, now: Long, onOpen: () -> Unit, onDismiss: () -> 
             if (isOpen(a)) {
                 CircularProgressIndicator(Modifier.size(24.dp), color = on, strokeWidth = 3.dp)
             } else {
-                Icon(if (a.state == AskState.DONE) Glyphs.Done else Glyphs.Link, contentDescription = null)
+                Icon(if (a.state == AskState.Done) Glyphs.Done else Glyphs.Link, contentDescription = null)
             }
             Spacer(Modifier.width(Space.l))
             Column(Modifier.weight(1f)) {
                 Text(askSays(a, now), style = MaterialTheme.typography.bodyMedium)
-                if (a.state == AskState.WAITING && a.url.isNotEmpty()) {
+                if (a.state == AskState.Waiting && a.url.isNotEmpty()) {
                     TextButton(onClick = onOpen, colors = ButtonDefaults.textButtonColors(contentColor = on)) {
                         Text("Open Plaid's page")
                     }

@@ -7,7 +7,7 @@
 package dev.harken.android
 
 import dev.arkdb.ffi.Id
-import uniffi.harken_domain.Playlist
+import dev.harken.android.gen.Playlist
 
 object Demo {
     private class Row(

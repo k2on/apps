@@ -1056,6 +1056,41 @@ own `Hashable` redundant). Not verified: an APK, a phone, an iPhone; a
 typed sum in Kotlin (UniFFI writes an all-unit enum as an `enum class`,
 which the extension's `is` would not match; harken has none).
 
+### Landed: one path to the phones
+
+The twins are gone: **every view's rows cross as their bytes in the
+value format**, and `arkdb gen` writes, beside each type's JSON, a reader
+of those bytes (`read(r: Reader)` in Kotlin, `init(_ r: Reader)` in Swift;
+the runtime is `Reader` in `Typed.kt` and `Typed.swift`, a varint, a
+zigzag, a length and a tag). `ViewHandle::rows` and `take` hand over
+`Vec<Vec<u8>>`, and `live_rows` too; inputs stay JSON, and so does the
+JSON an app reads of its own (harken's listening session and player),
+which is why the generated types keep their JSON readers. So
+`#[ark(ffi_view)]`/`#[ark(ffi)]`, `ark-macros/src/ffi.rs`,
+`ark-ffi/src/typed.rs` (`Twin`, `RowId`, `Typed<T>`, `view_typed`), the
+domains' `ffi` feature and UniFFI scaffolding, the generator's pin
+(`Walked::typed`) and UniFFI's per-domain bindings all go, and every view
+of both apps is read typed, not only the fourteen that had twins. A sum
+with a variant named as itself (money's `Cleared`) is qualified inside
+its sealed class in Kotlin. Swift's generated types are `Hashable`, as
+the twins were. The bridge also stopped keeping views of its own: a
+`ViewHandle` is the peer's view number (ark-peer keeps every view for
+whoever is signed in and makes it again for each login).
+
+*Measured* (src): `ark-ffi` 462 → 359, `ark-macros` 701 → 551, `arkdb`
+2,300 → 2,232, the domains −18. Hand-written `Typed.kt` 92 → 106,
+`Typed.swift` 89 → 106. Generated, committed: `Harken.kt` 1,176 → 1,340,
+`Harken.swift` 1,687 → 1,863, `Money.kt` 1,098 → 1,291, `Money.swift`
+1,582 → 1,862; UniFFI's `harken_domain` and `money_domain` bindings no
+longer exist. Verified here: both iOS apps' type-check and their tests run
+on Linux against the host libraries (`typecheck.sh` with `*_FFI_LIB`,
+nixpkgs' Swift 5.8; one harken test, a transcript's JSON with no `voice`,
+crashes `J.text` as it did before this change, and was run with the
+field given); the generated Kotlin, `Typed.kt`, money's `Banks.kt` and
+harken's Android-free files compiled by Kotlin 2.0.21 against stand-ins
+for the bridge and `org.json`. Not verified: an APK (no Android SDK here),
+the Compose screens, a phone.
+
 ### Landed: T2, one client runtime
 
 Five items, each its own commit (`cb0b747`…`1f3cf4e`). **One player**: the desktop

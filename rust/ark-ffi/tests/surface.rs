@@ -7,9 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ark::format::Encode;
 use ark_ffi::{Listener, Login, Op, Peer, Refusal};
 use ark_peer::{dev, Config, Handle, Memory};
-use arkdb::demo::{demo, Playlist};
+use arkdb::demo::{demo, Item, Playlist};
+use arkdb::room::Pointer;
 
 fn config() -> Config {
     Config::of(Arc::new(demo()))
@@ -64,8 +66,9 @@ fn playlists(p: &Peer) -> Vec<Playlist> {
 }
 
 /// Everything a phone calls, over a server in this process. Falsified by
-/// `State::settle` dropping the patches it took from the peer: the view
+/// `ViewHandle::take` dropping the patches it took from the peer: the view
 /// said `Unchanged` after the item was added.
+
 #[test]
 fn the_bridge_does_what_the_kit_does() {
     let hub = server();
@@ -102,17 +105,18 @@ fn the_bridge_does_what_the_kit_does() {
     // A view and its patches; a query answering the same.
     let args = format!(r#"{{"playlist_id":"{road}"}}"#);
     let items = alice.view("demo.items".into(), args.clone()).unwrap();
-    assert_eq!(items.rows(), Vec::<String>::new());
+    assert_eq!(items.rows(), Vec::<Vec<u8>>::new());
     let before = told.0.load(Ordering::Relaxed);
     let add = format!(r#"{{"playlist_id":"{road}","track_id":"t1"}}"#);
     alice.mutate("demo.add_to_playlist".into(), add).unwrap();
     let taken = items.take();
     let [row] = &taken.rows[..] else { panic!("one insert: {taken:?}") };
     assert_eq!(taken.ops[..], [Op::Insert { at: 0 }]);
-    assert!(row.contains(r#""track_id":"t1""#), "{row}");
+    let item = Item::from_bytes(row).unwrap();
+    assert_eq!(item.track_id, "t1", "a row crosses as its bytes");
     assert_eq!(items.take().ops, vec![]);
     assert!(told.0.load(Ordering::Relaxed) > before, "the listener was told");
-    assert_eq!(alice.query("demo.items".into(), args.clone()).unwrap(), format!("[{row}]"));
+    assert!(alice.query("demo.items".into(), args.clone()).unwrap().contains(r#""track_id":"t1""#));
 
     // Another device sees it; the live space carries a call between them.
     let bob = device(&db, "laptop", Some(login("bob@laptop")));
@@ -123,7 +127,9 @@ fn the_bridge_does_what_the_kit_does() {
     until("both here", || bob.live_rows("here".into()).len() == 2);
     alice.mutate("room.point".into(), r#"{"x":3}"#.into()).unwrap();
     until("bob sees the pointer", || {
-        bob.live_rows("pointer".into()).iter().any(|r| r.contains(r#""x":3"#))
+        bob.live_rows("pointer".into())
+            .iter()
+            .any(|r| Pointer::from_bytes(r).is_ok_and(|p| p.x == 3))
     });
     assert!(
         alice.mutate("room.point".into(), r#"{"x":"three"}"#.into()).is_err(),
@@ -150,7 +156,7 @@ fn the_bridge_does_what_the_kit_does() {
     // Signed out: nothing dialled, the history kept.
     alice.logout();
     assert_eq!(alice.status().link, "signed out");
-    assert_eq!(alice.query("demo.items".into(), args).unwrap(), format!("[{row}]"));
+    assert!(alice.query("demo.items".into(), args).unwrap().contains(r#""track_id":"t1""#));
     assert!(alice.take_refusals().is_empty());
 }
 

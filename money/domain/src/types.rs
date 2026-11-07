@@ -11,7 +11,6 @@ use crate::schema::{Account, AskState, BankAsk, Category, Filter, Group, Photo, 
 /// at the bank, seen there, or agreed to as part of a reconciled balance —
 /// which nothing changes afterwards, an import included.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
 pub enum Cleared {
     #[default]
     Uncleared,
@@ -668,7 +667,6 @@ pub struct Filtered {
 
 /// An account as the sidebar and its own page draw it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct AccountLine {
     pub id: Id<Account>,
     pub name: String,
@@ -693,7 +691,6 @@ pub struct AccountLine {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct GroupLine {
     pub id: Id<Group>,
     pub name: String,
@@ -704,7 +701,6 @@ pub struct GroupLine {
 /// One category in one month: what the month gave it, what was spent from
 /// it, and what it has.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct BudgetLine {
     pub category_id: Id<Category>,
     pub group_id: Id<Group>,
@@ -746,7 +742,6 @@ pub struct BudgetLine {
 
 /// The month as a whole: what is left to assign, and its totals.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct Summary {
     pub month: String,
     /// Every dollar that came in up to the end of the month, less what has
@@ -768,7 +763,6 @@ pub struct Summary {
 
 /// A transaction as a register draws it.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct TxnLine {
     pub id: Id<Txn>,
     pub account_id: Id<Account>,
@@ -797,7 +791,6 @@ pub struct TxnLine {
 
 /// Somebody paid, and the category their last transaction was for.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct PayeeLine {
     pub name: String,
     pub count: i64,
@@ -806,7 +799,6 @@ pub struct PayeeLine {
 
 /// A linked bank, and where its last import got to.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct BankLine {
     pub name: String,
     pub institution: String,
@@ -831,7 +823,6 @@ pub struct BankLine {
 /// An ask of the person reading, about a bank connection, and where it
 /// stands: newest first.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct AskLine {
     pub id: Id<BankAsk>,
     /// `connect`, `reconnect`, `add_accounts` or `disconnect`.
@@ -849,7 +840,6 @@ pub struct AskLine {
 
 /// What a month's spending went on, by group.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct SpendingLine {
     pub group_id: Id<Group>,
     pub group: String,
@@ -861,7 +851,6 @@ pub struct SpendingLine {
 /// One of a bank's accounts, and the account here it feeds — none when it
 /// feeds none yet, or is ignored.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi_view))]
 pub struct LinkedLine {
     pub plaid_account_id: String,
     pub bank: String,

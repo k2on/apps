@@ -10,7 +10,7 @@
 // address pasted.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.android.gen.Playlist
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background

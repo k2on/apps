@@ -114,8 +114,8 @@ import dev.arkui.rememberReorder
 import dev.arkui.sections
 import dev.arkui.toneColors
 import dev.money.android.gen.Auto
-import uniffi.money_domain.BudgetLine
-import uniffi.money_domain.GroupLine
+import dev.money.android.gen.BudgetLine
+import dev.money.android.gen.GroupLine
 
 /**
  * Whether what a category is given this month is anybody's to change here: not Ready to Assign's, and
