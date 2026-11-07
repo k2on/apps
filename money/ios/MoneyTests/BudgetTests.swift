@@ -109,7 +109,7 @@ final class BudgetTests: XCTestCase {
         XCTAssertEqual(r, .category(MoveCategory(id: dining.categoryId, groupId: bills.id, before: bills.lines[1].categoryId)))
         guard let r else { return }
         let drawn = Arranging.applied(r, to: groups)
-        s.write { m in if case let .category(c) = r { try m.moveCategory(c) } }
+        if case let .category(c) = r { s.write(.moveCategory(value: c)) }
         let now = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
         XCTAssertEqual(Arranging.shape(now), Arranging.shape(drawn))
         XCTAssertEqual(now.first { $0.id == bills.id }?.lines.map { $0.name },
@@ -157,7 +157,7 @@ final class BudgetTests: XCTestCase {
         XCTAssertEqual(r, .group(MoveGroup(id: groups[1].id, before: groups[3].id)))
         guard let r else { return }
         let drawn = Arranging.applied(r, to: groups)
-        s.write { m in if case let .group(g) = r { try m.moveGroup(g) } }
+        if case let .group(g) = r { s.write(.moveGroup(value: g)) }
         let now = Months.groups(s.snap.groups, s.snap.lines, hidden: false)
         XCTAssertEqual(now.map { $0.group.name }, [names[0], names[2], names[1], names[3], names[4]])
         XCTAssertEqual(Arranging.shape(now), Arranging.shape(drawn))
