@@ -23,7 +23,7 @@ use ark::row::{Id, Type};
 use ark::schema::{Schema, Space, Table};
 use ark::store::Store;
 use ark_peer::link::wait;
-use ark_peer::{dev, now_ms, Config, Disk, Memory, Peer, Server};
+use ark_peer::{dev, now_ms, Authority, Config, Disk, Memory, Peer, Server};
 use arkdb::demo::{demo as domain, AddToPlaylist};
 
 mod support;
@@ -146,11 +146,11 @@ fn an_offline_intent_writes_the_same_as_pending_grows() {
 /// A hub with `c` connections fed whole, each at the head, and one of
 /// them pushing an add: what one push allocates.
 fn fanout(c: usize) -> usize {
-    let mut hub = Peer::serve(Config::of(Arc::new(domain())), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(Config::of(Arc::new(domain())), Box::new(Memory::default()), 0).unwrap();
     let author = dev("alice@dev").unwrap();
     let a = hub.accept(author.clone());
     let mut local = 0;
-    let mut push = |hub: &mut Peer, conn, who: &ark::peer::Ctx, func: &str, input: Vec<u8>| {
+    let mut push = |hub: &mut Authority, conn, who: &ark::peer::Ctx, func: &str, input: Vec<u8>| {
         local += 1;
         hub.frame(conn, support::push(who, local, func, input), 0)
     };

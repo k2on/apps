@@ -1,7 +1,7 @@
 // Whether an address is a harken server this phone can use, from what its
 // `/healthz` answers.
 //
-// The server answers a line each (`harken-server`'s `health`): `ok`, its
+// The server answers a line each (`ark-peer`'s `Authority::health`): `ok`, its
 // connections, the log's head and horizon, and `domain <schema hash>
 // <version> current` — the domain it runs, as this library names its own
 // (`harken_domain`). The decision is a function of the answer and nothing

@@ -117,14 +117,15 @@ pub fn sessions() -> Vec<(&'static str, Net)> {
         net
     };
     let two = |seed| Net::new(demo(), |_| demo(), 2, seed);
-    let mut keep = demo();
+    let mut keep = ark_peer::ServerConfig::from(demo());
     keep.keep = Some(1);
     let anon = Ctx::who(String::new(), "anonymous", vec![]);
     let alice = Ctx::who("alice", "alice-session", vec!["listener".into()]);
-    let hub = Config {
+    let hub = ark_peer::ServerConfig {
         live_keep: Some(4),
-        ..crate::demo::hub(demo())
+        ..crate::demo::hub(demo()).into()
     };
+
     let device = |name: &str| crate::demo::device(demo(), name, 100);
     let point = |i, x| Op::Call(i, "room.point".into(), Point { x }.to_bytes());
     let steps = |n: usize| vec![Op::Step; n];

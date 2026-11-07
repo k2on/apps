@@ -4,7 +4,7 @@
 //! in, how many times it opened) and its pending intents, records appended
 //! ([`Kept`], `local.pending`); a server's journal and its volatile space
 //! as it last closed, each one record (`local.journal`, `local.volatile`,
-//! `crate::hub`). And an app's logins ([`Logins`]), an instance of
+//! `crate::authority`). And an app's logins ([`Logins`]), an instance of
 //! `ark-auth`'s schema of its own.
 
 use std::io;
@@ -60,31 +60,12 @@ pub const LOCAL: &str = "local.";
 
 /// One disk's blobs shared, each holder under a prefix of their names: how
 /// a peer keeps its records beside its log on the disk its log is on.
-#[derive(Clone)]
-pub(crate) struct Shared {
-    disk: Arc<Mutex<Box<dyn Disk>>>,
-    prefix: String,
-}
+struct Shared(Arc<Mutex<Box<dyn Disk>>>, &'static str);
 
 impl Shared {
-    pub fn new(disk: Box<dyn Disk>) -> Shared {
-        Shared {
-            disk: Arc::new(Mutex::new(disk)),
-            prefix: String::new(),
-        }
-    }
-
-    /// The same disk, under `prefix` of this one's names.
-    pub fn under(&self, prefix: &str) -> Shared {
-        Shared {
-            disk: self.disk.clone(),
-            prefix: format!("{}{prefix}", self.prefix),
-        }
-    }
-
     fn at<T>(&self, name: &str, f: impl FnOnce(&mut dyn Disk, &str) -> T) -> T {
-        let mut d = self.disk.lock().unwrap_or_else(|e| e.into_inner());
-        f(&mut **d, &format!("{}{name}", self.prefix))
+        let mut d = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut **d, &format!("{}{name}", self.1))
     }
 }
 
@@ -102,21 +83,24 @@ impl Disk for Shared {
     }
 }
 
-/// A peer's disk, and the same disk under [`LOCAL`]: what it keeps beside
-/// its log.
-pub(crate) fn beside(disk: Box<dyn Disk>) -> (Box<dyn Disk>, Box<dyn Disk>) {
-    let shared = Shared::new(disk);
-    let local = Box::new(shared.under(LOCAL));
-    (Box::new(shared), local)
+/// A peer's disk apart: the disk, the same disk under [`LOCAL`] — what it
+/// keeps beside its log — and the store of its files.
+pub(crate) fn beside(disk: Box<dyn Disk>) -> crate::Apart {
+    let (files, disk) = (disk.files(), Arc::new(Mutex::new(disk)));
+    (Box::new(Shared(disk.clone(), "")), Box::new(Shared(disk, LOCAL)), files)
 }
 
 /// A device's replica on `disk` said beforehand, as `f` changes it — what
-/// a simulator seeds, or a demo.
+/// a simulator seeds, or a demo — and written when it changed.
 pub fn preset(disk: &mut dyn Disk, f: impl FnOnce(&mut Replica)) -> io::Result<()> {
     let name = format!("{LOCAL}{REPLICA}");
-    let mut r = disk.get(&name)?.and_then(|b| Replica::from_bytes(&b).ok()).unwrap_or_default();
+    let was = disk.get(&name)?;
+    let mut r = was.as_deref().and_then(|b| Replica::from_bytes(b).ok()).unwrap_or_default();
     f(&mut r);
-    disk.put(&name, &r.to_bytes())
+    match was.is_some_and(|b| b == r.to_bytes()) {
+        true => Ok(()),
+        false => disk.put(&name, &r.to_bytes()),
+    }
 }
 
 /// Where one app's logins are remembered, one per server: `ark-auth`'s

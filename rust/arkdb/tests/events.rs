@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use ark_peer::{dev, Config, ConnId, Memory, Peer};
+use ark_peer::{dev, Authority, Config, ConnId, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
 use arkdb::events::{line, render_trace};
 
@@ -14,7 +14,7 @@ fn config() -> Config {
     Config::of(Arc::new(demo()))
 }
 
-fn carry(hub: &mut Peer, ds: &mut [(Peer, ConnId)]) {
+fn carry(hub: &mut Authority, ds: &mut [(Peer, ConnId)]) {
     for _ in 0..8 {
         for i in 0..ds.len() {
             let (frames, c) = (ds[i].0.take_frames(), ds[i].1);
@@ -34,7 +34,7 @@ fn carry(hub: &mut Peer, ds: &mut [(Peer, ConnId)]) {
 #[test]
 fn a_taps_trace_prints_what_it_caused_everywhere() {
     let kept = ark_peer::observe::memory();
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let mut ds: Vec<(Peer, ConnId)> = ["alice@phone", "bob@laptop"]
         .iter()
         .map(|t| {

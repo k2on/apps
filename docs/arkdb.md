@@ -891,7 +891,7 @@ own sequence numbers, has no wire yet.
 
 Handing authority *back* — a server going away and a peer resuming
 sequencing — is the same step in reverse and is deliberately not built
-first; a peer leaving a server that goes on is `Peer::leave`, above. Authority transfer between two live peers is a protocol with a
+first; a peer leaving a server that goes on is `Authority::leave`, above. Authority transfer between two live peers is a protocol with a
 fencing token, and nothing in harken needs it yet.
 
 ### 3.11 Authorization and partial sync

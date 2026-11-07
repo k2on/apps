@@ -1,32 +1,34 @@
-//! The peer on a thread of its own (§1.7), a device's and a server's
-//! alike: the machines are single-owner, and neither the thread an app
-//! draws on nor a server's sockets wait on what the peer takes in — a
-//! part of a fill, an entry's facts put, its views moved, the disk
-//! written. One [`Handle`] is that thread.
+//! A peer on a thread of its own (§1.7), a device's or a server's: the
+//! machines are single-owner, and neither the thread an app draws on nor a
+//! server's sockets wait on what the peer takes in — a part of a fill, an
+//! entry's facts put, its views moved, the disk written. One [`Handle`] is
+//! that thread, over whatever it drives ([`Driven`]): one loop, which
+//! turns whenever it is rung or its peer's deadline comes.
 //!
-//! What is done with the peer is done on the [`Peer`] itself, held
+//! What is done with the peer is done on the peer itself, held
 //! ([`Handle::lock`], [`Handle::with`]): a mutate, a query, a view opened
-//! or settled. The thread holds it for one pump at a time, so a call waits
+//! or settled. The thread holds it for one turn at a time, so a call waits
 //! for at most one; let go, the thread is rung, so what it said is sent.
-//! The thread pumps whenever the connection rings, the peer's deadline
-//! comes ([`Peer::deadline`]), the peer was let go or a server's
-//! connection said something, and tells the app (its waker,
-//! [`Handle::set_waker`]) when a pump moved what it can see
-//! ([`Pumped::shown`]), so a library coming in part by part is taken in
-//! without the app drawing again for each; the app then reads what moved
-//! ([`Handle::pump`]). In a browser there is no thread: the pump is the
-//! page's, one at a time between the page's own tasks ([`page`]).
 //!
-//! **A server's connections** ([`Handle::connect`]) are what its sockets
-//! (`serve`) said, queued for the thread, and each one's [`Sink`], where
-//! what the peer delivers to it goes; dropping a sink — the connection
-//! closed, its session revoked or expired ([`Handle::watched`]) — closes
-//! the connection. A device in this process dials it ([`Handle::dialer`]:
-//! the transport the perf tests, the scanner and the phones' in-process
-//! server use). Threads and channels only: no web server is linked. A
-//! connection is who its token proves (with `ark-auth`, the session row
-//! its signature names; with no sign-in configured the dev reading of
-//! [`dev`]).
+//! **A device's** thread pumps it ([`Peer::pump`]) whenever the connection
+//! rings, its deadline comes ([`Peer::deadline`]) or it was let go, and
+//! tells the app (its waker, [`Handle::set_waker`]) when a pump moved what
+//! it can see ([`Pumped::shown`]), so a library coming in part by part is
+//! taken in without the app drawing again for each; the app then reads
+//! what moved ([`Handle::pump`]). In a browser there is no thread: the
+//! pump is the page's, one at a time between the page's own tasks
+//! ([`page`]).
+//!
+//! **A server's** connections ([`Handle::connect`]) are what its sockets
+//! (`serve`) said, queued for its thread, each one's frames going to its
+//! [`crate::Sink`]; dropping a sink — the connection closed, its session
+//! revoked or expired ([`Handle::watched`]) — closes the connection. A
+//! device in this process dials it ([`Handle::dialer`]: the transport the
+//! perf tests, the scanner and the phones' in-process server use). Threads
+//! and channels only: no web server is linked. A connection is who its
+//! token proves (with `ark-auth`, the session row its signature names;
+//! with no sign-in configured the dev reading of [`dev`]). A server has no
+//! handlers: its work is a device of its own, dialling it.
 //!
 //! **Work off the thread an app draws on is still work.** A pump that
 //! takes longer than [`PUMP_BUDGET_MS`], and an app's wait for the peer
@@ -39,7 +41,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::peer::Ctx;
 
-use crate::link::{Pumped, Wake};
+use crate::link::{Pumped, Sendable, Wake};
 use crate::Peer;
 
 /// How long one pump may take, in ms, before it is said: past a frame,
@@ -73,9 +75,27 @@ fn held<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-struct Inner {
-    peer: Mutex<Peer>,
-    /// What the pumps did since the app last asked.
+/// What a [`Handle`]'s thread drives: a device ([`Peer`]) or a server
+/// ([`crate::Authority`]).
+pub trait Driven: Sendable + Sized + 'static {
+    /// What its handle keeps beside it, off its lock: a server's queue of
+    /// what its connections said.
+    type Beside: Default + Send + Sync;
+    /// Its handle made: the bell that rings its thread.
+    fn spawned(&mut self, _ring: &Wake) {}
+    /// When its thread is next to turn, whatever rings.
+    fn deadline(&self) -> Option<u64> {
+        None
+    }
+    /// One turn of its thread's, rung or due: whether the thread goes on.
+    fn turn(h: &Handle<Self>, rang: bool) -> bool;
+    /// Its last handle gone, or stopped.
+    fn end(&mut self) {}
+}
+
+struct Inner<P: Driven> {
+    peer: Mutex<P>,
+    /// What a device's pumps did since the app last asked.
     said: Mutex<Pumped>,
     /// The app's, rung when a pump moved anything.
     told: Mutex<Option<Wake>>,
@@ -85,30 +105,38 @@ struct Inner {
     /// Pumped by the app ([`Handle::pump`]) from now on, and not by the
     /// thread: a test that says when what arrived is taken in.
     by_hand: AtomicBool,
-    /// A server's connections natively; the page's timers in a browser.
-    beside: Beside,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    beside: P::Beside,
+    /// In a browser, the page's timers.
+    #[cfg(target_arch = "wasm32")]
+    page: page::Page,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-type Beside = serving::Serving;
-#[cfg(target_arch = "wasm32")]
-type Beside = page::Page;
-
-impl Inner {
-    fn lock(&self) -> MutexGuard<'_, Peer> {
+impl<P: Driven> Inner<P> {
+    fn lock(&self) -> MutexGuard<'_, P> {
         held(&self.peer)
     }
 
+    /// The app's waker rung.
+    fn tell(&self) {
+        let told = held(&self.told).clone();
+        if let Some(w) = told {
+            w();
+        }
+    }
+}
+
+impl<P: Driven> Drop for Inner<P> {
+    fn drop(&mut self) {
+        self.peer.get_mut().unwrap_or_else(|e| e.into_inner()).end();
+    }
+}
+
+impl Inner<Peer> {
     /// A pump, and what it did kept for the app; said when it took longer
-    /// than [`PUMP_BUDGET_MS`]. A server's is what its connections said,
-    /// taken in.
+    /// than [`PUMP_BUDGET_MS`].
     fn pump(&self) -> Pumped {
         let mut peer = self.lock();
-        #[cfg(not(target_arch = "wasm32"))]
-        if peer.hub.serving {
-            self.serve(&mut peer);
-            return Pumped::default();
-        }
         let began = crate::monotonic_ms();
         let p = peer.pump();
         let took = crate::monotonic_ms() - began;
@@ -119,14 +147,6 @@ impl Inner {
         drop(peer);
         absorb(&mut held(&self.said), &p);
         p
-    }
-
-    /// The app's waker rung.
-    fn tell(&self) {
-        let told = held(&self.told).clone();
-        if let Some(w) = told {
-            w();
-        }
     }
 }
 
@@ -142,35 +162,65 @@ fn absorb(said: &mut Pumped, p: &Pumped) {
     }
 }
 
-/// A [`Peer`] on a thread of its own (in a browser, the page's).
-#[derive(Clone)]
-pub struct Handle {
-    inner: Arc<Inner>,
+impl Driven for Peer {
+    type Beside = ();
+
+    fn spawned(&mut self, ring: &Wake) {
+        #[cfg(target_arch = "wasm32")]
+        ((self.link.budget, self.log.machine.part) = (Some(PAGE_BUDGET_MS), Some(PAGE_PART)));
+        self.set_waker(ring.clone());
+    }
+
+    fn deadline(&self) -> Option<u64> {
+        Peer::deadline(self)
+    }
+
+    /// Pumped by hand, the app is told what rang, and pumps itself; its own
+    /// clock is its deadlines.
+    fn turn(h: &Handle<Peer>, rang: bool) -> bool {
+        let by_hand = h.inner.by_hand.load(Relaxed);
+        if by_hand && rang || !by_hand && h.inner.pump().shown {
+            h.inner.tell();
+        }
+        true
+    }
 }
 
-/// The peer, held: what [`Handle::lock`] gives, the [`Peer`] itself. Let
-/// go, the thread is rung, so what the app had it say is sent.
-pub struct Locked<'a> {
-    guard: MutexGuard<'a, Peer>,
+/// A peer on a thread of its own (in a browser, the page's): a device's
+/// ([`Peer`]), or a server's ([`crate::Authority`]).
+pub struct Handle<P: Driven = Peer> {
+    inner: Arc<Inner<P>>,
+}
+
+impl<P: Driven> Clone for Handle<P> {
+    fn clone(&self) -> Self {
+        Handle { inner: self.inner.clone() }
+    }
+}
+
+/// The peer, held: what [`Handle::lock`] gives, the peer itself. Let go,
+/// the thread is rung, so what the app had it say is sent.
+pub struct Locked<'a, P: Driven = Peer> {
+    guard: MutexGuard<'a, P>,
     /// Which peer, as this thread holds it ([`HELD`]).
     held: usize,
-    inner: &'a Inner,
+    inner: &'a Inner<P>,
 }
 
-impl std::ops::Deref for Locked<'_> {
-    type Target = Peer;
-    fn deref(&self) -> &Peer {
+impl<P: Driven> std::ops::Deref for Locked<'_, P> {
+    type Target = P;
+    fn deref(&self) -> &P {
         &self.guard
     }
 }
 
-impl std::ops::DerefMut for Locked<'_> {
-    fn deref_mut(&mut self) -> &mut Peer {
+impl<P: Driven> std::ops::DerefMut for Locked<'_, P> {
+    fn deref_mut(&mut self) -> &mut P {
         &mut self.guard
     }
 }
 
-impl Drop for Locked<'_> {
+impl<P: Driven> Drop for Locked<'_, P> {
     fn drop(&mut self) {
         HELD.with(|h| h.borrow_mut().retain(|p| *p != self.held));
         // Pumped by hand, what the app had it say goes with its next pump.
@@ -188,17 +238,15 @@ thread_local! {
     static HELD: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-impl Handle {
-    /// `peer` on a thread of its own from now on: pumped, and — serving —
-    /// its connections taken in. The thread ends when every handle is
-    /// dropped, a server writing its volatile space for the next open. In
-    /// a browser, which has no thread, the page pumps it ([`page`]): a pump
-    /// takes in what it can in [`PAGE_BUDGET_MS`] and leaves the rest for
-    /// the next, so the page draws between them, and a fill comes in parts
-    /// of [`PAGE_PART`] bytes, each well inside one pump.
-    pub fn spawn(mut peer: Peer) -> Handle {
-        #[cfg(target_arch = "wasm32")]
-        ((peer.link.budget, peer.log.machine.part) = (Some(PAGE_BUDGET_MS), Some(PAGE_PART)));
+impl<P: Driven> Handle<P> {
+    /// `peer` on a thread of its own from now on: turned whenever it is
+    /// rung or due. The thread ends when every handle is dropped, a server
+    /// writing its volatile space for the next open. In a browser, which
+    /// has no thread, the page pumps a device ([`page`]): a pump takes in
+    /// what it can in [`PAGE_BUDGET_MS`] and leaves the rest for the next,
+    /// so the page draws between them, and a fill comes in parts of
+    /// [`PAGE_PART`] bytes, each well inside one pump.
+    pub fn spawn(mut peer: P) -> Handle<P> {
         #[cfg(not(target_arch = "wasm32"))]
         let mut thread = None;
         let inner = Arc::new_cyclic(|me| {
@@ -210,7 +258,7 @@ impl Handle {
             };
             #[cfg(target_arch = "wasm32")]
             let ring = page::ring(me.clone());
-            peer.set_waker(ring.clone());
+            peer.spawned(&ring);
             let (said, told, beside) = Default::default();
             let (peer, by_hand) = (Mutex::new(peer), Default::default());
             Inner {
@@ -220,6 +268,8 @@ impl Handle {
                 ring,
                 by_hand,
                 beside,
+                #[cfg(target_arch = "wasm32")]
+                page: Default::default(),
             }
         });
         #[cfg(not(target_arch = "wasm32"))]
@@ -231,9 +281,9 @@ impl Handle {
     }
 
     /// The peer, held until the guard is let go: the thread waits for it,
-    /// and it for the thread's pump — said when that was longer than
+    /// and it for the thread's turn — said when that was longer than
     /// [`WAIT_BUDGET_MS`].
-    pub fn lock(&self) -> Locked<'_> {
+    pub fn lock(&self) -> Locked<'_, P> {
         let held = Arc::as_ptr(&self.inner) as usize;
         HELD.with(|h| {
             let mut h = h.borrow_mut();
@@ -252,7 +302,9 @@ impl Handle {
             inner: &self.inner,
         }
     }
+}
 
+impl Handle<Peer> {
     /// `w` rung whenever a pump of the thread's moved what the app can see
     /// ([`Pumped::shown`]); pumped by hand, whenever the connection rang.
     pub fn set_waker(&self, w: Wake) {
@@ -283,12 +335,11 @@ impl Handle {
     }
 }
 
-/// The thread: a pump whenever the connection, the app or a connection
-/// rings or the peer's deadline comes — at least every second, a server's
-/// watch's clock — the app told when it moved anything; until the peer is
-/// gone or stopped.
+/// The thread: a turn whenever it is rung or its peer's deadline comes —
+/// at least every second, a server's watch's clock; until the peer is gone
+/// or stopped.
 #[cfg(not(target_arch = "wasm32"))]
-fn drive(inner: std::sync::Weak<Inner>, rx: std::sync::mpsc::Receiver<()>) {
+fn drive<P: Driven>(inner: std::sync::Weak<Inner<P>>, rx: std::sync::mpsc::Receiver<()>) {
     use std::sync::mpsc::RecvTimeoutError;
     use std::time::Duration;
     loop {
@@ -306,24 +357,17 @@ fn drive(inner: std::sync::Weak<Inner>, rx: std::sync::mpsc::Receiver<()>) {
         };
         while rx.try_recv().is_ok() {}
         let Some(i) = inner.upgrade() else { return };
-        if i.beside.stopped.load(Relaxed) {
+        if !P::turn(&Handle { inner: i }, rang) {
             return;
-        }
-        // Pumped by hand, the app is told what rang, and pumps itself; its
-        // own clock is its deadlines.
-        let by_hand = i.by_hand.load(Relaxed);
-        if by_hand && rang || !by_hand && i.pump().shown {
-            i.tell();
         }
     }
 }
 
-/// A server's half: its connections, queued for the thread, and its
-/// in-process transport.
+/// A server's half: its connections, queued for the thread, its watch,
+/// and its in-process transport.
 #[cfg(not(target_arch = "wasm32"))]
 mod serving {
-    use std::collections::BTreeMap;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
     use std::sync::mpsc::{channel, Receiver, TryRecvError};
     use std::sync::{Arc, Mutex};
 
@@ -331,133 +375,141 @@ mod serving {
     use ark::peer::Ctx;
     use ark_auth::server::Watch;
 
-    use super::{held, Handle, Inner};
+    use super::{held, Driven, Handle};
     use crate::link::{Closed, Dial, Event, Wake, Wire};
-    use crate::{now_ms, ConnId, Deliver, Peer};
-
-    /// Where a connection's frames go; false once it is gone.
-    pub type Sink = Box<dyn Fn(Vec<u8>) -> bool + Send>;
+    use crate::{now_ms, Authority, ConnId, Deliver, Sink};
 
     /// Who a token proves, or nobody.
     pub use ark_auth::server::Authenticate;
 
-    type Job = Box<dyn FnOnce(&mut Peer, &mut BTreeMap<ConnId, Sink>) -> Vec<Deliver> + Send>;
+    type Job = Box<dyn FnOnce(&mut Authority) -> Vec<Deliver> + Send>;
 
-    /// What a server's thread keeps beside its peer: what its connections
-    /// said, in order, not yet taken in; where each one's frames go; the
-    /// next one's number; its watch and when it last looked; and whether it
-    /// stopped.
+    /// What a server's handle keeps beside it: what its connections said,
+    /// in order, not yet taken in; the next one's number; and its watch
+    /// and when it last looked.
     #[derive(Default)]
-    pub(super) struct Serving {
+    pub struct Queue {
         jobs: Arc<Mutex<Vec<Job>>>,
-        sinks: Mutex<BTreeMap<ConnId, Sink>>,
         next: AtomicU64,
         watch: Mutex<(Option<Watch>, i64)>,
-        pub stopped: AtomicBool,
     }
 
-    impl Inner {
-        /// What the connections said, taken in, what is written delivered,
-        /// the calls made run on threads of their own, and the watch told
-        /// what changed and, each second, the clock: the sessions it names
-        /// have their connections closed.
-        pub(super) fn serve(&self, peer: &mut Peer) {
-            let s = &self.beside;
-            if !peer.hub.serving || s.stopped.load(Relaxed) {
-                return;
-            }
-            let jobs = std::mem::take(&mut *held(&s.jobs));
-            let mut sinks = held(&s.sinks);
-            let mut out: Vec<Deliver> = jobs.into_iter().flat_map(|job| job(peer, &mut sinks)).collect();
-            out.extend(peer.release());
-            for (call, f) in peer.take_calls() {
-                let (c, id) = (call.conn, call.id);
-                let Some(f) = f else {
-                    out.extend(peer.reply(c, id, Err(format!("this server has no function {}", call.name))));
-                    continue;
-                };
-                // Its own thread: a call may take its time (another
-                // service's sign-in) and the log does not wait for it.
-                let (jobs, ring) = (Arc::downgrade(&s.jobs), self.ring.clone());
-                std::thread::spawn(move || {
-                    let answer = f(&call.who, &call.input);
-                    if let Some(jobs) = jobs.upgrade() {
-                        held(&jobs).push(Box::new(move |p, _| p.reply(c, id, answer)));
-                        ring();
-                    }
-                });
-            }
-            deliver(&mut sinks, out);
-            let mut watch = held(&s.watch);
-            let (Some(w), ticked) = &mut *watch else { return };
-            // Delivered first: a sign-out's own confirmation, then the close.
-            let (now, seen) = (now_ms(), std::mem::take(&mut peer.hub.seen));
-            let tick = now - *ticked >= 1000;
-            if !tick && seen.is_empty() {
-                return;
-            }
-            *ticked = if tick { now } else { *ticked };
-            let open: Vec<Ctx> = peer.connections().map(|(_, w)| w.clone()).collect();
-            for session in w(&peer.log.store, (!tick).then_some(&seen[..]), &open, now) {
-                let out = close(peer, &mut sinks, &session);
-                deliver(&mut sinks, out);
+    impl Authority {
+        /// Each frame given to its connection's sink; a connection whose
+        /// sink is gone, gone.
+        fn deliver(&mut self, out: Vec<Deliver>) {
+            for (c, b) in out {
+                if self.sinks.get(&c).is_some_and(|s| !s(b)) {
+                    self.sinks.remove(&c);
+                }
             }
         }
     }
 
-    impl Drop for Inner {
-        fn drop(&mut self) {
-            let peer = self.peer.get_mut().unwrap_or_else(|e| e.into_inner());
-            if peer.hub.serving && !self.beside.stopped.swap(true, Relaxed) {
-                peer.close();
+    impl Driven for Authority {
+        type Beside = Queue;
+
+        fn turn(h: &Handle<Authority>, _: bool) -> bool {
+            let mut p = h.inner.lock();
+            h.serve(&mut p);
+            !p.stopped
+        }
+
+        /// Its volatile space written for the next open, once.
+        fn end(&mut self) {
+            if !std::mem::replace(&mut self.stopped, true) {
+                self.close();
             }
         }
     }
 
-    impl Handle {
+    impl Handle<Authority> {
         /// [`Handle::spawn`] of a server, with `watch` told what every
         /// entry changed and, each second, the clock; the sessions it names
         /// have their connections closed (`ark_auth::server::Auth::watcher`).
-        pub fn watched(mut peer: Peer, watch: Option<Watch>) -> Handle {
-            peer.hub.watched = watch.is_some();
+        pub fn watched(mut peer: Authority, watch: Option<Watch>) -> Handle<Authority> {
+            peer.seen = watch.is_some().then(Vec::new);
             let h = Handle::spawn(peer);
             held(&h.inner.beside.watch).0 = watch;
             h
         }
 
+        /// What the connections said, taken in, what is written delivered,
+        /// the calls made run on threads of their own, and the watch told
+        /// what changed and, each second, the clock: the sessions it names
+        /// have their connections closed.
+        fn serve(&self, p: &mut Authority) {
+            if p.stopped {
+                return;
+            }
+            let q = &self.inner.beside;
+            let jobs = std::mem::take(&mut *held(&q.jobs));
+            let mut out: Vec<Deliver> = jobs.into_iter().flat_map(|job| job(p)).collect();
+            out.extend(p.release());
+            for (call, f) in p.take_calls() {
+                let (c, id) = (call.conn, call.id);
+                let Some(f) = f else {
+                    out.extend(p.reply(c, id, Err(format!("this server has no function {}", call.name))));
+                    continue;
+                };
+                // Its own thread: a call may take its time (another
+                // service's sign-in) and the log does not wait for it.
+                let (jobs, ring) = (Arc::downgrade(&q.jobs), self.inner.ring.clone());
+                std::thread::spawn(move || {
+                    let answer = f(&call.who, &call.input);
+                    if let Some(jobs) = jobs.upgrade() {
+                        held(&jobs).push(Box::new(move |p| p.reply(c, id, answer)));
+                        ring();
+                    }
+                });
+            }
+            p.deliver(out);
+            let mut watch = held(&q.watch);
+            let (Some(w), ticked) = &mut *watch else { return };
+            // Delivered first: a sign-out's own confirmation, then the close.
+            let (now, seen) = (now_ms(), p.seen.as_mut().map(std::mem::take).unwrap_or_default());
+            let tick = now - *ticked >= 1000;
+            if !tick && seen.is_empty() {
+                return;
+            }
+            *ticked = if tick { now } else { *ticked };
+            let open: Vec<Ctx> = p.connections().map(|(_, w)| w.clone()).collect();
+            for session in w(&p.log.store, (!tick).then_some(&seen[..]), &open, now) {
+                let out = p.revoke(&session, now);
+                p.deliver(out);
+            }
+        }
+
         /// `job` for the thread, in order after what came before.
-        fn run(&self, job: impl FnOnce(&mut Peer, &mut BTreeMap<ConnId, Sink>) -> Vec<Deliver> + Send + 'static) {
+        fn run(&self, job: impl FnOnce(&mut Authority) -> Vec<Deliver> + Send + 'static) {
             held(&self.inner.beside.jobs).push(Box::new(job));
             (self.inner.ring)();
         }
 
         /// A connection verified as `who`, its frames to `sink`.
         pub fn connect(&self, who: Ctx, sink: Sink) -> ConnId {
-            // Above any `Peer::accept`'s own.
+            // Above any `Authority::accept`'s own.
             let c = (1 << 32) + self.inner.beside.next.fetch_add(1, Relaxed);
-            self.run(move |p, s| {
+            self.run(move |p| {
                 p.accept_as(c, who);
-                s.insert(c, sink);
+                p.sinks.insert(c, sink);
                 vec![]
             });
             c
         }
 
         pub fn frame(&self, c: ConnId, bytes: Vec<u8>) {
-            self.run(move |p, _| p.frame(c, bytes, now_ms()));
+            self.run(move |p| p.frame(c, bytes, now_ms()));
         }
 
         pub fn close(&self, c: ConnId) {
-            self.run(move |p, s| {
-                s.remove(&c);
-                p.leave(c, now_ms())
-            });
+            self.run(move |p| p.leave(c, now_ms()));
         }
 
         /// Every connection of a session closed.
         pub fn revoke(&self, session: &str) {
             let session = session.to_string();
-            self.run(move |p, s| close(p, s, &session));
+            self.run(move |p| p.revoke(&session, now_ms()));
         }
 
         /// What came before taken in, the volatile space written and the
@@ -465,40 +517,39 @@ mod serving {
         /// exits, which would otherwise cut that write short. Every handle
         /// is inert after.
         pub fn stop(&self) {
-            let mut peer = self.inner.lock();
-            self.inner.serve(&mut peer);
-            if !self.inner.beside.stopped.swap(true, Relaxed) {
-                peer.close();
-            }
-            drop(peer);
+            let mut p = self.inner.lock();
+            self.serve(&mut p);
+            p.end();
+            drop(p);
             (self.inner.ring)();
         }
 
-        /// `f` on the peer, after what came before, and its answer; none
+        /// `f` on the server, after what came before, and its answer; none
         /// once stopped.
-        pub fn with<T>(&self, f: impl FnOnce(&mut Peer) -> T) -> Option<T> {
-            let mut peer = self.inner.lock();
-            self.inner.serve(&mut peer);
-            if self.inner.beside.stopped.load(Relaxed) {
+        pub fn with<T>(&self, f: impl FnOnce(&mut Authority) -> T) -> Option<T> {
+            let mut p = self.inner.lock();
+            self.serve(&mut p);
+            if p.stopped {
                 return None;
             }
-            let t = f(&mut peer);
-            self.inner.serve(&mut peer);
+            let t = f(&mut p);
+            self.serve(&mut p);
             Some(t)
         }
 
-        /// An entry the authority authors itself ([`Peer::mutate`]): the head
-        /// of the space it is on, sequenced, or the refusal.
+        /// An entry the authority authors itself ([`Authority::mutate_at`]):
+        /// the head of the space it is on, sequenced, or the refusal.
         pub fn mutate(&self, name: String, input: Vec<u8>) -> Option<Result<Seq, String>> {
             self.with(move |p| {
                 let space = p.function(&name)?.space;
-                p.mutate(&name, input)?;
+                p.mutate_at(&name, input, now_ms())?;
+
                 Ok(p.machine(space).map_or(0, |m| m.log().head().0))
             })
         }
 
-        /// Facts the authority writes raw ([`Peer::write`]): the head they
-        /// were sequenced at, or the refusal.
+        /// Facts the authority writes raw ([`Authority::write`]): the head
+        /// they were sequenced at, or the refusal.
         pub fn write(&self, facts: Vec<ark::store::Change>) -> Option<Result<Seq, String>> {
             self.with(move |p| p.write(facts, now_ms()).map(|_| p.log.log().head().0))
         }
@@ -524,25 +575,7 @@ mod serving {
         }
     }
 
-    fn deliver(sinks: &mut BTreeMap<ConnId, Sink>, out: Vec<Deliver>) {
-        for (c, b) in out {
-            if sinks.get(&c).is_some_and(|s: &Sink| !s(b)) {
-                sinks.remove(&c);
-            }
-        }
-    }
-
-    /// Every connection of a session closed: its sinks dropped, and left.
-    fn close(p: &mut Peer, sinks: &mut BTreeMap<ConnId, Sink>, session: &str) -> Vec<Deliver> {
-        let mut out = vec![];
-        for c in p.of_session(session) {
-            sinks.remove(&c);
-            out.extend(p.leave(c, now_ms()));
-        }
-        out
-    }
-
-    struct InProcess(Handle, ConnId, Receiver<Vec<u8>>, bool);
+    struct InProcess(Handle<Authority>, ConnId, Receiver<Vec<u8>>, bool);
 
     impl Wire for InProcess {
         fn send(&mut self, frame: Vec<u8>) {
@@ -575,7 +608,7 @@ mod serving {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use serving::{Authenticate, Sink};
+pub use serving::{Authenticate, Queue};
 
 /// The pump in a browser: a run as soon as the page is free whenever the
 /// connection or the app rings and while what arrived is not all taken in,
@@ -588,7 +621,7 @@ mod page {
 
     use wasm_bindgen::JsCast;
 
-    use super::{held, Inner};
+    use super::{held, Driven, Handle, Inner};
 
     /// A run of the page's pump asked for and not yet made, and the
     /// deadline the page has a timer set for.
@@ -599,39 +632,38 @@ mod page {
     }
 
     /// The page's bell: a run as soon as the page is free.
-    pub fn ring(inner: Weak<Inner>) -> crate::link::Wake {
+    pub fn ring<P: Driven>(inner: Weak<Inner<P>>) -> crate::link::Wake {
         std::rc::Rc::new(move || soon(&inner))
     }
 
-    fn soon(inner: &Weak<Inner>) {
+    fn soon<P: Driven>(inner: &Weak<Inner<P>>) {
         let Some(i) = inner.upgrade() else { return };
-        if !i.beside.asked.swap(true, Ordering::Relaxed) {
+        if !i.page.asked.swap(true, Ordering::Relaxed) {
             after(inner.clone(), 0);
         }
     }
 
     /// A task of the page's, in `ms`.
-    fn after(inner: Weak<Inner>, ms: u64) {
+    fn after<P: Driven>(inner: Weak<Inner<P>>, ms: u64) {
         let run = wasm_bindgen::closure::Closure::once_into_js(move || drive(&inner));
         if let Some(w) = web_sys::window() {
             let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(run.unchecked_ref(), ms.min(i32::MAX as u64) as i32);
         }
     }
 
-    fn drive(inner: &Weak<Inner>) {
+    fn drive<P: Driven>(inner: &Weak<Inner<P>>) {
         let Some(i) = inner.upgrade() else { return };
-        i.beside.asked.store(false, Ordering::Relaxed);
+        i.page.asked.store(false, Ordering::Relaxed);
         if i.by_hand.load(Ordering::Relaxed) {
             return i.tell();
         }
-        if i.pump().shown {
-            i.tell();
-        }
+        P::turn(&Handle { inner: i.clone() }, true);
         let (now, due) = (crate::monotonic_ms(), i.lock().deadline());
         match due {
             Some(d) if d <= now => soon(inner),
             Some(d) => {
-                let mut armed = held(&i.beside.armed);
+                let mut armed = held(&i.page.armed);
+
                 if *armed != Some(d) {
                     *armed = Some(d);
                     after(inner.clone(), d - now);

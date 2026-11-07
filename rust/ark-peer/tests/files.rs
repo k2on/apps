@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ark::file::FileRef;
 use ark::prelude::*;
-use ark_peer::{dev, Config, ConnId, Memory, Peer};
+use ark_peer::{dev, Authority, Config, ConnId, Memory, Peer, ServerConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 pub struct Photo {
@@ -53,21 +53,25 @@ fn domain() -> Domain {
     ark::register!(Domain::new::<Photos>("photos", "1"); add, mine)
 }
 
-fn config(scoped: bool) -> Config {
-    let mut c = Config::of(Arc::new(domain()));
+fn config() -> Config {
+    Config::of(Arc::new(domain()))
+}
+
+fn server(scoped: bool) -> ServerConfig {
+    let mut c = ServerConfig::of(Arc::new(domain()));
     if scoped {
         c.feed = Arc::new(|_| Some("photos.mine".into()));
     }
     c
 }
 
-fn device(scoped: bool, who: &str) -> Peer {
-    Peer::open(config(scoped), dev(who).unwrap(), Box::new(Memory::default()))
+fn device(who: &str) -> Peer {
+    Peer::open(config(), dev(who).unwrap(), Box::new(Memory::default()))
 }
 
 /// A device on the directory `dir`.
 fn on(dir: &std::path::Path, who: &str) -> Peer {
-    Peer::open(config(false), dev(who).unwrap(), Box::new(ark_peer::Files::new(dir).unwrap()))
+    Peer::open(config(), dev(who).unwrap(), Box::new(ark_peer::Files::new(dir).unwrap()))
 }
 
 /// Whether the device on `dir` marks `f` as made there and not yet sent.
@@ -77,7 +81,7 @@ fn unsent(dir: &std::path::Path, f: &FileRef) -> bool {
 
 /// Frames carried both ways until nobody has more; `drop` says which of a
 /// device's frames are lost on the way.
-fn carry(hub: &mut Peer, ds: &mut [(ConnId, &mut Peer)], drop: &dyn Fn(&Frame) -> bool) {
+fn carry(hub: &mut Authority, ds: &mut [(ConnId, &mut Peer)], drop: &dyn Fn(&Frame) -> bool) {
     for _ in 0..1000 {
         let mut out = vec![];
         for (c, d) in ds.iter_mut() {
@@ -103,9 +107,9 @@ fn carry(hub: &mut Peer, ds: &mut [(ConnId, &mut Peer)], drop: &dyn Fn(&Frame) -
 use ark::frames::Frame;
 
 /// A file's bytes when `p` holds it whole, read whole.
-fn read(p: &mut Peer, f: &FileRef) -> Result<Option<Vec<u8>>, String> {
+fn read(file: Result<Option<Box<dyn ark_peer::files::Bytes>>, String>) -> Result<Option<Vec<u8>>, String> {
     let mut out = vec![];
-    match p.file(f)? {
+    match file? {
         Some(mut b) => b.read_to_end(&mut out).map(|_| Some(out)).map_err(|e| e.to_string()),
         None => Ok(None),
     }
@@ -124,15 +128,15 @@ fn bytes(n: usize) -> Vec<u8> {
 /// would carry its bytes.
 #[test]
 fn a_file_made_offline_goes_up_on_the_next_connection_and_down_to_another_device() {
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let mut alice = on(dir.path(), "alice@phone");
-    let mut bob = device(false, "bob@laptop");
+    let mut bob = device("bob@laptop");
     let photo = bytes(2 * ark_peer::files::CHUNK + 1234);
 
     // Offline: kept, named, pending.
     let f = alice.put_file(&photo[..], "image/jpeg").unwrap();
-    assert_eq!(read(&mut alice, &f).unwrap().as_deref(), Some(&photo[..]), "there at once, offline");
+    assert_eq!(read(alice.file(&f)).unwrap().as_deref(), Some(&photo[..]), "there at once, offline");
     alice
         .mutate(
             "photos.add",
@@ -149,22 +153,22 @@ fn a_file_made_offline_goes_up_on_the_next_connection_and_down_to_another_device
     bob.connected();
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
     assert!(!unsent(dir.path(), &f), "sent");
-    assert_eq!(read(&mut hub, &f).unwrap().as_deref(), Some(&photo[..]), "the server holds it whole");
+    assert_eq!(read(hub.file(&f)).unwrap().as_deref(), Some(&photo[..]), "the server holds it whole");
     let log = format!("{:?}", hub.log.log().entries());
     assert!(log.len() < photo.len(), "the bytes are not in the log");
 
-    assert_eq!(read(&mut bob, &f), Ok(None), "not here until it is fetched");
+    assert_eq!(read(bob.file(&f)), Ok(None), "not here until it is fetched");
     assert!(!bob.pump().shown, "nothing to ring yet");
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
     assert!(bob.pump().shown, "the views rung");
-    assert_eq!(read(&mut bob, &f).unwrap().as_deref(), Some(&photo[..]));
+    assert_eq!(read(bob.file(&f)).unwrap().as_deref(), Some(&photo[..]));
 }
 
 /// Falsified by an upload that starts again from nothing after its
 /// connection is cut, or one that is taken as done though cut short.
 #[test]
 fn an_upload_cut_off_goes_on_from_where_it_stopped() {
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let mut alice = on(dir.path(), "alice@phone");
     let photo = bytes(3 * ark_peer::files::CHUNK);
@@ -184,7 +188,7 @@ fn an_upload_cut_off_goes_on_from_where_it_stopped() {
     });
     chunks += cut.get();
     assert!(chunks >= 2);
-    assert_eq!(read(&mut hub, &f), Ok(None), "not whole");
+    assert_eq!(read(hub.file(&f)), Ok(None), "not whole");
     alice.disconnected();
     hub.leave(a, 2);
 
@@ -199,7 +203,7 @@ fn an_upload_cut_off_goes_on_from_where_it_stopped() {
     });
     let at = resumed.borrow().clone();
     assert_eq!(at.first(), Some(&(ark_peer::files::CHUNK as u64)), "from the second chunk: {at:?}");
-    assert_eq!(read(&mut hub, &f).unwrap().as_deref(), Some(&photo[..]));
+    assert_eq!(read(hub.file(&f)).unwrap().as_deref(), Some(&photo[..]));
     assert!(!unsent(dir.path(), &f));
 }
 
@@ -207,8 +211,8 @@ fn an_upload_cut_off_goes_on_from_where_it_stopped() {
 /// connection is cut.
 #[test]
 fn a_download_cut_off_goes_on_from_where_it_stopped() {
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
-    let mut alice = device(false, "alice@phone");
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
+    let mut alice = device("alice@phone");
     let dir = tempfile::tempdir().unwrap();
     let mut bob = on(dir.path(), "bob@laptop");
     let photo = bytes(3 * ark_peer::files::CHUNK + 5);
@@ -228,7 +232,7 @@ fn a_download_cut_off_goes_on_from_where_it_stopped() {
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
 
     // Only the first ask reaches the server before the connection drops.
-    assert_eq!(read(&mut bob, &f), Ok(None));
+    assert_eq!(read(bob.file(&f)), Ok(None));
     let asked = Cell::new(0);
     carry(&mut hub, &mut [(b, &mut bob)], &|fr| {
         asked.set(asked.get() + matches!(fr, Frame::Want { .. }) as usize);
@@ -248,15 +252,15 @@ fn a_download_cut_off_goes_on_from_where_it_stopped() {
         false
     });
     assert_eq!(resumed.borrow().first(), Some(&(ark_peer::files::CHUNK as u64)), "from the second chunk");
-    assert_eq!(read(&mut bob, &f).unwrap().as_deref(), Some(&photo[..]));
+    assert_eq!(read(bob.file(&f)).unwrap().as_deref(), Some(&photo[..]));
 }
 
 /// Falsified by a server that gives any file to anyone who names it.
 #[test]
 fn a_scoped_connection_gets_only_the_files_its_rows_name() {
-    let mut hub = Peer::serve(config(true), Box::new(Memory::default()), 0);
-    let mut alice = device(true, "alice@phone");
-    let mut bob = device(true, "bob@laptop");
+    let mut hub = Authority::serve(server(true), Box::new(Memory::default()), 0).unwrap();
+    let mut alice = device("alice@phone");
+    let mut bob = device("bob@laptop");
     let f = alice.put_file(&b"alice's receipt"[..], "image/jpeg").unwrap();
     alice
         .mutate(
@@ -271,29 +275,29 @@ fn a_scoped_connection_gets_only_the_files_its_rows_name() {
     alice.connected();
     bob.connected();
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
-    assert!(read(&mut hub, &f).unwrap().is_some());
+    assert!(read(hub.file(&f)).unwrap().is_some());
 
-    assert_eq!(read(&mut bob, &f), Ok(None));
+    assert_eq!(read(bob.file(&f)), Ok(None));
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
-    assert_eq!(read(&mut bob, &f), Err("no row this connection reads names it".into()), "not bob's");
+    assert_eq!(read(bob.file(&f)), Err("no row this connection reads names it".into()), "not bob's");
 
     // Alice's other device reads her rows, so it gets her file.
-    let mut tablet = device(true, "alice@tablet");
+    let mut tablet = device("alice@tablet");
     let t = hub.accept(tablet.me().clone());
     tablet.connected();
     carry(&mut hub, &mut [(t, &mut tablet)], &none);
-    assert_eq!(read(&mut tablet, &f), Ok(None));
+    assert_eq!(read(tablet.file(&f)), Ok(None));
     carry(&mut hub, &mut [(t, &mut tablet)], &none);
-    assert_eq!(read(&mut tablet, &f).unwrap().as_deref(), Some(&b"alice's receipt"[..]));
+    assert_eq!(read(tablet.file(&f)).unwrap().as_deref(), Some(&b"alice's receipt"[..]));
 }
 
 /// Falsified by a server that forgets who wanted a file before it arrived:
 /// the other device would wait for ever.
 #[test]
 fn a_file_wanted_before_it_arrived_is_sent_when_it_does() {
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
-    let mut alice = device(false, "alice@phone");
-    let mut bob = device(false, "bob@laptop");
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
+    let mut alice = device("alice@phone");
+    let mut bob = device("bob@laptop");
     let (a, b) = (hub.accept(alice.me().clone()), hub.accept(bob.me().clone()));
     alice.connected();
     bob.connected();
@@ -312,23 +316,23 @@ fn a_file_wanted_before_it_arrived_is_sent_when_it_does() {
     // The row goes; the upload is held up.
     let upload = |fr: &Frame| matches!(fr, Frame::Offer { .. } | Frame::Chunk { .. });
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &upload);
-    assert_eq!(read(&mut bob, &f), Ok(None));
+    assert_eq!(read(bob.file(&f)), Ok(None));
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &upload);
-    assert_eq!(read(&mut bob, &f), Err("not here yet".into()));
+    assert_eq!(read(bob.file(&f)), Err("not here yet".into()));
 
     alice.disconnected();
     hub.leave(a, 2);
     let a = hub.accept(alice.me().clone());
     alice.connected();
     carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
-    assert_eq!(read(&mut bob, &f).unwrap().as_deref(), Some(&b"art"[..]), "sent when it arrived");
+    assert_eq!(read(bob.file(&f)).unwrap().as_deref(), Some(&b"art"[..]), "sent when it arrived");
 }
 
 /// Falsified by a server that takes bytes under any name.
 #[test]
 fn bytes_that_are_not_their_name_are_not_kept() {
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
-    let alice = device(false, "alice@phone");
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
+    let alice = device("alice@phone");
     let a = hub.accept(alice.me().clone());
     let hash = ark::file::hash(b"the real one");
     let _ = hub.frame(a, Frame::Offer { hash: hash.clone(), size: 4 }.enc(), 1);
@@ -350,7 +354,7 @@ fn bytes_that_are_not_their_name_are_not_kept() {
         size: 4,
         media: String::new(),
     };
-    assert_eq!(read(&mut hub, &f), Ok(None));
+    assert_eq!(read(hub.file(&f)), Ok(None));
 }
 
 /// Falsified by a device that forgets, when it opens again, what it made
@@ -358,30 +362,24 @@ fn bytes_that_are_not_their_name_are_not_kept() {
 #[test]
 fn a_device_s_unsent_files_outlast_a_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let open = || {
-        Peer::open(
-            config(false),
-            dev("alice@phone").unwrap(),
-            Box::new(ark_peer::Files::new(dir.path()).unwrap()),
-        )
-    };
+    let open = || Peer::open(config(), dev("alice@phone").unwrap(), Box::new(ark_peer::Files::new(dir.path()).unwrap()));
     let mut alice = open();
     let f = alice.put_file(&b"a playlist's art"[..], "image/png").unwrap();
     drop(alice);
 
     let mut alice = open();
     assert!(unsent(dir.path(), &f));
-    assert_eq!(read(&mut alice, &f).unwrap().as_deref(), Some(&b"a playlist's art"[..]));
+    assert_eq!(read(alice.file(&f)).unwrap().as_deref(), Some(&b"a playlist's art"[..]));
     assert!(dir.path().join("files").join(&f.hash).is_file(), "kept in the directory");
 
-    let mut hub = Peer::serve(config(false), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(server(false), Box::new(Memory::default()), 0).unwrap();
     let a = hub.accept(alice.me().clone());
     alice.connected();
     carry(&mut hub, &mut [(a, &mut alice)], &none);
     assert!(!unsent(dir.path(), &f), "the mark is off on the disk");
 
     // A name that is a path is no file's: nothing is written beside `files/`.
-    let mut hub = Peer::serve(config(false), Box::new(ark_peer::Files::new(dir.path().join("x")).unwrap()), 0);
+    let mut hub = Authority::serve(server(false), Box::new(ark_peer::Files::new(dir.path().join("x")).unwrap()), 0).unwrap();
     let c = hub.accept(alice.me().clone());
     let bytes = b"no".to_vec();
     let chunk = ark::frames::Frame::Chunk {
@@ -454,8 +452,8 @@ impl Read for Made {
 fn a_file_many_windows_long_goes_up_and_down_never_held_whole() {
     let size = 256u64 << 20;
     let dir = tempfile::tempdir().unwrap();
-    let server = Box::new(ark_peer::Files::new(dir.path().join("server")).unwrap());
-    let mut hub = Peer::serve(config(false), server, 0);
+    let disk = Box::new(ark_peer::Files::new(dir.path().join("server")).unwrap());
+    let mut hub = Authority::serve(server(false), disk, 0).unwrap();
     let mut alice = on(&dir.path().join("alice"), "alice@phone");
     let mut bob = on(&dir.path().join("bob"), "bob@laptop");
     let (a, b) = (hub.accept(alice.me().clone()), hub.accept(bob.me().clone()));
@@ -473,7 +471,7 @@ fn a_file_many_windows_long_goes_up_and_down_never_held_whole() {
             )
             .unwrap();
         carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
-        assert!(read(&mut bob, &f).unwrap().is_none());
+        assert!(read(bob.file(&f)).unwrap().is_none());
         carry(&mut hub, &mut [(a, &mut alice), (b, &mut bob)], &none);
         let mut whole = bob.file(&f).unwrap().expect("bob holds it whole");
         let said = ark::file::hash_reader(&mut whole).unwrap();
@@ -488,17 +486,17 @@ fn a_file_many_windows_long_goes_up_and_down_never_held_whole() {
 /// of one it refused.
 #[test]
 fn a_file_larger_than_the_server_takes_is_refused() {
-    let mut c = config(false);
+    let mut c = server(false);
     c.max_file = 3 * ark_peer::files::CHUNK as u64;
-    let mut hub = Peer::serve(c, Box::new(Memory::default()), 0);
-    let mut alice = device(false, "alice@phone");
+    let mut hub = Authority::serve(c, Box::new(Memory::default()), 0).unwrap();
+    let mut alice = device("alice@phone");
     let a = hub.accept(alice.me().clone());
     alice.connected();
     let ok = alice.put_file(&bytes(3 * ark_peer::files::CHUNK)[..], "image/png").unwrap();
     let big = alice.put_file(&bytes(3 * ark_peer::files::CHUNK + 1)[..], "video/mp4").unwrap();
     carry(&mut hub, &mut [(a, &mut alice)], &none);
-    assert!(read(&mut hub, &ok).unwrap().is_some(), "as large as it may be");
-    assert_eq!(read(&mut hub, &big), Ok(None));
+    assert!(read(hub.file(&ok)).unwrap().is_some(), "as large as it may be");
+    assert_eq!(read(hub.file(&big)), Ok(None));
 
     // Asked for a window ahead; refused when it says it is larger.
     let said = |out: Vec<(ConnId, Vec<u8>)>| out.iter().map(|(_, b)| Frame::dec(b).unwrap()).collect::<Vec<_>>();
@@ -518,7 +516,7 @@ fn a_file_larger_than_the_server_takes_is_refused() {
         bytes: bytes(10),
     };
     assert!(matches!(&said(hub.frame(a, chunk.enc(), 1))[..], [Frame::Absent { .. }]));
-    assert_eq!(read(&mut hub, &FileRef { hash: other, ..big }), Ok(None), "nothing of it kept");
+    assert_eq!(read(hub.file(&FileRef { hash: other, ..big })), Ok(None), "nothing of it kept");
 }
 
 /// Falsified by a part of a file kept for ever: an upload given up, a
@@ -542,7 +540,7 @@ fn a_part_left_long_is_dropped() {
 }
 
 /// A device dialling `hub` in process from the directory `dir`, and its bell.
-fn dialled(dir: &std::path::Path, who: &str, hub: &ark_peer::Handle) -> (Peer, std::sync::mpsc::Receiver<()>) {
+fn dialled(dir: &std::path::Path, who: &str, hub: &ark_peer::Handle<Authority>) -> (Peer, std::sync::mpsc::Receiver<()>) {
     let mut c = on(dir, who);
     let (wake, rx) = ark_peer::link::bell();
     c.set_waker(wake);
@@ -566,7 +564,7 @@ fn pumped(c: &mut (Peer, std::sync::mpsc::Receiver<()>), f: impl Fn(&Peer) -> bo
 fn throughput() {
     let mb = 256;
     let dir = tempfile::tempdir().unwrap();
-    let mut s = ark_peer::Server::new(config(false));
+    let mut s = ark_peer::Server::new(server(false));
     s.data = Some(dir.path().join("server"));
     let hub = s.build().unwrap().0;
     let mut alice = dialled(&dir.path().join("alice"), "alice@phone", &hub);

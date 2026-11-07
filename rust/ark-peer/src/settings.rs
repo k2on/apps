@@ -65,11 +65,11 @@ pub struct Serve {
     /// that leaves three unanswered is closed.
     pub keepalive: Duration,
     /// How many entries the log keeps above the snapshot it stands on
-    /// (`_RETAIN_ENTRIES`, 10,000: `Config::keep`); a device further behind
+    /// (`_RETAIN_ENTRIES`, 10,000: `ServerConfig::keep`); a device further behind
     /// is sent the snapshot and rebases onto it.
     pub retain: usize,
     /// The largest file a device may put, in bytes (`_MAX_FILE_MB`, 16 GiB:
-    /// `Config::max_file`).
+    /// `ServerConfig::max_file`).
     pub max_file: u64,
     /// Who holds which role: role → account ids (`_ROLES`). Asked at every
     /// connection, so a restart with another configuration grants or

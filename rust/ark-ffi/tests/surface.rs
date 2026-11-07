@@ -15,9 +15,9 @@ fn config() -> Config {
     Config::of(Arc::new(demo()))
 }
 
-fn server() -> Handle {
+fn server() -> Handle<ark_peer::Authority> {
     let c = arkdb::demo::hub(config());
-    Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), 0))
+    Handle::spawn(ark_peer::Authority::serve(c, Box::new(Memory::default()), 0).unwrap())
 }
 
 /// The login the dev server reads `token` as.

@@ -62,7 +62,7 @@ fn episode(p: &mut Replica) {
 
 /// A window that cannot play, joined to the hub, and the phone playing the
 /// episode from its start; the window on its transcript.
-fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
+fn playing_on_the_phone(hub: &ark_peer::Handle<ark_peer::Authority>) -> (App, Option<Replica>) {
     let mut client = crate::client::memory_as(who("me"), Some("dev"), crate::client::device(false, "Browser"));
     client.set_roles([crate::domain::LIBRARY]);
     episode(&mut client);

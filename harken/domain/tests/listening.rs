@@ -1262,10 +1262,10 @@ struct Wire {
 
 impl Wire {
     fn new() -> Wire {
-        let hub = Config {
+        let hub = ark_peer::ServerConfig {
             live: Some(module()),
             live_keep: Some(64),
-            ..Config::of(module())
+            ..ark_peer::ServerConfig::of(module())
         };
         Wire {
             net: Net::of(hub, vec![], 1),

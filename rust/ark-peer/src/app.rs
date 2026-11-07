@@ -4,7 +4,7 @@
 //! An app authors ([`Peer::mutate`], on the space the function writes) and
 //! asks by a function's name (`create_playlist`, or its whole binding,
 //! `playlists.create_playlist`) — or calls the domain's own
-//! view functions ([`Peer::answer`]) — and holds the
+//! view functions ([`Core::answer`]), of a device or a server alike — and holds the
 //! maintained views its lists are, each one's patches handed back. The peer keeps every intent's [`Outcome`] and, per space,
 //! the refusals its server sent until they are taken.
 //!
@@ -26,10 +26,10 @@ use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::schema::Space;
 
-use crate::{now_ms, Config, Disk, Patch, Peer};
+use crate::{now_ms, Config, Core, Disk, Patch, Peer};
 
 /// What a function is called with: a value, or its encoding already (a
-/// host's that speaks JSON, [`Peer::input_json`]).
+/// host's that speaks JSON, [`crate::Core::input_json`]).
 pub trait Arg {
     fn bytes(self) -> Vec<u8>;
 }
@@ -131,22 +131,13 @@ impl Peer {
     /// ([`nobody`]) on a disk nobody ever signed in on — and then, given a
     /// login and its token, as that login, its pending intents made the
     /// login's when they were somebody else's.
-    pub fn open_as(config: Config, disk: Box<dyn Disk>, login: Option<(Ctx, String)>) -> Peer {
-        let files = disk.files();
-        let (disk, mut local) = crate::local::beside(disk);
-        let kept = crate::local::Replica::read(&mut *local);
-        let me = match kept.actor {
-            Some(actor) => Ctx::who(actor, kept.session, vec![]),
-            None => {
-                let me = nobody();
-                let (actor, session) = (Some(me.actor.clone()), me.session.clone());
-                let r = crate::local::Replica { actor, session, ..kept };
-                let _ = local.put(crate::local::REPLICA, &r.to_bytes());
-                me
-            }
-        };
-        let mut p = Peer::opened(config, me, disk, local, crate::link::Link::default());
-        p.keep_files(files);
+    pub fn open_as(config: Config, mut disk: Box<dyn Disk>, login: Option<(Ctx, String)>) -> Peer {
+        let mut me = nobody();
+        let _ = crate::local::preset(&mut *disk, |r| match &r.actor {
+            Some(actor) => me = Ctx::who(actor.clone(), r.session.clone(), vec![]),
+            None => (r.actor, r.session) = (Some(me.actor.clone()), me.session.clone()),
+        });
+        let mut p = Peer::open(config, me, disk);
         match login {
             Some((who, token)) if (&who.actor, &who.session) != (&p.log.me.actor, &p.log.me.session) => p.login(who, token),
             Some((who, token)) => {
@@ -172,73 +163,19 @@ impl Peer {
         self.link.token.is_none()
     }
 
-    /// The roles this login holds, which every intent it authors carries:
-    /// a write is refused here as the server would refuse it.
-    pub fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
-        let roles: Vec<String> = roles.into_iter().map(Into::into).collect();
-        self.log.me.roles.clone_from(&roles);
-        if let Some(l) = &mut self.live {
-            l.me.roles = roles;
-        }
-    }
-
-    pub fn me(&self) -> &Ctx {
-        &self.log.me
-    }
-
-    /// Who a view is read and kept for.
-    pub fn ctx(&self) -> Ctx {
-        let me = self.me();
-        Ctx {
-            id: EntryId::of(&me.session, 0),
-            now: now_ms(),
-            ..me.clone()
-        }
-    }
-
-    pub fn domain(&self) -> &Domain {
-        &self.config.log
-    }
-
-    /// The function a name means ([`Domain::binding`]) and the domain it
-    /// is of: the log's, else the live space's.
-    fn found(&self, name: &str) -> Result<(&Domain, &Function), String> {
-        let live = self.config.live.as_deref();
-        [&*self.config.log]
-            .into_iter()
-            .chain(live)
-            .find_map(|d| Some((d, d.get(d.binding(name)?)?)))
-            .ok_or_else(|| format!("no function {name}"))
-    }
-
-    /// The function a name means, of the log's domain or the live space's:
-    /// its whole name, its kind and space, what it takes and answers.
-    pub fn function(&self, name: &str) -> Result<&Function, String> {
-        Ok(self.found(name)?.1)
-    }
-
-    /// A view's answer over the optimistic state, as this login reads it:
-    /// its encoding.
-    pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
-        let b = &self.function(name)?.name;
-        self.domain().ask(&self.log.store, &self.ctx(), b, input)
-    }
-
     /// An intent of the function `name` (its binding, or the binding's last
     /// part) on `input` — a value, or its encoding — on the space the
-    /// function writes, now: its id, or the refusal its preview (or, serving,
-    /// its sequencing) gave it here and now. A live one the
-    /// config relays (`Config::ephemeral`) goes through the relay, under the
-    /// id it is sent with when nothing goes first.
+    /// function writes, now: its id, or the refusal its preview gave it
+    /// here and now. A live one the config relays (`Config::ephemeral`)
+    /// goes through the relay, under the id it is sent with when nothing
+    /// goes first.
     pub fn mutate(&mut self, name: &str, input: impl Arg) -> Result<EntryId, String> {
         self.mutate_at(name, input, now_ms())
     }
 
     /// [`Peer::mutate`] at `now`: a simulator's clock.
     pub fn mutate_at(&mut self, name: &str, input: impl Arg, now: i64) -> Result<EntryId, String> {
-        let f = self.function(name)?;
-        let (space, f) = (f.space, f.name.clone());
-        let id = self.machine(space).ok_or_else(|| format!("no {space:?} machine here"))?.next_id();
+        let (space, f, id) = self.intent(name)?;
         if let Err(why) = self.author(space, &f, input.bytes(), now) {
             // Said here, as the answer; not again among the refusals.
             self.told.refused[space as usize].retain(|(r, _)| *r != id);
@@ -246,49 +183,6 @@ impl Peer {
         }
         self.flush();
         Ok(id)
-    }
-
-    /// A function's input — of the log's domain or the live one's — from its
-    /// JSON (§1.1's human form), as the value format writes it: what a host
-    /// that speaks JSON authors and asks with.
-    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
-        let (d, f) = self.found(name)?;
-        d.input_json(&f.name, text)
-    }
-
-    /// What [`Peer::ask`] answered, as JSON.
-    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, f) = self.found(name)?;
-        d.answer_json(&f.name, bytes)
-    }
-
-    /// One row of a view of `name`, as JSON.
-    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
-        let (d, f) = self.found(name)?;
-        d.element_json(&f.name, bytes)
-    }
-
-    /// A row of a table of either space, as JSON.
-    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
-        let live = self.config.live.as_deref();
-        let mut ds = [&*self.config.log].into_iter().chain(live);
-        let d = ds.find(|d| d.schema.table(table).is_some()).ok_or_else(|| format!("no table {table}"))?;
-        d.row_json(table, bytes)
-    }
-
-    /// A view's answer over the optimistic state, as this login reads it.
-    pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
-        let bytes = self.ask(name, &input.to_bytes())?;
-        T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
-    }
-
-    /// A view function of the domain in Rust (§1.16) answered afresh over
-    /// the optimistic state, as this login reads it: the domain's own
-    /// function, called as it is.
-    pub fn answer<S: ark::db::Tables, I, T: ark::plan::Elem>(&self, f: ark::domain::ViewFn<S, I, T>, input: I) -> Result<Vec<T>, String> {
-        let ctx = self.ctx();
-        let plan = ark::db::read::<S, _>(&self.log.store, |db| f(&ctx, db, input))?;
-        Ok(plan.run(&self.log.store, &ctx))
     }
 
     /// A maintained view (§1.10) over the optimistic state, as this login
@@ -328,17 +222,6 @@ impl Peer {
         self.log.pending().len()
     }
 
-    /// The head of the confirmed chain.
-    pub fn cursor(&self) -> i64 {
-        self.log.log().head().0
-    }
-
-    /// The confirmed and pending state's hash: what moves when the store
-    /// does.
-    pub fn state(&self) -> StateHash {
-        self.log.store.state_hash()
-    }
-
     /// Why its server cannot serve this build, once it said so (§1.2): the
     /// app is to be updated; the link is closed until it is.
     pub fn update_needed(&self) -> Option<&str> {
@@ -361,5 +244,116 @@ impl Peer {
             _ if self.dialling() => "connecting",
             _ => "waiting to dial",
         }
+    }
+}
+
+impl Core {
+    /// The roles this login holds, which every intent it authors carries:
+    /// a write is refused here as the server would refuse it.
+    pub fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        let roles: Vec<String> = roles.into_iter().map(Into::into).collect();
+        self.log.me.roles.clone_from(&roles);
+        if let Some(l) = &mut self.live {
+            l.me.roles = roles;
+        }
+    }
+
+    pub fn me(&self) -> &Ctx {
+        &self.log.me
+    }
+
+    /// Who a view is read and kept for.
+    pub fn ctx(&self) -> Ctx {
+        let me = self.me();
+        Ctx {
+            id: EntryId::of(&me.session, 0),
+            now: now_ms(),
+            ..me.clone()
+        }
+    }
+
+    pub fn domain(&self) -> &Domain {
+        &self.log.domain
+    }
+
+    /// The domains it has, the log's and the live space's.
+    fn domains(&self) -> impl Iterator<Item = &Domain> {
+        [&self.log].into_iter().chain(&self.live).map(|m| &*m.domain)
+    }
+
+    /// The function a name means ([`Domain::binding`]) and the domain it
+    /// is of: the log's, else the live space's.
+    fn found(&self, name: &str) -> Result<(&Domain, &Function), String> {
+        self.domains()
+            .find_map(|d| Some((d, d.get(d.binding(name)?)?)))
+            .ok_or_else(|| format!("no function {name}"))
+    }
+
+    /// The function a name means, of the log's domain or the live space's:
+    /// its whole name, its kind and space, what it takes and answers.
+    pub fn function(&self, name: &str) -> Result<&Function, String> {
+        Ok(self.found(name)?.1)
+    }
+
+    /// A view's answer over the optimistic state, as this login reads it:
+    /// its encoding.
+    pub fn ask(&self, name: &str, input: &[u8]) -> Result<Vec<u8>, String> {
+        let b = &self.function(name)?.name;
+        self.domain().ask(&self.log.store, &self.ctx(), b, input)
+    }
+
+    /// A function's input — of the log's domain or the live one's — from its
+    /// JSON (§1.1's human form), as the value format writes it: what a host
+    /// that speaks JSON authors and asks with.
+    pub fn input_json(&self, name: &str, text: &str) -> Result<Vec<u8>, String> {
+        let (d, f) = self.found(name)?;
+        d.input_json(&f.name, text)
+    }
+
+    /// What [`Core::ask`] answered, as JSON.
+    pub fn answer_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        let (d, f) = self.found(name)?;
+        d.answer_json(&f.name, bytes)
+    }
+
+    /// One row of a view of `name`, as JSON.
+    pub fn element_json(&self, name: &str, bytes: &[u8]) -> Result<String, String> {
+        let (d, f) = self.found(name)?;
+        d.element_json(&f.name, bytes)
+    }
+
+    /// A row of a table of either space, as JSON.
+    pub fn row_json(&self, table: &str, bytes: &[u8]) -> Result<String, String> {
+        let d = self
+            .domains()
+            .find(|d| d.schema.table(table).is_some())
+            .ok_or_else(|| format!("no table {table}"))?;
+        d.row_json(table, bytes)
+    }
+
+    /// A view's answer over the optimistic state, as this login reads it.
+    pub fn query<T: Encode>(&self, name: &str, input: &impl Encode) -> Result<T, String> {
+        let bytes = self.ask(name, &input.to_bytes())?;
+        T::from_bytes(&bytes).map_err(|r| format!("{name}: {r}"))
+    }
+
+    /// A view function of the domain in Rust (§1.16) answered afresh over
+    /// the optimistic state, as this login reads it: the domain's own
+    /// function, called as it is.
+    pub fn answer<S: ark::db::Tables, I, T: ark::plan::Elem>(&self, f: ark::domain::ViewFn<S, I, T>, input: I) -> Result<Vec<T>, String> {
+        let ctx = self.ctx();
+        let plan = ark::db::read::<S, _>(&self.log.store, |db| f(&ctx, db, input))?;
+        Ok(plan.run(&self.log.store, &ctx))
+    }
+
+    /// The head of the confirmed chain.
+    pub fn cursor(&self) -> i64 {
+        self.log.log().head().0
+    }
+
+    /// The confirmed and pending state's hash: what moves when the store
+    /// does.
+    pub fn state(&self) -> StateHash {
+        self.log.store.state_hash()
     }
 }

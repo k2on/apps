@@ -88,10 +88,14 @@ fn auth(data: &Path) -> Arc<Auth> {
 }
 
 /// The server over `data`: its hub, and its sign-in.
-fn server(data: &Path) -> (ark_peer::Handle, Arc<Auth>) {
+fn server(data: &Path) -> (ark_peer::Handle<ark_peer::Authority>, Arc<Auth>) {
     let auth = auth(data);
     // A server keeping one entry folds its log into `kv` as it goes.
-    let mut s = Server::new(Config { keep: Some(1), ..config() }).auth(auth.clone());
+    let mut s = Server::new(ark_peer::ServerConfig {
+        keep: Some(1),
+        ..config().into()
+    })
+    .auth(auth.clone());
     s.data = Some(data.to_path_buf());
     (s.build().unwrap().0, auth)
 }

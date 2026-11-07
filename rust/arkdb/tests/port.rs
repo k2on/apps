@@ -17,7 +17,7 @@ fn dir(name: &str) -> std::path::PathBuf {
     d
 }
 
-fn server(data: &Path) -> ark_peer::Handle {
+fn server(data: &Path) -> ark_peer::Handle<ark_peer::Authority> {
     let mut s = Server::new(Config::of(Arc::new(demo())));
     s.data = Some(data.to_path_buf());
     s.build().unwrap().0

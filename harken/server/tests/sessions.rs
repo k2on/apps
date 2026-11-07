@@ -94,7 +94,7 @@ fn an_expired_session_is_closed_and_turned_away() {
         Auth::new::<harken_server::domain::Harken>(Mode::Dev, "http://127.0.0.1", b"key")
             .with_ttl(1_500),
     );
-    let config = harken_server::hub_config(&Hosted::harken(), 100);
+    let config = harken_player::config::hub(&Hosted::harken().domain, Some(100));
     let running = rt
         .block_on(
             ark_peer::Server::new(config)

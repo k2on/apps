@@ -1,5 +1,5 @@
 //! Setting up where receipts come from: functions of the server's own that
-//! a device calls over its link (ark-peer's `Config::calls`), never
+//! a device calls over its link (ark-peer's `ServerConfig::calls`), never
 //! intents. What they carry — Amazon's password — is the server's alone:
 //! it is kept in the server's vault and never in a row, so it is in no
 //! log, on no device, and in no backup of the budget. Each answers with

@@ -27,7 +27,7 @@ use ark::hash::hex;
 use ark::log::Logged;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
-use ark_peer::{Config, Files, Peer};
+use ark_peer::{Authority, Config, Files};
 use arkdb::sim::{Net, Op};
 use harken_server::hosted::Hosted;
 use serde_json::{json, Value};
@@ -114,7 +114,12 @@ impl Log {
             }
         }
         let disk = Box::new(Files::new(copy.path()).unwrap());
-        let mut p = Peer::serve(harken_server::hub_config(hosted(), 10_000), disk, 0);
+        let mut p = Authority::serve(
+            harken_player::config::hub(&hosted().domain, Some(10_000)),
+            disk,
+            0,
+        )
+        .unwrap();
         let state = std::mem::replace(
             &mut p.log.store,
             Store::new(hosted().domain.schema.clone(), ark::schema::Space::Durable),
@@ -887,9 +892,10 @@ pub struct Seeder {
 
 impl Seeder {
     fn new(dir: &Path) -> Seeder {
-        let config = harken_server::hub_config(hosted(), 10_000);
+        let config = harken_player::config::hub(&hosted().domain, Some(10_000));
         let mut net = Net::of(config.clone(), vec![], 0);
-        net.hub = Peer::serve(config, Box::new(Files::new(dir.join("log")).unwrap()), 0);
+        net.hub =
+            Authority::serve(config, Box::new(Files::new(dir.join("log")).unwrap()), 0).unwrap();
         Seeder {
             net,
             users: BTreeMap::new(),

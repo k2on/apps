@@ -23,7 +23,7 @@ use ark::peer::Ctx;
 use ark::prelude::Id;
 use ark::schema::Space;
 use ark::store::Store;
-use ark_peer::{Config, Peer};
+use ark_peer::{Config, Peer, ServerConfig};
 
 use crate::demo::{AddToPlaylist, CreatePlaylist, Items, Playlist, RemoveFromPlaylist, RenamePlaylist};
 pub use crate::sim::Rng;
@@ -134,17 +134,15 @@ pub fn session(seed: u64) -> Result<(Net, Found), String> {
     let mut r = Rng(seed);
     let g = Gen::new();
     let live = r.one_in(2);
-    let mut hub = Config::of(Arc::new(crate::demo::demo()));
+    let mut hub = ServerConfig::of(Arc::new(crate::demo::demo()));
     let scope = g.scope.clone();
     let scoped = scope.clone();
     hub.feed = Arc::new(move |w: &Ctx| w.session.starts_with("partial").then(|| scoped.clone()));
     hub.keep = r.one_in(3).then(|| 2 + r.below(4) as usize);
     if live {
-        hub = Config {
-            live_keep: Some(4),
-            ..crate::demo::hub(hub)
-        };
+        (hub.live, hub.live_keep) = (Some(Arc::new(crate::demo::room())), Some(4));
     }
+
     let n = 2 + r.below(3) as i64;
     let partial = r.one_in(2);
     let config = |i: i64| match live {

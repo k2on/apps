@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ark::format::Encode;
 
 use ark_peer::observe::{install, Event, Sink};
-use ark_peer::{dev, Config, Memory, Peer};
+use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
 
 /// Falsified by the hub taking the events' call for one of its app's
@@ -18,7 +18,7 @@ use arkdb::demo::{demo, CreatePlaylist};
 fn a_devices_events_reach_its_server_named_by_its_login() {
     assert!(install(Sink::Outbox).is_ok());
     let config = || Config::of(Arc::new(demo()));
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
     d.connected();

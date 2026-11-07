@@ -130,7 +130,7 @@ beside what the bank says was paid:
 **Settings set the stores up** (`iced/src/stores.rs`, answered by
 `server/src/setup.rs`), and nothing they are told is part of the budget.
 They are calls of the server's own over the sync socket
-(`domain/src/setup.rs`, ark-peer's `Config::calls`), not intents: a `Call`
+(`domain/src/setup.rs`, ark-peer's `ServerConfig::calls`), not intents: a `Call`
 frame answered by a `Reply` to that connection alone, never logged, journaled
 or told to anyone else. Amazon's login, with an authenticator secret for an
 account with two-step verification, is kept in `<data>/stores.json`,

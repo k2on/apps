@@ -1,6 +1,6 @@
 //! Setting up where receipts come from, from the app's Settings: the
 //! functions of the server's own a device calls over its link
-//! (`money_domain::setup`, ark-peer's `Config::calls`), outside the log.
+//! (`money_domain::setup`, ark-peer's `ServerConfig::calls`), outside the log.
 //! What they are told is kept in the vault ([`crate::vault`]), never a row,
 //! and what they answer is [`Stores`]: who, masked, and no secret.
 //!
@@ -41,7 +41,7 @@ pub struct Setup {
 /// The largest photo taken, decoded.
 const PHOTO_LIMIT: usize = 12 << 20;
 
-/// The calls, by name, for the hub's `Config::calls`.
+/// The calls, by name, for the hub's `ServerConfig::calls`.
 pub fn calls(setup: Setup) -> BTreeMap<String, ark_peer::Call> {
     let mut out = BTreeMap::new();
     let mut add = |name: &str, f: fn(&Setup, &[u8]) -> Result<Vec<u8>>| {

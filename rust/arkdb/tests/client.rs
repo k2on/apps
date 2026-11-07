@@ -119,9 +119,9 @@ fn a_view_is_its_patches_and_a_fresh_evaluation() {
 /// moves.
 #[test]
 fn the_room_comes_and_goes_and_the_pointer_is_relayed() {
-    let hub = Config {
+    let hub = ark_peer::ServerConfig {
         live_keep: Some(8),
-        ..arkdb::demo::hub(demo())
+        ..arkdb::demo::hub(demo()).into()
     };
     let config = |name: &str| arkdb::demo::device(demo(), name, 100);
     let mut n = Net::of(hub, vec![(who(0), config("phone")), (who(1), config("laptop"))], 9);

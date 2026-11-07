@@ -61,7 +61,7 @@ use ark::peer::Ctx;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
 use ark::store::{Dir, Read, Scan as Range, Store};
 use ark_auth::Login;
-use ark_peer::{Config, Files, Handle, Instance};
+use ark_peer::{Authority, Config, Files, Handle, Instance};
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
@@ -211,7 +211,7 @@ impl Scanner {
     pub fn start(
         root: PathBuf,
         hosted: Hosted,
-        hub: Handle,
+        hub: Handle<Authority>,
         data: PathBuf,
         login: Login,
         catalogue: Option<String>,
@@ -700,7 +700,7 @@ fn pump(peer: &mut ark_peer::Peer) {
 fn run(
     mut scan: Scan,
     mut peer: ark_peer::Peer,
-    hub: Handle,
+    hub: Handle<Authority>,
     rx: Receiver<Nudge>,
     heard: Receiver<Said>,
     stop: &AtomicBool,
@@ -815,7 +815,7 @@ fn ask(peer: &mut ark_peer::Peer, root: &Path, nudges: Vec<Nudge>) {
 /// "already a song" means the library and not an empty replica. Bounded: a
 /// scanner that cannot catch up still scans, and the procedure keeps the
 /// library right.
-fn catch_up(peer: &mut ark_peer::Peer, hub: &Handle, stop: &AtomicBool) {
+fn catch_up(peer: &mut ark_peer::Peer, hub: &Handle<Authority>, stop: &AtomicBool) {
     let head = hub.with(|h| h.log.log().head().0).unwrap_or(0);
     let deadline = Instant::now() + Duration::from_secs(30);
     while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {

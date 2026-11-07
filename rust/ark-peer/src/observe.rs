@@ -2,7 +2,7 @@
 //! any code says it. The machine says what it does where it does it (an
 //! entry authored, judged, held, confirmed; a fill done; a divergence —
 //! `ark::peer`), inside the span its driver opens around every step, which
-//! names the peer ([`crate::Peer::label`]), the space and the connection;
+//! names the peer ([`crate::Core::label`]), the space and the connection;
 //! the driver says what is its own (the link, a slow pump, a job's run).
 //! Every entry's event carries its id, `trace` and `span` (an entry's span
 //! is its id) and the span it was a child of (`parent`), so that one tap's

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use ark::peer::Ctx;
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{now_ms, Handle, Memory};
+use ark_peer::{now_ms, Authority, Handle, Memory};
 
 /// Who a hall's token, `user/session` or `user/session/role,role`, is.
 fn token(t: &str) -> Option<Ctx> {
@@ -23,7 +23,7 @@ fn token(t: &str) -> Option<Ctx> {
 
 #[derive(uniffi::Object)]
 pub struct Hall {
-    hub: Handle,
+    hub: Handle<Authority>,
     devices: Mutex<Vec<Weak<Peer>>>,
 }
 
@@ -31,7 +31,7 @@ pub struct Hall {
 impl Hall {
     #[uniffi::constructor]
     pub fn new() -> Arc<Hall> {
-        let hub = Handle::spawn(ark_peer::Peer::serve(crate::config(), Box::new(Memory::default()), now_ms()));
+        let hub = Handle::spawn(Authority::serve(crate::config(), Box::new(Memory::default()), now_ms()).expect("an empty log reads"));
         Arc::new(Hall {
             hub,
             devices: Mutex::default(),

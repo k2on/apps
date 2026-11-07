@@ -64,7 +64,7 @@ use ark::format::Encode;
 use ark::peer::Ctx;
 use ark::row::Id;
 use ark_auth::Login;
-use ark_peer::{Handle, Memory, Peer};
+use ark_peer::{Authority, Handle, Memory, Peer};
 use money_domain::plaid::import_of;
 use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
 
@@ -169,7 +169,7 @@ pub struct Importer {
 impl Importer {
     /// The importer for `banks`, signed in as `login`, dialling `hub`; its
     /// store in `data`. It runs once as soon as it is linked.
-    pub fn start(banks: Option<Banks>, stores: Stores, hub: Handle, data: PathBuf, login: Login) -> Result<Importer> {
+    pub fn start(banks: Option<Banks>, stores: Stores, hub: Handle<Authority>, data: PathBuf, login: Login) -> Result<Importer> {
         let mut roles = login.user.roles.clone();
         roles.push(money_domain::BANK.to_string());
         roles.sort();

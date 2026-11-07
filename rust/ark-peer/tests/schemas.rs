@@ -36,14 +36,14 @@ fn grown() -> Config {
     Config::of(Arc::new(d))
 }
 
-fn server(config: Config, data: &Path) -> anyhow::Result<ark_peer::Handle> {
+fn server(config: Config, data: &Path) -> anyhow::Result<ark_peer::Handle<ark_peer::Authority>> {
     let mut s = Server::new(config);
     s.data = Some(data.to_path_buf());
     Ok(s.build()?.0)
 }
 
 /// A device of `config` on `disk`, linked to `hub`, pumped until `f` holds.
-fn synced(config: Config, disk: &Path, who: &str, hub: &ark_peer::Handle, author: &[&str], f: impl Fn(&Peer) -> bool) -> Peer {
+fn synced(config: Config, disk: &Path, who: &str, hub: &ark_peer::Handle<ark_peer::Authority>, author: &[&str], f: impl Fn(&Peer) -> bool) -> Peer {
     let mut p = Peer::open(config, dev(who).unwrap(), Box::new(Files::new(disk).unwrap()));
     let (wake, rx) = bell();
     p.set_waker(wake);

@@ -35,10 +35,4 @@ impl Hosted {
         self.get(name)
             .unwrap_or_else(|| panic!("no function {name}"))
     }
-
-    /// What this build runs, in a word: its domain's schema hash and
-    /// version.
-    pub fn version(&self) -> String {
-        format!("{} {}", self.domain.schema_hash(), self.domain.version)
-    }
 }

@@ -5,16 +5,16 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Peer};
+use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
 use arkdb::demo::{Arrival, CreatePlaylist, Point};
 
-fn hub() -> Peer {
-    let c = Config {
+fn hub() -> Authority {
+    let c = ark_peer::ServerConfig {
         live: Some(Arc::new(arkdb::demo::room())),
-        ..Config::of(Arc::new(domain()))
+        ..ark_peer::ServerConfig::of(Arc::new(domain()))
     };
-    Peer::serve(c, Box::new(Memory::default()), 0)
+    Authority::serve(c, Box::new(Memory::default()), 0).unwrap()
 }
 
 fn device() -> Peer {
@@ -28,7 +28,7 @@ fn device() -> Peer {
     p
 }
 
-fn carry(hub: &mut Peer, d: &mut Peer, c: u64) {
+fn carry(hub: &mut Authority, d: &mut Peer, c: u64) {
     loop {
         let mut q = vec![];
         for f in d.take_frames() {

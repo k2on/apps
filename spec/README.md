@@ -48,8 +48,9 @@ is right. `RUNNERS.md` says what `arkdb` does with `protocol/`, `trace/`,
 | — | `lib.rs` | the prelude a domain uses (a refusal is its words, a `String`); the derives and attributes are `rust/ark-macros` |
 
 The drivers are the reference reading, not the specification:
-`rust/ark-peer` (the one peer, dialling or listening: storage, the link,
-the hub, the app kit) and `rust/arkdb` (the demo, the simulator, the
+`rust/ark-peer` (a device that dials and a server that listens, over one
+core: storage, the link, the server's connections and `/healthz`,
+the app kit) and `rust/arkdb` (the demo, the simulator, the
 trace player, the fuzzer, the vector writer).
 
 ## The vectors

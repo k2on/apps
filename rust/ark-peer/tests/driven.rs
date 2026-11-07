@@ -9,15 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ark_peer::link::bell;
-use ark_peer::{dev, Handle, Memory, Peer};
+use ark_peer::{dev, Authority, Handle, Memory, Peer};
 use support::{config, named};
 
-fn hub() -> Handle {
-    Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
+fn hub() -> Handle<Authority> {
+    Handle::spawn(Authority::serve(config(), Box::new(Memory::default()), 0).unwrap())
 }
 
 /// `token`'s device, linked to `hub`, driven.
-fn driven(token: &str, hub: &Handle) -> Handle {
+fn driven(token: &str, hub: &Handle<Authority>) -> Handle {
     let mut p = Peer::open(config(), dev(token).unwrap(), Box::new(Memory::default()));
     p.set_token(Some(token.into()));
     p.connect_with("", hub.dialer(Arc::new(dev)));

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use ark::peer::Ctx;
 use ark_ffi::{Login, Peer, Refusal};
-use ark_peer::{now_ms, Config, Handle, Memory};
+use ark_peer::{now_ms, Authority, Config, Handle, Memory};
 use harken_domain::host::{self, Listening};
 use serde_json::json;
 
@@ -58,11 +58,10 @@ fn listening_json(l: &Listening) -> String {
 }
 
 /// The domain this library carries as a server's `/healthz` names it:
-/// its schema's hash and its version (`harken-server`'s `domain` line).
+/// its schema's hash and its version (`ark_peer::version`: the server's `domain` line).
 #[uniffi::export]
 pub fn harken_domain() -> String {
-    let d = harken_domain::shared();
-    format!("{} {}", d.schema_hash(), d.version)
+    ark_peer::version(&harken_domain::shared())
 }
 
 /// Where a track's file is, from where its server is.
@@ -84,7 +83,7 @@ fn token(t: &str) -> Option<Ctx> {
 
 #[derive(uniffi::Object)]
 pub struct Hall {
-    hub: Handle,
+    hub: Handle<Authority>,
     devices: Mutex<Vec<Weak<Peer>>>,
 }
 
@@ -93,7 +92,7 @@ impl Hall {
     #[uniffi::constructor]
     pub fn new() -> Arc<Hall> {
         let c = harken_player::config::hub(&harken_domain::shared(), None);
-        let hub = Handle::spawn(ark_peer::Peer::serve(c, Box::new(Memory::default()), now_ms()));
+        let hub = Handle::spawn(Authority::serve(c, Box::new(Memory::default()), now_ms()).expect("an empty log reads"));
         Arc::new(Hall {
             hub,
             devices: Mutex::default(),

@@ -13,7 +13,7 @@ use ark::frames::{Frame, Verdict};
 use ark::peer::Ctx;
 use ark::prelude::*;
 
-use ark_peer::{dev, Config, Disk, Instance, Memory, Peer};
+use ark_peer::{dev, Authority, Config, Disk, Instance, Memory, Peer, ServerConfig};
 
 mod support;
 
@@ -96,10 +96,10 @@ fn an_ephemeral_instance_holds_volatile_rows() {
     assert_eq!(i.read::<Room, _>(|db| db.seen.scan()).len(), 1);
 }
 
-fn config() -> Config {
-    Config {
+fn config() -> ServerConfig {
+    ServerConfig {
         keep: Some(1),
-        ..Config::of(Arc::new(arkdb::demo::demo()))
+        ..ServerConfig::of(Arc::new(arkdb::demo::demo()))
     }
 }
 
@@ -118,9 +118,9 @@ fn verdicts(out: &[(u64, Vec<u8>)]) -> Vec<Verdict> {
         .collect()
 }
 
-fn restarted(mut hub: Peer) -> Peer {
+fn restarted(mut hub: Authority) -> Authority {
     let disk = hub.log.disk.take().unwrap();
-    Peer::serve(config(), disk, 0)
+    Authority::serve(config(), disk, 0).unwrap()
 }
 
 /// An origin whose every entry is below the horizon is remembered by its
@@ -130,7 +130,7 @@ fn restarted(mut hub: Peer) -> Peer {
 #[test]
 fn the_last_of_each_origin_survives_a_restart() {
     let (alice, bob) = (dev("alice@laptop").unwrap(), dev("bob@phone").unwrap());
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let (a, b) = (hub.accept(alice.clone()), hub.accept(bob.clone()));
     for n in 1..=2 {
         hub.frame(a, push(&alice, n, CREATE, &format!("A{n}")), 1);

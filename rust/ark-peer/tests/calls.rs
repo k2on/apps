@@ -1,5 +1,5 @@
 //! A device calls one of its server's own functions over its link
-//! (`Config::calls`): a `Call` frame answered by a `Reply` to that
+//! (`ServerConfig::calls`): a `Call` frame answered by a `Reply` to that
 //! connection alone, and nothing of it in either log, on another
 //! connection, or kept to send again.
 
@@ -7,11 +7,15 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use ark::frames::{Frame, Reply};
-use ark_peer::{dev, Call, Config, Handle, Memory, Peer};
+use ark_peer::{dev, Authority, Call, Config, Handle, Memory, Peer, ServerConfig};
 use arkdb::demo::demo;
 
 fn config() -> Config {
-    let mut c = Config::of(Arc::new(demo()));
+    Config::of(Arc::new(demo()))
+}
+
+fn hub() -> ServerConfig {
+    let mut c = ServerConfig::of(Arc::new(demo()));
     let echo: Call = Arc::new(|who, input| match input {
         b"no" => Err(format!("{} may not", who.actor)),
         _ => Ok([who.actor.as_bytes(), b":", input].concat()),
@@ -24,7 +28,7 @@ fn config() -> Config {
 /// hub would have no call to take, and the log would move.
 #[test]
 fn a_call_is_answered_to_its_caller_alone_and_logged_nowhere() {
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(hub(), Box::new(Memory::default()), 0).unwrap();
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     let other = Peer::open(config(), dev("bob@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
@@ -60,7 +64,7 @@ fn a_call_is_answered_to_its_caller_alone_and_logged_nowhere() {
 
 #[test]
 fn a_function_the_server_has_not_is_none() {
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(hub(), Box::new(Memory::default()), 0).unwrap();
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     let c = hub.accept(d.me().clone());
     d.connected();
@@ -97,7 +101,7 @@ fn a_call_is_never_kept_to_send_later() {
 /// refused by name.
 #[test]
 fn the_servers_thread_runs_calls_and_answers() {
-    let handle = Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0));
+    let handle = Handle::spawn(Authority::serve(hub(), Box::new(Memory::default()), 0).unwrap());
     let (tx, rx) = mpsc::channel();
     let c = handle.connect(dev("alice@phone").unwrap(), Box::new(move |b| tx.send(b).is_ok()));
     let call = |id, name: &str, input: &[u8]| {
@@ -136,14 +140,15 @@ fn the_servers_thread_runs_calls_and_answers() {
 fn a_call_goes_out_as_it_is_made() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let ran = Arc::new(AtomicBool::new(false));
-    let mut server = config();
+    let mut server = hub();
+
     let seen = ran.clone();
     let mark: Call = Arc::new(move |_, _| {
         seen.store(true, Ordering::SeqCst);
         Ok(vec![])
     });
     server.calls.insert("mark".into(), mark);
-    let hub = Handle::spawn(Peer::serve(server, Box::new(Memory::default()), 0));
+    let hub = Handle::spawn(Authority::serve(server, Box::new(Memory::default()), 0).unwrap());
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
     d.set_token(Some("alice@phone".into()));
     d.connect_with("", hub.dialer(Arc::new(dev)));

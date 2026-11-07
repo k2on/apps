@@ -49,8 +49,7 @@ pub fn money_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusa
 /// schema's hash and its version (the server's `domain` line).
 #[uniffi::export]
 pub fn money_domain() -> String {
-    let d = money_domain::shared();
-    format!("{} {}", d.schema_hash(), d.version)
+    ark_peer::version(&money_domain::shared())
 }
 
 /// What became of a mutation as the device sent it: its intent, whose

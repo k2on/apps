@@ -10,7 +10,9 @@
 //! the row, whose key is its idempotency key, and the peer, to author
 //! what it found; its answer is the `<table>.finish`. Nothing runs during a replay or an open: rows only
 //! move what is kept, and a handler runs when its driver pumps the peer
-//! ([`Peer::pump`]), never on a peer that did not register it. A claim
+//! ([`Peer::pump`]), never on a peer that did not register it — a device's
+//! (a server's work is a device of its own). A claim
+
 //! from before a restart is another's: its row is due again only when its
 //! lease runs out. The handler is a plain function on the driver's
 //! thread: ark-peer has no executor (it is pumped, natively and in a
@@ -97,8 +99,7 @@ impl<R: Effect, F: FnMut(&mut Peer, &R) -> Result<R::Outcome, String> + Sendable
             }
         }
         for (k, (e, span)) in std::mem::take(&mut self.claims) {
-            // An authority's own claim is decided as it is made.
-            match if p.hub.serving { Some(Outcome::Ok) } else { p.outcome(&e) } {
+            match p.outcome(&e) {
                 Some(Outcome::Pending) => drop(self.claims.insert(k, (e, span))),
                 Some(Outcome::Ok) => {
                     let Some((r, _, _)) = self.open.get(&k) else { continue };

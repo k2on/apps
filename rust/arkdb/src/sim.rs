@@ -1,5 +1,5 @@
-//! The simulator: a real server and real devices (`ark_peer::Peer` in
-//! each role, their disks in memory) over a network a seeded
+//! The simulator: a real server and real devices (an `ark_peer::Authority`
+//! and `ark_peer::Peer`s, their disks in memory) over a network a seeded
 //! scheduler moves one frame at a time — a random frame from a random
 //! direction, arriving twice one time in eight and not at all one in
 //! sixteen, by Knuth's MMIX generator (v4's `ark::sim`, ported by K1). No
@@ -20,7 +20,7 @@ use ark::frames::Frame;
 use ark::peer::Ctx;
 use ark::plan::splice;
 use ark::schema::Space;
-use ark_peer::{Config, ConnId, Deliver, Memory, Peer};
+use ark_peer::{Authority, Config, ConnId, Deliver, Memory, Peer, ServerConfig};
 
 /// The whole of a seeded run's randomness — the simulator's network, the
 /// fuzzer's script, harken's port — one generator: an LCG of Knuth's MMIX
@@ -78,8 +78,8 @@ pub enum Op {
 }
 
 pub struct Net {
-    pub hub: Peer,
-    pub hub_config: Config,
+    pub hub: Authority,
+    pub hub_config: ServerConfig,
     pub clients: BTreeMap<i64, Peer>,
     /// The linked clients' connections.
     pub conns: BTreeMap<i64, ConnId>,
@@ -112,14 +112,15 @@ pub type Watched = (Space, String, Vec<u8>, Ctx, Vec<Vec<u8>>);
 
 impl Net {
     /// A hub and `n` clients, each opened as [`who`] with `config`, linked.
-    pub fn new(hub: Config, config: impl Fn(i64) -> Config, n: i64, seed: u64) -> Net {
+    pub fn new(hub: impl Into<ServerConfig>, config: impl Fn(i64) -> Config, n: i64, seed: u64) -> Net {
         Net::of(hub, (0..n).map(|i| (who(i), config(i))).collect(), seed)
     }
 
     /// A hub and a client per login, each linked.
-    pub fn of(hub: Config, clients: Vec<(Ctx, Config)>, seed: u64) -> Net {
+    pub fn of(hub: impl Into<ServerConfig>, clients: Vec<(Ctx, Config)>, seed: u64) -> Net {
+        let hub = hub.into();
         let mut net = Net {
-            hub: Peer::serve(hub.clone(), Box::new(Memory::default()), 0),
+            hub: Authority::serve(hub.clone(), Box::new(Memory::default()), 0).expect("an empty log reads"),
             hub_config: hub,
             clients: BTreeMap::new(),
             conns: BTreeMap::new(),
@@ -287,7 +288,7 @@ impl Net {
         }
         self.hub.close();
         let disk = self.hub.log.disk.take().expect("a server's disk");
-        self.hub = Peer::serve(self.hub_config.clone(), disk, self.now);
+        self.hub = Authority::serve(self.hub_config.clone(), disk, self.now).expect("its own log reads");
     }
 
     fn check(&mut self, b: &[u8]) {

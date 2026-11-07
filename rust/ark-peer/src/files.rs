@@ -11,7 +11,7 @@
 //! reader of its bytes, never whole; one not there is wanted, and the views
 //! are rung when it is whole (`crate::link::Pumped::shown`).
 //!
-//! **A server** takes what is offered, up to [`crate::Config::max_file`],
+//! **A server** takes what is offered, up to [`crate::ServerConfig::max_file`],
 //! into its store and checks it against its name, and gives a file to a
 //! connection that may read a row naming it ([`ark::file::held`]); one
 //! wanted before it has arrived is answered `Absent` and, when it does,
@@ -34,7 +34,7 @@ use std::time::Duration;
 use ark::file::{is_hash, FileRef};
 use ark::frames::Frame;
 
-use crate::{ConnId, Deliver, Peer};
+use crate::{Authority, ConnId, Core, Deliver, Peer};
 
 /// The most of a file one `Chunk` carries.
 pub const CHUNK: usize = 1 << 20;
@@ -42,14 +42,11 @@ pub const CHUNK: usize = 1 << 20;
 /// How many chunks of a file its taker asks for ahead of what it holds.
 pub const WINDOW: u64 = 8;
 
-/// The largest file a server takes unless told ([`crate::Config::max_file`]).
+/// The largest file a server takes unless told ([`crate::ServerConfig::max_file`]).
 pub const MAX_FILE: u64 = 16 << 30;
 
 /// How long a part of a file is kept with nothing more of it written.
 pub const STALE: Duration = Duration::from_secs(3 * 24 * 3600);
-
-/// A device's transfers are on its one connection, the server's.
-const SERVER: ConnId = 0;
 
 /// A file's bytes, held whole: read from the start, or a seek's range.
 pub trait Bytes: Read + Seek + Send {}
@@ -138,7 +135,7 @@ impl Store {
 
     /// Every part nothing was written to for [`STALE`], gone — an upload
     /// or a download given up, a put cut off — and when (`now_ms`).
-    fn sweep(&self) -> i64 {
+    pub(crate) fn sweep(&self) -> i64 {
         if let Store::Dir(d) = self {
             for p in self.names(".part").into_iter().map(|n| d.join(n)) {
                 let at = fs::metadata(&p).and_then(|m| m.modified());
@@ -244,21 +241,26 @@ fn arriving(s: &mut Store, hash: &str, at: u64, size: u64, bytes: &[u8], next: &
     }
 }
 
-/// What a peer does with files: its store, and where each transfer is.
+/// A device's transfers, on its one connection, its server's.
 #[derive(Default)]
-pub(crate) struct Files {
-    pub store: Store,
-    /// A device's: the files it was asked for and does not hold whole.
+pub(crate) struct Device {
+    /// The files it was asked for and does not hold whole.
     wanted: BTreeSet<String>,
-    /// Each file coming in, by its connection (a device's, [`SERVER`]):
-    /// where its next ask begins.
-    asked: BTreeMap<(ConnId, String), u64>,
+    /// Each file coming in: where its next ask begins.
+    asked: BTreeMap<String, u64>,
     /// Whether a wanted file arrived whole since the last pump: what rings
-    /// a device's views.
+    /// its views.
     pub arrived: bool,
     /// Why the server would not give one, by file, until it does.
-    pub absent: BTreeMap<String, String>,
-    /// A server's: the connections that wanted a file before it arrived.
+    absent: BTreeMap<String, String>,
+}
+
+/// A server's transfers, by connection.
+#[derive(Default)]
+pub(crate) struct Server {
+    /// Each file coming in, by its connection: where its next ask begins.
+    asked: BTreeMap<(ConnId, String), u64>,
+    /// The connections that wanted a file before it arrived.
     waiting: BTreeMap<String, BTreeSet<ConnId>>,
     /// The files each connection was let read, so a file is judged once per
     /// connection, not once a chunk.
@@ -267,20 +269,31 @@ pub(crate) struct Files {
     swept: i64,
 }
 
-impl Peer {
+impl Core {
     /// The store files are kept in: a device's is `files/` beside its disk
     /// when that is a directory ([`crate::Disk::files`]). Parts left
     /// [`STALE`] are dropped.
     pub fn keep_files(&mut self, store: Store) {
-        self.files.swept = store.sweep();
-        self.files.store = store;
+        store.sweep();
+        self.files = store;
     }
 
+    /// A file's bytes when they are here whole, to read in order or from a
+    /// seek; none when they are not.
+    pub fn file(&self, f: &FileRef) -> Result<Option<Box<dyn Bytes>>, String> {
+        if whole(&self.files, &f.hash).is_none() {
+            return Ok(None);
+        }
+        self.files.open(&blob(&f.hash, "")?).map(Some).map_err(|e| e.to_string())
+    }
+}
+
+impl Peer {
     /// A file made here, read from `from` (a file, a buffer) into the store
     /// as it is hashed: marked unsent and offered to the server when there
     /// is one; its reference, for a row to name.
     pub fn put_file(&mut self, from: impl Read, media: &str) -> Result<FileRef, String> {
-        let (hash, size) = put(&mut self.files.store, from).map_err(|e| e.to_string())?;
+        let (hash, size) = put(&mut self.files, from).map_err(|e| e.to_string())?;
         if self.linked {
             self.frames.push(Frame::Offer { hash: hash.clone(), size }.enc());
             self.flush();
@@ -289,111 +302,128 @@ impl Peer {
         Ok(FileRef { hash, size, media })
     }
 
-    /// A file's bytes when they are here whole, to read in order or from a
-    /// seek; when not, wanted from the server (the views rung when they
-    /// arrive) — or why the server would not give it, when it said.
+    /// A file's bytes when they are here whole ([`Core::file`]); when not,
+    /// wanted from the server (the views rung when they arrive) — or why
+    /// the server would not give it, when it said.
     pub fn file(&mut self, f: &FileRef) -> Result<Option<Box<dyn Bytes>>, String> {
         if !self.have_files(std::slice::from_ref(&f.hash)) {
             self.flush();
-            return self.files.absent.get(&f.hash).map_or(Ok(None), |why| Err(why.clone()));
+            return self.transfers.absent.get(&f.hash).map_or(Ok(None), |why| Err(why.clone()));
         }
-        self.files.store.open(&blob(&f.hash, "")?).map(Some).map_err(|e| e.to_string())
+        self.core.file(f)
     }
 
     fn want(&mut self, hash: &str) {
-        let files = &mut self.files;
+        let (store, t) = (&self.core.files, &mut self.transfers);
         // Here already: a store shared with the server's, which has it.
-        if whole(&files.store, hash).is_some() {
-            if files.wanted.remove(hash) {
-                files.absent.remove(hash);
-                files.arrived = true;
+        if whole(store, hash).is_some() {
+            if t.wanted.remove(hash) {
+                t.absent.remove(hash);
+                t.arrived = true;
             }
             return;
         }
         // Asked once a connection; how big it is is known from its first chunk.
-        if let (true, Entry::Vacant(next)) = (self.linked, files.asked.entry((SERVER, hash.into()))) {
-            self.frames.extend(window(&files.store, hash, 0, next.insert(0)).iter().map(Frame::enc));
+        if let (true, Entry::Vacant(next)) = (self.linked, t.asked.entry(hash.into())) {
+            self.frames.extend(window(store, hash, 0, next.insert(0)).iter().map(Frame::enc));
         }
     }
 
     /// A connection up: every unsent file offered, every wanted one asked.
     pub(crate) fn files_connected(&mut self) {
-        self.files.asked.clear();
-        for hash in self.files.store.names(".unsent").iter().filter_map(|n| n.strip_suffix(".unsent")) {
-            match whole(&self.files.store, hash) {
+        self.transfers.asked.clear();
+        for hash in self.files.names(".unsent").iter().filter_map(|n| n.strip_suffix(".unsent")) {
+            match whole(&self.core.files, hash) {
                 Some(size) => self.frames.push(Frame::Offer { hash: hash.into(), size }.enc()),
-                None => self.files.store.remove(&format!("{hash}.unsent")),
+                None => self.core.files.remove(&format!("{hash}.unsent")),
             }
         }
-        let wanted: Vec<String> = self.files.wanted.iter().cloned().collect();
+        let wanted: Vec<String> = self.transfers.wanted.iter().cloned().collect();
         wanted.iter().for_each(|h| self.want(h));
     }
 
     /// A file's frame from the server.
     pub(crate) fn file_told(&mut self, f: Frame) {
-        let files = &mut self.files;
+        let (store, t) = (&mut self.core.files, &mut self.transfers);
         match f {
             // The server taking an upload: the chunk it asks for.
-            Frame::Want { hash, at } if blob(&hash, ".unsent").is_ok_and(|b| files.store.len(&b).is_some()) => {
-                self.frames.extend(chunk(&files.store, &hash, at).map(|c| c.enc()));
+            Frame::Want { hash, at } if blob(&hash, ".unsent").is_ok_and(|b| store.len(&b).is_some()) => {
+                self.frames.extend(chunk(store, &hash, at).map(|c| c.enc()));
             }
-            Frame::Chunk { hash, at, size, bytes } if files.wanted.contains(&hash) => {
-                let key = (SERVER, hash.clone());
-                let next = files.asked.entry(key.clone()).or_default();
-                match arriving(&mut files.store, &hash, at, size, &bytes, next) {
+            Frame::Chunk { hash, at, size, bytes } if t.wanted.contains(&hash) => {
+                let next = t.asked.entry(hash.clone()).or_default();
+                match arriving(store, &hash, at, size, &bytes, next) {
                     Ok(Some(asks)) => return self.frames.extend(asks.iter().map(Frame::enc)),
                     Ok(None) => {
-                        files.wanted.remove(&hash);
-                        files.absent.remove(&hash);
-                        files.arrived = true;
+                        t.wanted.remove(&hash);
+                        t.absent.remove(&hash);
+                        t.arrived = true;
                     }
-                    Err(why) => drop(files.absent.insert(hash, why.to_string())),
+                    Err(why) => drop(t.absent.insert(hash.clone(), why.to_string())),
                 }
-                files.asked.remove(&key);
+                t.asked.remove(&hash);
             }
             Frame::Have { hash } if is_hash(&hash) => {
-                files.store.remove(&format!("{hash}.unsent"));
-                if files.wanted.contains(&hash) {
-                    files.asked.remove(&(SERVER, hash.clone()));
+                store.remove(&format!("{hash}.unsent"));
+                if t.wanted.contains(&hash) {
+                    t.asked.remove(&hash);
                     self.want(&hash);
                 }
             }
             // Wanted again when the server says it has it.
             Frame::Absent { hash, why } => {
-                files.absent.insert(hash, why);
+                t.absent.insert(hash, why);
             }
             _ => {}
         }
     }
 
-    /// A file's frame from a connection, as a server.
+    /// Whether every one of these files is here; those that are not,
+    /// wanted.
+    pub(crate) fn have_files(&mut self, hashes: &[String]) -> bool {
+        let mut all = true;
+        for h in hashes {
+            if whole(&self.files, h).is_none() {
+                all = false;
+                if is_hash(h) && self.transfers.wanted.insert(h.clone()) {
+                    self.want(h);
+                }
+            }
+        }
+        all
+    }
+}
+
+impl Authority {
+    /// A file's frame from a connection.
     pub(crate) fn file_frame(&mut self, c: ConnId, f: Frame) -> Vec<Deliver> {
         let to = |fs: Vec<Frame>| fs.iter().map(|f| (c, f.enc())).collect();
         let absent = |hash: String, why: &str| to(vec![Frame::Absent { hash, why: why.into() }]);
-        let (max, files) = (self.config.max_file, &mut self.files);
+        let max = self.config.max_file;
+        let (store, t) = (&mut self.core.files, &mut self.transfers);
         match f {
             Frame::Offer { hash, .. } | Frame::Chunk { hash, .. } if !is_hash(&hash) => absent(hash, "not a file's name"),
-            Frame::Offer { hash, .. } | Frame::Chunk { hash, .. } if whole(&files.store, &hash).is_some() => to(vec![Frame::Have { hash }]),
+            Frame::Offer { hash, .. } | Frame::Chunk { hash, .. } if whole(store, &hash).is_some() => to(vec![Frame::Have { hash }]),
             Frame::Offer { hash, size } | Frame::Chunk { hash, size, .. } if size > max => {
-                files.store.remove(&format!("{hash}.part"));
+                store.remove(&format!("{hash}.part"));
                 tracing::info!(target: "ark", file = %hash, size, max, "file refused");
                 absent(hash, &format!("larger than the {max} bytes a file may be here"))
             }
             Frame::Offer { hash, size } => {
                 // Swept once an hour, as uploads begin.
-                if crate::now_ms() > files.swept + 3_600_000 {
-                    files.swept = files.store.sweep();
+                if crate::now_ms() > t.swept + 3_600_000 {
+                    t.swept = store.sweep();
                 }
-                let next = files.asked.entry((c, hash.clone())).or_default();
+                let next = t.asked.entry((c, hash.clone())).or_default();
                 *next = 0;
-                to(window(&files.store, &hash, size, next))
+                to(window(store, &hash, size, next))
             }
             Frame::Chunk { hash, at, size, bytes } => {
-                let next = files.asked.entry((c, hash.clone())).or_default();
-                match arriving(&mut files.store, &hash, at, size, &bytes, next) {
+                let next = t.asked.entry((c, hash.clone())).or_default();
+                match arriving(store, &hash, at, size, &bytes, next) {
                     Ok(Some(asks)) => to(asks),
                     Ok(None) => {
-                        let waiting = files.waiting.remove(&hash).unwrap_or_default();
+                        let waiting = t.waiting.remove(&hash).unwrap_or_default();
                         let have = Frame::Have { hash }.enc();
                         std::iter::once(c).chain(waiting).map(|w| (w, have.clone())).collect()
                     }
@@ -404,11 +434,10 @@ impl Peer {
                 if !self.may_read(c, &hash) {
                     return absent(hash, "no row this connection reads names it");
                 }
-                let files = &mut self.files;
-                match chunk(&files.store, &hash, at) {
+                match chunk(&self.core.files, &hash, at) {
                     Some(f) => to(vec![f]),
                     None => {
-                        files.waiting.entry(hash.clone()).or_default().insert(c);
+                        self.transfers.waiting.entry(hash.clone()).or_default().insert(c);
                         absent(hash, "not here yet")
                     }
                 }
@@ -419,22 +448,23 @@ impl Peer {
 
     /// Whether a connection may read a file: a row it reads names it.
     fn may_read(&mut self, c: ConnId, hash: &str) -> bool {
-        if self.files.let_read.get(&c).is_some_and(|s| s.contains(hash)) {
+        if self.transfers.let_read.get(&c).is_some_and(|s| s.contains(hash)) {
             return true;
         }
         let Some(who) = self.who(c) else { return false };
         let may = ark::file::held(&self.log.store, hash, self.log.reads(&who));
         if may {
-            self.files.let_read.entry(c).or_default().insert(hash.into());
+            self.transfers.let_read.entry(c).or_default().insert(hash.into());
         }
         may
     }
 
     /// A connection gone: what it waited for, and took, forgotten.
     pub(crate) fn files_left(&mut self, c: ConnId) {
-        self.files.let_read.remove(&c);
-        self.files.asked.retain(|(k, _), _| *k != c);
-        self.files.waiting.values_mut().for_each(|w| {
+        let t = &mut self.transfers;
+        t.let_read.remove(&c);
+        t.asked.retain(|(k, _), _| *k != c);
+        t.waiting.values_mut().for_each(|w| {
             w.remove(&c);
         });
     }
@@ -452,21 +482,4 @@ pub(crate) fn named<R: ark::row::Row>(r: &R) -> Vec<String> {
         ark::file::named(&ty, &v, &mut out);
     }
     out
-}
-
-impl Peer {
-    /// Whether every one of these files is here; those that are not,
-    /// wanted.
-    pub(crate) fn have_files(&mut self, hashes: &[String]) -> bool {
-        let mut all = true;
-        for h in hashes {
-            if whole(&self.files.store, h).is_none() {
-                all = false;
-                if is_hash(h) && self.files.wanted.insert(h.clone()) {
-                    self.want(h);
-                }
-            }
-        }
-        all
-    }
 }

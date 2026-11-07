@@ -191,8 +191,8 @@ fn a_server_that_cannot_sign_anybody_in_does_not_start() {
 
 /// `/healthz` says the log's head, the module it runs and who is
 /// connected, a line each, as the fleet and the VM test read it. Falsified
-/// by not putting harken's answer in front of the hub's own: it said `ok`
-/// and nothing else.
+/// by `ark-peer`'s answering `ok` alone, as it once did.
+
 #[test]
 fn the_health_says_the_head_and_who_is_connected() {
     let rt = runtime();
@@ -216,7 +216,7 @@ fn the_health_says_the_head_and_who_is_connected() {
     assert!(lines.contains(&"horizon 0"), "{h}");
     assert!(lines.contains(&"room alice peers 2"), "{h}");
     assert!(
-        lines.contains(&format!("domain {} current", hosted().version()).as_str()),
+        lines.contains(&format!("domain {} current", ark_peer::version(&hosted().domain)).as_str()),
         "{h}"
     );
     rt.block_on(server.stop());

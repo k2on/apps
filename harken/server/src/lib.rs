@@ -50,7 +50,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context, Result};
 use ark_auth::server::Auth;
 use ark_auth::Account;
-use ark_peer::{Config as HubConfig, Running};
+use ark_peer::Running;
 
 use assistant::ha;
 use hosted::Hosted;
@@ -254,63 +254,6 @@ const SCANNER: &str = "the scanner";
 /// What the house's sign-in of a listener says it is.
 const HOUSE: &str = "the house's speakers";
 
-/// The hub's configuration for `hosted` (`harken_player::config::hub`),
-/// keeping `keep` entries above the log's snapshot.
-pub fn hub_config(hosted: &Hosted, keep: usize) -> HubConfig {
-    harken_player::config::hub(&hosted.domain, Some(keep))
-}
-
-/// What `/healthz` says, a line each: `ok`; the connections open; the
-/// log's head and its horizon (the snapshot it stands on); the domain it
-/// runs, its schema's hash and its version (§1.16); and every account with
-/// a connection open, with how many — what the fleet and the VM test read.
-/// Answered in front of `ark-peer`'s own `/healthz`, which says `ok` alone.
-pub async fn health(hub: &ark_peer::Handle, hosted: &Hosted) -> Option<String> {
-    let hub = hub.clone();
-    let modules = format!("domain {} current\n", hosted.version());
-    tokio::task::spawn_blocking(move || {
-        hub.with(move |h| {
-            let mut rooms: std::collections::BTreeMap<String, usize> = Default::default();
-            for (_, who) in h.connections() {
-                *rooms.entry(who.actor.clone()).or_default() += 1;
-            }
-            let mut text = format!("ok\nconnections {}\n", rooms.values().sum::<usize>());
-            text.push_str(&format!(
-                "head {}\nhorizon {}\n",
-                h.log.log().head().0,
-                h.log.log().base_seq()
-            ));
-            text.push_str(&modules);
-            for (room, n) in rooms {
-                text.push_str(&format!("room {room} peers {n}\n"));
-            }
-            text
-        })
-    })
-    .await
-    .ok()
-    .flatten()
-}
-
-async fn healthz(
-    axum::extract::State((hub, hosted)): axum::extract::State<(ark_peer::Handle, Hosted)>,
-    req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    if req.uri().path() != "/healthz" {
-        return next.run(req).await;
-    }
-    match health(&hub, &hosted).await {
-        Some(text) => text.into_response(),
-        None => (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "the hub is gone\n",
-        )
-            .into_response(),
-    }
-}
-
 /// A server that is up, and the things running beside it.
 pub struct Server {
     pub running: Running,
@@ -347,50 +290,21 @@ impl Server {
 /// bridge beside it.
 pub async fn start(config: Config) -> Result<Server> {
     let hosted = Hosted::harken();
-    std::fs::create_dir_all(&config.data)
-        .with_context(|| format!("creating {}", config.data.display()))?;
-    eprintln!("harken-server: data in {}", config.data.display());
-
-    let public_url = config.public_url();
-    // `docs/plan-auth.md` The roles the configuration grants, and the
-    // scanner's own `library`, by construction: the scanner is the library,
-    // and the role is what the library's mutations are guarded by
-    // (`is_library`). Asked at every connection, and stamped on every entry
-    // that connection pushes.
-    let roles = config
-        .roles
-        .iter()
-        .map(|(r, a)| (r.clone(), a.clone()))
-        .chain([(
-            crate::domain::LIBRARY.to_string(),
-            vec![library::ACCOUNT.to_string()],
-        )]);
     // A sign-in is a row of the log, its token signed with a key kept in
-    // the data directory (`ark_auth::server`).
-    let mode = config.sign_in.mode().await?;
-    let mut auth = Auth::open::<crate::domain::Harken>(mode, &public_url, &config.data)
-        .context("the session key")?
-        .allow_redirect(PHONE_SCHEME)
-        .with_roles(roles)
-        // A person's Favorites, made once, here, at their first sign-in.
-        .welcome("playlists.welcome");
-    for prefix in &config.redirects {
-        auth = auth.allow_redirect(prefix);
-    }
-    // A provider may point pictures at a server beside it on the private
-    // network (ark's photos, say): trusted as the provider is.
-    for host in &config.picture_hosts {
-        auth = auth.trust_picture_host(host);
-    }
-    let auth = Arc::new(auth);
-
-    let mut hub = hub_config(&hosted, config.retain);
-    hub.max_file = config.max_file;
-    if config.scoped {
-        hub.feed = Arc::new(|_| Some("session.feed".into()));
-    }
-    let mut server = ark_peer::Server::new(hub).auth(auth.clone());
-    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive);
+    // the data directory (`ark_auth::server`). `docs/plan-auth.md` The
+    // roles the configuration grants, and the scanner's own `library`, by
+    // construction: the scanner is the library, and the role is what the
+    // library's mutations are guarded by (`is_library`).
+    let auth = config.auth::<crate::domain::Harken>(PHONE_SCHEME).await?;
+    eprintln!("harken-server: data in {}", config.data.display());
+    let library = [(crate::domain::LIBRARY, vec![library::ACCOUNT])];
+    // A person's Favorites, made once, here, at their first sign-in.
+    let auth = Arc::new(auth.with_roles(library).welcome("playlists.welcome"));
+    let public_url = config.public_url();
+    let mut server = config.server(
+        harken_player::config::hub(&hosted.domain, None),
+        auth.clone(),
+    );
     if config.keepalive != ark_peer::settings::KEEPALIVE {
         eprintln!(
             "harken-server: the sync socket pings every {}ms and gives up after 3 unanswered",
@@ -432,18 +346,11 @@ pub async fn start(config: Config) -> Result<Server> {
         .merge(speaker::routes(speaker.clone()));
         lower = Some(speaker);
     }
-    // Everything the routes above do not match falls through to the page,
-    // with the build as its validator: a store path cannot be one, since nix
-    // dates every file in it 1970.
-    if let Some(dir) = &config.web {
-        server.web = Some((dir.clone(), config.web_module.clone()));
-    }
-    let (hub, router) = server.build()?;
-    let router = router.layer(axum::middleware::from_fn_with_state(
-        (hub.clone(), hosted.clone()),
-        healthz,
-    ));
-    let running = Running::listen(hub.clone(), router, &config.listen).await?;
+    // Everything the routes above do not match falls through to the page
+    // (`config.web`), with the build as its validator: a store path cannot
+    // be one, since nix dates every file in it 1970.
+    let running = server.listen(&config.listen).await?;
+    let hub = running.hub.clone();
     eprintln!("harken-server: listening on http://{}", running.addr);
 
     // Every `media_player` named becomes a device in every listening

@@ -43,10 +43,10 @@ pub mod vault;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use ark_auth::server::Auth;
 use ark_auth::Account;
-use ark_peer::Running;
+use ark_peer::{Running, ServerConfig};
 
 use importer::{Banks, Importer};
 
@@ -184,49 +184,6 @@ fn banks(env: &impl Fn(&str) -> Option<String>) -> Result<Option<Banks>> {
     }))
 }
 
-/// What this build runs, in a word: its domain's schema hash and version,
-/// as a phone's build of the same domain says it (and as harken's server
-/// does).
-pub fn version() -> String {
-    let d = money_domain::shared();
-    format!("{} {}", d.schema_hash(), d.version)
-}
-
-/// What `/healthz` says, a line each: `ok`; the connections open; the
-/// log's head and its horizon; and the domain it runs (`domain <hash>
-/// <version> current`), which a phone holds its own build to. Answered in
-/// front of `ark-peer`'s own `/healthz`, which says `ok` alone.
-pub async fn health(hub: &ark_peer::Handle) -> Option<String> {
-    let hub = hub.clone();
-    let domain = format!("domain {} current\n", version());
-    let read = move || {
-        hub.with(move |h| {
-            let (connections, log) = (h.connections().count(), h.log.log());
-            format!(
-                "ok\nconnections {connections}\nhead {}\nhorizon {}\n{domain}",
-                log.head().0,
-                log.base_seq()
-            )
-        })
-    };
-    tokio::task::spawn_blocking(read).await.ok().flatten()
-}
-
-async fn healthz(
-    axum::extract::State(hub): axum::extract::State<ark_peer::Handle>,
-    req: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    if req.uri().path() != "/healthz" {
-        return next.run(req).await;
-    }
-    match health(&hub).await {
-        Some(text) => text.into_response(),
-        None => (axum::http::StatusCode::SERVICE_UNAVAILABLE, "the hub is gone\n").into_response(),
-    }
-}
-
 /// A server that is up, and the importer beside it.
 pub struct Server {
     pub running: Running,
@@ -250,37 +207,21 @@ impl Server {
 
 /// Build the server from `config`, listen, and start the importer beside it.
 pub async fn start(config: Config) -> Result<Server> {
-    std::fs::create_dir_all(&config.data).with_context(|| format!("creating {}", config.data.display()))?;
-    eprintln!("money-server: data in {}", config.data.display());
-    let public_url = config.public_url();
-
     // The roles the configuration grants, and the importer's own `bank`,
     // by construction: asked at every connection and stamped on every
     // entry that connection pushes.
-    let roles =
-        (config.roles.iter().map(|(r, a)| (r.clone(), a.clone()))).chain([(money_domain::BANK.to_string(), vec![importer::ACCOUNT.to_string()])]);
-    let mode = config.sign_in.mode().await?;
-    eprintln!("money-server: {}", mode.announce());
-    let mut auth = Auth::open::<money_domain::Money>(mode, &public_url, &config.data)
-        .context("the session key")?
-        .allow_redirect(PHONE_SCHEME)
-        .with_roles(roles);
-    for prefix in &config.redirects {
-        auth = auth.allow_redirect(prefix);
-    }
-    for host in &config.picture_hosts {
-        auth = auth.trust_picture_host(host);
-    }
-    let auth = Arc::new(auth);
+    let auth = config.auth::<money_domain::Money>(PHONE_SCHEME).await?;
+    eprintln!("money-server: data in {}", config.data.display());
+    eprintln!("money-server: {}", auth.mode().announce());
+    let auth = Arc::new(auth.with_roles([(money_domain::BANK, vec![importer::ACCOUNT])]));
+    let public_url = config.public_url();
 
     // The receipts folder anybody's exports wait in: the server's own
     // unless told another.
     let mut stores = config.stores.clone();
     stores.dir.get_or_insert_with(|| config.data.join("receipts"));
     let importer_slot = Arc::new(std::sync::Mutex::new(None));
-    let mut hub = ark_peer::Config {
-        keep: Some(config.retain),
-        max_file: config.max_file,
+    let hub = ServerConfig {
         // Settings' stores, called over the socket and kept off the log.
         calls: setup::calls(setup::Setup {
             data: config.data.clone(),
@@ -289,20 +230,12 @@ pub async fn start(config: Config) -> Result<Server> {
             ocr: stores.ocr.clone(),
             importer: importer_slot.clone(),
         }),
-        ..ark_peer::Config::of(money_domain::shared())
+        ..ServerConfig::of(money_domain::shared())
     };
-    if config.scoped {
-        hub.feed = Arc::new(|_| Some("session.feed".into()));
-    }
-    let mut server = ark_peer::Server::new(hub).auth(auth.clone());
-    (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive);
-    if let Some(dir) = &config.web {
-        server.web = Some((dir.clone(), config.web_module.clone()));
-    }
-    let (hub, router) = server.build()?;
-    let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
-    let running = Running::listen(hub.clone(), router, &config.listen).await?;
+    let running = config.server(hub, auth.clone()).listen(&config.listen).await?;
+    let hub = running.hub.clone();
     eprintln!("money-server: listening on http://{}", running.addr);
+
     match &config.web {
         Some(dir) => eprintln!("money-server: browser client on {public_url}/ from {}", dir.display()),
         None => eprintln!("money-server: no browser client: set MONEY_WEB to a built one"),

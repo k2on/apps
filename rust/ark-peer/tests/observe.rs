@@ -11,7 +11,7 @@ use ark::effect::Job;
 use ark::log::Span;
 use ark::prelude::*;
 use ark::schema::Space;
-use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
+use ark_peer::{dev, now_ms, Authority, Config, ConnId, Memory, Peer};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
 #[effect(lease_ms = 150, retry_ms = 150, owner = owner)]
@@ -47,14 +47,14 @@ fn config() -> Config {
 }
 
 struct Net {
-    hub: Peer,
+    hub: Authority,
     devices: Vec<(Peer, ConnId)>,
 }
 
 impl Net {
     fn new(n: usize) -> Net {
         let mut net = Net {
-            hub: Peer::serve(config(), Box::new(Memory::default()), 0),
+            hub: Authority::serve(config(), Box::new(Memory::default()), 0).unwrap(),
             devices: vec![],
         };
         for i in 0..n {

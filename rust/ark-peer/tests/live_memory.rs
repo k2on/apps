@@ -22,25 +22,25 @@ use std::time::{Duration, Instant};
 
 use ark::format::Encode;
 use ark::schema::Space;
-use ark_peer::{dev, Config, Memory, Peer};
+use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::demo as domain;
 use arkdb::demo::{Arrival, Point};
 
 /// harken-server's live `keep`.
 const KEEP: usize = 256;
 
-fn hub() -> Peer {
+fn hub() -> Authority {
     scoped_hub(Arc::new(|_| None))
 }
 
-fn scoped_hub(feed: ark_peer::Scoping) -> Peer {
-    let c = Config {
+fn scoped_hub(feed: ark_peer::Scoping) -> Authority {
+    let c = ark_peer::ServerConfig {
         live_keep: Some(KEEP),
         live: Some(Arc::new(arkdb::demo::room())),
         feed,
-        ..Config::of(Arc::new(domain()))
+        ..ark_peer::ServerConfig::of(Arc::new(domain()))
     };
-    Peer::serve(c, Box::new(Memory::default()), 0)
+    Authority::serve(c, Box::new(Memory::default()), 0).unwrap()
 }
 
 fn device(k: usize) -> Peer {
@@ -56,7 +56,7 @@ fn device(k: usize) -> Peer {
 }
 
 /// Every frame each side has, carried until none is left.
-fn carry(hub: &mut Peer, ds: &mut [(Peer, u64)]) {
+fn carry(hub: &mut Authority, ds: &mut [(Peer, u64)]) {
     loop {
         let mut q = vec![];
         for (d, c) in ds.iter_mut() {
@@ -85,7 +85,7 @@ struct Held {
     per_call: Duration,
 }
 
-fn live(p: &Peer) -> &ark::peer::Peer {
+fn live(p: &ark_peer::Core) -> &ark::peer::Peer {
     p.machine(Space::Volatile).expect("a live machine")
 }
 
@@ -182,7 +182,7 @@ fn a_scoped_connection_holds_only_its_live_rows() {
     }
     ds[0].0.mutate_at("room.point", Point { x: 7 }.to_bytes(), 2).unwrap();
     carry(&mut hub, &mut ds);
-    let pointers = |p: &Peer| -> Vec<String> {
+    let pointers = |p: &ark_peer::Core| -> Vec<String> {
         let rows = live(p)
             .store
             .rows("pointer")

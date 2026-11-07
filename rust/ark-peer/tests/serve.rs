@@ -16,7 +16,7 @@ use ark::frames::{Frame, Verdict};
 use ark::peer::Ctx;
 use ark::schema::Space;
 use ark_peer::link::{socket, wait, Dial, Event};
-use ark_peer::{dev, now_ms, Config, Disk, Files, Handle, Memory, Peer, Server};
+use ark_peer::{dev, now_ms, Authority, Disk, Files, Handle, Memory, Peer, Server, ServerConfig};
 
 mod support;
 
@@ -38,8 +38,8 @@ fn two_clients(url: &str, a: impl Dial + 'static, b: impl Dial + 'static) {
     assert_eq!(bob.0.log.log().entries()[0].entry.actor, "alice");
 }
 
-fn hub() -> Handle {
-    Handle::spawn(Peer::serve(config(), Box::new(Memory::default()), 0))
+fn hub() -> Handle<Authority> {
+    Handle::spawn(Authority::serve(config(), Box::new(Memory::default()), 0).unwrap())
 }
 
 /// Two peers, each dialling the server in this process, converge.
@@ -156,18 +156,18 @@ fn a_revoked_session_is_closed_and_dials_again() {
 
 /// The log on disk: a hub stopped and opened again from its directory holds
 /// the chain it had, and its journal; the authority's own `local` goes on.
-/// Falsified by `Peer::serve` not loading its disk: the reopened hub's log
+/// Falsified by `Authority::serve` not loading its disk: the reopened hub's log
 /// was empty.
 #[test]
 fn the_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0).unwrap();
     for name in ["a", "b"] {
         hub.mutate_at("demo.create_playlist", named(name), 1).unwrap();
     }
     let store = hub.log.store.clone();
     drop(hub);
-    let mut hub = Peer::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Files::new(dir.path()).unwrap()), 0).unwrap();
     assert_eq!((hub.log.log(), &hub.log.store), (store.log(), &store));
     hub.mutate_at("demo.create_playlist", named("c"), 1).unwrap();
     assert_eq!(hub.log.log().entries()[2].entry.local, 3, "its own count goes on");
@@ -202,7 +202,7 @@ fn push(who: &Ctx, local: i64, name: &str) -> Vec<u8> {
 #[test]
 fn nothing_is_delivered_before_it_is_written() {
     let fail = Arc::new(AtomicBool::new(true));
-    let mut hub = Peer::serve(config(), Box::new(Flaky(Memory::default(), fail.clone())), 0);
+    let mut hub = Authority::serve(config(), Box::new(Flaky(Memory::default(), fail.clone())), 0).unwrap();
     let alice = dev("alice@laptop").unwrap();
     let c = hub.accept(alice.clone());
     assert!(hub.frame(c, push(&alice, 1, "Road"), 1).is_empty());
@@ -234,7 +234,7 @@ fn nothing_is_delivered_before_it_is_written() {
 #[test]
 fn the_journal_keeps_a_refusal_across_a_restart() {
     let alice = dev("alice@laptop").unwrap();
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let c = hub.accept(alice.clone());
     let refused = |out: &[(u64, Vec<u8>)]| {
         out.iter().any(|(_, b)| {
@@ -249,7 +249,7 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
     };
     assert!(refused(&hub.frame(c, push(&alice, 1, " "), 1)), "a playlist needs a name");
     let disk = hub.log.disk.take().unwrap();
-    let mut hub = Peer::serve(config(), disk, 0);
+    let mut hub = Authority::serve(config(), disk, 0).unwrap();
     let c = hub.accept(alice.clone());
     let out = hub.frame(c, push(&alice, 2, "Road"), 1);
     assert!(
@@ -274,9 +274,9 @@ fn the_journal_keeps_a_refusal_across_a_restart() {
 #[test]
 fn a_refusal_is_forgotten_once_its_device_moves_past_it() {
     let alice = dev("alice@laptop").unwrap();
-    let mut hub = Peer::serve(config(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let c = hub.accept(alice.clone());
-    let refused = |h: &Peer| h.log.journal().unwrap().refused.len();
+    let refused = |h: &Authority| h.log.journal().unwrap().refused.len();
     hub.frame(c, push(&alice, 1, " "), 1);
     assert_eq!(refused(&hub), 1, "kept while her device may push it again");
     let origin = ark::log::Origin::named(&alice.session);
@@ -284,7 +284,7 @@ fn a_refusal_is_forgotten_once_its_device_moves_past_it() {
     hub.frame(c, Frame::push(Space::Durable, config().log.schema_hash(), 1, [road]).enc(), 1);
     assert_eq!(refused(&hub), 0, "forgotten: her pending intents begin past it");
     let disk = hub.log.disk.take().unwrap();
-    let hub = Peer::serve(config(), disk, 0);
+    let hub = Authority::serve(config(), disk, 0).unwrap();
     assert_eq!(refused(&hub), 0, "the journal written without it");
     assert_eq!(hub.log.journal().unwrap().last_of(&origin), 2);
 }
@@ -300,7 +300,7 @@ fn an_older_build_s_journal_is_read() {
     let last = std::collections::BTreeMap::from([(origin, (alice.actor.clone(), 1i64))]);
     let refused = vec![(ark::log::EntryId::of(origin, 1), "a playlist needs a name".to_string())];
     disk.put("local.journal", &ark::format::encode(&(last, refused)).unwrap()).unwrap();
-    let mut hub = Peer::serve(config(), Box::new(disk), 0);
+    let mut hub = Authority::serve(config(), Box::new(disk), 0).unwrap();
     let c = hub.accept(alice.clone());
     let out = hub.frame(c, push(&alice, 1, "Road"), 1);
     assert!(
@@ -341,16 +341,16 @@ fn a_web_build_is_its_own_validator() {
 /// The live space across a restart: what the hub held when it closed is
 /// what it opens with, and `on_restore` is authored over it — the room
 /// keeps who was here and lets every pointer go — and its journal, so each
-/// origin is judged on from where it was. Falsified by `Peer::serve`
+/// origin is judged on from where it was. Falsified by `Authority::serve`
 /// not reading what `close` wrote: the room came back empty.
 #[test]
 fn the_live_space_is_restored_and_on_restore_authored() {
-    let config = Config {
+    let config = ServerConfig {
         live_keep: Some(8),
         live: Some(Arc::new(arkdb::demo::room())),
-        ..config()
+        ..config().into()
     };
-    let mut hub = Peer::serve(config.clone(), Box::new(Memory::default()), 0);
+    let mut hub = Authority::serve(config.clone(), Box::new(Memory::default()), 0).unwrap();
     let alice = dev("alice@phone").unwrap();
     let c = hub.accept(alice.clone());
     let device = Frame::Call {
@@ -369,18 +369,18 @@ fn the_live_space_is_restored_and_on_restore_authored() {
     hub.frame(c, device.enc(), 1);
     hub.frame(c, hello.enc(), 1);
     hub.mutate_at("room.point", arkdb::demo::Point { x: 7 }.to_bytes(), 2).unwrap();
-    let live = |h: &Peer| h.live.as_ref().unwrap().store.snapshot_rows();
+    let live = |h: &Authority| h.live.as_ref().unwrap().store.snapshot_rows();
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),
         vec![1, 1],
         "here, and a pointer"
     );
-    let journal = |h: &Peer| h.live.as_ref().unwrap().journal().expect("an authority").last.clone();
+    let journal = |h: &Authority| h.live.as_ref().unwrap().journal().expect("an authority").last.clone();
     let judged = journal(&hub);
     assert!(!judged.is_empty());
     hub.close();
     let disk = hub.log.disk.take().unwrap();
-    let hub = Peer::serve(config, disk, 3);
+    let hub = Authority::serve(config, disk, 3).unwrap();
     assert!(judged.iter().all(|(o, l)| journal(&hub).get(o) == Some(l)), "the journal kept");
     assert_eq!(
         live(&hub).iter().map(|(_, rs)| rs.len()).collect::<Vec<_>>(),

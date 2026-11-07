@@ -2960,8 +2960,8 @@ pub mod ha {
     use ark::peer::{Ctx, Input, Output, Peer, Role, To};
     use ark::schema::Space;
     use ark::store::{Read, Scan};
-    use ark_peer::Handle;
     use ark_peer::{now_ms, ConnId};
+    use ark_peer::{Authority, Handle};
 
     use super::{input, listening, playing, Act, Playing, Speaker, Speakers, GROUPING, VOLUME_SET};
     use crate::hosted::Hosted;
@@ -3070,7 +3070,12 @@ pub mod ha {
     }
 
     /// Offer the house's players to every account somebody is listening as.
-    pub fn start(config: Config, hub: Handle, hosted: Hosted, sign_in: SignIn) -> Assistant {
+    pub fn start(
+        config: Config,
+        hub: Handle<Authority>,
+        hosted: Hosted,
+        sign_in: SignIn,
+    ) -> Assistant {
         let stop = Arc::new(AtomicBool::new(false));
         let (wake, woken) = channel();
         let flag = stop.clone();
@@ -3153,7 +3158,7 @@ pub mod ha {
     /// Every session, as the hub holds it now: each account with a row in
     /// the session's tables, its speakers named by their entities; and the
     /// head of the volatile log they were read at.
-    fn sessions(hub: &Handle, entities: &[String]) -> (i64, Vec<(String, Listening)>) {
+    fn sessions(hub: &Handle<Authority>, entities: &[String]) -> (i64, Vec<(String, Listening)>) {
         let read = hub.with(|h| {
             let live = h.live.as_ref()?;
             let (head, store) = (live.log().head().0, &live.store);
@@ -3197,7 +3202,7 @@ pub mod ha {
 
     /// The speakers' machines and their connections to the hub.
     struct Wires {
-        hub: Handle,
+        hub: Handle<Authority>,
         hosted: Hosted,
         /// The entities offered.
         entities: Vec<String>,
@@ -4076,11 +4081,14 @@ pub mod ha {
         const KITCHEN: &str = "media_player.kitchen";
         const STUDY: &str = "media_player.study";
         let hosted = Hosted::harken();
-        let hub = Handle::spawn(ark_peer::Peer::serve(
-            crate::hub_config(&hosted, 1_000),
-            Box::new(ark_peer::Memory::default()),
-            now_ms(),
-        ));
+        let hub = Handle::spawn(
+            ark_peer::Authority::serve(
+                harken_player::config::hub(&hosted.domain, Some(1_000)),
+                Box::new(ark_peer::Memory::default()),
+                now_ms(),
+            )
+            .unwrap(),
+        );
         let mut w = Wires {
             hub,
             hosted,

@@ -42,7 +42,7 @@ impl Peer {
     /// which no row holds) — so a preview refuses nothing the server would
     /// take.
     pub(crate) fn signs(&mut self, cs: &[Change]) {
-        if self.hub.serving || !cs.iter().any(|c| [SignIn::TABLE, Role::TABLE].contains(&c.table())) {
+        if !cs.iter().any(|c| [SignIn::TABLE, Role::TABLE].contains(&c.table())) {
             return;
         }
         let mut roles = self.me().roles.clone();

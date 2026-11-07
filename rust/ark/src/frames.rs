@@ -53,7 +53,7 @@
 //!
 //! `Call` and `Reply` are no machine's either: a device's call of a
 //! function its server's program registered by name (ark-peer's
-//! `Config::calls`) and the server's answer, matched by the device's `id`.
+//! `ServerConfig::calls`) and the server's answer, matched by the device's `id`.
 //! A call is never an entry: its input is not logged, journaled, recorded
 //! or told to any other connection, so it can carry what must stay off the
 //! log (a password for the server alone). It is answered once, while the

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark::effect::{Cancel, Job};
 use ark::prelude::*;
-use ark_peer::{dev, now_ms, Config, ConnId, Memory, Peer};
+use ark_peer::{dev, now_ms, Authority, Config, ConnId, Memory, Peer};
 
 /// Something to fetch for its owner: the job, its outcome the body.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
@@ -53,14 +53,14 @@ fn config() -> Config {
 
 /// A server and its devices, every frame carried at once.
 struct Net {
-    hub: Peer,
+    hub: Authority,
     devices: Vec<(Peer, ConnId)>,
 }
 
 impl Net {
     fn new(n: usize) -> Net {
         let mut net = Net {
-            hub: Peer::serve(config(), Box::new(Memory::default()), 0),
+            hub: Authority::serve(config(), Box::new(Memory::default()), 0).unwrap(),
             devices: vec![],
         };
         for i in 0..n {
@@ -195,10 +195,11 @@ fn a_handler_runs_once_across_a_restart() {
 }
 
 /// A job is run only by the peer its handler is registered on: another
-/// device and the server, pumped and past its due, run nothing and it
-/// stays pending; the registering device's turn runs it. Falsified by
-/// keeping handlers in one registry of the process's, which every peer's
-/// turn runs: the second device ran the first's handler.
+/// device, pumped and past its due, runs nothing and it stays pending
+/// (a server has no handlers: no `Authority::handle`, nor a pump to run
+/// them); the registering device's turn runs it. Falsified by keeping
+/// handlers in one registry of the process's, which every peer's turn
+/// runs: the second device ran the first's handler.
 #[test]
 fn a_handler_runs_only_where_it_is_registered() {
     let mut net = Net::new(2);
@@ -207,9 +208,9 @@ fn a_handler_runs_only_where_it_is_registered() {
     asked(&mut net, 0);
     for _ in 0..3 {
         net.d(1).pump();
-        net.hub.pump();
         net.carry();
     }
+
     assert_eq!(n.load(Ordering::Relaxed), 0);
     assert!(matches!(net.state(), Job::Pending { .. }));
     for _ in 0..2 {

@@ -27,9 +27,9 @@
 //! the rows without its domain compiled in reads them under it.
 //!
 //! What a peer keeps beside its log is records under the names `local.*`
-//! (`local::Shared`): a device's replica (`local.replica`) and its pending
+//! (`local::beside`): a device's replica (`local.replica`) and its pending
 //! intents, records framed the same way and appended (`local.pending`,
-//! `local::Kept`); a server's journal and volatile space (`crate::hub`).
+//! `local::Kept`); a server's journal and volatile space (`crate::authority`).
 //!
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
