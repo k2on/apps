@@ -10,8 +10,8 @@
 
 use ark::format::Encode;
 use ark::log::EntryId;
+use ark::peer::Told;
 use ark::row::Row;
-use ark::store::Change;
 use ark_auth::rows::REVOKE;
 use ark_auth::{Revoke, Role, SignIn};
 
@@ -41,8 +41,8 @@ impl Peer {
     /// changed — with what the login said (the configuration's roles,
     /// which no row holds) — so a preview refuses nothing the server would
     /// take.
-    pub(crate) fn signs(&mut self, cs: &[Change]) {
-        if !cs.iter().any(|c| [SignIn::TABLE, Role::TABLE].contains(&c.table())) {
+    pub(crate) fn signs(&mut self, told: &[Told]) {
+        if !told.iter().any(|t| [SignIn::TABLE, Role::TABLE].contains(&t.change.table())) {
             return;
         }
         let mut roles = self.me().roles.clone();

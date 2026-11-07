@@ -149,7 +149,11 @@ fn health_says_which_domain() {
     let data = tempfile::tempdir().unwrap();
     let server = serve(&rt, data.path(), |_| {});
     let mut alice = signed_in(&server, "alice");
-    pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
+    // Alice is linked once her socket opens, before the server has judged
+    // her token, and the importer dials from its own thread: both are
+    // counted once the hub holds their connections.
+    let open = || server.running.hub.with(|h| h.connections().count()).unwrap();
+    pump_until(&mut [&mut alice], 10, |_| open() == 2);
     let text = ureq::get(&format!("{}/healthz", server.url())).call().unwrap().into_string().unwrap();
     let d = money_domain::shared();
     assert!(text.starts_with("ok\n"), "{text}");

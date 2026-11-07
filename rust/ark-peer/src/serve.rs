@@ -162,13 +162,13 @@ impl Serve {
     /// The server this says, of `config`, signed in by `auth`: its log in
     /// the data directory keeping `retain` entries above its snapshot, the
     /// largest file it takes `max_file`, every connection fed
-    /// `session.feed` when scoped, its keepalive, and the web build at `/`.
+    /// [`ark_auth::FEED`] when scoped, its keepalive, and the web build at `/`.
     /// The app adds its routes.
     pub fn server(&self, config: impl Into<ServerConfig>, auth: Arc<Auth>) -> Server {
         let mut config = config.into();
         (config.keep, config.max_file) = (Some(self.retain), self.max_file);
         if self.scoped {
-            config.feed = Arc::new(|_| Some("session.feed".into()));
+            config.feed = Arc::new(|_| Some(ark_auth::FEED.into()));
         }
         Server {
             data: Some(self.data.clone()),

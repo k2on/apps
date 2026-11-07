@@ -56,8 +56,6 @@ enum Kept {
     Outbox,
 }
 
-const FILES: usize = 8;
-const FILE_BYTES: u64 = 8 << 20;
 const OUTBOX: usize = 4096;
 
 static SINK: OnceLock<Kept> = OnceLock::new();
@@ -139,6 +137,9 @@ struct Files {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Files {
+    const KEPT: usize = 8;
+    const BYTES: u64 = 8 << 20;
+
     fn new(dir: std::path::PathBuf) -> std::io::Result<Files> {
         std::fs::create_dir_all(&dir)?;
         let n = numbered(&dir).last().map_or(0, |(n, _)| n + 1);
@@ -154,13 +155,13 @@ impl Files {
         use std::io::Write;
         let mut line = serde_json::to_vec(e).unwrap_or_default();
         line.push(b'\n');
-        if self.file.is_none() || self.bytes + line.len() as u64 > FILE_BYTES {
+        if self.file.is_none() || self.bytes + line.len() as u64 > Self::BYTES {
             let path = self.dir.join(format!("events-{:06}.jsonl", self.n));
             self.n += 1;
             self.bytes = 0;
             self.file = std::fs::OpenOptions::new().create(true).append(true).open(path).ok();
             let all = numbered(&self.dir);
-            for (_, old) in all.iter().take(all.len().saturating_sub(FILES)) {
+            for (_, old) in all.iter().take(all.len().saturating_sub(Self::KEPT)) {
                 let _ = std::fs::remove_file(old);
             }
         }

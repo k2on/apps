@@ -468,12 +468,11 @@ impl Peer {
                     if let Some(by) = told.iter().rev().find_map(|t| t.by) {
                         self.woke[space as usize] = Some(by);
                     }
-                    let cs: &Vec<Change> = &told.iter().map(|t| t.change.clone()).collect();
-                    self.changed(space, cs);
+                    self.changed(space, &told);
                     if space == Space::Durable {
                         self.runners.iter_mut().for_each(|r| r.changed(&told));
                         self.missed.iter_mut().for_each(|m| m.extend(told.iter().cloned()));
-                        self.signs(cs);
+                        self.signs(&told);
                     }
                 }
                 Output::Settled(id, r) => {
@@ -536,7 +535,7 @@ impl Peer {
     /// kept up, or could not be made, is made again over the store as it
     /// is, under its number: its rows as they were removed, and as they are
     /// inserted ([`watched::again`]).
-    fn changed(&mut self, space: Space, cs: &[Change]) {
+    fn changed(&mut self, space: Space, told: &[Told]) {
         if !self.views.values().any(|w| w.space == space) {
             return;
         }
@@ -544,7 +543,8 @@ impl Peer {
         // Read once for every view, of the tables they read: what they are
         // told of a table none reads (a fill's) is nothing to them.
         let reads = self.reads(space);
-        let cs: Vec<Change> = cs.iter().filter(|c| reads.iter().any(|t| t == c.table())).cloned().collect();
+        let read = |c: &&Change| reads.iter().any(|t| t == c.table());
+        let cs: Vec<Change> = told.iter().map(|t| &t.change).filter(read).cloned().collect();
         let store = &self.core.machine(space).expect("a machine that spoke").store;
         let p = ark::plan::Pushed::of(store, &cs);
         for (&i, w) in self.views.iter_mut().filter(|(_, w)| w.space == space) {
