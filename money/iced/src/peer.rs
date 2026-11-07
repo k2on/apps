@@ -87,6 +87,11 @@ pub struct Peer {
     pub preview: Option<Watched<FormulaPreview>>,
 }
 
+/// What a slot's view did, when it holds one.
+fn slot<T>(w: &mut Option<Watched<T>>, c: &mut Replica) -> Vec<ark_peer::Patch> {
+    w.as_mut().map_or(vec![], |w| w.settle(c))
+}
+
 fn month_of(month: &str) -> Month {
     Month { month: month.into() }
 }
@@ -166,24 +171,12 @@ impl Peer {
         note(self.asks.settle(c));
         note(self.filters.settle(c));
         note(self.formulas.settle(c));
-        if let Some(w) = &mut self.txn {
-            note(w.settle(c));
-        }
-        if let Some(w) = &mut self.receipt {
-            note(w.settle(c));
-        }
-        if let Some(w) = &mut self.charges {
-            note(w.settle(c));
-        }
-        if let Some(w) = &mut self.candidates {
-            note(w.settle(c));
-        }
-        if let Some(w) = &mut self.splits {
-            note(w.settle(c));
-        }
-        if let Some(w) = &mut self.preview {
-            note(w.settle(c));
-        }
+        note(slot(&mut self.txn, c));
+        note(slot(&mut self.receipt, c));
+        note(slot(&mut self.charges, c));
+        note(slot(&mut self.candidates, c));
+        note(slot(&mut self.splits, c));
+        note(slot(&mut self.preview, c));
         // A receipt read or attached: its items on screen.
         if any {
             self.follow_txn();
