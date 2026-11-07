@@ -65,7 +65,7 @@ impl<UT, T: Twin<UT>> Twin<UT> for Vec<T> {
 
 /// A row id across the bridge: its sixteen bytes, as their hex (the apps'
 /// `Id`, by `uniffi.toml`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RowId(pub [u8; 16]);
 
 uniffi::custom_type!(RowId, String, {
@@ -83,6 +83,34 @@ impl<UT, R> Twin<UT> for ark::row::Id<R> {
     }
     fn from_ffi(f: RowId) -> Self {
         ark::row::Id::new(f.0)
+    }
+}
+
+/// A file a row names (`ark::file::FileRef`, docs/plan-files.md) across
+/// the bridge: its hash, size and media type.
+#[derive(Clone, Debug, PartialEq, Eq, Default, uniffi::Record)]
+#[uniffi(name = "FileRef")]
+pub struct FileRefFfi {
+    pub hash: String,
+    pub size: i64,
+    pub media: String,
+}
+
+impl<UT> Twin<UT> for ark::file::FileRef {
+    type Ffi = FileRefFfi;
+    fn ffi(self) -> FileRefFfi {
+        FileRefFfi {
+            hash: self.hash,
+            size: self.size,
+            media: self.media,
+        }
+    }
+    fn from_ffi(f: FileRefFfi) -> Self {
+        ark::file::FileRef {
+            hash: f.hash,
+            size: f.size,
+            media: f.media,
+        }
     }
 }
 

@@ -95,8 +95,8 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "format",
         name: "Format",
-        summary: "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
-        api: &["clock(secs)", "spell(ms)", "plural(n, word)", "span(born, died)", "day(ms, now)"],
+        summary: "Words for numbers: a clock, a length, a plural, a span of time, a day.",
+        api: &["clock(ms)", "clock_secs(secs)", "length(ms)", "plural(n, word)", "span(born, died)", "published(ms, now, offset)"],
         rules: &["A length past an hour is h:mm:ss."],
     },
     Entry {
@@ -282,11 +282,11 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["`step` returns None only at that edge, which means \"not mine\": the app says what lies past it."],
     },
     Entry {
-        module: "route",
-        name: "Route",
-        summary: "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
-        api: &["trait Route { fragment(), parse() }", "join(kind, name), split(fragment)", "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
-        rules: &["`parse` never fails: an unknown fragment is home.", "Call `sync` after every update."],
+        module: "router",
+        name: "Router",
+        summary: "An app's routes as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+        api: &["trait Routable { path(), from_path(), home() } (ark-router; #[derive(Routes)] writes it)", "fragment(&route), parse(fragment)", "join(kind, name), split(path)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
+        rules: &["`parse` never fails: a fragment that names nothing is home.", "Call `sync` after every update."],
     },
     Entry {
         module: "scroll",

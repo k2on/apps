@@ -6,6 +6,8 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
+import uniffi.money_domain.AccountKind
+import uniffi.money_domain.cardGroupId
 import dev.arkui.Landing
 import dev.arkui.landing
 import dev.arkui.reordered
@@ -104,7 +106,7 @@ class ReorderTests {
     private val budget
         get() = l.byGroup()
     private val people
-        get() = budget.filter { it.first.id != Book.CARD_GROUP }
+        get() = budget.filter { it.first.id != cardGroupId() }
     private val fits
         get() = fitsOf(budget)
 
@@ -112,11 +114,11 @@ class ReorderTests {
 
     @Test fun theCardsGroupComesFirst() {
         val (cards, rest) = budget.first()
-        assertEquals(Book.CARD_GROUP, cards.id)
+        assertEquals(cardGroupId(), cards.id)
         assertEquals("Credit Card Payments", cards.name)
         assertTrue(rest.isNotEmpty())
-        assertTrue(rest.all { Ledger.isPayment(it) && it.card != null })
-        assertTrue(people.flatMap { it.second }.none { Ledger.isPayment(it) })
+        assertTrue(rest.all { it.isPayment() && it.card != null })
+        assertTrue(people.flatMap { it.second }.none { it.isPayment() })
     }
 
     @Test fun aCategoryDropIsAMoveIntoTheGroupItLandedUnder() {
@@ -157,7 +159,7 @@ class ReorderTests {
         // And were it let go there all the same, the domain says no in its own words.
         book.moveCategory(Id(pay.substringAfter('/')), g1.first.id, null)
         assertTrue(book.said.last(), book.said.last().contains("stays with the cards"))
-        assertEquals(Book.CARD_GROUP, l.line(Id(pay.substringAfter('/')))!!.groupId)
+        assertEquals(cardGroupId(), l.line(Id(pay.substringAfter('/')))!!.groupId)
     }
 
     // * The demo's household: the drop made, and read back in the order it was dragged into
@@ -198,7 +200,7 @@ class ReorderTests {
 
     @Test fun theCardsPaymentsAreDraggedAmongThemselves() {
         // A second card, so the cards' group has two to put in order.
-        book.openAccount("Visa", "credit", onBudget = true, balance = 0)
+        book.openAccount("Visa", AccountKind.CREDIT, onBudget = true, balance = 0)
         val pays = budget.first().second
         assertEquals(2, pays.size)
         val after = drop(categoryKey(pays[0].categoryId), categoryKey(pays[1].categoryId))

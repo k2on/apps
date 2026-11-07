@@ -9,31 +9,26 @@
 #if os(iOS)
 import SwiftUI
 
-/// Cents in the locale's currency format: `$1,234.56`.
+/// Cents as the locale writes money, `$1,234.56`, by the app's library
+/// (`Cents.write`).
 public struct CentsText: View {
     let cents: Int64
-    let code: String
     let signed: Bool
 
     /// `signed` writes a plus on what is above nothing, as an inflow reads.
-    public init(_ cents: Int64, code: String = CentsText.code, signed: Bool = false) {
+    public init(_ cents: Int64, signed: Bool = false) {
         self.cents = cents
-        self.code = code
         self.signed = signed
     }
 
-    /// The locale's currency, US dollars when it has none.
-    public static var code: String { Locale.current.currency?.identifier ?? "USD" }
-
     public var body: some View {
-        Text(CentsText.string(cents, code: code, signed: signed))
+        Text(CentsText.string(cents, signed: signed))
             .monospacedDigit()
     }
 
     /// The text alone, for a label or an accessibility value.
-    public static func string(_ cents: Int64, code: String = CentsText.code, signed: Bool = false) -> String {
-        let style = Decimal.FormatStyle.Currency(code: code).sign(strategy: signed ? .always() : .automatic)
-        return Cents.decimal(cents).formatted(style)
+    public static func string(_ cents: Int64, signed: Bool = false) -> String {
+        Cents.write(cents, signed)
     }
 }
 
@@ -64,16 +59,17 @@ public struct MarkedCents: View {
 }
 
 /// What a figure says about itself: the colour of its pill and its text, the
-/// theme's signals (arkui/theme.toml), each legible on the page.
+/// theme's signals (arkui/theme.toml), each legible on the page. The same
+/// five as Android's `Tint` and the desktop's `arkui::parts::Tint`.
 public enum Tint: Equatable, Sendable {
-    case neutral, good, caution, bad, accent
+    case neutral, positive, caution, negative, accent
 
     public var color: Color {
         switch self {
         case .neutral: return .quiet
-        case .good: return .positive
+        case .positive: return .positive
         case .caution: return .caution
-        case .bad: return .error
+        case .negative: return .error
         case .accent: return .accentText
         }
     }
@@ -259,24 +255,30 @@ public struct Pager: View {
     let forward: () -> Void
     let home: (() -> Void)?
     let homeLabel: String
+    let backLabel: String
+    let forwardLabel: String
     @State private var steps = 0
     /// Which way the last step went: forward brings the next name in from
     /// the right, back from the left; home, whose way is not known here, fades.
     @State private var way: Edge? = nil
 
-    /// `home`, when given, is offered as `homeLabel` ("Today").
-    public init(_ title: String, homeLabel: String = "Today", home: (() -> Void)? = nil, back: @escaping () -> Void, forward: @escaping () -> Void) {
+    /// `home`, when given, is offered as `homeLabel` ("Today"); VoiceOver
+    /// hears the chevrons as `backLabel` and `forwardLabel`.
+    public init(_ title: String, homeLabel: String = "Today", home: (() -> Void)? = nil, backLabel: String = "Previous", forwardLabel: String = "Next",
+                back: @escaping () -> Void, forward: @escaping () -> Void) {
         self.title = title
         self.back = back
         self.forward = forward
         self.home = home
         self.homeLabel = homeLabel
+        self.backLabel = backLabel
+        self.forwardLabel = forwardLabel
     }
 
     public var body: some View {
         HStack(spacing: Space.s) {
             Button { steps -= 1; go(.leading, back) } label: { Image(systemName: "chevron.left") }
-                .accessibilityLabel("Previous")
+                .accessibilityLabel(backLabel)
             ZStack {
                 // A new name for each title, so a step slides the old one out
                 // and the new one in rather than changing one in place; a
@@ -291,7 +293,7 @@ public struct Pager: View {
             .clipped()
             .motion(Springs.move, value: title)
             Button { steps += 1; go(.trailing, forward) } label: { Image(systemName: "chevron.right") }
-                .accessibilityLabel("Next")
+                .accessibilityLabel(forwardLabel)
             if let home {
                 Button(homeLabel) { steps += 1; go(nil, home) }
                     .font(.subheadline.weight(.semibold))

@@ -43,6 +43,7 @@ import dev.arkui.Space
 import dev.arkui.TabTitle
 import dev.arkui.pressable
 import dev.arkui.rememberDestinationListState
+import uniffi.ark_format.formatCount
 
 /** What a needle found, in three groups. */
 data class Results(val needle: String, val songs: List<Track>, val albums: List<Album>, val artists: List<Artist>) {
@@ -160,7 +161,7 @@ fun SearchScreen(
                     item { Heading("Artists") }
                     item {
                         Shelf("artists", found.artists, key = { it.name }) { a ->
-                            CoverCard(a.name, a.art, a.name, Media.count(a.tracks.toInt(), "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
+                            CoverCard(a.name, a.art, a.name, formatCount(a.tracks, "song"), SEARCH_ARTIST, round = true, opens = true, onClick = {
                                 onSearched(needle)
                                 act.open(Page.ForArtist(a.name))
                             })

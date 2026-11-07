@@ -35,22 +35,10 @@ struct ReceiptSheets: ViewModifier {
     let txn: Id?
     @Binding var acts: ReceiptActs
     @EnvironmentObject private var model: Model
-    @State private var held = [String]()
 
     func body(content: Content) -> some View {
-        let ids = txn.map { (model.snapshot.paid[$0.hex] ?? []).map(\.id) } ?? []
         content
-            .onAppear { if let t = txn { model.hold(paid: t) } }
-            .onDisappear {
-                if let t = txn { model.release(paid: t) }
-                held.forEach { model.release(items: $0) }
-                held = []
-            }
-            .onChange(of: ids, initial: true) { _, now in
-                for r in now where !held.contains(r) { model.hold(items: r) }
-                for r in held where !now.contains(r) { model.release(items: r) }
-                held = now
-            }
+            .holding(txn.map { MoneyView.paid(txn: $0) })
             .fullScreenCover(isPresented: $acts.scanning) {
                 DocumentScanner { image in
                     acts.scanning = false
@@ -94,7 +82,7 @@ struct ReceiptSection: View {
 
     var body: some View {
         let s = model.snapshot
-        let state = Receipts.state(txn: txn, receipts: s.paid[txn.hex] ?? [], photos: s.photos)
+        let state = Receipts.state(txn: txn, receipts: model.paid(txn), photos: s.photos)
         Section {
             switch state {
             case .none:
@@ -116,13 +104,14 @@ struct ReceiptSection: View {
                     Label("Check this: it doesn't add up as read", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(Color.caution)
                 }
-                PaperReceipt(receipt: r, items: s.items[r.id] ?? [])
+                PaperReceipt(receipt: r, items: model.items(r.id))
+                    .holding(MoneyView.items(receipt: r.id))
                     .listRowInsets(EdgeInsets(top: Space.m, leading: 0, bottom: Space.m, trailing: 0))
                     .listRowBackground(Color.clear)
                 if let p = Receipts.photo(of: r.id, s.photos) {
                     NavigationLink { ReceiptPhotoView(file: p.file) } label: { Label("Photo", systemImage: "photo") }
                 }
-                Button { acts.typing = ReceiptDraft(r, items: s.items[r.id] ?? [], txn: txn) } label: { Label("Edit Receipt", systemImage: "pencil") }
+                Button { acts.typing = ReceiptDraft(r, items: model.items(r.id), txn: txn) } label: { Label("Edit Receipt", systemImage: "pencil") }
                 Button(role: .destructive) { model.pay(receipt: r.id, with: nil) } label: { Label("Take Receipt Off", systemImage: "minus.circle") }
             }
             if !state.hasReceipt { adding(s) }
@@ -167,7 +156,7 @@ struct PaperReceipt: View {
                     Text(ReceiptDraft.typed(-i.amount))
                 }
                 if i.quantity != 1000 {
-                    Text("  \(quantity(i)) \(i.unit)").foregroundStyle(Color.black.opacity(0.55))
+                    Text("  \(formatQuantity(thousandths: i.quantity)) \(i.unit)").foregroundStyle(Color.black.opacity(0.55))
                 }
             }
             if items.isEmpty && receipt.items > 0 { Text("…").frame(maxWidth: .infinity) }
@@ -192,14 +181,6 @@ struct PaperReceipt: View {
         Text(String(repeating: "-", count: 40)).lineLimit(1).truncationMode(.tail).foregroundStyle(Color.black.opacity(0.5))
     }
 
-    /// Thousandths as a person reads them: `2`, `11.482`.
-    private func quantity(_ i: ItemLine) -> String {
-        let whole = i.quantity / 1000, frac = i.quantity % 1000
-        if frac == 0 { return "\(whole)" }
-        var f = String(format: "%03d", Int(frac.magnitude))
-        while f.hasSuffix("0") { f.removeLast() }
-        return "\(whole).\(f)"
-    }
 }
 
 /// A receipt typed by hand, or one already read put right: where, when, and

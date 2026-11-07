@@ -1,14 +1,13 @@
 //! money's library for its phones (`docs/plan-v5.md` §1.16, N3): the
 //! bridge (`ark-ffi`) with money's domain linked in. The apps load this one
 //! shared library, open their replica with [`money_open`] — or the demo's
-//! household with [`money_demo`] — and call every function of the domain by
-//! name through it, typed by what `arkdb gen` writes from the domain. The
-//! views a budget is drawn from (accounts, the month's lines and summary, a
-//! register, what needs a look, payees, banks, spending) hand over UniFFI's
-//! records, no JSON per row (`money_domain`'s `ffi` feature).
+//! household with [`money_demo`] — and send every change of the domain's
+//! through it as a `MoneyChange` ([`Session::send`]). Every view hands over
+//! UniFFI's records, and the records carry the domain's rules as methods
+//! (`money_domain`'s `ffi` feature): nothing crosses as JSON.
 //!
-//! Signing in is the bridge's, as harken's phones do it: the server's page
-//! (`login_url`, redirecting to `money://auth`), the code exchanged
+//! Signing in is `ark_auth::onboarding`'s machine, through the bridge: the server's page
+//! (`Effect::Browse`, redirecting to `money://auth`), the code exchanged
 //! (`exchange`), the peer told (`Peer::login`) and dialled (`socket_url`,
 //! `Peer::connect`). A refusal is a value wherever the app can ask before
 //! it acts (`Peer::check`) or after (`Peer::standing`, `take_rejections`);
@@ -23,14 +22,21 @@ use ark_peer::Config;
 
 uniffi::setup_scaffolding!();
 
+/// Numbers, days and lengths as every client writes them: in this library,
+/// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
+/// come with the app's, and the phones print what the desktop prints.
+pub use ark_format;
+
 mod demo;
 mod hall;
 #[cfg(feature = "page")]
 mod page;
+mod session;
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 #[cfg(feature = "page")]
 pub use page::money_page_corners;
+pub use session::{Budget, Changed, Holding, MoneyView, Session};
 
 /// money's peer as a phone is made of it: the domain for the log, and no
 /// live space — a budget has nothing but what was said.
@@ -61,12 +67,12 @@ pub enum Sent {
     Refused { why: String },
 }
 
-/// The function `name` on its input's JSON, as `Peer::mutate` does it, its
-/// refusal a value: what a form's button calls when it says the sentence
-/// under the field rather than catching.
+/// A change sent over `peer` with no session, its refusal a value: the
+/// tests', and anything that sends before it holds a view.
 #[uniffi::export]
-pub fn money_send(peer: Arc<Peer>, name: String, input: String) -> Sent {
-    match peer.mutate(name, input) {
+pub fn money_send(peer: Arc<Peer>, change: <money_domain::MoneyChange as ark_ffi::Twin<money_domain::UniFfiTag>>::Ffi) -> Sent {
+    let c = <money_domain::MoneyChange as ark_ffi::Twin<money_domain::UniFfiTag>>::from_ffi(change);
+    match peer.mutate_encoded(c.name(), c.input()) {
         Ok(id) => Sent::Intent { id },
         Err(Refusal::Refused { why }) => Sent::Refused { why },
     }
@@ -83,10 +89,4 @@ pub fn money_today() -> String {
 #[uniffi::export]
 pub fn money_add_months(month: String, n: i64) -> String {
     money_domain::dates::add_months(&month, n)
-}
-
-/// A month as a heading says it: `October 2026`.
-#[uniffi::export]
-pub fn money_month_name(month: String) -> String {
-    money_domain::dates::month_name(&month)
 }

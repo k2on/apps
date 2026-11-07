@@ -426,6 +426,7 @@ pub struct Rule {
 
 /// Which way money moved: either, in, or out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub enum Direction {
     #[default]
     /// Either way (not `Any`, which a Kotlin binding could not name).
@@ -442,13 +443,14 @@ pub enum Direction {
 /// account, what needs a look, one account) and what a formula sums — and
 /// one matcher for all of them, [`Filter::matches`].
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Filter {
     /// The accounts it reads; none is every account.
     pub accounts: Vec<Id<Account>>,
     /// Only accounts on the budget.
     pub on_budget: bool,
     /// What the payee or the bank's own line for it holds, any case; blank
-    /// is anything.
+    /// is anything. A search box reads it wider (`Filtered::search`).
     pub text: String,
     /// The categories; none is any. `None` among them is "no category".
     pub categories: Vec<Option<Id<Category>>>,
@@ -480,6 +482,7 @@ pub struct SavedFilter {
 /// One term of a formula: `times / per` (kept exactly: 10% is 1/10) of
 /// what a saved filter's transactions add up to in the month.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
 pub struct Term {
     pub filter_id: Id<SavedFilter>,
     pub times: i64,

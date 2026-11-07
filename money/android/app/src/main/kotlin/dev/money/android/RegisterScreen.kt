@@ -7,6 +7,8 @@
 // cleared balance? Yes locks it; no asks what the bank says and adjusts.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
+import dev.arkui.CardCorner
+import dev.arkui.RowDivider
 import dev.arkui.Tokens
 import dev.arkdb.ffi.Id
 import dev.arkui.AmountField
@@ -75,20 +78,17 @@ import uniffi.money_domain.Cleared
 import uniffi.money_domain.TxnLine
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatDayHeading
 
 @Composable
 fun RegisterScreen(ledger: Ledger, account: Id?, onBack: () -> Unit) {
     val shell = LocalShell.current
     val book = shell.book
     val acc = account?.let { ledger.account(it) }
-    DisposableEffect(account) {
-        book.holdRegister(account)
-        onDispose { book.releaseRegister(account) }
-    }
     var reconciling by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
-    val rows = ledger.register(account)
+    val rows = book.watched.watch(MoneyView.Register(account)) { book.session.register(account) }
 
     Page(
         title = if (account == null) "All Accounts" else acc?.name ?: "Account",
@@ -162,7 +162,7 @@ fun LazyListScope.days(rows: List<TxnLine>, today: String, showAccount: Boolean,
     for ((day, ts) in byDay) {
         stickyHeader(key = "d$day") {
             Text(
-                Dates.heading(day, today),
+                formatDayHeading(day, today),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier =
@@ -210,7 +210,7 @@ fun TxnRow(
     val shell = LocalShell.current
     val book = shell.book
     val a = LocalAmounts.current
-    val needs = needsCategory(t)
+    val needs = t.needsCategory()
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     val row: @Composable () -> Unit = {
         Column(Modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {

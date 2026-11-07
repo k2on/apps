@@ -30,8 +30,7 @@ fn app() -> App {
 
 fn account<'a>(app: &'a App, name: &str) -> &'a AccountLine {
     app.peer
-        .accounts
-        .rows
+        .accounts()
         .iter()
         .find(|a| a.name == name)
         .unwrap_or_else(|| panic!("no account {name}"))
@@ -39,8 +38,7 @@ fn account<'a>(app: &'a App, name: &str) -> &'a AccountLine {
 
 fn category(app: &App, name: &str) -> BudgetLine {
     app.peer
-        .lines
-        .rows
+        .lines()
         .iter()
         .find(|l| l.name == name)
         .cloned()
@@ -50,7 +48,7 @@ fn category(app: &App, name: &str) -> BudgetLine {
 #[test]
 fn the_household_is_seeded() {
     let app = app();
-    let names: Vec<&str> = app.peer.accounts.rows.iter().map(|a| a.name.as_str()).collect();
+    let names: Vec<&str> = app.peer.accounts().iter().map(|a| a.name.as_str()).collect();
     assert_eq!(names, ["Checking", "Savings", "Cash", "Mortgage", "Retirement", "Chase Sapphire"]);
     let card = account(&app, "Chase Sapphire");
     assert!(card.on_budget && card.bank == seed::BANK_NAME && card.mask == "4417");
@@ -60,10 +58,10 @@ fn the_household_is_seeded() {
     assert_eq!(s.ready_to_assign, 128_450, "what is left to assign this month");
     assert!(s.overspent >= 1, "Dining Out was given too little");
     assert!(s.underfunded >= 2, "Vacation and Gifts were given nothing");
-    assert!(!app.peer.inbox.rows.is_empty(), "the last few days of the card wait for a look");
-    assert!(app.peer.inbox.rows.iter().all(|t| t.date.as_str() >= "2026-10-22"));
+    assert!(!app.peer.inbox().is_empty(), "the last few days of the card wait for a look");
+    assert!(app.peer.inbox().iter().all(|t| t.date.as_str() >= "2026-10-22"));
     // The budget's figures are the domain's: groups and categories in order.
-    let groups: Vec<&str> = app.peer.groups.rows.iter().map(|g| g.name.as_str()).collect();
+    let groups: Vec<&str> = app.peer.groups().iter().map(|g| g.name.as_str()).collect();
     assert_eq!(groups, ["Credit Card Payments", "Bills", "Everyday", "Quality of Life", "Savings Goals"]);
     // The card's payment category holds what its categories covered, less
     // what was paid; the last days, not filed yet, are debt not covered.
@@ -78,16 +76,16 @@ fn the_household_is_seeded() {
     let card_id = card.id;
     let mut app = app;
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(card_id))));
-    let payments: Vec<&TxnLine> = app.peer.register.rows.iter().filter(|t| t.transfer).collect();
+    let payments: Vec<&TxnLine> = app.peer.register().iter().filter(|t| t.transfer).collect();
     assert_eq!(payments.len(), 2);
     assert!(payments.iter().all(|t| t.imported && t.approved));
     // Some of it Sam entered.
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    assert!(app.peer.register.rows.iter().any(|t| t.user_id == seed::PARTNER));
+    assert!(app.peer.register().iter().any(|t| t.user_id == seed::PARTNER));
     // And checking was reconciled at the end of last month.
     let checking = account(&app, "Checking").id;
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
-    assert!(app.peer.register.rows.iter().any(|t| t.cleared == Cleared::Reconciled));
+    assert!(app.peer.register().iter().any(|t| t.cleared == Cleared::Reconciled));
 }
 
 #[test]
@@ -158,7 +156,7 @@ fn a_transaction_is_entered_and_corrected() {
     let _ = app.update(Message::SaveTxn);
     assert!(app.form.is_none(), "saved: {}", app.note);
     assert_eq!(account(&app, "Checking").balance, before - 1_234);
-    let t = app.peer.register.rows.iter().find(|t| t.memo == "a top-up").unwrap().clone();
+    let t = app.peer.register().iter().find(|t| t.memo == "a top-up").unwrap().clone();
     assert_eq!(
         (t.payee.as_str(), t.category.as_str(), t.user_id.as_str()),
         ("Mint Mobile", "Phone", seed::ME)
@@ -201,7 +199,7 @@ fn an_existing_transaction_is_made_a_transfer() {
     let _ = app.update(Message::Form(Field::Outflow, "50".into()));
     let _ = app.update(Message::Form(Field::Memo, "card payment".into()));
     let _ = app.update(Message::SaveTxn);
-    let t = app.peer.register.rows.iter().find(|t| t.memo == "card payment").unwrap().clone();
+    let t = app.peer.register().iter().find(|t| t.memo == "card payment").unwrap().clone();
     assert!(!t.transfer);
     let _ = app.update(Message::EditTxn(t.id));
     let _ = app.update(Message::ChooseCategory);
@@ -213,7 +211,7 @@ fn an_existing_transaction_is_made_a_transfer() {
     let _ = app.update(Message::SaveTxn);
     assert!(app.form.is_none(), "saved: {}", app.note);
     let id = t.id;
-    let t = app.peer.register.rows.iter().find(|t| t.id == id).unwrap();
+    let t = app.peer.register().iter().find(|t| t.id == id).unwrap();
     assert_eq!((t.transfer, t.payee.as_str()), (true, "Transfer : Chase Sapphire"));
     assert_eq!(account(&app, "Chase Sapphire").balance, card.balance + 5_000);
     assert_eq!(category(&app, "Chase Sapphire").activity, pay.activity - 5_000);
@@ -224,12 +222,11 @@ fn sync_brings_the_bank_and_posts_what_was_pending() {
     let mut app = app();
     let card = account(&app, "Chase Sapphire").id;
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(card))));
-    let before = app.peer.register.rows.len();
+    let before = app.peer.register().len();
     let _ = app.update(Message::Sync);
     let coffee: Vec<TxnLine> = app
         .peer
-        .register
-        .rows
+        .register()
         .iter()
         .filter(|t| t.payee == "Blue Bottle Coffee" && t.date == TODAY)
         .cloned()
@@ -239,7 +236,7 @@ fn sync_brings_the_bank_and_posts_what_was_pending() {
         (coffee[0].amount, coffee[0].cleared, coffee[0].approved),
         (-650, Cleared::Uncleared, false)
     );
-    assert_eq!(app.peer.register.rows.len(), before + 2);
+    assert_eq!(app.peer.register().len(), before + 2);
     // A category given while it was pending survives its posting.
     let dining = category(&app, "Dining Out").category_id;
     let _ = app.update(Message::Categorize(vec![coffee[0].id]));
@@ -247,8 +244,7 @@ fn sync_brings_the_bank_and_posts_what_was_pending() {
     let _ = app.update(Message::Sync);
     let posted: Vec<&TxnLine> = app
         .peer
-        .register
-        .rows
+        .register()
         .iter()
         .filter(|t| t.payee == "Blue Bottle Coffee" && t.date == TODAY)
         .collect();
@@ -258,7 +254,7 @@ fn sync_brings_the_bank_and_posts_what_was_pending() {
         (coffee[0].id, -775, Cleared::Cleared)
     );
     assert_eq!(posted[0].category, "Dining Out");
-    assert_eq!(app.peer.register.rows.len(), before + 3);
+    assert_eq!(app.peer.register().len(), before + 3);
     let _ = app.update(Message::Sync);
     assert_eq!(app.note, "Chase: nothing new at the bank");
 }
@@ -267,10 +263,10 @@ fn sync_brings_the_bank_and_posts_what_was_pending() {
 fn what_needs_a_look_is_approved() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Inbox)));
-    let waiting: Vec<Id<Txn>> = app.peer.register.rows.iter().filter(|t| !t.approved).map(|t| t.id).collect();
+    let waiting: Vec<Id<Txn>> = app.peer.register().iter().filter(|t| !t.approved).map(|t| t.id).collect();
     assert!(!waiting.is_empty());
     let _ = app.update(Message::Approve(waiting));
-    assert!(app.peer.register.rows.iter().all(|t| t.approved && t.category != "Needs a category"));
+    assert!(app.peer.register().iter().all(|t| t.approved && t.category != "Needs a category"));
 }
 
 #[test]
@@ -282,8 +278,7 @@ fn months_move_and_the_budget_follows() {
     assert_eq!(s.ready_to_assign, 0, "last month everything was assigned");
     assert!(app
         .peer
-        .lines
-        .rows
+        .lines()
         .iter()
         .all(|l| l.available >= 0 || l.name == "Dining Out" || l.activity < 0));
     let _ = app.update(Message::ThisMonth);
@@ -551,20 +546,12 @@ fn the_budget_drawn() {
     let _ = receipts.update(Message::Sync);
     let order = receipts
         .peer
-        .receipts
-        .rows
+        .receipts()
         .iter()
         .find(|r| r.store == "amazon")
         .map(|r| r.id.clone())
         .unwrap_or_default();
-    let paid = receipts
-        .peer
-        .register
-        .rows
-        .iter()
-        .filter(|t| t.receipt == order)
-        .map(|t| t.id)
-        .next_back();
+    let paid = receipts.peer.register().iter().filter(|t| t.receipt == order).map(|t| t.id).next_back();
     if let Some(id) = paid {
         let _ = receipts.update(Message::EditTxn(id));
     }
@@ -574,7 +561,7 @@ fn the_budget_drawn() {
     let mut split = app();
     let _ = split.update(Message::Resized(iced::Size::new(1400.0, 820.0)));
     let _ = split.update(Message::Go(Page::Ledger(Ledger::All)));
-    let paid = split.peer.receipts.rows.iter().find(|r| r.store == "target").and_then(|r| r.txn_id);
+    let paid = split.peer.receipts().iter().find(|r| r.store == "target").and_then(|r| r.txn_id);
     if let Some(id) = paid {
         let _ = split.update(Message::EditTxn(id));
     }
@@ -631,14 +618,7 @@ fn the_budget_drawn() {
     let _ = ruled.update(Message::Formula(formula::Msg::Save));
     let _ = ruled.update(Message::EditAssigned(gifts));
     // Every group above Gifts' folded, so its marked cell is on screen.
-    let folded: Vec<Id<Group>> = ruled
-        .peer
-        .groups
-        .rows
-        .iter()
-        .filter(|g| g.name != "Savings Goals")
-        .map(|g| g.id)
-        .collect();
+    let folded: Vec<Id<Group>> = ruled.peer.groups().iter().filter(|g| g.name != "Savings Goals").map(|g| g.id).collect();
     for g in folded {
         let _ = ruled.update(Message::Collapse(g));
     }
@@ -802,27 +782,9 @@ fn the_register_categorizes_a_selection_from_the_keys() {
     assert!(app.dropdown.is_none());
     let groceries = category(&app, "Groceries").category_id;
     for id in ids {
-        let t = app.peer.register.rows.iter().find(|t| t.id == id).expect("still there");
+        let t = app.peer.register().iter().find(|t| t.id == id).expect("still there");
         assert_eq!(t.category_id, Some(groceries), "{}", t.payee);
     }
-}
-
-/// What the bank called an imported transaction is said where it says
-/// more than its payee; not for one typed in, nor one named alike.
-#[test]
-fn the_bank_says_what_the_payee_does_not() {
-    let mut t = TxnLine {
-        payee: "Chipotle".into(),
-        imported: true,
-        imported_payee: "CHIPOTLE 1234 SAN FRANCISCO CA".into(),
-        ..TxnLine::default()
-    };
-    assert_eq!(crate::bank_said(&t), "CHIPOTLE 1234 SAN FRANCISCO CA");
-    t.imported_payee = "CHIPOTLE".into();
-    assert_eq!(crate::bank_said(&t), "", "named alike");
-    t.imported_payee = "CHIPOTLE 1234".into();
-    t.imported = false;
-    assert_eq!(crate::bank_said(&t), "", "typed in");
 }
 
 /// The demo's Target and Costco receipts are matched to the charges that
@@ -834,16 +796,16 @@ fn the_bank_says_what_the_payee_does_not() {
 fn receipts_are_filed_from_their_transaction() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    let stores: Vec<&str> = app.peer.receipts.rows.iter().map(|r| r.store.as_str()).collect();
+    let stores: Vec<&str> = app.peer.receipts().iter().map(|r| r.store.as_str()).collect();
     assert_eq!(stores.len(), 3, "{stores:?}");
     assert!(stores.contains(&"target") && stores.contains(&"costco") && stores.contains(&"amazon"));
     assert!(
-        app.peer.receipts.rows.iter().filter(|r| r.store != "amazon").all(|r| r.txn_id.is_some()),
+        app.peer.receipts().iter().filter(|r| r.store != "amazon").all(|r| r.txn_id.is_some()),
         "each matched to its charge"
     );
     assert!(!app.places().iter().any(|(_, label, _, _)| label == "Receipts"), "no receipts page");
-    let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
-    let paid = app.peer.register.rows.iter().find(|t| Some(t.id) == target.txn_id).unwrap().clone();
+    let target = app.peer.receipts().iter().find(|r| r.store == "target").unwrap().clone();
+    let paid = app.peer.register().iter().find(|t| Some(t.id) == target.txn_id).unwrap().clone();
     assert_eq!(paid.receipt, target.id, "marked in the register");
     assert!(paid.category.starts_with("Split"), "{}", paid.category);
     let _ = app.update(Message::EditTxn(paid.id));
@@ -863,12 +825,12 @@ fn receipts_are_filed_from_their_transaction() {
     assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Items(i)) if *i == chips));
     let groceries = category(&app, "Groceries").category_id;
     let _ = app.update(Message::Chose(Choice::Category(Some(groceries))));
-    assert!(app.peer.unfiled.rows.iter().all(|i| i.name != "GG TORTILLA CHIPS"));
-    let r = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap();
+    assert!(app.peer.unfiled().iter().all(|i| i.name != "GG TORTILLA CHIPS"));
+    let r = app.peer.receipts().iter().find(|r| r.store == "target").unwrap();
     assert_eq!((r.filed, r.items), (3, 3));
     // Closed, its receipt goes with it.
     let _ = app.update(Message::CancelTxn);
-    assert!(app.peer.txn.is_none() && app.peer.receipt.is_none());
+    assert!(app.peer.txn().is_none() && app.peer.receipt().is_none());
 }
 
 /// A receipt typed by hand for a transaction with none: it pays for it,
@@ -882,8 +844,7 @@ fn a_receipt_is_typed_put_right_and_attached() {
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
     let t = app
         .peer
-        .register
-        .rows
+        .register()
         .iter()
         .find(|t| t.amount < 0 && !t.transfer && t.receipt.is_empty())
         .unwrap()
@@ -907,7 +868,7 @@ fn a_receipt_is_typed_put_right_and_attached() {
     assert!(app.paper.is_none(), "{}", app.note);
     let r = app.peer.txn_receipts()[0].clone();
     assert_eq!((r.total, r.items, r.txn_id), (t.amount, 2, Some(t.id)));
-    assert_eq!(app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().receipt, r.id);
+    assert_eq!(app.peer.register().iter().find(|x| x.id == t.id).unwrap().receipt, r.id);
 
     let _ = app.update(Message::Receipt(Msg::Write(Some(r.id.clone()))));
     assert_eq!(app.paper.as_ref().unwrap().items.len(), 2, "what it says, to put right");
@@ -917,9 +878,11 @@ fn a_receipt_is_typed_put_right_and_attached() {
 
     let _ = app.update(Message::Receipt(Msg::Detach(r.id.clone())));
     assert!(app.peer.txn_receipts().is_empty());
-    let line = app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().clone();
+    let line = app.peer.register().iter().find(|x| x.id == t.id).unwrap().clone();
     assert!(
-        crate::receipt::unmatched(&app.peer.receipts.rows, &line).iter().any(|x| x.id == r.id),
+        money_domain::words::unmatched_for(app.peer.receipts(), line.amount, &line.date)
+            .iter()
+            .any(|x| x.id == r.id),
         "offered again"
     );
     let _ = app.update(Message::Receipt(Msg::Attach(r.id.clone())));
@@ -935,14 +898,7 @@ fn a_photo_dropped_on_a_transaction_is_its_receipt() {
     use crate::receipt::Msg;
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    let t = app
-        .peer
-        .register
-        .rows
-        .iter()
-        .find(|t| t.amount < 0 && t.receipt.is_empty())
-        .unwrap()
-        .clone();
+    let t = app.peer.register().iter().find(|t| t.amount < 0 && t.receipt.is_empty()).unwrap().clone();
     let given = |name: &str, media: &str| {
         Message::Receipt(Msg::Given(arkui::files::Picked {
             name: name.into(),
@@ -959,9 +915,9 @@ fn a_photo_dropped_on_a_transaction_is_its_receipt() {
     assert!(app.note.contains("is not a photo"), "the browser's word: {}", app.note);
     // Dropped on the desktop (its name says) or in a browser (it says).
     let _ = app.update(given("receipt.JPG", ""));
-    let photo = app.peer.photos.rows.iter().find(|p| p.txn_id == Some(t.id)).unwrap().clone();
+    let photo = app.peer.photos().iter().find(|p| p.txn_id == Some(t.id)).unwrap().clone();
     assert_eq!((photo.state.as_str(), photo.file.media.as_str()), ("reading", "image/jpeg"));
-    assert_eq!(app.peer.register.rows.iter().find(|x| x.id == t.id).unwrap().photos, 1);
+    assert_eq!(app.peer.register().iter().find(|x| x.id == t.id).unwrap().photos, 1);
     let _ = app.update(Message::Receipt(Msg::Photo(photo.file.clone())));
     assert!(matches!(app.modal, Some(Modal::Photo(_))));
     assert!(app.photo.as_ref().is_some_and(|(h, _)| *h == photo.file.hash), "here already: made here");
@@ -977,8 +933,7 @@ fn a_transaction_is_split_in_the_form() {
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
     let t = app
         .peer
-        .register
-        .rows
+        .register()
         .iter()
         .find(|t| t.amount < -5_000 && !t.transfer && t.category_id.is_some())
         .unwrap()
@@ -1002,7 +957,7 @@ fn a_transaction_is_split_in_the_form() {
     let _ = app.update(Message::SplitAmount(1, crate::amount::editable(-t.amount - half)));
     let _ = app.update(Message::SaveTxn);
     assert!(app.form.is_none(), "{}", app.note);
-    let now = app.peer.register.rows.iter().find(|r| r.id == t.id).unwrap().clone();
+    let now = app.peer.register().iter().find(|r| r.id == t.id).unwrap().clone();
     assert_eq!(now.category, "Split (2)");
     // Opened again, it opens on its lines.
     let _ = app.update(Message::EditTxn(t.id));
@@ -1025,7 +980,7 @@ fn a_transaction_is_split_in_the_form() {
     let _ = app.update(Message::ChooseCategory);
     let _ = app.update(Message::Chose(Choice::Category(Some(household))));
     let _ = app.update(Message::SaveTxn);
-    let now = app.peer.register.rows.iter().find(|r| r.id == t.id).unwrap().clone();
+    let now = app.peer.register().iter().find(|r| r.id == t.id).unwrap().clone();
     assert_eq!((now.category.as_str(), now.category_id), ("Household", Some(household)));
 }
 
@@ -1039,14 +994,14 @@ fn a_kind_is_added_and_settings_say_where_amazon_is_set_up() {
     let _ = app.update(Message::NewKind(dining));
     let _ = app.update(Message::NewKindTyped("Coffee".into()));
     let _ = app.update(Message::NewKindDone);
-    assert!(app.peer.tree.rows.iter().any(|n| n.name == "Coffee" && n.parent_id == Some(dining)));
+    assert!(app.peer.tree().iter().any(|n| n.name == "Coffee" && n.parent_id == Some(dining)));
     let _ = app.update(Message::Categorize(vec![]));
     let _ = app.update(Message::DropTyped("coffee".into()));
     let found: Vec<String> = app.drop_groups().iter().flat_map(|g| g.items.iter().map(|i| i.label.clone())).collect();
     assert_eq!(found, ["Dining Out \u{203a} Coffee"]);
     let _ = app.update(Message::CloseDrop);
     let _ = app.update(Message::Go(Page::Settings));
-    assert_eq!(app.place(), crate::Place::Settings);
+    assert_eq!(app.route(), crate::Route::Settings);
     let _ = app.update(Message::Stores(crate::stores::Msg::SaveAmazon));
     assert!(app.note.contains("the demo has no server"), "{}", app.note);
 }
@@ -1070,7 +1025,7 @@ fn a_new_transaction_is_split_as_it_is_entered() {
     let _ = app.update(Message::SplitAmount(1, "25.00".into()));
     let _ = app.update(Message::SaveTxn);
     assert!(app.form.is_none(), "{}", app.note);
-    let t = app.peer.register.rows.iter().find(|t| t.payee == "Corner Hardware").unwrap().clone();
+    let t = app.peer.register().iter().find(|t| t.payee == "Corner Hardware").unwrap().clone();
     assert_eq!((t.category.as_str(), t.amount), ("Split (2)", -4_000));
     let _ = app.update(Message::EditTxn(t.id));
     let rows = app.form.as_ref().unwrap().split.clone().unwrap();
@@ -1088,7 +1043,7 @@ fn a_new_transaction_is_split_as_it_is_entered() {
 fn an_amazon_order_is_paid_charge_by_charge() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    let amazon = || |app: &App| app.peer.receipts.rows.iter().find(|r| r.store == "amazon").unwrap().clone();
+    let amazon = || |app: &App| app.peer.receipts().iter().find(|r| r.store == "amazon").unwrap().clone();
     let r = amazon()(&app);
     assert_eq!((r.charges, r.charged, r.txn_id), (2, 1, None));
     let _ = app.update(Message::Sync);
@@ -1096,9 +1051,9 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     let _ = app.update(Message::Sync);
     let r = amazon()(&app);
     assert_eq!((r.charges, r.charged), (2, 2), "{}", app.note);
-    let first = app.peer.register.rows.iter().find(|t| t.receipt == r.id).unwrap().id;
+    let first = app.peer.register().iter().find(|t| t.receipt == r.id).unwrap().id;
     let _ = app.update(Message::EditTxn(first));
-    let charges = app.peer.charges.as_ref().unwrap().rows.clone();
+    let charges = app.peer.charges().unwrap().to_vec();
     assert_eq!(charges.len(), 2);
     let live = charges.iter().find(|c| c.amount == -2_399).unwrap().clone();
     let paid = live.txn_id.unwrap();
@@ -1108,8 +1063,8 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     // its receipt leaves as somebody confirmed it).
     let _ = app.update(Message::EditTxn(paid));
     let rows = app.form.as_ref().unwrap().split.clone().expect("split");
-    let eggs = app.peer.tree.rows.iter().find(|n| n.name == "Eggs").unwrap().id;
-    let household = app.peer.tree.rows.iter().find(|n| n.name == "Household").unwrap().id;
+    let eggs = app.peer.tree().iter().find(|n| n.name == "Eggs").unwrap().id;
+    let household = app.peer.tree().iter().find(|n| n.name == "Household").unwrap().id;
     assert_eq!(rows.iter().map(|r| r.category).collect::<Vec<_>>(), [Some(eggs), Some(household)]);
     let _ = app.update(Message::CancelTxn);
     // Paid by nothing, then found again by hand.
@@ -1127,7 +1082,7 @@ fn an_amazon_order_is_paid_charge_by_charge() {
     let choose = first.choose.clone();
     let _ = app.update(choose);
     assert_eq!(amazon()(&app).charged, 2);
-    assert!(app.peer.candidates.is_none(), "closed with the dropdown");
+    assert!(app.peer.candidates().is_none(), "closed with the dropdown");
 }
 
 /// A page come back to by `^O` is where it was left; a new visit is at the
@@ -1198,7 +1153,7 @@ fn a_waiting_account_is_chosen_for_from_one_menu() {
     second_login(&mut app);
     let _ = app.update(Message::Go(Page::Settings));
     let checking = account(&app, "Everyday Checking").id;
-    let line = |app: &App, id: &str| app.peer.linked.rows.iter().find(|l| l.plaid_account_id == id).unwrap().clone();
+    let line = |app: &App, id: &str| app.peer.linked().iter().find(|l| l.plaid_account_id == id).unwrap().clone();
     assert_eq!(app.suggested(&line(&app, "wf2-chk")), Some(checking));
     assert_eq!(app.suggested(&line(&app, "wf2-sav")), None);
     drop(app.view());
@@ -1225,29 +1180,28 @@ fn a_waiting_account_is_chosen_for_from_one_menu() {
 /// the keys, as on any page.
 #[test]
 fn the_demo_shows_its_bank_and_cannot_connect_one() {
-    use arkui::route::Route;
     let mut app = app();
     let _ = app.update(Message::AccountMenu);
     let menu = app.ctx.menu.as_ref().expect("the account's menu");
     assert_eq!(menu.entries[0].label, "Settings");
     let _ = app.update(Message::MenuActivate);
     assert_eq!(app.page, Page::Settings);
-    assert_eq!(app.place(), crate::Place::Settings);
-    assert_eq!(app.place().fragment(), crate::Place::parse("settings").fragment());
-    assert_eq!(crate::Place::parse("settings"), crate::Place::Settings);
+    assert_eq!(app.route(), crate::Route::Settings);
+    assert_eq!(app.route().path(), "settings");
+    assert_eq!(arkui::router::parse::<crate::Route>("#settings"), crate::Route::Settings);
     let _ = app.act(Action::Move(Motion::Left(1)));
     let _ = app.update(Message::Key(
         iced::keyboard::Key::Character("h".into()),
         iced::keyboard::Modifiers::default(),
     ));
     assert_eq!(app.pane, Pane::Sidebar);
-    assert_eq!(app.peer.banks.rows.len(), 1);
-    let card = app.peer.linked.rows.first().expect("the card's link");
+    assert_eq!(app.peer.banks().len(), 1);
+    let card = app.peer.linked().first().expect("the card's link");
     assert!(!card.waiting && !card.account.is_empty());
     drop(app.view());
     let _ = app.update(Message::Banks(Msg::Connect));
     assert!(app.note.contains("no server"), "{}", app.note);
-    assert!(app.peer.asks.rows.is_empty() && app.opened.is_empty());
+    assert!(app.peer.asks().is_empty() && app.opened.is_empty());
 }
 
 /// The live window on a server in this process, with a peer standing in
@@ -1293,7 +1247,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     settle(&mut app, &mut importer, &|a| a.peer.client.status().link == "online");
     let open = OpenAccount {
         name: "Checking".into(),
-        kind: "checking".into(),
+        kind: money_domain::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 50_000,
         date: TODAY.into(),
@@ -1303,11 +1257,9 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     let _ = app.update(Message::Banks(Msg::Connect));
     assert_eq!(app.page, Page::Settings);
     assert!(app.awaiting.is_some());
-    settle(&mut app, &mut importer, &|a| {
-        a.peer.asks.rows.first().is_some_and(|x| x.what == "connect")
-    });
+    settle(&mut app, &mut importer, &|a| a.peer.asks().first().is_some_and(|x| x.what == "connect"));
     assert!(app.opened.is_empty(), "nothing to open before the server answers");
-    let ask = app.peer.asks.rows[0].id;
+    let ask = app.peer.asks()[0].id;
     let answer = |importer: &mut crate::client::Replica, a: Answer| {
         importer.mutate("answer", &a).expect("the importer answers");
     };
@@ -1360,7 +1312,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
         ..money_domain::plaid::import_of("wells-fargo", "Wells Fargo", &accounts, &Default::default())
     };
     importer.mutate("import", &import).expect("the importer imports");
-    settle(&mut app, &mut importer, &|a| a.peer.linked.rows.len() == 2);
+    settle(&mut app, &mut importer, &|a| a.peer.linked().len() == 2);
     assert_eq!(app.banks_wanting(), 2, "two accounts wait for a choice");
     drop(app.view());
 
@@ -1382,21 +1334,19 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     assert_eq!(account(&app, "Checking").bank, "wells-fargo");
 
     let _ = app.update(Message::Banks(Msg::Reconnect("wells-fargo".into())));
-    settle(&mut app, &mut importer, &|a| {
-        a.peer.asks.rows.first().is_some_and(|x| x.what == "reconnect")
-    });
-    assert_eq!(app.peer.asks.rows[0].bank, "wells-fargo");
+    settle(&mut app, &mut importer, &|a| a.peer.asks().first().is_some_and(|x| x.what == "reconnect"));
+    assert_eq!(app.peer.asks()[0].bank, "wells-fargo");
     let _ = app.update(Message::Banks(Msg::AddAccounts("wells-fargo".into())));
     settle(&mut app, &mut importer, &|a| {
-        a.peer.asks.rows.first().is_some_and(|x| x.what == "add_accounts")
+        a.peer.asks().first().is_some_and(|x| x.what == "add_accounts")
     });
-    assert_eq!(app.peer.asks.rows[0].bank, "wells-fargo");
+    assert_eq!(app.peer.asks()[0].bank, "wells-fargo");
     let _ = app.update(Message::Banks(Msg::Disconnect("wells-fargo".into())));
     assert_eq!(app.modal, Some(Modal::Disconnect("wells-fargo".into())));
     drop(app.view());
     let _ = app.update(Message::Banks(Msg::Disconnected("wells-fargo".into())));
-    settle(&mut app, &mut importer, &|a| a.peer.asks.rows.iter().any(|x| x.what == "disconnect"));
-    let order: Vec<(&str, i64)> = app.peer.asks.rows.iter().map(|x| (x.what.as_str(), x.asked_ms)).collect();
+    settle(&mut app, &mut importer, &|a| a.peer.asks().iter().any(|x| x.what == "disconnect"));
+    let order: Vec<(&str, i64)> = app.peer.asks().iter().map(|x| (x.what.as_str(), x.asked_ms)).collect();
     assert_eq!(order[0].0, "disconnect", "newest first: {order:?}");
     assert_eq!(app.opened.len(), 1, "a disconnection opens no page");
     rt.block_on(server.stop());
@@ -1417,7 +1367,7 @@ fn an_account_is_renamed_where_it_stands() {
 
 // * Filters and formulas
 
-use crate::{filter, formula, Place};
+use crate::{filter, formula, Route};
 
 /// A filter typed into the register's bar from All Accounts and saved
 /// under `name`: its id.
@@ -1429,7 +1379,7 @@ fn saved_filter(app: &mut App, name: &str, edits: &[filter::Edit]) -> Id<SavedFi
     let _ = app.update(Message::Filter(filter::Msg::SaveAs));
     let _ = app.update(Message::Filter(filter::Msg::Name(name.into())));
     let _ = app.update(Message::Filter(filter::Msg::SaveDone));
-    app.peer.filters.rows.iter().find(|f| f.name == name).expect("saved").id
+    app.peer.filters().iter().find(|f| f.name == name).expect("saved").id
 }
 
 /// What Acme paid into checking: money in, matching "acme".
@@ -1449,11 +1399,11 @@ fn acme(app: &App) -> Vec<filter::Edit> {
 fn a_filter_is_typed_into_the_bar_and_saved() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    let every = app.peer.register.rows.len();
+    let every = app.peer.register().len();
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Text("acme".into()))));
     assert_eq!(app.page, Page::Ledger(Ledger::Adhoc));
-    assert_eq!(app.place(), Place::Filtered);
-    let rows = app.peer.register.rows.clone();
+    assert_eq!(app.route(), Route::Filtered);
+    let rows = app.peer.register().to_vec();
     assert!(!rows.is_empty() && rows.len() < every);
     assert!(rows.iter().all(|t| (t.payee.clone() + &t.imported_payee).to_lowercase().contains("acme")));
     let total = app.peer.total();
@@ -1466,7 +1416,7 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     let checking = account(&app, "Checking").id;
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::In))));
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Account(checking))));
-    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking && t.amount > 0));
+    assert!(app.peer.register().iter().all(|t| t.account_id == checking && t.amount > 0));
     assert_eq!(app.register_account(), None, "more than an account's conditions: no account tools");
     // Saved: the register is the saved filter's, by its name.
     let _ = app.update(Message::Filter(filter::Msg::SaveAs));
@@ -1474,9 +1424,16 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     let _ = app.update(Message::Filter(filter::Msg::Name("Acme pay".into())));
     let _ = app.update(Message::Filter(filter::Msg::SaveDone));
     assert!(app.modal.is_none(), "{}", app.note);
-    let saved = app.peer.filters.rows.iter().find(|f| f.name == "Acme pay").expect("saved").clone();
+    let saved = app.peer.filters().iter().find(|f| f.name == "Acme pay").expect("saved").clone();
     assert_eq!(app.page, Page::Ledger(Ledger::Saved(saved.id)));
-    assert_eq!(app.place(), Place::Filter("Acme pay".into()));
+    assert_eq!(
+        app.route(),
+        Route::Filter {
+            id: saved.id.hex(),
+            name: "Acme pay".into()
+        }
+    );
+    assert_eq!(app.route().path(), format!("filter/{}/acme-pay", saved.id.hex()));
     assert_eq!(saved.total, app.peer.total().total);
     let places = app.places();
     let entry = places
@@ -1507,13 +1464,17 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     let _ = app.update(Message::CloseModal);
     // Renamed where it stands, and deleted.
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Saved(saved.id))));
+    let before = app.route();
     let _ = app.update(Message::Rename(crate::Naming::Filter(saved.id)));
     let _ = app.update(Message::RenameTyped("Paychecks".into()));
     let _ = app.update(Message::RenameDone);
-    assert_eq!(app.place(), Place::Filter("Paychecks".into()));
+    // Renamed, it is the same route, and the route from before still finds it.
+    assert_eq!(app.route(), before);
+    assert_eq!(app.route().title(), "Paychecks");
+    assert_eq!(app.page_of(&before), Some(Page::Ledger(Ledger::Saved(saved.id))));
     let _ = app.update(Message::Filter(filter::Msg::Delete(saved.id)));
     assert_eq!(app.page, Page::Ledger(Ledger::All));
-    assert!(app.peer.filters.rows.is_empty());
+    assert!(app.peer.filters().is_empty());
 }
 
 /// An account in the sidebar is the built-in filter for it, the same
@@ -1526,23 +1487,29 @@ fn an_accounts_register_is_its_filter() {
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
     assert_eq!(app.register_filter(), Filter::account(checking));
     assert_eq!(app.register_account(), Some(checking));
-    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking));
+    assert!(app.peer.register().iter().all(|t| t.account_id == checking));
     assert_eq!(app.peer.total().total, account(&app, "Checking").balance, "its total is its balance");
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Out))));
     assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Account(checking)));
     assert_eq!(app.register_account(), None);
-    assert!(app.peer.register.rows.iter().all(|t| t.account_id == checking && t.amount < 0));
+    assert!(app.peer.register().iter().all(|t| t.account_id == checking && t.amount < 0));
     let lit = app.sidebar_at();
     assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Account(checking)), "the account stays lit");
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
     assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
-    assert_eq!(app.place(), Place::Account("Checking".into()));
+    assert_eq!(
+        app.route(),
+        Route::Account {
+            id: checking.hex(),
+            name: "Checking".into()
+        }
+    );
     // Every account taken off: All Accounts; needs a look: the inbox.
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Account(checking))));
     assert_eq!(app.page, Page::Ledger(Ledger::All));
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NeedsLook(true))));
     assert_eq!(app.page, Page::Ledger(Ledger::Inbox));
-    assert_eq!(app.peer.register.rows, app.peer.inbox.rows);
+    assert_eq!(app.peer.register(), app.peer.inbox());
 }
 
 /// The sidebar's keys walk into the saved filters as into the accounts,
@@ -1560,19 +1527,74 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
     assert_eq!(app.sidebar_at(), n - 1);
     assert_eq!(app.page, Page::Ledger(Ledger::Saved(id)), "the last place is the filter");
     let f = app.peer.saved(id).unwrap().filter.clone();
-    assert!(app.peer.register.rows.iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
+    assert!(app.peer.register().iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
     let checking = account(&app, "Checking").id;
     for (fragment, page) in [
-        ("#filter/Acme%20pay", Page::Ledger(Ledger::Saved(id))),
-        ("#account/Checking", Page::Ledger(Ledger::Account(checking))),
-        ("#accounts", Page::Ledger(Ledger::All)),
-        ("#inbox", Page::Ledger(Ledger::Inbox)),
+        (format!("#filter/{}/acme-pay", id.hex()), Page::Ledger(Ledger::Saved(id))),
+        (format!("#account/{}/checking", checking.hex()), Page::Ledger(Ledger::Account(checking))),
+        // A link from before ids: still read, by name.
+        ("#filter/Acme%20pay".into(), Page::Ledger(Ledger::Saved(id))),
+        ("#account/Checking".into(), Page::Ledger(Ledger::Account(checking))),
+        ("#accounts".into(), Page::Ledger(Ledger::All)),
+        ("#inbox".into(), Page::Ledger(Ledger::Inbox)),
     ] {
-        let place = <Place as arkui::route::Route>::parse(fragment);
-        assert_eq!(app.page_of(&place), Some(page), "{fragment}");
-        assert_eq!(arkui::route::Route::fragment(&place), fragment);
+        let route = arkui::router::parse::<Route>(&fragment);
+        assert_eq!(app.page_of(&route), Some(page), "{fragment}");
+        // Read back it has no slug, which is only for reading, and is the same route.
+        assert_eq!(arkui::router::parse::<Route>(&arkui::router::fragment(&route)), route);
     }
-    assert_eq!(app.page_of(&Place::Filter("nobody".into())), None);
+    // An id that is no row's is not found by its slug's name.
+    let gone = arkui::router::parse::<Route>("#account/ffffffffffffffffffffffffffffffff/checking");
+    assert_eq!(app.page_of(&gone), None);
+    assert_eq!(
+        app.page_of(&Route::Filter {
+            id: String::new(),
+            name: "nobody".into()
+        }),
+        None
+    );
+}
+
+/// A link from before ids lands on the account, and is written over with
+/// its id rather than after it: back goes to where the window was, not to
+/// the link and straight back. Falsified by not `landed`'s replace.
+#[test]
+fn an_older_link_is_written_over_with_its_id() {
+    use arkui::navigator::Navigator;
+    use arkui::router::AddressBar;
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Budget));
+    app.history.push(&Route::from_path("account/Checking").unwrap());
+    let _ = app.update(Message::Sync);
+    assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
+    assert_eq!(
+        app.history.router().bar().read().as_deref(),
+        Some(format!("#account/{}/checking", checking.hex()).as_str())
+    );
+    app.history.back();
+    let _ = app.update(Message::Sync);
+    assert_eq!(app.page, Page::Budget, "back got past the link");
+}
+
+/// Renaming an account keeps its register: the route it was opened at,
+/// read back from the bar, is still its register under the new name.
+/// Falsified by finding an account by name: the old link finds nothing and
+/// lands on All Accounts.
+#[test]
+fn a_renamed_accounts_register_is_still_its_own() {
+    let mut app = app();
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    let link = arkui::router::fragment(&app.route());
+    let _ = app.update(Message::Rename(crate::Naming::Account(checking)));
+    let _ = app.update(Message::RenameTyped("Everyday".into()));
+    let _ = app.update(Message::RenameDone);
+    assert_eq!(account(&app, "Everyday").id, checking, "{}", app.note);
+    let route = arkui::router::parse::<Route>(&link);
+    assert_eq!(app.page_of(&route), Some(Page::Ledger(Ledger::Account(checking))));
+    assert_eq!(app.route(), route);
+    assert_eq!(app.route().title(), "Everyday");
 }
 
 /// The register's keys in a filtered register: `j`, `v`, `c` and the
@@ -1584,7 +1606,7 @@ fn the_keys_work_in_a_filtered_register() {
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::NeedsLook(true))));
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Out))));
     assert_eq!(app.page, Page::Ledger(Ledger::Adhoc));
-    let before = app.peer.register.rows.len();
+    let before = app.peer.register().len();
     assert!(before >= 2, "the card's last days");
     let _ = app.register_act(Action::Move(Motion::First));
     let _ = app.register_act(Action::Visual(true));
@@ -1598,15 +1620,15 @@ fn the_keys_work_in_a_filtered_register() {
     assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Txns(t)) if *t == ids));
     let _ = app.update(Message::DropTyped("groc".into()));
     let _ = app.update(Message::DropChoose);
-    assert_eq!(app.peer.register.rows.len(), before - 2, "looked at: no longer here");
-    assert!(app.peer.register.rows.iter().all(|t| !ids.contains(&t.id)));
+    assert_eq!(app.peer.register().len(), before - 2, "looked at: no longer here");
+    assert!(app.peer.register().iter().all(|t| !ids.contains(&t.id)));
     // The categories' chip is the same dropdown, ticking.
     let _ = app.update(Message::Filter(filter::Msg::Chip(filter::Chip::Categories)));
     assert!(matches!(app.dropdown.as_ref().map(|d| &d.choosing), Some(Choosing::Filter)));
     let _ = app.update(Message::DropTyped("No category".into()));
     let _ = app.update(Message::DropChoose);
     assert_eq!(app.register_filter().categories, vec![None]);
-    assert!(app.peer.register.rows.iter().all(|t| t.category_id.is_none()));
+    assert!(app.peer.register().iter().all(|t| t.category_id.is_none()));
     // `h` is the sidebar from here too.
     let _ = app.register_act(Action::Move(Motion::Left(1)));
     assert_eq!(app.pane, crate::Pane::Sidebar);
@@ -1628,14 +1650,14 @@ fn a_category_is_assigned_by_formula_from_its_inspector() {
     let before = app.peer.summary().ready_to_assign;
     let _ = app.update(Message::Select(Some(gifts.category_id)));
     assert_eq!(app.formula, formula::Form::default());
-    assert!(app.peer.preview.is_none(), "nothing chosen, nothing to preview");
+    assert!(!app.peer.previewing(), "nothing chosen, nothing to preview");
     let _ = app.update(Message::Formula(formula::Msg::Pick(0)));
     let menu = app.ctx.menu.as_ref().expect("the filters' menu");
     assert_eq!(menu.entries.len(), 1);
     let _ = app.update(Message::MenuActivate);
     assert_eq!(app.formula.terms[0].filter, Some(pay));
     assert_eq!(app.formula.terms[0].factor, "100%");
-    let preview = |app: &App| app.peer.preview.as_ref().and_then(|p| p.rows.first().cloned()).expect("a preview");
+    let preview = |app: &App| app.peer.preview().cloned().expect("a preview");
     // October's two Acme paydays into checking, $3,150 each.
     assert_eq!(preview(&app).amount, 630_000);
     let _ = app.update(Message::Formula(formula::Msg::Factor(0, "10%".into())));
@@ -1644,7 +1666,7 @@ fn a_category_is_assigned_by_formula_from_its_inspector() {
     assert_eq!(p.text, "10% \u{d7} SUM(Acme pay)");
     // A second term, not yet a filter: no preview; removed again.
     let _ = app.update(Message::Formula(formula::Msg::Add));
-    assert!(app.peer.preview.is_none());
+    assert!(!app.peer.previewing());
     let _ = app.update(Message::Formula(formula::Msg::Save));
     assert!(app.note.contains("every term sums a filter"), "{}", app.note);
     let _ = app.update(Message::Formula(formula::Msg::Remove(1)));
@@ -1668,7 +1690,7 @@ fn a_category_is_assigned_by_formula_from_its_inspector() {
     // Its term opened: the filter's register, October's alone.
     let _ = app.update(Message::Formula(formula::Msg::Open(0)));
     assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Saved(pay)));
-    let rows = &app.peer.register.rows;
+    let rows = app.peer.register();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|t| t.date.starts_with("2026-10")));
     assert_eq!(app.peer.total().total, 630_000);
@@ -1688,7 +1710,7 @@ fn a_category_is_assigned_by_formula_from_its_inspector() {
     // A factor that is not one is said, and nothing is saved.
     let _ = app.update(Message::Formula(formula::Msg::Chose(0, pay)));
     let _ = app.update(Message::Formula(formula::Msg::Factor(0, "ten".into())));
-    assert!(app.peer.preview.is_none());
+    assert!(!app.peer.previewing());
     let _ = app.update(Message::Formula(formula::Msg::Save));
     assert!(app.note.contains("not a factor"), "{}", app.note);
     assert!(!category(&app, "Gifts").ruled);
@@ -1781,7 +1803,7 @@ fn on_a_server_settings_set_up_amazon_and_costco() {
 fn the_cursors_receipt_is_beside_the_register() {
     let mut app = app();
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
-    let target = app.peer.receipts.rows.iter().find(|r| r.store == "target").unwrap().clone();
+    let target = app.peer.receipts().iter().find(|r| r.store == "target").unwrap().clone();
     let paid = target.txn_id.unwrap();
     let _ = app.update(Message::TxnClick(paid));
     assert!(app.form.is_none(), "selected, not opened");
@@ -1791,5 +1813,5 @@ fn the_cursors_receipt_is_beside_the_register() {
     );
     assert!(!app.peer.receipt_items().is_empty());
     let _ = app.update(Message::Go(Page::Budget));
-    assert!(app.peer.txn.is_none(), "none off the register");
+    assert!(app.peer.txn().is_none(), "none off the register");
 }

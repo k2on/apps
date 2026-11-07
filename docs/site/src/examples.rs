@@ -251,9 +251,9 @@ pub fn answers(component: &str) -> Vec<Answers> {
         "text" => vec![Answers {
             caption: "arkui::format",
             rows: vec![
-                ("clock(261.0)".into(), format::clock(261.0)),
-                ("clock(3725.0)".into(), format::clock(3725.0)),
-                ("spell(3_725_000)".into(), format::spell(3_725_000)),
+                ("clock_secs(261.0)".into(), format::clock_secs(261.0)),
+                ("clock_secs(3725.0)".into(), format::clock_secs(3725.0)),
+                ("length(3_725_000)".into(), format::length(3_725_000)),
                 ("plural(1, \"place\")".into(), format::plural(1, "place")),
                 ("plural(12, \"place\")".into(), format::plural(12, "place")),
                 ("span(1685, 1750)".into(), format::span(1685, 1750)),
@@ -270,13 +270,13 @@ pub fn answers(component: &str) -> Vec<Answers> {
         "routes" => {
             let name = "North/South #1 · é";
             vec![Answers {
-                caption: "arkui::url and arkui::route",
+                caption: "arkui::url and arkui::router",
                 rows: vec![
                     (format!("url::encoded(\"{name}\")"), url::encoded(name)),
                     ("url::decode(url::encoded(…))".into(), url::decode(&url::encoded(name))),
                     (
-                        format!("route::join(\"place\", Some(\"{name}\"))"),
-                        arkui::route::join("place", Some(name)),
+                        format!("router::join(\"album\", Some(\"{name}\"))"),
+                        arkui::router::join("album", Some(name)),
                     ),
                 ],
             }]
@@ -309,7 +309,7 @@ pub fn notes(component: &str) -> &'static [&'static str] {
         "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
-        "routes" => &["A place is its address: walking a sidebar writes the bar, and back and forward come back through Router::poll."],
+        "routes" => &["A route is its path (ark-router's #[derive(Routes)]): walking a sidebar writes the bar, and back and forward come back through Router::poll."],
         "waking" => &["A window that runs no loop sleeps until something rings its Bell: a page's hashchange and popstate ring it (wake::page_changes)."],
         _ => &[],
     }

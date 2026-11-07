@@ -98,13 +98,15 @@ shape is the most likely to need a fix at the first build (README.md,
 
 | Android | iOS | API | File | Built |
 |---|---|---|---|---|
-| Server step: one field, `host`, `host:port` or a URL; https first, http too for local addresses only; `/healthz` probed; sentences for every failure | The same machine (`Address`, `Health`, `Probe`, held by `OnboardingTests`), the field on glass | `URLSession`, `URLError` codes | Onboarding.swift, Model.swift, OnboardingViews.swift | yes |
-| Sign in: a button opens a Custom Tab on `/auth/login?redirect=harken://auth`; the code comes back to the activity (`singleTask`) | **No button**, as the browser now has it: a server with nobody signed in goes to sign in by itself, in the system's browser sheet, back on `harken://auth`; once a launch — a sign-in that comes back empty or refused is said on the page and not tried again until the app comes back to the front, so it can never loop | `@Environment(\.webAuthenticationSession)`, `authenticate(using:callbackURLScheme:)` (SwiftUI's `ASWebAuthenticationSession`) ‡, `.onOpenURL`, `CFBundleURLTypes` | Onboarding.swift, HarkenApp.swift | yes |
-| Exchange the code (`exchange`), remember the login whole | Same (`Logins`, `Remembered` over `UserDefaults`) | the bridge's `exchange` | Model.swift, Onboarding.swift | yes |
+| Server step: one field, `host`, `host:port` or a URL; https first, http too for local addresses only; `/healthz` probed; sentences for every failure | The same: the sign-in machine is `ark_auth::onboarding`'s, through the bridge, on both phones and the desktop; the probe is ArkUI's (`Probe`, `Health`) | `URLSession`, `URLError` codes | Onboarding.swift, Model.swift, OnboardingViews.swift | yes |
+| Sign in: the machine opens a Custom Tab on `/auth/login?redirect=harken://auth` by itself, once a launch (the button opens it again); the code comes back to the activity (`singleTask`) | **No button**: the same machine opens the system's browser sheet by itself, back on `harken://auth`; a sign-in that comes back empty or refused is said and not tried again until the app comes back to the front | `@Environment(\.webAuthenticationSession)`, `authenticate(using:callbackURLScheme:)` (SwiftUI's `ASWebAuthenticationSession`) ‡, `.onOpenURL`, `CFBundleURLTypes` | Onboarding.swift, HarkenApp.swift | yes |
+| Exchange the code (`exchange`), remember the login whole (`loginJson`) | Same (`Kept` over `UserDefaults`) | the bridge's `exchange`, `loginJson`, `loginParse` | Model.swift, Onboarding.swift | yes |
 | Opening: "Getting your library from …" after 600 ms, until synced | Same | — | OnboardingViews.swift | yes |
 | Denied by the server: back to sign in, the server kept | Same, and the sign-in goes by itself again — once a launch | — | Onboarding.swift | yes |
 | Notifications permission step | Not built: iOS needs no permission for the lock screen's now-playing card | — | — | no, nothing to ask |
 | "Use another server" | Same | — | OnboardingViews.swift | yes |
+| A join link or a scanned code (`harken://join?server=…&code=…`): asked about first ("Join …?"), then signed in with the code | Same; "Scan a Code" on the server step (VisionKit) | the bridge's `joinOf`, `redeem`; ArkUI's `QrScanner` | OnboardingViews.swift, Model.swift | yes |
+| Settings: "Add a Device", a QR code and the link | Same, shared with a share sheet | the bridge's `deviceLink`; ArkUI's `AddDeviceView` | SettingsView.swift | yes |
 
 ## Motion
 

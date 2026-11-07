@@ -207,3 +207,19 @@ public final class DefaultsShelf: Shelf {
         if let v = value { d.set(v, forKey: key) } else { d.removeObject(forKey: key) }
     }
 }
+
+/// What "Add a Device" shows: the join link, and it as a QR code; or why
+/// it could not be made.
+public struct DeviceLinkShown: Sendable {
+    public var link: String?
+    public var size: Int
+    public var dark: [Bool]
+    public var error: String?
+
+    public init(link: String?, size: Int, dark: [Bool], error: String?) {
+        self.link = link
+        self.size = size
+        self.dark = dark
+        self.error = error
+    }
+}

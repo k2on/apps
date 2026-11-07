@@ -58,6 +58,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.NameField
 import dev.arkui.Cover
 import dev.arkui.SheetRow
 import dev.arkui.Springs
@@ -73,6 +74,7 @@ import kotlinx.coroutines.delay
 import uniffi.harken_domain.Playlist
 import dev.arkui.Feedback
 import dev.arkui.SensoryFeedback
+import uniffi.ark_format.formatClock
 
 /** What a song's menu can do. */
 interface MenuActions {
@@ -129,7 +131,7 @@ fun TrackMenu(
         if (track.kind != "song") {
             val played = listened?.finished == true
             SheetRow(Glyphs.Show, if (played) "Mark as Unplayed" else "Mark as Played", { actions.markPlayed(!played) })
-            for (c in chapters) SheetRow(Glyphs.Play, "${Media.clock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
+            for (c in chapters) SheetRow(Glyphs.Play, "${formatClock(c.startMs)}  ${c.title}", { actions.playFrom(c.startMs) })
         }
     }
 }
@@ -178,21 +180,10 @@ fun NewPlaylistCard(name: String, problem: String?, adding: Boolean, onName: (St
     }
 }
 
-/** Naming a new playlist: the field, and the module's sentence when the name will not do. */
+/** Naming a new playlist: ArkUI's field, and the module's sentence when the name will not do. */
 @Composable
 fun NewPlaylist(name: String, problem: String?, onName: (String) -> Unit) {
-    Column {
-        OutlinedTextField(
-            value = name,
-            onValueChange = onName,
-            label = { Text("Name") },
-            singleLine = true,
-            isError = problem != null && name.isNotEmpty(),
-            supportingText = { Text(if (problem != null && name.isNotEmpty()) problem.replaceFirstChar { it.uppercase() } else "A name you already use gets a number after it.") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(Space.xs))
-    }
+    NameField(name, onName, problem, hint = "A name you already use gets a number after it.")
 }
 
 /** What the device picker's rows can do: hand the sound over, and each row's volume and group. */

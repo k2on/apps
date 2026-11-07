@@ -55,6 +55,35 @@ fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result
     })
 }
 
+/// What a client does about an ask it made, once the asks have moved.
+#[derive(Clone, Debug, PartialEq, Eq, Describe)]
+#[cfg_attr(feature = "ffi", ark(ffi))]
+pub enum Follow {
+    /// The server has not answered with a page yet: keep watching.
+    Wait,
+    /// Plaid's page arrived: open it, once.
+    Page { url: String },
+    /// Answered otherwise — done, failed, expired: nothing to open.
+    Over,
+}
+
+/// Where an ask made here stands: the newest of `asks` (newest first, as
+/// [`asks`] reads them), once it is not `since` — the newest there was
+/// before it was made (none: there was none). By the ask's id, not a
+/// clock, so a device whose clock is off follows its own ask all the same.
+pub fn follow(asks: &[AskLine], since: Option<Id<BankAsk>>) -> Follow {
+    let Some(a) = asks.first() else { return Follow::Wait };
+    if Some(a.id) == since {
+        return Follow::Wait;
+    }
+    match a.state {
+        AskState::Asked => Follow::Wait,
+        AskState::Waiting if a.url.is_empty() => Follow::Wait,
+        AskState::Waiting => Follow::Page { url: a.url.clone() },
+        AskState::Done | AskState::Failed | AskState::Expired => Follow::Over,
+    }
+}
+
 fn bank_of(db: &Db<Money>, name: &str) -> Result<Bank, Refusal> {
     db.bank.get(name).ok_or_else(|| Refusal::new("no bank of that name is connected"))
 }

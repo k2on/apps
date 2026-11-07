@@ -3,7 +3,7 @@
 
 use ark_ffi::{Peer, Taken};
 use money_domain::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
-use money_ffi::{money_add_months, money_demo, money_month_name, DemoBank};
+use money_ffi::{money_add_months, money_demo, DemoBank};
 use money_seed as seed;
 use std::sync::Arc;
 
@@ -61,5 +61,4 @@ fn a_day_is_the_same_household_every_time() {
     assert_eq!(rows(a), rows(b));
     assert!(money_demo(Some("26 October".into())).is_err());
     assert_eq!(money_add_months("2026-11".into(), 2), "2027-01");
-    assert_eq!(money_month_name("2026-10".into()), "October 2026");
 }

@@ -3,18 +3,23 @@
 // demo's household — kept in step with it, and every change the screens
 // make, as one of the domain's functions.
 //
-// **Everything that touches the views runs on one thread** (`run`): the
-// first read, every splice, every mutation and the read after it. The peer
-// says when anything moved (its listener, on a thread of the kernel's); a
-// drain then runs there once, asks each view what it did, splices the
-// patches into the lists it holds, and publishes one [Ledger] — an
-// immutable snapshot the screens draw from (`state`, a StateFlow). A peer
-// at rest runs nothing: there is no clock here.
+// **The views are the core's** (`Session`, money/ffi): it holds each one by
+// count, keeps its rows spliced on the kernel's thread, says which moved
+// (`Changed`), and a page is what the domain says it is made of — the
+// budget for a month is its lines, summary and spending. The book holds
+// what every screen draws from as long as it is open, and the month's
+// budget for the month on screen; a screen holds the rest while it shows
+// them (`watched.watch(view) { read }`, arkui's): a register, a receipt's
+// items.
 //
-// **The lists are spliced, not re-read**, as harken's are: each view is read
-// once and then asked what it did (`Held`). The month's three views are
-// opened again for another month; a register is held while a screen shows
-// it and let go after the last one leaves.
+// **Everything else runs on one thread** (`run`): every mutation, and the
+// drain after it or after the core said something moved, which reads again
+// the views whose version moved and publishes one [Ledger] — an immutable
+// snapshot the screens draw from (`state`, a StateFlow). A peer at rest
+// runs nothing: there is no clock here.
+//
+// **A change is one of the domain's** (`MoneyChange`, UniFFI's), sent
+// through the session: nothing crosses the bridge as JSON.
 //
 // **A refusal is said, not thrown.** The domain's own sentence for why a
 // change was not taken — refused here, or by the server later — is a note
@@ -22,50 +27,18 @@
 // ([check]) and says the sentence under its field.
 package dev.money.android
 
+import dev.arkdb.ffi.FileRef
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Update
-import dev.arkdb.ffi.View
-import dev.arkdb.ffi.splice
-import dev.money.android.gen.AddCategory
-import dev.money.android.gen.AddPhoto
-import dev.money.android.gen.FileRef
-import dev.money.android.gen.ItemLine
-import dev.money.android.gen.MatchReceipt
-import dev.money.android.gen.OneReceipt
-import dev.money.android.gen.PhotoLine
-import dev.money.android.gen.ReceiptLine
-import dev.money.android.gen.WriteReceipt
-import dev.money.android.gen.AddGroup
-import dev.money.android.gen.AddTransaction
-import dev.money.android.gen.Assign
-import dev.money.android.gen.Auto
-import dev.money.android.gen.AutoAssign
-import dev.money.android.gen.BankName
-import dev.money.android.gen.Categorize
-import dev.money.android.gen.DeleteCategory
-import dev.money.android.gen.EditTransaction
-import dev.money.android.gen.HideCategory
-import dev.money.android.gen.IgnoreLinked
-import dev.money.android.gen.LinkAccount
-import dev.money.android.gen.Money
-import dev.money.android.gen.Month
-import dev.money.android.gen.MoveCategory
-import dev.money.android.gen.MoveGroup
-import dev.money.android.gen.MoveMoney
-import dev.money.android.gen.OpenLinked
-import dev.money.android.gen.OpenAccount
-import dev.money.android.gen.Reconcile
-import dev.money.android.gen.Register
-import dev.money.android.gen.RenameCategory
-import dev.money.android.gen.SetCleared
-import dev.money.android.gen.SetTarget
-import dev.money.android.gen.Txns
+import dev.money.ffi.Changed
 import dev.money.ffi.DemoBank
+import dev.money.ffi.Holding
+import dev.money.ffi.MoneyView
+import dev.money.ffi.Sent
+import dev.money.ffi.Session
 import dev.money.ffi.moneyAddMonths
-import java.security.MessageDigest
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
@@ -78,18 +51,53 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import uniffi.money_domain.AccountKind
 import uniffi.money_domain.AccountLine
+import uniffi.money_domain.AddCategory
+import uniffi.money_domain.AddGroup
+import uniffi.money_domain.AddPhoto
 import uniffi.money_domain.AskLine
-import uniffi.money_domain.AskState
+import uniffi.money_domain.Assign
+import uniffi.money_domain.Auto
+import uniffi.money_domain.AutoAssign
 import uniffi.money_domain.BankLine
+import uniffi.money_domain.BankName
 import uniffi.money_domain.BudgetLine
+import uniffi.money_domain.Categorize
+import uniffi.money_domain.DeleteCategory
+import uniffi.money_domain.Draft
+import uniffi.money_domain.Follow
 import uniffi.money_domain.GroupLine
+import uniffi.money_domain.HideCategory
+import uniffi.money_domain.IgnoreLinked
+import uniffi.money_domain.ItemLine
+import uniffi.money_domain.LinkAccount
 import uniffi.money_domain.LinkedLine
+import uniffi.money_domain.MatchReceipt
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.MoveCategory
+import uniffi.money_domain.MoveGroup
+import uniffi.money_domain.MoveMoney
+import uniffi.money_domain.OpenAccount
+import uniffi.money_domain.OpenLinked
 import uniffi.money_domain.PayeeLine
+import uniffi.money_domain.PhotoLine
+import uniffi.money_domain.ReceiptLine
+import uniffi.money_domain.Reconcile
+import uniffi.money_domain.RenameCategory
+import uniffi.money_domain.SetCleared
+import uniffi.money_domain.SetTarget
 import uniffi.money_domain.SpendingLine
 import uniffi.money_domain.Summary
 import uniffi.money_domain.TxnLine
+import uniffi.money_domain.Txns
+import uniffi.money_domain.WriteReceipt
+import uniffi.money_domain.banksWanting
+import uniffi.money_domain.follow
+import uniffi.money_domain.uncovered
+import uniffi.money_domain.unmatchedReceipts
 import dev.arkui.Feedback
+import dev.arkui.Watched
 import kotlinx.coroutines.flow.update
 
 /** What the hand last felt of the book's changes, and how many there have been (`Book.felt`). */
@@ -114,8 +122,6 @@ data class Ledger(
     val groups: List<GroupLine> = emptyList(),
     val accounts: List<AccountLine> = emptyList(),
     val inbox: List<TxnLine> = emptyList(),
-    /** Each held register by [key]. */
-    val registers: Map<String, List<TxnLine>> = emptyMap(),
     val payees: List<PayeeLine> = emptyList(),
     val spending: List<SpendingLine> = emptyList(),
     val banks: List<BankLine> = emptyList(),
@@ -140,14 +146,10 @@ data class Ledger(
     val photos: List<PhotoLine> = emptyList(),
     /** Every receipt, the newest first. */
     val receipts: List<ReceiptLine> = emptyList(),
-    /** The items of each receipt a screen holds, by its id. */
-    val items: Map<String, List<ItemLine>> = emptyMap(),
 ) {
     fun line(category: Id): BudgetLine? = lines.firstOrNull { it.categoryId == category }
 
     fun account(id: Id): AccountLine? = accounts.firstOrNull { it.id == id }
-
-    fun register(account: Id?): List<TxnLine> = registers[key(account)] ?: emptyList()
 
     /**
      * The receipts that paid for `txn` (`receipt` the one its line names) — whole, or by one of their
@@ -164,9 +166,8 @@ data class Ledger(
     /** The photo a receipt was read from, when it was. */
     fun photoOf(receipt: String): PhotoLine? = photos.firstOrNull { it.receiptId == receipt }
 
-    /** The receipts nothing pays for yet, for somebody to say which transaction did. */
-    val unmatched: List<ReceiptLine>
-        get() = receipts.filter { it.txnId == null && it.charges == 0L }
+    /** The receipts nothing pays for yet a transaction of `amount` on `day` is offered (the core's). */
+    fun unmatched(amount: Long, day: String): List<ReceiptLine> = unmatchedReceipts(receipts, amount, day)
 
     /** The month's categories, by group in the budget's order, the hidden left out unless `hidden`. */
     fun byGroup(hidden: Boolean = false): List<Pair<GroupLine, List<BudgetLine>>> =
@@ -177,74 +178,32 @@ data class Ledger(
 
     /** The cards' payment categories this month. */
     val cards: List<BudgetLine>
-        get() = lines.filter { isPayment(it) }
+        get() = lines.filter { it.isPayment() }
 
-    /** What the cards owe beyond what is set aside for them. */
+    /** What the cards owe beyond what is set aside for them (the core's). */
     val cardsShort: Long
-        get() = cards.filter { !it.hidden }.sumOf { it.underfunded }
+        get() = uncovered(lines)
 
     /** What wants somebody in Settings: a bank whose login ran out, or an account waiting for a choice. */
     val banksWanting: Int
-        get() = banks.sumOf { it.waiting.toInt() + if (it.needsLogin) 1 else 0 }
+        get() = banksWanting(banks).toInt()
+}
 
+/**
+ * A transaction being entered or corrected: the core's [Draft], and what the form shows beside it —
+ * who entered the one corrected, what the bank called it, the receipt its line says paid for it.
+ */
+data class TxnForm(
+    val draft: Draft,
+    val by: String = "",
+    val bankSaid: String = "",
+    val receipt: String = "",
+) {
     companion object {
-        /**
-         * Whether `l` is a card's payment category: one of the cards' own group, which is the domain's
-         * and changes as the cards do — never renamed, deleted, moved out, or a transaction's category.
-         */
-        fun isPayment(l: BudgetLine): Boolean = l.card != null || l.groupId == Book.CARD_GROUP
-
-        /** A register's key: an account's id, or `all`. */
-        fun key(account: Id?): String = account?.hex ?: "all"
+        /** The form over a transaction already in a register. */
+        fun of(t: TxnLine): TxnForm = TxnForm(t.draft(), t.userId, t.bankSaid().orEmpty(), t.receipt)
     }
 }
-
-/** A view read once and then spliced: the rows a screen holds. */
-private class Held<T>(private val view: View<T>) : AutoCloseable {
-    val rows: ArrayList<T> = ArrayList(view.rows())
-
-    /** What the view did since, spliced in; whether anything moved. */
-    fun settle(): Boolean =
-        when (val u = view.take()) {
-            is Update.Unchanged -> false
-            is Update.Patched -> {
-                rows.splice(u.changes)
-                true
-            }
-            is Update.Reset -> {
-                rows.clear()
-                rows.addAll(u.rows)
-                true
-            }
-        }
-
-    override fun close() = view.close()
-}
-
-/** A transaction being entered or corrected: what the form holds. */
-data class TxnForm(
-    /** The one corrected; none for a new one. */
-    val editing: Id? = null,
-    val account: Id? = null,
-    val date: String = "",
-    val payee: String = "",
-    val category: Id? = null,
-    /** The other account, for a transfer. */
-    val transferTo: Id? = null,
-    val memo: String = "",
-    /** Positive in, negative out, in cents. */
-    val amount: Long = 0,
-    val cleared: Boolean = false,
-    /** Who entered the one corrected. */
-    val by: String = "",
-    /**
-     * What the bank called the one corrected, when it was imported and the bank's words say more than
-     * the payee does: `CHIPOTLE 1234 SAN FRANCISCO CA` for Chipotle. Shown, never sent.
-     */
-    val bankSaid: String = "",
-    /** The receipt its line says paid for the one corrected (`TxnLine.receipt`), blank for none. */
-    val receipt: String = "",
-)
 
 class Book
 private constructor(
@@ -256,8 +215,11 @@ private constructor(
     private val owned: ExecutorService?,
     private val listen: Boolean,
 ) : AutoCloseable {
-    /** The domain's functions, typed. */
-    val money: Money = Money(peer)
+    /** The views, held and kept by the core. */
+    val session: Session = Session(peer)
+
+    /** The views as a screen holds them while it shows them (arkui's `watch`). */
+    val watched: Watched<MoneyView> = Watched({ session.hold(it) })
 
     private val bank: DemoBank? = if (demo) DemoBank() else null
     private val _state = MutableStateFlow(Ledger(today = today, month = today.take(7), demo = demo, server = server))
@@ -285,7 +247,7 @@ private constructor(
 
     private val _pages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
-    /** Plaid's pages to open, each once: the answer to a connection asked for here (Banks.kt). */
+    /** Plaid's pages to open, each once: the answer to a connection asked for here. */
     val pages: SharedFlow<String> = _pages.asSharedFlow()
 
     /** Every page asked to be opened, in order: the tests'. */
@@ -293,20 +255,12 @@ private constructor(
 
     // Held on `run`'s thread only.
     private var month: String = today.take(7)
-    private var accounts: Held<AccountLine>? = null
-    private var groups: Held<GroupLine>? = null
-    private var lines: Held<BudgetLine>? = null
-    private var summary: Held<Summary>? = null
-    private var spending: Held<SpendingLine>? = null
-    private var inbox: Held<TxnLine>? = null
-    private var payees: Held<PayeeLine>? = null
-    private var banks: Held<BankLine>? = null
-    private var linked: Held<LinkedLine>? = null
-    private var asks: Held<AskLine>? = null
-    private var photos: Held<PhotoLine>? = null
-    private var receipts: Held<ReceiptLine>? = null
-    private val items = HashMap<String, Pair<Held<ItemLine>, Int>>()
-    private val registers = HashMap<String, Pair<Held<TxnLine>, Int>>()
+    /** What every screen draws from, held while the book is open. */
+    private val always = ArrayList<Holding>()
+    /** The month on screen's budget. */
+    private var budget: Holding? = null
+    /** Each view's version when it was last read into the ledger. */
+    private val seen = HashMap<MoneyView, ULong>()
     private var syncing = false
 
     /**
@@ -318,31 +272,28 @@ private constructor(
     private class Awaiting(val after: Id?)
 
     private fun start() {
-        accounts = Held(money.accounts())
-        groups = Held(money.groups())
-        openMonth()
-        inbox = Held(money.inbox())
-        payees = Held(money.payees())
-        banks = Held(money.banks())
-        linked = Held(money.linked())
-        asks = Held(money.asks())
-        photos = Held(money.photos())
-        receipts = Held(money.receipts())
+        for (v in ALWAYS) always.add(session.hold(v))
+        budget = session.hold(MoneyView.Budget(month))
         if (listen) {
             peer.setListener(
                 object : Listener {
                     override fun changed() = drainSoon()
                 })
+            session.setListener(
+                object : Changed {
+                    override fun moved(views: List<MoneyView>) {
+                        watched.moved(views)
+                        drainSoon()
+                    }
+                })
         }
         drain()
     }
 
-    private fun openMonth() {
-        listOf(lines, summary, spending).forEach { it?.close() }
-        val m = Month(month)
-        lines = Held(money.month(m))
-        summary = Held(money.summary(m))
-        spending = Held(money.spending(m))
+    private fun showBudget() {
+        val was = budget
+        budget = session.hold(MoneyView.Budget(month))
+        was?.close()
     }
 
     private fun post(f: () -> Unit) {
@@ -367,17 +318,18 @@ private constructor(
         }
     }
 
-    // On `run`'s thread: every view settled, the server's refusals said, one Ledger published.
+    // On `run`'s thread: what moved read again, the server's refusals said, one Ledger published.
     private fun drain() {
         draining.set(false)
         if (closed) return
-        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
-        for ((h, _) in items.values) h.settle()
-        for ((h, _) in registers.values) h.settle()
         for (r in peer.takeRejections()) say("The server didn't take a change: ${r.why}")
+        val was = _state.value
+        val b = MoneyView.Budget(month)
+        val got = if (fresh(b) || was.month != month) session.budget(month) else null
+        val asks = if (fresh(MoneyView.Asks)) session.asks() else was.asks
         awaiting?.let { w ->
-            when (val f = follow(asks?.rows.orEmpty(), w.after)) {
-                is Follow.Open -> {
+            when (val f = follow(asks, w.after)) {
+                is Follow.Page -> {
                     awaiting = null
                     browse(f.url)
                 }
@@ -393,17 +345,16 @@ private constructor(
             Ledger(
                 today = today,
                 month = month,
-                summary = summary?.rows?.firstOrNull(),
-                lines = lines?.rows?.toList().orEmpty(),
-                groups = groups?.rows?.toList().orEmpty(),
-                accounts = accounts?.rows?.toList().orEmpty(),
-                inbox = inbox?.rows?.toList().orEmpty(),
-                registers = registers.mapValues { it.value.first.rows.toList() },
-                payees = payees?.rows?.toList().orEmpty(),
-                spending = spending?.rows?.toList().orEmpty(),
-                banks = banks?.rows?.toList().orEmpty(),
-                linked = linked?.rows?.toList().orEmpty(),
-                asks = asks?.rows?.toList().orEmpty(),
+                summary = if (got != null) got.summary else was.summary,
+                lines = got?.lines ?: was.lines,
+                groups = if (fresh(MoneyView.Groups)) session.groups() else was.groups,
+                accounts = if (fresh(MoneyView.Accounts)) session.accounts() else was.accounts,
+                inbox = if (fresh(MoneyView.Inbox)) session.inbox() else was.inbox,
+                payees = if (fresh(MoneyView.Payees)) session.payees() else was.payees,
+                spending = got?.spending ?: was.spending,
+                banks = if (fresh(MoneyView.Banks)) session.banks() else was.banks,
+                linked = if (fresh(MoneyView.Linked)) session.linked() else was.linked,
+                asks = asks,
                 link = Link(s.linked, if (s.alone) "alone" else s.link, s.pending.toInt()),
                 who = who.replaceFirstChar { it.uppercase() },
                 picture = signed?.let { Faces.url(server, it.user, it.picture) }.orEmpty(),
@@ -412,10 +363,15 @@ private constructor(
                 syncing = syncing,
                 ready = true,
                 denied = s.denied,
-                photos = photos?.rows?.toList().orEmpty(),
-                receipts = receipts?.rows?.toList().orEmpty(),
-                items = items.mapValues { it.value.first.rows.toList() },
+                photos = if (fresh(MoneyView.Photos)) session.photos() else was.photos,
+                receipts = if (fresh(MoneyView.Receipts)) session.receipts() else was.receipts,
             )
+    }
+
+    // Whether `v` moved since it was last read here; it counts as read from now.
+    private fun fresh(v: MoneyView): Boolean {
+        val now = session.version(v)
+        return seen.put(v, now) != now
     }
 
     /** A sentence for the snackbar, from a screen. */
@@ -426,22 +382,27 @@ private constructor(
         _notes.tryEmit(note)
     }
 
-    // A change by the domain's function: its refusal said in its sentence, and what the hand feels
-    // of it, if anything, once it is taken.
-    private fun act(what: String, feel: Feedback? = null, f: (Money) -> Unit) = post {
-        try {
-            f(money)
-            if (feel != null) _felt.update { Felt(it.count + 1, feel) }
-        } catch (e: Refusal) {
-            say("Couldn't $what: ${why(e)}")
+    // One of the domain's changes, sent: its refusal said in its sentence, and what the hand feels
+    // of it, if anything, once it is taken. Whether it was taken.
+    private fun send(what: String, feel: Feedback?, change: MoneyChange): Boolean =
+        when (val s = session.send(change)) {
+            is Sent.Intent -> {
+                if (feel != null) _felt.update { Felt(it.count + 1, feel) }
+                true
+            }
+            is Sent.Refused -> {
+                say("Couldn't $what: ${s.why}")
+                false
+            }
         }
-    }
+
+    private fun act(what: String, feel: Feedback? = null, change: () -> MoneyChange) = post { send(what, feel, change()) }
 
     /**
-     * The domain's sentence for the first thing wrong with `input` to the function `name`, or null:
-     * what a form says under its field before anything is sent.
+     * The domain's sentence for the first thing wrong with `change`, or null: what a form says under
+     * its field before anything is sent.
      */
-    fun check(name: String, input: String): String? = peer.check(name, input)
+    fun check(change: MoneyChange): String? = session.check(change)
 
     // * The month
 
@@ -449,36 +410,32 @@ private constructor(
     fun showMonth(m: String) = post {
         if (m != month) {
             month = m
-            openMonth()
+            showBudget()
         }
     }
 
     /** `n` months later (or earlier); zero is this month. */
     fun stepMonth(n: Int) = post {
         month = if (n == 0) today.take(7) else moneyAddMonths(month, n.toLong())
-        openMonth()
+        showBudget()
     }
 
     fun assign(category: Id, amount: Long) =
-        act("assign it", Feedback.Success) { it.assign(Assign(month, category, amount)) }
+        act("assign it", Feedback.Success) { MoneyChange.Assign(Assign(month, category, amount)) }
 
     /** Last month's amounts, each target's shortfall, or nothing — for `only` these, or every one. */
     fun autoAssign(how: Auto, only: List<Id> = emptyList()) =
-        act("assign the month", Feedback.Success) { it.autoAssign(AutoAssign(month, how, only)) }
+        act("assign the month", Feedback.Success) { MoneyChange.AutoAssign(AutoAssign(month, how, only)) }
 
     /** `amount` from one category to another; none is Ready to Assign. */
     fun moveMoney(from: Id?, to: Id?, amount: Long) =
-        act("move the money", Feedback.Success) { it.moveMoney(MoveMoney(month, from, to, amount)) }
+        act("move the money", Feedback.Success) { MoneyChange.MoveMoney(MoveMoney(month, from, to, amount)) }
 
     /** An overspent category made whole from `from` (none: Ready to Assign). */
     fun cover(category: Id, from: Id?) = post {
-        val short = -(lines?.rows?.firstOrNull { it.categoryId == category }?.available ?: 0)
+        val short = -(session.budget(month).lines.firstOrNull { it.categoryId == category }?.available ?: 0)
         if (short <= 0) return@post
-        try {
-            money.moveMoney(MoveMoney(month, from, category, short))
-        } catch (e: Refusal) {
-            say("Couldn't cover it: ${why(e)}")
-        }
+        send("cover it", null, MoneyChange.MoveMoney(MoveMoney(month, from, category, short)))
     }
 
     /**
@@ -486,122 +443,95 @@ private constructor(
      * Ready to Assign, as the desktop's "Assign $X to cover the debt" does.
      */
     fun coverCard(category: Id) = post {
-        val l = lines?.rows?.firstOrNull { it.categoryId == category } ?: return@post
-        if (l.underfunded <= 0) return@post
-        try {
-            money.assign(Assign(month, category, l.assigned + l.underfunded))
-        } catch (e: Refusal) {
-            say("Couldn't cover the card: ${why(e)}")
-        }
+        val l = session.budget(month).lines.firstOrNull { it.categoryId == category } ?: return@post
+        val cover = l.toCover() ?: return@post
+        send("cover the card", null, MoneyChange.Assign(Assign(month, category, cover)))
     }
 
     fun setTarget(category: Id, target: Long) =
-        act("set the target") { it.setTarget(SetTarget(category, target.coerceAtLeast(0))) }
+        act("set the target") { MoneyChange.SetTarget(SetTarget(category, target.coerceAtLeast(0))) }
 
-    fun addCategory(group: Id, name: String) = act("add the category") { it.addCategory(AddCategory(group, name)) }
+    fun addCategory(group: Id, name: String) = act("add the category") { MoneyChange.AddCategory(AddCategory(group, name)) }
 
-    fun addGroup(name: String) = act("add the group") { it.addGroup(AddGroup(name)) }
+    fun addGroup(name: String) = act("add the group") { MoneyChange.AddGroup(AddGroup(name)) }
 
     fun renameCategory(category: Id, name: String) =
-        act("rename it") { it.renameCategory(RenameCategory(category, name)) }
+        act("rename it") { MoneyChange.RenameCategory(RenameCategory(category, name)) }
 
     fun hideCategory(category: Id, hidden: Boolean) =
-        act("hide it") { it.hideCategory(HideCategory(category, hidden)) }
+        act("hide it") { MoneyChange.HideCategory(HideCategory(category, hidden)) }
 
     fun deleteCategory(category: Id) =
-        act("delete the category") { it.deleteCategory(DeleteCategory(category, null)) }
+        act("delete the category") { MoneyChange.DeleteCategory(DeleteCategory(category, null)) }
 
     /** A category into `group`, in front of `before` (one of that group's) or at its end. */
     fun moveCategory(category: Id, group: Id, before: Id?) =
-        act("move the category") { it.moveCategory(MoveCategory(category, group, before)) }
+        act("move the category") { MoneyChange.MoveCategory(MoveCategory(category, group, before)) }
 
     /** A group in front of `before`, or after every other. */
-    fun moveGroup(group: Id, before: Id?) = act("move the group") { it.moveGroup(MoveGroup(group, before)) }
+    fun moveGroup(group: Id, before: Id?) = act("move the group") { MoneyChange.MoveGroup(MoveGroup(group, before)) }
 
     // * Transactions
 
-    /** A new transaction, or the one corrected; one corrected into a transfer becomes one (`transfer_to`). */
-    fun save(f: TxnForm) =
-        act("save the transaction", Feedback.Success) { m ->
-            val editing = f.editing
-            if (editing != null) {
-                m.editTransaction(
-                    EditTransaction(editing, f.date, if (f.transferTo != null) "" else f.payee, f.category, f.memo, f.amount, f.transferTo))
-            } else {
-                val account = f.account ?: throw Refusal.Refused("which account?")
-                m.addTransaction(
-                    AddTransaction(
-                        account,
-                        f.date,
-                        if (f.transferTo != null) "" else f.payee,
-                        if (f.transferTo != null) null else f.category,
-                        f.memo,
-                        f.amount,
-                        f.cleared,
-                        f.transferTo))
-            }
-        }
+    /**
+     * A new transaction, or the one corrected, as the core's form makes it (`Draft.toChange`): said
+     * as its problem when it has one.
+     */
+    fun save(d: Draft) = post {
+        val c = d.toChange()
+        if (c == null) say(d.problem() ?: "Couldn't save the transaction") else send("save the transaction", Feedback.Success, c)
+    }
 
-    fun delete(ids: List<Id>) = act("delete it") { it.deleteTransactions(Txns(ids)) }
+    fun delete(ids: List<Id>) = act("delete it") { MoneyChange.DeleteTransactions(Txns(ids)) }
 
-    fun approve(ids: List<Id>) = act("approve it", Feedback.Success) { it.approve(Txns(ids)) }
+    fun approve(ids: List<Id>) = act("approve it", Feedback.Success) { MoneyChange.Approve(Txns(ids)) }
 
-    fun categorize(ids: List<Id>, category: Id?) = act("file it") { it.categorize(Categorize(ids, category)) }
+    fun categorize(ids: List<Id>, category: Id?) = act("file it") { MoneyChange.Categorize(Categorize(ids, category)) }
 
     fun setCleared(id: Id, cleared: Boolean) =
-        act("clear it", Feedback.Selection) { it.setCleared(SetCleared(id, cleared)) }
+        act("clear it", Feedback.Selection) { MoneyChange.SetCleared(SetCleared(id, cleared)) }
 
     /** The account agreed with the bank at `balance`, today; a difference becomes an adjustment. */
-    fun reconcile(account: Id, balance: Long) =
-        act("reconcile", Feedback.Success) {
-            it.reconcile(Reconcile(account, balance, today))
-            say("Reconciled")
-        }
+    fun reconcile(account: Id, balance: Long) = post {
+        if (send("reconcile", Feedback.Success, MoneyChange.Reconcile(Reconcile(account, balance, today)))) say("Reconciled")
+    }
 
     // * Accounts and the bank
 
-    fun openAccount(name: String, kind: String, onBudget: Boolean, balance: Long) =
-        act("add the account") { it.openAccount(OpenAccount(name, kind, onBudget, balance, today)) }
+    fun openAccount(name: String, kind: AccountKind, onBudget: Boolean, balance: Long) =
+        act("add the account") { MoneyChange.OpenAccount(OpenAccount(name, kind, onBudget, balance, today)) }
 
     /** The bank's account `plaid` feeds `account` from now on. */
-    fun link(plaid: String, account: Id) = act("link it") { it.link(LinkAccount(plaid, account)) }
+    fun link(plaid: String, account: Id) = act("link it") { MoneyChange.Link(LinkAccount(plaid, account)) }
 
-    fun ignore(plaid: String, ignored: Boolean) = act("change it") { it.ignore(IgnoreLinked(plaid, ignored)) }
+    fun ignore(plaid: String, ignored: Boolean) = act("change it") { MoneyChange.Ignore(IgnoreLinked(plaid, ignored)) }
 
     /** The bank's account `plaid` given an account of its own, of its kind (a card a credit account). */
-    fun openLinked(plaid: String) =
-        act("open an account for it") {
-            it.open(OpenLinked(plaid, ""))
+    fun openLinked(plaid: String) = post {
+        if (send("open an account for it", null, MoneyChange.OpenLinked(OpenLinked(plaid, "")))) {
             say("Opened. Its history arrives with the bank's next import")
         }
+    }
 
     /** Ask the server to connect a bank: its page opens when the server answers with it ([pages]). */
-    fun connect() = askPage("connect a bank") { it.connect() }
+    fun connect() = askPage("connect a bank", MoneyChange.Connect)
 
     /** Ask the server for the page to log in to `bank` again. */
-    fun reconnect(bank: String) = askPage("reconnect the bank") { it.reconnect(BankName(bank)) }
+    fun reconnect(bank: String) = askPage("reconnect the bank", MoneyChange.Reconnect(BankName(bank)))
 
     /** Ask the server to forget `bank`. Its accounts here, and what is in them, stay. */
     fun disconnect(bank: String) = post {
         if (demo) return@post say("The demo has no server to disconnect a bank from")
-        try {
-            money.disconnect(BankName(bank))
-            say("Asked the server to disconnect the bank")
-        } catch (e: Refusal) {
-            say("Couldn't disconnect the bank: ${why(e)}")
-        }
+        if (send("disconnect the bank", null, MoneyChange.Disconnect(BankName(bank)))) say("Asked the server to disconnect the bank")
     }
 
     // An ask whose answer is a page to open: the newest ask before it kept, so the drain knows its answer.
-    private fun askPage(what: String, f: (Money) -> Unit) = post {
+    private fun askPage(what: String, change: MoneyChange) = post {
         if (demo) return@post say("The demo has no server to connect a bank through")
-        val after = asks?.rows?.firstOrNull()?.id
-        try {
-            f(money)
+        val after = session.asks().firstOrNull()?.id
+        if (send(what, null, change)) {
             awaiting = Awaiting(after)
             say("Asked the server for Plaid's page")
-        } catch (e: Refusal) {
-            say("Couldn't $what: ${why(e)}")
         }
     }
 
@@ -612,10 +542,10 @@ private constructor(
     }
 
     /**
-     * A change by the domain's function as it is, said as `what` when refused: what the server's
-     * importer does, which a test stands in for (the demo holds its role).
+     * A change as it is, said as `what` when refused: what the server's importer does, which a test
+     * stands in for (the demo holds its role).
      */
-    internal fun change(what: String, f: (Money) -> Unit) = act(what, f = f)
+    internal fun change(what: String, change: MoneyChange) = act(what) { change }
 
     /**
      * Ask the bank for anything new. The demo's bank answers at once; a server's importer is asked
@@ -630,8 +560,7 @@ private constructor(
                 val b = bank
                 if (b != null) {
                     say(b.sync(peer, today).note)
-                } else {
-                    money.sync()
+                } else if (send("sync", null, MoneyChange.Sync)) {
                     peer.dialNow()
                     say("Asked the bank for anything new")
                 }
@@ -642,56 +571,33 @@ private constructor(
         }
     }
 
-    /** Hold `account`'s register (none: every account's) while a screen shows it. */
-    fun holdRegister(account: Id?) = post {
-        val k = Ledger.key(account)
-        val had = registers[k]
-        registers[k] =
-            if (had != null) had.first to had.second + 1 else Held(money.register(Register(account))) to 1
-    }
-
-    fun releaseRegister(account: Id?) = post {
-        val k = Ledger.key(account)
-        val had = registers[k] ?: return@post
-        if (had.second <= 1) {
-            registers.remove(k)
-            had.first.close()
-        } else registers[k] = had.first to had.second - 1
-    }
-
     // * Receipts
 
-    /** Hold a receipt's items while a screen shows it. */
-    fun holdItems(receipt: String) = post {
-        val had = items[receipt]
-        items[receipt] = if (had != null) had.first to had.second + 1 else Held(money.receiptItems(OneReceipt(receipt))) to 1
-    }
-
-    fun releaseItems(receipt: String) = post {
-        val had = items[receipt] ?: return@post
-        if (had.second <= 1) {
-            items.remove(receipt)
-            had.first.close()
-        } else items[receipt] = had.first to had.second - 1
-    }
+    /** A receipt's items, as far as a screen holds them (`MoneyView.Items`). */
+    fun itemsOf(receipt: String): List<ItemLine> = session.items(receipt)
 
     /**
      * A photo of a receipt, for `txn` when it was taken for one: kept on this phone at once, sent to the
      * server now or on its next connection, where it is read.
      */
-    fun addPhoto(jpeg: ByteArray, txn: Id?, media: String = "image/jpeg") =
-        act("keep the photo", Feedback.Success) { m ->
-            val hash = peer.putFile(jpeg, media)
-            m.addPhoto(AddPhoto(FileRef(hash, jpeg.size.toLong(), media), txn))
+    fun addPhoto(jpeg: ByteArray, txn: Id?, media: String = "image/jpeg") = post {
+        val hash =
+            try {
+                peer.putFile(jpeg, media)
+            } catch (e: Refusal) {
+                return@post say("Couldn't keep the photo: ${why(e)}")
+            }
+        if (send("keep the photo", Feedback.Success, MoneyChange.AddPhoto(AddPhoto(FileRef(hash, jpeg.size.toLong(), media), txn)))) {
             say(if (state.value.link.linked) "Photo kept: reading it" else "Photo kept: it's read once you're online")
         }
+    }
 
     /** A receipt typed by hand, or one already read put right. */
-    fun writeReceipt(w: WriteReceipt) = act("save the receipt") { it.writeReceipt(w) }
+    fun writeReceipt(w: WriteReceipt) = act("save the receipt") { MoneyChange.WriteReceipt(w) }
 
     /** `receipt` paid for by `txn`, or (none) by nothing. */
     fun pay(receipt: String, txn: Id?) =
-        act(if (txn == null) "take the receipt off" else "attach the receipt") { it.pay(MatchReceipt(receipt, txn)) }
+        act(if (txn == null) "take the receipt off" else "attach the receipt") { MoneyChange.Pay(MatchReceipt(receipt, txn)) }
 
     /**
      * A photo's bytes when this phone holds them; when not, fetched from the server, and the state moves
@@ -715,11 +621,12 @@ private constructor(
         val shut = {
             closed = true
             peer.setListener(null)
-            for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.close()
-            for ((h, _) in items.values) h.close()
-            items.clear()
-            for ((h, _) in registers.values) h.close()
-            registers.clear()
+            session.setListener(null)
+            for (h in always) h.close()
+            always.clear()
+            budget?.close()
+            budget = null
+            session.close()
             peer.close()
         }
         try {
@@ -731,20 +638,19 @@ private constructor(
     }
 
     companion object {
-        /** The budget's own category, where money that comes in goes: the same id on every peer. */
-        val READY_TO_ASSIGN: Id = Id(fixed("ready to assign"))
-
-        /**
-         * The cards' own group, "Credit Card Payments", first in the budget: a card's payment category
-         * for each card on the budget, and nothing else (`money/domain/src/cards.rs`).
-         */
-        val CARD_GROUP: Id = Id(fixed("credit card payments"))
-
-        private fun fixed(what: String): String =
-            MessageDigest.getInstance("SHA-256")
-                .digest("money $what".toByteArray(Charsets.UTF_8))
-                .take(16)
-                .joinToString("") { "%02x".format(it) }
+        /** What every screen draws from: held as long as the book is open. */
+        private val ALWAYS =
+            listOf(
+                MoneyView.Accounts,
+                MoneyView.Groups,
+                MoneyView.Inbox,
+                MoneyView.Payees,
+                MoneyView.Banks,
+                MoneyView.Linked,
+                MoneyView.Asks,
+                MoneyView.Photos,
+                MoneyView.Receipts,
+            )
 
         /** The domain's sentence in a refusal. */
         fun why(e: Refusal): String = (e as? Refusal.Refused)?.why ?: e.message ?: "no reason given"

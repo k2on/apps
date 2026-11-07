@@ -6,7 +6,7 @@
 # `MoneyFFI.xcframework` (the Rust kernel with money's domain linked in, a
 # static library for a phone and the simulator) and `swift/`, the Swift
 # UniFFI writes for it with the bridge's typed half — and the app's own
-# sources, the generated types in `Money/Gen/` among them; and its tests,
+# sources; and its tests,
 # the model's rules and the session over the demo's household.
 #
 # Swift 5 language mode, not 6, for harken's reasons (harken/ios/project.yml):
@@ -62,7 +62,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Money syncs with your own budget server, which may be on this network.
         # The receipt scanner (VisionKit's document camera), and a receipt's photo chosen from the library.
-        NSCameraUsageDescription: Money scans a paper receipt so your server can read its items.
+        NSCameraUsageDescription: Money scans a paper receipt so your server can read its items, and the code another of your devices shows to sign you in.
         NSPhotoLibraryUsageDescription: Money reads a photo of a receipt you choose so your server can read its items.
         # ProMotion: without it an app's own animation (a spring, a drag's
         # settle) is held to 60 Hz on an iPhone that draws at 120.

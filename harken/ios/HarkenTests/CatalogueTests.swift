@@ -67,9 +67,6 @@ final class CatalogueTests: XCTestCase {
         XCTAssertEqual(Catalogue.initials("Ludwig van Beethoven"), "L. van Beethoven")
         XCTAssertEqual(Catalogue.initials("Hildegard"), "Hildegard")
         XCTAssertEqual(Catalogue.initials(" "), "")
-        XCTAssertEqual(Catalogue.life(born: 1685, died: 1750), "1685\u{2013}1750")
-        XCTAssertEqual(Catalogue.life(born: 1950, died: 0), "1950\u{2013}")
-        XCTAssertEqual(Catalogue.life(born: 0, died: 0), "")
     }
 
     func testAPerformanceSaysWhenHowMuchAndHowLong() {

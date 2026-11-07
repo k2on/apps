@@ -82,10 +82,16 @@ import dev.arkui.AccountSheet
 import dev.arkui.ArkGlyphs
 import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
+import dev.arkui.Links
+import dev.arkui.Navigator
+import dev.arkui.RouteArg
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
+import uniffi.money_domain.Route
 import uniffi.money_domain.TxnLine
+import uniffi.money_domain.newDraft
+import uniffi.money_domain.routeFromPath
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector) {
@@ -108,13 +114,15 @@ class Shell(
     val onSignOut: () -> Unit,
     /** The account sheet: what the face at the end of a tab's title raises. */
     val onAccountSheet: () -> Unit = {},
+    /** "Add a Device": the join link another phone signs in with, made as this login. */
+    val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
 
 /** The budget, its tabs and its pages; `onSignOut` leaves it. */
 @Composable
-fun MoneyApp(book: Book, onSignOut: () -> Unit) {
+fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") }) {
     val nav = rememberNavController()
     val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -140,14 +148,29 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 book = book,
                 snackbar = snackbar,
                 onAdd = { account -> form = newForm(book.state.value, account) },
-                onEdit = { t -> form = formOf(t, book.state.value) },
-                onAccount = { id -> nav.navigate("register/${id?.hex ?: ALL}") },
+                onEdit = { t -> form = TxnForm.of(t) },
+                onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.id.hex, it.name) } ?: Route.Accounts)) },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
                 onTab = { t -> nav.go(t) },
                 onSignOut = onSignOut,
                 onAccountSheet = { account = true },
+                addDevice = addDevice,
             )
         }
+
+    // A link the app was opened with (`money://account/Checking`): its route, navigated to. The
+    // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
+    Links("money") { link ->
+        Navigator(nav, ::destination).handle(link, "money", ::routeFromPath) { r ->
+            when (r) {
+                is Route.Join -> true
+                is Route.Budget, is Route.Category -> true.also { nav.go(Tab.Budget) }
+                is Route.Reflect -> true.also { nav.go(Tab.Insights) }
+                is Route.Inbox -> true.also { nav.go(Tab.Activity) }
+                else -> false
+            }
+        }
+    }
 
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -195,9 +218,11 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit) {
                 composable(Tab.Accounts.route) { AccountsScreen(ledger) }
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
-                composable("register/{account}") { e ->
-                    val hex = e.arguments?.getString("account").orEmpty()
-                    val id = if (hex == ALL) null else Id(hex)
+                composable("register/{arg}") { e ->
+                    // The route names the account by its id (an older link's by its name, `names`), so a
+                    // renamed one keeps its register; one that is gone is the route's fallback, All Accounts.
+                    val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
+                    val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { a.names(it.id.hex, it.name) }?.id }
                     RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
                 }
                 composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
@@ -242,8 +267,19 @@ private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
     }
 }
 
-/** The register route's account for All Accounts: every account's transactions. */
-private const val ALL = "all"
+/** Where the back stack goes for a register's route: an account's, or All Accounts. */
+private fun register(route: Route): String = "register/" + RouteArg.of(route.path())
+
+/**
+ * Where the back stack goes for a route this phone pushes: a register (a saved filter's is every
+ * account's here), or Settings, which is where the banks are.
+ */
+private fun destination(route: Route): String =
+    when (route) {
+        is Route.Settings, is Route.Banks, is Route.Bank -> "settings"
+        is Route.Account -> register(route)
+        else -> register(Route.Accounts)
+    }
 
 /** A tab, kept where it was; the tab showing goes back to its top. */
 private fun NavHostController.go(t: Tab) {
@@ -276,38 +312,8 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popEnter(reduced: 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExit(reduced: Boolean): ExitTransition =
     if (between()) ExitTransition.None else Transitions.popOut(reduced)
 
-/** A new transaction: today, in `account` or the first open budget account, money going out. */
-fun newForm(l: Ledger, account: Id?): TxnForm =
-    TxnForm(
-        account = account ?: l.accounts.firstOrNull { it.onBudget && !it.closed }?.id,
-        date = l.today,
-    )
-
-/** A transaction as the form corrects it. */
-fun formOf(t: TxnLine, l: Ledger): TxnForm =
-    TxnForm(
-        editing = t.id,
-        account = t.accountId,
-        date = t.date,
-        payee = if (t.transfer) "" else t.payee,
-        category = t.categoryId,
-        transferTo = if (t.transfer) l.accounts.firstOrNull { "Transfer : ${it.name}" == t.payee }?.id else null,
-        memo = t.memo,
-        amount = t.amount,
-        cleared = t.cleared != uniffi.money_domain.Cleared.UNCLEARED,
-        by = t.userId,
-        bankSaid = bankSaid(t),
-        receipt = t.receipt,
-    )
-
-/**
- * The bank's own description of `t` when it was imported and that says something the payee does not;
- * otherwise empty.
- */
-fun bankSaid(t: TxnLine): String {
-    val said = t.importedPayee.trim()
-    return if (t.imported && said.isNotEmpty() && !said.equals(t.payee.trim(), ignoreCase = true)) said else ""
-}
+/** A new transaction: today, in `account` or the usual one (the core's), money going out. */
+fun newForm(l: Ledger, account: Id?): TxnForm = TxnForm(newDraft(l.accounts, account, l.today))
 
 /**
  * A page as every screen here is laid out: a large top app bar that collapses as the content

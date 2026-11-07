@@ -7,7 +7,7 @@ use crate::domain::{AddToPlaylist, RemoveFromPlaylist};
 use crate::domain::{DescribePerson, RemoveMedia, Search};
 
 use crate::peer::{key, Moved, Peer};
-use crate::places::Source;
+use crate::routes::Route;
 use crate::rows::{Album, Artist, Composer, Item, Playlist};
 
 /// Every open list against its query, read once.
@@ -35,7 +35,7 @@ fn check(peer: &Peer, what: &str) {
     );
     let details: HashMap<_, _> = peer.track_details().into_iter().map(|t| (t.media_id, t)).collect();
     assert_eq!(peer.details, details, "track_details, {what}");
-    let Source::Album(id, _) = &peer.source else { unreachable!() };
+    let Route::Album { key: id, .. } = &peer.source else { unreachable!() };
     assert_eq!(peer.shown(), peer.album_rows(id), "the album page, {what}");
     assert_eq!(
         peer.choices[0].count,
@@ -68,7 +68,10 @@ fn patched(peer: &Peer) -> BTreeSet<&str> {
 #[test]
 fn every_list_on_screen_is_its_query_after_every_change() {
     let mut peer = super::demo_app().peer;
-    peer.source = Source::Album(peer.album_id("Water Music"), "Water Music".into());
+    peer.source = Route::Album {
+        key: peer.album_id("Water Music"),
+        title: "Water Music".into(),
+    };
     peer.open_page();
     check(&peer, "opened");
     let favorites = peer.playlist;
@@ -131,7 +134,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
 fn the_search_box_drives_a_view() {
     use iced::keyboard::{key::Named, Key, Modifiers};
 
-    use crate::places::Pane;
+    use crate::routes::Pane;
     use crate::{App, Message};
 
     let mut app = super::demo_app();

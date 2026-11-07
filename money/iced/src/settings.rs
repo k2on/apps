@@ -59,14 +59,46 @@ impl App {
     /// replica stays, and what is done now is the same person's when they
     /// sign in again.
     pub fn sign_out(&mut self) {
-        let Some(s) = &mut self.server else { return };
-        if s.login.take().is_some() {
+        let Some(s) = &self.server else { return };
+        if s.login.is_some() {
             let _ = self.peer.client.sign_out();
         }
-        if let Some(logins) = &s.logins {
-            logins.forget(&s.url);
-        }
+        let _ = self.onboard(ark_auth::onboarding::Event::SignOut);
         self.note = "signed out \u{2014} what you do now stays on this device; reload to sign in".into();
+    }
+
+    /// "Add a Device": a one-time code made as this login, on a thread —
+    /// the server is asked — for the join link another device scans or
+    /// opens (`ark_auth::onboarding::join_link`).
+    pub fn add_device(&mut self) -> Task<Message> {
+        let Some(s) = &self.server else { return Task::none() };
+        let Some(token) = s.login.as_ref().map(|l| l.token.clone()) else {
+            return Task::none();
+        };
+        let server = s.url.clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(ark_auth::client::device_code(&server, &token).map(|(code, _)| code));
+            });
+            Task::perform(
+                async move { rx.await.unwrap_or_else(|_| Err("the thread went away".into())) },
+                Message::DeviceCode,
+            )
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (server, token);
+            Task::done(Message::DeviceCode(Err("make the code on the desktop or a phone".into())))
+        }
+    }
+
+    /// The code made, as the link to show; or why not.
+    pub fn device_coded(&mut self, made: Result<String, String>) {
+        let Some(s) = &mut self.server else { return };
+        let app = live::app();
+        s.device = Some(made.map(|code| ark_auth::onboarding::join_link(app.scheme, s.url.clone(), Some(code))));
     }
 
     pub fn view_settings(&self) -> Element<'_, Message> {
@@ -79,7 +111,23 @@ impl App {
                 };
                 let mut c = column![text(who).size(14).style(style::faint(0.8))].spacing(12);
                 if s.login.is_some() {
-                    c = c.push(quiet("Sign out", Message::SignOut));
+                    c = c.push(quiet("Sign Out", Message::SignOut));
+                    c = c.push(quiet("Add a Device", Message::AddDevice));
+                }
+                match &s.device {
+                    Some(Ok(link)) => {
+                        if let Some(q) = ark_auth::onboarding::qr_code(link.clone()) {
+                            c = c.push(arkui::qr::qr_code(q.size as usize, q.dark, 220.0));
+                        }
+                        c = c.push(dim(
+                            "Scan this with the other device, or open the link there. It works once, for ten minutes.",
+                            13,
+                        ));
+                        c = c.push(text(link.clone()).size(12).style(style::faint(0.7)));
+                        c = c.push(quiet("Copy Link", Message::CopyLink(link.clone())));
+                    }
+                    Some(Err(why)) => c = c.push(dim(format!("Couldn't make a code: {why}."), 13)),
+                    None => {}
                 }
                 c.into()
             }

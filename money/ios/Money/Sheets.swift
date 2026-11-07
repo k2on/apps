@@ -14,7 +14,7 @@ import SwiftUI
 // MARK: the transaction form
 
 struct TransactionSheet: View {
-    @State var draft: Draft
+    @State var draft: TxnForm
     @EnvironmentObject private var model: Model
     @Environment(\.dismiss) private var dismiss
     @FocusState private var payeeFocused: Bool
@@ -56,7 +56,7 @@ struct TransactionSheet: View {
                             }
                         }
                     if payeeFocused {
-                        ForEach(Payees.suggest(draft.payee, s.payees)) { p in
+                        ForEach(suggestPayees(typed: draft.payee, payees: s.payees, limit: 4)) { p in
                             Button {
                                 draft.choose(p)
                                 payeeFocused = false
@@ -164,7 +164,7 @@ struct TransactionSheet: View {
     private func categoryWords(_ s: Snapshot) -> String {
         if let t = draft.transferTo { return "Transfer: \(s.account(t)?.name ?? "")" }
         guard let c = draft.category else { return "Choose" }
-        if c == Fixed.readyToAssign { return "Ready to Assign" }
+        if c == readyToAssignId() { return "Ready to Assign" }
         return s.line(c)?.name ?? "Choose"
     }
 }
@@ -204,7 +204,7 @@ struct CategoryPicker: View {
         List {
             if categories && inflow && (n.isEmpty || "ready to assign".contains(n)) {
                 Section("Inflow") {
-                    row("Ready to Assign", s.summary?.readyToAssign, chosen == Fixed.readyToAssign) { pick(.category(Fixed.readyToAssign)) }
+                    row("Ready to Assign", s.summary?.readyToAssign, chosen == readyToAssignId()) { pick(.category(readyToAssignId())) }
                 }
             }
             ForEach(categories ? Cards.choosable(Months.groups(s.groups, s.lines, hidden: false)) : []) { g in
@@ -283,10 +283,10 @@ struct AssignSheet: View {
 
     var body: some View {
         let l = model.snapshot.line(id)
-        let ruled = l.map { !Ruled.editable($0) } ?? false
+        let ruled = l.map { !$0.assignable() } ?? false
         NavigationStack {
             VStack(spacing: Space.l) {
-                if let l, let words = Ruled.words(l) {
+                if let l, let words = l.ruleWords() {
                     // Its rule assigns this month: the amount shown, never typed.
                     VStack(spacing: Space.s) {
                         MarkedCents(l.assigned, mark: Ruled.symbol, says: "assigned by its rule")
@@ -304,7 +304,7 @@ struct AssignSheet: View {
                 }
                 if let l, !ruled {
                     HStack(spacing: Space.s) {
-                        if let cover = Cards.toCover(l) { chip("Covers the Card", cover) }
+                        if let cover = l.toCover() { chip("Covers the Card", cover) }
                         if l.target > 0 { chip("Target", l.target) }
                         if l.assignedLastMonth > 0 { chip("Last Month", l.assignedLastMonth) }
                         if l.averageSpent > 0 { chip("Average Spent", l.averageSpent) }
@@ -375,7 +375,7 @@ struct MoveSheet: View {
                         .listRowBackground(Color.clear)
                 }
                 Section(covering ? "Cover It From" : "Move It To") {
-                    if let l, let words = Ruled.words(l) {
+                    if let l, let words = l.ruleWords() {
                         // Its rule assigns this month: nothing moves to or from it.
                         Label(words, systemImage: Ruled.symbol).foregroundStyle(.quiet)
                     } else {
@@ -475,7 +475,7 @@ struct AddAccountSheet: View {
     @EnvironmentObject private var model: Model
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
-    @State private var kind = "checking"
+    @State private var kind = AccountKind.checking
     @State private var onBudget = true
     @State private var cents: Int64 = 0
     @State private var negative = false
@@ -488,17 +488,17 @@ struct AddAccountSheet: View {
                     TextField("Name", text: $name)
                         .textInputAutocapitalization(.words)
                     Picker("Type", selection: $kind) {
-                        ForEach(Accounts.kinds, id: \.kind) { k in
-                            Label(k.name, systemImage: Accounts.symbol(k.kind)).tag(k.kind)
+                        ForEach(accountKinds(), id: \.self) { k in
+                            Label(k.title(), systemImage: Accounts.symbol(k.key())).tag(k)
                         }
                     }
-                    .onChange(of: kind) { _, k in onBudget = Accounts.onBudget(byDefault: k) }
+                    .onChange(of: kind) { _, k in onBudget = k.onBudgetByDefault() }
                 }
                 Section {
-                    AmountEntry(cents: $cents, prompt: Accounts.owes(kind) ? "Owed on it today" : "In it today")
+                    AmountEntry(cents: $cents, prompt: kind.owes() ? "Owed on it today" : "In it today")
                         .padding(.vertical, Space.m)
                 } header: {
-                    Text(Accounts.owes(kind) ? "Balance Owed" : "Balance")
+                    Text(kind.owes() ? "Balance Owed" : "Balance")
                 }
                 Section {
                     Toggle("In the Budget", isOn: $onBudget)
@@ -518,7 +518,7 @@ struct AddAccountSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(role: .confirm) {
-                        let balance = Accounts.owes(kind) ? -cents : cents
+                        let balance = kind.owes() ? -cents : cents
                         model.openAccount(name: name.trimmingCharacters(in: .whitespaces), kind: kind, onBudget: onBudget, balance: balance) { ok in
                             if ok { dismiss() } else { why = model.notice }
                         }
@@ -545,7 +545,7 @@ struct ReconcileSheet: View {
 
     var body: some View {
         let a = model.snapshot.account(id)
-        let owes = Accounts.owes(a?.kind ?? "")
+        let owes = a?.accountKind()?.owes() ?? false
         let cleared = a?.cleared ?? 0
         NavigationStack {
             VStack(spacing: Space.l) {
@@ -624,7 +624,7 @@ struct NewCategorySheet: View {
                     .onSubmit(add)
                 Picker("Group", selection: $chosen) {
                     // Not the cards' group: its categories come with the cards.
-                    ForEach(model.snapshot.groups.filter { !Cards.isGroup($0.id) }) { g in Text(g.name).tag(Optional(g.id)) }
+                    ForEach(model.snapshot.groups.filter { !$0.isCards() }) { g in Text(g.name).tag(Optional(g.id)) }
                 }
             }
             .navigationTitle("New Category")
@@ -640,7 +640,7 @@ struct NewCategorySheet: View {
                 }
             }
             .onAppear {
-                chosen = group ?? model.snapshot.groups.first { !Cards.isGroup($0.id) }?.id
+                chosen = group ?? model.snapshot.groups.first { !$0.isCards() }?.id
                 focused = true
             }
         }

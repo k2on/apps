@@ -74,3 +74,26 @@ fn a_dev_login_without_a_name_is_a_form() {
     let body = ureq::get(&url).call().unwrap().into_string().unwrap();
     assert!(body.contains("<form") && body.contains("takes your word"), "{body}");
 }
+
+/// A signed-in device makes a code; another redeems it, once, for a session
+/// of its own as the same person. A second try, an unknown code, a token
+/// that is not a session's, and too many codes waiting are each refused in
+/// a sentence. Falsified by `redeem_device_code` not marking the code used.
+#[test]
+fn a_device_code_signs_another_device_in_once() {
+    let (_rt, server, auth, rows) = serve();
+    let first = ark_auth::client::login(&server, Some("alice"), |_| {}).unwrap();
+    let (code, expires) = ark_auth::client::device_code(&server, &first.token).unwrap();
+    assert!(expires > 0);
+    let second = ark_auth::client::redeem(&server, &code).unwrap();
+    assert_eq!(second.user.id, "alice");
+    assert_ne!(second.session, first.session);
+    assert_eq!(rows.sign_ins().len(), 2);
+    assert_eq!(ark_auth::client::redeem(&server, &code).unwrap_err(), ark_auth::server::CODE_USED);
+    assert_eq!(ark_auth::client::redeem(&server, "nope").unwrap_err(), ark_auth::server::CODE_UNKNOWN);
+    assert!(ark_auth::client::device_code(&server, "x.y").is_err());
+    for _ in 0..ark_auth::server::DEVICE_CODES_PER_ACCOUNT {
+        auth.device_code(&first.token).unwrap();
+    }
+    assert!(auth.device_code(&first.token).unwrap_err().contains("enough codes"));
+}

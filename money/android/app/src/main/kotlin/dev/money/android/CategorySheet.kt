@@ -69,13 +69,14 @@ import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
 import dev.arkui.MarkedAmount
-import dev.arkui.Meter
+import dev.arkui.ProgressBar
 import dev.arkui.Pill
 import dev.arkui.Space
 import dev.arkui.Stat
-import dev.arkui.Tone
-import dev.arkui.toneColors
+import dev.arkui.Tint
+import dev.arkui.tintColors
 import uniffi.money_domain.BudgetLine
+import uniffi.ark_format.formatMonthAlone
 
 /** Which page of the sheet is showing. */
 private enum class Leaf {
@@ -121,7 +122,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
     var renaming by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf(false) }
     val typed = a.parse(assigned)
-    val payment = Ledger.isPayment(l)
+    val payment = l.isPayment()
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.xl).navigationBarsPadding(),
@@ -148,9 +149,9 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         Spacer(Modifier.height(Space.l))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Available", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Pill(toneOf(l)) { AmountText(l.available, style = MaterialTheme.typography.titleLarge) }
+            Pill(l.tone().tint()) { AmountText(l.available, style = MaterialTheme.typography.titleLarge) }
         }
-        val story = storyOf(l, a)
+        val story = l.story(a.style)
         if (story.isNotEmpty()) {
             Text(story, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -173,14 +174,14 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
         }
 
         Spacer(Modifier.height(Space.xl))
-        if (!assignable(l)) {
+        if (!l.assignable()) {
             // The month follows its rule: what it is given is the rule's, shown and not typed.
             Ruled(l)
         } else {
             AmountField(
                 assigned,
                 onType = { assigned = it },
-                label = "Assigned in ${Dates.monthAlone(ledger.month)}",
+                label = "Assigned in ${formatMonthAlone(ledger.month)}",
                 error = if (typed == null) "That isn't an amount" else null,
                 onDone = { typed?.let { book.assign(l.categoryId, it) } },
                 modifier = Modifier.fillMaxWidth(),
@@ -208,7 +209,7 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (l.target > 0) {
                 Spacer(Modifier.height(Space.s))
-                Meter(l.assigned.toFloat() / l.target, color = if (l.assigned >= l.target) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary)
+                ProgressBar(l.assigned.toFloat() / l.target, color = if (l.assigned >= l.target) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary)
             }
             val t = a.parse(target)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = Space.s)) {
@@ -230,12 +231,12 @@ private fun Story(ledger: Ledger, l: BudgetLine, onMove: () -> Unit, onCover: ()
 
         Spacer(Modifier.height(Space.xl))
         // Moving money to or from a month its rule assigns is refused: neither is offered.
-        if (l.available < 0 && assignable(l)) {
+        if (l.available < 0 && l.assignable()) {
             Button(onClick = onCover, modifier = Modifier.fillMaxWidth()) {
-                Text(if (creditOverspent(l)) "Cover ${a.format(-l.available)} spent on a card" else "Cover ${a.format(-l.available)} overspending")
+                Text(if (l.onCard()) "Cover ${a.format(-l.available)} spent on a card" else "Cover ${a.format(-l.available)} overspending")
             }
         }
-        if (l.available > 0 && assignable(l)) {
+        if (l.available > 0 && l.assignable()) {
             OutlinedButton(onClick = onMove, modifier = Modifier.fillMaxWidth()) {
                 Icon(Glyphs.Move, contentDescription = null, modifier = Modifier.padding(end = Space.s))
                 Text("Move Money")
@@ -293,7 +294,7 @@ private fun CardBalance(l: BudgetLine) {
             Figure("Not covered", l.underfunded, color = if (l.underfunded > 0) c.tertiary else c.primary)
             if (l.debt > 0) {
                 Spacer(Modifier.height(Space.s))
-                Meter(l.available.toFloat() / l.debt, color = if (l.underfunded > 0) c.tertiary else c.primary)
+                ProgressBar(l.available.toFloat() / l.debt, color = if (l.underfunded > 0) c.tertiary else c.primary)
             }
             Spacer(Modifier.height(Space.m))
             when {
@@ -316,7 +317,7 @@ private fun CardBalance(l: BudgetLine) {
 /** A category that spent more on a card than it had: debt now, not next month's money. */
 @Composable
 private fun CreditOverspent(l: BudgetLine) {
-    val (container, on) = toneColors(Tone.Caution)
+    val (container, on) = tintColors(Tint.Caution)
     Card(
         colors = CardDefaults.cardColors(containerColor = container, contentColor = on),
         shape = MaterialTheme.shapes.large,

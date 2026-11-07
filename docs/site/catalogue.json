@@ -610,17 +610,19 @@
       "id": "routes",
       "name": "Routes",
       "section": "behaviour",
-      "summary": "Places as addresses, kept in step with the address bar or the back stack.",
+      "summary": "An app's routes as paths, kept in step with the address bar or the back stack.",
       "desktop": [
-        "route",
+        "router",
         "url"
       ],
       "android": {
         "at": [
-          "ui/Destination.kt: Destination, Destinations"
+          "ui/Destination.kt: Destination, Destinations",
+          "Router.kt: RouteArg"
         ],
         "how": [
-          "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack."
+          "Destination(owner, name) { content }: a page's own ViewModel store, kept while it is on the stack.",
+          "RouteArg.of(route.path()) / RouteArg.path(arg): a route's path as a destination's argument, and back."
         ]
       },
       "ios": null,
@@ -718,13 +720,14 @@
     {
       "module": "format",
       "name": "Format",
-      "summary": "Words for numbers: a clock, a count spelt out, a plural, a span of time, a day.",
+      "summary": "Words for numbers: a clock, a length, a plural, a span of time, a day.",
       "api": [
-        "clock(secs)",
-        "spell(ms)",
+        "clock(ms)",
+        "clock_secs(secs)",
+        "length(ms)",
         "plural(n, word)",
         "span(born, died)",
-        "day(ms, now)"
+        "published(ms, now, offset)"
       ],
       "rules": [
         "A length past an hour is h:mm:ss."
@@ -1099,17 +1102,18 @@
       ]
     },
     {
-      "module": "route",
-      "name": "Route",
-      "summary": "Places as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+      "module": "router",
+      "name": "Router",
+      "summary": "An app's routes as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
       "api": [
-        "trait Route { fragment(), parse() }",
-        "join(kind, name), split(fragment)",
-        "Router::new(), sync(&place), replace_next(), poll(ready), go(by), can_go(by)",
+        "trait Routable { path(), from_path(), home() } (ark-router; #[derive(Routes)] writes it)",
+        "fragment(&route), parse(fragment)",
+        "join(kind, name), split(path)",
+        "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)",
         "AddressBar, Browser, Nav"
       ],
       "rules": [
-        "`parse` never fails: an unknown fragment is home.",
+        "`parse` never fails: a fragment that names nothing is home.",
         "Call `sync` after every update."
       ]
     },

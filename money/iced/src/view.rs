@@ -2,15 +2,15 @@
 //! the month's budget and its inspector, an account's register, or where
 //! the month's money went — with a panel over it when one is open.
 
-use arkui::{glyphs, icon, layer, menu, outline, panel, style, table};
+use arkui::{format, glyphs, icon, layer, menu, outline, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
-use money_domain::dates::{month_name, month_of};
+use money_domain::dates::month_of;
 use money_domain::*;
 
 use crate::amount::{money, money_or_blank};
-use crate::look::{self, Tone};
+use crate::look::{self, Looks, Tone};
 use crate::peer::Ledger;
 use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, SplitRow, TxnForm};
 
@@ -58,7 +58,7 @@ impl App {
     /// have none.
     pub(crate) fn compact_title(&self) -> Option<String> {
         match self.page {
-            Page::Reflect => Some(format!("Spending in {}", month_name(&self.peer.month))),
+            Page::Reflect => Some(format!("Spending in {}", format::month(&self.peer.month))),
             Page::Settings => Some("Settings".into()),
             _ => None,
         }
@@ -140,7 +140,7 @@ pub(crate) fn quiet<'a>(label: &str, msg: Message) -> Element<'a, Message> {
     button(text(label.to_string()).size(13))
         .on_press(msg)
         .padding([5, 10])
-        .style(look::choice(false))
+        .style(arkui::style::chip(false))
         .into()
 }
 
@@ -290,10 +290,10 @@ impl App {
     /// a filter's. What the keys walk is what is drawn.
     pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
         let pages = [
-            (glyphs::HOME, "Budget".to_string(), None, Page::Budget),
-            (glyphs::LIBRARY, "Reflect".to_string(), None, Page::Reflect),
-            (glyphs::PLAYLIST, "All Accounts".to_string(), None, Page::Ledger(Ledger::All)),
-            (glyphs::WRENCH, "Settings".to_string(), None, Page::Settings),
+            (glyphs::HOME, crate::Route::Budget.title(), None, Page::Budget),
+            (glyphs::LIBRARY, crate::Route::Reflect.title(), None, Page::Reflect),
+            (glyphs::PLAYLIST, crate::Route::Accounts.title(), None, Page::Ledger(Ledger::All)),
+            (glyphs::WRENCH, crate::Route::Settings.title(), None, Page::Settings),
         ];
         let sections: [Section; 3] = [
             ("On Budget", |a| a.on_budget && !a.closed),
@@ -301,7 +301,7 @@ impl App {
             ("Closed", |a| a.closed),
         ];
         let accounts = sections.into_iter().flat_map(|(name, keep)| {
-            self.peer.accounts.rows.iter().filter(move |a| keep(a)).map(move |a| {
+            self.peer.accounts().iter().filter(move |a| keep(a)).map(move |a| {
                 let label = match a.mask.is_empty() {
                     true => a.name.clone(),
                     false => format!("{} \u{2022}\u{2022}{}", a.name, a.mask),
@@ -312,8 +312,7 @@ impl App {
         // The saved filters, after the accounts: registers like theirs.
         let saved = self
             .peer
-            .filters
-            .rows
+            .filters()
             .iter()
             .map(|f| (glyphs::SEARCH, f.name.clone(), Some("Filters"), Page::Ledger(Ledger::Saved(f.id))));
         pages.into_iter().chain(accounts).chain(saved).collect()
@@ -337,7 +336,7 @@ impl App {
     fn view_sidebar(&self) -> Element<'_, Message> {
         let cursor = self.sidebar_at();
         let focused = self.pane == Pane::Sidebar && self.keys_free();
-        let inbox = self.peer.inbox.rows.len();
+        let inbox = self.peer.inbox().len();
         let items = self
             .places()
             .into_iter()
@@ -345,7 +344,7 @@ impl App {
             .map(|(i, (glyph, label, heading, page))| {
                 let lit = arkui::sidebar::lit(i, cursor, focused);
                 let trailing = match page {
-                    Page::Ledger(Ledger::All) => (inbox > 0).then(|| self.badge(inbox, lit)),
+                    Page::Ledger(Ledger::All) => (inbox > 0).then(|| arkui::parts::badge(inbox)),
                     Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
                     Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map(|f| balance(f.total, lit)),
                     _ => None,
@@ -362,41 +361,13 @@ impl App {
         arkui::sidebar::view(items, cursor, focused, SIDEBAR, PAD, SIDEBAR_SCROLL)
     }
 
-    /// A count in a bubble: what needs looking at.
-    fn badge<'a>(&self, n: usize, _lit: bool) -> Element<'a, Message> {
-        container(text(n.to_string()).size(10).style(move |theme| text::Style {
-            color: Some(arkui::theme::of(theme).primary.base.text),
-        }))
-        .padding([1, 6])
-        .style(move |theme| {
-            let p = arkui::theme::of(theme);
-            container::Style {
-                background: Some(iced::Background::Color(p.primary.base.color)),
-                border: iced::Border {
-                    radius: 8.0.into(),
-                    ..iced::Border::default()
-                },
-                ..container::Style::default()
-            }
-        })
-        .into()
-    }
-
     // * The budget
 
     fn view_budget(&self) -> Element<'_, Message> {
         let s = self.peer.summary();
         let this = month_of(&self.today);
-        let mut month = row![
-            glyph_button(glyphs::BACK, Message::Month(-1)),
-            page_title(month_name(&self.peer.month)),
-            glyph_button(glyphs::CHEVRON, Message::Month(1)),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        if self.peer.month != this {
-            month = month.push(link("Today", Message::ThisMonth));
-        }
+        let home = (self.peer.month != this).then_some(("Today", Message::ThisMonth));
+        let month = arkui::parts::pager(format::month(&self.peer.month), Message::Month(-1), Message::Month(1), home);
         let ready = container(
             row![column![
                 bold(money(s.ready_to_assign), 22),
@@ -414,7 +385,7 @@ impl App {
         .style(look::ready(s.ready_to_assign));
 
         let mut notices = row![].spacing(14).align_y(Alignment::Center);
-        let inbox = self.peer.inbox.rows.len();
+        let inbox = self.peer.inbox().len();
         if inbox > 0 {
             notices = notices.push(link(
                 format!(
@@ -426,7 +397,7 @@ impl App {
             ));
         }
         if s.overspent > 0 {
-            notices = notices.push(text(format!("{} overspent", s.overspent)).size(12).style(Tone::Over.text()));
+            notices = notices.push(text(format!("{} overspent", s.overspent)).size(12).style(Tone::Overspent.text()));
         }
         if s.underfunded > 0 {
             notices = notices.push(text(format!("{} underfunded", s.underfunded)).size(12).style(Tone::Short.text()));
@@ -472,7 +443,7 @@ impl App {
                         .on_submit(Message::NewGroupDone)
                         .size(13)
                         .padding([5, 8])
-                        .style(look::input),
+                        .style(arkui::style::field),
                 )
                 .padding([4, 8]),
             );
@@ -493,7 +464,7 @@ impl App {
                                 .on_submit(Message::NewCategoryDone)
                                 .size(13)
                                 .padding([5, 8])
-                                .style(look::input),
+                                .style(arkui::style::field),
                         )
                         .padding(Padding {
                             top: 2.0,
@@ -565,7 +536,7 @@ impl App {
                 .size(13)
                 .padding([3, 6])
                 .width(Length::Fixed(240.0))
-                .style(look::input)
+                .style(arkui::style::field)
                 .into(),
             _ => name,
         }
@@ -615,8 +586,7 @@ impl App {
         )
         .padding([0.0, ROW_INSET])
         .height(Length::Fill)
-        .align_y(Alignment::Center)
-        .style(look::group_card);
+        .align_y(Alignment::Center);
         container(card).padding([6, 0]).height(Length::Fill).into()
     }
 
@@ -626,7 +596,7 @@ impl App {
     /// `style::on_row` — the pill too, which on the accent is the accent's
     /// text on a wash of it.
     fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool) -> Element<'a, Message> {
-        let tone = tone(l);
+        let tone = l.tone();
         let hidden = l.hidden;
         let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, hidden)),
@@ -642,7 +612,7 @@ impl App {
                 .size(14)
                 .padding([3, 6])
                 .width(Length::Fixed(MONEY_COL - 14.0))
-                .style(look::input)
+                .style(arkui::style::field)
                 .into(),
             // Worked out by its formula: the amount, with the formula's mark, and
             // pressing it says why it does not open.
@@ -677,12 +647,12 @@ impl App {
                 color: Some(style::on_row(theme, lit, false, false)),
             }),
         };
-        let goal = text(progress(l)).size(13).style(move |theme| text::Style {
+        let goal = text(l.progress(crate::amount::style())).size(13).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, true)),
         });
         let available = container(text(money(l.available)).size(14).font(arkui::hero::BOLD))
             .padding([4, 12])
-            .style(look::pill(tone, lit));
+            .style(arkui::style::pill(tone.tint()));
         container(
             row![
                 container(name).width(Length::Fill),
@@ -728,9 +698,9 @@ impl App {
 
     fn inspect_month(&self) -> Column<'_, Message> {
         let s = self.peer.summary();
-        let lines = &self.peer.lines.rows;
+        let lines = self.peer.lines();
         let carried: i64 = lines.iter().map(|l| l.carried).sum();
-        let name = month_name(&self.peer.month);
+        let name = format::month(&self.peer.month);
         let summary = container(
             column![
                 bold(format!("{name}'s Summary"), 14),
@@ -746,7 +716,7 @@ impl App {
             .spacing(8),
         )
         .padding(14)
-        .style(look::card);
+        .style(arkui::style::card);
         let auto = container(
             column![
                 bold("Auto-Assign", 14),
@@ -758,7 +728,7 @@ impl App {
             .spacing(8),
         )
         .padding(14)
-        .style(look::card);
+        .style(arkui::style::card);
         let shared = container(
             column![
                 bold("One budget, one household", 14),
@@ -771,12 +741,12 @@ impl App {
             .spacing(6),
         )
         .padding(14)
-        .style(look::card);
+        .style(arkui::style::card);
         column![summary, auto, shared]
     }
 
     fn inspect_category<'a>(&'a self, l: &'a BudgetLine) -> Column<'a, Message> {
-        let tone = tone(l);
+        let tone = l.tone();
         let spent = match l.card {
             Some(_) => "Spending covered, less payments",
             None => "Cash spending",
@@ -791,7 +761,7 @@ impl App {
                 text("Available Balance").size(12).width(Length::Fill),
                 container(text(money(l.available)).size(14))
                     .padding([3, 10])
-                    .style(look::pill(tone, false)),
+                    .style(arkui::style::pill(tone.tint())),
             ]
             .align_y(Alignment::Center),
             rule::horizontal(1).style(style::hairline),
@@ -817,7 +787,7 @@ impl App {
         } else {
             quiet("Move money", Message::MoveMoney)
         });
-        let head = container(figures).padding(14).style(look::card);
+        let head = container(figures).padding(14).style(arkui::style::card);
 
         if l.card.is_some() {
             return column![head, self.inspect_card(l)];
@@ -834,7 +804,11 @@ impl App {
                 ]
                 .align_y(Alignment::Center),
             );
-            target = target.push(progress_bar(0.0..=1.0, funded).girth(Length::Fixed(6.0)).style(look::progress(tone)));
+            target = target.push(
+                progress_bar(0.0..=1.0, funded)
+                    .girth(Length::Fixed(6.0))
+                    .style(arkui::style::progress(tone.bar())),
+            );
             if have < l.target && l.ruled {
                 target = target.push(dim("Its formula assigns it: what its filters add up to decides.", 11));
             } else if have < l.target {
@@ -844,7 +818,7 @@ impl App {
                     Message::AssignTo(l.category_id, l.target),
                 ));
             } else {
-                target = target.push(text("Funded this month").size(12).style(Tone::Funded.text()));
+                target = target.push(text("Funded this month").size(12).style(Tone::Positive.text()));
             }
         } else {
             target = target.push(dim("How much does it need each month?", 11));
@@ -856,13 +830,13 @@ impl App {
                     .on_submit(Message::TargetDone)
                     .size(13)
                     .padding([5, 8])
-                    .style(look::input),
+                    .style(arkui::style::field),
                 quiet("Save", Message::TargetDone),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
         );
-        let target = container(target).padding(14).style(look::card);
+        let target = container(target).padding(14).style(arkui::style::card);
 
         let auto = container(
             column![
@@ -874,7 +848,7 @@ impl App {
             .spacing(8),
         )
         .padding(14)
-        .style(look::card);
+        .style(arkui::style::card);
 
         let mut kinds = column![
             bold("Kinds", 14),
@@ -884,7 +858,7 @@ impl App {
             ),
         ]
         .spacing(6);
-        for n in self.peer.tree.rows.iter().filter(|n| n.depth >= 2 && self.is_under(n, l.category_id)) {
+        for n in self.peer.tree().iter().filter(|n| n.depth >= 2 && self.is_under(n, l.category_id)) {
             let indent = 12.0 * (n.depth - 2) as f32;
             kinds = kinds.push(row![Space::new().width(Length::Fixed(indent)), text(n.name.clone()).size(12)]);
         }
@@ -896,7 +870,7 @@ impl App {
                     .on_submit(Message::NewKindDone)
                     .size(13)
                     .padding([5, 8])
-                    .style(look::input),
+                    .style(arkui::style::field),
                 quiet("Add", Message::NewKindDone),
             ]
             .spacing(6)
@@ -904,7 +878,7 @@ impl App {
             .into(),
             _ => link("+ Add a kind", Message::NewKind(l.category_id)),
         });
-        let kinds = container(kinds).padding(14).style(look::card);
+        let kinds = container(kinds).padding(14).style(arkui::style::card);
 
         let hidden = l.hidden;
         let manage = row![
@@ -931,7 +905,7 @@ impl App {
                 text("Not covered").size(12).width(Length::Fill),
                 text(money(l.underfunded))
                     .size(12)
-                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Funded }.text()),
+                    .style(if l.underfunded > 0 { Tone::Short } else { Tone::Positive }.text()),
             ]
             .align_y(Alignment::Center),
         ]
@@ -942,7 +916,7 @@ impl App {
                 Message::AssignTo(l.category_id, l.assigned + l.underfunded),
             ));
         } else if l.debt > 0 {
-            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Funded.text()));
+            card = card.push(text("Enough set aside to pay it").size(12).style(Tone::Positive.text()));
         } else {
             card = card.push(dim("Nothing owed on it.", 11));
         }
@@ -952,7 +926,7 @@ impl App {
         ));
         let hidden = l.hidden;
         column![
-            container(card).padding(14).style(look::card),
+            container(card).padding(14).style(arkui::style::card),
             link(if hidden { "Unhide" } else { "Hide" }, Message::HideCategory(l.category_id, !hidden)),
         ]
         .spacing(12)
@@ -977,7 +951,7 @@ impl App {
             .on_press(Message::AssignTo(l.category_id, cents.max(0)))
             .padding([5, 8])
             .width(Length::Fill)
-            .style(look::choice(false))
+            .style(arkui::style::chip(false))
             .into()
     }
 
@@ -997,7 +971,7 @@ impl App {
     /// household's tools on every account's, the bar of its conditions,
     /// and its transactions.
     fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
-        let rows = &self.peer.register.rows;
+        let rows = self.peer.register();
         let account = self.register_account().and_then(|a| self.peer.account(a));
         // The account column, unless every row is one account's.
         let all = account.is_none();
@@ -1048,7 +1022,7 @@ impl App {
                 let n = self.banks_wanting();
                 tools = tools.push(quiet(&format!("Banks need a look ({n})"), Message::Go(Page::Settings)));
             }
-            if !self.peer.banks.rows.is_empty() {
+            if !self.peer.banks().is_empty() {
                 tools = tools.push(quiet("Sync", Message::Sync));
             }
         }
@@ -1239,7 +1213,7 @@ impl App {
                 .on_submit(Message::SaveTxn)
                 .size(13)
                 .padding([4, 6])
-                .style(look::input)
+                .style(arkui::style::field)
         };
         let category_label = match (f.transfer_to, f.category) {
             (Some(a), _) => format!("Transfer : {}", self.peer.account(a).map(|a| a.name.as_str()).unwrap_or("?")),
@@ -1267,14 +1241,14 @@ impl App {
                     button(text(category_label.clone()).size(13))
                         .padding([4, 6])
                         .width(Length::FillPortion(3))
-                        .style(look::choice(false)),
+                        .style(arkui::style::chip(false)),
                 ),
                 _ => Element::from(
                     button(text(category_label).size(13))
                         .on_press(Message::ChooseCategory)
                         .padding([4, 6])
                         .width(Length::FillPortion(3))
-                        .style(look::choice(false)),
+                        .style(arkui::style::chip(false)),
                 ),
             })
             .push(field("Memo", &f.memo, Field::Memo).width(Length::FillPortion(2)))
@@ -1296,12 +1270,12 @@ impl App {
         let mut under = row![].spacing(10).align_y(Alignment::Center);
         if f.editing.is_none() && all {
             under = under.push(dim("Into", 12));
-            for a in self.peer.accounts.rows.iter().filter(|a| !a.closed) {
+            for a in self.peer.accounts().iter().filter(|a| !a.closed) {
                 under = under.push(
                     button(text(a.name.clone()).size(12))
                         .on_press(Message::FormAccount(a.id))
                         .padding([3, 8])
-                        .style(look::choice(f.account == Some(a.id))),
+                        .style(arkui::style::chip(f.account == Some(a.id))),
                 );
             }
         }
@@ -1355,14 +1329,14 @@ impl App {
                     .on_press(Message::SplitCategory(i))
                     .padding([3, 6])
                     .width(Length::Fixed(240.0))
-                    .style(look::choice(false)),
+                    .style(arkui::style::chip(false)),
                 text_input("0.00", &r.amount)
                     .on_input(move |v| Message::SplitAmount(i, v))
                     .on_submit(Message::SaveTxn)
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fixed(94.0))
-                    .style(look::input),
+                    .style(arkui::style::field),
             ]
             .spacing(8)
             .align_y(Alignment::Center);
@@ -1375,7 +1349,7 @@ impl App {
         let said = match left {
             0 => dim("Every cent has a category", 11),
             l if l > 0 => text(format!("{} left to split", money(l))).size(11).style(Tone::Short.text()),
-            l => text(format!("{} too much", money(-l))).size(11).style(Tone::Over.text()),
+            l => text(format!("{} too much", money(-l))).size(11).style(Tone::Overspent.text()),
         };
         lines
             .push(
@@ -1411,7 +1385,7 @@ impl App {
             }))
             .padding([3, 6])
             .width(Length::Fill)
-            .style(look::choice(false));
+            .style(arkui::style::chip(false));
             let what = match c.amount > 0 {
                 true => format!("refund {}", money(c.amount)),
                 false => money(-c.amount),
@@ -1434,7 +1408,7 @@ impl App {
 
     fn view_reflect(&self) -> Element<'_, Message> {
         let s = self.peer.summary();
-        let spending = &self.peer.spending.rows;
+        let spending = self.peer.spending();
         let total: i64 = spending.iter().map(|g| g.spent).sum();
         let most = spending.first().map_or(1, |g| g.spent.max(1));
         let mut bars = column![].spacing(10);
@@ -1444,9 +1418,9 @@ impl App {
                     text(g.group.clone()).size(13).width(Length::Fixed(160.0)),
                     progress_bar(0.0..=1.0, g.spent as f32 / most as f32)
                         .girth(Length::Fixed(14.0))
-                        .style(look::progress(Tone::Funded)),
+                        .style(arkui::style::progress(Tone::Positive.bar())),
                     text(money(g.spent)).size(13).width(Length::Fixed(110.0)),
-                    text(format!("{:.0}%", 100.0 * g.spent as f32 / total.max(1) as f32))
+                    text(format::percent(g.spent, total))
                         .size(12)
                         .style(style::dim)
                         .width(Length::Fixed(48.0)),
@@ -1458,29 +1432,28 @@ impl App {
         if spending.is_empty() {
             bars = bars.push(dim("Nothing spent this month yet.", 13));
         }
-        let month = row![
-            glyph_button(glyphs::BACK, Message::Month(-1)),
-            page_title(format!("Spending in {}", month_name(&self.peer.month))),
-            glyph_button(glyphs::CHEVRON, Message::Month(1)),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        let month = arkui::parts::pager(
+            format!("Spending in {}", format::month(&self.peer.month)),
+            Message::Month(-1),
+            Message::Month(1),
+            None,
+        );
         let mut tiles = row![
-            self.tile("Income", s.income, Tone::Funded),
-            self.tile("Spent", total, Tone::Zero),
-            self.tile("Net", s.income - total, if s.income >= total { Tone::Funded } else { Tone::Over }),
+            self.tile("Income", s.income, Tone::Positive),
+            self.tile("Spent", total, Tone::Neutral),
+            self.tile("Net", s.income - total, if s.income >= total { Tone::Positive } else { Tone::Overspent }),
         ]
         .spacing(12);
         // Paying a card is not spending (what it bought was), so it is not
         // in the bars; what the cards owe beyond what is set aside is.
-        let cards: Vec<&BudgetLine> = self.peer.lines.rows.iter().filter(|l| l.card.is_some()).collect();
+        let cards: Vec<&BudgetLine> = self.peer.lines().iter().filter(|l| l.card.is_some()).collect();
         if !cards.is_empty() {
             let short: i64 = cards.iter().map(|l| l.underfunded).sum();
-            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Funded }));
+            tiles = tiles.push(self.tile("Card debt not covered", short, if short > 0 { Tone::Short } else { Tone::Positive }));
         }
         // All of it scrolls, its padding inside: a month of many categories
         // is taller than the window, and was cut off at the foot.
-        let page = column![month, tiles, container(bars).padding(16).width(Length::Fill).style(look::card)]
+        let page = column![month, tiles, container(bars).padding(16).width(Length::Fill).style(arkui::style::card)]
             .spacing(16)
             .padding(PAD)
             .width(Length::Fill);
@@ -1497,7 +1470,7 @@ impl App {
         container(column![dim(label.to_string(), 11), bold(money(cents), 20).style(tone.text())].spacing(4))
             .padding(14)
             .width(Length::Fill)
-            .style(look::card)
+            .style(arkui::style::card)
             .into()
     }
 
@@ -1517,10 +1490,10 @@ impl App {
                 let mut kinds = row![].spacing(6);
                 for k in accounts::KINDS {
                     kinds = kinds.push(
-                        button(text(k).size(12))
+                        button(text(accounts::kind_title(k)).size(12))
                             .on_press(Message::AccountKind(k))
                             .padding([4, 8])
-                            .style(look::choice(*kind == k)),
+                            .style(arkui::style::chip(*kind == k)),
                     );
                 }
                 column![
@@ -1529,7 +1502,7 @@ impl App {
                         .on_input(Message::AccountName)
                         .size(13)
                         .padding([6, 8])
-                        .style(look::input),
+                        .style(arkui::style::field),
                     dim("What sort of account?", 12),
                     kinds,
                     dim(
@@ -1544,16 +1517,16 @@ impl App {
                         .on_submit(Message::CreateAccount)
                         .size(13)
                         .padding([6, 8])
-                        .style(look::input),
+                        .style(arkui::style::field),
                     row![
                         button(text("Budget").size(12))
                             .on_press(Message::AccountOnBudget(true))
                             .padding([4, 10])
-                            .style(look::choice(*on_budget)),
+                            .style(arkui::style::chip(*on_budget)),
                         button(text("Tracking only").size(12))
                             .on_press(Message::AccountOnBudget(false))
                             .padding([4, 10])
-                            .style(look::choice(!*on_budget)),
+                            .style(arkui::style::chip(!*on_budget)),
                     ]
                     .spacing(6),
                     row![
@@ -1583,7 +1556,7 @@ impl App {
                                 .on_submit(Message::ReconcileDone)
                                 .size(13)
                                 .padding([6, 8])
-                                .style(look::input),
+                                .style(arkui::style::field),
                         )
                         .push(row![fill(), quiet("Cancel", Message::CloseModal), action("Reconcile", Message::ReconcileDone)].spacing(8));
                 } else {
@@ -1612,8 +1585,12 @@ impl App {
         let option = |label: String, trailing: Option<i64>, choice: Choice| -> Element<'a, Message> {
             let mut r = row![text(label).size(13).width(Length::Fill)].align_y(Alignment::Center);
             if let Some(cents) = trailing {
-                let tone = Tone::of(cents, 0, 0);
-                r = r.push(container(text(money(cents)).size(11)).padding([1, 7]).style(look::pill(tone, false)));
+                let tone = Tone::of_amount(cents);
+                r = r.push(
+                    container(text(money(cents)).size(11))
+                        .padding([1, 7])
+                        .style(arkui::style::pill(tone.tint())),
+                );
             }
             button(r)
                 .on_press(Message::Chose(choice))
@@ -1638,7 +1615,7 @@ impl App {
                         .on_input(Message::MoveTyped)
                         .size(13)
                         .padding([6, 8])
-                        .style(look::input),
+                        .style(arkui::style::field),
                 );
                 (*from, if short { "Cover it from".to_string() } else { "Move it to".to_string() })
             }
@@ -1647,7 +1624,7 @@ impl App {
         if let (Choosing::Form, Some(f)) = (choosing, &self.form) {
             if f.editing.is_none() {
                 list = list.push(container(text("Transfer to").size(10).style(style::faint(0.5))).padding([6, 10]));
-                for a in self.peer.accounts.rows.iter().filter(|a| !a.closed && Some(a.id) != f.account) {
+                for a in self.peer.accounts().iter().filter(|a| !a.closed && Some(a.id) != f.account) {
                     list = list.push(option(format!("Transfer : {}", a.name), None, Choice::Transfer(a.id)));
                 }
             }
@@ -1658,12 +1635,11 @@ impl App {
         };
         list = list.push(container(text("Inflow").size(10).style(style::faint(0.5))).padding([6, 10]));
         list = list.push(option("Ready to Assign".into(), Some(self.peer.summary().ready_to_assign), rta));
-        for g in self.peer.groups.rows.iter().filter(|g| !g.hidden) {
+        for g in self.peer.groups().iter().filter(|g| !g.hidden) {
             list = list.push(container(text(g.name.clone()).size(10).style(style::faint(0.5))).padding([6, 10]));
             for l in self
                 .peer
-                .lines
-                .rows
+                .lines()
                 .iter()
                 .filter(|l| l.group_id == g.id && !l.hidden && Some(l.category_id) != skip)
             {
@@ -1741,35 +1717,6 @@ pub fn category_glyph(name: &str) -> &'static [u8] {
     }
 }
 
-/// What a category's pill says by its colour, as YNAB's does: red for cash
-/// overspent (next month pays for it), amber for overspending that was
-/// all on a card (it is debt now) and for a card's payment that does not
-/// cover what the card owes, else as its target reads it.
-pub fn tone(l: &BudgetLine) -> Tone {
-    match () {
-        _ if l.available < 0 && l.credit_overspent >= -l.available => Tone::Short,
-        _ if l.available >= 0 && l.card.is_some() && l.underfunded > 0 => Tone::Short,
-        _ => Tone::of(l.available, l.target, l.assigned),
-    }
-}
-
-/// How far along a category is: the share of its goal given this month,
-/// as the inspector counts it; for one with no goal, the share of what it
-/// had that was spent; blank for neither.
-fn progress(l: &BudgetLine) -> String {
-    let had = l.carried + l.assigned;
-    match () {
-        // A card's: what of its debt is not covered yet.
-        _ if l.card.is_some() && l.underfunded > 0 => format!("{} short", money(l.underfunded)),
-        _ if l.card.is_some() && l.debt > 0 => "Covered".into(),
-        _ if l.card.is_some() => String::new(),
-        _ if l.credit_overspent > 0 => format!("{} on card", money(l.credit_overspent)),
-        _ if l.target > 0 => format!("{}% goal", (l.assigned.max(0) * 100 / l.target).min(999)),
-        _ if l.activity < 0 && had > 0 => format!("{}% used", (-l.activity * 100 / had).min(999)),
-        _ => String::new(),
-    }
-}
-
 impl App {
     /// The box a category is typed into: the cell itself, what it says now
     /// greyed under what is typed, `<Enter>` choosing the row with the keys.
@@ -1781,29 +1728,7 @@ impl App {
             .on_submit(Message::DropChoose)
             .size(13)
             .padding([4, 6])
-            .style(look::input)
+            .style(arkui::style::field)
             .into()
-    }
-}
-
-/// A store as the receipts page names it.
-pub(crate) fn store_name(store: &str) -> String {
-    match store {
-        "amazon" => "Amazon".into(),
-        "target" => "Target".into(),
-        "costco" => "Costco".into(),
-        s => s.to_string(),
-    }
-}
-
-/// How many, in thousandths, as a line says it: `2`, `11.482 gal`.
-pub(crate) fn quantity(thousandths: i64, unit: &str) -> String {
-    let n = match thousandths % 1000 {
-        0 => (thousandths / 1000).to_string(),
-        _ => format!("{:.3}", thousandths as f64 / 1000.0).trim_end_matches('0').to_string(),
-    };
-    match unit {
-        "" | "ea" => format!("\u{00d7}{n}"),
-        u => format!("{n} {u}"),
     }
 }

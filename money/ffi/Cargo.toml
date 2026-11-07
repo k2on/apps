@@ -13,6 +13,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-ffi = { path = "../../rust/ark-ffi" }
+# Every number, day and length as the apps write them, for the phones too
+# (re-exported in lib.rs, so its functions are in this library).
+ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-domain = { path = "../domain", features = ["ffi"] }
 # The demo's household (`money/seed`), which `money_demo` opens on.
@@ -34,6 +37,3 @@ tempfile = "3"
 # The scanner's pages, read (tests/page.rs).
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
-# The typed Kotlin and Swift the apps call the domain with, held to what the
-# generator writes now (tests/gen.rs).
-arkdb = { path = "../../rust/arkdb" }

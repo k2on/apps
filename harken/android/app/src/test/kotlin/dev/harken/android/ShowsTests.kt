@@ -54,11 +54,11 @@ class ShowsTests {
     }
 
     @Test
-    fun aShowsPageIsARouteAndAPlace() {
+    fun aShowsPageIsARoute() {
         val page = Page.ForShow("podcast/full-time-nix")
-        assertEquals(page, Page.parse(page.route))
-        assertEquals("#show/podcast%2Ffull-time-nix", page.place(emptyList()))
-        assertEquals(page, Page.ofPlace(page.place(emptyList()), emptyList()))
+        assertEquals(page, Page.of(routeOf(page.route(emptyList())!!.destination().substringAfter('/')), emptyList()))
+        assertEquals("#show/podcast%2Ffull-time-nix", page.from(emptyList()))
+        assertEquals(page, Page.of(page.from(emptyList()), emptyList()))
     }
 
     /**
@@ -165,8 +165,7 @@ class ShowsTests {
         assertEquals(listOf("Shahar \"Dawn\" Or", "Jacek Galowicz", "Kiara Grouwstra"), people.map { it.name })
         assertEquals(listOf(true, false, false), people.map { it.hosts })
         assertEquals(OnEpisode("Jacek Galowicz", "Guest", ".feeds/jacek.jpg", "https://galowicz.de"), people[1])
-        assertEquals("Jacek Galowicz and Kiara Grouwstra", OnEpisode.named(OnEpisode.guests(people)))
-        assertEquals("Ada, Grace and Edsger", OnEpisode.named(listOf("Ada", "Grace", "Edsger").map { OnEpisode(it, "Guest", "", "") }))
+        assertEquals(listOf("Jacek Galowicz", "Kiara Grouwstra"), OnEpisode.guests(people).map { it.name })
 
         h.setTranscript(
             SetTranscript(
@@ -291,17 +290,4 @@ class ShowsTests {
         assertEquals("queued", Episodes.left(bump, null, Download(bump.id, "queued", 0, 0, "")))
     }
 
-    /** When an episode came out, as its row says it: today, yesterday, a day, a day of another year. */
-    @Test
-    fun anEpisodeIsDatedAsAPodcastAppDatesIt() {
-        val utc = java.time.ZoneOffset.UTC
-        fun on(y: Int, m: Int, d: Int, hour: Int = 9): Long = java.time.ZonedDateTime.of(y, m, d, hour, 0, 0, 0, utc).toInstant().toEpochMilli()
-        val now = on(2026, 10, 27, 12)
-        assertEquals("Today", Episodes.dated(on(2026, 10, 27, 1), now, utc))
-        assertEquals("Yesterday", Episodes.dated(on(2026, 10, 26, 23), now, utc))
-        assertEquals("Oct 25", Episodes.dated(on(2026, 10, 25), now, utc))
-        assertEquals("Oct 20", Episodes.dated(on(2026, 10, 20), now, utc))
-        assertEquals("Dec 31, 2025", Episodes.dated(on(2025, 12, 31), now, utc))
-        assertEquals("nobody said", "", Episodes.dated(0, now, utc))
-    }
 }

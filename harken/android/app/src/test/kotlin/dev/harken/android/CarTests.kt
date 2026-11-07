@@ -82,7 +82,7 @@ class CarTests {
             val albums = car.children(Car.ALBUMS, 0, 1000, Car.TABS)!!
             assertEquals(Phone.once({ peer.albums() }) { it.name }, titles(albums))
             val water = albums.first { it.mediaMetadata.title == "Water Music" }
-            assertEquals(Page.ForAlbum(Demo.key("Water Music")).route, water.mediaId)
+            assertEquals(Page.ForAlbum(Demo.key("Water Music")).from(emptyList()), water.mediaId)
 
             // An album's tracks: the domain's `album` query, in its order, playable.
             val want = tracks { Phone.album(peer, Demo.key("Water Music")) }

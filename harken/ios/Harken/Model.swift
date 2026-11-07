@@ -1,5 +1,5 @@
-// The app's one model, on the main actor: the onboarding's machine run
-// (Onboarding.swift) — its effects carried out, the probe and the exchange
+// The app's one model, on the main actor: the sign-in machine run
+// (`ark_auth::onboarding`, Onboarding.swift) — its effects carried out, the probe and the exchange
 // off the main thread — the session it opens ([Bridge]) and the snapshot it
 // publishes, this phone's player ([SoundCore]) and what the screens draw of
 // what plays ([PlayerState]), and every button the screens have. Nothing of
@@ -7,18 +7,12 @@
 // views are SwiftUI's and read this; it is type-checked on Linux against a
 // stand-in for Combine. The twin of Android's `ArkHost`, the wiring half of
 // `HarkenApp.kt` and the screens' end of `Playback.kt`.
+import ArkUICore
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
 import Combine
-
-/// What a screen can ask to open: a page of a tab's stack, or Settings.
-enum Route: Hashable {
-    case page(Page)
-    case settings
-    case diagnostics
-}
 
 /// The tabs: Home, the Library, and Search's own. (`Tab` is SwiftUI's.)
 enum Pane: Hashable {
@@ -30,6 +24,8 @@ final class Model: ObservableObject {
     // MARK: what is published
 
     @Published private(set) var step: Step
+    /// What the onboarding's page says now: its question, what it waits on, its error.
+    @Published private(set) var said = Said(question: nil, status: nil, error: nil)
     @Published private(set) var snapshot = Snapshot()
     @Published private(set) var player = PlayerState()
     /// The last refusal, rejection or failure, said once.
@@ -56,8 +52,8 @@ final class Model: ObservableObject {
 
     // MARK: what it holds
 
-    private var machine: Onboarding
-    private let remembered: Remembered
+    private let machine = Onboarding(app: .harken)
+    private let remembered: Kept
     private let root: URL
     let deviceName: String
     let sound: SoundCore
@@ -76,16 +72,15 @@ final class Model: ObservableObject {
     /// The model over `shelf` (the app's `UserDefaults`), replicas under
     /// `root`, this phone called `deviceName`, playing through `engine`.
     init(shelf: Shelf, root: URL, deviceName: String, engine: Engine) {
-        remembered = Remembered(shelf)
+        remembered = Kept(shelf)
         self.root = root
         self.deviceName = deviceName
         sound = SoundCore(engine: engine)
         recent = remembered.searches
         diagnosticsUnlocked = remembered.diagnostics
-        machine = Onboarding(server: remembered.server, login: remembered.login) { loginUrl(server: $0, redirect: $1) }
-        step = machine.step
+        step = machine.step()
         sound.moved = { [weak self] in self?.redraw() }
-        run(machine.begin())
+        send(.launched(remembered: remembered.remembered, code: nil, returned: false))
     }
 
     // MARK: the onboarding
@@ -95,13 +90,9 @@ final class Model: ObservableObject {
         // Back in front: the server dialled now rather than when the link's backoff says, so one
         // that is there is reached before a screen says it is not.
         if case .foreground = e { bridge?.dialNow() }
-        let effects = machine.next(e)
-        step = machine.step
-        run(effects)
-    }
-
-    private func run(_ effects: [Effect]) {
-        step = machine.step
+        let effects = machine.next(event: e)
+        step = machine.step()
+        said = machine.said()
         for e in effects { carry(e) }
     }
 
@@ -110,75 +101,68 @@ final class Model: ObservableObject {
         case let .findServer(typed):
             let domain = harkenDomain()
             Task {
-                let found = await Probe.find(typed, domain: domain, get: Model.get)
-                self.send(.checked(found))
+                let found = await Probe.find(typed, domain: domain, get: Probe.get)
+                self.send(.checked(found: Found(found)))
             }
-        case let .rememberServer(url): remembered.server = url
-        case let .browse(url): browse = URL(string: url)
-        case let .exchange(server, code):
-            Task {
-                let answer: Event = await Task.detached {
-                    do {
-                        return Event.signedIn(try exchange(server: server, code: code))
-                    } catch {
-                        return Event.signInFailed("Signing in didn't finish: \(why(error)).")
-                    }
-                }.value
-                self.send(answer)
-            }
-        case let .rememberLogin(l): remembered.login = l
-        case .forgetLogin: remembered.login = nil
+        case let .remember(r): remembered.remembered = r
+        case let .browse(_, url): browse = URL(string: url)
+        case let .exchange(server, code): trade { try exchange(server: server, code: code) }
+        case let .redeem(server, code): trade { try redeem(server: server, code: code) }
         case let .openSession(server, login): open(server, login)
+        case .openDemo: break
         case .closeSession: close()
         }
     }
 
-    /// What the browser sheet came back with: the redirect, or why there was none.
-    func signInReturned(_ url: URL?, error: String?) {
-        browse = nil
-        if let u = url, let code = Model.code(u) { return send(.code(code)) }
-        send(.cameBack(error ?? "The sign-in came back without a login."))
+    // A code traded off the main thread: the login, or the sentence why not.
+    private func trade(_ f: @escaping @Sendable () throws -> Login) {
+        Task {
+            let answer: Event = await Task.detached {
+                do { return Event.signedIn(login: try f()) } catch { return Event.signInFailed(why: why(error)) }
+            }.value
+            self.send(answer)
+        }
     }
 
-    /// A link the system opened the app with: `harken://auth?code=…` is a sign-in coming back.
+    /// What the browser sheet came back with: the redirect, or why there
+    /// was none (none for closed).
+    func signInReturned(_ url: URL?, error: String?) {
+        browse = nil
+        if let u = url, let code = Model.code(u) { return send(.code(code: code)) }
+        send(.cameBack(why: url == nil ? error : "it came back without a code"))
+    }
+
+    /// A link the system opened the app with, or a code scanned.
+    /// `harken://auth?code=…` is a sign-in coming back. Any other link of this
+    /// app's is a route (the domain's `Route`): `harken://join?…`, a server and
+    /// a code to join with, goes to the sign-in machine (`Event.joined`,
+    /// asked about first); the rest is the shell's to navigate to ([link]).
+    /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
-        if let code = Model.code(url) { send(.code(code)) }
+        if let code = Model.code(url) { return send(.code(code: code)) }
+        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.harken.scheme, parse: { routeFromPath(path: $0) }) {
+            if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
+            link = url
+            return
+        }
+        if let j = joinOf(link: url.absoluteString) { send(.joined(server: j.server, code: j.code)) }
+    }
+
+    /// A link the system opened the app with that names a page
+    /// (`harken://…`), for the shell to navigate to (`Navigator.handle`);
+    /// nil again once it has.
+    @Published var link: URL? = nil
+
+    /// What a link names that is not a page: a sign-in link (`harken://join?…`)
+    /// is the sign-in machine's ([open(url:)]), and is not navigated to.
+    func takes(_ route: Route) -> Bool {
+        if case .join = route { return true }
+        return false
     }
 
     /// The code in `harken://auth?code=…`, or none for any other link.
     nonisolated static func code(_ url: URL) -> String? {
-        guard url.scheme == Onboarding.scheme, url.host == "auth" else { return nil }
-        let c = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "code" }?.value
-        return (c?.isEmpty ?? true) ? nil : c
-    }
-
-    /// A GET asking for JSON, ten seconds to connect and ten to answer.
-    nonisolated static func get(_ url: String) async -> Answer {
-        guard let u = URL(string: url) else { return .unreachable("that isn't a URL") }
-        var r = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
-        r.setValue("application/json", forHTTPHeaderField: "Accept")
-        return await withCheckedContinuation { done in
-            URLSession.shared.dataTask(with: r) { data, response, error in
-                if let e = error as? URLError { return done.resume(returning: .unreachable(Model.reason(e))) }
-                if let e = error { return done.resume(returning: .unreachable("\(e.localizedDescription)")) }
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                done.resume(returning: .answered(status: status, body: String(decoding: data ?? Data(), as: UTF8.self)))
-            }.resume()
-        }
-    }
-
-    /// Why a request failed, in words.
-    nonisolated static func reason(_ e: URLError) -> String {
-        switch e.code {
-        case .cannotFindHost, .dnsLookupFailed: return "there is no such name"
-        case .cannotConnectToHost: return "nothing answered there"
-        case .notConnectedToInternet, .networkConnectionLost: return "this phone has no way to it"
-        case .timedOut: return "it took too long to answer"
-        case .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateNotYetValid, .serverCertificateHasUnknownRoot, .secureConnectionFailed:
-            return "its certificate isn't one this phone trusts"
-        case .appTransportSecurityRequiresSecureConnection: return "this phone only speaks https to it"
-        default: return e.localizedDescription
-        }
+        Probe.code(url, scheme: AppInfo.harken.scheme)
     }
 
     // MARK: the session
@@ -189,7 +173,7 @@ final class Model: ObservableObject {
         let b = Bridge(server: server, login: login, root: root, name: deviceName, sound: sound,
                        publish: { [weak self] s in self?.took(s) },
                        notice: { [weak self] n in self?.notice = n },
-                       denied: { [weak self] d in self?.send(.denied(d)) },
+                       denied: { [weak self] d in self?.send(.denied(reason: d)) },
                        failed: { [weak self] w in self?.failed(server, w) })
         sound.poke = { [weak b] in b?.poke() }
         bridge = b
@@ -206,8 +190,7 @@ final class Model: ObservableObject {
 
     // A replica that cannot be opened is not a reason to lose the login: signing in again opens it again.
     private func failed(_ server: String, _ why: String) {
-        notice = "This phone's copy of the library couldn't be opened (\(why))."
-        send(.signOut)
+        send(.openFailed(why: why))
     }
 
     private func took(_ s: Snapshot) {
@@ -261,7 +244,7 @@ final class Model: ObservableObject {
 
     // MARK: reading
 
-    var server: String { bridge?.server ?? remembered.server ?? "" }
+    var server: String { bridge?.server ?? machine.remembered().server ?? "" }
     var login: Login? { bridge?.login }
     var tracks: [LibraryEntry] { snapshot.tracks }
     var playlists: [Playlist] { snapshot.playlists }
@@ -464,7 +447,7 @@ final class Model: ObservableObject {
     /// Play `list` from `at`, from the page it was on.
     func play(_ list: [LibraryEntry], at: Int, from page: Page?, shuffled: Bool = false, positionMs: Int64? = nil) {
         guard let q = Started.queue(list, at: at, shuffled: shuffled, album: albumName) else { return }
-        let from = page?.place(playlists) ?? ""
+        let from = page?.from(playlists) ?? ""
         // An episode begun picks up where its listener left it.
         let ms = positionMs ?? (shuffled ? 0 : list.indices.contains(at) ? mine(list[at].id)?.resumeMs ?? 0 : 0)
         press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled, positionMs: ms) }

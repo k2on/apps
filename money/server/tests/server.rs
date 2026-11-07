@@ -11,7 +11,7 @@ use money_domain::*;
 fn open_account(name: &str) -> OpenAccount {
     OpenAccount {
         name: name.into(),
-        kind: "checking".into(),
+        kind: money_domain::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 10_000,
         date: "2026-10-01".into(),

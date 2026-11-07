@@ -2,7 +2,7 @@
 // apps reach theirs (and from the budget's menu): the banks, and who is
 // signed in where.
 //
-// **Banks.** The household's connections through Plaid (Banks.kt), each a
+// **Banks.** The household's connections through Plaid (the core's: `AskLine.said`, `BankLine.status`), each a
 // card: the bank, how its last import went — in the error's colour when its
 // login ran out or the import failed, with Reconnect then a button of its own
 // — and Reconnect and Disconnect (asked first) behind its menu. Under it, each
@@ -82,13 +82,15 @@ import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.SectionHeader
 import dev.arkui.Space
-import dev.arkui.Tone
-import dev.arkui.toneColors
+import dev.arkui.Tint
+import dev.arkui.tintColors
 import kotlinx.coroutines.delay
 import uniffi.money_domain.AskLine
 import uniffi.money_domain.AskState
 import uniffi.money_domain.BankLine
 import uniffi.money_domain.LinkedLine
+import uniffi.money_domain.askShown
+import uniffi.money_domain.linkableAccounts
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +100,7 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
     var disconnecting by remember { mutableStateOf<BankLine?>(null) }
     // The ask put away, by its id's hex.
     var dismissed by rememberSaveable { mutableStateOf<String?>(null) }
-    val now = rememberNow(ticking = ledger.asks.firstOrNull()?.let(::isOpen) == true)
+    val now = rememberNow(ticking = ledger.asks.firstOrNull()?.isOpen() == true)
     val ask = askShown(ledger.asks, dismissed?.let { Id(it) }, now)
 
     Page(title = "Settings", onBack = onBack) { pad, _ ->
@@ -142,7 +144,7 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.m),
                     horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Button(onClick = { book.connect() }, enabled = ask == null || !isOpen(ask)) {
+                        Button(onClick = { book.connect() }, enabled = ask == null || !ask.isOpen()) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.padding(end = Space.s))
                             Text("Connect a Bank")
                         }
@@ -160,7 +162,7 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
         val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(onDismissRequest = { linking = null }, sheetState = sheet) {
             Column(Modifier.navigationBarsPadding()) {
-                val free = linkTargets(ledger.accounts)
+                val free = linkableAccounts(ledger.accounts, "")
                 AccountPicker(
                     free,
                     title = "What does ${l.name} feed?",
@@ -180,7 +182,7 @@ fun SettingsScreen(ledger: Ledger, onBack: () -> Unit) {
     disconnecting?.let { b ->
         AlertDialog(
             onDismissRequest = { disconnecting = null },
-            title = { Text("Disconnect ${bankName(b)}?") },
+            title = { Text("Disconnect ${b.title()}?") },
             text = { Text("Plaid forgets the login and the bank stops importing. Its accounts here, and what is in them, stay.") },
             confirmButton = {
                 TextButton(
@@ -214,32 +216,32 @@ private fun rememberNow(ticking: Boolean): Long {
 private fun AskCard(a: AskLine, now: Long, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val tone =
         when (a.state) {
-            AskState.FAILED, AskState.EXPIRED -> Tone.Negative
-            AskState.DONE -> Tone.Positive
-            else -> Tone.Neutral
+            AskState.FAILED, AskState.EXPIRED -> Tint.Negative
+            AskState.DONE -> Tint.Positive
+            else -> Tint.Neutral
         }
-    val (container, on) = toneColors(tone)
+    val (container, on) = tintColors(tone)
     Card(
         colors = CardDefaults.cardColors(containerColor = container, contentColor = on),
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s),
     ) {
         Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
-            if (isOpen(a)) {
+            if (a.isOpen()) {
                 CircularProgressIndicator(Modifier.size(24.dp), color = on, strokeWidth = 3.dp)
             } else {
                 Icon(if (a.state == AskState.DONE) Glyphs.Done else Glyphs.Link, contentDescription = null)
             }
             Spacer(Modifier.width(Space.l))
             Column(Modifier.weight(1f)) {
-                Text(askSays(a, now), style = MaterialTheme.typography.bodyMedium)
+                Text(a.said(now), style = MaterialTheme.typography.bodyMedium)
                 if (a.state == AskState.WAITING && a.url.isNotEmpty()) {
                     TextButton(onClick = onOpen, colors = ButtonDefaults.textButtonColors(contentColor = on)) {
                         Text("Open Plaid's page")
                     }
                 }
             }
-            if (!isOpen(a)) {
+            if (!a.isOpen()) {
                 TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = on)) { Text("Dismiss") }
             }
         }
@@ -258,7 +260,7 @@ private fun BankCard(
     onLink: (LinkedLine) -> Unit,
 ) {
     val c = MaterialTheme.colorScheme
-    val status = bankStatus(b, now)
+    val status = b.status(now)
     var menu by remember { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(containerColor = c.surfaceContainerLow),
@@ -266,7 +268,7 @@ private fun BankCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s),
     ) {
         ListItem(
-            headlineContent = { Text(bankName(b), style = MaterialTheme.typography.titleMedium) },
+            headlineContent = { Text(b.title(), style = MaterialTheme.typography.titleMedium) },
             supportingContent = { Text(status.words, color = if (status.alarm) c.error else c.onSurfaceVariant) },
             leadingContent = {
                 Box(Modifier.size(40.dp).clip(CircleShape).background(c.secondaryContainer), contentAlignment = Alignment.Center) {
@@ -275,7 +277,7 @@ private fun BankCard(
             },
             trailingContent = {
                 Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More about ${bankName(b)}") }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More about ${b.title()}") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("Reconnect") }, onClick = { menu = false; onReconnect() })
                         DropdownMenuItem(text = { Text("Disconnect…") }, onClick = { menu = false; onDisconnect() })
@@ -299,7 +301,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
     val book = LocalShell.current.book
     val a = LocalAmounts.current
     val name = if (l.mask.isNotEmpty()) "${l.name} ••${l.mask}" else l.name
-    val what = l.subtype.ifEmpty { kindName(l.kind) }.replaceFirstChar { it.uppercase() }
+    val what = l.kindWords()
     val feeds =
         when {
             l.waiting -> "Waiting for a choice: what does it feed?"
@@ -332,7 +334,7 @@ private fun LinkedRow(l: LinkedLine, onLink: () -> Unit) {
             Modifier.fillMaxWidth().padding(start = 56.dp, end = Space.l, bottom = Space.s),
             horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 FilledTonalButton(onClick = { book.openLinked(l.plaidAccountId) }) {
-                    Text("New ${kindName(l.opensAs).lowercase()} account")
+                    Text(l.opensWords())
                 }
                 OutlinedButton(onClick = onLink) { Text("Existing Account") }
                 TextButton(onClick = { book.ignore(l.plaidAccountId, true) }) { Text("Ignore") }
@@ -373,6 +375,14 @@ private fun AccountCard(ledger: Ledger) {
                         color = c.onSurfaceVariant)
                 }
             }
+        }
+        if (!ledger.demo) {
+            var adding by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = { adding = true },
+                modifier = Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, bottom = Space.s),
+            ) { Text("Add a Device") }
+            if (adding) dev.arkui.AddDeviceDialog(shell.addDevice, onDismiss = { adding = false })
         }
         OutlinedButton(
             onClick = shell.onSignOut,

@@ -9,6 +9,8 @@
 // sentence, and nothing else.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,7 +44,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,9 +59,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkdb.ffi.Id
+import dev.arkui.Empty
+import dev.arkui.SearchField
+import dev.arkui.ArkGlyphs
 import dev.arkui.Space
 import dev.arkui.reflowing
 import uniffi.money_domain.TxnLine
+import uniffi.ark_format.formatAmount
+import uniffi.ark_format.numberStyleUs
 
 /**
  * The rows `needle` finds: its payee, category, memo or account holds it, or its amount written
@@ -71,22 +77,10 @@ fun search(rows: List<TxnLine>, needle: String): List<TxnLine> {
     if (n.isEmpty()) return rows
     return rows.filter { r ->
         r.payee.lowercase().contains(n) || r.category.lowercase().contains(n) || r.memo.lowercase().contains(n) ||
-            r.account.lowercase().contains(n) || plain(r.amount).contains(n)
+            r.account.lowercase().contains(n) || formatAmount(r.amount, false, numberStyleUs()).contains(n)
     }
 }
 
-/**
- * Whether a transaction wants a category before it can be approved: the domain says so in its
- * category's place (a split with a line that has none says it too), as the iPhone reads it.
- */
-fun needsCategory(t: TxnLine): Boolean = t.category == "Needs a category"
-
-/** Cents as a person types them: `-1,850.00`. */
-fun plain(cents: Long): String {
-    val sign = if (cents < 0) "-" else ""
-    val c = kotlin.math.abs(cents)
-    return sign + "%,d.%02d".format(java.util.Locale.US, c / 100, c % 100)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,10 +92,7 @@ fun ActivityScreen(ledger: Ledger) {
     var filing by remember { mutableStateOf<List<Id>?>(null) }
     val list = rememberLazyListState()
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
-    DisposableEffect(Unit) {
-        book.holdRegister(null)
-        onDispose { book.releaseRegister(null) }
-    }
+    val everything = book.watched.watch(MoneyView.Register(null)) { book.session.register(null) }
     val waiting = ledger.inbox
     val review = search(waiting, needle)
 
@@ -116,7 +107,10 @@ fun ActivityScreen(ledger: Ledger) {
         },
     ) { pad, _ ->
         LazyColumn(state = list, contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
-            item(key = "search") { SearchField(needle, onType = { needle = it }) }
+            item(key = "search") {
+                // The page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+                SearchField(needle, { needle = it }, "Payee, category, memo or amount", Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs))
+            }
             item(key = "segments") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {
                     SegmentedButton(selected = !all, onClick = { all = false }, shape = SegmentedButtonDefaults.itemShape(0, 2), icon = {}) {
@@ -128,11 +122,11 @@ fun ActivityScreen(ledger: Ledger) {
                 }
             }
             if (all) {
-                days(search(ledger.register(null), needle), ledger.today, showAccount = true)
+                days(search(everything, needle), ledger.today, showAccount = true)
             } else if (review.isEmpty()) {
                 item(key = "caught-up") { CaughtUp(needle) }
             } else {
-                val ready = review.filter { !it.approved && !needsCategory(it) }.map { it.id }
+                val ready = review.filter { !it.approved && !it.needsCategory() }.map { it.id }
                 item(key = "h-review") {
                     Row(
                         Modifier.fillMaxWidth().padding(start = Space.page + Space.l, end = Space.page, top = Space.l),
@@ -146,7 +140,7 @@ fun ActivityScreen(ledger: Ledger) {
                         }
                 }
                 itemsIndexed(review, key = { _, t -> "r" + t.id.hex }) { i, t ->
-                    val needs = needsCategory(t)
+                    val needs = t.needsCategory()
                     TxnRow(
                         t,
                         showAccount = true,
@@ -190,49 +184,12 @@ private fun GroupHeadingText(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
 }
 
-/**
- * The search field over the list, a filled capsule as the iPhone's is (ArkUI's `SearchRow`): the
- * page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
- */
-@Composable
-private fun SearchField(needle: String, onType: (String) -> Unit) {
-    TextField(
-        value = needle,
-        onValueChange = onType,
-        placeholder = { Text("Payee, category, memo or amount", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        trailingIcon = {
-            if (needle.isNotEmpty()) {
-                IconButton(onClick = { onType("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear the search") }
-            }
-        },
-        singleLine = true,
-        shape = CircleShape,
-        colors =
-            TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-            ),
-        modifier = Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs),
-    )
-}
-
+/** What the list says with nothing left to look at, or nothing matching the search: ArkUI's [Empty]. */
 @Composable
 private fun CaughtUp(needle: String) {
-    Column(
-        Modifier.fillMaxWidth().padding(top = 96.dp, start = Space.xxl, end = Space.xxl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center) {
-            Icon(if (needle.isEmpty()) Glyphs.Done else Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
-            Spacer(Modifier.height(Space.l))
-            Text(if (needle.isEmpty()) "All Caught Up" else "No Results", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Text(
-                if (needle.isEmpty()) "Everything from the bank has been looked at, and everything has a category. Pull down to ask the bank for anything new."
-                else "Nothing waiting matches “$needle”.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center)
-        }
+    if (needle.isEmpty()) {
+        Empty(Glyphs.Done, "All Caught Up", "Everything from the bank has been looked at, and everything has a category. Pull down to ask the bank for anything new.")
+    } else {
+        Empty(ArkGlyphs.Search, "No Results", "Nothing waiting matches “$needle”.")
+    }
 }

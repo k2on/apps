@@ -10,23 +10,10 @@
 import ArkUI
 import SwiftUI
 
-/// What a screen can push onto its tab's stack.
-enum Route: Hashable {
-    /// A category's month, the desktop's inspector.
-    case category(Id)
-    /// An account's register; none is every account's.
-    case register(Id?)
-    /// The banks, as Settings lists them, from the Accounts tab.
-    case banks
-    /// One connected bank, by the name the server keeps it under.
-    case bank(String)
-    case settings
-}
-
 /// The sheets a screen can raise.
 enum Sheet: Identifiable {
     /// The transaction form: a new one or one corrected.
-    case transaction(Draft)
+    case transaction(TxnForm)
     /// A category's assigned amount, typed.
     case assign(Id)
     /// Money moved out of a category, or into an overspent one; none is from Ready to Assign.
@@ -72,7 +59,7 @@ extension EnvironmentValues {
         set { self[PresentKey.self] = newValue }
     }
 
-    /// Push a page onto the tab's own stack: what the account sheet's rows open, once it has gone.
+    /// Navigate to a route on the tab's own back stack: what the account sheet's rows open, once it has gone.
     var open: (Route) -> Void {
         get { self[OpenKey.self] }
         set { self[OpenKey.self] = newValue }
@@ -81,12 +68,14 @@ extension EnvironmentValues {
 
 struct Shell: View {
     @EnvironmentObject private var model: Model
+    @EnvironmentObject private var watched: Watched<MoneyView>
     @State private var tab: Pane = .budget
     @State private var sheet: Sheet? = nil
-    @State private var paths: [Pane: NavigationPath] = [:]
+    /// Each tab's back stack (ArkUI's `Navigator`), of money's routes.
+    @State private var navs: [Pane: Navigator<Route>] = [:]
 
-    private func path(_ t: Pane) -> Binding<NavigationPath> {
-        Binding(get: { paths[t] ?? NavigationPath() }, set: { paths[t] = $0 })
+    private func path(_ t: Pane) -> Binding<[Route]> {
+        Binding(get: { navs[t]?.path ?? [] }, set: { navs[t, default: Navigator()].path = $0 })
     }
 
     var body: some View {
@@ -110,9 +99,16 @@ struct Shell: View {
         .sheet(item: $sheet) { s in
             sheetView(s)
                 .environmentObject(model)
+                .environmentObject(watched)
                 .environment(\.present) { next in present(next) }
         }
         .toast($model.notice)
+        // A link the app was opened with: its route, navigated to on the tab shown.
+        .onChange(of: model.link) {
+            guard let url = model.link else { return }
+            model.link = nil
+            navs[tab, default: Navigator()].handle(url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }, take: model.takes)
+        }
         // Plaid's page, as soon as the server answers with it, wherever the
         // person is; closed by its Done, or once the server is finished.
         .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
@@ -131,17 +127,26 @@ struct Shell: View {
     private func stack<Root: View>(_ t: Pane, @ViewBuilder root: () -> Root) -> some View {
         NavigationStack(path: path(t)) {
             root()
-                .navigationDestination(for: Route.self) { r in
-                    switch r {
-                    case let .category(id): CategoryView(id: id)
-                    case let .register(account): RegisterView(account: account)
-                    case .banks: BanksView()
-                    case let .bank(name): BankView(name: name)
-                    case .settings: SettingsView()
-                    }
-                }
+                .navigationDestination(for: Route.self) { r in destination(r) }
         }
-        .environment(\.open) { r in paths[t, default: NavigationPath()].append(r) }
+        .environment(\.open) { r in navs[t, default: Navigator()].push(r) }
+    }
+
+    /// What a route on the back stack draws. An account and a category are
+    /// found by the route's id (an older link's by its name, `names`), so a
+    /// renamed one keeps its page; a bank by its name, its key. An account
+    /// that is gone is the route's fallback, All Accounts.
+    @ViewBuilder private func destination(_ r: Route) -> some View {
+        switch r {
+        case .category:
+            if let l = model.snapshot.lines.first(where: { r.names(id: $0.categoryId.hex, name: $0.name) }) { CategoryView(id: l.categoryId) } else { ContentUnavailableView("This Category Is Gone", systemImage: "tray") }
+        case .accounts: RegisterView(account: nil)
+        case .account: RegisterView(account: model.snapshot.accounts.first { r.names(id: $0.id.hex, name: $0.name) }?.id)
+        case .banks: BanksView()
+        case let .bank(name): BankView(name: name)
+        case .settings: SettingsView()
+        default: EmptyView()
+        }
     }
 
     @ViewBuilder private func sheetView(_ s: Sheet) -> some View {
@@ -173,7 +178,7 @@ struct AccountButton: View {
     private enum Then { case page(Route), signOut }
 
     var body: some View {
-        let wanting = Banks.wanting(model.snapshot.banks)
+        let wanting = Int(banksWanting(banks: model.snapshot.banks))
         AccountFace(name: model.who, picture: model.picture, attention: wanting > 0 ? "Banks need a look" : nil) { showing = true }
             .sheet(isPresented: $showing, onDismiss: after) {
                 AccountSheet(name: model.who, picture: model.picture,
@@ -230,8 +235,8 @@ struct AddTransactionButton: View {
 
     var body: some View {
         Button {
-            let a = account ?? Accounts.usual(model.snapshot.accounts)?.id
-            present(.transaction(Draft(account: a, date: model.today)))
+            let a = account ?? usualAccount(accounts: model.snapshot.accounts)
+            present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
         } label: {
             Image(systemName: "plus")
         }

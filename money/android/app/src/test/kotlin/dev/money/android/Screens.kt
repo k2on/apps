@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import dev.arkui.Space
-import dev.money.android.gen.StoreItem
-import dev.money.android.gen.WriteReceipt
+import uniffi.money_domain.StoreItem
+import uniffi.money_domain.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkui.SignInPhase
+import dev.arkdb.auth.Phase
+import dev.arkdb.auth.Said
+import dev.arkdb.auth.Step
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -47,16 +49,17 @@ class Screens {
     }
 
     private val none: () -> Unit = {}
+    private val said = Said(null, null, null)
 
-    @Test fun welcome() = shot("welcome") { StartScreens(Step.Welcome(), {}, none, none, none, none, none) }
+    @Test fun welcome() = shot("welcome") { StartScreens(Step.Server("", false, null), said, null, {}, none) }
 
     @Test fun welcomeRefused() =
         shot("welcome-refused") {
-            StartScreens(Step.Welcome(typed = "example.com", error = "example.com answered, but it isn't an Ark server: it has no health page."), {}, none, none, none, none, none)
+            StartScreens(Step.Server("example.com", false, "example.com answered, but it isn't an Ark server: it has no health page."), said, null, {}, none)
         }
 
     @Test fun signIn() =
-        shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", SignInPhase.Browser), {}, none, none, none, none, none) }
+        shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", Phase.BROWSER, null), said, null, {}, none) }
 
     @Test fun budget() = shot("budget") { BudgetScreen(book.state.value) }
 
@@ -78,13 +81,13 @@ class Screens {
     @Test fun receipt() {
         val acc = book.state.value.accounts.first { it.onBudget && !it.closed }.id
         book.holdRegister(acc)
-        val t = book.state.value.register(acc).first { it.amount < -2_000 && !it.transfer && it.receipt.isEmpty() }
+        val t = book.register(acc).first { it.amount < -2_000 && !it.transfer && it.receipt.isEmpty() }
         val item = { name: String, cents: Long -> StoreItem(name, "", 1000, "ea", -cents) }
         val tax = 83L
         val items =
             listOf(item("KS ORGANIC EGGS 24CT", 899), item("BANANAS 3LB", 149), item("SPARKLING WATER", -t.amount - 899 - 149 - tax), item("TAX", tax))
         book.writeReceipt(WriteReceipt("", t.id, "Corner Shop", t.date, null, items))
-        val line = book.state.value.register(acc).first { it.id == t.id }
+        val line = book.register(acc).first { it.id == t.id }
         book.holdItems(line.receipt)
         shot("receipt") { Column(Modifier.padding(Space.xl)) { ReceiptSection(book.state.value, t.id, line.receipt, t.amount, t.date) } }
     }

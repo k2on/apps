@@ -161,7 +161,7 @@ public struct LargeTitleRow<Trailing: View>: View {
 
 /// A tab's large title at the top of a `List`, whatever its style: the
 /// title's line (`LargeTitleRow`) and `below` — what comes first under it:
-/// a pager, a card, a search field (`SearchRow`) over a segmented control —
+/// a pager, a card, a search field (`SearchField`) over a segmented control —
 /// as the header of the page's first section, with `rows` its rows (most
 /// often none). Not rows: an inset grouped list clips each section's rows
 /// to its rounded card, and those corners cut the title's first letter, the

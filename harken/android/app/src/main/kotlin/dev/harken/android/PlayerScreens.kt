@@ -119,6 +119,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import dev.arkui.pressable
 import dev.arkui.Press
+import uniffi.ark_format.formatClock
 
 /** How far an episode's skip goes back, and on, in seconds: what a podcast player's do. */
 const val JOG_BACK = 15
@@ -538,27 +539,16 @@ private fun Scrubber(state: PlayerState, position: StateFlow<Long>, scrubbing: S
     val ms by position.collectAsStateWithLifecycle()
     val theirs by scrubbing.collectAsStateWithLifecycle()
     Recompositions.hit("Progress")
-    var dragging by remember { mutableStateOf<Float?>(null) }
     val total = state.durationMs.coerceAtLeast(1)
-    val at = dragging ?: ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f)
-    Bar(
-        value = at,
-        onValue = {
-            dragging = it
-            controls.scrub((it * total).toLong())
-        },
-        onDone = {
-            dragging?.let { controls.seek((it * total).toLong()) }
-            dragging = null
-        },
+    dev.arkui.Scrubber(
+        value = ((theirs ?: ms).toFloat() / total).coerceIn(0f, 1f),
+        onValue = { controls.scrub((it * total).toLong()) },
+        onDone = { controls.seek((it * total).toLong()) },
+        left = { formatClock((it * total).toLong()) },
+        right = { "-" + formatClock((state.durationMs - (it * total).toLong()).coerceAtLeast(0)) },
         enabled = state.durationMs > 0,
         label = "Position",
     )
-    val gone = (at * total).toLong()
-    Row(Modifier.fillMaxWidth()) {
-        Text(Media.clock(gone), style = quiet(MaterialTheme.typography.labelMedium), modifier = Modifier.weight(1f))
-        Text("-" + Media.clock((state.durationMs - gone).coerceAtLeast(0)), style = quiet(MaterialTheme.typography.labelMedium))
-    }
 }
 
 @Composable

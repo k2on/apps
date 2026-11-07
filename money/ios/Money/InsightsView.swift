@@ -63,8 +63,8 @@ struct InsightsView: View {
                     // Paying a card is not spending (what it bought was), so
                     // it is in neither figure; what the cards owe beyond
                     // what is set aside for them is said apart.
-                    if s.lines.contains(where: Cards.isPayment) {
-                        let short = Cards.uncovered(s.lines)
+                    if s.lines.contains(where: { $0.isPayment() }) {
+                        let short = uncovered(lines: s.lines)
                         LabeledContent("Card Debt Not Covered") {
                             CentsText(short).foregroundStyle(short > 0 ? Color.caution : Color.positive).rolls(on: model.snapshot.month)
                         }
@@ -93,10 +93,7 @@ struct InsightsView: View {
     /// theme's chart palette (arkui/theme.toml), the Android app's too.
     static let palette: [Color] = Color.chart
 
-    private func share(_ part: Int64, _ whole: Int64) -> String {
-        guard whole > 0 else { return "" }
-        return (Double(part) / Double(whole)).formatted(.percent.precision(.fractionLength(0)))
-    }
+    private func share(_ part: Int64, _ whole: Int64) -> String { formatPercent(part: part, whole: whole) }
 
     /// The group a selected angle falls in: the running sum passes it.
     private func selected(_ spending: [SpendingLine]) -> SpendingLine? {
@@ -165,7 +162,7 @@ struct InsightsView: View {
             AxisMarks { v in
                 AxisGridLine()
                 AxisValueLabel {
-                    if let d = v.as(Double.self) { Text(d, format: .currency(code: CentsText.code).precision(.fractionLength(0))) }
+                    if let d = v.as(Double.self) { Text(formatAmountWhole(cents: Int64((d * 100).rounded()), style: Numbers.style)) }
                 }
             }
         }

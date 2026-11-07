@@ -5,7 +5,7 @@
 use iced::keyboard::{Key, Modifiers};
 
 use crate::nav::Mark;
-use crate::places::{Pane, Source};
+use crate::routes::{Pane, Route};
 use crate::{App, Message};
 
 fn press(app: &mut App, c: &str) {
@@ -15,7 +15,7 @@ fn press(app: &mut App, c: &str) {
 fn album(name: &str) -> App {
     let mut app = super::demo_app();
     let id = app.peer.album_id(name);
-    let _ = app.update(Message::Select(Source::Album(id, name.into())));
+    let _ = app.update(Message::Select(Route::Album { key: id, title: name.into() }));
     app.pane = Pane::Tracks;
     app
 }
@@ -46,7 +46,7 @@ fn the_keys_walk_rows_and_items_not_links() {
     assert_eq!(app.at(Pane::Tracks), face, "then the faces under the list");
     let _ = app.update(Message::Key(Key::Named(iced::keyboard::key::Named::Enter), Modifiers::empty()));
     assert!(
-        matches!(app.peer.source, Source::Artist(..)),
+        matches!(app.peer.source, Route::Artist { .. }),
         "<Enter> on a face opens them: {:?}",
         app.peer.source
     );
@@ -71,11 +71,11 @@ fn a_still_pointer_does_not_take_the_cursor_from_the_keys() {
 #[test]
 fn ctrl_o_and_ctrl_i_go_back_and_forward() {
     let mut app = album("The Four Seasons");
-    let _ = app.update(Message::Select(Source::Albums));
+    let _ = app.update(Message::Select(Route::Albums));
     let _ = app.update(Message::Key(Key::Character("o".into()), Modifiers::CTRL));
     assert_eq!(app.peer.source.title(), "The Four Seasons");
     let _ = app.update(Message::Key(Key::Character("i".into()), Modifiers::CTRL));
-    assert_eq!(app.peer.source, Source::Albums);
+    assert_eq!(app.peer.source, Route::Albums);
 }
 
 /// A work's performance set apart, and its Play, are cells: `<Enter>` on
@@ -85,7 +85,10 @@ fn ctrl_o_and_ctrl_i_go_back_and_forward() {
 fn a_featured_play_is_a_key_away() {
     let mut app = super::demo_app();
     let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
-    let _ = app.update(Message::Select(Source::Work(id, "Goldberg Variations".into())));
+    let _ = app.update(Message::Select(Route::Work {
+        key: id,
+        title: "Goldberg Variations".into(),
+    }));
     app.pane = Pane::Tracks;
     let l = app.layout();
     assert!(l.cell(Mark::Featured).is_some(), "the performance set apart");

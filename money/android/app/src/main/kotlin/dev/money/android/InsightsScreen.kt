@@ -37,13 +37,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arkui.GroupCard
+import dev.arkui.RowDivider
+import dev.arkui.SectionHeader
 import dev.arkui.AmountText
 import dev.arkui.Donut
 import dev.arkui.LocalAmounts
-import dev.arkui.Meter
+import dev.arkui.ProgressBar
 import dev.arkui.Part
 import dev.arkui.Space
 import dev.arkui.chartPalette
+import uniffi.ark_format.formatMonth
+import uniffi.ark_format.formatMonthAlone
+import uniffi.ark_format.formatPercent
 
 @Composable
 fun InsightsScreen(ledger: Ledger) {
@@ -55,24 +61,24 @@ fun InsightsScreen(ledger: Ledger) {
             .sortedByDescending { it.spent }
             .mapIndexed { i, s -> Part(s.group, s.spent, palette[i % palette.size]) }
     val total = parts.sumOf { it.value }
-    val month = Dates.monthAlone(ledger.month)
+    val month = formatMonthAlone(ledger.month)
     val said =
         if (parts.isEmpty()) "Nothing spent in $month yet."
         else "Spent ${a.format(total)} in $month: " + parts.joinToString(", ") { "${it.label} ${a.format(it.value)}" }
     // The groups that did anything this month, the cards' not among them: paying a card is no spending.
-    val groups = ledger.byGroup(false).filter { (g, ls) -> g.id != Book.CARD_GROUP && ls.any { it.assigned != 0L || it.activity != 0L } }
+    val groups = ledger.byGroup(false).filter { (g, ls) -> !g.isCards() && ls.any { it.assigned != 0L || it.activity != 0L } }
 
     Page(title = "Insights") { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xl)) {
             item(key = "month") { MonthPager(ledger) }
-            item(key = "h-spending") { GroupHeading("Spending") }
+            item(key = "h-spending") { SectionHeader("Spending") }
             item(key = "spending") {
                 GroupCard {
                     if (parts.isEmpty()) {
                         Column(Modifier.fillMaxWidth().padding(Space.xl), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Nothing Spent Yet", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "What ${Dates.month(ledger.month)} spends shows here.",
+                                "What ${formatMonth(ledger.month)} spends shows here.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center)
@@ -89,13 +95,13 @@ fun InsightsScreen(ledger: Ledger) {
                         RowDivider()
                         parts.forEachIndexed { i, p ->
                             if (i > 0) RowDivider(inset = Space.l + 10.dp + Space.m)
-                            LegendRow(p, share(p.value, total))
+                            LegendRow(p, formatPercent(p.value, total))
                         }
                     }
                 }
             }
             ledger.summary?.let { s ->
-                item(key = "h-month") { GroupHeading("The Month") }
+                item(key = "h-month") { SectionHeader("The Month") }
                 item(key = "month-figures") {
                     GroupCard {
                         Figure("Income") { AmountText(s.income, style = MaterialTheme.typography.bodyLarge, color = positiveColor()) }
@@ -125,7 +131,7 @@ fun InsightsScreen(ledger: Ledger) {
                 }
             }
             if (groups.isNotEmpty()) {
-                item(key = "h-bars") { GroupHeading("Assigned and Spent") }
+                item(key = "h-bars") { SectionHeader("Assigned and Spent") }
                 item(key = "bars") {
                     GroupCard { PairedBars(groups.map { (g, ls) -> Triple(g.name, ls.sumOf { it.assigned }, ls.sumOf { -it.activity }.coerceAtLeast(0)) }) }
                     Text(
@@ -138,9 +144,6 @@ fun InsightsScreen(ledger: Ledger) {
         }
     }
 }
-
-/** A part's share of the whole, as a whole percent; empty for a whole of nothing. */
-fun share(part: Long, whole: Long): String = if (whole <= 0) "" else "${Math.round(part * 100.0 / whole)}%"
 
 /** One line of the ring's legend: its colour, its group, its share and its amount. */
 @Composable
@@ -215,7 +218,7 @@ private fun Key(color: Color, label: String) {
 @Composable
 private fun Bar(fraction: Float, color: Color, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Meter(fraction, color = color, track = Color.Transparent, height = 10.dp, modifier = Modifier.weight(1f))
+        ProgressBar(fraction, color = color, track = Color.Transparent, height = 10.dp, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(Space.s))
         Text(
             value,

@@ -1,5 +1,5 @@
-// The app's one model, on the main actor: the first run's machine run
-// (Onboarding.swift) — its effects carried out, the probe and the exchange
+// The app's one model, on the main actor: the sign-in machine run
+// (`ark_auth::onboarding`, Onboarding.swift) — its effects carried out, the probe and the exchange
 // off the main thread — the session it opens ([Bridge]) and the snapshot it
 // publishes, the month the budget shows, and every button the screens have,
 // each one function of the domain. Nothing of SwiftUI but
@@ -18,6 +18,8 @@ final class Model: ObservableObject {
     // MARK: what is published
 
     @Published private(set) var step: Step
+    /// What the first run's page says now: its question, what it waits on, its error.
+    @Published private(set) var said = Said(question: nil, status: nil, error: nil)
     @Published private(set) var snapshot = Snapshot()
     /// The month the budget, the spending and the month's figures are of: `2026-10`.
     @Published private(set) var month: String
@@ -30,11 +32,20 @@ final class Model: ObservableObject {
     @Published private(set) var bankPage: URL? = nil
     /// The answered ask put away from Settings.
     @Published private(set) var dismissedAsk: Id? = nil
+    /// Bumped whenever a view a screen holds moved, or was first held: the
+    /// screens read it again.
+    @Published private(set) var moves = 0
+
+    /// The views, held and kept by the core: what a screen holding one
+    /// (ArkUI's `.holding`) reads it from.
+    private(set) var session: Session? = nil
+    /// Told which views moved, on the main queue: the app's `Watched`.
+    var onMoved: ([MoneyView]) -> Void = { _ in }
 
     // MARK: what it holds
 
-    private var machine: Onboarding
-    private let remembered: Remembered
+    private let machine = Onboarding(app: .money)
+    private let kept: Kept
     private let root: URL
     /// The demo's day when it is a fixed one (previews, tests, screenshots); today when none.
     private let demoDay: String?
@@ -42,19 +53,18 @@ final class Model: ObservableObject {
     /// How a session's snapshot reaches the model: the main queue in the app.
     private let deliver: (@escaping () -> Void) -> Void
     /// When this phone asked for a Plaid page it has not opened yet.
-    private var awaiting: Int64? = nil
+    private var awaiting: Id?? = nil
 
     /// The model over `shelf` (the app's `UserDefaults`), replicas under `root`.
     init(shelf: Shelf, root: URL, demoDay: String? = nil,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
-        remembered = Remembered(shelf)
+        kept = Kept(shelf)
         self.root = root
         self.demoDay = demoDay
         self.deliver = deliver
-        machine = Onboarding(server: remembered.server, login: remembered.login, demo: remembered.demo) { loginUrl(server: $0, redirect: $1) }
-        step = machine.step
+        step = machine.step()
         month = Months.of(demoDay ?? moneyToday())
-        run(machine.begin())
+        send(.launched(remembered: kept.remembered, code: nil, returned: false))
     }
 
     // MARK: the first run
@@ -62,13 +72,9 @@ final class Model: ObservableObject {
     /// An event from a screen, the browser sheet, a link or the app's phase.
     func send(_ e: Event) {
         if case .foreground = e { bridge?.dialNow() }
-        let effects = machine.next(e)
-        step = machine.step
-        run(effects)
-    }
-
-    private func run(_ effects: [Effect]) {
-        step = machine.step
+        let effects = machine.next(event: e)
+        step = machine.step()
+        said = machine.said()
         for e in effects { carry(e) }
     }
 
@@ -78,39 +84,62 @@ final class Model: ObservableObject {
             let domain = moneyDomain()
             Task {
                 let found = await Probe.find(typed, domain: domain, get: Probe.get)
-                self.send(.checked(found))
+                self.send(.checked(found: Found(found)))
             }
-        case let .rememberServer(url): remembered.server = url
-        case let .browse(url): browse = URL(string: url)
-        case let .exchange(server, code):
-            Task {
-                let answer: Event = await Task.detached {
-                    do {
-                        return Event.signedIn(try exchange(server: server, code: code))
-                    } catch {
-                        return Event.signInFailed("Signing in didn't finish: \(why(error)).")
-                    }
-                }.value
-                self.send(answer)
-            }
-        case let .rememberLogin(l): remembered.login = l
-        case let .rememberDemo(d): remembered.demo = d
+        case let .remember(r): kept.remembered = r
+        case let .browse(_, url): browse = URL(string: url)
+        case let .exchange(server, code): trade { try exchange(server: server, code: code) }
+        case let .redeem(server, code): trade { try redeem(server: server, code: code) }
         case let .openSession(server, login): open(.server(server: server, login: login, root: root))
         case .openDemo: open(.demo(today: demoDay))
         case .closeSession: close()
         }
     }
 
-    /// What the browser sheet came back with: the redirect, or why there was none.
-    func signInReturned(_ url: URL?, error: String?) {
-        browse = nil
-        if let u = url, let code = Probe.code(u, scheme: Onboarding.scheme) { return send(.code(code)) }
-        send(.cameBack(error ?? "The sign-in came back without a login."))
+    // A code traded off the main thread: the login, or the sentence why not.
+    private func trade(_ f: @escaping @Sendable () throws -> Login) {
+        Task {
+            let answer: Event = await Task.detached {
+                do { return Event.signedIn(login: try f()) } catch { return Event.signInFailed(why: why(error)) }
+            }.value
+            self.send(answer)
+        }
     }
 
-    /// A link the system opened the app with: `money://auth?code=…` is a sign-in coming back.
+    /// What the browser sheet came back with: the redirect, or why there
+    /// was none (none for closed).
+    func signInReturned(_ url: URL?, error: String?) {
+        browse = nil
+        if let u = url, let code = Probe.code(u, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
+        send(.cameBack(why: url == nil ? error : "it came back without a code"))
+    }
+
+    /// A link the system opened the app with, or a code scanned.
+    /// `money://auth?code=…` is a sign-in coming back. Any other link of this
+    /// app's is a route (the domain's `Route`): `money://join?…`, a server and
+    /// a code to join with, goes to the sign-in machine (`Event.joined`,
+    /// asked about first); the rest is the shell's to navigate to ([link]).
+    /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
-        if let code = Probe.code(url, scheme: Onboarding.scheme) { send(.code(code)) }
+        if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
+        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }) {
+            if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
+            link = url
+            return
+        }
+        if let j = joinOf(link: url.absoluteString) { send(.joined(server: j.server, code: j.code)) }
+    }
+
+    /// A link the system opened the app with that names a page
+    /// (`money://…`), for the shell to navigate to (`Navigator.handle`);
+    /// nil again once it has.
+    @Published var link: URL? = nil
+
+    /// What a link names that is not a page: a sign-in link (`money://join?…`)
+    /// is the sign-in machine's ([open(url:)]), and is not navigated to.
+    func takes(_ route: Route) -> Bool {
+        if case .join = route { return true }
+        return false
     }
 
     // MARK: the session
@@ -120,24 +149,29 @@ final class Model: ObservableObject {
         bridge = Bridge(o, month: month, deliver: deliver,
                         publish: { [weak self] s in self?.took(s) },
                         notice: { [weak self] n in self?.notice = n },
-                        denied: { [weak self] d in self?.send(.denied(d)) },
-                        failed: { [weak self] w in self?.failed(w) })
+                        denied: { [weak self] d in self?.send(.denied(reason: d)) },
+                        failed: { [weak self] w in self?.failed(w) },
+                        opened: { [weak self] s in self?.session = s },
+                        moved: { [weak self] views in
+                            self?.moves += 1
+                            self?.onMoved(views)
+                        })
     }
 
     private func close() {
         bridge?.close()
         bridge = nil
+        session = nil
         snapshot = Snapshot()
     }
 
     private func failed(_ why: String) {
-        notice = "This phone's copy of the budget couldn't be opened (\(why))."
-        send(.signOut)
+        send(.openFailed(why: why))
     }
 
     private func took(_ s: Snapshot) {
         snapshot = s
-        follow()
+        followAsk()
         // Signed in just now: opening, until the replica has what the server had —
         // or the server cannot be reached, and there is nothing more to wait for.
         if case .opening = step, let st = s.status, st.linked || st.cursor > 0 || st.link == "waiting to dial" || st.link == "offline" {
@@ -151,7 +185,7 @@ final class Model: ObservableObject {
     // MARK: who and where
 
     var isDemo: Bool { if case .demo = step { return true } else { return false } }
-    var server: String { remembered.server ?? "" }
+    var server: String { machine.remembered().server ?? "" }
     var login: Login? {
         switch step {
         case let .running(_, l), let .opening(_, l): return l
@@ -159,7 +193,7 @@ final class Model: ObservableObject {
         }
     }
     /// What to call whoever is using the budget.
-    var who: String { isDemo ? "Alex" : login.map(Logins.name) ?? "" }
+    var who: String { isDemo ? "Alex" : login.map { loginName(login: $0) } ?? "" }
     /// Their picture, as this phone loads it (`Faces.url`); empty for none, and for the demo.
     var picture: String { login.map { Faces.url(server: server, user: $0.user, picture: $0.picture) } ?? "" }
 
@@ -184,85 +218,106 @@ final class Model: ObservableObject {
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }
     func showThisMonth() { showMonth(thisMonth) }
-    var monthName: String { moneyMonthName(month: month) }
+    var monthName: String { formatMonth(month: month) }
 
-    // MARK: registers
+    // MARK: what a screen holds
 
-    func hold(register account: Id?) { bridge?.hold(register: account) }
-    func release(register account: Id?) { bridge?.release(register: account) }
-    func register(_ account: Id?) -> [TxnLine]? { snapshot.registers[Registers.key(account)] }
+    /// `view` held for a screen until the answer is let go (ArkUI's
+    /// `.holding`, through the app's `Watched`).
+    func hold(_ view: MoneyView) -> Holding? {
+        let h = session?.hold(view: view)
+        moves += 1
+        return h
+    }
+
+    /// `f` of the session's `view`, once something holds it.
+    private func read<T>(_ view: MoneyView, _ f: (Session) -> T) -> T? {
+        guard let s = session, s.version(view: view) > 0 else { return nil }
+        return f(s)
+    }
+
+    /// `account`'s register (none: every account's), while a screen holds it.
+    func register(_ account: Id?) -> [TxnLine]? { read(.register(account: account)) { $0.register(account: account) } }
+
+    /// What a search finds in `account`'s register (none: every account's), while a screen holds it.
+    func search(_ account: Id?, _ text: String) -> [TxnLine]? {
+        read(.search(account: account, text: text)) { $0.search(account: account, text: text) }
+    }
+
+    /// What paid for `txn`, while a screen holds it.
+    func paid(_ txn: Id) -> [ReceiptLine] {
+        read(.paid(txn: txn)) { $0.paid(txn: txn) } ?? []
+    }
+
+    /// A receipt's items, while a screen holds them.
+    func items(_ receipt: String) -> [ItemLine] {
+        read(.items(receipt: receipt)) { $0.items(receipt: receipt) } ?? []
+    }
 
     // MARK: the budget's buttons
 
-    private func write(_ what: String, _ f: @escaping (Money) throws -> Void, done: @escaping (Bool) -> Void = { _ in }) {
+    private func write(_ what: String, _ change: MoneyChange, done: @escaping (Bool) -> Void = { _ in }) {
         guard let b = bridge else { return done(false) }
-        b.write(what, f, done: done)
+        b.write(what, change, done: done)
     }
 
     /// Give a category exactly `cents` this month.
     func assign(_ id: Id, _ cents: Int64, done: @escaping (Bool) -> Void = { _ in }) {
         let m = month
-        write("assign it", { try $0.assign(Assign(month: m, categoryId: id, amount: cents)) }, done: done)
+        write("assign it", .assign(value: Assign(month: m, categoryId: id, amount: cents)), done: done)
     }
 
     /// Money moved between `line` and `other` (either none for Ready to Assign), as [Moves] says.
     func move(_ line: BudgetLine?, _ other: Id?, _ cents: Int64, done: @escaping (Bool) -> Void = { _ in }) {
         let mm = Moves.of(month: month, line: line, other: other, cents: cents)
-        write("move the money", { try $0.moveMoney(mm) }, done: done)
+        write("move the money", .moveMoney(value: mm), done: done)
     }
 
     /// The whole month (or `only` these) assigned at once.
     func autoAssign(_ how: Auto, only: [Id] = []) {
         let m = month
-        write("auto-assign", { try $0.autoAssign(AutoAssign(month: m, how: how, only: only)) })
+        write("auto-assign", .autoAssign(value: AutoAssign(month: m, how: how, only: only)))
     }
 
-    func setTarget(_ id: Id, _ cents: Int64) { write("set the target", { try $0.setTarget(SetTarget(id: id, target: cents)) }) }
-    func addGroup(_ name: String) { write("add the group", { try $0.addGroup(AddGroup(name: name)) }) }
-    func addCategory(_ group: Id, _ name: String) { write("add the category", { try $0.addCategory(AddCategory(groupId: group, name: name)) }) }
-    func rename(category id: Id, _ name: String) { write("rename it", { try $0.renameCategory(RenameCategory(id: id, name: name)) }) }
-    func rename(group id: Id, _ name: String) { write("rename it", { try $0.renameGroup(RenameGroup(id: id, name: name)) }) }
-    func hide(category id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", { try $0.hideCategory(HideCategory(id: id, hidden: hidden)) }) }
-    func hide(group id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", { try $0.hideGroup(HideGroup(id: id, hidden: hidden)) }) }
-    func delete(category id: Id, moveTo: Id?) { write("delete it", { try $0.deleteCategory(DeleteCategory(id: id, moveTo: moveTo)) }) }
-    func delete(group id: Id, moveTo: Id?) { write("delete it", { try $0.deleteGroup(DeleteGroup(id: id, moveTo: moveTo)) }) }
+    func setTarget(_ id: Id, _ cents: Int64) { write("set the target", .setTarget(value: SetTarget(id: id, target: cents))) }
+    func addGroup(_ name: String) { write("add the group", .addGroup(value: AddGroup(name: name))) }
+    func addCategory(_ group: Id, _ name: String) { write("add the category", .addCategory(value: AddCategory(groupId: group, name: name))) }
+    func rename(category id: Id, _ name: String) { write("rename it", .renameCategory(value: RenameCategory(id: id, name: name))) }
+    func rename(group id: Id, _ name: String) { write("rename it", .renameGroup(value: RenameGroup(id: id, name: name))) }
+    func hide(category id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", .hideCategory(value: HideCategory(id: id, hidden: hidden))) }
+    func hide(group id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", .hideGroup(value: HideGroup(id: id, hidden: hidden))) }
+    func delete(category id: Id, moveTo: Id?) { write("delete it", .deleteCategory(value: DeleteCategory(id: id, moveTo: moveTo))) }
+    func delete(group id: Id, moveTo: Id?) { write("delete it", .deleteGroup(value: DeleteGroup(id: id, moveTo: moveTo))) }
 
     /// A row of Edit let go somewhere new, as [Arranging] reads it: a
     /// category into a group in front of another, or a group past others.
     func rearrange(_ r: Rearrange) {
         switch r {
-        case let .category(m): write("move it", { try $0.moveCategory(m) })
-        case let .group(m): write("move it", { try $0.moveGroup(m) })
+        case let .category(m): write("move it", .moveCategory(value: m))
+        case let .group(m): write("move it", .moveGroup(value: m))
         }
     }
 
     // MARK: transactions
 
     /// The form saved: a new transaction, or the one corrected.
-    func save(_ d: Draft, done: @escaping (Bool) -> Void = { _ in }) {
-        if let problem = d.problem {
-            notice = problem
+    func save(_ f: TxnForm, done: @escaping (Bool) -> Void = { _ in }) {
+        let d = f.sent
+        guard let change = d.toChange() else {
+            notice = d.problem() ?? "Couldn't save it."
             return done(false)
         }
-        if let e = d.edit {
-            write("save it", { try $0.editTransaction(e) }, done: done)
-        } else if let a = d.adding {
-            write("add it", { try $0.addTransaction(a) }, done: done)
-        }
+        write(d.editing == nil ? "add it" : "save it", change, done: done)
     }
 
-    func delete(_ ids: [Id]) { write("delete it", { try $0.deleteTransactions(Txns(ids: ids)) }) }
-    func approve(_ ids: [Id]) { write("approve it", { try $0.approve(Txns(ids: ids)) }) }
+    func delete(_ ids: [Id]) { write("delete it", .deleteTransactions(value: Txns(ids: ids))) }
+    func approve(_ ids: [Id]) { write("approve it", .approve(value: Txns(ids: ids))) }
     /// Given a category, which is looking at them: they are approved with it.
-    func categorize(_ ids: [Id], _ category: Id?) { write("categorize it", { try $0.categorize(Categorize(ids: ids, categoryId: category)) }) }
-    func setCleared(_ id: Id, _ cleared: Bool) { write("mark it", { try $0.setCleared(SetCleared(id: id, cleared: cleared)) }) }
+    func categorize(_ ids: [Id], _ category: Id?) { write("categorize it", .categorize(value: Categorize(ids: ids, categoryId: category))) }
+    func setCleared(_ id: Id, _ cleared: Bool) { write("mark it", .setCleared(value: SetCleared(id: id, cleared: cleared))) }
 
     // MARK: receipts
 
-    func hold(paid txn: Id) { bridge?.hold(paid: txn) }
-    func release(paid txn: Id) { bridge?.release(paid: txn) }
-    func hold(items receipt: String) { bridge?.hold(items: receipt) }
-    func release(items receipt: String) { bridge?.release(items: receipt) }
     /// A file's bytes, once the phone has them; asked for when it does not.
     func file(_ f: FileRef) -> Data? {
         if let d = snapshot.files[f.hash] { return d }
@@ -282,28 +337,28 @@ final class Model: ObservableObject {
             notice = problem
             return done(false)
         }
-        write("save the receipt", { try $0.writeReceipt(r.write) }, done: done)
+        write("save the receipt", .writeReceipt(value: r.write), done: done)
     }
 
     /// A receipt said to be what paid for `txn`; none, for nothing.
     func pay(receipt: String, with txn: Id?) {
-        write(txn == nil ? "take the receipt off" : "match the receipt", { try $0.pay(MatchReceipt(receiptId: receipt, txnId: txn)) })
+        write(txn == nil ? "take the receipt off" : "match the receipt", .pay(value: MatchReceipt(receiptId: receipt, txnId: txn)))
     }
 
     // MARK: accounts
 
-    func openAccount(name: String, kind: String, onBudget: Bool, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {
+    func openAccount(name: String, kind: AccountKind, onBudget: Bool, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {
         let input = OpenAccount(name: name, kind: kind, onBudget: onBudget, balance: balance, date: today)
-        write("add the account", { try $0.openAccount(input) }, done: done)
+        write("add the account", .openAccount(value: input), done: done)
     }
 
-    func rename(account id: Id, _ name: String) { write("rename it", { try $0.renameAccount(RenameAccount(id: id, name: name)) }) }
-    func close(account id: Id, _ closed: Bool) { write(closed ? "close it" : "reopen it", { try $0.closeAccount(CloseAccount(id: id, closed: closed)) }) }
+    func rename(account id: Id, _ name: String) { write("rename it", .renameAccount(value: RenameAccount(id: id, name: name))) }
+    func close(account id: Id, _ closed: Bool) { write(closed ? "close it" : "reopen it", .closeAccount(value: CloseAccount(id: id, closed: closed))) }
 
     /// The account agreed with the bank at `balance`: an adjustment for any difference, and what was cleared locked.
     func reconcile(_ id: Id, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {
         let d = today
-        write("reconcile it", { try $0.reconcile(Reconcile(accountId: id, balance: balance, date: d)) }, done: done)
+        write("reconcile it", .reconcile(value: Reconcile(accountId: id, balance: balance, date: d)), done: done)
     }
 
     // MARK: the bank
@@ -326,35 +381,35 @@ final class Model: ObservableObject {
 
     /// Connect a bank: the server asked for Plaid's page, which opens as
     /// soon as it answers with it ([bankPage]).
-    func connectBank() { askForPage("connect a bank") { try $0.connect() } }
+    func connectBank() { askForPage("connect a bank", .connect) }
 
     /// Log in to a bank again, on Plaid's page in update mode.
-    func reconnect(bank: String) { askForPage("reconnect the bank") { try $0.reconnect(BankName(bank: bank)) } }
+    func reconnect(bank: String) { askForPage("reconnect the bank", .reconnect(value: BankName(bank: bank))) }
 
     /// Plaid forgets the login and the bank stops importing; its accounts here stay.
     func disconnect(bank: String) {
         guard connectsBanks else { notice = "The demo has no server to disconnect a bank from."; return }
         dismissedAsk = nil
-        write("disconnect the bank", { try $0.disconnect(BankName(bank: bank)) })
+        write("disconnect the bank", .disconnect(value: BankName(bank: bank)))
     }
 
     /// A bank's account given an account of its own here, of the kind it is.
     func openAccount(for plaid: String) {
-        write("open an account for it", { try $0.open(OpenLinked(plaidAccountId: plaid, name: "")) }) { [weak self] ok in
+        write("open an account for it", .openLinked(value: OpenLinked(plaidAccountId: plaid, name: ""))) { [weak self] ok in
             if ok { self?.notice = "Opened. Its history comes with the bank's next import." }
         }
     }
 
     /// A bank's account made to feed an account already here.
     func link(_ plaid: String, to account: Id) {
-        write("link it", { try $0.link(LinkAccount(plaidAccountId: plaid, accountId: account)) }) { [weak self] ok in
+        write("link it", .link(value: LinkAccount(plaidAccountId: plaid, accountId: account))) { [weak self] ok in
             if ok { self?.notice = "Linked. The bank's next import writes there." }
         }
     }
 
     /// A bank's account left out, or followed again.
     func ignore(_ plaid: String, _ ignored: Bool) {
-        write(ignored ? "ignore it" : "follow it", { try $0.ignore(IgnoreLinked(plaidAccountId: plaid, ignored: ignored)) })
+        write(ignored ? "ignore it" : "follow it", .ignore(value: IgnoreLinked(plaidAccountId: plaid, ignored: ignored)))
     }
 
     /// Plaid's page opened again, from the ask in Settings.
@@ -367,27 +422,28 @@ final class Model: ObservableObject {
     func dismiss(ask: AskLine) { dismissedAsk = ask.id }
 
     /// An ask for a Plaid page: watched from now until the server answers it.
-    private func askForPage(_ what: String, _ f: @escaping (Money) throws -> Void) {
+    private func askForPage(_ what: String, _ change: MoneyChange) {
         guard connectsBanks else { notice = "The demo has no server to connect a bank through."; return }
-        awaiting = nowMs()
+        // The newest ask before this one: the core follows the next by its id, not a clock.
+        awaiting = .some(snapshot.asks.first?.id)
         dismissedAsk = nil
-        write(what, f) { [weak self] ok in if !ok { self?.awaiting = nil } }
+        write(what, change) { [weak self] ok in if !ok { self?.awaiting = nil } }
     }
 
     /// The asks moved: Plaid's page opened once its address arrives, and
     /// closed again when the server says the ask is over — the person
     /// logged in and the server finished, or the page ran out.
-    private func follow() {
-        if let page = bankPage, let a = snapshot.asks.first(where: { $0.url == page.absoluteString }), !BankAsks.isOpen(a) {
+    private func followAsk() {
+        if let page = bankPage, let a = snapshot.asks.first(where: { $0.url == page.absoluteString }), !a.isOpen() {
             bankPage = nil
         }
         guard let since = awaiting else { return }
-        switch BankAsks.follow(snapshot.asks, since: since) {
-        case .waiting: break
-        case let .open(url):
+        switch follow(asks: snapshot.asks, since: since) {
+        case .wait: break
+        case let .page(url):
             awaiting = nil
-            bankPage = url
-        case .answered: awaiting = nil
+            bankPage = URL(string: url)
+        case .over: awaiting = nil
         }
     }
 }

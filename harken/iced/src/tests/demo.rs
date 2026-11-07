@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use arkui::images::Images;
 
 use crate::peer::Peer;
-use crate::places::{Place, Source};
+use crate::routes::Route;
 use crate::{licences, media_url, seed};
 
 /// A seeded demo replica, from nothing.
@@ -295,11 +295,13 @@ fn the_messiah_has_an_orchestra_and_a_conductor() {
 #[test]
 fn the_whole_path_from_a_composer_to_a_movement() {
     let mut peer = fresh();
-    peer.source = Source::Composers;
+    peer.source = Route::Composers;
     peer.open_page();
     assert!(peer.composers().iter().any(|c| c.name == "Johann Sebastian Bach"));
 
-    peer.source = Source::Artist("Johann Sebastian Bach".into());
+    peer.source = Route::Artist {
+        name: "Johann Sebastian Bach".into(),
+    };
     peer.open_page();
     let goldbergs = peer
         .works()
@@ -309,14 +311,20 @@ fn the_whole_path_from_a_composer_to_a_movement() {
         .clone();
     assert_eq!(goldbergs.title, "Goldberg Variations");
 
-    peer.source = Source::Work(goldbergs.id.clone(), goldbergs.title.clone());
+    peer.source = Route::Work {
+        key: goldbergs.id.clone(),
+        title: goldbergs.title.clone(),
+    };
     peer.open_page();
     assert_eq!(peer.works().len(), 1, "the work's own row, for the header");
     assert_eq!(peer.works()[0].catalogue, "BWV 988");
     assert_eq!(peer.recordings().len(), 1);
     let take = peer.recordings()[0].clone();
 
-    peer.source = Source::Recording(take.id.clone(), String::new());
+    peer.source = Route::Recording {
+        key: take.id.clone(),
+        title: String::new(),
+    };
     peer.open_page();
     assert!(peer.rows().len() > 20, "{}", peer.rows().len());
     assert_eq!(
@@ -325,26 +333,61 @@ fn the_whole_path_from_a_composer_to_a_movement() {
     );
     assert_eq!(
         peer.source,
-        Source::Recording(take.id, "Kimiko Ishizaka".into()),
+        Route::Recording {
+            key: take.id,
+            title: "Kimiko Ishizaka".into()
+        },
         "a page titled with nothing"
     );
 }
 
 /// A work link resolves by its key, and one naming nothing lands on the
-/// library. Falsified by resolving `Place::Work` against `works` (one
+/// library. Falsified by resolving `Route::Work` against `works` (one
 /// composer's, empty here) instead of by query.
 #[test]
 fn a_work_link_resolves_by_its_key() {
     let peer = fresh();
     let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
     assert!(id.contains('/'), "{id}");
-    assert_eq!(peer.source_of(&Place::Work(id.clone())), Source::Work(id, "Goldberg Variations".into()));
-    assert_eq!(peer.source_of(&Place::Work("nobody/nothing".into())), Source::Library);
-    let water = peer.album_id("Water Music");
-    assert_eq!(peer.source_of(&Place::Album(water.clone())), Source::Album(water, "Water Music".into()));
+    // A route read from a path has no title: resolving finds it.
+    let work = peer.resolve(&Route::from_path(&format!("work/{}", arkui::url::encoded(&id))).unwrap());
     assert_eq!(
-        peer.source_of(&Place::Album("Water Music".into())),
-        Source::Library,
+        work,
+        Route::Work {
+            key: id,
+            title: String::new()
+        }
+    );
+    assert_eq!(work.title(), "Goldberg Variations");
+    assert_eq!(
+        peer.resolve(&Route::Work {
+            key: "nobody/nothing".into(),
+            title: String::new()
+        }),
+        Route::Library
+    );
+    let water = peer.album_id("Water Music");
+    let album = peer.resolve(&Route::Album {
+        key: water.clone(),
+        title: String::new(),
+    });
+    assert_eq!(
+        (album.path(), album.title()),
+        (
+            Route::Album {
+                key: water,
+                title: String::new()
+            }
+            .path(),
+            "Water Music".to_string()
+        )
+    );
+    assert_eq!(
+        peer.resolve(&Route::Album {
+            key: "Water Music".into(),
+            title: String::new()
+        }),
+        Route::Library,
         "an album by its key, not its name"
     );
 }
@@ -369,7 +412,10 @@ fn the_catalogue_is_the_key() {
 fn a_featured_play_queues_the_performance() {
     let mut app = super::demo_app();
     let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
-    let _ = app.update(crate::Message::Select(Source::Work(id.clone(), "Goldberg Variations".into())));
+    let _ = app.update(crate::Message::Select(Route::Work {
+        key: id.clone(),
+        title: "Goldberg Variations".into(),
+    }));
     assert!(app.peer.rows().is_empty(), "a work's page lists performances");
     let take = app.peer.recordings()[0].clone();
     let titles = |q: &[crate::listening::Track]| q.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
@@ -378,7 +424,13 @@ fn a_featured_play_queues_the_performance() {
     let _ = app.update(crate::Message::PlayRecording(take.id.clone()));
     assert_eq!(titles(&app.queue), movements);
     assert_eq!(app.queue.len() as i64, take.tracks);
-    assert_eq!(app.queued_from, arkui::route::Route::fragment(&Place::Recording(take.id.clone())));
+    assert_eq!(
+        app.queued_from,
+        arkui::router::fragment(&Route::Recording {
+            key: take.id.clone(),
+            title: String::new()
+        })
+    );
 
     app.queue.clear();
     let _ = app.update(crate::Message::PlayWork(id));
@@ -402,12 +454,16 @@ fn the_best_known_works_are_the_most_recorded() {
     assert_eq!(ranked, ["Gigue", "Bourrée", "Air", "Chaconne"]);
 
     let mut app = super::demo_app();
-    let _ = app.update(crate::Message::Select(Source::Artist("Johann Sebastian Bach".into())));
+    let _ = app.update(crate::Message::Select(Route::Artist {
+        name: "Johann Sebastian Bach".into(),
+    }));
     let all = app.peer.works().len();
     assert_eq!(app.listed_works().len(), all.min(crate::KNOWN_WORKS));
     let _ = app.update(crate::Message::AllWorks(true));
     assert_eq!(app.listed_works().len(), all);
-    let _ = app.update(crate::Message::Select(Source::Artist("Johann Sebastian Bach".into())));
+    let _ = app.update(crate::Message::Select(Route::Artist {
+        name: "Johann Sebastian Bach".into(),
+    }));
     assert!(!app.all_works, "gone with the page");
 }
 
@@ -419,16 +475,26 @@ fn the_best_known_works_are_the_most_recorded() {
 fn a_composer_and_an_artist_are_one_page() {
     let mut app = super::demo_app();
     let bach = "Johann Sebastian Bach".to_string();
-    assert_eq!(app.peer.source_of(&Place::Composer(bach.clone())), Source::Artist(bach.clone()));
-    assert_eq!(app.peer.source_of(&Place::Artist(bach.clone())), Source::Artist(bach.clone()));
-    let _ = app.update(crate::Message::Select(Source::Composers));
+    let composer = Route::from_path(&format!("composer/{}", arkui::url::encoded(&bach))).unwrap();
+    assert_eq!(app.peer.resolve(&composer), Route::Artist { name: bach.clone() });
+    assert_eq!(
+        app.peer.resolve(&Route::Artist { name: bach.clone() }),
+        Route::Artist { name: bach.clone() }
+    );
+    let _ = app.update(crate::Message::Select(Route::Composers));
     let at = app.peer.composers().iter().position(|c| c.name == bach).unwrap();
-    assert_eq!(app.card_under_cursor(at), Some(Source::Artist(bach.clone())));
+    assert_eq!(app.card_under_cursor(at), Some(Route::Artist { name: bach.clone() }));
 
-    let _ = app.update(crate::Message::Select(Source::Artist(bach.clone())));
+    let _ = app.update(crate::Message::Select(Route::Artist { name: bach.clone() }));
     assert!(!app.peer.works().is_empty(), "a composer's page lists their works");
     let first = app.listed_works()[0].clone();
-    assert_eq!(app.card_under_cursor(0), Some(Source::Work(first.id, first.title)));
+    assert_eq!(
+        app.card_under_cursor(0),
+        Some(Route::Work {
+            key: first.id,
+            title: first.title
+        })
+    );
 
     let pop = app
         .peer
@@ -437,7 +503,7 @@ fn a_composer_and_an_artist_are_one_page() {
         .find(|a| !app.peer.composers().iter().any(|c| c.name == a.name))
         .map(|a| a.name.clone());
     if let Some(pop) = pop {
-        let _ = app.update(crate::Message::Select(Source::Artist(pop)));
+        let _ = app.update(crate::Message::Select(Route::Artist { name: pop }));
         assert!(app.peer.works().is_empty());
         assert_eq!(app.card_under_cursor(0), None, "<Enter> plays a song");
     }
@@ -458,7 +524,10 @@ fn the_catalogue_describes_its_people_and_works() {
         .expect("Bach composed something here");
     assert!(bach.description.contains("Leipzig"), "{}", bach.description);
     let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
-    let _ = app.update(crate::Message::Select(Source::Work(id.clone(), "Goldberg Variations".into())));
+    let _ = app.update(crate::Message::Select(Route::Work {
+        key: id.clone(),
+        title: "Goldberg Variations".into(),
+    }));
     let work = app.peer.works().iter().find(|w| w.id == id).cloned().expect("the work's own row");
     assert!(work.description.contains("thirty variations"), "{}", work.description);
 }
@@ -495,15 +564,22 @@ fn the_demo_has_a_podcast_and_sermons() {
     assert_eq!(podcasts.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Full Time Nix"]);
     assert!(app.peer.items().iter().all(|i| i.kind == "song"), "the Songs page is the music");
 
-    let _ = app.update(crate::Message::Select(Source::Podcasts));
-    assert_eq!(app.peer.source.place(), Place::Podcasts);
-    let show = Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into());
+    let _ = app.update(crate::Message::Select(Route::Podcasts));
+    assert_eq!(app.peer.source, Route::Podcasts);
+    let show = Route::Show {
+        key: "podcast/full-time-nix".into(),
+        title: "Full Time Nix".into(),
+    };
     let _ = app.update(crate::Message::Select(show.clone()));
     let rows = app.peer.rows().to_vec();
     assert_eq!(rows.len(), 11, "the newest ten, and an older one with a transcript");
     assert!(rows.iter().all(|r| r.kind == "podcast" && r.creator == "Full Time Nix"));
     assert_eq!(rows[0].title, "NixCon 2026 Day Ⅰ", "newest first");
-    assert_eq!(app.peer.source_of(&Place::Show("podcast/full-time-nix".into())), show);
+    let found = app.peer.resolve(&Route::Show {
+        key: "podcast/full-time-nix".into(),
+        title: String::new(),
+    });
+    assert_eq!((found.path(), found.title()), (show.path(), show.title()));
     let (_, entries) = app.row_entries(rows[0].id).unwrap();
     assert!(entries.iter().any(|e| e.label == "Go to Full Time Nix"));
 }
@@ -519,11 +595,14 @@ fn the_demo_has_a_podcast_and_sermons() {
 #[test]
 fn a_guests_page_is_the_episodes_they_are_on() {
     use crate::nav::Mark;
-    use crate::places::Pane;
+    use crate::routes::Pane;
     use arkui::vim::{Action, Motion};
     let jacek = "Jacek Galowicz";
     let mut app = super::demo_app();
-    let show = Source::Show("podcast/full-time-nix".into(), "Full Time Nix".into());
+    let show = Route::Show {
+        key: "podcast/full-time-nix".into(),
+        title: "Full Time Nix".into(),
+    };
     let _ = app.update(crate::Message::Select(show));
     let hosts: Vec<String> = app.hosts().into_iter().map(|h| h.name).collect();
     assert_eq!(hosts, ["Shahar \"Dawn\" Or"], "the host, from the newest episode");
@@ -546,10 +625,10 @@ fn a_guests_page_is_the_episodes_they_are_on() {
     let l = app.layout();
     let click = l.cell(Mark::Guest(0, k)).and_then(|c| l.message(c).cloned()).expect("his name opens him");
     let _ = app.update(click);
-    assert_eq!(app.peer.source, Source::Artist(jacek.into()));
+    assert_eq!(app.peer.source, Route::Artist { name: jacek.into() });
     assert_eq!(
-        app.peer.source_of(&Place::Artist(jacek.into())),
-        Source::Artist(jacek.into()),
+        app.peer.resolve(&Route::Artist { name: jacek.into() }),
+        Route::Artist { name: jacek.into() },
         "a link to him lands here"
     );
 
@@ -574,16 +653,16 @@ fn a_guests_page_is_the_episodes_they_are_on() {
 #[test]
 fn an_episode_skips_seconds_and_a_song_a_track() {
     let mut app = super::demo_app();
-    let _ = app.update(crate::Message::Select(Source::Show(
-        "podcast/full-time-nix".into(),
-        "Full Time Nix".into(),
-    )));
+    let _ = app.update(crate::Message::Select(Route::Show {
+        key: "podcast/full-time-nix".into(),
+        title: "Full Time Nix".into(),
+    }));
     let first = app.peer.rows()[0].id;
     let _ = app.update(crate::Message::PlayItem(first));
     assert!(app.jogs(), "an episode plays");
     assert!(matches!(app.forward(), crate::Message::Jog(30)));
     assert!(matches!(app.back(), crate::Message::Jog(-15)));
-    let _ = app.update(crate::Message::Select(Source::Library));
+    let _ = app.update(crate::Message::Select(Route::Library));
     let song = app.peer.items()[0].id;
     let _ = app.update(crate::Message::PlayItem(song));
     assert!(!app.jogs(), "a song plays");
@@ -605,10 +684,10 @@ fn an_episode_skips_seconds_and_a_song_a_track() {
 fn a_feed_is_followed_from_its_shows_page() {
     use crate::directory::Found;
     use crate::nav::Mark;
-    use crate::places::Focus;
+    use crate::routes::Focus;
     const FEED: &str = "https://feeds.transistor.fm/full-time-nix";
     let mut app = super::demo_app();
-    let _ = app.update(crate::Message::Select(Source::Sermons));
+    let _ = app.update(crate::Message::Select(Route::Sermons));
     let add = app.layout().cell(Mark::Add).expect("the + is a cell");
     let _ = app.update(crate::Message::HoverAt(add));
     app.keyed = None;
@@ -621,7 +700,7 @@ fn a_feed_is_followed_from_its_shows_page() {
     let _ = app.act(arkui::vim::Action::Cancel);
     assert!(app.adding.is_none(), "<Esc> shuts it");
 
-    let _ = app.update(crate::Message::Select(Source::Podcasts));
+    let _ = app.update(crate::Message::Select(Route::Podcasts));
     let _ = app.update(crate::Message::Adding(true));
     let _ = app.update(crate::Message::Query("full time nix".into()));
     let nix = Found {
@@ -643,7 +722,7 @@ fn a_feed_is_followed_from_its_shows_page() {
     assert!(subs.contains(&(FEED.into(), "podcast".into(), 20)));
     assert!(app.peer.subscription_of("sermon/gospel-in-life").is_none(), "nobody follows its feed");
     // Not read yet: on its page over the shows, with its Unfollow.
-    let _ = app.update(crate::Message::Select(Source::Sermons));
+    let _ = app.update(crate::Message::Select(Route::Sermons));
     assert_eq!(app.unread_feeds().len(), 1);
     assert!(app.layout().cell(Mark::Unfollow(0)).is_some());
 
@@ -659,7 +738,10 @@ fn a_feed_is_followed_from_its_shows_page() {
     let id = "podcast/full-time-nix";
     let sub = app.peer.subscription_of(id).expect("its show followed").clone();
     assert!(sub.has_older());
-    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
+    let _ = app.update(crate::Message::Select(Route::Show {
+        key: id.into(),
+        title: "Full Time Nix".into(),
+    }));
     let older = app.layout().cell(Mark::Older).expect("older ones under the list");
     assert!(older > app.layout().page.main, "after the episodes");
     let _ = app.update(crate::Message::HoverAt(older));
@@ -708,7 +790,10 @@ fn a_feed_is_followed_from_its_shows_page() {
 fn an_episode_keeps_each_listeners_place_and_its_chapters() {
     let mut app = super::demo_app();
     let id = "podcast/full-time-nix";
-    let _ = app.update(crate::Message::Select(Source::Show(id.into(), "Full Time Nix".into())));
+    let _ = app.update(crate::Message::Select(Route::Show {
+        key: id.into(),
+        title: "Full Time Nix".into(),
+    }));
     let first = app.peer.rows()[0].clone();
     let place = crate::domain::ReportProgress {
         media_id: crate::peer::key(first.id),

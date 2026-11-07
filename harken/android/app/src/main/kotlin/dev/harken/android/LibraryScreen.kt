@@ -30,8 +30,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.arkui.AccountFace
+import dev.arkui.Chip
 import dev.arkui.Cover
 import dev.arkui.Empty
 import dev.arkui.ListRow
@@ -59,6 +58,8 @@ import dev.arkui.rememberDestinationScrollState
 import dev.arkui.rememberHero
 import dev.arkui.Press
 import dev.arkui.pressable
+import uniffi.ark_format.formatCount
+import uniffi.ark_format.formatSpan
 
 /** The Library's lists; a list of shows says which kind (`podcast`, `sermon`), which its + follows a feed as. */
 enum class LibraryTab(val title: String, val kind: String? = null) {
@@ -112,20 +113,7 @@ fun LibraryScreen(tab: LibraryTab, onTab: (LibraryTab) -> Unit, data: LibraryDat
             // with no outline.
             for (t in LibraryTab.entries.filter { it == tab || offers(it, data) }) {
                 val on = t == tab
-                FilterChip(
-                    selected = on,
-                    onClick = { onTab(t) },
-                    label = { Text(t.title) },
-                    shape = CircleShape,
-                    colors =
-                        FilterChipDefaults.filterChipColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            labelColor = MaterialTheme.colorScheme.onSurface,
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = Color.Transparent, selectedBorderColor = Color.Transparent),
-                )
+                Chip(t.title, selected = on, onClick = { onTab(t) })
             }
         }
         if (data.offline != null) Offline(data.offline)
@@ -206,7 +194,7 @@ private fun ShowsGrid(shows: List<Show>, waiting: List<Subscription>, kind: Stri
                 Cover(s.title, s.art, 180.dp, Modifier.fillMaxWidth().aspectRatio(1f).then(hero.modifier))
                 Spacer(Modifier.height(Space.s))
                 Text(s.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(s.author.ifEmpty { Media.count(s.episodes.toInt(), "episode") }, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(s.author.ifEmpty { formatCount(s.episodes, "episode") }, style = quiet(MaterialTheme.typography.bodySmall), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(Space.s)) }
@@ -303,7 +291,7 @@ private fun Artists(artists: List<Artist>, act: Do) {
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = Space.s)) {
         items(artists, key = { it.name }) { a ->
             val hero = rememberHero(Space.corner, round = true)
-            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = Media.count(a.tracks.toInt(), "song")) {
+            ListRow(onClick = hero.lifting { act.open(Page.ForArtist(a.name)) }, title = a.name, under = formatCount(a.tracks, "song")) {
                 Cover(a.name, a.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }
         }
@@ -322,7 +310,7 @@ private fun Composers(composers: List<Composer>, act: Do) {
         items(composers, key = { it.name }) { c ->
             val hero = rememberHero(Space.corner, round = true)
             // When they lived; nobody's years known, and it is how many works of theirs there are.
-            val under = Catalogue.span(c.born, c.died).ifEmpty { Media.count(c.works.toInt(), "work") }
+            val under = formatSpan(c.born, c.died).ifEmpty { formatCount(c.works, "work") }
             ListRow(onClick = hero.lifting { act.open(Page.ForArtist(c.name)) }, title = c.name, under = under) {
                 Cover(c.name, c.art, 56.dp, Modifier.size(56.dp).then(hero.modifier), round = true)
             }

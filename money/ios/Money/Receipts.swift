@@ -112,17 +112,16 @@ struct ReceiptDraft: Equatable {
         if self.items.isEmpty { self.items = [PaperItem()] }
     }
 
-    /// Cents as dollars typed: `429` is `4.29`, `-50` is `-0.50`.
+    /// Cents as dollars typed, as the paper prints them: `429` is `4.29`,
+    /// `-50` is `-0.50`.
     static func typed(_ cents: Int64) -> String {
-        let sign = cents < 0 ? "-" : ""
-        let m = cents.magnitude
-        return "\(sign)\(m / 100).\(String(format: "%02d", Int(m % 100)))"
+        formatAmountEditable(cents: cents, style: numberStyleUs())
     }
 
-    /// What was typed as cents, as the desktop reads an amount (`Cents.parse`:
-    /// `4.29`, `$4.29`, `-0.5`); none when it is not one, or blank.
+    /// What was typed as cents, as the desktop reads an amount (`4.29`,
+    /// `$4.29`, `-0.5`); none when it is not one, or blank.
     static func cents(_ typed: String) -> Int64? {
-        typed.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Cents.parse(typed)
+        typed.trimmingCharacters(in: .whitespaces).isEmpty ? nil : parseAmount(typed: typed, style: numberStyleUs())
     }
 
     /// The lines with something in them.

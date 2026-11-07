@@ -1,7 +1,7 @@
 // Every destination comes back where it was left, on its first frame, however
 // it comes back — and is where it was on every frame it is drawn on the way,
 // the preview of a back included (docs/plan-android.md, "Where a
-// destination's state lives"). Parametrized over `Route`, the list each
+// destination's state lives"). Parametrized over `Destination`, the list each
 // tab's NavHost is built from, so a route added there is a case here: the
 // `when` in `reach` does not compile without one. The library's views and
 // the Library's four lists are each a case of their own.
@@ -41,6 +41,7 @@ import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.Recordings
 import dev.harken.android.gen.Works
+import uniffi.harken_domain.Route
 import dev.arkdb.ffi.Id
 import android.view.MotionEvent
 import android.view.View
@@ -93,12 +94,12 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
 /** A destination as a case: a route, and for the Library's root which of its lists. */
-data class Case(val route: Route, val view: LibraryTab? = null) {
+data class Case(val route: Destination, val view: LibraryTab? = null) {
     override fun toString(): String = if (view == null) route.name else "${route.name}-${view.name}"
 
     companion object {
         /** Every route, and the Library's root once per list. */
-        val all: List<Case> = Route.entries.flatMap { r -> if (r == Route.Library) LibraryTab.entries.map { Case(r, it) } else listOf(Case(r)) }
+        val all: List<Case> = Destination.entries.flatMap { r -> if (r == Destination.Library) LibraryTab.entries.map { Case(r, it) } else listOf(Case(r)) }
     }
 }
 
@@ -391,19 +392,19 @@ class RestorationTests(private val case: Case) {
     /** Where on the stack it is put, and how. */
     private fun Driver.reach() {
         when (case.route) {
-            Route.Home -> {}
-            Route.Search -> {
+            Destination.Home -> {}
+            Destination.Search -> {
                 click("Search")
             }
-            Route.Library -> {}
-            Route.Album -> navs.getValue(tab).navigate(Page.ForAlbum(Demo.key("Water Music")).route)
-            Route.Artist -> navs.getValue(tab).navigate(Page.ForArtist(Fixture.ARTIST).route)
-            Route.Playlist -> navs.getValue(tab).navigate(Page.ForPlaylist(Fixture.first!!).route)
-            Route.Work -> navs.getValue(tab).navigate(Page.ForWork(Fixture.work).route)
-            Route.Recording -> navs.getValue(tab).navigate(Page.ForRecording(Fixture.recording).route)
-            Route.Show -> navs.getValue(tab).navigate(Page.ForShow(Fixture.show).route)
-            Route.Settings -> navs.getValue(tab).navigate(Route.Settings.pattern)
-            Route.Diagnostics -> navs.getValue(tab).navigate(Route.Diagnostics.pattern)
+            Destination.Library -> {}
+            Destination.Album -> navs.getValue(tab).navigate(Route.Album(Demo.key("Water Music"), "Water Music").destination())
+            Destination.Artist -> navs.getValue(tab).navigate(Route.Artist(Fixture.ARTIST).destination())
+            Destination.Playlist -> navs.getValue(tab).navigate(Route.Playlist(Fixture.first!!.hex, Fixture.playlists.first()).destination())
+            Destination.Work -> navs.getValue(tab).navigate(Route.Work(Fixture.work, "").destination())
+            Destination.Recording -> navs.getValue(tab).navigate(Route.Recording(Fixture.recording, "").destination())
+            Destination.Show -> navs.getValue(tab).navigate(Route.Show(Fixture.show, "").destination())
+            Destination.Settings -> navs.getValue(tab).navigate(Destination.Settings.pattern)
+            Destination.Diagnostics -> navs.getValue(tab).navigate(Destination.Diagnostics.pattern)
         }
     }
 
@@ -425,7 +426,7 @@ class RestorationTests(private val case: Case) {
                     if (!s.canScrollForward) fits += k
                     else if (k.startsWith("shelf:")) s.scrollToItem(1, 23)
                     // Search's results end in its two shelves: down to them, so they are drawn.
-                    else if (case.route == Route.Search) s.scrollToItem(s.layoutInfo.totalItemsCount - 5, 31)
+                    else if (case.route == Destination.Search) s.scrollToItem(s.layoutInfo.totalItemsCount - 5, 31)
                     else s.scrollToItem(2, 31)
                 }
                 is LazyGridState -> if (!s.canScrollForward) fits += k else s.scrollToItem(2, 31)
@@ -481,7 +482,7 @@ class RestorationTests(private val case: Case) {
         Driver(paparazzi).run(30_000L, start = case.view) {
             reach()
             frames(700)
-            if (case.route == Route.Search) {
+            if (case.route == Destination.Search) {
                 type("a")
                 frames(700)
             }
@@ -506,7 +507,7 @@ class RestorationTests(private val case: Case) {
             holds("tab switched back", left) { click(tab.title) }
 
             // A page opened from it, and back: by the arrow, by the edge, by a pull.
-            val page = Page.ForAlbum(Demo.key("The Four Seasons")).route
+            val page = Route.Album(Demo.key("The Four Seasons"), "The Four Seasons").destination()
             for (how in listOf("arrow", "edge", "pull")) {
                 navs.getValue(tab).navigate(page)
                 frames(700)

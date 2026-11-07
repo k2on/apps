@@ -21,7 +21,10 @@ struct RegisterView: View {
 
     var body: some View {
         let a = model.snapshot.account(account)
-        let rows = Registers.search(model.register(account) ?? [], needle)
+        // A search is the core's (`MoneyView.search`: payee, the bank's words, memo, category, account or amount), held while typed.
+        let searched = needle.trimmingCharacters(in: .whitespaces)
+        let all = model.register(account) ?? []
+        let rows = searched.isEmpty ? all : model.search(account, searched) ?? []
         List {
             if let a {
                 Section {
@@ -67,13 +70,13 @@ struct RegisterView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .holding(searched.isEmpty ? nil : MoneyView.search(account: account, text: searched))
         .navigationTitle(a?.name ?? "All Accounts")
-        .navigationSubtitle(a.map(Accounts.subtitle) ?? "Every transaction in the household")
+        .navigationSubtitle(a.map { $0.subtitle() } ?? "Every transaction in the household")
         .searchable(text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.selection, trigger: cleared)
-        .onAppear { model.hold(register: account) }
-        .onDisappear { model.release(register: account) }
+        .holding(MoneyView.register(account: account))
         .toolbar {
             if let a {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -101,7 +104,7 @@ struct RegisterView: View {
     /// The working balance large, the cleared and uncleared under it, and
     /// what the bank last said when Plaid feeds the account.
     private func balances(_ a: AccountLine) -> some View {
-        HeroFigure(Accounts.owes(a.kind) ? "Balance Owed" : "Working Balance", cents: a.balance, tint: .neutral,
+        HeroFigure((a.accountKind()?.owes() ?? false) ? "Balance Owed" : "Working Balance", cents: a.balance, tint: .neutral,
                    note: a.bankBalance.map { "The bank says \(CentsText.string($0))" } ?? "") {
             HStack(spacing: Space.l) {
                 figure("Cleared", a.cleared, "c.circle.fill")
@@ -124,16 +127,10 @@ struct RegisterView: View {
 /// A day's heading, as Wallet and Mail head one: Today, Yesterday, or the weekday and date.
 struct DayHeader: View {
     let day: String
+    @EnvironmentObject private var model: Model
 
     var body: some View {
-        if let d = Days.date(day) {
-            let cal = Calendar.current
-            if cal.isDateInToday(d) { Text("Today") }
-            else if cal.isDateInYesterday(d) { Text("Yesterday") }
-            else { Text(d, format: .dateTime.weekday(.wide).month(.abbreviated).day()) }
-        } else {
-            Text(day)
-        }
+        Text(formatDayHeading(day: day, today: model.today))
     }
 }
 
@@ -145,10 +142,10 @@ struct TxnButton: View {
     @Environment(\.present) private var present
 
     var body: some View {
-        Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
+        Button { present(.transaction(TxnForm(txn))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
             .foregroundStyle(.ink)
             .contextMenu {
-                Button { present(.transaction(Draft(txn, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
+                Button { present(.transaction(TxnForm(txn))) } label: { Label("Edit", systemImage: "pencil") }
                 if !txn.transfer {
                     Button { present(.categorize([txn.id], approve: false)) } label: { Label("Categorize…", systemImage: "folder") }
                 }
@@ -184,7 +181,7 @@ struct TxnRow: View {
                 HStack(spacing: Space.xs) {
                     if txn.transfer { Image(systemName: "arrow.left.arrow.right").font(.caption2) }
                     Text(txn.category)
-                        .foregroundStyle(Registers.needsCategory(txn) ? Color.caution : Color.quiet)
+                        .foregroundStyle(txn.needsCategory() ? Color.caution : Color.quiet)
                     if showAccount { Text("· \(txn.account)").foregroundStyle(.quiet) }
                 }
                 .font(.caption)

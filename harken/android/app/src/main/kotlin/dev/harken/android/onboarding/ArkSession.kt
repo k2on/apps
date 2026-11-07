@@ -28,7 +28,7 @@
 package dev.harken.android.onboarding
 
 import dev.arkdb.ffi.Listener
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.Login
 import dev.arkdb.ffi.Refusal
 import dev.arkdb.ffi.socketUrl
 import dev.harken.android.gen.Device

@@ -233,11 +233,11 @@ struct LastPlayed: Equatable {
                 on = id == h.me ? "Playing on \(here)" : "Playing on \(s.devices[id]?.name ?? "another device")"
             }
             let p = Playing(id: t.id.hex, title: t.title, artist: t.creator, album: t.album, art: cover(t.album, t.creator))
-            return LastPlayed(track: p, from: Page.of(place: a.from, playlists: playlists), live: true, on: on)
+            return LastPlayed(track: p, from: Page.of(from: a.from, playlists: playlists), live: true, on: on)
         }
         guard let p = played else { return nil }
         let track = Playing(id: p.trackId?.hex ?? "", title: p.title, artist: p.creator, album: p.album, art: cover(p.album, p.creator))
-        return LastPlayed(track: track, from: Page.of(place: p.from, playlists: playlists))
+        return LastPlayed(track: track, from: Page.of(from: p.from, playlists: playlists))
     }
 
     /// Where it was played from, in words: an album by its name, found by its

@@ -4,7 +4,7 @@
 // harken server in the same process, `harken/ffi`).
 package dev.harken.android
 
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.Login
 import dev.harken.android.gen.AddSong
 import dev.harken.android.gen.Device as Declared
 import dev.harken.android.gen.Harken

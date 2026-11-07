@@ -73,10 +73,10 @@ fun lastPlayed(h: Heard, played: Played?, playlists: List<Playlist>, art: (Strin
             else (a.output as? dev.harken.android.gen.Output.Device)?.id?.let { id ->
                 if (id == h.me) "Playing on $here" else "Playing on ${s.devices[id]?.name ?: "another device"}"
             }
-        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album, t.creator)), Page.ofPlace(a.from, playlists), live = true, on = on)
+        return LastPlayed(Playing(t.id.hex, t.title, t.creator, t.album, cover(t.album, t.creator)), Page.of(a.from, playlists), live = true, on = on)
     }
     val p = played ?: return null
-    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album, p.creator)), Page.ofPlace(p.from, playlists))
+    return LastPlayed(Playing(p.track?.hex ?: "", p.title, p.creator, p.album, cover(p.album, p.creator)), Page.of(p.from, playlists))
 }
 
 /** What Home draws: a snapshot, its lists copies, so an equal one is the same one to Compose. */

@@ -45,6 +45,7 @@ import dev.harken.android.gen.NameVoice
 import dev.harken.android.gen.Unsubscribe
 import dev.harken.android.gen.TrackDetailsEntry
 import dev.harken.android.gen.TranscriptEntry
+import uniffi.ark_format.formatLength
 
 /**
  * Something playable as a list draws it: a row of the `library` or `playlist` view (the domain's
@@ -234,25 +235,6 @@ data class EpisodeDetail(val mediaId: Id, val description: String, val published
 
 /** What an episode's row says, as a podcast app's do: when it came out, and how much of it is left. */
 object Episodes {
-    private val MONTHS = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-
-    /**
-     * When it came out, as the iPhone's row says it: "Today", "Yesterday", then its day — "Oct 21" —
-     * with its year when that is not this one. Nothing, for nobody said.
-     */
-    fun dated(publishedMs: Long, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
-        if (publishedMs <= 0) return ""
-        val day = java.time.Instant.ofEpochMilli(publishedMs).atZone(zone).toLocalDate()
-        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-        val ago = java.time.temporal.ChronoUnit.DAYS.between(day, today)
-        return when {
-            ago == 0L -> "Today"
-            ago == 1L -> "Yesterday"
-            day.year == today.year -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}"
-            else -> "${MONTHS[day.monthValue - 1]} ${day.dayOfMonth}, ${day.year}"
-        }
-    }
-
     /**
      * What stands beside its play: how its download to the server goes while its file is not
      * there yet, "Played", the time left once begun, or its length.
@@ -262,8 +244,8 @@ object Episodes {
         return when {
             download != null -> download.short
             mine?.finished == true -> "Played"
-            mine != null && mine.positionMs > 0 && whole > 0 -> "${Media.spell((whole - mine.positionMs).coerceAtLeast(0))} left"
-            track.durationMs > 0 -> Media.spell(track.durationMs)
+            mine != null && mine.positionMs > 0 && whole > 0 -> "${formatLength((whole - mine.positionMs).coerceAtLeast(0))} left"
+            track.durationMs > 0 -> formatLength(track.durationMs)
             else -> ""
         }
     }
@@ -302,10 +284,6 @@ data class OnEpisode(val name: String, val role: String, val art: String, val li
 
         /** Who an episode's row names: everybody on it but its hosts, whom the show's page names once. */
         fun guests(all: List<OnEpisode>): List<OnEpisode> = all.filterNot { it.hosts }
-
-        /** Their names as a sentence lists them: "Ada", "Ada and Grace", "Ada, Grace and Edsger". */
-        fun named(all: List<OnEpisode>): String =
-            if (all.size < 2) all.firstOrNull()?.name.orEmpty() else all.dropLast(1).joinToString(", ") { it.name } + " and " + all.last().name
     }
 }
 

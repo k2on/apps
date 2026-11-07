@@ -36,7 +36,9 @@ import dev.arkui.Press
 import dev.arkui.AmountText
 import dev.arkui.Pill
 import dev.arkui.Space
-import dev.arkui.Tone
+import dev.arkui.Tint
+import uniffi.money_domain.kindTitle
+import uniffi.money_domain.readyToAssignId
 import uniffi.money_domain.AccountLine
 
 /** What a picker answered. */
@@ -61,7 +63,7 @@ fun CategoryPicker(
     ledger: Ledger,
     title: String,
     onPick: (Pick) -> Unit,
-    ready: Pick? = Pick.Category(Book.READY_TO_ASSIGN),
+    ready: Pick? = Pick.Category(readyToAssignId()),
     skip: Id? = null,
     none: Boolean = false,
     transferFrom: Id? = null,
@@ -127,7 +129,7 @@ fun CategoryPicker(
  */
 fun choosable(ledger: Ledger, cards: Boolean, moving: Boolean = false): List<Pair<uniffi.money_domain.GroupLine, List<uniffi.money_domain.BudgetLine>>> =
     ledger.byGroup()
-        .map { (g, ls) -> g to ls.filter { (cards || !Ledger.isPayment(it)) && (!moving || assignable(it)) } }
+        .map { (g, ls) -> g to ls.filter { (cards || !it.isPayment()) && (!moving || it.assignable()) } }
         .filter { it.second.isNotEmpty() }
 
 @Composable
@@ -146,7 +148,7 @@ private fun Option(name: String, available: Long?, onClick: () -> Unit) {
         trailingContent =
             if (available != null) {
                 {
-                    val tone = if (available < 0) Tone.Negative else if (available > 0) Tone.Positive else Tone.Neutral
+                    val tone = if (available < 0) Tint.Negative else if (available > 0) Tint.Positive else Tint.Neutral
                     Pill(tone) { AmountText(available, style = MaterialTheme.typography.labelLarge) }
                 }
             } else null,
@@ -167,7 +169,7 @@ fun AccountPicker(accounts: List<AccountLine>, title: String, onPick: (AccountLi
             items(accounts.filter { !it.closed && it.id != skip }.sortedWith(compareBy({ !it.onBudget }, { it.pos })), key = { it.id.hex }) { a ->
                 ListItem(
                     headlineContent = { Text(a.name) },
-                    supportingContent = { Text(kindName(a.kind)) },
+                    supportingContent = { Text(kindTitle(a.kind)) },
                     leadingContent = { Icon(Glyphs.account(a.kind), contentDescription = null) },
                     trailingContent = { AmountText(a.balance, style = MaterialTheme.typography.labelLarge) },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -177,15 +179,3 @@ fun AccountPicker(accounts: List<AccountLine>, title: String, onPick: (AccountLi
         }
     }
 }
-
-/** An account's kind, as a person says it. */
-fun kindName(kind: String): String =
-    when (kind) {
-        "checking" -> "Checking"
-        "savings" -> "Savings"
-        "cash" -> "Cash"
-        "credit" -> "Credit card"
-        "loan" -> "Loan"
-        "investment" -> "Investment"
-        else -> kind.replaceFirstChar { it.uppercase() }
-    }

@@ -10,6 +10,12 @@ license.workspace = true
 # same in every one of them.
 
 [dependencies]
+# Numbers, days and lengths as every client writes them (`format.rs`
+# re-exports it).
+ark-format = { path = "../ark-format" }
+# How an app's routes are spelled: UI-free, so a domain spells its `Route`
+# enum with it too; `router` is the address bar over it.
+ark-router = { path = "../ark-router" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced a timer and an executor on the desktop; a browser already
@@ -26,6 +32,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # Fetching a picture, blocking, on a thread of its own: there is no async
 # runtime on the desktop and one picture is not a reason to start one.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# The system's time zone, for the day an instant fell on where the person
+# is (`format::utc_offset_minutes`); a browser asks its own `Date`.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # A file chosen on Linux: the desktop's chooser through its portal, over the
 # session bus the theme is already read from (mundy's zbus; `files.rs`).

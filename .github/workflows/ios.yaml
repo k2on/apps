@@ -70,6 +70,7 @@ on:
       - "rust/ark-auth/**"
       - "rust/ark-peer/**"
       - "rust/ark-ffi/**"
+      - "rust/ark-format/**"
       - "rust/Cargo.lock"
       - "rust/Cargo.toml"
       - "swift/ArkUI/**"

@@ -55,16 +55,25 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.arkui.GroupCard
+import dev.arkui.RowDivider
+import dev.arkui.SectionHeader
+import dev.arkui.Badge
+import dev.arkui.Tile
+import dev.arkui.ListRow
 import dev.arkui.AmountField
 import dev.arkui.AmountText
 import dev.arkui.LocalAmounts
 import dev.arkui.Chevron
 import dev.arkui.Space
-import dev.arkui.Tone
+import dev.arkui.Tint
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.style.TextOverflow
-import org.json.JSONObject
+import uniffi.money_domain.AccountKind
 import uniffi.money_domain.AccountLine
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.OpenAccount
+import uniffi.money_domain.accountKinds
 import dev.arkui.pressable
 import dev.arkui.Press
 
@@ -89,22 +98,26 @@ fun AccountsScreen(ledger: Ledger) {
     ) { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
             item(key = "worth") {
-                HeroCard("Net Worth", open.sumOf { it.balance }, Tone.Neutral, note = "Every open account, less what's owed")
+                HeroCard("Net Worth", open.sumOf { it.balance }, Tint.Neutral, note = "Every open account, less what's owed")
             }
             item(key = "all") {
                 GroupCard(Modifier.padding(top = Space.xl)) {
-                    LinkRow(
+                    ListRow(
                         title = "All Accounts",
                         onClick = { shell.onAccount(null) },
-                        leading = { Tile(Glyphs.Activity, MaterialTheme.colorScheme.onSurfaceVariant) },
-                        trailing = { AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        picture = { Tile(Glyphs.Activity, MaterialTheme.colorScheme.onSurfaceVariant) },
+                        trailing = {
+                            AmountText(budget.sumOf { it.balance }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(Space.xs))
+                            Chevron()
+                        },
                     )
                 }
             }
             for ((name, rows) in listOf("Budget" to budget, "Tracking" to tracking, "Closed" to closed)) {
                 if (rows.isEmpty()) continue
                 item(key = "h-$name") {
-                    GroupHeading(name) { if (name != "Closed") HeadingTotal(rows.sumOf { it.balance }) }
+                    SectionHeader(name) { if (name != "Closed") HeadingTotal(rows.sumOf { it.balance }) }
                 }
                 item(key = "s-$name") {
                     GroupCard {
@@ -117,17 +130,21 @@ fun AccountsScreen(ledger: Ledger) {
             }
             item(key = "actions") {
                 GroupCard(Modifier.padding(top = Space.xl)) {
-                    LinkRow(
+                    ListRow(
                         title = if (ledger.banks.isEmpty()) "Connect a Bank" else "Bank Connections",
                         onClick = shell.onSettings,
-                        leading = { Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailing = {
+                            Spacer(Modifier.width(Space.xs))
+                            Chevron()
+                        },
+                        picture = { Icon(Glyphs.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                     )
                     RowDivider(inset = Space.l + 32.dp + Space.m)
-                    LinkRow(
+                    ListRow(
                         title = "Add Account",
                         onClick = { adding = true },
-                        leading = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        chevron = false,
+                        picture = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailing = {},
                         accent = true,
                     )
                 }
@@ -137,15 +154,6 @@ fun AccountsScreen(ledger: Ledger) {
     if (adding) AddAccountSheet(onDismiss = { adding = false })
 }
 
-/** What an account says under its name: the bank and its last digits when one feeds it, else its kind. */
-fun subtitleOf(acc: AccountLine): String {
-    val bank = acc.bank.replaceFirstChar { it.titlecase() }
-    return when {
-        acc.bank.isEmpty() -> kindName(acc.kind)
-        acc.mask.isEmpty() -> bank
-        else -> "$bank ••${acc.mask}"
-    }
-}
 
 /** An account in its section's card: its mark, its name and what feeds it, its count to review, its balance. */
 @Composable
@@ -157,7 +165,7 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
             .padding(horizontal = Space.l, vertical = Space.m)
             .semantics(mergeDescendants = true) {
                 contentDescription =
-                    "${acc.name}, ${subtitleOf(acc)}, ${a.format(acc.balance)}" + if (acc.unapproved > 0) ", ${acc.unapproved} to review" else ""
+                    "${acc.name}, ${acc.subtitle()}, ${a.format(acc.balance)}" + if (acc.unapproved > 0) ", ${acc.unapproved} to review" else ""
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -165,11 +173,11 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
         Spacer(Modifier.width(Space.m))
         Column(Modifier.weight(1f)) {
             Text(acc.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitleOf(acc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(acc.subtitle(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         Spacer(Modifier.width(Space.s))
         if (acc.unapproved > 0) {
-            CountBadge(acc.unapproved.toInt(), "${acc.unapproved} to review")
+            Badge(acc.unapproved.toInt(), "${acc.unapproved} to review")
             Spacer(Modifier.width(Space.s))
         }
         AmountText(
@@ -181,40 +189,6 @@ private fun AccountRow(acc: AccountLine, onClick: () -> Unit) {
     }
 }
 
-/** A row of a card that opens something: what leads it, its name, what trails it, and a chevron. */
-@Composable
-private fun LinkRow(
-    title: String,
-    onClick: () -> Unit,
-    leading: @Composable () -> Unit,
-    trailing: @Composable () -> Unit = {},
-    chevron: Boolean = true,
-    accent: Boolean = false,
-) {
-    Row(
-        Modifier.fillMaxWidth().pressable(onClick = onClick, press = Press.Highlight).padding(horizontal = Space.l, vertical = Space.m).height(32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { leading() }
-        Spacer(Modifier.width(Space.m))
-        Text(
-            title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f))
-        trailing()
-        if (chevron) {
-            Spacer(Modifier.width(Space.xs))
-            Chevron()
-        }
-    }
-}
-
-/** The kinds an account can be, in the order a sheet offers them. */
-val KINDS: List<String> = listOf("checking", "savings", "cash", "credit", "loan", "investment")
-
-/** Whether an account of `kind` is in the budget unless somebody says otherwise (the domain's rule). */
-fun onBudgetByDefault(kind: String): Boolean = kind in setOf("checking", "savings", "cash", "credit")
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -223,16 +197,15 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
     val a = LocalAmounts.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("checking") }
+    var kind by remember { mutableStateOf(AccountKind.CHECKING) }
     var onBudget by remember { mutableStateOf(true) }
     var typed by remember { mutableStateOf("") }
     val cents = a.parse(typed)
-    val owed = kind == "credit" || kind == "loan"
-    val balance = cents?.let { if (owed) -kotlin.math.abs(it) else it }
+    val balance = cents?.let { if (kind.owes()) -kotlin.math.abs(it) else it }
     // The domain's own sentence for the name, asked as it is typed.
     val why =
         if (name.isEmpty()) null
-        else book.check("accounts.open_account", JSONObject().put("name", name).put("kind", kind).put("on_budget", onBudget).put("balance", balance ?: 0L).put("date", "2000-01-01").toString())
+        else book.check(MoneyChange.OpenAccount(OpenAccount(name, kind, onBudget, balance ?: 0L, "2000-01-01")))
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding().imePadding()) {
             Text("Add Account", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
@@ -247,15 +220,15 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(Space.s))
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                for (k in KINDS) {
+                for (k in accountKinds()) {
                     FilterChip(
                         selected = kind == k,
                         onClick = {
                             kind = k
-                            onBudget = onBudgetByDefault(k)
+                            onBudget = k.onBudgetByDefault()
                         },
-                        label = { Text(kindName(k)) },
-                        leadingIcon = if (kind == k) { { Icon(Glyphs.account(k), contentDescription = null, modifier = Modifier.size(18.dp)) } } else null,
+                        label = { Text(k.title()) },
+                        leadingIcon = if (kind == k) { { Icon(Glyphs.account(k.key()), contentDescription = null, modifier = Modifier.size(18.dp)) } } else null,
                     )
                 }
             }
@@ -263,7 +236,7 @@ fun AddAccountSheet(onDismiss: () -> Unit) {
             AmountField(
                 typed,
                 onType = { typed = it },
-                label = if (owed) "What you owe on it" else "What's in it today",
+                label = if (kind.owes()) "What you owe on it" else "What's in it today",
                 error = if (cents == null) "That isn't an amount" else null,
                 modifier = Modifier.fillMaxWidth())
             ListItem(

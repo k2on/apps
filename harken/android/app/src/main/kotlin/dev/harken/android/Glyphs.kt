@@ -11,8 +11,9 @@
 //
 // Geometry only: every glyph is drawn in a placeholder ink that `Icon`
 // replaces with the content colour, so its colour is always the theme's.
-// The three `ark-ui` draws itself — the menu, back, the chevron — are its
-// (`ArkGlyphs`), the same paths, named here so a screen asks one table.
+// The ones that are no app's own — the menu, back, the chevron, search,
+// clear, add, a tick, offline — are `dev.arkui`'s (`ArkGlyphs`), the same
+// paths, named here so a screen asks one table.
 package dev.harken.android
 
 import androidx.compose.ui.graphics.SolidColor
@@ -52,7 +53,7 @@ object Glyphs {
             "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8",
             "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
         )
-    val Search = glyph("search", "m21 21-4.34-4.34", circle(11f, 11f, 8f))
+    val Search = ArkGlyphs.Search
     val Library =
         glyph(
             "library",
@@ -120,25 +121,15 @@ object Glyphs {
     val More = ArkGlyphs.More
     val Back = ArkGlyphs.Back
     val Chevron = ArkGlyphs.Chevron
-    val Down = glyph("chevron-down", "m6 9 6 6 6-6")
-    val Close = glyph("x", "M18 6 6 18", "m6 6 12 12")
-    val Plus = glyph("plus", "M5 12h14", "M12 5v14")
-    val Minus = glyph("minus", "M5 12h14")
-    val Tick = glyph("check", "M20 6 9 17l-5-5")
-    val Ticked = glyph("circle-check", circle(12f, 12f, 10f), "m16 9-5.5 5.5L8 12")
-    val Untick = glyph("circle", circle(12f, 12f, 10f))
-    val SignOut = glyph("log-out", "m16 17 5-5-5-5", "M21 12H9", "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4")
-    val Offline =
-        glyph(
-            "wifi-off",
-            "M12 20h.01",
-            "M8.5 16.429a5 5 0 0 1 7 0",
-            "M5 12.859a10 10 0 0 1 5.17-2.69",
-            "M19 12.859a10 10 0 0 0-2.007-1.523",
-            "M2 8.82a15 15 0 0 1 4.177-2.643",
-            "M22 8.82a15 15 0 0 0-11.288-3.764",
-            "m2 2 20 20",
-        )
+    val Down = ArkGlyphs.Down
+    val Close = ArkGlyphs.Close
+    val Plus = ArkGlyphs.Plus
+    val Minus = ArkGlyphs.Minus
+    val Tick = ArkGlyphs.Tick
+    val Ticked = ArkGlyphs.Ticked
+    val Untick = ArkGlyphs.Untick
+    val SignOut = ArkGlyphs.SignOut
+    val Offline = ArkGlyphs.Offline
     val Playing = glyph("audio-lines", "M2 10v3", "M6 6v11", "M10 3v18", "M14 8v7", "M18 5v13", "M22 10v3")
     val Remove = glyph("list-minus", "M16 5H3", "M11 12H3", "M16 19H3", "M21 12h-6")
     val PlayNext = glyph("list-start", "M16 12H3", "M16 18H3", "M10 6H3", "M21 18V8a2 2 0 0 0-2-2h-5", "m16 8-2-2 2-2")

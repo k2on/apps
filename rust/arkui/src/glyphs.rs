@@ -218,3 +218,59 @@ pub const ZAP: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 
 /// `receipt`: a store's receipt, on a transaction it paid for.
 pub const RECEIPT: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6"/><path d="M16 12h-6"/><path d="M13 16h-3"/></svg>"##;
+
+/// The glyph Lucide calls `name`, of the ones every toolkit has under the
+/// same name (docs/arkui-parts.md, "Glyphs"): Compose's `ArkGlyphs.named`
+/// and SwiftUI's `ArkGlyphs.symbol` (an SF Symbol) answer the same names.
+pub fn named(name: &str) -> Option<&'static [u8]> {
+    Some(match name {
+        "chevron-left" => BACK,
+        "chevron-right" => CHEVRON,
+        "chevron-down" => DOWN,
+        "ellipsis-vertical" => MORE,
+        "x" => CLOSE,
+        "plus" => PLUS,
+        "minus" => MINUS,
+        "check" => TICK,
+        "circle-check" => TICKED,
+        "circle" => UNTICK,
+        "search" => SEARCH,
+        "wifi-off" => OFFLINE,
+        "volume-2" => VOLUME,
+        "volume-x" => MUTED,
+        "log-out" => SIGN_OUT,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod named_tests {
+    use super::*;
+
+    /// The shared names find their drawings, and a name no toolkit shares
+    /// finds none. Falsified by a typo in a name: `chevron-rigth`.
+    #[test]
+    fn the_shared_names_are_found() {
+        for n in [
+            "chevron-left",
+            "chevron-right",
+            "chevron-down",
+            "ellipsis-vertical",
+            "x",
+            "plus",
+            "minus",
+            "check",
+            "circle-check",
+            "circle",
+            "search",
+            "wifi-off",
+            "volume-2",
+            "volume-x",
+            "log-out",
+        ] {
+            assert!(named(n).is_some(), "{n}");
+        }
+        assert_eq!(named("search"), Some(SEARCH));
+        assert!(named("disc-3").is_none());
+    }
+}

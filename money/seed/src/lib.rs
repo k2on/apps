@@ -302,7 +302,7 @@ impl Seeder {
     fn open(&mut self, name: &str, kind: &str, on_budget: bool, balance: i64, date: &str) {
         let a = OpenAccount {
             name: name.into(),
-            kind: kind.into(),
+            kind: money_domain::accounts::AccountKind::of(kind).expect("the seed's kinds are kinds"),
             on_budget,
             balance,
             date: date.into(),

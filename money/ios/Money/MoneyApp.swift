@@ -13,20 +13,29 @@ import SwiftUI
 @main
 struct MoneyApp: App {
     @StateObject private var model: Model
+    /// The views the screens hold (`.holding`), told what moved by the model.
+    @StateObject private var watched: Watched<MoneyView>
     @Environment(\.scenePhase) private var phase
     @State private var wasAway = false
 
     init() {
         // money's accent, the green, before the first view draws it.
         Accent.use(.green)
+        // Money written as every client writes it, in the phone's locale.
+        Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        _model = StateObject(wrappedValue: Model(shelf: DefaultsShelf(), root: support))
+        let model = Model(shelf: DefaultsShelf(), root: support)
+        let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
+        model.onMoved = { [weak watched] views in watched?.moved(views) }
+        _model = StateObject(wrappedValue: model)
+        _watched = StateObject(wrappedValue: watched)
     }
 
     var body: some Scene {
         WindowGroup {
             Root()
                 .environmentObject(model)
+                .environmentObject(watched)
                 .tint(Color.accent)
                 // The derived square in the green (ArkUI's are neutral).
                 .environment(\.squares, .green)
@@ -53,6 +62,7 @@ struct Root: View {
             case let .server(typed, checking, error): ServerScreen(typed: typed, checking: checking, error: error)
             case let .signIn(server, phase, error): SignInScreen(server: server, phase: phase, error: error)
             case let .opening(server, _): OpeningScreen(server: server)
+            case let .confirm(_, _, error): ConfirmScreen(error: error)
             case .running, .demo: Shell()
             }
         }
@@ -62,12 +72,12 @@ struct Root: View {
         .task(id: model.browse) {
             guard let url = model.browse else { return }
             do {
-                let back = try await web.authenticate(using: url, callbackURLScheme: Onboarding.scheme)
+                let back = try await web.authenticate(using: url, callbackURLScheme: AppInfo.money.scheme)
                 model.signInReturned(back, error: nil)
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
-                model.signInReturned(nil, error: "The sign-in was closed before it finished.")
+                model.signInReturned(nil, error: nil)
             } catch {
-                model.signInReturned(nil, error: "Signing in didn't finish: \(error.localizedDescription)")
+                model.signInReturned(nil, error: error.localizedDescription)
             }
         }
     }
@@ -78,6 +88,7 @@ struct Root: View {
         case .signIn: return 1
         case .opening: return 2
         case .running, .demo: return 3
+        case .confirm: return 4
         }
     }
 }

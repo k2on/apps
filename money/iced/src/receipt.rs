@@ -63,15 +63,6 @@ pub struct Paper {
 /// What a receipt's photo may be, for the chooser.
 const PHOTOS: &[&str] = &["image/jpeg", "image/png", "image/heic", "image/webp"];
 
-/// The receipts that paid for nothing yet, nearest this transaction in
-/// amount and then in days first.
-pub fn unmatched<'a>(receipts: &'a [ReceiptLine], t: &TxnLine) -> Vec<&'a ReceiptLine> {
-    let mut free: Vec<&ReceiptLine> = receipts.iter().filter(|r| r.txn_id.is_none() && r.charges == 0).collect();
-    free.sort_by_key(|r| ((r.total - t.amount).abs(), money_domain::dates::days_between(&r.date, &t.date).abs()));
-    free.truncate(5);
-    free
-}
-
 impl App {
     /// The transaction whose receipt is beside the register: the one open
     /// in the form, else the one under the register's cursor.
@@ -82,7 +73,7 @@ impl App {
 
     fn open_txn(&self) -> Option<&TxnLine> {
         let id = self.receipt_txn()?;
-        self.peer.register.rows.iter().find(|t| t.id == id)
+        self.peer.register().iter().find(|t| t.id == id)
     }
 
     pub fn receipt(&mut self, m: Msg) -> Task<Message> {
@@ -247,17 +238,17 @@ impl App {
 
     /// A transaction's receipt and what is done with it, one under another.
     fn view_receipt<'a>(&'a self, t: &'a TxnLine) -> Element<'a, Message> {
-        let photos: Vec<&PhotoLine> = self.peer.photos.rows.iter().filter(|p| p.txn_id == Some(t.id)).collect();
+        let photos: Vec<&PhotoLine> = self.peer.photos().iter().filter(|p| p.txn_id == Some(t.id)).collect();
         let mut side = column![].spacing(8);
         match self.peer.txn_receipts().first() {
             Some(r) => {
-                let photo = self.peer.photos.rows.iter().find(|p| p.receipt_id == r.id);
+                let photo = self.peer.photos().iter().find(|p| p.receipt_id == r.id);
                 side = side.push(self.view_paper(r, photo));
                 if photo.is_some_and(|p| p.state == "check") {
                     side = side.push(
                         text("Check this: what was read does not add up to the total.")
                             .size(12)
-                            .style(look::Tone::Short.text()),
+                            .style(look::Looks::text(look::Tone::Short)),
                     );
                 }
                 let mut links = row![].spacing(16);
@@ -270,8 +261,8 @@ impl App {
                 }
                 side = side.push(links);
                 // Paid shipment by shipment: each charge and what paid it.
-                if let Some(c) = self.peer.charges.as_ref().filter(|_| r.charges > 0) {
-                    side = side.push(self.view_charges(&c.rows));
+                if let Some(c) = self.peer.charges().filter(|_| r.charges > 0) {
+                    side = side.push(self.view_charges(c));
                 }
             }
             None => {
@@ -290,10 +281,10 @@ impl App {
                     ]
                     .spacing(16),
                 );
-                let free = unmatched(&self.peer.receipts.rows, t);
+                let free = money_domain::words::unmatched_for(self.peer.receipts(), t.amount, &t.date);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
-                    for r in free {
+                    for r in &free {
                         let what = format!("{} \u{b7} {} \u{b7} {}", r.date, place_of(r), money(-r.total));
                         side = side.push(
                             row![
@@ -338,7 +329,7 @@ impl App {
                     match i.quantity {
                         // One, or none said (a coupon is -1): no count.
                         q if q == 1000 || q <= 0 => format!("  {filed}"),
-                        q => format!("  {} \u{b7} {filed}", crate::view::quantity(q, &i.unit)),
+                        q => format!("  {} \u{b7} {filed}", money_domain::words::quantity(q, &i.unit)),
                     },
                     10,
                     tint
@@ -385,7 +376,7 @@ impl App {
                 .on_submit(Message::Receipt(Msg::Save))
                 .size(12)
                 .padding([3, 6])
-                .style(look::input)
+                .style(arkui::style::field)
         };
         let mut form = column![
             bold(
@@ -411,14 +402,14 @@ impl App {
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fill)
-                    .style(look::input),
+                    .style(arkui::style::field),
                 text_input("0.00", cost)
                     .on_input(move |v| Message::Receipt(Msg::Amount(i, v)))
                     .on_submit(Message::Receipt(Msg::Save))
                     .size(12)
                     .padding([3, 6])
                     .width(Length::Fixed(76.0))
-                    .style(look::input),
+                    .style(arkui::style::field),
             ]
             .spacing(8)
             .align_y(Alignment::Center);
@@ -470,7 +461,7 @@ impl App {
 /// A receipt's store, as its paper names it.
 fn place_of(r: &ReceiptLine) -> String {
     match (r.place.trim(), r.store.as_str()) {
-        ("", s) => crate::view::store_name(s),
+        ("", s) => money_domain::words::store_name(s),
         (p, _) => p.into(),
     }
 }

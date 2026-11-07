@@ -3,8 +3,8 @@
 // the green, with the shared caution in the tertiary slot, which is what
 // "worth a look" is drawn in. The wallpaper's colours are there for asking
 // (`dynamic`), and off by default: money is green on every phone, as it is
-// on the iPhone and the desktop. And how the screens write a day and a
-// month: in the phone's locale, as its own apps do.
+// on the iPhone and the desktop. And money written as every client writes
+// it: by the library (ark_format), in what the phone's locale says.
 package dev.money.android
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -16,18 +16,23 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.os.ConfigurationCompat
 import dev.arkui.Accent
 import dev.arkui.Amounts
+import dev.arkui.LocaleNumbers
 import dev.arkui.ArkTheme
 import dev.arkui.LocalAmounts
 import dev.arkui.LocalArkTheme
 import dev.arkui.MaterialYou
+import dev.arkui.Tint
 import dev.arkui.arkuiScheme
 import dev.arkui.expressiveTypography
 import dev.arkui.tracked
 import java.time.LocalDate
-import java.time.YearMonth
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 import java.util.Locale
+import uniffi.ark_format.NumberStyle
+import uniffi.ark_format.formatAmount
+import uniffi.ark_format.formatAmountEditable
+import uniffi.ark_format.numberStyleUs
+import uniffi.ark_format.parseAmount
+import uniffi.money_domain.Tone
 
 /** money's type scale: arkui's expressive one, tracked for each size. */
 private val MoneyType = expressiveTypography().tracked()
@@ -45,7 +50,7 @@ object Palette {
 @Composable
 fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
     val locale = ConfigurationCompat.getLocales(LocalConfiguration.current)[0] ?: Locale.getDefault()
-    val amounts = remember(locale) { Amounts(locale) }
+    val amounts = remember(locale) { LibraryAmounts(LocaleNumbers.of(locale)) }
     // Material's expressive scale, tracked and led for each size as the iPhone's is (arkui's
     // `tracked`): the big figures and titles tight, body text as drawn, captions a little open.
     MaterialYou(light = Palette.Light, dark = Palette.Dark, darkTheme = dark, dynamic = dynamic, typography = MoneyType) {
@@ -53,53 +58,46 @@ fun MoneyTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, 
     }
 }
 
-/** Days and months as the phone's locale writes them. */
-object Dates {
-    private fun day(d: String): LocalDate? = runCatching { LocalDate.parse(d) }.getOrNull()
+/**
+ * Money as the library writes it (ark_format's, every client's): in [numbers], what java.text says
+ * of the phone's locale, read once ([LocaleNumbers.of]).
+ */
+class LibraryAmounts(numbers: LocaleNumbers = LocaleNumbers.of()) : Amounts {
+    val style =
+        NumberStyle(
+            numbers.currency, numbers.symbol, numbers.symbolFirst, numbers.symbolSpaced,
+            numbers.decimal, numbers.grouping, numbers.minus, numbers.minusFirst)
 
-    /** `October 2026`, in the locale ("octobre 2026"). */
-    fun month(m: String, locale: Locale = Locale.getDefault()): String =
-        runCatching { YearMonth.parse(m).format(DateTimeFormatter.ofPattern("LLLL yyyy", locale)) }
-            .getOrDefault(m)
-            .replaceFirstChar { it.titlecase(locale) }
+    override fun format(minor: Long): String = formatAmount(minor, false, style)
 
-    /** The month alone: `October`. */
-    fun monthAlone(m: String, locale: Locale = Locale.getDefault()): String =
-        runCatching { YearMonth.parse(m).format(DateTimeFormatter.ofPattern("LLLL", locale)) }
-            .getOrDefault(m)
-            .replaceFirstChar { it.titlecase(locale) }
+    override fun signed(minor: Long): String = formatAmount(minor, true, style)
 
-    /** A register's day heading: Today, Yesterday, or `Mon, Oct 26`. */
-    fun heading(d: String, today: String, locale: Locale = Locale.getDefault()): String {
-        val day = day(d) ?: return d
-        val now = day(today)
-        return when {
-            now != null && day == now -> "Today"
-            now != null && day == now.minusDays(1) -> "Yesterday"
-            now != null && day.year == now.year -> day.format(DateTimeFormatter.ofPattern("EEE, MMM d", locale))
-            else -> day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
-        }
+    override val symbol: String = numbers.symbol
+
+    override fun editable(minor: Long): String = formatAmountEditable(minor, style)
+
+    override fun parse(typed: String): Long? = parseAmount(typed, style)
+}
+
+/** The number style the core writes this phone's amounts in (`BudgetLine.story`, `captions`). */
+val Amounts.style: NumberStyle
+    get() = (this as? LibraryAmounts)?.style ?: numberStyleUs()
+
+/** What arkui draws one of the core's tones in: money's one map, as the iPhone's and the desktop's. */
+fun Tone.tint(): Tint =
+    when (this) {
+        Tone.NEUTRAL -> Tint.Neutral
+        Tone.POSITIVE -> Tint.Positive
+        Tone.SHORT, Tone.ON_CARD -> Tint.Caution
+        Tone.OVERSPENT -> Tint.Negative
     }
 
-    /** A day in a form: `Oct 26, 2026`. */
-    fun long(d: String, locale: Locale = Locale.getDefault()): String =
-        day(d)?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)) ?: d
+/** A day as the date picker holds it: UTC midnight, in ms. The words for a day are ark_format's. */
+object Dates {
+    private fun day(d: String): LocalDate? = runCatching { LocalDate.parse(d) }.getOrNull()
 
     /** A day as the date picker holds it: UTC midnight, in ms. */
     fun millis(d: String): Long? = day(d)?.toEpochDay()?.times(86_400_000L)
 
     fun ofMillis(ms: Long): String = LocalDate.ofEpochDay(Math.floorDiv(ms, 86_400_000L)).toString()
-
-    /** How long ago `ms` was, in words: `just now`, `5 min ago`, `3 h ago`, `2 days ago`. */
-    fun ago(ms: Long, now: Long = System.currentTimeMillis()): String {
-        if (ms <= 0) return "never"
-        val s = (now - ms).coerceAtLeast(0) / 1000
-        return when {
-            s < 60 -> "just now"
-            s < 3600 -> "${s / 60} min ago"
-            s < 86_400 -> "${s / 3600} h ago"
-            s < 2 * 86_400 -> "yesterday"
-            else -> "${s / 86_400} days ago"
-        }
-    }
 }

@@ -181,11 +181,13 @@ dependencies = [
  "js-sys",
  "openidconnect",
  "percent-encoding",
+ "qrcode",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "tower-http",
+ "uniffi",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -204,6 +206,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+ "uniffi",
+]
+
+[[package]]
+name = "ark-format"
+version = "0.1.0"
+dependencies = [
  "uniffi",
 ]
 
@@ -240,6 +249,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-router"
+version = "0.1.0"
+dependencies = [
+ "ark-macros",
+]
+
+[[package]]
 name = "arkdb"
 version = "0.1.0"
 dependencies = [
@@ -253,6 +269,9 @@ dependencies = [
 name = "arkui"
 version = "0.1.0"
 dependencies = [
+ "ark-format",
+ "ark-router",
+ "chrono",
  "iced",
  "iced_test",
  "image",
@@ -2216,6 +2235,7 @@ dependencies = [
  "ark-auth",
  "ark-ffi",
  "ark-peer",
+ "ark-router",
  "arkdb",
  "serde",
  "serde_json",
@@ -2228,6 +2248,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-ffi",
+ "ark-format",
  "ark-peer",
  "arkdb",
  "harken-domain",
@@ -3531,7 +3552,9 @@ dependencies = [
  "ark",
  "ark-auth",
  "ark-ffi",
+ "ark-format",
  "ark-peer",
+ "ark-router",
  "serde",
  "serde_json",
  "uniffi",
@@ -3543,8 +3566,8 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-ffi",
+ "ark-format",
  "ark-peer",
- "arkdb",
  "image",
  "money-domain",
  "money-seed",
@@ -4825,6 +4848,12 @@ checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"

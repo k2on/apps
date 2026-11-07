@@ -18,8 +18,15 @@ use serde_json::json;
 
 uniffi::setup_scaffolding!();
 
+/// Numbers, days and lengths as every client writes them: in this library,
+/// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
+/// come with the app's, and the phones print what the desktop prints.
+pub use ark_format;
+
 mod player;
+mod session;
 pub use player::{Loudness, PhoneSound, Player, SoundState};
+pub use session::{Changed, HarkenSession, HarkenView, Holding};
 
 /// harken's peer as a phone is made of it (`harken_player::config::peer`):
 /// the domain for the log and the listening session, saying `device` in its

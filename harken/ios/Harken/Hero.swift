@@ -1,82 +1,27 @@
-// The pieces a catalogue's pages are made of, as the desktop's are
-// (`rust/arkui/src/hero.rs`, and `view_cover`, `view_featured`,
-// `work_heading` and `view_foot` in `harken/iced/src/view.rs`): a person's
-// banner, run up to the top of the screen, under the status bar and the
-// navigation bar, so its back button is Liquid Glass over the picture; a
-// record's header, its cover beside its title; the one thing a section
-// sets apart, with a Play; a section's heading; an entry over its
-// hairline, and the "See All" under a list of them; a work's heading over
-// its movements; and a record's small print. The pages (Pages.swift) put
-// them together.
+// The pieces a catalogue's pages are made of that are harken's, as the
+// desktop's are (`view_cover`, `view_featured`, `work_heading` and
+// `view_foot` in `harken/iced/src/view.rs`): a person's banner's picture,
+// fetched; a record's header, its cover beside its title; the one thing a
+// section sets apart, with a Play; a work's heading over its movements;
+// and a record's small print. The banner itself, a section's heading, an
+// entry over its hairline and the "See All" under a list of them are
+// ArkUI's (`HeroBanner`, `HeroHeading`, `HeroEntry`, `HeroMore`, the twins
+// of `rust/arkui/src/hero.rs`). The pages (Pages.swift) put them together.
 import ArkUI
 import SwiftUI
 import UIKit
 
-/// A person's banner: their wide picture across the page, cropped to fill,
-/// run up to the top of the screen under the status bar and that much
-/// taller, so what shows below the bar is the shape `shape(width:)` says;
-/// `kind` in small type and their name in bold on its lower edge,
-/// over a shade that keeps both legible on a white collar or a white wig,
-/// and a lighter one at its top under the bar and the back button. Until
-/// the picture arrives the ground is drawn, so the name is already where it
-/// will be. Somebody with no wide picture has no banner.
-struct Banner: View {
+/// A person's banner: ArkUI's `HeroBanner`, with their wide picture
+/// fetched and kept as a cover is (`Covers`). Somebody with no wide picture
+/// has no banner.
+struct PersonBanner: View {
     let url: String
     let kind: String
     let name: String
-
-    /// How tall a banner `width` wide is below the status bar: its own shape
-    /// (2400×933) across a phone would be a strip, so a phone crops it to a
-    /// taller frame, never past the desktop's tallest (Android's
-    /// `bannerHeight`).
-    static func shape(width: CGFloat) -> CGFloat {
-        min(max(max(width / (2400 / 933), width * 0.82), 200), 486)
-    }
-
-    /// The status bar's height: the top of the window's own safe area, which
-    /// is the bar's and not the navigation bar's.
-    static var statusBar: CGFloat { phone?.safeAreaInsets.top ?? 0 }
-
-    /// Its whole height, the status bar it runs under included.
-    static var height: CGFloat { shape(width: phone?.bounds.width ?? 393) + statusBar }
-
-    /// The window the app is drawn in, as UIKit has it.
-    private static var phone: UIWindow? {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow
-    }
-
     @State private var image: UIImage? = nil
 
     var body: some View {
-        let top = Banner.statusBar
-        Color(uiColor: .secondarySystemBackground)
-            .frame(maxWidth: .infinity)
-            .frame(height: Banner.height)
-            .overlay {
-                if let i = image { Image(uiImage: i).resizable().scaledToFill().accessibilityHidden(true) }
-            }
-            .overlay {
-                LinearGradient(stops: [.init(color: Color.clear, location: 0.45), .init(color: Color.black.opacity(0.6), location: 1)],
-                               startPoint: .top, endPoint: .bottom)
-            }
-            // Under the status bar's icons and the back button: a little shade.
-            .overlay(alignment: .top) {
-                LinearGradient(colors: [Color.black.opacity(0.35), Color.clear], startPoint: .top, endPoint: .bottom)
-                    .frame(height: top + 72)
-                    .allowsHitTesting(false)
-            }
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind).font(.caption.weight(.semibold)).foregroundStyle(Color.white.opacity(0.85))
-                    Text(name).font(.largeTitle.bold()).foregroundStyle(Color.white)
-                        .lineLimit(3).minimumScaleFactor(0.6)
-                }
-                .padding(.horizontal, Space.page + 4)
-                .padding(.bottom, Space.xl)
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
-            }
-            .clipped()
+        HeroBanner(image: image, kind: kind, name: name)
             .task(id: url) {
                 image = url.isEmpty ? nil : Covers.shared.cached(url, side: Covers.bound)
                 if url.isEmpty || image != nil { return }
@@ -206,77 +151,6 @@ struct Featured: View {
     }
 }
 
-/// A section's heading, bold.
-struct SectionHeading: View {
-    let title: String
-
-    var body: some View {
-        Text(title).font(.title2.weight(.semibold))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.page)
-            .padding(.top, Space.xl + 4)
-            .padding(.bottom, Space.xs)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// One entry of a catalogue's list, over its hairline: `picture` (a cover)
-/// at its left when it has one, a line of small type over its title
-/// (who it is by), a line under, a count at its right, and a chevron.
-struct EntryRow<Picture: View>: View {
-    var over: String = ""
-    let title: String
-    var under: String = ""
-    var count: String = ""
-    let onOpen: () -> Void
-    @ViewBuilder let picture: () -> Picture
-
-    var body: some View {
-        Button(action: onOpen) {
-            VStack(spacing: 0) {
-                HStack(spacing: Space.m) {
-                    picture()
-                    VStack(alignment: .leading, spacing: 2) {
-                        if !over.isEmpty { Text(over).font(.caption2.weight(.semibold)).foregroundStyle(.quiet) }
-                        Text(title).font(.body).foregroundStyle(.ink).multilineTextAlignment(.leading)
-                        if !under.isEmpty { Text(under).font(.footnote).foregroundStyle(.quiet).lineLimit(2) }
-                    }
-                    Spacer(minLength: Space.s)
-                    if !count.isEmpty { Text(count).font(.subheadline).foregroundStyle(.quiet).monospacedDigit() }
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
-                }
-                .padding(.vertical, Space.m - 2)
-                Divider()
-            }
-            // Inside the press, so a pressed row darkens the page's width.
-            .padding(.horizontal, Space.page)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.pressRow)
-    }
-}
-
-/// The line under a list that opens the rest of it — "See All 40 Works" —
-/// in the gold, its chevron where an entry's is.
-struct MoreRow: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title).foregroundStyle(Color.accentText)
-                Spacer()
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.outline)
-            }
-            .padding(.vertical, Space.m)
-            .padding(.horizontal, Space.page)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.pressRow)
-    }
-}
-
 /// A work's heading over its movements: its composer in small type over
 /// its title, and how long the run of it lasts, in the column
 /// the tracks' lengths are in.
@@ -293,7 +167,7 @@ struct WorkHeading: View {
                 Text(work).font(.headline).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Text(Spell.clock(ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
+            Text(formatClock(ms: ms)).font(.caption).foregroundStyle(.quiet).monospacedDigit()
         }
         // In from where a track's title starts; and short of where its menu
         // is, so the lengths line up.
@@ -348,7 +222,7 @@ struct RecordFoot: View {
     @EnvironmentObject private var model: Model
 
     var body: some View {
-        let length = [Spell.count(tracks.count, "track"), Spell.total(tracks)].compactMap { $0 }.joined(separator: ", ")
+        let length = [formatCount(n: Int64(tracks.count), word: "track"), Spell.total(tracks)].compactMap { $0 }.joined(separator: ", ")
         VStack(alignment: .leading, spacing: 3) {
             if year > 0 { Text(String(year)) }
             Text(length)

@@ -3,7 +3,7 @@
 use arkui::command::Press;
 
 use super::{alone, song};
-use crate::places::Source;
+use crate::routes::Route;
 use crate::{App, Message};
 
 /// A window alone, with two albums by two people.
@@ -89,7 +89,7 @@ fn the_keys_walk_what_it_found_and_choosing_an_album_opens_it() {
     let _ = app.update(chosen);
     assert!(app.command.is_none());
     assert!(
-        matches!(&app.peer.source, Source::Album(_, name) if name == "Suites"),
+        matches!(&app.peer.source, Route::Album { title: name, .. } if name == "Suites"),
         "{:?}",
         app.peer.source
     );

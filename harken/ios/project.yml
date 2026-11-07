@@ -65,6 +65,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # A server on the home network, found by its address.
         NSLocalNetworkUsageDescription: Harken plays from your own music server, which may be on this network.
+        NSCameraUsageDescription: Harken scans the code another of your devices shows, to sign you in here.
         # ProMotion: without it an app's own animation (a spring, a drag's
         # settle) is held to 60 Hz on an iPhone that draws at 120.
         CADisableMinimumFrameDurationOnPhone: true

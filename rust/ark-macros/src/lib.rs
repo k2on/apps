@@ -7,6 +7,16 @@ use proc_macro::TokenStream;
 
 mod domain;
 mod ffi;
+mod routes;
+
+/// `#[derive(Routes)]`: an app's `Route` enum as paths — `#[route("/album/:key")]`
+/// on each variant (more than one `#[route]`: the first is written, all are read),
+/// `#[home]` on the one a path that names nothing lands on (`routes.rs`).
+/// Used through `ark_router::Routes`.
+#[proc_macro_derive(Routes, attributes(route, home))]
+pub fn routes(input: TokenStream) -> TokenStream {
+    out(routes::routes(syn::parse_macro_input!(input as syn::DeriveInput)))
+}
 
 /// What a derive or an attribute wrote, or its error as `compile_error!`.
 fn out(r: syn::Result<proc_macro2::TokenStream>) -> TokenStream {

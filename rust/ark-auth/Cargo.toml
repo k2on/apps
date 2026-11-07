@@ -10,6 +10,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 percent-encoding = "2"
 ark = { path = "../ark" }
+# The sign-in machine (`onboarding`) through UniFFI, for a phone's bridge
+# (`ark-ffi`, which turns it on): its types, the machine and its helpers.
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+# A join link drawn as a QR code ("Add a Device"): its modules, which each
+# platform's ArkUI draws; no image or SVG renderer.
+qrcode = { version = "0.14", default-features = false }
 
 # Natively: the relying party, the tokens (HMAC-SHA256), the routes as an
 # axum Router (the `server` feature: a phone links none of axum); and getting a login through a loopback listener and the
@@ -36,6 +42,7 @@ web-sys = { version = "0.3", features = ["Headers", "History", "Location", "Requ
 [features]
 default = ["server"]
 server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+ffi = ["dep:uniffi"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

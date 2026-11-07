@@ -7,6 +7,8 @@
 // (a reading put right), shown as its photo, or taken off.
 package dev.money.android
 
+import dev.money.ffi.MoneyView
+import dev.arkui.watch
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -52,7 +54,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,18 +87,22 @@ import dev.arkui.Press
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import dev.arkui.Tokens
-import dev.money.android.gen.FileRef
-import dev.money.android.gen.ItemLine
-import dev.money.android.gen.PhotoLine
-import dev.money.android.gen.ReceiptLine
-import dev.money.android.gen.StoreItem
-import dev.money.android.gen.WriteReceipt
+import dev.arkdb.ffi.FileRef
+import uniffi.money_domain.ItemLine
+import uniffi.money_domain.MoneyChange
+import uniffi.money_domain.PhotoLine
+import uniffi.money_domain.ReceiptLine
+import uniffi.money_domain.StoreItem
+import uniffi.money_domain.WriteReceipt
+import uniffi.money_domain.storeName
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.ark_format.formatQuantity
+import uniffi.ark_format.formatDayLong
 
 /** The paper's colours: a receipt is white whatever the phone's theme, so the light side's. */
 private val Paper = Tokens.Light.surface
@@ -135,7 +140,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
             val photo = ledger.photoOf(r.id)
             ReceiptPaper(ledger, r, photo)
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(vertical = Space.s)) {
-                TextButton(onClick = { typing = ReceiptDraft.of(r, ledger.items[r.id].orEmpty(), txn) }) { Text("Edit") }
+                TextButton(onClick = { typing = ReceiptDraft.of(r, book.itemsOf(r.id), txn) }) { Text("Edit") }
                 if (photo != null) TextButton(onClick = { showing = photo.file }) { Text("Photo") }
                 if (r.txnId == txn) TextButton(onClick = { book.pay(r.id, null) }) { Text("Take Off") }
             }
@@ -161,7 +166,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
                 onClick = { typing = ReceiptDraft.blank(txn, date, amount) },
                 label = { Text("Type It") },
                 leadingIcon = { Icon(Glyphs.Write, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
-            if (ledger.unmatched.isNotEmpty()) {
+            if (ledger.unmatched(amount, date).isNotEmpty()) {
                 AssistChip(
                     onClick = { attaching = true },
                     label = { Text("Attach One") },
@@ -180,7 +185,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
     }
     typing?.let { d -> ReceiptEditor(d, onDismiss = { typing = null }) }
     if (attaching) {
-        AttachDialog(ledger.unmatched, amount, date, onPick = { r ->
+        AttachDialog(ledger.unmatched(amount, date), onPick = { r ->
             book.pay(r.id, txn)
             attaching = false
         }, onDismiss = { attaching = false })
@@ -193,11 +198,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
 fun ReceiptPaper(ledger: Ledger, r: ReceiptLine, photo: PhotoLine?) {
     val book = LocalShell.current.book
     val a = LocalAmounts.current
-    DisposableEffect(r.id) {
-        book.holdItems(r.id)
-        onDispose { book.releaseItems(r.id) }
-    }
-    val items = ledger.items[r.id].orEmpty()
+    val items = book.watched.watch(MoneyView.Items(r.id)) { book.itemsOf(r.id) }
     Column {
         when (photo?.state) {
             "check" -> Banner("Check this: what was read doesn't add up to the total", MaterialTheme.colorScheme.errorContainer)
@@ -222,7 +223,7 @@ fun ReceiptPaper(ledger: Ledger, r: ReceiptLine, photo: PhotoLine?) {
                     for (i in items) {
                         PaperLine(i.name, money(a, -i.amount))
                         if (i.quantity != 1000L && i.quantity > 0) {
-                            Text("  ${quantity(i.quantity)} ${i.unit} @ ${money(a, i.unitPrice)}", style = Mono.copy(color = Faded))
+                            Text("  ${formatQuantity(i.quantity)} ${i.unit} @ ${money(a, i.unitPrice)}", style = Mono.copy(color = Faded))
                         }
                     }
                     Rule()
@@ -261,16 +262,6 @@ private fun Rule() {
 /** Money as a receipt prints it: no sign for what was paid, a minus for what was taken off. */
 private fun money(a: dev.arkui.Amounts, paid: Long): String = if (paid < 0) "-" + a.format(-paid) else a.format(paid)
 
-private fun quantity(thousandths: Long): String =
-    if (thousandths % 1000 == 0L) "${thousandths / 1000}" else "%.3f".format(thousandths / 1000.0).trimEnd('0')
-
-private fun storeName(store: String): String =
-    when (store) {
-        "amazon" -> "Amazon"
-        "target" -> "Target"
-        "costco" -> "Costco"
-        else -> "Receipt"
-    }
 
 /** A photo taken for the transaction and not read into a receipt yet. */
 @Composable
@@ -329,11 +320,10 @@ fun PhotoViewer(f: FileRef, onDismiss: () -> Unit) {
     }
 }
 
-/** The receipts nothing pays for, the nearest in amount and then in days first, to attach one. */
+/** The receipts nothing pays for, the nearest first (the core's `unmatchedReceipts`), to attach one. */
 @Composable
-private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: String, onPick: (ReceiptLine) -> Unit, onDismiss: () -> Unit) {
+private fun AttachDialog(near: List<ReceiptLine>, onPick: (ReceiptLine) -> Unit, onDismiss: () -> Unit) {
     val a = LocalAmounts.current
-    val near = unmatched.sortedWith(compareBy({ abs(it.total - amount) }, { abs((Dates.millis(it.date) ?: 0) - (Dates.millis(date) ?: 0)) })).take(30)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Attach a Receipt") },
@@ -342,7 +332,7 @@ private fun AttachDialog(unmatched: List<ReceiptLine>, amount: Long, date: Strin
                 for (r in near) {
                     ListItem(
                         headlineContent = { Text(r.place.ifEmpty { storeName(r.store) }) },
-                        supportingContent = { Text("${Dates.long(r.date)} · ${r.items} items") },
+                        supportingContent = { Text("${formatDayLong(r.date)} · ${r.items} items") },
                         trailingContent = { Text(a.format(abs(r.total))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.pressable(onClickLabel = "Attach", onClick = { onPick(r) }, press = Press.Highlight),
@@ -385,7 +375,7 @@ data class ReceiptDraft(
         fun blank(txn: Id, date: String, amount: Long) = ReceiptDraft("", txn, "", date, listOf(DraftItem()), amount)
 
         fun of(r: ReceiptLine, items: List<ItemLine>, txn: Id): ReceiptDraft {
-            val a = dev.arkui.Amounts()
+            val a = LibraryAmounts()
             return ReceiptDraft(
                 r.id,
                 r.txnId ?: txn,
@@ -416,7 +406,7 @@ fun ReceiptEditor(start: ReceiptDraft, onDismiss: () -> Unit) {
                         d.copy(items = items.toList()).write(a).fold(
                             onSuccess = {
                                 // The domain's own sentence first (a day that isn't one), under the form.
-                                val why = book.check("receipts.write_receipt", it.json())
+                                val why = book.check(MoneyChange.WriteReceipt(it))
                                 if (why != null) {
                                     error = why
                                 } else {

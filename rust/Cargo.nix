@@ -67,6 +67,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-format" = rec {
+      packageId = "ark-format";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-format";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-macros" = rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -81,6 +91,16 @@ rec {
       packageId = "ark-peer";
       build = internal.buildRustCrateWithFeatures {
         packageId = "ark-peer";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-router" = rec {
+      packageId = "ark-router";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-router";
       };
 
       # Debug support which might change between releases.
@@ -739,6 +759,11 @@ rec {
             packageId = "percent-encoding";
           }
           {
+            name = "qrcode";
+            packageId = "qrcode";
+            usesDefaultFeatures = false;
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -768,6 +793,12 @@ rec {
             optional = true;
             target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "cors" ];
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "ureq";
@@ -825,9 +856,10 @@ rec {
         ];
         features = {
           "default" = [ "server" ];
+          "ffi" = [ "dep:uniffi" ];
           "server" = [ "dep:axum" "dep:tokio" "dep:tower-http" ];
         };
-        resolvedDefaultFeatures = [ "default" "server" ];
+        resolvedDefaultFeatures = [ "default" "ffi" "server" ];
       };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
@@ -851,6 +883,7 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
@@ -893,6 +926,25 @@ rec {
           "bindgen" = [ "uniffi/cli" "uniffi/cargo-metadata" ];
         };
         resolvedDefaultFeatures = [ "bindgen" ];
+      };
+      "ark-format" = rec {
+        crateName = "ark-format";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format; };
+        libName = "ark_format";
+        dependencies = [
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "ark-macros" = rec {
         crateName = "ark-macros";
@@ -1031,6 +1083,20 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "server" ];
       };
+      "ark-router" = rec {
+        crateName = "ark-router";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-router; };
+        libName = "ark_router";
+        dependencies = [
+          {
+            name = "ark-macros";
+            packageId = "ark-macros";
+          }
+        ];
+
+      };
       "arkdb" = rec {
         crateName = "arkdb";
         version = "0.1.0";
@@ -1071,6 +1137,21 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui; };
         dependencies = [
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
+            name = "chrono";
+            packageId = "chrono";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "clock" ];
+          }
           {
             name = "iced";
             packageId = "iced";
@@ -7009,6 +7090,15 @@ rec {
             optional = true;
           }
           {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -7026,11 +7116,6 @@ rec {
           }
         ];
         devDependencies = [
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
           {
             name = "arkdb";
             packageId = "arkdb";
@@ -7055,6 +7140,11 @@ rec {
           {
             name = "ark-ffi";
             packageId = "ark-ffi";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
@@ -11052,6 +11142,19 @@ rec {
             optional = true;
           }
           {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -11068,15 +11171,8 @@ rec {
             usesDefaultFeatures = false;
           }
         ];
-        devDependencies = [
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-        ];
         features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
+          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "ark-format/ffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -11094,6 +11190,11 @@ rec {
           {
             name = "ark-ffi";
             packageId = "ark-ffi";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+            features = [ "ffi" ];
           }
           {
             name = "ark-peer";
@@ -11127,10 +11228,6 @@ rec {
           }
         ];
         devDependencies = [
-          {
-            name = "arkdb";
-            packageId = "arkdb";
-          }
           {
             name = "image";
             packageId = "image";
@@ -16999,6 +17096,20 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "qrcode" = rec {
+        crateName = "qrcode";
+        version = "0.14.1";
+        edition = "2021";
+        crateBin = [];
+        sha256 = "1v693x68yg90wfpas5v4bf6cfmnq9dq54qfgd3kb33j07r3851yn";
+        authors = [
+          "kennytm <kennytm@gmail.com>"
+        ];
+        features = {
+          "default" = [ "image" "svg" "pic" ];
+          "image" = [ "dep:image" ];
+        };
       };
       "quick-error" = rec {
         crateName = "quick-error";

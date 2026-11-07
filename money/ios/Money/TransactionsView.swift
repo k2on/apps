@@ -25,8 +25,12 @@ struct TransactionsView: View {
     @State private var fold: CGFloat = 0
 
     var body: some View {
-        let inbox = Registers.search(model.snapshot.inbox, needle)
-        let all = Registers.search(model.register(nil) ?? [], needle)
+        // A search is the core's (`MoneyView.search`), held while typed; what needs a look is the
+        // inbox's rows among what it finds.
+        let searched = needle.trimmingCharacters(in: .whitespaces)
+        let found = searched.isEmpty ? nil : model.search(nil, searched).map { Set($0.map(\.id)) }
+        let inbox = found.map { f in model.snapshot.inbox.filter { f.contains($0.id) } } ?? model.snapshot.inbox
+        let all = searched.isEmpty ? model.register(nil) ?? [] : model.search(nil, searched) ?? []
         List {
             // The large title, and at the end of its line what the tab offers and the account's face.
             // With the search field and To Review / All under it, the title's
@@ -35,7 +39,7 @@ struct TransactionsView: View {
                 AddTransactionButton()
                 AccountButton()
             } below: {
-                SearchRow(text: $needle, prompt: "Payee, category, memo or amount")
+                SearchField(text: $needle, prompt: "Payee, category, memo or amount")
                 Picker("Showing", selection: $showing) {
                     ForEach(Showing.allCases, id: \.self) { s in
                         Text(s == .review && !model.snapshot.inbox.isEmpty ? "\(s.rawValue) (\(model.snapshot.inbox.count))" : s.rawValue).tag(s)
@@ -52,8 +56,7 @@ struct TransactionsView: View {
         .largeTitleBar("Transactions", fold: fold)
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)
-        .onAppear { model.hold(register: nil) }
-        .onDisappear { model.release(register: nil) }
+        .holding(MoneyView.register(account: nil))
     }
 
     @ViewBuilder private func review(_ rows: [TxnLine]) -> some View {
@@ -65,18 +68,18 @@ struct TransactionsView: View {
             }
             .listRowBackground(Color.clear)
         } else {
-            let ready = rows.filter { !$0.approved && !Registers.needsCategory($0) }.map(\.id)
+            let ready = rows.filter { !$0.approved && !$0.needsCategory() }.map(\.id)
             Section {
                 ForEach(rows) { t in
                     Button {
-                        if Registers.needsCategory(t) { present(.categorize([t.id], approve: true)) }
-                        else { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) }
+                        if t.needsCategory() { present(.categorize([t.id], approve: true)) }
+                        else { present(.transaction(TxnForm(t))) }
                     } label: {
                         TxnRow(txn: t, showAccount: true)
                     }
                     .foregroundStyle(.ink)
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if !Registers.needsCategory(t) {
+                        if !t.needsCategory() {
                             Button {
                                 model.approve([t.id])
                                 approved += 1
@@ -87,15 +90,15 @@ struct TransactionsView: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button { present(.categorize([t.id], approve: true)) } label: { Label("Categorize", systemImage: "folder") }
                             .tint(Color.caution)
-                        Button { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
+                        Button { present(.transaction(TxnForm(t))) } label: { Label("Edit", systemImage: "pencil") }
                             .tint(Color.quiet)
                     }
                     .contextMenu {
                         Button { present(.categorize([t.id], approve: true)) } label: { Label("Categorize and Approve…", systemImage: "folder") }
-                        if !Registers.needsCategory(t) && !t.approved {
+                        if !t.needsCategory() && !t.approved {
                             Button { model.approve([t.id]); approved += 1 } label: { Label("Approve", systemImage: "checkmark.circle") }
                         }
-                        Button { present(.transaction(Draft(t, accounts: model.snapshot.accounts))) } label: { Label("Edit", systemImage: "pencil") }
+                        Button { present(.transaction(TxnForm(t))) } label: { Label("Edit", systemImage: "pencil") }
                         Divider()
                         Button(role: .destructive) { model.delete([t.id]) } label: { Label("Delete", systemImage: "trash") }
                     }

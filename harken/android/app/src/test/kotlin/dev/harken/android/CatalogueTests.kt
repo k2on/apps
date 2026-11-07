@@ -65,12 +65,12 @@ class CatalogueTests {
      */
     @Test
     fun aFaceSaysWhoByItsInitials() {
-        assertEquals("A", Who.initials("Ada"))
-        assertEquals("JB", Who.initials("Johann Sebastian Bach"))
-        assertEquals("AL", Who.initials("  ada   lovelace "))
-        assertEquals("U", Who.initials("user-0123"))
-        assertEquals("", Who.initials(""))
-        assertEquals("\u00c9", Who.initials("\u00e9mile (\u2014)"))
+        assertEquals("A", dev.arkui.Faces.initials("Ada"))
+        assertEquals("JB", dev.arkui.Faces.initials("Johann Sebastian Bach"))
+        assertEquals("AL", dev.arkui.Faces.initials("  ada   lovelace "))
+        assertEquals("U", dev.arkui.Faces.initials("user-0123"))
+        assertEquals("", dev.arkui.Faces.initials(""))
+        assertEquals("\u00c9", dev.arkui.Faces.initials("\u00e9mile (\u2014)"))
     }
 
     @Test
@@ -79,10 +79,6 @@ class CatalogueTests {
         assertEquals("L. van Beethoven", Catalogue.initials("Ludwig van Beethoven"))
         assertEquals("Vivaldi", Catalogue.initials("Vivaldi"))
         assertEquals("", Catalogue.initials(""))
-        assertEquals("1685–1750", Catalogue.span(1685, 1750))
-        assertEquals("1685–", Catalogue.span(1685, 0))
-        assertEquals("–1750", Catalogue.span(0, 1750))
-        assertEquals("", Catalogue.span(0, 0))
     }
 
     /** A performance's line: year, tracks, length — each only when known, the terms left to the foot; and nobody named is said. */
@@ -149,14 +145,14 @@ class CatalogueTests {
     }
 
     @Test
-    fun aCataloguePageIsARouteAndAPlace() {
+    fun aCataloguePageIsARoute() {
         for (p in listOf(Page.ForArtist("Johann Sebastian Bach"), Page.ForWork("johann-sebastian-bach/bwv-988"), Page.ForRecording("johann-sebastian-bach/bwv-988@kimiko-ishizaka"))) {
-            assertEquals(p, Page.parse(p.route))
-            assertEquals(p, Page.ofPlace(p.place(emptyList()), emptyList()))
+            assertEquals(p, Page.of(routeOf(p.route(emptyList())!!.destination().substringAfter('/')), emptyList()))
+            assertEquals(p, Page.of(p.from(emptyList()), emptyList()))
         }
         // A composer's address, as the desktop wrote it, is their one page.
-        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.ofPlace("#composer/Johann%20Sebastian%20Bach", emptyList()))
-        assertEquals("#work/johann-sebastian-bach%2Fbwv-988", Page.ForWork("johann-sebastian-bach/bwv-988").place(emptyList()))
+        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.of("#composer/Johann%20Sebastian%20Bach", emptyList()))
+        assertEquals("#work/johann-sebastian-bach%2Fbwv-988", Page.ForWork("johann-sebastian-bach/bwv-988").from(emptyList()))
     }
 
     // Through the kernel ----------------------------------------------------------------------

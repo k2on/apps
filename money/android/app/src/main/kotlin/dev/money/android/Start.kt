@@ -1,60 +1,56 @@
-// How the app gets to a budget: the server's address (money.koon.us unless
-// somebody types another), its `/healthz` asked whether it runs money's
-// domain, the server's own sign-in page in a Custom Tab, the code it sends
-// back to `money://auth` exchanged for a login — or no server at all, the
-// demo's household in memory. The step is state (`step`), the effects are
-// carried out here, and what was decided is remembered on the phone so it is
-// asked once: the server, the login, and whether this phone runs the demo.
+// How the app gets to a budget: the sign-in machine every Ark app shares
+// (`ark_auth::onboarding`, through the bridge — its `Onboarding`, `Step`,
+// `Event` and `Effect`, whose rules are written and tested once, in Rust),
+// its effects carried out here: the server's `/healthz` asked whether it
+// runs money's domain, the server's own sign-in page in a Custom Tab, the
+// code it sends back to `money://auth` exchanged for a login, a join link's
+// code redeemed — or no server at all, the demo's household in memory. What
+// is remembered is kept on the phone so it is asked once: the server, the
+// login, and whether this phone runs the demo.
 //
-// The machine is plain Kotlin over a [Shelf] and three functions it is
-// handed (find a server, exchange a code, open a book), so the JVM tests
-// walk it without a network or a phone. `Start` is the ViewModel that gives
-// it the real ones and outlives a rotation; the activity only opens the
-// browser it asks for and hands it the redirect.
+// `Start` is the ViewModel that holds the machine and the book it opened,
+// and outlives a rotation; the activity only opens the browser it asks for
+// and hands it the redirect.
 package dev.money.android
 
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import dev.arkdb.ffi.Login
+import dev.arkdb.auth.AppInfo
+import dev.arkdb.auth.Effect
+import dev.arkdb.auth.Event
+import dev.arkdb.auth.Found
+import dev.arkdb.auth.Login
+import dev.arkdb.auth.Onboarding
+import dev.arkdb.auth.Remembered
+import dev.arkdb.auth.Said
+import dev.arkdb.auth.Step
+import dev.arkdb.auth.loginJson
+import dev.arkdb.auth.loginParse
+import dev.arkdb.ffi.deviceLink
 import dev.arkdb.ffi.exchange
-import dev.arkdb.ffi.loginUrl
+import dev.arkdb.ffi.redeem
 import dev.arkdb.ffi.socketUrl
-import dev.arkui.SignInPhase
-import dev.arkui.server.Found
+import dev.arkui.DeviceLinkShown
 import dev.arkui.server.Probe
 import dev.money.ffi.moneyDemo
 import dev.money.ffi.moneyDomain
 import dev.money.ffi.moneyOpen
 import dev.money.ffi.moneyToday
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 /** The household's server, unless somebody says another. */
 const val DEFAULT_SERVER: String = "money.koon.us"
 
-/** Where the sign-in sends its code back to (the manifest's filter). */
-const val SCHEME: String = "money"
-
-/** Where the app is on its way to a budget. */
-sealed class Step {
-    /** The server's address, as typed; the last check's sentence; whether one is under way. */
-    data class Welcome(val typed: String = "", val error: String? = null, val checking: Boolean = false) : Step()
-
-    data class SignIn(val server: String, val phase: SignInPhase = SignInPhase.Idle, val error: String? = null) : Step()
-
-    /** A budget: the server's, or the demo's. */
-    data class Running(val book: Book) : Step()
-}
+/** money, to the sign-in machine. */
+val MONEY: AppInfo = AppInfo(name = "Money", scheme = "money", demo = true, what = "your budget")
 
 /** A key/value store of strings; `null` removes. */
 interface Shelf {
@@ -73,189 +69,22 @@ class MemoryShelf : Shelf {
     }
 }
 
-/** What the start remembers, so that it is asked once. */
-class Remembered(private val shelf: Shelf) {
-    var server: String?
-        get() = shelf.get("money.server")
-        set(v) = shelf.put("money.server", v)
-
-    /** The login, or null — including when what was kept no longer reads as one. */
-    var login: Login?
-        get() = shelf.get("money.login")?.let { runCatching { Logins.parse(it) }.getOrNull() }
-        set(v) = shelf.put("money.login", v?.let(Logins::json))
-
-    var demo: Boolean
-        get() = shelf.get("money.demo") == "1"
-        set(v) = shelf.put("money.demo", if (v) "1" else null)
-}
-
-/** A login as `ark_auth::Login`'s JSON. */
-object Logins {
-    fun json(l: Login): String =
-        JSONObject()
-            .put("token", l.token)
-            .put("session", l.session)
-            .put(
-                "user",
-                JSONObject()
-                    .put("id", l.user)
-                    .put("name", l.name)
-                    .put("email", l.email)
-                    .put("picture", l.picture)
-                    .put("roles", JSONArray(l.roles)))
-            .put("expires_ms", l.expiresMs)
-            .toString()
-
-    fun parse(s: String): Login {
-        val o = JSONObject(s)
-        val u = o.getJSONObject("user")
-        val roles = u.optJSONArray("roles")
-        return Login(
-            token = o.getString("token"),
-            session = o.getString("session"),
-            user = u.getString("id"),
-            name = u.optString("name"),
-            email = u.optString("email"),
-            roles = List(roles?.length() ?: 0) { roles!!.getString(it) },
-            expiresMs = o.optLong("expires_ms"),
-            picture = u.optString("picture"),
-        )
-    }
-}
-
-/** What the machine is handed: the network, the browser and the kernel, as functions. */
-class Effects(
-    /** The server an address means, asked of its `/healthz` (off the main thread). */
-    val find: (typed: String) -> Found,
-    /** A code from the sign-in, exchanged for a login (off the main thread). */
-    val exchange: (server: String, code: String) -> Login,
-    /** The server's book, signed in as `login`. */
-    val openServer: (server: String, login: Login) -> Book,
-    /** The demo's household. */
-    val openDemo: () -> Book,
-    /** Open `url` in a browser tab. */
-    val browse: (String) -> Unit,
-)
-
-/** The start's machine: one step at a time, its effects done through [Effects] in `scope`. */
-class Starter(
-    private val shelf: Shelf,
-    private val fx: Effects,
-    private val scope: CoroutineScope,
-    private val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
-) {
-    private val remembered = Remembered(shelf)
-    private val _step = MutableStateFlow<Step>(Step.Welcome())
-    val step: StateFlow<Step> = _step.asStateFlow()
-
-    /** Where a launch starts: the budget it had, signing in again, or the welcome. */
-    fun begin() {
-        val server = remembered.server
-        val login = remembered.login
-        _step.value =
-            when {
-                remembered.demo -> Step.Running(fx.openDemo())
-                server != null && login != null -> Step.Running(fx.openServer(server, login))
-                server != null -> Step.SignIn(server)
-                else -> Step.Welcome()
-            }
-    }
-
-    fun type(typed: String) {
-        val s = _step.value as? Step.Welcome ?: return
-        _step.value = s.copy(typed = typed, error = null)
-    }
-
-    /** Ask the typed address whether it is a money server; sign in there if it is. */
-    fun check() {
-        val s = _step.value as? Step.Welcome ?: return
-        if (s.checking) return
-        _step.value = s.copy(checking = true, error = null)
-        scope.launch {
-            val found = withContext(io) { fx.find(s.typed) }
-            val now = _step.value as? Step.Welcome ?: return@launch
-            _step.value =
-                when (found) {
-                    is Found.Server -> {
-                        remembered.server = found.url
-                        Step.SignIn(found.url)
-                    }
-                    is Found.Failed -> now.copy(checking = false, error = found.why)
-                }
+/**
+ * What the start remembers, under the keys it always had: the server, the login kept whole as
+ * `ark_auth::Login`'s JSON (one that no longer reads is none), and whether this phone runs the demo.
+ */
+class Kept(private val shelf: Shelf) {
+    var remembered: Remembered
+        get() =
+            Remembered(
+                server = shelf.get("money.server"),
+                login = shelf.get("money.login")?.let { loginParse(it) },
+                demo = shelf.get("money.demo") == "1")
+        set(r) {
+            shelf.put("money.server", r.server)
+            shelf.put("money.login", r.login?.let { loginJson(it) })
+            shelf.put("money.demo", if (r.demo) "1" else null)
         }
-    }
-
-    /** No server: the demo's household, until somebody leaves it. */
-    fun demo() {
-        remembered.demo = true
-        _step.value = Step.Running(fx.openDemo())
-    }
-
-    fun openSignIn() {
-        val s = _step.value as? Step.SignIn ?: return
-        _step.value = s.copy(phase = SignInPhase.Browser, error = null)
-        fx.browse(loginUrlOf(s.server))
-    }
-
-    /** Back from the browser with no code: the person closed it. */
-    fun returned() {
-        val s = _step.value as? Step.SignIn ?: return
-        if (s.phase == SignInPhase.Browser) _step.value = s.copy(phase = SignInPhase.Idle)
-    }
-
-    /** The code the server sent back to `money://auth`. */
-    fun code(code: String) {
-        val s = _step.value as? Step.SignIn ?: return
-        if (s.phase == SignInPhase.Exchanging) return
-        _step.value = s.copy(phase = SignInPhase.Exchanging, error = null)
-        scope.launch {
-            val login =
-                try {
-                    withContext(io) { fx.exchange(s.server, code) }
-                } catch (e: Exception) {
-                    _step.value = s.copy(phase = SignInPhase.Idle, error = "Signing in didn't finish: ${e.message ?: "no answer"}. Try again.")
-                    return@launch
-                }
-            remembered.login = login
-            _step.value =
-                try {
-                    Step.Running(fx.openServer(s.server, login))
-                } catch (e: Exception) {
-                    s.copy(phase = SignInPhase.Idle, error = "This phone's copy of the budget couldn't be opened. Sign in to try again.")
-                }
-        }
-    }
-
-    fun changeServer() {
-        val s = _step.value as? Step.SignIn ?: return
-        _step.value = Step.Welcome(typed = Probe.display(s.server))
-    }
-
-    /** Sign out, or leave the demo: the book closed, the login forgotten, the server kept. */
-    fun signOut(why: String? = null) {
-        val s = _step.value
-        if (s is Step.Running) {
-            s.book.logout()
-            s.book.close()
-        }
-        val server = remembered.server
-        remembered.login = null
-        _step.value =
-            if (s is Step.Running && s.book.demo) {
-                remembered.demo = false
-                Step.Welcome()
-            } else if (server != null) Step.SignIn(server, error = why)
-            else Step.Welcome()
-    }
-
-    /** The process is going: the book's peer closed. */
-    fun close() {
-        (_step.value as? Step.Running)?.book?.close()
-    }
-
-    companion object {
-        fun loginUrlOf(server: String): String = loginUrl(server, "$SCHEME://auth")
-    }
 }
 
 /** The app's private `SharedPreferences`, as a [Shelf]. */
@@ -269,36 +98,112 @@ class PrefsShelf(context: Context) : Shelf {
     }
 }
 
-/** The start for the activity: the machine with the real network, browser and kernel. */
+/** The start for the activity: the machine, its effects carried out, and the book it opened. */
 class Start(app: Application) : AndroidViewModel(app) {
-    private val _browse = MutableStateFlow<String?>(null)
+    private val machine = Onboarding(MONEY)
+    private val kept = Kept(PrefsShelf(app))
 
+    private val _step = MutableStateFlow(machine.step())
+    val step: StateFlow<Step> = _step.asStateFlow()
+
+    private val _said = MutableStateFlow(machine.said())
+    /** What the page says now: its question, what it waits on, its error. */
+    val said: StateFlow<Said> = _said.asStateFlow()
+
+    private val _book = MutableStateFlow<Book?>(null)
+    /** The budget open now: the server's, or the demo's. */
+    val book: StateFlow<Book?> = _book.asStateFlow()
+
+    private val _browse = MutableStateFlow<String?>(null)
     /** A URL the activity is to open in a Custom Tab, once. */
     val browse: StateFlow<String?> = _browse.asStateFlow()
 
-    val starter: Starter =
-        Starter(
-            PrefsShelf(app),
-            Effects(
-                find = { typed -> Probe.find(typed, moneyDomain(), "money", Probe::http) },
-                exchange = { server, code -> exchange(server, code) },
-                openServer = { server, login -> openServer(app, server, login) },
-                openDemo = { Book.open(moneyDemo(null), moneyToday(), demo = true, server = "") },
-                browse = { _browse.value = it },
-            ),
-            viewModelScope,
-        )
-
     init {
-        starter.begin()
+        send(Event.Launched(kept.remembered, null, false))
+    }
+
+    /** An event from a screen, the browser, a link or the app's phase. */
+    fun send(event: Event) {
+        if (event is Event.Foreground) _book.value?.dialNow()
+        val effects = machine.next(event)
+        _step.value = machine.step()
+        _said.value = machine.said()
+        for (e in effects) run(e)
     }
 
     fun browsed() {
         _browse.value = null
     }
 
+    private fun run(e: Effect) {
+        when (e) {
+            is Effect.FindServer ->
+                viewModelScope.launch {
+                    val found =
+                        withContext(Dispatchers.IO) { Probe.find(e.typed, moneyDomain(), "money", Probe::http) }
+                    send(Event.Checked(found.machine()))
+                }
+            is Effect.Remember -> kept.remembered = e.remembered
+            is Effect.Browse -> _browse.value = e.url
+            is Effect.Exchange -> trade { exchange(e.server, e.code) }
+            is Effect.Redeem -> trade { redeem(e.server, e.code) }
+            is Effect.OpenSession ->
+                try {
+                    _book.value?.close()
+                    _book.value = openServer(getApplication(), e.server, e.login)
+                } catch (x: Exception) {
+                    send(Event.OpenFailed(x.message ?: x.javaClass.simpleName))
+                }
+            is Effect.OpenDemo -> {
+                _book.value?.close()
+                _book.value = Book.open(moneyDemo(null), moneyToday(), demo = true, server = "")
+            }
+            is Effect.CloseSession -> {
+                _book.value?.close()
+                _book.value = null
+            }
+        }
+    }
+
+    // A code traded off the main thread: the login, or the sentence why not.
+    private fun trade(f: () -> Login) {
+        viewModelScope.launch {
+            val answer =
+                withContext(Dispatchers.IO) {
+                    try {
+                        Event.SignedIn(f())
+                    } catch (x: Exception) {
+                        Event.SignInFailed(x.message ?: "no answer")
+                    }
+                }
+            send(answer)
+        }
+    }
+
+    /** "Add a Device": the join link another phone signs in with, made as this login; or why not. */
+    suspend fun deviceLink(): DeviceLinkShown {
+        val r = machine.remembered()
+        val server = r.server
+        val token = r.login?.token
+        if (server == null || token.isNullOrEmpty()) return DeviceLinkShown(null, 0, emptyList(), "Sign in first.")
+        return withContext(Dispatchers.IO) {
+            try {
+                val d = deviceLink(MONEY.scheme, server, token)
+                DeviceLinkShown(d.link, d.qr.size.toInt(), d.qr.dark, null)
+            } catch (x: Exception) {
+                DeviceLinkShown(null, 0, emptyList(), "Couldn't make a code: ${x.message ?: "no answer"}.")
+            }
+        }
+    }
+
+    /** Sign out, or leave the demo: the session revoked first, then the machine told. */
+    fun signOut() {
+        _book.value?.logout()
+        send(Event.SignOut)
+    }
+
     override fun onCleared() {
-        starter.close()
+        _book.value?.close()
     }
 
     private companion object {
@@ -311,3 +216,10 @@ class Start(app: Application) : AndroidViewModel(app) {
         }
     }
 }
+
+/** What ArkUI's probe found, as the machine takes it. */
+fun dev.arkui.server.Found.machine(): Found =
+    when (this) {
+        is dev.arkui.server.Found.Server -> Found.Server(url, newer)
+        is dev.arkui.server.Found.Failed -> Found.Failed(why)
+    }

@@ -69,6 +69,9 @@ import dev.arkui.Transitions
 import dev.arkui.AmountField
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
+import uniffi.ark_format.formatDayLong
+import uniffi.money_domain.readyToAssignId
+import uniffi.money_domain.suggestPayees
 
 private enum class Choosing {
     None,
@@ -82,9 +85,10 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
     val book = LocalShell.current.book
     val a = LocalAmounts.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var f by remember(start) { mutableStateOf(start) }
-    var inflow by remember(start) { mutableStateOf(start.amount > 0) }
-    var typed by remember(start) { mutableStateOf(a.editable(kotlin.math.abs(start.amount))) }
+    // The core's form (`Draft`): its fields here, its rules and its change the core's.
+    var f by remember(start) { mutableStateOf(start.draft) }
+    var inflow by remember(start) { mutableStateOf(start.draft.amount > 0) }
+    var typed by remember(start) { mutableStateOf(a.editable(kotlin.math.abs(start.draft.amount))) }
     var choosing by remember { mutableStateOf(Choosing.None) }
     var picking by remember { mutableStateOf(false) }
     val amount = a.parse(typed)
@@ -94,11 +98,11 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
     val categoryName =
         when {
             transfer != null -> "Transfer to ${transfer.name}"
-            f.category == Book.READY_TO_ASSIGN -> "Ready to Assign"
+            f.category == readyToAssignId() -> "Ready to Assign"
             f.category != null -> ledger.line(f.category!!)?.name ?: "A category"
             else -> "Choose a category"
         }
-    val ok = signed != null && f.account != null && (f.payee.isNotBlank() || transfer != null)
+    val ok = signed != null && f.copy(amount = signed).problem() == null
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         AnimatedContent(choosing, transitionSpec = { Transitions.crossFade() }, label = "txn-sheet") { now ->
@@ -114,10 +118,10 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                             onPick = { p ->
                                 f =
                                     when (p) {
-                                        is Pick.Category -> f.copy(category = p.id, transferTo = null)
-                                        is Pick.Transfer -> f.copy(category = null, transferTo = p.account)
+                                        is Pick.Category -> f.withCategory(p.id)
+                                        is Pick.Transfer -> f.withTransfer(p.account)
                                     }
-                                if (p is Pick.Category && p.id == Book.READY_TO_ASSIGN) inflow = true
+                                if (p is Pick.Category && p.id == readyToAssignId()) inflow = true
                                 choosing = Choosing.None
                             },
                         )
@@ -186,34 +190,29 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                         val one = p.replace('\n', ' ')
                                         // A payee somebody has paid before brings the category it was for last time.
                                         val known = ledger.payees.firstOrNull { it.name.equals(one, ignoreCase = true) }
-                                        f = f.copy(payee = one, category = f.category ?: known?.categoryId)
+                                        f = if (known != null) f.withPayee(known).copy(payee = one) else f.copy(payee = one)
                                     },
                                     label = { Text(if (inflow) "From" else "Payee") },
                                     maxLines = 4,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                     modifier = Modifier.fillMaxWidth(),
                                 )
-                                val q = f.payee.trim()
-                                val near =
-                                    ledger.payees
-                                        .filter { q.isNotEmpty() && it.name.startsWith(q, ignoreCase = true) && !it.name.equals(q, ignoreCase = true) }
-                                        .sortedByDescending { it.count }
-                                        .take(4)
+                                val near = if (f.payee.isBlank()) emptyList() else suggestPayees(f.payee, ledger.payees, 4u)
                                 if (near.isNotEmpty()) {
                                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                                         for (p in near) {
                                             SuggestionChip(
-                                                onClick = { f = f.copy(payee = p.name, category = f.category ?: p.categoryId) },
+                                                onClick = { f = f.withPayee(p) },
                                                 label = { Text(p.name) })
                                         }
                                     }
                                 }
                             }
-                            if (f.bankSaid.isNotEmpty()) {
+                            if (start.bankSaid.isNotEmpty()) {
                                 // The bank's own words for it, whole and selectable: what the payee was made from.
                                 ListItem(
                                     overlineContent = { Text("Bank Description") },
-                                    headlineContent = { SelectionContainer { Text(f.bankSaid) } },
+                                    headlineContent = { SelectionContainer { Text(start.bankSaid) } },
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 )
                             }
@@ -222,7 +221,7 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                             Field("Account", account?.name ?: "Choose an account", onClick = {
                                 if (f.editing == null) choosing = Choosing.Account
                             })
-                            Field("Date", Dates.long(f.date), icon = { Icon(Icons.Default.DateRange, contentDescription = null) }, onClick = { picking = true })
+                            Field("Date", formatDayLong(f.date), icon = { Icon(Icons.Default.DateRange, contentDescription = null) }, onClick = { picking = true })
                             OutlinedTextField(
                                 value = f.memo,
                                 onValueChange = { f = f.copy(memo = it) },
@@ -236,9 +235,9 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                                     trailingContent = { Switch(checked = f.cleared, onCheckedChange = { f = f.copy(cleared = it) }) },
                                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 )
-                            } else if (f.by.isNotEmpty()) {
+                            } else if (start.by.isNotEmpty()) {
                                 Text(
-                                    "Entered by ${f.by}",
+                                    "Entered by ${start.by}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(vertical = Space.m))
@@ -246,7 +245,7 @@ fun TxnSheet(ledger: Ledger, start: TxnForm, onDismiss: () -> Unit) {
                             // What it bought, as the paper says: a transfer buys nothing.
                             val editing = f.editing
                             if (editing != null && f.transferTo == null) {
-                                ReceiptSection(ledger, editing, f.receipt, start.amount, f.date)
+                                ReceiptSection(ledger, editing, start.receipt, start.draft.amount, f.date)
                             }
                             Spacer(Modifier.height(Space.xl))
                         }

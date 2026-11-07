@@ -8,37 +8,45 @@ import ArkUI
 import SwiftUI
 
 extension Tone {
-    /// The figure's tint, as ArkUI's pill and hero draw it.
+    /// The core's tone in ArkUI's tint, as its pill and hero draw it:
+    /// money's one map, Android's and the desktop's the same.
     var tint: Tint {
         switch self {
-        case .zero: return .neutral
-        case .funded: return .good
-        case .short: return .caution
-        case .over: return .bad
-        case .onCard: return .caution
-        }
-    }
-
-    /// What the colour means, for VoiceOver.
-    var words: String {
-        switch self {
-        case .zero: return "nothing available"
-        case .funded: return "funded"
-        case .short: return "underfunded"
-        case .over: return "overspent"
-        case .onCard: return "overspent on a card"
+        case .neutral: return .neutral
+        case .positive: return .positive
+        case .short, .onCard: return .caution
+        case .overspent: return .negative
         }
     }
 }
+
+/// The SF Symbol an account of a kind is drawn with.
+enum Accounts {
+    static func symbol(_ kind: String) -> String {
+        switch kind {
+        case "checking": return "building.columns.fill"
+        case "savings": return "dollarsign.circle.fill"
+        case "cash": return "banknote.fill"
+        case "credit": return "creditcard.fill"
+        case "loan": return "house.fill"
+        case "investment": return "chart.line.uptrend.xyaxis"
+        default: return "building.columns.fill"
+        }
+    }
+}
+
+/// Now, as the domain counts time: milliseconds since 1970.
+func nowMs(_ date: Date = Date()) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
 
 extension Summary {
     /// Ready to Assign's tint: green while there is money to give a job,
     /// red when more was assigned than there is, quiet at nothing.
-    var tint: Tint { readyToAssign > 0 ? .good : readyToAssign < 0 ? .bad : .neutral }
+    var tint: Tint { tone().tint }
 }
 
 /// An account's mark: its kind's symbol in its colour on a faint wash of
-/// that colour, a rounded square as Settings' tinted rows draw one. The
+/// that colour, a rounded square as Settings' tinted rows draw one (ArkUI's
+/// `Tile`). The
 /// colours are the theme's chart palette (arkui/theme.toml), which the
 /// Android app draws its marks in too.
 struct AccountMark: View {
@@ -60,26 +68,6 @@ struct AccountMark: View {
         case "loan": return c[2]
         case "investment": return c[4]
         default: return .quiet
-        }
-    }
-
-    /// A symbol in `color` on a wash of it: an account's mark, or All
-    /// Accounts'. It grows with the person's text size, as the row's words
-    /// beside it do, up to half as large again.
-    struct Tile: View {
-        let symbol: String
-        let color: Color
-        var side: CGFloat = 32
-        @ScaledMetric(relativeTo: .body) private var grows: CGFloat = 1
-
-        var body: some View {
-            let side = self.side * min(grows, 1.5)
-            Image(systemName: symbol)
-                .font(.system(size: side * 0.5, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: side, height: side)
-                .background(color.opacity(0.16), in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
-                .accessibilityHidden(true)
         }
     }
 }

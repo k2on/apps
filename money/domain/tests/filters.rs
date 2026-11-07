@@ -79,6 +79,7 @@ impl House {
             saved: None,
             filter,
             month: month.map(str::to_string),
+            search: false,
         };
         self.b.list("filtered", &f)
     }
