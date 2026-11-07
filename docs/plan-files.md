@@ -128,9 +128,9 @@ hash, so nobody can put other bytes under a file's name.
 
 ## The server's jobs
 
-A job that reads a file is an effect handler (`Peer::handle`) on a peer
-the server runs in process, given the server's store: `p.file(&photo)` is
-then a read of the disk. A mutator that inserts a row naming a file
+A job that reads a file is an effect handler (`Peer::handle`) on a worker
+the server runs in process (`Handle::<Authority>::worker`), whose files
+are the server's: `p.file(&photo)` is then a read of the disk. A mutator that inserts a row naming a file
 inserts the job beside it (`Job::Pending{due_ms: ctx.now}`); the handler
 returns `Err("not here yet")` while the upload is still going, and the
 job is retried after its `RETRY_MS`.

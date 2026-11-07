@@ -8,8 +8,10 @@
 //! generates ([`domain`]). What is harken's is the things only harken has,
 //! each a module a test can reach:
 //!
-//! - [`library`]: the media directory as a peer — walked, watched, and
-//!   authored as `library.add_song`;
+//! - [`library`]: the media directory, the feeds and the catalogue as a
+//!   worker of the server's, its work jobs — walked, watched, read,
+//!   downloaded, heard, and
+//!   authored as `library.add_song` and the rest;
 //! - [`covers`]: where a track's cover comes from, and `/media`;
 //! - [`assistant`]: the house's speakers, as devices in each account's
 //!   listening session — which is the domain's live state
@@ -248,9 +250,6 @@ pub fn pretty(entity: &str) -> String {
     }
 }
 
-/// What the scanner's session says signed in.
-const SCANNER: &str = "the scanner";
-
 /// What the house's sign-in of a listener says it is.
 const HOUSE: &str = "the house's speakers";
 
@@ -292,22 +291,22 @@ pub async fn start(config: Config) -> Result<Server> {
     let hosted = Hosted::harken();
     // A sign-in is a row of the log, its token signed with a key kept in
     // the data directory (`ark_auth::server`). `docs/plan-auth.md` The
-    // roles the configuration grants, and the scanner's own `library`, by
-    // construction: the scanner is the library, and the role is what the
-    // library's mutations are guarded by (`is_library`).
+    // roles the configuration grants; the scanner's own `library` is its
+    // account's (`library::Scanner::start`): the scanner is the library,
+    // and the role is what the library's mutations are guarded by
+    // (`is_library`).
     let auth = config.auth::<crate::domain::Harken>(PHONE_SCHEME).await?;
-    eprintln!("harken-server: data in {}", config.data.display());
-    let library = [(crate::domain::LIBRARY, vec![library::ACCOUNT])];
+    tracing::info!("data in {}", config.data.display());
     // A person's Favorites, made once, here, at their first sign-in.
-    let auth = Arc::new(auth.with_roles(library).welcome("playlists.welcome"));
+    let auth = Arc::new(auth.welcome("playlists.welcome"));
     let public_url = config.public_url();
     let mut server = config.server(
         harken_player::config::hub(&hosted.domain, None),
         auth.clone(),
     );
     if config.keepalive != ark_peer::settings::KEEPALIVE {
-        eprintln!(
-            "harken-server: the sync socket pings every {}ms and gives up after 3 unanswered",
+        tracing::info!(
+            "the sync socket pings every {}ms and gives up after 3 unanswered",
             config.keepalive.as_millis()
         );
     }
@@ -326,8 +325,8 @@ pub async fn start(config: Config) -> Result<Server> {
     let mut lower = None;
     if let Some(dir) = &config.media {
         let art = library::art_dir(&config.data);
-        eprintln!(
-            "harken-server: serving {} at /media, and {} at /media/{}, unauthenticated",
+        tracing::info!(
+            "serving {} at /media, and {} at /media/{}, unauthenticated",
             dir.display(),
             art.display(),
             covers::ART
@@ -351,7 +350,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // be one, since nix dates every file in it 1970.
     let running = server.listen(&config.listen).await?;
     let hub = running.hub.clone();
-    eprintln!("harken-server: listening on http://{}", running.addr);
+    tracing::info!("listening on http://{}", running.addr);
 
     // Every `media_player` named becomes a device in every listening
     // session somebody is in: a connection of its own in that session,
@@ -362,62 +361,50 @@ pub async fn start(config: Config) -> Result<Server> {
     // sign-ins name them.
     let house = config.house.clone().map(|mut house| {
         house.lower = lower.clone();
-        eprintln!("harken-server: the house: {house}");
-        let auth = auth.clone();
+        tracing::info!("the house: {house}");
+        let (auth, workers) = (auth.clone(), hub.clone());
         let sign_in: ha::SignIn = Arc::new(move |user: &str| {
             let account = Account {
                 id: user.into(),
                 ..Account::default()
             };
-            auth.own(&account, HOUSE)
+            workers.worker(
+                &auth,
+                &account,
+                HOUSE,
+                Box::new(ark_peer::Memory::default()),
+            )
         });
         ha::start(house, hub.clone(), hosted.clone(), sign_in)
     });
 
     // The scanner signs in like everything else, as the account `library`.
     let scanner = match &config.media {
-        Some(dir) => {
-            let account = Account {
-                id: library::ACCOUNT.into(),
-                name: "Library".into(),
-                roles: vec![crate::domain::LIBRARY.into()],
-                ..Account::default()
-            };
-            let login = auth
-                .own(&account, SCANNER)
-                .map_err(|e| anyhow!("signing the scanner in: {e}"))?;
-            Some(Scanner::start(
-                dir.clone(),
-                hosted.clone(),
-                hub.clone(),
-                config.data.clone(),
-                login,
-                config.catalogue.clone(),
-                config.transcriber.clone(),
-                chapters::chain(&config.chapters),
-            )?)
-        }
+        Some(dir) => Some(Scanner::start(
+            dir.clone(),
+            &hub,
+            &auth,
+            config.data.clone(),
+            config.catalogue.clone(),
+            config.transcriber.clone(),
+            chapters::chain(&config.chapters),
+        )?),
         None => None,
     };
 
-    eprintln!(
-        "harken-server: one listening session per account, a volatile space on the sync socket"
-    );
+    tracing::info!("one listening session per account, a volatile space on the sync socket");
     match &config.media {
-        Some(dir) => eprintln!(
-            "harken-server: media from {} (music in music/, podcasts/ and sermons/ beside it; feeds followed from the clients)",
+        Some(dir) => tracing::info!(
+            "media from {} (music in music/, podcasts/ and sermons/ beside it; feeds followed from the clients)",
             dir.display()
         ),
         // Said out loud: a server with no media looks exactly like one whose
         // directory is misconfigured.
-        None => eprintln!("harken-server: no media: set HARKEN_MEDIA to a directory"),
+        None => tracing::warn!("no media: set HARKEN_MEDIA to a directory"),
     }
     match &config.web {
-        Some(dir) => eprintln!(
-            "harken-server: browser client on {public_url}/ from {}",
-            dir.display()
-        ),
-        None => eprintln!("harken-server: no browser client: set HARKEN_WEB to a built one"),
+        Some(dir) => tracing::info!("browser client on {public_url}/ from {}", dir.display()),
+        None => tracing::warn!("no browser client: set HARKEN_WEB to a built one"),
     }
 
     Ok(Server {

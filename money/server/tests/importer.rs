@@ -3,8 +3,8 @@
 //! through (`money/domain/tests/import.rs` walks the domain through the
 //! same answers), a new bank's accounts waiting for the household to say
 //! what each feeds, a household member's ask answered, the cursor kept
-//! across a restart and only once the import is in, a run said twice
-//! changing nothing, and no secret ever said.
+//! on the bank's row with its import and read from there across a
+//! restart, and no secret ever said.
 
 mod common;
 
@@ -23,8 +23,10 @@ fn txns(server: &money_server::Server) -> Vec<(String, String, i64, Cleared, Opt
     t
 }
 
-fn cursor(data: &std::path::Path) -> Option<String> {
-    store(data).banks.get("chase").and_then(|c| c.cursor.clone())
+/// Where chase's last import got to: its row's cursor.
+fn cursor(server: &money_server::Server) -> Option<String> {
+    let banks = hub_rows::<Bank>(server, "bank");
+    banks.into_iter().find(|b| b.name == "chase").map(|b| b.cursor).filter(|c| !c.is_empty())
 }
 
 /// Both of chase's accounts given accounts of their own, as somebody would
@@ -60,7 +62,7 @@ fn the_importer_walks_one_bank_through_three_phases() {
     let r = runs(&server, 1);
     assert_eq!(r[0].banks["chase"], Outcome::Imported { upserts: 4, removed: 0 });
     assert_eq!(mock.cursors(), [None, Some("p1a".to_string())]);
-    assert_eq!(cursor(data.path()).as_deref(), Some("c1"));
+    assert_eq!(cursor(&server).as_deref(), Some("c1"));
     assert!(hub_rows::<Account>(&server, "account").is_empty(), "nothing opens by itself");
     assert!(hub_rows::<Txn>(&server, "txn").is_empty());
     let linked: Vec<LinkedLine> = hub_query(&server, "banks.linked", ());
@@ -105,7 +107,7 @@ fn the_importer_walks_one_bank_through_three_phases() {
     pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
     let r = runs(&server, 3);
     assert_eq!(r[2].banks["chase"], Outcome::Imported { upserts: 2, removed: 1 });
-    assert_eq!(cursor(data.path()).as_deref(), Some("c2"));
+    assert_eq!(cursor(&server).as_deref(), Some("c2"));
     let after2 = txns(&server);
     let gas: Vec<_> = after2.iter().filter(|t| t.1.starts_with("GAS")).collect();
     assert_eq!(gas.len(), 1, "posted in place: {gas:?}");
@@ -125,12 +127,12 @@ fn the_importer_walks_one_bank_through_three_phases() {
     rt.block_on(server.stop());
 }
 
-/// A restart asks from the cursor the last run kept and answers no ask it
-/// answered before; a run said again from an older cursor — the import
-/// in, the cursor never kept — changes nothing. Falsified by loading no
-/// store at start: the restart had no bank to import. (It once read the
-/// budget after the third run, which was the second open's, not the
-/// sync's, as often as the two opens were answered by a run each.)
+/// A restart asks from the cursor the last import put on the bank's row
+/// and answers no ask it answered before; the store's cursor, older, is
+/// not read once the row has one. Falsified by loading no store at start:
+/// the restart had no bank to import. (It once read the budget after the
+/// third run, which was the second open's, not the sync's, as often as
+/// the two opens were answered by a run each.)
 #[test]
 fn a_restart_resumes_from_the_cursor_and_a_run_said_twice_changes_nothing() {
     let rt = runtime();
@@ -173,16 +175,17 @@ fn a_restart_resumes_from_the_cursor_and_a_run_said_twice_changes_nothing() {
     assert_eq!(server.importer.as_ref().unwrap().runs().len(), 1);
     rt.block_on(server.stop());
 
-    // As if the server had stopped between the import and keeping its
-    // cursor: phase two again, from c1.
+    // The store saying an older cursor, as one kept before the row's was
+    // read: the row's is where it asks from.
     let mut s = store(data.path());
     s.banks.get_mut("chase").unwrap().cursor = Some("c1".into());
     s.save(data.path()).unwrap();
     let server = importing(&rt, data.path(), &mock, secrets.path());
     let r = runs(&server, 1);
-    assert_eq!(r[0].banks["chase"], Outcome::Imported { upserts: 2, removed: 1 });
-    assert_eq!(txns(&server), after2, "the same run twice is the same budget");
-    assert_eq!(cursor(data.path()).as_deref(), Some("c2"));
+    assert_eq!(r[0].banks["chase"], Outcome::Imported { upserts: 0, removed: 0 });
+    assert_eq!(mock.cursors().last().unwrap().as_deref(), Some("c2"));
+    assert_eq!(txns(&server), after2);
+    assert_eq!(cursor(&server).as_deref(), Some("c2"));
     rt.block_on(server.stop());
 }
 
@@ -203,7 +206,7 @@ fn a_failed_run_keeps_the_cursor() {
         matches!(&r[0].banks["chase"], Outcome::Failed(why) if why.contains("INTERNAL_SERVER_ERROR")),
         "{r:?}"
     );
-    assert_eq!(cursor(data.path()), None);
+    assert_eq!(cursor(&server), None);
     let bank: Vec<BankLine> = hub_query(&server, "banks.banks", ());
     assert_eq!(
         (bank[0].error_code.as_str(), bank[0].synced_ms, bank[0].needs_login),
@@ -215,7 +218,7 @@ fn a_failed_run_keeps_the_cursor() {
     let r = runs(&server, 2);
     assert!(matches!(r[1].banks["chase"], Outcome::Imported { .. }));
     assert_eq!(mock.cursors(), [None, Some("p1a".into()), None, Some("p1a".into())]);
-    assert_eq!(cursor(data.path()).as_deref(), Some("c1"));
+    assert_eq!(cursor(&server).as_deref(), Some("c1"));
     let bank: Vec<BankLine> = hub_query(&server, "banks.banks", ());
     assert_eq!(bank[0].error_code, "", "an import that works clears it");
     rt.block_on(server.stop());

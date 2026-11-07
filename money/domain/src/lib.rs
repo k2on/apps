@@ -62,6 +62,8 @@ pub fn domain() -> Domain {
     ark::functions!(Domain::new::<Money>("money", VERSION))
         .with(ark_auth::register::<Money>)
         .with(<Photo as ark::effect::Effect>::register::<Money>)
+        .with(<Asking as ark::effect::Effect>::register::<Money>)
+        .with(<Syncing as ark::effect::Effect>::register::<Money>)
 }
 
 /// [`domain`], once.

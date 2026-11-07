@@ -137,6 +137,8 @@ fn describe(input: &DeriveInput) -> syn::Result<TokenStream> {
 
 /// `Effect` for a row whose `state` field is a `Job<T>` — a job — and
 /// what `#[effect(..)]` says: the lease and the retry (a minute each by
+/// default), the longest a run of failures puts it off (the retry by
+/// default), how many run at once (one by
 /// default), the role a claim needs, the field naming its owner. Nothing
 /// for any other row.
 fn effect(input: &DeriveInput, fields: &syn::FieldsNamed, keys: &[&Ident], key_tys: &[&Type]) -> syn::Result<TokenStream> {
@@ -159,13 +161,21 @@ fn effect(input: &DeriveInput, fields: &syn::FieldsNamed, keys: &[&Ident], key_t
         return err(name.span(), "a job is keyed by one column");
     };
     let (mut lease, mut retry, mut role, mut owner) = (quote!(60_000), quote!(60_000), quote!(None), quote!());
+    let mut most = quote!();
     for it in items_of(&input.attrs, "effect")?.into_iter().flatten() {
         match it {
             Item::Is(n, e) if n == "lease_ms" => lease = e.to_token_stream(),
             Item::Is(n, e) if n == "retry_ms" => retry = e.to_token_stream(),
+            Item::Is(n, e) if n == "retry_max_ms" => most.extend(quote!(const RETRY_MAX_MS: i64 = #e;)),
+            Item::Is(n, e) if n == "at_once" => most.extend(quote!(const AT_ONCE: usize = #e;)),
             Item::Is(n, e) if n == "role" => role = quote!(Some(#e)),
             Item::Is(n, Expr::Path(f)) if n == "owner" => owner = quote!(fn owner(&self) -> Option<&str> { Some(&self.#f) }),
-            _ => return err(name.span(), "#[effect(..)]: lease_ms = .., retry_ms = .., role = \"..\", owner = field"),
+            _ => {
+                return err(
+                    name.span(),
+                    "#[effect(..)]: lease_ms = .., retry_ms = .., retry_max_ms = .., at_once = .., role = \"..\", owner = field",
+                )
+            }
         }
     }
     Ok(quote! {
@@ -173,6 +183,7 @@ fn effect(input: &DeriveInput, fields: &syn::FieldsNamed, keys: &[&Ident], key_t
             type Outcome = #outcome;
             const LEASE_MS: i64 = #lease;
             const RETRY_MS: i64 = #retry;
+            #most
             const ROLE: Option<&'static str> = #role;
             fn job(&self) -> &::ark::effect::Job<#outcome> {
                 &self.state

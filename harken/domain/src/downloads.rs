@@ -5,8 +5,10 @@
 //! [`download_progress`] how it is going, and [`downloaded`] that it is
 //! here. A media row with no [`Download`] is on the server.
 //!
-//! The server says how a download goes now and then rather than byte by
-//! byte (`harken-server`'s `sync.rs`), so a file is a handful of entries.
+//! A file queued is a job too ([`Fetch`], `ark::effect`): the server's
+//! handler claims it, downloads it, says how it goes now and then rather
+//! than byte by byte, so a file is a handful of entries, and finishes it.
+//! An episode here is heard the same way ([`Hearing`], [`hear`]).
 
 use ark::prelude::*;
 
@@ -28,13 +30,28 @@ fn media_of(db: &Db<Harken>, file: &str) -> Result<Media, String> {
         .ok_or_else(|| format!("no media has the file {file}"))
 }
 
-/// A file still to come: queued, from `source`. Said again of a file
-/// queued from there already, it writes nothing; of one that was
-/// downloading or failed, it is queued again.
+/// A job pended now, unless it is due already or claimed: what it is
+/// about asked for again is the one job, and one due later is due now.
+pub(crate) fn pend<R: ark::effect::Effect>(ctx: &Ctx, db: &mut Db<Harken>, row: impl FnOnce(Job<R::Outcome>) -> R) -> Result<bool, String> {
+    let r = row(Job::Pending { due_ms: ctx.now });
+    if let Some(was) = db.tab::<R>().at(&r.key()) {
+        if matches!(was.job(), Job::Pending { due_ms } if *due_ms <= ctx.now) || matches!(was.job(), Job::Claimed { .. }) {
+            return Ok(false);
+        }
+    }
+    db.tab::<R>().put(r).map(|_| true)
+}
+
+/// A file still to come: queued, from `source`, and its download a job
+/// ([`Fetch`]). Said again of a file queued or downloading already, it
+/// writes nothing; of one that failed, it is queued again.
 #[mutator("library.queue_download")]
 pub fn queue_download(ctx: &Ctx, db: &mut Db<Harken>, input: QueueDownload) -> Result<(), String> {
     is_library(ctx)?;
     let media = media_of(db, &input.file)?;
+    if !pend::<Fetch>(ctx, db, |state| Fetch { media_id: media.id, state })? {
+        return Ok(());
+    }
     let was = db.download.get(media.id);
     db.download.put(Download {
         media_id: media.id,
@@ -72,6 +89,14 @@ pub fn downloaded(ctx: &Ctx, db: &mut Db<Harken>, input: Downloaded) -> Result<(
     is_library(ctx)?;
     let media = media_of(db, &input.file)?;
     db.download.delete(media.id)
+}
+
+/// An episode's file heard ([`Hearing`]), unless it is being heard.
+#[mutator("hearing.hear")]
+pub fn hear(ctx: &Ctx, db: &mut Db<Harken>, input: Hear) -> Result<(), String> {
+    is_library(ctx)?;
+    let media = media_of(db, &input.file)?;
+    pend::<Hearing>(ctx, db, |state| Hearing { media_id: media.id, state }).map(|_| ())
 }
 
 /// Every file still to come, with its title, by when it was asked for.

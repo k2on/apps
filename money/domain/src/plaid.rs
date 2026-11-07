@@ -850,10 +850,24 @@ pub fn ignore(_: &Ctx, db: &mut Db<Money>, input: IgnoreLinked) -> Result<(), St
 /// `synced_ms` moving is the answer.
 #[mutator("banks.sync")]
 pub fn sync(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), String> {
+    ask_sync(ctx, db, ())?;
     db.asked.put(Asked {
         user_id: ctx.user().into(),
         asked_ms: ctx.now,
     })
+}
+
+/// The banks and the stores imported now, as the server itself asks (at
+/// its start, and when it is nudged): the household's sync job
+/// ([`Syncing`]) pending, unless it is running.
+#[mutator("syncing.ask")]
+pub fn ask_sync(ctx: &Ctx, db: &mut Db<Money>, _: ()) -> Result<(), String> {
+    let running = db.syncing.get(&String::new()).is_some_and(|s| matches!(s.state, Job::Claimed { .. }));
+    if running {
+        return Ok(());
+    }
+    let state = Job::Pending { due_ms: ctx.now };
+    db.syncing.put(Syncing { id: String::new(), state })
 }
 
 /// The latest ask of anybody's: when the importer was last asked to sync.

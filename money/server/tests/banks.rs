@@ -90,7 +90,8 @@ fn a_bank_is_connected_from_the_app() {
     }
     let runs_now = runs(&server, 2);
     assert_eq!(runs_now[1].banks["wells-fargo"], Outcome::Imported { upserts: 2, removed: 0 });
-    assert_eq!(store(data.path()).banks["wells-fargo"].cursor.as_deref(), Some("w1"));
+    let bank = hub_rows::<Bank>(&server, "bank").into_iter().find(|b| b.name == "wells-fargo").unwrap();
+    assert_eq!(bank.cursor, "w1", "where its import got to, on its row");
     let rows = wells_rows(&server);
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|l| l.waiting));
@@ -252,11 +253,11 @@ fn a_bank_is_disconnected() {
 
 /// An existing connection moved in by hand: `banks.json` with the token
 /// and the cursor alone, under the name the budget knows the bank by. A
-/// fresh server imports only what is new since that cursor, fills in what
-/// Plaid says of the connection, and doubles nothing. The cursor may stay
-/// in `importer.json`, where the importer kept it before, too. Falsified
-/// by ignoring the cursor of a connection written by hand: the import
-/// asked from the start.
+/// fresh server imports only what is new since the cursor — the bank's
+/// row's, which the store's says too — fills in what Plaid says of the
+/// connection, and doubles nothing; the cursor after is on the row. The
+/// cursor may be in `importer.json`, where the importer kept it before,
+/// too. Falsified by reading no cursor: the import asked from the start.
 #[test]
 fn a_connection_written_by_hand_imports_only_what_is_new() {
     let rt = runtime();
@@ -296,10 +297,9 @@ fn a_connection_written_by_hand_imports_only_what_is_new() {
     assert_eq!(txns.iter().filter(|t| t.imported_id.as_deref() == Some("WC1")).count(), 1);
     let kept = store(data.path());
     let wf = &kept.banks["wellsfargo"];
-    assert_eq!(
-        (wf.cursor.as_deref(), wf.item_id.as_str(), wf.institution.as_str()),
-        (Some("w2"), "item-wf", "Wells Fargo")
-    );
+    assert_eq!((wf.item_id.as_str(), wf.institution.as_str()), ("item-wf", "Wells Fargo"));
+    let bank = hub_rows::<Bank>(&server, "bank").into_iter().find(|b| b.name == "wellsfargo").unwrap();
+    assert_eq!(bank.cursor, "w2");
     rt.block_on(server.stop());
 
     // The cursor where the importer kept it before: importer.json.

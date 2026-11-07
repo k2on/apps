@@ -395,12 +395,71 @@ data class FeedRead(val url: String, val title: String, val items: Long, val err
     }
 }
 
+/** The record `Fetch`. */
+data class Fetch(val mediaId: Id, val state: JobInt) {
+    fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + state.json() + "}"
+
+    companion object {
+        fun of(j: Any?): Fetch = (j as JSONObject).let { o -> Fetch(Id(J.text(o.opt("media_id"))), JobInt.of(o.opt("state"))) }
+    }
+}
+
+/** The record `FetchCancel`. */
+data class FetchCancel(val id: Id) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+
+    companion object {
+        fun of(j: Any?): FetchCancel = (j as JSONObject).let { o -> FetchCancel(Id(J.text(o.opt("id")))) }
+    }
+}
+
+/** The record `FetchClaim`. */
+data class FetchClaim(val id: Id, val by: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+
+    companion object {
+        fun of(j: Any?): FetchClaim = (j as JSONObject).let { o -> FetchClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
+    }
+}
+
+/** The record `FetchFinish`. */
+data class FetchFinish(val id: Id, val by: String, val outcome: FetchOutcome, val againMs: Long? = null) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
+
+    companion object {
+        fun of(j: Any?): FetchFinish = (j as JSONObject).let { o -> FetchFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), FetchOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
+    }
+}
+
 /** The record `FetchOlder`. */
 data class FetchOlder(val url: String, val more: Long) {
     fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"more\":" + more.toString() + "}"
 
     companion object {
         fun of(j: Any?): FetchOlder = (j as JSONObject).let { o -> FetchOlder(J.text(o.opt("url")), J.int(o.opt("more"))) }
+    }
+}
+
+/** The sum `FetchOutcome`. */
+sealed class FetchOutcome {
+    abstract fun json(): String
+
+    data class Ok(val value: Long) : FetchOutcome() {
+        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.toString() + "}" + "}"
+    }
+
+    data class Err(val why: String) : FetchOutcome() {
+        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
+    }
+
+    companion object {
+        fun of(j: Any?): FetchOutcome = J.sum(j) { t, o ->
+            when (t) {
+                "Ok" -> Ok(J.int(o!!.opt("value")))
+                "Err" -> Err(J.text(o!!.opt("why")))
+                else -> throw IllegalArgumentException("FetchOutcome: no variant $t")
+            }
+        }
     }
 }
 
@@ -437,6 +496,112 @@ data class GroupVolume(val level: Long) {
 
     companion object {
         fun of(j: Any?): GroupVolume = (j as JSONObject).let { o -> GroupVolume(J.int(o.opt("level"))) }
+    }
+}
+
+/** The record `Hear`. */
+data class Hear(val file: String) {
+    fun json(): String = "{" + "\"file\":" + J.q(file) + "}"
+
+    companion object {
+        fun of(j: Any?): Hear = (j as JSONObject).let { o -> Hear(J.text(o.opt("file"))) }
+    }
+}
+
+/** The record `Hearing`. */
+data class Hearing(val mediaId: Id, val state: JobInt) {
+    fun json(): String = "{" + "\"media_id\":" + J.q(mediaId.hex) + "," + "\"state\":" + state.json() + "}"
+
+    companion object {
+        fun of(j: Any?): Hearing = (j as JSONObject).let { o -> Hearing(Id(J.text(o.opt("media_id"))), JobInt.of(o.opt("state"))) }
+    }
+}
+
+/** The record `HearingCancel`. */
+data class HearingCancel(val id: Id) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "}"
+
+    companion object {
+        fun of(j: Any?): HearingCancel = (j as JSONObject).let { o -> HearingCancel(Id(J.text(o.opt("id")))) }
+    }
+}
+
+/** The record `HearingClaim`. */
+data class HearingClaim(val id: Id, val by: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "}"
+
+    companion object {
+        fun of(j: Any?): HearingClaim = (j as JSONObject).let { o -> HearingClaim(Id(J.text(o.opt("id"))), J.text(o.opt("by"))) }
+    }
+}
+
+/** The record `HearingFinish`. */
+data class HearingFinish(val id: Id, val by: String, val outcome: HearingOutcome, val againMs: Long? = null) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
+
+    companion object {
+        fun of(j: Any?): HearingFinish = (j as JSONObject).let { o -> HearingFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), HearingOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
+    }
+}
+
+/** The sum `HearingOutcome`. */
+sealed class HearingOutcome {
+    abstract fun json(): String
+
+    data class Ok(val value: Long) : HearingOutcome() {
+        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.toString() + "}" + "}"
+    }
+
+    data class Err(val why: String) : HearingOutcome() {
+        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
+    }
+
+    companion object {
+        fun of(j: Any?): HearingOutcome = J.sum(j) { t, o ->
+            when (t) {
+                "Ok" -> Ok(J.int(o!!.opt("value")))
+                "Err" -> Err(J.text(o!!.opt("why")))
+                else -> throw IllegalArgumentException("HearingOutcome: no variant $t")
+            }
+        }
+    }
+}
+
+/** The sum `JobInt`. */
+sealed class JobInt {
+    abstract fun json(): String
+
+    data class Pending(val dueMs: Long) : JobInt() {
+        override fun json(): String = "{\"Pending\":" + "{" + "\"due_ms\":" + dueMs.toString() + "}" + "}"
+    }
+
+    data class Claimed(val by: String, val atMs: Long) : JobInt() {
+        override fun json(): String = "{\"Claimed\":" + "{" + "\"by\":" + J.q(by) + "," + "\"at_ms\":" + atMs.toString() + "}" + "}"
+    }
+
+    data class Done(val value: Long) : JobInt() {
+        override fun json(): String = "{\"Done\":" + "{" + "\"value\":" + value.toString() + "}" + "}"
+    }
+
+    data class Failed(val why: String, val retryMs: Long) : JobInt() {
+        override fun json(): String = "{\"Failed\":" + "{" + "\"why\":" + J.q(why) + "," + "\"retry_ms\":" + retryMs.toString() + "}" + "}"
+    }
+
+    data object Cancelled : JobInt() {
+        override fun json(): String = "\"Cancelled\""
+    }
+
+    companion object {
+        fun of(j: Any?): JobInt = J.sum(j) { t, o ->
+            when (t) {
+                "Pending" -> Pending(J.int(o!!.opt("due_ms")))
+                "Claimed" -> Claimed(J.text(o!!.opt("by")), J.int(o!!.opt("at_ms")))
+                "Done" -> Done(J.int(o!!.opt("value")))
+                "Failed" -> Failed(J.text(o!!.opt("why")), J.int(o!!.opt("retry_ms")))
+                "Cancelled" -> Cancelled
+                else -> throw IllegalArgumentException("JobInt: no variant $t")
+            }
+        }
     }
 }
 
@@ -565,11 +730,11 @@ data class LookClaim(val id: Id, val by: String) {
 }
 
 /** The record `LookFinish`. */
-data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome) {
-    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "}"
+data class LookFinish(val id: Id, val by: String, val outcome: LookOutcome, val againMs: Long? = null) {
+    fun json(): String = "{" + "\"id\":" + J.q(id.hex) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
 
     companion object {
-        fun of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome"))) }
+        fun of(j: Any?): LookFinish = (j as JSONObject).let { o -> LookFinish(Id(J.text(o.opt("id"))), J.text(o.opt("by")), LookOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
     }
 }
 
@@ -797,6 +962,15 @@ data class QueueDownload(val file: String, val source: String) {
 
     companion object {
         fun of(j: Any?): QueueDownload = (j as JSONObject).let { o -> QueueDownload(J.text(o.opt("file")), J.text(o.opt("source"))) }
+    }
+}
+
+/** The record `Read`. */
+data class Read(val url: String) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "}"
+
+    companion object {
+        fun of(j: Any?): Read = (j as JSONObject).let { o -> Read(J.text(o.opt("url"))) }
     }
 }
 
@@ -1084,6 +1258,65 @@ data class Song(val mediaId: Id, val albumId: String?, val disc: Long, val track
     }
 }
 
+/** The record `Source`. */
+data class Source(val url: String, val state: JobInt) {
+    fun json(): String = "{" + "\"url\":" + J.q(url) + "," + "\"state\":" + state.json() + "}"
+
+    companion object {
+        fun of(j: Any?): Source = (j as JSONObject).let { o -> Source(J.text(o.opt("url")), JobInt.of(o.opt("state"))) }
+    }
+}
+
+/** The record `SourceCancel`. */
+data class SourceCancel(val id: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "}"
+
+    companion object {
+        fun of(j: Any?): SourceCancel = (j as JSONObject).let { o -> SourceCancel(J.text(o.opt("id"))) }
+    }
+}
+
+/** The record `SourceClaim`. */
+data class SourceClaim(val id: String, val by: String) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "}"
+
+    companion object {
+        fun of(j: Any?): SourceClaim = (j as JSONObject).let { o -> SourceClaim(J.text(o.opt("id")), J.text(o.opt("by"))) }
+    }
+}
+
+/** The record `SourceFinish`. */
+data class SourceFinish(val id: String, val by: String, val outcome: SourceOutcome, val againMs: Long? = null) {
+    fun json(): String = "{" + "\"id\":" + J.q(id) + "," + "\"by\":" + J.q(by) + "," + "\"outcome\":" + outcome.json() + "," + "\"again_ms\":" + J.wopt(againMs) { v0 -> v0.toString() } + "}"
+
+    companion object {
+        fun of(j: Any?): SourceFinish = (j as JSONObject).let { o -> SourceFinish(J.text(o.opt("id")), J.text(o.opt("by")), SourceOutcome.of(o.opt("outcome")), J.opt(o.opt("again_ms")) { v0 -> J.int(v0) }) }
+    }
+}
+
+/** The sum `SourceOutcome`. */
+sealed class SourceOutcome {
+    abstract fun json(): String
+
+    data class Ok(val value: Long) : SourceOutcome() {
+        override fun json(): String = "{\"Ok\":" + "{" + "\"value\":" + value.toString() + "}" + "}"
+    }
+
+    data class Err(val why: String) : SourceOutcome() {
+        override fun json(): String = "{\"Err\":" + "{" + "\"why\":" + J.q(why) + "}" + "}"
+    }
+
+    companion object {
+        fun of(j: Any?): SourceOutcome = J.sum(j) { t, o ->
+            when (t) {
+                "Ok" -> Ok(J.int(o!!.opt("value")))
+                "Err" -> Err(J.text(o!!.opt("why")))
+                else -> throw IllegalArgumentException("SourceOutcome: no variant $t")
+            }
+        }
+    }
+}
+
 /** The record `Start`. */
 data class Start(val at: Long, val from: String, val position: Long, val queue: List<Track>) {
     fun json(): String = "{" + "\"at\":" + at.toString() + "," + "\"from\":" + J.q(from) + "," + "\"position\":" + position.toString() + "," + "\"queue\":" + J.wlist(queue) { v0 -> v0.json() } + "}"
@@ -1239,6 +1472,33 @@ data class Works(val composer: String) {
 
 /** The domain's functions, each called by its name through [peer]. */
 class Harken(val peer: Peer) {
+    /** `fetch.cancel`: its intent's id. */
+    fun fetchCancel(input: FetchCancel): String = peer.mutate("fetch.cancel", input.json())
+
+    /** `fetch.claim`: its intent's id. */
+    fun fetchClaim(input: FetchClaim): String = peer.mutate("fetch.claim", input.json())
+
+    /** `fetch.due`, kept. */
+    fun fetchDue(): View<Fetch> = View(peer.view("fetch.due", "null")) { j -> Fetch.of(j) }
+
+    /** `fetch.finish`: its intent's id. */
+    fun fetchFinish(input: FetchFinish): String = peer.mutate("fetch.finish", input.json())
+
+    /** `hearing.cancel`: its intent's id. */
+    fun hearingCancel(input: HearingCancel): String = peer.mutate("hearing.cancel", input.json())
+
+    /** `hearing.claim`: its intent's id. */
+    fun hearingClaim(input: HearingClaim): String = peer.mutate("hearing.claim", input.json())
+
+    /** `hearing.due`, kept. */
+    fun hearingDue(): View<Hearing> = View(peer.view("hearing.due", "null")) { j -> Hearing.of(j) }
+
+    /** `hearing.finish`: its intent's id. */
+    fun hearingFinish(input: HearingFinish): String = peer.mutate("hearing.finish", input.json())
+
+    /** `hearing.hear`: its intent's id. */
+    fun hear(input: Hear): String = peer.mutate("hearing.hear", input.json())
+
     /** `library.add_episode`: its intent's id. */
     fun addEpisode(input: AddEpisode): String = peer.mutate("library.add_episode", input.json())
 
@@ -1489,16 +1749,16 @@ class Harken(val peer: Peer) {
     fun unjoin(input: Member) { peer.mutate("listening.unjoin", input.json()) }
 
     /** `look.cancel`: its intent's id. */
-    fun cancel(input: LookCancel): String = peer.mutate("look.cancel", input.json())
+    fun lookCancel(input: LookCancel): String = peer.mutate("look.cancel", input.json())
 
     /** `look.claim`: its intent's id. */
-    fun claim(input: LookClaim): String = peer.mutate("look.claim", input.json())
+    fun lookClaim(input: LookClaim): String = peer.mutate("look.claim", input.json())
 
     /** `look.due`, kept. */
-    fun due(): View<Look> = View(peer.view("look.due", "null")) { j -> Look.of(j) }
+    fun lookDue(): View<Look> = View(peer.view("look.due", "null")) { j -> Look.of(j) }
 
     /** `look.finish`: its intent's id. */
-    fun finish(input: LookFinish): String = peer.mutate("look.finish", input.json())
+    fun lookFinish(input: LookFinish): String = peer.mutate("look.finish", input.json())
 
     /** `playlists.add_all_to_playlist`: its intent's id. */
     fun addAllToPlaylist(input: AddAllToPlaylist): String = peer.mutate("playlists.add_all_to_playlist", input.json())
@@ -1535,6 +1795,21 @@ class Harken(val peer: Peer) {
 
     /** `session.revoke`: its intent's id. */
     fun sessionRevoke(input: Revoke): String = peer.mutate("session.revoke", input.json())
+
+    /** `source.cancel`: its intent's id. */
+    fun sourceCancel(input: SourceCancel): String = peer.mutate("source.cancel", input.json())
+
+    /** `source.claim`: its intent's id. */
+    fun sourceClaim(input: SourceClaim): String = peer.mutate("source.claim", input.json())
+
+    /** `source.due`, kept. */
+    fun sourceDue(): View<Source> = View(peer.view("source.due", "null")) { j -> Source.of(j) }
+
+    /** `source.finish`: its intent's id. */
+    fun sourceFinish(input: SourceFinish): String = peer.mutate("source.finish", input.json())
+
+    /** `source.read`: its intent's id. */
+    fun read(input: Read): String = peer.mutate("source.read", input.json())
 
     private fun typed(v: LibraryEntryView): View<LibraryEntry> = View.typed(v::rows, { v.take().let { it.ops to it.rows } }, v::close)
 

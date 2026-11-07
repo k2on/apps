@@ -1,7 +1,8 @@
 //! What a connection fed `session.feed` holds (§1.8), table by table, is
 //! what the scope listed before each row said its owner: the durable tables
 //! whole; the sign-ins, the roles and the live space's tables (§1.9) its
-//! person's; the library's looks none. Each table is asked of a row its
+//! person's; the server's jobs (the library's looks, its fetches, its
+//! sources' reads and its hearings) none. Each table is asked of a row its
 //! reader's and a row somebody else's.
 
 use ark::peer::Ctx;
@@ -11,7 +12,7 @@ use serde_json::{json, Value};
 /// The tables the scope fed only its person's rows of, and the one it fed
 /// none of; every other one it fed whole.
 const THEIRS: &[&str] = &["listening", "listening_device", "listening_scrub", "sign_in", "role"];
-const NONE: &[&str] = &["look"];
+const NONE: &[&str] = &["look", "fetch", "source", "hearing"];
 
 /// A value of `t` as JSON, every `user` in it `user`.
 fn zero(t: &Type, user: &str) -> Value {

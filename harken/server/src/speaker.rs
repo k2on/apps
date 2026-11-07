@@ -150,13 +150,13 @@ impl Lower {
         match status {
             Ok(s) if s.success() => {
                 std::fs::rename(&part, &out).ok()?;
-                println!("harken-server: speaker: {file} made at {MAX_RATE} Hz");
+                tracing::info!("{file} made at {MAX_RATE} Hz");
                 Some(out)
             }
             other => {
                 let _ = std::fs::remove_file(&part);
-                eprintln!(
-                    "harken-server: speaker: {file}: {} {}: {other:?}",
+                tracing::warn!(
+                    "{file}: {} {}: {other:?}",
                     self.ffmpeg.display(),
                     source.display()
                 );

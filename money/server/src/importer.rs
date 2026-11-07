@@ -2,73 +2,76 @@
 //! household's budget as what it writes to — and the one place a bank is
 //! connected, logged in to again, or disconnected.
 //!
-//! It is a peer like any other: an `ark_peer::Peer` in this process,
-//! dialling the hub through its handle (no socket), signed in as the
-//! account `bank` and holding the [`money_domain::BANK`] role, which the
-//! server grants that account and nobody else unless told.
+//! It is a worker of the server's (`Handle::<Authority>::worker`): a peer
+//! in this process, signed in as the account `bank` and holding the
+//! [`money_domain::BANK`] role, which that account is given and nobody else
+//! unless told. Its work is jobs (`ark::effect`), each kind a handler of
+//! its, run on a thread of its own:
 //!
-//! **What it imports** is every bank in the server's store
-//! ([`crate::store`], `banks.json` in the data directory): for each, a run
-//! asks Plaid for the item's accounts and for every page of what changed
-//! since the bank's cursor, makes them one import
-//! (`money_domain::plaid::import_of`) and authors it as `banks.import`. The
-//! cursor after it is kept in the store only once the hub has confirmed the
-//! entry, which it does only once the entry is on its disk; a run that
-//! stops anywhere before that is asked again from the old cursor next
-//! time, and an import says the same thing twice without changing anything
-//! (Plaid's id is the `imported_id`). An account the import is the first to
-//! see waits for somebody in the household to say what it feeds
-//! (`money_domain::banks`); when somebody does, the bank's next import is
-//! asked from no cursor, its whole history again. What Plaid says when a
-//! bank fails is authored as `banks.failed`, for the household to see.
+//! - **a sync** (a `syncing` row, `banks.sync`): every bank in the
+//!   server's store ([`crate::store`], `banks.json` in the data directory)
+//!   imported, then every store's receipts. For each bank a run asks Plaid
+//!   for the item's accounts and for every page of what changed since the
+//!   bank's cursor — the one its last import put on its `bank` row, in the
+//!   log — makes them one import (`money_domain::plaid::import_of`) and
+//!   authors it as `banks.import`, the cursor after it on the row. An
+//!   import refused, or lost before the hub kept it, leaves the row's
+//!   cursor where it was, so the next run asks from there; an import says
+//!   the same thing twice without changing anything (Plaid's id is the
+//!   `imported_id`). A bank with no row yet — a connection moved into
+//!   `banks.json` by hand — asks from the cursor the store says. An
+//!   account the import is the first to see waits for somebody in the
+//!   household to say what it feeds (`money_domain::banks`); when somebody
+//!   does, the bank's next import is asked from no cursor, its whole
+//!   history again. What Plaid says when a bank fails is authored as
+//!   `banks.failed`, for the household to see. A sync runs once at start,
+//!   whenever it is nudged ([`Importer::nudge`]: `SIGUSR1`, which the NixOS
+//!   module's timer sends twice a day), and whenever somebody in the
+//!   household asks; asked again while it runs, it runs again after.
 //!
-//! **When it runs:** once at start, whenever it is nudged ([`Importer::nudge`]:
-//! `SIGUSR1`, which the NixOS module's timer sends twice a day), whenever
-//! somebody in the household asks (`banks.sync`, a row of the `asked`
-//! table it holds like everything else: an ask newer than the last one it
-//! answered is answered by a run), and for one bank at once when it has
-//! just been connected or logged in to again.
+//! - **an ask** about a connection (an `asking` row: `banks.connect`,
+//!   `banks.reconnect`, `banks.add_accounts`, `banks.disconnect`), several
+//!   at once. For a connection it opens a Plaid Hosted Link page and
+//!   answers with its address; then it asks Plaid after the page every
+//!   [`Banks::poll`] until somebody finishes it there, trades the public
+//!   token for the bank's access token, keeps the bank in the store,
+//!   answers, and imports it at once. A page nobody finished in
+//!   [`Banks::lifetime_s`] is answered expired; a page open when the server
+//!   stopped is answered expired at its next start, its link token having
+//!   been held in memory only. A disconnection tells Plaid to forget the
+//!   login (`/item/remove`) and drops it from the store.
+//!   `banks.add_accounts` is the reconnection's page with Plaid's account
+//!   picker (`update.account_selection_enabled`); what is picked there is
+//!   opened at the import after. A second login to a bank already
+//!   connected folds into the first at its first import
+//!   (`money_domain::plaid`), and the login it replaced is removed at Plaid
+//!   and dropped from the store as a disconnection's is, then said retired
+//!   (`banks.retired`).
 //!
-//! **Connecting** is an ask too (`banks.connect`, `banks.reconnect`,
-//! `banks.add_accounts`, `banks.disconnect`, rows of `bank_ask`). For a connection it opens a
-//! Plaid Hosted Link page and answers with its address; then it asks Plaid
-//! after the page every [`Banks::poll`] until somebody finishes it there,
-//! trades the public token for the bank's access token, keeps the bank in
-//! the store, answers, and imports it at once. A page nobody finished in
-//! [`Banks::lifetime_s`] is answered expired; a page open when the server
-//! stopped is answered expired at its next start, its link token having
-//! been held in memory only. A disconnection tells Plaid to forget the
-//! login (`/item/remove`) and drops it from the store.
-//! `banks.add_accounts` is the reconnection's page with Plaid's account
-//! picker (`update.account_selection_enabled`); what is picked there is
-//! opened at the import after. A second login to a bank already
-//! connected folds into the first at its first import
-//! (`money_domain::plaid`), and the login it replaced is removed at Plaid
-//! and dropped from the store as a disconnection's is, then said retired
-//! (`banks.retired`).
+//! - **a receipt's photo** read ([`crate::photos`]).
 //!
 //! **Secrets are never said.** The client id and the secret are read from
 //! their files whenever they are needed, the tokens from the store; all of
 //! them go to Plaid alone. Every line the importer says is in
-//! [`Importer::said`] as well as on stderr, which is how the tests hold it
-//! to that.
+//! [`Importer::said`] as well as in the server's events, which is how the
+//! tests hold it to that.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use ark::format::Encode;
-use ark::peer::Ctx;
 use ark::row::Id;
-use ark_auth::Login;
-use ark_peer::{Authority, Handle, Memory, Peer};
+use ark_auth::server::Auth;
+use ark_auth::Account;
+use ark_peer::{Authority, Handle, Memory, Peer, Work};
 use money_domain::plaid::import_of;
-use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
+use money_domain::{Answer, AskState, Asking, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport, Syncing};
 
-use crate::plaid::{LinkMode, LinkSession, Linking, Plaid, PlaidError};
+use crate::plaid::{LinkMode, Linking, Plaid, PlaidError};
 use crate::store::{Connection, Store};
 use crate::stores::{put_away, waiting, Stores};
 
@@ -78,9 +81,6 @@ pub const ACCOUNT: &str = "bank";
 
 /// What the importer's sign-in says it is.
 pub const DEVICE: &str = "the bank importer";
-
-/// How long a run waits for the hub to confirm an entry.
-const CONFIRM: Duration = Duration::from_secs(60);
 
 /// Everything the importer is told. Plaid's keys are files, read whenever
 /// they are needed; the banks are the store's.
@@ -135,7 +135,7 @@ pub struct Run {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// Imported, confirmed, its cursor kept.
+    /// Imported: authored, its cursor on its row.
     Imported {
         upserts: usize,
         removed: usize,
@@ -145,170 +145,149 @@ pub enum Outcome {
     /// Another login to the same bank replaced it (`money_domain::plaid`):
     /// not imported, and removed at Plaid as soon as Plaid answers.
     Replaced,
-    /// A store's receipts, imported and confirmed.
+    /// A store's receipts, imported.
     Receipts {
         receipts: usize,
     },
-    /// A store's charges, imported and confirmed.
+    /// A store's charges, imported.
     Charges {
         charges: usize,
     },
     Failed(String),
 }
 
-/// The importer, running on a thread of its own.
+/// The importer, running: its worker, and what its handlers share.
 pub struct Importer {
-    wake: ark_peer::Wake,
-    nudged: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
-    said: Arc<Mutex<Vec<String>>>,
-    runs: Arc<Mutex<Vec<Run>>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    worker: Handle<Peer>,
+    hub: Handle<Authority>,
+    job: Arc<Job>,
 }
 
 impl Importer {
-    /// The importer for `banks`, signed in as `login`, dialling `hub`; its
-    /// store in `data`. It runs once as soon as it is linked.
-    pub fn start(banks: Option<Banks>, stores: Stores, hub: Handle<Authority>, data: PathBuf, login: Login) -> Result<Importer> {
-        let mut roles = login.user.roles.clone();
-        roles.push(money_domain::BANK.to_string());
-        roles.sort();
-        roles.dedup();
-        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
-        // In memory: what it holds is the hub's, filled at every start, and
-        // an import it had not seen confirmed is pulled again from the
-        // cursor kept, rather than pushed again from a disk.
-        let config = ark_peer::Config::of(money_domain::shared());
-        let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()));
-        peer.sign_in(who.clone());
-        let token = login.token.clone();
-        let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
-        peer.set_token(Some(login.token));
-        let (wake, rx) = ark_peer::link::bell();
-        peer.set_waker(wake.clone());
-        // Receipt photos read here, from the server's own files.
-        if let Some(program) = stores.ocr.clone() {
-            crate::photos::handle(&mut peer, program, data.clone()).map_err(|e| anyhow!("the server's files: {e}"))?;
-        }
-        peer.connect_with("", dial);
-
-        let store = Store::load(&data)?;
-        let (nudged, stop) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicBool::new(false)));
-        let (said, runs) = (Arc::new(Mutex::new(Vec::new())), Arc::new(Mutex::new(Vec::new())));
-        let job = Job {
-            peer,
-            rx,
+    /// The importer for `banks` and `stores`, a worker of `hub` signed in by
+    /// `auth`; its store in `data`. It runs once as soon as it is linked.
+    pub fn start(banks: Option<Banks>, stores: Stores, hub: &Handle<Authority>, auth: &Arc<Auth>, data: PathBuf) -> Result<Importer> {
+        let account = Account {
+            id: ACCOUNT.into(),
+            name: "Bank".into(),
+            roles: vec![money_domain::BANK.into()],
+            ..Account::default()
+        };
+        // In memory: what it holds is the hub's, filled at every start.
+        let worker = hub
+            .worker(auth, &account, DEVICE, Box::new(Memory::default()))
+            .map_err(|e| anyhow!("signing the importer in: {e}"))?;
+        let job = Arc::new(Job {
+            store: Mutex::new(Store::load(&data)?),
             banks,
             stores,
             data,
-            store,
-            live: BTreeMap::new(),
-            said: said.clone(),
-            runs: runs.clone(),
-        };
-        let names: Vec<&str> = job.store.banks.keys().map(String::as_str).collect();
+            said: Mutex::default(),
+            runs: Mutex::default(),
+            swept: AtomicBool::new(false),
+            started: ark_peer::now_ms(),
+            nudged: AtomicBool::new(false),
+        });
+        let names: Vec<String> = job.store().banks.keys().cloned().collect();
         job.say(match names.len() {
             _ if job.banks.is_none() => "no Plaid keys: importing the stores' receipts alone".into(),
             0 => "no banks connected yet: connect one from the app".into(),
             _ => format!("connected to {}", names.join(", ")),
         });
-        let thread = {
-            let (nudged, stop) = (nudged.clone(), stop.clone());
-            let mut job = job;
-            std::thread::Builder::new()
-                .name("money-importer".into())
-                .spawn(move || job.run(&nudged, &stop))
-                .map_err(|e| anyhow!("starting the importer: {e}"))?
+        {
+            let mut p = worker.lock();
+            let j = job.clone();
+            p.handle::<Syncing>(move |w, _| j.sync(w).map_err(|e| format!("{e:#}")));
+            if job.banks.is_some() {
+                let j = job.clone();
+                p.handle::<Asking>(move |w, a| j.ask(w, a.id).map(|_| 0));
+            }
+            // Receipt photos read here, from the server's own files.
+            if let Some(program) = job.stores.ocr.clone() {
+                crate::photos::handle(&mut p, program, job.data.clone());
+            }
+        }
+        let importer = Importer {
+            worker,
+            hub: hub.clone(),
+            job,
         };
-        Ok(Importer {
-            wake,
-            nudged,
-            stop,
-            said,
-            runs,
-            thread: Some(thread),
-        })
+        importer.nudge();
+        Ok(importer)
     }
 
     /// Run now (or as soon as the current run ends).
     pub fn nudge(&self) {
-        self.nudged.store(true, Ordering::SeqCst);
-        (self.wake)();
+        self.handle().nudge();
     }
 
     /// A handle Settings' calls ask a run with, and read the last of.
     pub fn handle(&self) -> ImporterHandle {
         ImporterHandle {
-            wake: self.wake.clone(),
-            nudged: self.nudged.clone(),
-            runs: self.runs.clone(),
+            hub: self.hub.clone(),
+            job: self.job.clone(),
         }
     }
 
     /// Every line the importer has said.
     pub fn said(&self) -> Vec<String> {
-        self.said.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        held(&self.job.said).clone()
     }
 
     /// Every run it has finished, oldest first: a run of every bank, or of
     /// one just connected.
     pub fn runs(&self) -> Vec<Run> {
-        self.runs.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        held(&self.job.runs).clone()
     }
+
+    /// Whether every entry it authored has been answered by the hub.
+    pub fn settled(&self) -> bool {
+        self.worker.lock().pending_len() == 0
+    }
+}
+
+fn held<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// What of the importer another thread may hold: its nudge, and its runs.
 #[derive(Clone)]
 pub struct ImporterHandle {
-    wake: ark_peer::Wake,
-    nudged: Arc<AtomicBool>,
-    runs: Arc<Mutex<Vec<Run>>>,
+    hub: Handle<Authority>,
+    job: Arc<Job>,
 }
 
 impl ImporterHandle {
+    /// A sync asked, by the server itself: run now, or again once the one
+    /// running ends.
     pub fn nudge(&self) {
-        self.nudged.store(true, Ordering::SeqCst);
-        (self.wake)();
+        self.job.nudged.store(true, Ordering::SeqCst);
+        if let Some(Err(why)) = self.hub.mutate("syncing.ask".into(), ().to_bytes()) {
+            tracing::warn!("a sync was refused: {why}");
+        }
     }
 
     /// The last run it finished.
     pub fn last(&self) -> Option<Run> {
-        self.runs.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
+        held(&self.job.runs).last().cloned()
     }
 }
 
-impl Drop for Importer {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        (self.wake)();
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
-/// A Hosted Link page open for an ask.
-struct Live {
-    what: String,
-    bank: String,
-    session: LinkSession,
-    until: Instant,
-    next: Instant,
-}
-
-/// The importer's thread: its peer, and what it keeps.
+/// What the importer's handlers share.
 struct Job {
-    peer: Peer,
-    rx: mpsc::Receiver<()>,
     /// None: no Plaid keys, and only the stores imported.
     banks: Option<Banks>,
     stores: Stores,
     data: PathBuf,
-    store: Store,
-    /// The pages open, by the ask they answer.
-    live: BTreeMap<Id<BankAsk>, Live>,
-    said: Arc<Mutex<Vec<String>>>,
-    runs: Arc<Mutex<Vec<Run>>>,
+    store: Mutex<Store>,
+    said: Mutex<Vec<String>>,
+    runs: Mutex<Vec<Run>>,
+    /// Whether the asks open before this start have been looked at, and
+    /// when it started; whether the server asked for a sync since the
+    /// last began.
+    swept: AtomicBool,
+    started: i64,
+    nudged: AtomicBool,
 }
 
 /// What failing at a bank says: Plaid's code, when it gave one, and the
@@ -320,41 +299,42 @@ fn failure(e: &anyhow::Error) -> (String, String) {
     }
 }
 
+/// A read of what the worker holds.
+fn read<T>(w: &mut Work, f: impl FnOnce(&ark::db::Db<money_domain::Money>) -> T) -> Option<T> {
+    w.with(|p| ark::db::read::<money_domain::Money, _>(&p.log.store, f)).ok()
+}
+
+/// A mutation authored.
+fn author(w: &mut Work, name: &str, input: &impl Encode) -> Result<()> {
+    w.mutate(name, input).map(|_| ()).map_err(|why| anyhow!("refused: {why}"))
+}
+
 impl Job {
     fn say(&self, line: String) {
-        eprintln!("money-server: importer: {line}");
-        self.said.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+        tracing::info!("{line}");
+        held(&self.said).push(line);
     }
 
-    /// The peer pumped, and whatever the hub refused said.
-    fn pump(&mut self) {
-        let p = self.peer.pump();
-        if let Some(why) = p.denied {
-            self.say(format!("the hub turned the importer's sign-in away: {why}"));
-        }
-        for (_, why) in self.peer.take_refusals(ark::schema::Space::Durable) {
-            self.say(format!("refused: {why}"));
-        }
+    fn store(&self) -> MutexGuard<'_, Store> {
+        held(&self.store)
     }
 
-    /// A read of what the importer holds.
-    fn read<T>(&self, f: impl FnOnce(&ark::db::Db<money_domain::Money>) -> T) -> Option<T> {
-        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, String>(f(db))).ok()
+    /// The store changed by `f`, and kept.
+    fn change<T>(&self, f: impl FnOnce(&mut Store) -> T) -> Result<T> {
+        let mut store = self.store();
+        let t = f(&mut store);
+        store.save(&self.data)?;
+        Ok(t)
     }
 
     /// The day of the first transaction any bank brought; none before one
     /// has.
-    fn first_bank_day(&self) -> Option<String> {
-        self.read(|db| {
+    fn first_bank_day(&self, w: &mut Work) -> Option<String> {
+        read(w, |db| {
             let txns: Vec<money_domain::Txn> = db.txn.scan();
             txns.into_iter().filter(|t| !t.imported_by.is_empty()).map(|t| t.date).min()
         })
         .flatten()
-    }
-
-    /// The newest ask the importer holds.
-    fn asked(&self) -> i64 {
-        self.read(money_domain::plaid::last_asked).flatten().map_or(0, |a: Asked| a.asked_ms)
     }
 
     /// The banks' configuration: only asked on a server with Plaid's keys.
@@ -368,195 +348,164 @@ impl Job {
         Ok(Plaid::new(&self.banks().url, id, s))
     }
 
-    fn save(&self) -> Result<()> {
-        self.store.save(&self.data)
-    }
-
     fn record(&self, run: Run) {
-        self.runs.lock().unwrap_or_else(|e| e.into_inner()).push(run);
+        held(&self.runs).push(run);
     }
 
-    fn run(&mut self, nudged: &AtomicBool, stop: &AtomicBool) {
-        loop {
-            let wait = match (self.live.is_empty(), &self.banks) {
-                (false, Some(b)) => b.poll.min(Duration::from_secs(1)),
-                _ => Duration::from_secs(1),
-            };
-            ark_peer::link::wait(&self.peer, &self.rx, wait);
-            if stop.load(Ordering::SeqCst) {
-                return;
-            }
-            self.pump();
-            // Linked and filled: the asks it holds are the hub's.
-            if !self.peer.linked || self.peer.log.filling() {
-                continue;
-            }
-            if self.banks.is_some() {
-                self.answer_asks();
-                self.poll_pages();
-            }
-            let asked = self.asked();
-            let due = nudged.swap(false, Ordering::SeqCst) || asked > self.store.answered_ms;
-            if !due {
-                continue;
-            }
-            let mut run = match self.banks.is_some() {
-                true => self.import_all(stop),
-                false => Run::default(),
-            };
-            run.stores = self.import_stores(stop);
-            if asked > self.store.answered_ms {
-                self.store.answered_ms = asked;
-                if let Err(e) = self.save() {
-                    self.say(format!("could not keep what it answered: {e:#}"));
-                }
-            }
-            self.record(run);
+    /// A sync: every bank, then every store; run again after when it was
+    /// asked for again meanwhile.
+    fn sync(&self, w: &mut Work) -> Result<i64> {
+        let began = ark_peer::now_ms();
+        self.nudged.store(false, Ordering::SeqCst);
+        if self.banks.is_some() && !self.swept.swap(true, Ordering::SeqCst) {
+            self.sweep(w);
         }
+        let mut run = match self.banks.is_some() {
+            true => self.import_all(w),
+            false => Run::default(),
+        };
+        run.stores = self.import_stores(w);
+        self.record(run);
+        let asked = read(w, money_domain::plaid::last_asked).flatten().map_or(0, |a| a.asked_ms);
+        if asked > began || self.nudged.load(Ordering::SeqCst) {
+            w.again(ark_peer::now_ms());
+        }
+        Ok(0)
     }
 
     // * Asks
 
-    /// Every ask nobody has answered, answered: a page opened for a
-    /// connection, a disconnection done. A page the store says is open but
-    /// this process never opened was opened before a restart: expired.
-    fn answer_asks(&mut self) {
-        let open = self.read(money_domain::banks::open_asks).unwrap_or_default();
-        for a in open {
-            if self.live.contains_key(&a.id) {
-                continue;
-            }
-            let answered = match (a.state, a.what.as_str()) {
-                (AskState::Waiting, _) => {
-                    self.answer(a.id, AskState::Expired, "the server restarted while Plaid's page was open: ask again");
-                    Ok(())
-                }
-                (_, "connect") => self.open_page(&a, LinkMode::New { days: self.banks().history }),
-                (_, what @ ("reconnect" | "add_accounts")) => match self.store.banks.get(&a.bank).map(|c| c.access_token.clone()) {
-                    Some(token) if what == "reconnect" => self.open_page(&a, LinkMode::Update(token)),
-                    // Plaid's account picker, for accounts not shared before.
-                    Some(token) => self.open_page(&a, LinkMode::AddAccounts(token)),
-                    None => Err(anyhow!("this server holds no login for {}", a.bank)),
-                },
-                (_, "disconnect") => self.disconnect(&a),
-                (_, what) => Err(anyhow!("nothing here does {what:?}")),
-            };
-            if let Err(e) = answered {
-                let (code, why) = failure(&e);
-                self.say(format!("{} {}: failed: {why}", a.what, a.bank));
-                let said = match code.is_empty() {
-                    true => why,
-                    false => format!("Plaid said {code}: {why}"),
-                };
-                self.answer(a.id, AskState::Failed, &said);
-            }
+    /// The asks open from before this start: a page open then was opened
+    /// by a process that is gone, with its link token, and one asked
+    /// before asks were jobs is nobody's: each answered expired.
+    fn sweep(&self, w: &mut Work) {
+        let open = read(w, |db| {
+            let open = money_domain::banks::open_asks(db).into_iter();
+            let before = |a: &BankAsk| a.state == AskState::Waiting && a.answered_ms < self.started;
+            open.filter(|a| before(a) || db.asking.get(a.id).is_none()).collect::<Vec<BankAsk>>()
+        });
+        for a in open.unwrap_or_default() {
+            let a: BankAsk = a;
+            self.answer(w, a.id, AskState::Expired, "the server restarted while Plaid's page was open: ask again");
         }
     }
 
-    /// `banks.answer` authored with a sentence, said when it is refused.
-    fn answer(&mut self, id: Id<BankAsk>, state: AskState, message: &str) {
-        self.answer_with(Answer {
-            id,
-            state,
-            message: message.into(),
-            ..Answer::default()
-        });
+    /// An ask answered: a page opened for a connection and asked after
+    /// until it is finished, a disconnection done. One answered already —
+    /// expired at a restart — is nothing to do.
+    fn ask(&self, w: &mut Work, id: Id<BankAsk>) -> Result<(), String> {
+        let Some(a) = read(w, |db| db.bank_ask.get(id)).flatten() else {
+            return Ok(());
+        };
+        if a.state != AskState::Asked {
+            return Ok(());
+        }
+        let token = self.store().banks.get(&a.bank).map(|c| c.access_token.clone());
+        let answered = match (a.what.as_str(), token) {
+            ("connect", _) => self.page(w, &a, LinkMode::New { days: self.banks().history }),
+            ("reconnect", Some(token)) => self.page(w, &a, LinkMode::Update(token)),
+            // Plaid's account picker, for accounts not shared before.
+            ("add_accounts", Some(token)) => self.page(w, &a, LinkMode::AddAccounts(token)),
+            ("reconnect" | "add_accounts", None) => Err(anyhow!("this server holds no login for {}", a.bank)),
+            ("disconnect", _) => self.disconnect(w, &a),
+            (what, _) => Err(anyhow!("nothing here does {what:?}")),
+        };
+        if let Err(e) = answered {
+            let (code, why) = failure(&e);
+            self.say(format!("{} {}: failed: {why}", a.what, a.bank));
+            let said = match code.is_empty() {
+                true => why,
+                false => format!("Plaid said {code}: {why}"),
+            };
+            self.answer(w, a.id, AskState::Failed, &said);
+        }
+        Ok(())
     }
 
-    fn answer_with(&mut self, answer: Answer) {
-        if let Err(e) = self.author("banks.answer", &answer) {
+    /// `banks.answer` authored with a sentence, said when it is refused.
+    fn answer(&self, w: &mut Work, id: Id<BankAsk>, state: AskState, message: &str) {
+        let message = message.into();
+        self.answer_with(
+            w,
+            Answer {
+                id,
+                state,
+                message,
+                ..Answer::default()
+            },
+        );
+    }
+
+    fn answer_with(&self, w: &mut Work, answer: Answer) {
+        if let Err(e) = author(w, "banks.answer", &answer) {
             self.say(format!("could not answer an ask: {e:#}"));
         }
     }
 
-    /// A Hosted Link page: for a new bank, a bank's login, or its accounts.
-    fn open_page(&mut self, a: &BankAsk, mode: LinkMode) -> Result<()> {
-        let plaid = self.plaid()?;
-        let session = plaid.link_create(&mode, self.banks().lifetime_s)?;
-        let lifetime = Duration::from_secs(self.banks().lifetime_s);
+    /// A Hosted Link page — for a new bank, a bank's login, or its
+    /// accounts — opened, answered with, and asked after until somebody
+    /// finishes it, closes it, or it expires.
+    fn page(&self, w: &mut Work, a: &BankAsk, mode: LinkMode) -> Result<()> {
+        let (plaid, lifetime_s) = (self.plaid()?, self.banks().lifetime_s);
+        let session = plaid.link_create(&mode, lifetime_s)?;
+        let lifetime = Duration::from_secs(lifetime_s);
         self.say(match a.bank.as_str() {
             "" => format!("{}: Plaid's page is open", a.what),
             bank => format!("{} {bank}: Plaid's page is open", a.what),
         });
-        self.answer_with(Answer {
-            id: a.id,
-            state: AskState::Waiting,
-            url: session.url.clone(),
-            expires_ms: ark_peer::now_ms() + lifetime.as_millis() as i64,
-            ..Answer::default()
-        });
-        self.live.insert(
-            a.id,
-            Live {
-                what: a.what.clone(),
-                bank: a.bank.clone(),
-                session,
-                until: Instant::now() + lifetime,
-                next: Instant::now() + self.banks().poll,
+        let (url, expires_ms) = (session.url.clone(), ark_peer::now_ms() + lifetime.as_millis() as i64);
+        self.answer_with(
+            w,
+            Answer {
+                id: a.id,
+                state: AskState::Waiting,
+                url,
+                expires_ms,
+                ..Answer::default()
             },
         );
-        Ok(())
-    }
-
-    /// Every open page whose turn it is, asked after.
-    fn poll_pages(&mut self) {
-        let now = Instant::now();
-        let due: Vec<Id<BankAsk>> = self.live.iter().filter(|(_, l)| l.next <= now).map(|(id, _)| *id).collect();
-        for id in due {
-            let Some(mut live) = self.live.remove(&id) else { continue };
-            let plaid = match self.plaid() {
-                Ok(p) => p,
-                Err(e) => {
-                    self.answer(id, AskState::Failed, &format!("{e:#}"));
-                    continue;
-                }
-            };
-            let linking = match plaid.link_get(&live.session) {
-                Ok(l) => l,
+        let until = Instant::now() + lifetime;
+        let linking = loop {
+            std::thread::sleep(self.banks().poll);
+            match plaid.link_get(&session) {
+                Ok(Linking::Open) if Instant::now() < until => {}
+                Ok(l) => break l,
                 // Plaid out of reach for a moment is not the page's end.
-                Err(PlaidError::Transport(why)) => {
-                    self.say(format!("asking after Plaid's page: {why}"));
-                    Linking::Open
-                }
-                Err(e) => Linking::Exited(Some(e.to_string())),
-            };
-            match linking {
-                Linking::Open if Instant::now() >= live.until => {
-                    self.answer(id, AskState::Expired, "nobody finished Plaid's page in time: ask again");
-                }
-                Linking::Open => {
-                    live.next = Instant::now() + self.banks().poll;
-                    self.live.insert(id, live);
-                }
-                Linking::Connected(Some(public)) if live.what == "connect" => {
-                    if let Err(e) = self.connected(id, &plaid, &public) {
-                        let (_, why) = failure(&e);
-                        self.say(format!("connecting a bank failed: {why}"));
-                        self.answer(id, AskState::Failed, &why);
-                    }
-                }
-                // Update mode: the login given again, or accounts picked;
-                // nothing to exchange.
-                Linking::Connected(_) | Linking::Exited(None) if live.what == "reconnect" || live.what == "add_accounts" => {
-                    let bank = live.bank.clone();
-                    self.say(match live.what.as_str() {
-                        "reconnect" => format!("{bank}: logged in again"),
-                        _ => format!("{bank}: its accounts picked again"),
-                    });
-                    self.answer(id, AskState::Done, "");
-                    self.import_now(&bank);
-                }
-                Linking::Connected(_) | Linking::Exited(None) => {
-                    self.answer(id, AskState::Failed, "Plaid's page was closed before a bank was connected");
-                }
-                Linking::Exited(Some(why)) => self.answer(id, AskState::Failed, &why),
+                Err(PlaidError::Transport(why)) => self.say(format!("asking after Plaid's page: {why}")),
+                Err(e) => break Linking::Exited(Some(e.to_string())),
             }
+        };
+        let (id, bank) = (a.id, a.bank.clone());
+        match linking {
+            Linking::Open => self.answer(w, id, AskState::Expired, "nobody finished Plaid's page in time: ask again"),
+            Linking::Connected(Some(public)) if a.what == "connect" => {
+                if let Err(e) = self.connected(w, id, &plaid, &public) {
+                    let (_, why) = failure(&e);
+                    self.say(format!("connecting a bank failed: {why}"));
+                    self.answer(w, id, AskState::Failed, &why);
+                }
+            }
+            // Update mode: the login given again, or accounts picked;
+            // nothing to exchange.
+            Linking::Connected(_) | Linking::Exited(None) if a.what == "reconnect" || a.what == "add_accounts" => {
+                self.say(match a.what.as_str() {
+                    "reconnect" => format!("{bank}: logged in again"),
+                    _ => format!("{bank}: its accounts picked again"),
+                });
+                self.answer(w, id, AskState::Done, "");
+                self.import_now(w, &bank);
+            }
+            Linking::Connected(_) | Linking::Exited(None) => {
+                self.answer(w, id, AskState::Failed, "Plaid's page was closed before a bank was connected");
+            }
+            Linking::Exited(Some(why)) => self.answer(w, id, AskState::Failed, &why),
         }
+        Ok(())
     }
 
     /// A new bank's public token traded for its login, the bank kept under
     /// a name of its own, the ask answered, and the bank imported at once.
-    fn connected(&mut self, id: Id<BankAsk>, plaid: &Plaid, public: &str) -> Result<()> {
+    fn connected(&self, w: &mut Work, id: Id<BankAsk>, plaid: &Plaid, public: &str) -> Result<()> {
         let (token, item_id) = plaid.exchange(public)?;
         let item = plaid.accounts(&token).ok();
         let institution_id = item.as_ref().and_then(|i| i.institution_id.clone()).unwrap_or_default();
@@ -564,59 +513,61 @@ impl Job {
             "" => String::new(),
             i => plaid.institution(i).unwrap_or_default(),
         };
-        let known: BTreeSet<String> = self
-            .read(|db| db.bank.scan().into_iter().map(|b: Bank| b.name).collect())
-            .unwrap_or_default();
-        let name = self.store.name_for(&institution, |n| known.contains(n));
-        self.store.banks.insert(
-            name.clone(),
-            Connection {
-                access_token: token,
-                cursor: None,
-                item_id,
-                institution_id,
-                institution: institution.clone(),
-                added_ms: ark_peer::now_ms(),
-                rest: BTreeMap::new(),
+        let known: BTreeSet<String> = read(w, |db| db.bank.scan().into_iter().map(|b: Bank| b.name).collect()).unwrap_or_default();
+        let connection = Connection {
+            access_token: token,
+            cursor: None,
+            item_id,
+            institution_id,
+            institution: institution.clone(),
+            added_ms: ark_peer::now_ms(),
+            rest: BTreeMap::new(),
+        };
+        let name = self.change(|s| {
+            let name = s.name_for(&institution, |n| known.contains(n));
+            s.banks.insert(name.clone(), connection);
+            name
+        })?;
+        self.say(format!("{name}: connected"));
+        let bank = name.clone();
+        self.answer_with(
+            w,
+            Answer {
+                id,
+                state: AskState::Done,
+                bank,
+                institution,
+                ..Answer::default()
             },
         );
-        self.save()?;
-        self.say(format!("{name}: connected"));
-        self.answer_with(Answer {
-            id,
-            state: AskState::Done,
-            bank: name.clone(),
-            institution,
-            ..Answer::default()
-        });
-        self.import_now(&name);
+        self.import_now(w, &name);
         Ok(())
     }
 
     /// Plaid told to forget a bank's login, the login dropped, and the ask
     /// answered: the domain forgets the bank.
-    fn disconnect(&mut self, a: &BankAsk) -> Result<()> {
-        if let Some(c) = self.store.banks.get(&a.bank).cloned() {
+    fn disconnect(&self, w: &mut Work, a: &BankAsk) -> Result<()> {
+        let held = self.store().banks.get(&a.bank).cloned();
+        if let Some(c) = held {
             match self.plaid()?.remove(&c.access_token) {
                 Ok(()) => {}
                 // Plaid has forgotten it already.
                 Err(e) if matches!(e.code(), Some("ITEM_NOT_FOUND" | "INVALID_ACCESS_TOKEN")) => {}
                 Err(e) => return Err(e.into()),
             }
-            self.store.banks.remove(&a.bank);
-            self.save()?;
+            self.change(|s| s.banks.remove(&a.bank))?;
         }
         self.say(format!("{}: disconnected", a.bank));
-        self.answer(a.id, AskState::Done, "");
+        self.answer(w, a.id, AskState::Done, "");
         Ok(())
     }
 
     // * Imports
 
     /// One bank, now, as a run of its own.
-    fn import_now(&mut self, name: &str) {
+    fn import_now(&self, w: &mut Work, name: &str) {
         let outcome = match self.plaid() {
-            Ok(plaid) => self.import_or_say(&plaid, name),
+            Ok(plaid) => self.import_or_say(w, &plaid, name),
             Err(e) => Outcome::Failed(e.to_string()),
         };
         self.record(Run {
@@ -625,11 +576,12 @@ impl Job {
         });
     }
 
-    /// One run: every bank, each on its own — one failing is said and the
-    /// rest go on.
-    fn import_all(&mut self, stop: &AtomicBool) -> Run {
+    /// Every bank, each on its own — one failing is said and the rest go
+    /// on.
+    fn import_all(&self, w: &mut Work) -> Run {
         let mut run = Run::default();
-        if self.store.banks.is_empty() {
+        let names: Vec<String> = self.store().banks.keys().cloned().collect();
+        if names.is_empty() {
             self.say("no banks to import: connect one from the app".into());
             return run;
         }
@@ -637,41 +589,37 @@ impl Job {
             Ok(p) => p,
             Err(e) => {
                 self.say(format!("no Plaid keys: {e}"));
-                for item in self.store.banks.keys() {
-                    run.banks.insert(item.clone(), Outcome::Failed(e.to_string()));
+                for item in names {
+                    run.banks.insert(item, Outcome::Failed(e.to_string()));
                 }
                 return run;
             }
         };
-        self.retire(&plaid);
-        let names: Vec<String> = self.store.banks.keys().cloned().collect();
+        self.retire(w, &plaid);
         for name in names {
-            if stop.load(Ordering::SeqCst) {
-                break;
-            }
             // Retired by the import of the login that replaced it.
-            if !self.store.banks.contains_key(&name) {
+            if !self.store().banks.contains_key(&name) {
                 continue;
             }
-            let outcome = self.import_or_say(&plaid, &name);
+            let outcome = self.import_or_say(w, &plaid, &name);
             run.banks.insert(name, outcome);
         }
         run
     }
 
-    /// One bank imported, or what went wrong said — on stderr, and to the
-    /// household as `banks.failed` when it is news.
-    fn import_or_say(&mut self, plaid: &Plaid, name: &str) -> Outcome {
-        let replaced = self.read(|db| db.bank.get(name)).flatten().is_some_and(|b| !b.replaced_by.is_empty());
+    /// One bank imported, or what went wrong said — in the server's events,
+    /// and to the household as `banks.failed` when it is news.
+    fn import_or_say(&self, w: &mut Work, plaid: &Plaid, name: &str) -> Outcome {
+        let replaced = read(w, |db| db.bank.get(name)).flatten().is_some_and(|b| !b.replaced_by.is_empty());
         if replaced {
-            self.retire(plaid);
+            self.retire(w, plaid);
             return Outcome::Replaced;
         }
-        let e = match self.import_one(plaid, name) {
+        let e = match self.import_one(w, plaid, name) {
             Ok(o) => {
                 // Its first import may have folded it into another login
                 // to the same bank: that one goes.
-                self.retire(plaid);
+                self.retire(w, plaid);
                 return o;
             }
             Err(e) => e,
@@ -681,15 +629,15 @@ impl Job {
             true => self.say(format!("{name}: the bank wants a fresh login; Reconnect it from the app")),
             false => self.say(format!("{name}: failed: {e:#}")),
         }
-        let said = self.read(|db| db.bank.get(name)).flatten();
+        let said = read(w, |db| db.bank.get(name)).flatten();
         if said.as_ref().is_none_or(|b| b.error_code != code || b.error != why) {
             let failed = BankFailed {
                 bank: name.to_string(),
-                institution: self.store.banks.get(name).map(|c| c.institution.clone()).unwrap_or_default(),
+                institution: self.store().banks.get(name).map(|c| c.institution.clone()).unwrap_or_default(),
                 error_code: code,
                 error: why,
             };
-            if let Err(e) = self.author("banks.failed", &failed) {
+            if let Err(e) = author(w, "banks.failed", &failed) {
                 self.say(format!("{name}: could not say so: {e:#}"));
             }
         }
@@ -701,12 +649,11 @@ impl Job {
     /// from the store, and said retired, which has the budget forget it as
     /// it does a disconnected bank. One Plaid will not remove now is tried
     /// again at the next run, and imported by nobody meanwhile.
-    fn retire(&mut self, plaid: &Plaid) {
-        let replaced: Vec<Bank> = self
-            .read(|db| db.bank.scan().into_iter().filter(|b: &Bank| !b.replaced_by.is_empty()).collect())
-            .unwrap_or_default();
+    fn retire(&self, w: &mut Work, plaid: &Plaid) {
+        let replaced: Vec<Bank> = read(w, |db| db.bank.scan().into_iter().filter(|b: &Bank| !b.replaced_by.is_empty()).collect()).unwrap_or_default();
         for b in replaced {
-            if let Some(c) = self.store.banks.get(&b.name).cloned() {
+            let held = self.store().banks.get(&b.name).cloned();
+            if let Some(c) = held {
                 match plaid.remove(&c.access_token) {
                     Ok(()) => {}
                     // Plaid has forgotten it already.
@@ -716,21 +663,20 @@ impl Job {
                         continue;
                     }
                 }
-                self.store.banks.remove(&b.name);
-                if let Err(e) = self.save() {
+                if let Err(e) = self.change(|s| s.banks.remove(&b.name)) {
                     self.say(format!("{}: removed at Plaid, and could not be dropped here: {e:#}", b.name));
                     continue;
                 }
             }
             self.say(format!("{}: replaced by {}, removed", b.name, b.replaced_by));
-            if let Err(e) = self.author("banks.retired", &BankName { bank: b.name.clone() }) {
+            if let Err(e) = author(w, "banks.retired", &BankName { bank: b.name.clone() }) {
                 self.say(format!("{}: could not say it is retired: {e:#}", b.name));
             }
         }
     }
 
-    fn import_one(&mut self, plaid: &Plaid, name: &str) -> Result<Outcome> {
-        let Some(conn) = self.store.banks.get(name).cloned() else {
+    fn import_one(&self, w: &mut Work, plaid: &Plaid, name: &str) -> Result<Outcome> {
+        let Some(conn) = self.store().banks.get(name).cloned() else {
             bail!("no longer connected");
         };
         let token = conn.access_token.clone();
@@ -747,27 +693,29 @@ impl Job {
             filled.institution = plaid.institution(&filled.institution_id).unwrap_or_default();
         }
         if filled != conn {
-            self.store.banks.insert(name.to_string(), filled.clone());
-            if let Err(e) = self.save() {
+            if let Err(e) = self.change(|s| s.banks.insert(name.to_string(), filled.clone())) {
                 self.say(format!("{name}: could not keep what Plaid said of it: {e:#}"));
             }
         }
-        let bank = self.read(|db| db.bank.get(name)).flatten();
+        let bank = read(w, |db| db.bank.get(name)).flatten();
         let institution = match (filled.institution.as_str(), &bank) {
             ("", Some(b)) if !b.institution.is_empty() => b.institution.clone(),
             ("", _) => name.to_string(),
             (i, _) => i.to_string(),
         };
-        let repull = bank.as_ref().is_some_and(|b| b.repull);
-        let cursor = match repull {
-            true => None,
-            false => conn.cursor.clone().filter(|c| !c.is_empty()),
+        // Where its last import got to, as its row says; a bank no import
+        // has reached yet, as the store does.
+        let cursor = match &bank {
+            Some(b) if b.repull => None,
+            Some(b) if !b.cursor.is_empty() => Some(b.cursor.clone()),
+            _ => conn.cursor.clone(),
         };
+        let cursor = cursor.filter(|c| !c.is_empty());
         let Some(pulled) = plaid.pull(&token, cursor.as_deref(), self.banks().history)? else {
             self.say(format!("{name}: Plaid has not finished its first pull; the next run picks it up"));
             // Its accounts known meanwhile, so the household can choose
             // what each feeds before its transactions arrive.
-            let known = self.read(|db| got.accounts.iter().all(|a| db.linked.get(&a.account_id).is_some()));
+            let known = read(w, |db| got.accounts.iter().all(|a| db.linked.get(&a.account_id).is_some()));
             if known == Some(false) {
                 let import = Import {
                     cursor: bank.map(|b| b.cursor).unwrap_or_default(),
@@ -775,7 +723,7 @@ impl Job {
                     institution_id: Some(filled.institution_id.clone()).filter(|i| !i.is_empty()),
                     ..import_of(name, &institution, &got.accounts, &Default::default())
                 };
-                self.author("banks.import", &import)?;
+                author(w, "banks.import", &import)?;
             }
             return Ok(Outcome::NotReady);
         };
@@ -794,32 +742,27 @@ impl Job {
             ..import_of(name, &institution, &got.accounts, &pulled)
         };
         let (upserts, removed) = (import.upserts.len(), import.removed.len());
-        self.author("banks.import", &import)?;
-        if let Some(c) = self.store.banks.get_mut(name) {
-            c.cursor = Some(pulled.cursor.clone());
-        }
-        self.save()
-            .map_err(|e| anyhow!("the import is in, and its cursor could not be kept: {e:#}"))?;
+        author(w, "banks.import", &import)?;
         Ok(Outcome::Imported { upserts, removed })
     }
 
     /// Every store's receipts, from `amazon-orders` and the folder of
     /// exports, and Costco's page in the browser: each on its own, one failing said and
     /// the rest going on.
-    fn import_stores(&mut self, stop: &AtomicBool) -> BTreeMap<String, Outcome> {
+    fn import_stores(&self, w: &mut Work) -> BTreeMap<String, Outcome> {
         let mut out = BTreeMap::new();
         if let Some(amazon) = self.stores.amazon.clone() {
             // A login's first pull reaches back to the banks' first day, so
             // every order the household's transactions show is there; each
             // sync after, the last days alone.
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let since = (!amazon.pulled(&self.data)).then(|| self.first_bank_day()).flatten();
+            let since = (!amazon.pulled(&self.data)).then(|| self.first_bank_day(w)).flatten();
             let got = match &since {
                 Some(day) => amazon.orders_since(&self.data, day, &today),
                 None => amazon.run(&self.data),
             }
             .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
-            .and_then(|import| self.author_receipts(&import));
+            .and_then(|import| self.author_receipts(w, &import));
             let ordered = got.is_ok();
             out.insert("amazon".to_string(), self.outcome("amazon", got));
             // How each order was charged, once its orders are in.
@@ -829,7 +772,7 @@ impl Job {
                     None => amazon.charges(&self.data),
                 }
                 .and_then(|text| money_domain::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
-                .and_then(|import| self.author_charges(&import));
+                .and_then(|import| self.author_charges(w, &import));
                 let charged = got.is_ok();
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
                 if charged && since.is_some() {
@@ -841,11 +784,11 @@ impl Job {
         }
         // Nothing from Costco, said or not, on a server with no browser. Its
         // first pull reaches back to the banks' first day, as Amazon's does.
-        let since = (!crate::costco::pulled(&self.data)).then(|| self.first_bank_day()).flatten();
+        let since = (!crate::costco::pulled(&self.data)).then(|| self.first_bank_day(w)).flatten();
         if let Some(got) = self.stores.costco.receipts(since.as_deref()).transpose() {
             let got = got
                 .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
-                .and_then(|import| self.author_receipts(&import));
+                .and_then(|import| self.author_receipts(w, &import));
             if got.is_ok() && since.is_some() {
                 if let Err(e) = crate::costco::mark_pulled(&self.data) {
                     self.say(format!("costco: the first pull is in, and could not be marked so: {e:#}"));
@@ -854,17 +797,14 @@ impl Job {
             out.insert("costco".to_string(), self.outcome("costco", got));
         }
         let Some(dir) = self.stores.dir.clone() else { return out };
-        for w in waiting(&dir) {
-            if stop.load(Ordering::SeqCst) {
-                break;
-            }
-            let name = format!("{}/{}", w.store, w.file.file_name().and_then(|n| n.to_str()).unwrap_or("?"));
-            let read = std::fs::read_to_string(&w.file)
+        for w8 in waiting(&dir) {
+            let name = format!("{}/{}", w8.store, w8.file.file_name().and_then(|n| n.to_str()).unwrap_or("?"));
+            let read = std::fs::read_to_string(&w8.file)
                 .map_err(|e| anyhow!("cannot read it: {e}"))
-                .and_then(|text| money_domain::stores::read(&w.store, &text).map_err(|e| anyhow!(e)));
+                .and_then(|text| money_domain::stores::read(&w8.store, &text).map_err(|e| anyhow!(e)));
             let (got, under) = match read {
                 Err(e) => (Err(e), "failed"),
-                Ok(import) => match self.author_receipts(&import) {
+                Ok(import) => match self.author_receipts(w, &import) {
                     Ok(n) => (Ok(n), "imported"),
                     // Not the file's fault: it is tried again next run.
                     Err(e) => {
@@ -873,7 +813,7 @@ impl Job {
                     }
                 },
             };
-            if let Err(e) = put_away(&w, under) {
+            if let Err(e) = put_away(&w8, under) {
                 self.say(format!("{name}: could not put it away: {e:#}"));
             }
             out.insert(name.clone(), self.outcome(&name, got));
@@ -907,47 +847,21 @@ impl Job {
         }
     }
 
-    /// A store's charges authored as `receipts.add_charges`, and
-    /// confirmed: how many.
-    fn author_charges(&mut self, import: &money_domain::ChargeImport) -> Result<usize> {
+    /// A store's charges authored as `receipts.add_charges`: how many.
+    fn author_charges(&self, w: &mut Work, import: &money_domain::ChargeImport) -> Result<usize> {
         if import.charges.is_empty() {
             return Ok(0);
         }
-        self.author("receipts.add_charges", import)?;
+        author(w, "receipts.add_charges", import)?;
         Ok(import.charges.len())
     }
 
-    /// A store's receipts authored as `receipts.add_receipts`, and
-    /// confirmed: how many.
-    fn author_receipts(&mut self, import: &ReceiptImport) -> Result<usize> {
+    /// A store's receipts authored as `receipts.add_receipts`: how many.
+    fn author_receipts(&self, w: &mut Work, import: &ReceiptImport) -> Result<usize> {
         if import.receipts.is_empty() {
             return Ok(0);
         }
-        self.author("receipts.add_receipts", import)?;
+        author(w, "receipts.add_receipts", import)?;
         Ok(import.receipts.len())
-    }
-
-    /// A mutation authored, and waited for until the hub confirms it — on
-    /// its disk — or refuses it.
-    fn author(&mut self, name: &str, input: &impl Encode) -> Result<()> {
-        let id = self.peer.mutate(name, input.to_bytes()).map_err(|why| anyhow!("refused here: {why}"))?;
-        let mut why = None;
-        let held = ark_peer::link::until(CONFIRM, Duration::from_millis(0), || {
-            ark_peer::link::wait(&self.peer, &self.rx, Duration::from_millis(50));
-            let p = self.peer.pump();
-            for (r, w) in self.peer.take_refusals(ark::schema::Space::Durable) {
-                if r == id {
-                    why = Some(w);
-                }
-            }
-            drop(p);
-            !matches!(self.peer.outcome(&id), Some(ark_peer::Outcome::Pending))
-        });
-        match (held, self.peer.outcome(&id), why) {
-            (_, Some(ark_peer::Outcome::Ok), _) => Ok(()),
-            (_, Some(ark_peer::Outcome::Refused(w)), _) | (_, _, Some(w)) => bail!("the hub refused it: {w}"),
-            (false, ..) => bail!("the hub did not confirm it within {}s", CONFIRM.as_secs()),
-            (true, s, None) => bail!("it stands {s:?}"),
-        }
     }
 }

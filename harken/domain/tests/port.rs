@@ -328,71 +328,75 @@ fn step(r: &mut Rng, s: &Store) -> Step {
 }
 
 /// The schema's hash (its bytes', postcard; `edd9a961…` its JSON's when
-/// a build could write values as JSON).
-const SCHEMA: &str = "b0f869fb912d16806b2340366f5b5f865e1ebfa4b6fd852050f1c0c35602249c";
+/// a build could write values as JSON). `b0f869fb…` before the server's
+/// work became jobs (`fetch`, `source`, `hearing` appended).
+const SCHEMA: &str = "23b5c9fe7224da12b6661c7e82b4bfee99b14734a0b0448c2b6bec64394e1557";
 
 /// Per seed, the state after 400 steps and the transcript's hash, as the
-/// value format writes them (postcard, N4).
+/// value format writes them (postcard, N4). Taken again when the server's
+/// jobs were appended to the schema, which the state's hash is over: the
+/// script runs none of them, and under the schema before them it reached
+/// the pins before.
 const PINS: [(u64, &str, &str); 12] = [
     (
         1,
-        "ddb40130e6bb64f67f83ed19045e1ae429bc1be6adacb4522d8f1934ac868957",
-        "2907fdbead575b073f87426059f587beafbefa0d09f25fccda38318c7cd1b026",
+        "f941bc19ba09a182660857f7c6e2eb03fb6aa5de8bf0f8685270268f43025833",
+        "9106b307309e13c86dcd32f8b09893130742bac415815538f0ef3b3d4d192905",
     ),
     (
         2,
-        "fb0cae3eb3e23fbe05e24a665b926715a63a2ac71bc13c60d44d9d49816c710d",
-        "1963c053e77ddcc4189edb975f3015a995d678e2376040153624ae9e4b7b83c4",
+        "e3b8ea2c84976e136afc572c1259deb10b693ef946e0fd0e5e83fb23b70a0106",
+        "0b1ee156187904169200f0aa8ead176fdd11794e4645be91b2253f4e6be88986",
     ),
     (
         3,
-        "9ab57014d03333c09065ee49f231afa429df6683bb283d1fa186fe25d035c9fb",
-        "3be6f080d70f49fbc0c66b8a1258b9ed8fa4ff8d2dc5e72fdb95466ae5b56601",
+        "2d44ff124cfcd2ebcd6bf839314b70dc8749a880de974c0816181e1a71a97268",
+        "24ede6e21761e37e1d977c39d875cb466a47351a175a112d69aa2341be4ab40a",
     ),
     (
         4,
-        "7b974edfa92fe1ba475526e8489ee00ff1230005dd873f4eff8325bd9800d459",
-        "a361cb2dfbbfd70c18f219e3a49be522815ab1950067fb5faac1a206d0729fa8",
+        "3f7d205c65e783e6c8234d948c160c95c43dfb195e5554f2d5c5c7eceaec7ecd",
+        "da4761154f0202406301895b408d65282dfae3b997e1f8212df1c06e174515cb",
     ),
     (
         5,
-        "4ec1962ff49c3e51c45811b951baf8c32cc7b647aa5cda9215c356bb480c5095",
-        "0e11d51af8ea74654b9d920dff67279ba8fa6e115323e5a2508abc4540735b2c",
+        "fb2ebf3d772dfa5c1337cc6a0b8db44720b4f29c54c35c6771c7d763324c64c2",
+        "211b57c955dfc6f648f4ed696e6d0f4d822f7d3623258f2c10c06e1127ea7fa8",
     ),
     (
         6,
-        "e9b1b2c28ef18e46fa67662962dc483242fcfd7571c952c4043d171aaa7d08e2",
-        "c53f1d2935e5bf2f1db6b007b83cb37665fa5af19dd5bbc44e5f1d202735b79e",
+        "00bef0484b74fe3f36f4ba3c7c027caa528ed24f95a138be7e8386aebed01f9c",
+        "7cd0ec3352ba5d29176bdd066c3cff9169d39852d7815074c426f607d3d362f2",
     ),
     (
         7,
-        "642b50a654b9468c232651f439ed9371ed24cfce82d8e84ffe9ed41f1ac478b4",
-        "5d79d8dd3f88d0e0ee51ad8c332a2ddc3fea079dfaef8b684ad1b451c265cfb4",
+        "2e084e18656cfa26129627d99dbf2e433af6766fb4e8b5420512f74d21766138",
+        "21d8d125fc33a309cfd827bba7e12cbd69286b535754299340dd1d98afc65f55",
     ),
     (
         8,
-        "20971f16633bc12c5eeb2d78ee532b233162f3248eec3c2c8d469571d7d0a169",
-        "6efe31e50cf826f609eb41e84b98ace73768f9b48d9519c70ad4f94d812140b2",
+        "0e3194b9d9471f29f07d336127ef0df67aa5740cdb4130a26feb2a5f54775274",
+        "38985eb6c00fff15283777616919f8eb853adb3f624eac7a68da165c77763ae5",
     ),
     (
         9,
-        "fc7289984c604b1f59fbc464175dcca0ac2bb389add8eb1c3a73232844ff6a5a",
-        "6e35fb12fb91754bfe4c29dffeb0a56a8747269253196394b3568f05552c36c0",
+        "1f2697919d16e156f78a6fda64e633217b72035a13ef9aa6d8d33dd3ec9617ba",
+        "c17917c0673b56fd85231eaad8c06951f5dd8640449dc5c83c97fc3642fc65b3",
     ),
     (
         10,
-        "04d16261e621af38a4147036efedbd64f21f6dc1f9d4f492bc98fd974b86a9e4",
-        "d018705119a3e27ab7246bc7dd09044c1e112d0a1b525063fa9a2b49f12733bf",
+        "d0b77d3a3584112a1c86885b2804ef0de1c102e859694181ae0bbf49e8bd762b",
+        "94ef084f98655e28fdc2d5f350b0735724da92c10581820c8c8418e8ea6fe909",
     ),
     (
         11,
-        "eff14a7c62805b0df723d0cba7b01d483620f9278514cab79d1be4459d1c2b3d",
-        "0efa9dae108cfce666b740b3568e9a4f1c950314064de272f3e9d20db9804a06",
+        "3933f3e03852d02e1204db854219fb166205f082085c5af3afb70141d5f548ea",
+        "ffb40e13f3631d1f8210e8e7dfe542968fca0a932721bd290d40ac3e0ef834e2",
     ),
     (
         12,
-        "dcd4714f86d627b57204d3b5c07a904ecbba6147340597c3219685a852407cd3",
-        "6e28e23af3d5dffd382d515b2f41e843d10cdf6f9902ca52144119fa6c88d0c6",
+        "1b667cdcc1bf64db5e60863058878e7819013d2a436ac472eff2d73dddbb483b",
+        "9d9ab1ce7b2ead00fc7b033a653d02ab8914896201e1a1737d195ed6b6bed258",
     ),
 ];
 
@@ -434,9 +438,9 @@ fn run(seed: u64) -> (String, String, usize, usize) {
         .filter(|f| f.kind == ark::domain::Kind::View)
         .map(|f| f.name.as_str())
         // A kind's due jobs became a view after these pins were taken (it
-        // was a query, never asked here): the pins are over the views
-        // there were.
-        .filter(|n| *n != "look.due")
+        // was a query, never asked here), and the jobs after the look came
+        // later still: the pins are over the views there were.
+        .filter(|n| !n.ends_with(".due"))
         .collect();
     assert_eq!(views.len(), 32);
     let (mut refused, mut moved) = (0, 0);

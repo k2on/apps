@@ -27,7 +27,7 @@ pub struct About<'a> {
     pub description: &'a str,
 }
 
-pub trait Chapterer: Send {
+pub trait Chapterer: Send + Sync {
     /// What `HARKEN_CHAPTERS` calls it.
     fn name(&self) -> &'static str;
 
@@ -48,7 +48,7 @@ pub fn chain(spec: &str) -> Vec<Box<dyn Chapterer>> {
                 "outline" => Some(Box::new(Outline)),
                 "tiling" => Some(Box::new(Tiling::default())),
                 other => {
-                    eprintln!("harken-server: chapters: no chapterer called {other}");
+                    tracing::warn!("no chapterer called {other}");
                     None
                 }
             }

@@ -11,7 +11,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use ark_peer::Peer;
+use ark_peer::{Peer, Work};
 use money_domain::schema::{Photo, PhotoRead};
 use money_domain::setup::{PaperLine, PaperReceipt};
 use money_domain::types::{MatchReceipt, ReceiptImport, StoreItem, StoreReceipt};
@@ -40,8 +40,8 @@ pub fn receipt(photo: &Photo, r: &PaperReceipt) -> StoreReceipt {
 }
 
 /// Reads one photo: what the importer's handler does with a job.
-pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<PhotoRead, String> {
-    let mut photo_file = p.file(&photo.file)?.ok_or("the photo has not reached the server yet")?;
+pub fn read(w: &mut Work, program: &Path, data: &Path, photo: &Photo) -> Result<PhotoRead, String> {
+    let mut photo_file = w.with(|p| p.file(&photo.file))??.ok_or("the photo has not reached the server yet")?;
     let mut bytes = vec![];
     photo_file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let readings = paper::ocr(program, data, &bytes).map_err(|e| format!("{e:#}"))?;
@@ -52,13 +52,13 @@ pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<
         store: money_domain::stores::PAPER.into(),
         receipts: vec![got],
     };
-    p.mutate("receipts.add_receipts", &import)?;
+    w.mutate("receipts.add_receipts", &import)?;
     if let Some(txn_id) = photo.txn_id {
         let pay = MatchReceipt {
             receipt_id: receipt_id.clone(),
             txn_id: Some(txn_id),
         };
-        p.mutate("receipts.pay", &pay)?;
+        w.mutate("receipts.pay", &pay)?;
     }
     Ok(PhotoRead {
         receipt_id,
@@ -67,10 +67,8 @@ pub fn read(p: &mut Peer, program: &Path, data: &Path, photo: &Photo) -> Result<
     })
 }
 
-/// The importer's peer reading photos: from the server's store, with
-/// `program`.
-pub fn handle(peer: &mut Peer, program: PathBuf, data: PathBuf) -> std::io::Result<()> {
-    peer.keep_files(ark_peer::files::Store::dir(data.join("log").join("files"))?);
-    peer.handle::<Photo>(move |p, photo| read(p, &program, &data, photo));
-    Ok(())
+/// The importer's worker reading photos, with `program`: from the
+/// server's files, which are its.
+pub fn handle(peer: &mut Peer, program: PathBuf, data: PathBuf) {
+    peer.handle::<Photo>(move |w, photo| read(w, &program, &data, photo));
 }

@@ -45,10 +45,10 @@ async fn main() -> Result<()> {
     if let Err(e) = ark_peer::observe::install(ark_peer::observe::Sink::Files(events.clone())) {
         eprintln!("harken-server: no events kept: {}: {e}", events.display());
     }
-    eprintln!("harken-server: events in {}", events.display());
+    tracing::info!("events in {}", events.display());
     let server = start(config).await?;
     stopped().await?;
-    eprintln!("harken-server: stopping");
+    tracing::info!("stopping");
     server.stop().await;
     Ok(())
 }

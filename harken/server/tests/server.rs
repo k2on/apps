@@ -321,3 +321,56 @@ fn a_first_sign_in_makes_favorites_once() {
         ["Favorites"]
     );
 }
+
+/// A device of the build before the server's work was jobs — its schema
+/// the server's without the tables appended for them (`fetch`, `source`,
+/// `hearing`) — is judged an older build's and served: filled, and what it
+/// writes taken. Falsified by appending the tables anywhere but last: the
+/// device's schema was another's, and it was told to update.
+#[test]
+fn a_device_of_the_schema_before_the_jobs_is_older_and_served() {
+    use ark::peer::{Role, Stance};
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |_| {});
+    let now = harken_server::domain::domain();
+    let mut was = (*now.schema).clone();
+    let jobs: Vec<&str> = was
+        .tables
+        .iter()
+        .rev()
+        .take(3)
+        .map(|t| t.name.as_str())
+        .collect();
+    assert_eq!(jobs, ["hearing", "source", "fetch"], "appended last");
+    was.tables.truncate(was.tables.len() - 3);
+    let hash = was.hash();
+    let older = ark::Domain {
+        schema: std::sync::Arc::new(was),
+        ..now
+    };
+    let l = login(&server, "alice");
+    let config = ark_peer::Config::of(std::sync::Arc::new(older));
+    let client = ark_peer::Peer::open(
+        config,
+        ark_peer::who(&l),
+        Box::new(ark_peer::Memory::default()),
+    );
+    let mut alice = Peer {
+        client,
+        dialled: None,
+        refused: vec![],
+        heard: false,
+    };
+    alice.connect(&server.url(), &l.token);
+    alice.mutate("playlists.create_playlist", &named("Older"));
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
+    assert!(alice.refused.is_empty(), "{:?}", alice.refused);
+    assert!(playlists(&server).contains(&("Older".into(), "alice".into())));
+    let stance = server.running.hub.with(move |h| match &h.log.role {
+        Role::Authority { builds, .. } => builds.get(&hash).copied(),
+        _ => None,
+    });
+    assert_eq!(stance.flatten(), Some(Stance::Older));
+    rt.block_on(server.stop());
+}

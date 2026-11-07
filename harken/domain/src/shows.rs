@@ -64,7 +64,24 @@ pub fn subscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Subscribe) -> Result<(),
             ..Subscription::default()
         },
     };
-    db.subscription.put(next)
+    followed(ctx, db, next)
+}
+
+/// A followed feed as it is now, and read now when it moved.
+fn followed(ctx: &Ctx, db: &mut Db<Harken>, now: Subscription) -> Result<(), String> {
+    if db.subscription.get(&now.url).as_ref() == Some(&now) {
+        return Ok(());
+    }
+    read(ctx, db, Read { url: now.url.clone() })?;
+    db.subscription.put(now)
+}
+
+/// Somewhere the library comes from read now ([`Source`]), unless it is
+/// being read.
+#[mutator("source.read")]
+pub fn read(ctx: &Ctx, db: &mut Db<Harken>, input: Read) -> Result<(), String> {
+    is_library(ctx)?;
+    crate::downloads::pend::<Source>(ctx, db, |state| Source { url: input.url, state }).map(|_| ())
 }
 
 /// Follow a feed no more: it, its show and every episode of it out of the
@@ -76,6 +93,9 @@ pub fn unsubscribe(ctx: &Ctx, db: &mut Db<Harken>, input: Unsubscribe) -> Result
         return Err(format!("not following {}", input.url));
     }
     db.subscription.delete(input.url.clone())?;
+    if db.source.has(&input.url) {
+        db.source.delete(input.url.clone())?;
+    }
     for show in db.show.scan().into_iter().filter(|s| s.feed == input.url) {
         for e in db.episode.by(Episode::SHOW_ID).from(&show.id).all() {
             take_out(db, e.media_id)?;
@@ -97,7 +117,7 @@ pub fn fetch_older(ctx: &Ctx, db: &mut Db<Harken>, input: FetchOlder) -> Result<
         (0, _) | (_, 0) => 0,
         (keep, more) => keep + more,
     };
-    db.subscription.put(Subscription { keep, ..was })
+    followed(ctx, db, Subscription { keep, ..was })
 }
 
 /// What the server read of a followed feed: its show's title and how

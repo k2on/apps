@@ -7,14 +7,15 @@
 //!
 //! ```text
 //! Pending{due} ──claim (now ≥ due)──► Claimed{by, at} ──finish Ok──► Done(T)
-//!     │                                 │      ▲    └──finish Err──► Failed{why, retry}
-//!     └─cancel─► Cancelled              │      └─claim (now ≥ at + lease)   │
+//!   │   ▲                               │      ▲    ├──finish Err──► Failed{why, retry}
+//!   │   └──────finish Ok, again at due──┼──────┼────┘                     │
+//!   └─cancel─► Cancelled                │      └─claim (now ≥ at + lease)   │
 //!                                       └─────────◄──claim (now ≥ retry)───┘
 //! ```
 //!
 //! `#[derive(Row)]` on a row with a `state: Job<T>` field writes
 //! [`Effect`]; [`Effect::register`] adds `<table>.claim {id, by}`,
-//! `<table>.finish {id, by, outcome}` and `<table>.cancel {id}` to a
+//! `<table>.finish {id, by, outcome, again_ms}` and `<table>.cancel {id}` to a
 //! domain, and the view `<table>.due`: the rows a claim would take now
 //! (what a handler outside Rust asks). Each is judged at the authority in log order: of a claim and a
 //! cancel of one pending row, whichever comes first wins and the other is
@@ -77,6 +78,13 @@ pub trait Effect: Row<Space = Durable> {
     const LEASE_MS: i64;
     /// How long after a failure it is due again.
     const RETRY_MS: i64;
+    /// The longest a run of failures puts it off: each failure in a row
+    /// twice the last, from `RETRY_MS` (its runner's count, `ark-peer`).
+    /// None longer by default.
+    const RETRY_MAX_MS: i64 = Self::RETRY_MS;
+    /// How many of its jobs one runner runs at once (`ark-peer`): one, a
+    /// download after another, unless it says.
+    const AT_ONCE: usize = 1;
     /// The role a claim and a finish need, when one does.
     const ROLE: Option<&'static str>;
     fn job(&self) -> &Job<Self::Outcome>;
@@ -110,7 +118,10 @@ pub struct Claim<R: Effect> {
     pub by: String,
 }
 
-/// `finish`'s input: the job, who claimed it, and what it came to.
+/// `finish`'s input: the job, who claimed it, what it came to, and when
+/// it is due again, if its runner says: a failure retried then rather
+/// than after `RETRY_MS`, or a job done pending again then (one that
+/// recurs).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Finish<R: Effect> {
@@ -118,6 +129,8 @@ pub struct Finish<R: Effect> {
     pub by: String,
     #[serde(with = "outcome")]
     pub outcome: Result<R::Outcome, String>,
+    #[serde(default)]
+    pub again_ms: Option<i64>,
 }
 
 // A variant carrying one value is written as a record of it, `{value}`
@@ -194,7 +207,8 @@ impl<R: Effect> Describe for Finish<R> {
         };
         let (ok, err) = (vec![("value".into(), R::Outcome::describe())], vec![("why".into(), Type::Text)]);
         let outcome = Type::Sum(name, vec![("Ok".into(), ok), ("Err".into(), err)]);
-        named::<R>("Finish", vec![("id", R::Id::describe()), ("by", Type::Text), ("outcome", outcome)])
+        let again = ("again_ms", Type::Option(Box::new(Type::Int)));
+        named::<R>("Finish", vec![("id", R::Id::describe()), ("by", Type::Text), ("outcome", outcome), again])
     }
 }
 
@@ -243,11 +257,12 @@ fn finish<S: Tables, R: Effect>(ctx: &Ctx, db: &mut Db<S>, i: Finish<R>) -> Resu
     if !matches!(r.job(), Job::Claimed { by, .. } if *by == i.by) {
         return Err(format!("{}: not claimed by {}", R::TABLE, i.by));
     }
-    *r.job_mut() = match i.outcome {
-        Ok(t) => Job::Done(t),
-        Err(why) => Job::Failed {
+    *r.job_mut() = match (i.outcome, i.again_ms) {
+        (Ok(t), None) => Job::Done(t),
+        (Ok(_), Some(due_ms)) => Job::Pending { due_ms },
+        (Err(why), again) => Job::Failed {
             why,
-            retry_ms: ctx.now + R::RETRY_MS,
+            retry_ms: again.unwrap_or(ctx.now + R::RETRY_MS),
         },
     };
     db.tab::<R>().update(r)

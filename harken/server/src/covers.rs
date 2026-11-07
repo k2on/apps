@@ -343,10 +343,7 @@ impl Covers {
                 .and_then(|()| std::fs::rename(&tmp, &path));
             if let Err(e) = written {
                 let _ = std::fs::remove_file(&tmp);
-                eprintln!(
-                    "harken-server: library: cannot keep a cover in {}: {e}",
-                    self.art.display()
-                );
+                tracing::warn!("cannot keep a cover in {}: {e}", self.art.display());
                 return None;
             }
         }

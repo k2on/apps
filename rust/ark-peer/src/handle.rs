@@ -81,8 +81,8 @@ pub trait Driven: Sendable + Sized + 'static {
     /// What its handle keeps beside it, off its lock: a server's queue of
     /// what its connections said.
     type Beside: Default + Send + Sync;
-    /// Its handle made: the bell that rings its thread.
-    fn spawned(&mut self, _ring: &Wake) {}
+    /// Its handle made: the bell that rings its thread, and the handle.
+    fn spawned(&mut self, _ring: &Wake, _me: Weak<Self>) {}
     /// When its thread is next to turn, whatever rings.
     fn deadline(&self) -> Option<u64> {
         None
@@ -165,10 +165,11 @@ fn absorb(said: &mut Pumped, p: &Pumped) {
 impl Driven for Peer {
     type Beside = ();
 
-    fn spawned(&mut self, ring: &Wake) {
+    fn spawned(&mut self, ring: &Wake, me: Weak<Peer>) {
         #[cfg(target_arch = "wasm32")]
         ((self.link.budget, self.log.machine.part) = (Some(PAGE_BUDGET_MS), Some(PAGE_PART)));
         self.set_waker(ring.clone());
+        self.driven = Some(me);
     }
 
     fn deadline(&self) -> Option<u64> {
@@ -195,6 +196,30 @@ pub struct Handle<P: Driven = Peer> {
 impl<P: Driven> Clone for Handle<P> {
     fn clone(&self) -> Self {
         Handle { inner: self.inner.clone() }
+    }
+}
+
+/// A handle that does not keep its peer: what the peer's own handlers'
+/// threads hold (`crate::jobs`), which end with it.
+pub struct Weak<P: Driven>(std::sync::Weak<Inner<P>>);
+
+impl<P: Driven> Clone for Weak<P> {
+    fn clone(&self) -> Self {
+        Weak(self.0.clone())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<P: Driven> Weak<P> {
+    pub(crate) fn upgrade(&self) -> Option<Handle<P>> {
+        self.0.upgrade().map(|inner| Handle { inner })
+    }
+
+    /// Its thread rung, while there is one.
+    pub(crate) fn ring(&self) {
+        if let Some(i) = self.0.upgrade() {
+            (i.ring)();
+        }
     }
 }
 
@@ -258,7 +283,7 @@ impl<P: Driven> Handle<P> {
             };
             #[cfg(target_arch = "wasm32")]
             let ring = page::ring(me.clone());
-            peer.spawned(&ring);
+            peer.spawned(&ring, Weak(me.clone()));
             let (said, told, beside) = Default::default();
             let (peer, by_hand) = (Mutex::new(peer), Default::default());
             Inner {

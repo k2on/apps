@@ -415,6 +415,48 @@ pub struct VoiceName {
     pub person_name: String,
 }
 
+// The server's work, as jobs (`ark::effect`) its scanner's handlers claim
+// and do (`harken-server`'s `library.rs`): each keyed by what it is about,
+// none fed to a device, and what each came to how many entries it
+// authored, or how many bytes it downloaded.
+
+/// A file still to come downloaded: queued with its [`Download`]
+/// (`library.queue_download`), which says how it goes. A failure is tried
+/// again ten minutes after, and twice as long each time, to six hours.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
+#[effect(role = crate::LIBRARY, lease_ms = 600_000, retry_ms = 600_000, retry_max_ms = 21_600_000)]
+pub struct Fetch {
+    #[ark(key)]
+    pub media_id: Id<Media>,
+    pub state: Job<i64>,
+}
+
+/// Somewhere the library comes from read: a followed feed, by its URL —
+/// read again every hour — or the catalogue, by its. Asked for at every
+/// full look (`source.read`), and when a feed is followed or more of it is
+/// asked for. A read that could not have everything is tried again ten
+/// minutes after, and twice as long each time, to an hour.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
+#[effect(role = crate::LIBRARY, lease_ms = 600_000, retry_ms = 600_000, retry_max_ms = 3_600_000)]
+pub struct Source {
+    #[ark(key)]
+    pub url: String,
+    pub state: Job<i64>,
+}
+
+/// An episode here heard, its captions written beside its file
+/// (`hearing.hear`): on a server with a transcriber.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
+#[effect(role = crate::LIBRARY, lease_ms = 600_000, retry_ms = 600_000, retry_max_ms = 21_600_000)]
+pub struct Hearing {
+    #[ark(key)]
+    pub media_id: Id<Media>,
+    pub state: Job<i64>,
+}
+
 /// harken's tables, in the schema's order.
 #[derive(Schema)]
 pub struct Harken {
@@ -445,6 +487,9 @@ pub struct Harken {
     pub cue: Cue,
     pub voice: Voice,
     pub voice_name: VoiceName,
+    pub fetch: Fetch,
+    pub source: Source,
+    pub hearing: Hearing,
 }
 
 ark_auth::install!(Harken);

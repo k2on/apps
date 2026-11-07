@@ -2915,7 +2915,7 @@ mod tests {
 
 /// The thread: Home Assistant's REST API, and the sessions.
 ///
-/// Blocking and polled, on a thread of its own, exactly as the scanner is.
+/// Blocking and polled, on a thread of its own, as a download is.
 /// There is no async in this server's own code and a bridge to a house is
 /// not a reason to start — a handful of small requests a second on a LAN is
 /// not a problem worth a runtime.
@@ -3103,7 +3103,7 @@ pub mod ha {
             })
             .ok();
         if thread.is_none() {
-            eprintln!("harken-server: house: could not start its thread");
+            tracing::warn!("could not start its thread");
         }
         Assistant { stop, wake, thread }
     }
@@ -3222,14 +3222,14 @@ pub mod ha {
         /// The house's sign-in of a listener, which their plays and their
         /// places are written in the log by.
         sign_in: SignIn,
-        /// Each listener's peer, by their account: opened at their first
+        /// Each listener's worker, by their account: opened at their first
         /// play on a speaker.
-        recorders: HashMap<String, ark_peer::Peer>,
+        recorders: HashMap<String, Handle<ark_peer::Peer>>,
     }
 
-    /// The house's sign-in of an account (`ark_auth`'s `own`), as the
-    /// server makes it.
-    pub type SignIn = Arc<dyn Fn(&str) -> Result<ark_auth::Login, String> + Send + Sync>;
+    /// The house's worker for an account (`Handle::<Authority>::worker`),
+    /// as the server makes it.
+    pub type SignIn = Arc<dyn Fn(&str) -> Result<Handle<ark_peer::Peer>, String> + Send + Sync>;
 
     impl Wires {
         /// Whether every speaker standing in `user`'s session has heard the
@@ -3306,7 +3306,7 @@ pub mod ha {
                 match o {
                     Output::Send(To::Back, f) => self.hub.frame(c, f.enc()),
                     Output::Settled(_, Err(why)) => {
-                        eprintln!("harken-server: house: a speaker's transition was refused: {why}")
+                        tracing::warn!("a speaker's transition was refused: {why}")
                     }
                     _ => {}
                 }
@@ -3397,52 +3397,21 @@ pub mod ha {
             for k in all {
                 self.leave(&k);
             }
-            self.pump_records();
         }
 
-        /// A mutation of the log as `user`, by the house's sign-in of
-        /// theirs: their peer opened and dialled the first time, and what
-        /// it writes pending until it is linked.
+        /// A mutation of the log as `user`, by the house's worker of
+        /// theirs: made the first time, and what it writes pending until it
+        /// is linked.
         fn record(&mut self, user: &str, name: &str, input: Vec<u8>) {
             if !self.recorders.contains_key(user) {
-                let login = match (self.sign_in)(user) {
-                    Ok(l) => l,
-                    Err(e) => {
-                        eprintln!("harken-server: house: cannot write {user}'s plays: {e}");
-                        return;
-                    }
-                };
-                let who = ark_peer::who(&login);
-                let config = ark_peer::Config::of(self.hosted.domain.clone());
-                let mut p = ark_peer::Peer::open(
-                    config,
-                    who.clone(),
-                    Box::new(ark_peer::Memory::default()),
-                );
-                p.sign_in(who.clone());
-                let token = login.token.clone();
-                let dial = self
-                    .hub
-                    .dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
-                p.set_token(Some(login.token.clone()));
-                p.connect_with("", dial);
-                self.recorders.insert(user.to_string(), p);
-            }
-            if let Some(p) = self.recorders.get_mut(user) {
-                if let Err(why) = p.mutate(name, input) {
-                    eprintln!("harken-server: house: {user}'s {name} was refused: {why}");
+                match (self.sign_in)(user) {
+                    Ok(w) => drop(self.recorders.insert(user.to_string(), w)),
+                    Err(e) => return tracing::warn!("cannot write {user}'s plays: {e}"),
                 }
-                p.pump();
             }
-        }
-
-        /// Each listener's peer pumped: what it wrote pushed, what the
-        /// server refused said.
-        fn pump_records(&mut self) {
-            for (user, p) in self.recorders.iter_mut() {
-                p.pump();
-                for (_, why) in p.take_refusals(ark::schema::Space::Durable) {
-                    eprintln!("harken-server: house: {user}'s entry was refused: {why}");
+            if let Some(w) = self.recorders.get(user) {
+                if let Err(why) = w.lock().mutate(name, input) {
+                    tracing::warn!("{user}'s {name} was refused: {why}");
                 }
             }
         }
@@ -3480,7 +3449,6 @@ pub mod ha {
             for record in bridge.take_records() {
                 perform(house, wires, &mut pushing, record);
             }
-            wires.pump_records();
             // Where to stand, and which speakers: every one beside a client;
             // where no client is, the ones making the sound, until it has
             // been silent for `idle`.
@@ -3541,9 +3509,10 @@ pub mod ha {
             for k in gone {
                 wires.leave(&k);
                 for act in bridge.left(&k.0, &k.1) {
-                    println!(
-                        "harken-server: house: {}: nobody is listening as {} and it is not playing; paused",
-                        k.1, k.0
+                    tracing::info!(
+                        "{}: nobody is listening as {} and it is not playing; paused",
+                        k.1,
+                        k.0
                     );
                     acts.push(act);
                 }
@@ -3601,7 +3570,7 @@ pub mod ha {
                             Trace::Lines(to) => {
                                 let _ = to.send(line);
                             }
-                            _ => println!("{line}"),
+                            _ => tracing::info!("{line}"),
                         }
                     }
                     // Said at once, each poll's: a position is as of the poll.
@@ -3701,7 +3670,7 @@ pub mod ha {
                 // looks exactly like one that stopped for no reason, and the
                 // reason is only ever known here.
                 if transition == "release" {
-                    println!("harken-server: house: {entity}: {why}; let go of {key}'s session");
+                    tracing::info!("{entity}: {why}; let go of {key}'s session");
                 }
                 // The members a speaker reports are speakers: by their ids in
                 // this session.
@@ -3724,8 +3693,8 @@ pub mod ha {
                     rest.extend(urls);
                     return;
                 }
-                println!(
-                    "harken-server: house: {entity}: {} track(s) {}",
+                tracing::info!(
+                    "{entity}: {} track(s) {}",
                     urls.len(),
                     if next { "put next" } else { "added to the end" }
                 );
@@ -3748,7 +3717,7 @@ pub mod ha {
             } => wires.record(&key, name, input),
             Act::Verb { entity, verb, why } => {
                 if verb == "media_pause" {
-                    println!("harken-server: house: {entity}: {why}; paused");
+                    tracing::info!("{entity}: {why}; paused");
                 }
                 house.call(&entity, verb, None);
             }
@@ -3775,10 +3744,7 @@ pub mod ha {
                 );
             }
             Act::Join { leader, members } => {
-                println!(
-                    "harken-server: house: {leader}: joined by {}",
-                    members.join(", ")
-                );
+                tracing::info!("{leader}: joined by {}", members.join(", "));
                 house.call(
                     &leader,
                     "join",
@@ -3786,7 +3752,7 @@ pub mod ha {
                 );
             }
             Act::Unjoin { entity } => {
-                println!("harken-server: house: {entity}: unjoined");
+                tracing::info!("{entity}: unjoined");
                 house.call(&entity, "unjoin", None);
             }
             Act::Start {
@@ -3811,8 +3777,8 @@ pub mod ha {
                 let Some(first) = urls.get(at) else {
                     return;
                 };
-                println!(
-                    "harken-server: house: {entity}: handed {} track(s) from {at}, {}",
+                tracing::info!(
+                    "{entity}: handed {} track(s) from {at}, {}",
                     urls.len(),
                     if playing { "playing" } else { "paused" }
                 );
@@ -3950,7 +3916,6 @@ pub mod ha {
                 Ok(_) => tracing::info!(target: "ark", entity, service, ms, "house"),
                 Err(e) => {
                     tracing::warn!(target: "ark", entity, service, ms, why = %e, "house failed");
-                    eprintln!("harken-server: house: {entity}: {service} failed: {e}");
                 }
             }
             sent.is_ok()

@@ -77,6 +77,8 @@ pub mod serve;
 pub mod settings;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod web;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+mod worker;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -100,6 +102,7 @@ pub use disk::{Disk, Files, Memory};
 pub use handle::Authenticate;
 pub use handle::{dev, Handle};
 pub use instance::Instance;
+pub use jobs::Work;
 pub use link::{Event, Pumped, Wake};
 pub use local::Logins;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
@@ -351,6 +354,9 @@ pub struct Peer {
     /// The handlers registered here, and what changed while they ran.
     runners: Vec<Box<dyn jobs::Runner>>,
     missed: Option<Vec<Told>>,
+    /// Its handle, once it has a thread of its own: its handlers run on
+    /// threads of their own then.
+    pub(crate) driven: Option<handle::Weak<Peer>>,
     /// The files rows name it asked its server for, and where each stands.
     pub(crate) transfers: files::Device,
 }
@@ -411,6 +417,7 @@ impl Peer {
             told: app::Told::default(),
             runners: vec![],
             missed: None,
+            driven: None,
             transfers: files::Device::default(),
         };
         let mut stored = p.log.stored();

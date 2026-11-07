@@ -117,6 +117,7 @@ fn a_finish_by_the_wrong_claimant_is_refused() {
             id: "a".into(),
             by: by.into(),
             outcome,
+            again_ms: None,
         }
         .to_bytes()
     };
@@ -139,6 +140,37 @@ fn a_finish_by_the_wrong_claimant_is_refused() {
     assert!(run(&d, &mut s, "claim", &w(9999), claim("w4")).is_err(), "done is over");
 }
 
+/// A finish that says when the job is due again: a failure retried then,
+/// not after its retry; a job done pending again then — one that recurs.
+/// Falsified by `finish` reading no `again_ms`: the failure was due at its
+/// retry, and the done job over.
+#[test]
+fn a_finish_may_say_when_it_is_due_again() {
+    let d = domain();
+    let w = |now| ctx("w", &["worker"], now);
+    let fin = |outcome: Result<i64, String>, again_ms| {
+        let f = Finish::<Fetch> {
+            id: "a".into(),
+            by: "w1".into(),
+            outcome,
+            again_ms,
+        };
+        f.to_bytes()
+    };
+    let mut s = store();
+    run(&d, &mut s, "claim", &w(20), claim("w1")).unwrap();
+    run(&d, &mut s, "finish", &w(21), fin(Err("down".into()), Some(500))).unwrap();
+    let retry = Job::Failed {
+        why: "down".into(),
+        retry_ms: 500,
+    };
+    assert_eq!(state(&s), retry);
+    assert!(run(&d, &mut s, "claim", &w(499), claim("w1")).is_err(), "not before it says");
+    run(&d, &mut s, "claim", &w(500), claim("w1")).unwrap();
+    run(&d, &mut s, "finish", &w(501), fin(Ok(1), Some(900))).unwrap();
+    assert_eq!(state(&s), Job::Pending { due_ms: 900 }, "done, and due again");
+}
+
 /// A job's and a finish's bytes read as their described types say, and
 /// back: a done job and a failure each a record of one field. Falsified by
 /// describing `Done` by its position (`0`): its bytes did not read.
@@ -156,6 +188,7 @@ fn a_job_reads_as_its_type_says() {
         id: "a".into(),
         by: "w".into(),
         outcome: Err("down".into()),
+        again_ms: None,
     };
     let text = ark::json::to_text(&Finish::<Fetch>::describe(), &failed.to_bytes()).unwrap();
     assert!(text.contains(r#""Err":{"why":"down"}"#), "{text}");

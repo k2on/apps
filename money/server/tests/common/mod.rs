@@ -509,7 +509,7 @@ pub fn importing(rt: &tokio::runtime::Runtime, data: &Path, mock: &Mock, secrets
 pub fn runs(server: &Server, n: usize) -> Vec<money_server::importer::Run> {
     let i = server.importer.as_ref().expect("an importer");
     assert!(
-        eventually(20, || i.runs().len() >= n),
+        eventually(20, || i.runs().len() >= n && i.settled()),
         "{} runs, waiting for {n}; said {:#?}",
         i.runs().len(),
         i.said()

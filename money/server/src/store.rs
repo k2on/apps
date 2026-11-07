@@ -19,18 +19,20 @@
 //!       "institution": "Wells Fargo",
 //!       "added_ms": 1793000000000
 //!     }
-//!   },
-//!   "answered_ms": 1793000000000
+//!   }
 //! }
 //! ```
 //!
 //! - `banks`: each connection by the name the budget knows the bank by
 //!   (its `bank` row; the name a connection made in the app is given is
 //!   the institution's, as `wells-fargo`). Only `access_token` is needed:
-//!   - `cursor`: Plaid's `/transactions/sync` cursor after the last import
-//!     the hub confirmed. Without one, the next import asks for the bank's
-//!     whole history — which changes nothing already imported (Plaid's id
-//!     is each transaction's `imported_id`), but brings back any a person
+//!   - `cursor`: Plaid's `/transactions/sync` cursor to import from, for a
+//!     bank the log has no row of yet — a connection moved here by hand;
+//!     once the bank has a row, its cursor is the row's (`Bank::cursor`,
+//!     which each import moves), and this one is no longer read or
+//!     written. Without one, the first import asks for the bank's whole
+//!     history — which changes nothing already imported (Plaid's id is
+//!     each transaction's `imported_id`), but brings back any a person
 //!     deleted. A connection with no cursor here takes the one
 //!     `importer.json` (what the importer kept before this file) has under
 //!     its name, if any.
@@ -38,10 +40,9 @@
 //!     connection, which the importer fills in at its next run when they
 //!     are missing.
 //!   - `added_ms`: when it was connected.
-//! - `answered_ms`: the newest `banks.sync` the importer answered, so a
-//!   restart does not answer it again.
 //!
-//! Anything else in the file is kept as it is.
+//! Anything else in the file is kept as it is: the `answered_ms` a file
+//! written before a sync was a job says among it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -97,15 +98,13 @@ impl fmt::Debug for Connection {
     }
 }
 
-/// Every connection, and what the importer last answered.
+/// Every connection.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Store {
     #[serde(default)]
     pub version: u32,
     #[serde(default)]
     pub banks: BTreeMap<String, Connection>,
-    #[serde(default)]
-    pub answered_ms: i64,
     #[serde(flatten)]
     pub rest: BTreeMap<String, Value>,
 }
@@ -115,8 +114,6 @@ pub struct Store {
 struct Legacy {
     #[serde(default)]
     cursors: BTreeMap<String, String>,
-    #[serde(default)]
-    answered_ms: i64,
 }
 
 fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Result<Option<T>> {
@@ -132,8 +129,8 @@ fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Result<Op
 
 impl Store {
     /// The connections kept in `data`: `banks.json`, with what
-    /// `importer.json` kept filling in a cursor or the last answer it
-    /// lacks. Neither file is no connections.
+    /// `importer.json` kept filling in a cursor it lacks. Neither file is
+    /// no connections.
     pub fn load(data: &Path) -> Result<Store> {
         let path = file(data);
         let mut store: Store = read_json(&path)?.unwrap_or_default();
@@ -144,7 +141,6 @@ impl Store {
             }
         }
         store.banks.retain(|_, c| !c.access_token.trim().is_empty());
-        store.answered_ms = store.answered_ms.max(legacy.answered_ms);
         tighten(&path);
         Ok(store)
     }
@@ -236,10 +232,7 @@ mod tests {
         .unwrap();
         let s = Store::load(dir.path()).unwrap();
         let wf = &s.banks["wellsfargo"];
-        assert_eq!(
-            (wf.access_token.as_str(), wf.cursor.as_deref(), s.answered_ms),
-            ("access-x", Some("c-old"), 7)
-        );
+        assert_eq!((wf.access_token.as_str(), wf.cursor.as_deref()), ("access-x", Some("c-old")));
         assert!(!format!("{s:?}").contains("access-x"), "a store's Debug never says a token");
         s.save(dir.path()).unwrap();
         let text = std::fs::read_to_string(file(dir.path())).unwrap();
@@ -251,7 +244,7 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         let back = Store::load(dir.path()).unwrap();
-        assert_eq!((back.banks, back.answered_ms, back.version), (s.banks, 7, VERSION));
+        assert_eq!((back.banks, back.version), (s.banks, VERSION));
     }
 
     #[test]

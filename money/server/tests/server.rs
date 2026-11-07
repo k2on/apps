@@ -160,3 +160,41 @@ fn health_says_which_domain() {
     assert!(text.contains("connections 2\n"), "{text}");
     rt.block_on(server.stop());
 }
+
+/// A device of the build before the importer's work was jobs — its schema
+/// the server's without the tables appended for them (`asking`,
+/// `syncing`) — is judged an older build's and served: filled, and what it
+/// writes taken. Falsified by appending the tables anywhere but last: the
+/// device's schema was another's, and it was told to update.
+#[test]
+fn a_device_of_the_schema_before_the_jobs_is_older_and_served() {
+    use ark::peer::{Role, Stance};
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let server = serve(&rt, data.path(), |_| {});
+    let now = money_domain::domain();
+    let mut was = (*now.schema).clone();
+    let jobs: Vec<&str> = was.tables.iter().rev().take(2).map(|t| t.name.as_str()).collect();
+    assert_eq!(jobs, ["syncing", "asking"], "appended last");
+    was.tables.truncate(was.tables.len() - 2);
+    let hash = was.hash();
+    let older = ark::Domain {
+        schema: std::sync::Arc::new(was),
+        ..now
+    };
+    let l = login(&server, "alice");
+    let config = ark_peer::Config::of(std::sync::Arc::new(older));
+    let client = ark_peer::Peer::open(config, ark_peer::who(&l), Box::new(ark_peer::Memory::default()));
+    let mut alice = Peer { client, refused: vec![] };
+    alice.connect(&server.url(), &l.token);
+    alice.mutate("accounts.open_account", &open_account("Older"));
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].pending() == 0);
+    assert!(alice.refused.is_empty(), "{:?}", alice.refused);
+    assert_eq!(names(&server), ["Older"]);
+    let stance = server.running.hub.with(move |h| match &h.log.role {
+        Role::Authority { builds, .. } => builds.get(&hash).copied(),
+        _ => None,
+    });
+    assert_eq!(stance.flatten(), Some(Stance::Older));
+    rt.block_on(server.stop());
+}

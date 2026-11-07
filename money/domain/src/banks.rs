@@ -28,6 +28,9 @@
 //!   of its accounts here. The accounts and their transactions stay: they
 //!   are the household's.
 //!
+//! Each ask is a job of the importer's too ([`Asking`]), which it claims
+//! and answers.
+//!
 //! An ask the importer cannot finish is answered [`AskState::Failed`] with
 //! a sentence, or [`AskState::Expired`] when nobody finished Plaid's page in
 //! time. Only the importer (the [`crate::BANK`] role) answers, and nothing
@@ -43,8 +46,10 @@ fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result
     // After every ask before it, even within one millisecond: newest first
     // is the order a person's asks are read in.
     let last = db.bank_ask.scan().iter().map(|a| a.asked_ms).max().unwrap_or(0);
+    let (id, state) = (ctx.new_id(), Job::Pending { due_ms: ctx.now });
+    db.asking.insert(Asking { id, state })?;
     db.bank_ask.insert(BankAsk {
-        id: ctx.new_id(),
+        id,
         what: what.into(),
         bank: bank.as_ref().map(|b| b.name.clone()).unwrap_or_default(),
         institution: bank.as_ref().map(|b| b.institution.clone()).unwrap_or_default(),

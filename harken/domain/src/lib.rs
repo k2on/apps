@@ -57,6 +57,9 @@ pub fn domain() -> Domain {
     ark::functions!(Domain::new::<Harken>("harken", VERSION))
         .with(ark_auth::register::<Harken>)
         .with(<Look as ark::effect::Effect>::register::<Harken>)
+        .with(<Fetch as ark::effect::Effect>::register::<Harken>)
+        .with(<Source as ark::effect::Effect>::register::<Harken>)
+        .with(<Hearing as ark::effect::Effect>::register::<Harken>)
 }
 
 /// [`domain`], once.

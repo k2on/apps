@@ -1,4 +1,5 @@
-//! The media directory, as a peer.
+//! The media directory, and everything else the library comes from, as a
+//! worker of the server's.
 //!
 //! A server that owns a folder of files has to get them into the log
 //! somehow, and there are only two honest ways: write the rows directly, or
@@ -7,13 +8,11 @@
 //! what "add a song" means, and the first time it disagreed with the domain's
 //! procedure the replicas would diverge with nothing to say so.
 //!
-//! So the scanner is an ordinary [`ark_peer::Peer`], with its own
-//! replica and its own pending intents on disk, its link dialling the hub
-//! in this process (`Handle::dialer`) instead of a socket. It gets its
-//! confirmations, it gets the rebase, and a file it adds fans out to every
-//! connected peer without anyone asking. It signs in like everyone else — the engine holds every
-//! entry to a session, and "the server wrote it" is not an exemption — as
-//! the account [`ACCOUNT`].
+//! So the scanner is a worker (`Handle::<Authority>::worker`): a device of
+//! the server's own, signed in as the account [`ACCOUNT`], with its own
+//! replica and its own pending intents on disk, dialling the hub in this
+//! process. It gets its confirmations, it gets the rebase, and a file it
+//! adds fans out to every connected peer without anyone asking.
 //!
 //! **A file is one song, and that is not this file's doing.** `add_song` is
 //! an upsert by `file`, inside the procedure: a file the library already has
@@ -21,52 +20,56 @@
 //! the same file saying nothing new writes nothing — for every peer
 //! replaying the log, not only for the scanner that authored it.
 //!
-//! **A look is a job** (`ark::effect`, `docs/plan-v5.md` S3a). What the
-//! scanner is told to look at — everything at boot or on a rescan, the
-//! paths a watch saw settle — is asked for as a [`Look`] row
-//! (`library.look`), and the scanner's handler, registered on its own peer
-//! and on no other, claims it, does it, and finishes it with what it read
-//! and authored. A look asked and not done before a stop is done after the
-//! next start, once its claim's lease has run out.
+//! **Its work is jobs** (`ark::effect`), each kind a handler of its
+//! worker's, run on a thread of its own:
+//! - a [`Look`] at the media directory (`library.look`): everything at boot
+//!   or on a rescan, the paths a watch saw settle;
+//! - a [`Source`] read (`source.read`): a followed feed, every hour and
+//!   whenever it is followed or more of it is asked for, or the catalogue —
+//!   each, with every feed, at every full look ([`crate::sync`]);
+//! - a [`Fetch`] of a file a source's rows name (`library.queue_download`),
+//!   one at a time;
+//! - a [`Hearing`] of an episode here without captions (`hearing.hear`), on
+//!   a server with a transcriber ([`crate::transcribe`]).
+//!
+//! A job asked and not done before a stop is done after the next start,
+//! once its claim's lease has run out; one that fails is tried again later.
 //!
 //! What this file adds is not asking. It keeps, beside its replica, what
 //! each file was when it was last offered — its size, when it was modified,
 //! and the same of the covers it was offered with ([`Prints`]). A file whose
 //! print has not moved, and which the replica has as a song, is not read at
 //! all; one whose print has moved is read, and authored only if the entry
-//! would change something the replica holds. So a restart over ten thousand
-//! untouched files reads no tags and authors nothing, a retagged file is one
-//! entry, and the first start of a server that never kept prints reads
-//! every file once — which is what gives a library scanned before covers
-//! were found its covers. The prints are this server's, never the log's —
-//! rows of a local instance of its own ([`HarkenLocal`]), beside the
-//! pictures it took out of files — and missing or unreadable they are a
-//! full read, and nothing worse.
+//! would change something the replica holds (`Peer::mutate_new`). So a
+//! restart over ten thousand untouched files reads no tags and authors
+//! nothing, a retagged file is one entry, and the first start of a server
+//! that never kept prints reads every file once — which is what gives a
+//! library scanned before covers were found its covers. The prints are this
+//! server's, never the log's — rows of a local instance of its own
+//! ([`HarkenLocal`]), beside the pictures it took out of files — and
+//! missing or unreadable they are a full read, and nothing worse.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::domain::{
-    AddEpisode, AddShow, AddSong, DownloadProgress, Downloaded, Harken, Look, LookAt, Looked,
-    QueueDownload, SetChapters, SetTranscript, Subscription,
+    AddEpisode, AddShow, AddSong, DownloadProgress, Downloaded, Fetch, Harken, Hear, Hearing, Look,
+    LookAt, Looked, Read, SetChapters, SetTranscript, Source,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use ark::format::Encode;
-use ark::peer::Ctx;
 use ark::prelude::{Deserialize, Row, Schema, Serialize};
-use ark::store::{Dir, Read, Scan as Range, Store};
-use ark_auth::Login;
-use ark_peer::{Authority, Config, Files, Handle, Instance};
+use ark_auth::server::Auth;
+use ark_auth::Account;
+use ark_peer::{Authority, Files, Handle, Instance, Peer, Work};
 use notify::{RecursiveMode, Watcher};
 
 use crate::covers::{self, Covers};
-use crate::hosted::Hosted;
-use crate::sync::{Reader, Said};
+use crate::sync::Plan;
 
 /// What the scanner will look at. Everything else in the directory —
 /// artwork, playlists, the stray `.DS_Store` — is not a track and is skipped
@@ -95,6 +98,9 @@ pub const SHOWS: &[(&str, &str)] = &[("podcasts", "podcast"), ("sermons", "sermo
 /// scanned row, which is the truth: the library put it there.
 pub const ACCOUNT: &str = "library";
 
+/// What the scanner's sign-in says it is.
+pub const DEVICE: &str = "the scanner";
+
 /// The mutation a file is offered as.
 const ADD_SONG: &str = "library.add_song";
 
@@ -107,28 +113,16 @@ const QUEUE_DOWNLOAD: &str = "library.queue_download";
 const DOWNLOAD_PROGRESS: &str = "library.download_progress";
 const DOWNLOADED: &str = "library.downloaded";
 
-/// The mutation a look is asked with.
+/// The mutations a look, a source's read and an episode's hearing are
+/// asked with.
 const LOOK: &str = "library.look";
+const READ: &str = "source.read";
+const HEAR: &str = "hearing.hear";
 
 /// How long a watched path is left to settle before it is read: a file is
 /// usually still being written when its create arrives, so the tags are not
 /// there yet. Every event inside the window is one look.
 const SETTLE: Duration = Duration::from_millis(400);
-
-/// How often the peer is pumped when nothing is happening, so the log other
-/// peers write does not pile up in its channel and "already a song" stays
-/// true.
-const IDLE: Duration = Duration::from_millis(250);
-
-/// Why the scanner woke up.
-enum Nudge {
-    /// Look at everything. Sent once at boot, because whatever happened
-    /// while the server was down produced no events to watch.
-    All,
-    /// Look at one path the watcher saw appear, change or — for a picture
-    /// — go.
-    One(PathBuf),
-}
 
 /// Where the scanner keeps what is its own under the server's data: its
 /// replica, the prints of the files it has offered, and the pictures it
@@ -149,20 +143,17 @@ pub fn art_dir(data: &Path) -> PathBuf {
     data.join("art")
 }
 
-/// The scanner, running. Dropping it stops the watch and the thread, and
-/// takes its peer off the hub.
+/// The scanner, running. Dropping it stops the watch and takes its worker
+/// off the hub.
 pub struct Scanner {
     /// Kept alive for as long as the scanner is: a watcher nobody holds
-    /// stops at once. Declared first, so it is dropped first and its clone
-    /// of the channel goes with it.
+    /// stops at once.
     _watcher: Option<notify::RecommendedWatcher>,
-    tx: Sender<Nudge>,
-    stop: Arc<AtomicBool>,
-    counts: Arc<Counts>,
-    thread: Option<JoinHandle<()>>,
+    worker: Handle<Peer>,
+    scan: Arc<Scan>,
 }
 
-/// What the scanner has done since it started, for what it prints and for
+/// What the scanner has done since it started, for what it says and for
 /// the tests.
 #[derive(Default)]
 struct Counts {
@@ -172,202 +163,163 @@ struct Counts {
     read: AtomicUsize,
 }
 
-impl Drop for Scanner {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-
 impl Scanner {
-    /// Scan `music/` under `root` and watch `root`, authoring through the
-    /// hub as `login`, with the scanner's own state — the replica, the
-    /// prints, the pictures taken out of files — under `data`
-    /// ([`replica_dir`], [`prints_dir`], [`art_dir`]).
+    /// Scan `music/` and the shows' folders under `root` and watch `root`,
+    /// authoring through `hub` as [`ACCOUNT`], signed in by `auth`, with the
+    /// scanner's own state — the replica, the prints, the pictures taken
+    /// out of files — under `data` ([`replica_dir`], [`prints_dir`],
+    /// [`art_dir`]).
     ///
     /// The walk is narrow and the watch is wide, on purpose: only `music/`
     /// holds tracks, but watching the root is what notices that directory
     /// being created at all — on a fresh install it may not exist yet, and a
     /// watch on a path that is not there watches nothing forever.
     ///
-    /// What is downloaded into the library comes from sources, each read
-    /// on a thread of its own (`sync.rs`) and authored here, its files
-    /// queued and then said as they download: with `catalogue`, the URL
-    /// of one (`catalogue.rs`), read at every full look (at boot, and
-    /// whenever a rescan is asked for); and the feeds the library follows
-    /// (`feeds.rs`), read at every full look, every hour, and whenever
-    /// somebody follows one or asks for more of it.
+    /// What is downloaded into the library comes from sources: with
+    /// `catalogue`, the URL of one (`catalogue.rs`); and the feeds the
+    /// library follows (`feeds.rs`). Captions beside an episode's file
+    /// (`<file>.vtt`) are its transcript, read at every full look and as
+    /// they are written, its chapters made from them by `chapters` when it
+    /// has none; with `transcriber`, the episodes here without any are
+    /// heard (`transcribe.rs`).
     ///
-    /// Returns at once: the walk happens on a thread of its own, so a
-    /// library of ten thousand files does not hold up anything.
-    ///
-    /// Captions beside an episode's file (`<file>.vtt`) are its transcript,
-    /// read at boot and as they are written, its chapters made from them
-    /// by `chapters` when it has none; with `transcriber`, the episodes
-    /// here without any are heard (`transcribe.rs`).
+    /// Returns at once: everything is done by the worker's handlers.
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         root: PathBuf,
-        hosted: Hosted,
-        hub: Handle<Authority>,
+        hub: &Handle<Authority>,
+        auth: &Arc<Auth>,
         data: PathBuf,
-        login: Login,
         catalogue: Option<String>,
         transcriber: Option<PathBuf>,
         chapters: Vec<Box<dyn crate::chapters::Chapterer>>,
     ) -> Result<Scanner> {
-        // `docs/plan-auth.md` The scanner is the library, by construction: it
-        // holds the library's role whatever else its login holds, and its
-        // entries carry it. The server grants the account the same role
-        // (`start`), so the device and the authority agree on it — which is
-        // what `is_library` asks, on the device and, of the roles the hub
-        // stamps, at the authority.
-        let mut roles = login.user.roles.clone();
-        roles.push(crate::domain::LIBRARY.to_string());
-        roles.sort();
-        roles.dedup();
-        let who = Ctx::who(login.user.id.clone(), login.session.clone(), roles);
+        let account = Account {
+            id: ACCOUNT.into(),
+            name: "Library".into(),
+            roles: vec![crate::domain::LIBRARY.into()],
+            ..Account::default()
+        };
         let dir = replica_dir(&data);
         let disk = Files::new(&dir)
             .map_err(|e| anyhow::anyhow!("the scanner's replica in {}: {e}", dir.display()))?;
-        let config = Config::of(hosted.domain.clone());
-        let mut client = ark_peer::Peer::open(config, who.clone(), Box::new(disk));
-        // Each start is a login of its own: what the replica kept pending
-        // is authored again under it, from its session's first `local`,
-        // or the hub would hold the first entry for the ones before it.
-        client.sign_in(who.clone());
-        // In this process, the token is the scanner's and proves its login.
-        let token = login.token.clone();
-        let dial = hub.dialer(Arc::new(move |t: &str| (t == token).then(|| who.clone())));
-        client.set_token(Some(login.token.clone()));
-        client.connect_with("", dial);
-        let (tx, rx) = channel();
-        let stop = Arc::new(AtomicBool::new(false));
-        let counts = Arc::new(Counts::default());
-        // The sources' threads: a read asked is however long its index,
-        // its pictures and then its files take, so it is not the scanner's
-        // to wait on; what it read and how its downloads go come back as
-        // [`Said`], authored here.
-        let (said, heard) = channel::<Said>();
-        let sync = catalogue.map(|url| {
-            let dir = crate::catalogue::dir(&data);
-            crate::sync::start(crate::catalogue::Import { url, dir }, said.clone())
-        });
-        let subscriptions = Arc::new(Mutex::new(Vec::new()));
-        let transcribe = transcriber.map(crate::transcribe::Transcriber::start);
-        let follow = crate::sync::start(
-            crate::feeds::Follow {
-                subscriptions: subscriptions.clone(),
-                dir: crate::feeds::dir(&data),
-            },
-            said,
-        );
-        let thread = {
-            let (stop, counts) = (stop.clone(), counts.clone());
-            let scan = Scan {
-                music: root.join(MUSIC),
-                root: root.clone(),
-                art: art_dir(&data),
-                prints: Prints::load(prints_dir(&data)),
-                sync,
-                follow,
-                subscriptions,
-                followed: None,
-                feeds: crate::feeds::dir(&data),
-                transcribe,
-                chapters,
-                listed: None,
-            };
-            std::thread::Builder::new()
-                .name("harken-scanner".into())
-                .spawn(move || run(scan, client, hub, rx, heard, &stop, counts))
-                .context("starting the scanner")?
-        };
-        tx.send(Nudge::All)
-            .context("the scanner stopped before it started")?;
-
-        // The watch is best-effort: a directory that cannot be watched is
-        // still scanned at boot, and saying so is better than refusing to
-        // start over it.
+        let worker = hub
+            .worker(auth, &account, DEVICE, Box::new(disk))
+            .map_err(|e| anyhow::anyhow!("signing the scanner in: {e}"))?;
         let feeds = crate::feeds::dir(&data);
         let _ = std::fs::create_dir_all(&feeds);
-        let events = tx.clone();
-        let watcher =
-            match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                let Ok(event) = event else { return };
-                // Creates and writes, and a picture going. A removed *track* is
-                // not handled on purpose: the log is permanent, and a file
-                // disappearing is not evidence that somebody meant to delete
-                // the song — an unplugged disk looks exactly the same. A
-                // removed cover is only a directory whose tracks are offered
-                // again, with whatever cover they have now.
-                let gone = matches!(event.kind, notify::EventKind::Remove(_));
-                if !gone
-                    && !matches!(
-                        event.kind,
-                        notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-                    )
-                {
-                    return;
-                }
-                for path in event.paths {
-                    if !gone || covers::is_image(&path) {
-                        let _ = events.send(Nudge::One(path));
-                    }
-                }
-            }) {
-                Ok(mut w) => match w.watch(&root, RecursiveMode::Recursive) {
-                    Ok(()) => {
-                        // A feed's episodes are in the data directory, and so
-                        // are their captions: read as they are written.
-                        if let Err(e) = w.watch(&feeds, RecursiveMode::NonRecursive) {
-                            eprintln!(
-                                "harken-server: library: cannot watch {}: {e}",
-                                feeds.display()
-                            );
-                        }
-                        Some(w)
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "harken-server: library: cannot watch {}: {e}",
-                            root.display()
-                        );
-                        None
-                    }
-                },
-                Err(e) => {
-                    eprintln!("harken-server: library: no filesystem watch available: {e}");
-                    None
-                }
-            };
-
+        let scan = Arc::new(Scan {
+            music: root.join(MUSIC),
+            root: root.clone(),
+            art: art_dir(&data),
+            prints: Mutex::new(Prints::load(prints_dir(&data))),
+            feeds: feeds.clone(),
+            catalogue: catalogue.map(|url| (url, crate::catalogue::dir(&data))),
+            transcriber,
+            chapters,
+            counts: Counts::default(),
+        });
+        {
+            let mut p = worker.lock();
+            let s = scan.clone();
+            p.handle::<Look>(move |w, job| s.look(w, job));
+            let s = scan.clone();
+            p.handle::<Source>(move |w, job| s.read(w, job));
+            let s = scan.clone();
+            p.handle::<Fetch>(move |w, job| s.fetch(w, job));
+            if scan.transcriber.is_some() {
+                let s = scan.clone();
+                p.handle::<Hearing>(move |w, job| s.hear(w, job));
+            }
+        }
+        let scanner = Scanner {
+            _watcher: None,
+            worker,
+            scan,
+        };
+        scanner.rescan();
         Ok(Scanner {
-            _watcher: watcher,
-            tx,
-            stop,
-            counts,
-            thread: Some(thread),
+            _watcher: scanner.watch(&feeds),
+            ..scanner
         })
     }
 
-    /// Walk the whole directory again. Safe at any time: a file whose print
-    /// has not moved is not read, and one that has is authored only if it
-    /// says something new.
+    /// The watch, best-effort: a directory that cannot be watched is still
+    /// scanned at boot, and saying so is better than refusing to start over
+    /// it. What it sees settles for [`SETTLE`] on a thread of its own, and
+    /// is one look.
+    fn watch(&self, feeds: &Path) -> Option<notify::RecommendedWatcher> {
+        let (events, seen) = channel::<PathBuf>();
+        let (worker, scan) = (self.worker.clone(), self.scan.clone());
+        let settle = std::thread::Builder::new().name("harken-watch".into());
+        let _ = settle.spawn(move || {
+            while let Ok(first) = seen.recv() {
+                std::thread::sleep(SETTLE);
+                let paths = std::iter::once(first).chain(seen.try_iter());
+                let paths: BTreeSet<String> = paths.filter_map(|p| scan.file_of(&p)).collect();
+                if !paths.is_empty() {
+                    ask(&worker, paths.into_iter().collect());
+                }
+            }
+        });
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            let Ok(event) = event else { return };
+            // Creates and writes, and a picture going. A removed *track* is
+            // not handled on purpose: the log is permanent, and a file
+            // disappearing is not evidence that somebody meant to delete
+            // the song — an unplugged disk looks exactly the same. A
+            // removed cover is only a directory whose tracks are offered
+            // again, with whatever cover they have now.
+            let gone = matches!(event.kind, notify::EventKind::Remove(_));
+            let made = matches!(
+                event.kind,
+                notify::EventKind::Create(_) | notify::EventKind::Modify(_)
+            );
+            for path in event
+                .paths
+                .into_iter()
+                .filter(|p| made || gone && covers::is_image(p))
+            {
+                let _ = events.send(path);
+            }
+        });
+        let mut w = watcher
+            .map_err(|e| tracing::warn!("no filesystem watch available: {e}"))
+            .ok()?;
+        if let Err(e) = w.watch(&self.scan.root, RecursiveMode::Recursive) {
+            tracing::warn!("cannot watch {}: {e}", self.scan.root.display());
+            return None;
+        }
+        // A feed's episodes are in the data directory, and so are their
+        // captions: read as they are written.
+        if let Err(e) = w.watch(feeds, RecursiveMode::NonRecursive) {
+            tracing::warn!("cannot watch {}: {e}", feeds.display());
+        }
+        Some(w)
+    }
+
+    /// Walk the whole directory again, and read every source. Safe at any
+    /// time: a file whose print has not moved is not read, and one that has
+    /// is authored only if it says something new.
     pub fn rescan(&self) {
-        let _ = self.tx.send(Nudge::All);
+        ask(&self.worker, vec![]);
     }
 
     /// How many entries this scanner has authored since it started.
     pub fn authored(&self) -> usize {
-        self.counts.authored.load(Ordering::Relaxed)
+        self.scan.counts.authored.load(Ordering::Relaxed)
     }
 
     /// How many files' tags this scanner has read since it started.
     pub fn read(&self) -> usize {
-        self.counts.read.load(Ordering::Relaxed)
+        self.scan.counts.read.load(Ordering::Relaxed)
+    }
+}
+
+/// A look asked for: at these files, or at everything.
+fn ask(worker: &Handle<Peer>, paths: Vec<String>) {
+    if let Err(why) = worker.lock().mutate(LOOK, &LookAt { paths }) {
+        tracing::warn!("a look was refused: {why}");
     }
 }
 
@@ -419,17 +371,14 @@ impl Prints {
         let disk: Box<dyn ark_peer::Disk> = match Files::new(&dir) {
             Ok(f) => Box::new(f),
             Err(e) => {
-                eprintln!(
-                    "harken-server: library: cannot keep prints in {}: {e}",
-                    dir.display()
-                );
+                tracing::warn!("cannot keep prints in {}: {e}", dir.display());
                 Box::new(ark_peer::Memory::default())
             }
         };
         let local = Instance::open::<HarkenLocal>(disk);
         if let Some(e) = &local.failure {
-            eprintln!(
-                "harken-server: library: {} is not readable ({e}); every file is read again",
+            tracing::warn!(
+                "{} is not readable ({e}); every file is read again",
                 dir.display()
             );
         }
@@ -472,76 +421,51 @@ impl Prints {
             Ok(())
         });
         if let Some(e) = kept.err().or(self.local.failure.clone()) {
-            eprintln!("harken-server: library: cannot keep the prints: {e}");
+            tracing::warn!("cannot keep the prints: {e}");
         }
     }
 }
 
-/// The scanner's own state on its thread: where things are, and the prints.
+/// What the scanner's handlers share: where things are, the sources, who
+/// hears and who makes chapters, the prints, and what it has done.
 struct Scan {
     root: PathBuf,
     music: PathBuf,
     art: PathBuf,
-    prints: Prints,
-    /// The catalogue's reader, when there is a catalogue.
-    sync: Option<Reader>,
-    /// The followed feeds' reader.
-    follow: Reader,
-    /// The feeds followed, as the feeds' reader reads them: the replica's
-    /// `subscription` rows, kept here as they move.
-    subscriptions: Arc<Mutex<Vec<Subscription>>>,
-    /// What of them the reader was last asked to read with.
-    followed: Option<Vec<(String, String, i64)>>,
-    /// Where a feed's episodes are on disk.
+    prints: Mutex<Prints>,
+    /// Where a feed's episodes are on disk, and the catalogue's URL and
+    /// where its files are, when there is a catalogue.
     feeds: PathBuf,
-    /// Who hears the episodes here, when anybody does, and the replica's
-    /// head when it was last told which they are.
-    transcribe: Option<crate::transcribe::Transcriber>,
-    listed: Option<ark::log::Seq>,
+    catalogue: Option<(String, PathBuf)>,
+    /// Who hears the episodes here, when anybody does.
+    transcriber: Option<PathBuf>,
     /// Who makes chapters of an episode's captions when it has none, in
     /// the order to try them.
     chapters: Vec<Box<dyn crate::chapters::Chapterer>>,
+    counts: Counts,
+}
+
+/// What `f` reads of what a peer holds.
+fn held<T>(p: &Peer, f: impl FnOnce(&ark::db::Db<Harken>) -> T) -> T {
+    ark::db::read::<Harken, _>(&p.log.store, f)
 }
 
 impl Scan {
-    /// The replica's followed feeds handed to the feeds' reader, and a
-    /// read asked of it, when they moved since it last was: a feed
-    /// followed, its kind changed, or more of it asked for. Its title and
-    /// what the last read said are the reader's own writes, and ask
-    /// nothing.
-    fn follow(&mut self, peer: &ark_peer::Peer) {
-        let now: Vec<Subscription> =
-            ark::db::read::<Harken, _>(&peer.log.store, |db| db.subscription.scan());
-        let moved: Vec<(String, String, i64)> = now
-            .iter()
-            .map(|s| (s.url.clone(), s.kind.clone(), s.keep))
-            .collect();
-        if self.followed.as_ref() == Some(&moved) {
-            return;
-        }
-        let first = self.followed.is_none();
-        self.followed = Some(moved);
-        if let Ok(mut s) = self.subscriptions.lock() {
-            *s = now;
-        }
-        // The first is the boot's, whose full look asks for a read itself.
-        if !first {
-            self.follow.read();
-        }
-    }
-}
-
-impl Scan {
-    /// Where an episode's file is on disk: a feed's under the data
-    /// directory's feeds, anything else under the media root.
+    /// Where a file the log names is on disk: a feed's or the catalogue's
+    /// under the data directory, anything else under the media root.
     fn path_of(&self, file: &str) -> PathBuf {
-        match file.strip_prefix(&format!("{}/", crate::feeds::DIR)) {
-            Some(name) => self.feeds.join(name),
-            None => self.root.join(file),
+        let under = |dir: &str| file.strip_prefix(dir).and_then(|f| f.strip_prefix('/'));
+        if let Some(name) = under(crate::feeds::DIR) {
+            return self.feeds.join(name);
+        }
+        match (under(crate::catalogue::DIR), &self.catalogue) {
+            (Some(name), Some((_, dir))) => dir.join(name),
+            _ => self.root.join(file),
         }
     }
 
-    /// The file an episode's path on disk is, as its row says it.
+    /// The file a path on disk is, as the log names it: a feed's, or one
+    /// under the media root.
     fn file_of(&self, path: &Path) -> Option<String> {
         match path.strip_prefix(&self.feeds) {
             Ok(name) => Some(format!("{}/{}", crate::feeds::DIR, name.to_str()?)),
@@ -549,58 +473,219 @@ impl Scan {
         }
     }
 
-    /// The episodes whose files are here and have no captions beside them,
-    /// newest first, told to the transcriber whenever the replica moved: a
-    /// download finished is an entry, and one not finished is a `.part`
-    /// beside its name, not yet here.
-    fn transcribe(&mut self, peer: &ark_peer::Peer) {
-        let Some(transcribe) = &self.transcribe else {
-            return;
-        };
-        let head = peer.log.store.log().head().0;
-        if self.listed == Some(head) {
-            return;
+    /// A [`Look`]: at the files it names, or at everything — and then
+    /// every source read again, every episode's captions read, and every
+    /// episode here without any heard.
+    fn look(&self, w: &mut Work, job: &Look) -> Result<Looked, String> {
+        let all = job.paths.is_empty();
+        let mut paths = BTreeSet::new();
+        if all {
+            walk(&self.music, &mut paths);
+            for (dir, _) in SHOWS {
+                walk(&self.root.join(dir), &mut paths);
+            }
         }
-        self.listed = Some(head);
-        let mut here: Vec<(i64, i64, crate::transcribe::Job)> =
-            ark::db::read::<Harken, _>(&peer.log.store, |db| {
-                db.episode
-                    .scan()
-                    .into_iter()
-                    .filter_map(|e| {
-                        let m = db.media.get(e.media_id)?;
-                        let job = crate::transcribe::Job {
-                            path: self.path_of(&m.file),
-                            title: m.title.clone(),
-                            // A sermon is its preacher's.
-                            one_voice: m.kind == "sermon",
-                        };
-                        Some((e.published_ms, m.pos, job))
-                    })
-                    .collect()
-            });
-        here.retain(|(_, _, j)| {
-            j.path.is_file() && !crate::transcribe::captions_of(&j.path).exists()
-        });
-        here.sort_by_key(|(published, pos, _)| std::cmp::Reverse((*published, *pos)));
-        transcribe.want(here.into_iter().map(|(_, _, j)| j).collect());
+        for p in job.paths.iter().map(|f| self.path_of(f)) {
+            match p {
+                // A *directory* appearing is the case that matters, and it
+                // is not the same as a file appearing. Dropping an album
+                // folder in creates the directory and its tracks in the same
+                // breath, and a recursive watch has to add a watch for the
+                // new directory before it can report anything inside it —
+                // so the tracks land in the gap and are never announced.
+                // What is announced is the directory, so that is what gets
+                // walked.
+                p if p.is_dir() => walk(&p, &mut paths),
+                // A picture added, replaced or taken away is every track
+                // below its directory offered again: an album's cover is its
+                // own directory's, and an artist's picture is the albums'
+                // under it.
+                p if covers::is_image(&p) => p.parent().iter().for_each(|d| walk(d, &mut paths)),
+                p => drop(paths.insert(p)),
+            }
+        }
+        let mut prints = self.prints.lock().unwrap_or_else(|e| e.into_inner());
+        let mut covers = Covers::new(&self.root, &self.music, &self.art, prints.art());
+        let (mut authored, mut read) = (0, 0);
+        for p in &paths {
+            // Captions are an episode's transcript.
+            if p.extension().is_some_and(|e| e == "vtt") {
+                authored += w.with(|peer| self.captions(peer, p))?;
+                continue;
+            }
+            match w.with(|peer| offer(peer, self, &mut prints, &mut covers, p))? {
+                Offered::Authored => (authored, read) = (authored + 1, read + 1),
+                Offered::Read => read += 1,
+                Offered::Not => {}
+            }
+        }
+        prints.save(covers.written());
+        drop(prints);
+        if all {
+            authored += w.with(|p| self.everything(p))?;
+        }
+        self.counts.read.fetch_add(read, Ordering::Relaxed);
+        self.said(authored, "library");
+        let (read, authored) = (read as i64, authored as i64);
+        Ok(Looked { read, authored })
     }
 
-    /// Every episode's captions here read, as [`Scan::captions`] reads one:
-    /// at boot, for whatever was written while the server was down.
-    fn sweep(&self, peer: &mut ark_peer::Peer) {
-        let files: Vec<String> = ark::db::read::<Harken, _>(&peer.log.store, |db| {
-            db.episode
-                .scan()
-                .into_iter()
-                .filter_map(|e| db.media.get(e.media_id).map(|m| m.file))
-                .collect()
+    /// What a full look asks besides the files: every source read, every
+    /// episode's captions read — whatever was written while the server
+    /// was down — and every episode here without any heard, newest first.
+    /// How many entries the captions were.
+    fn everything(&self, p: &mut Peer) -> usize {
+        let (followed, mut episodes) = held(p, |db| {
+            let episodes = db.episode.scan().into_iter().filter_map(|e| {
+                let m = db.media.get(e.media_id)?;
+                Some((std::cmp::Reverse((e.published_ms, m.pos)), m.file))
+            });
+            (db.subscription.scan(), episodes.collect::<Vec<_>>())
         });
-        for file in files {
-            let captions = crate::transcribe::captions_of(&self.path_of(&file));
-            if captions.is_file() {
-                self.captions(peer, &captions);
+        let sources = self.catalogue.iter().map(|c| c.0.clone());
+        for url in sources.chain(followed.into_iter().map(|s| s.url)) {
+            if let Err(why) = p.mutate_new(READ, &Read { url }) {
+                tracing::warn!("a read was refused: {why}");
             }
+        }
+        episodes.sort();
+        let mut authored = 0;
+        for (_, file) in episodes {
+            let captions = crate::transcribe::captions_of(&self.path_of(&file));
+            match captions.is_file() {
+                true => authored += self.captions(p, &captions),
+                false => self.to_hear(p, &file),
+            }
+        }
+        authored
+    }
+
+    /// An episode here without captions asked to be heard, on a server
+    /// with a transcriber.
+    fn to_hear(&self, p: &mut Peer, file: &str) {
+        let path = self.path_of(file);
+        if self.transcriber.is_none()
+            || !path.is_file()
+            || crate::transcribe::captions_of(&path).exists()
+        {
+            return;
+        }
+        if let Err(why) = p.mutate_new(HEAR, &Hear { file: file.into() }) {
+            tracing::warn!(file, "a hearing was refused: {why}");
+        }
+    }
+
+    /// A [`Source`] read: the catalogue, or a followed feed — read again in
+    /// an hour — each said as plans and authored. A read that could not
+    /// have everything fails, and is read again sooner.
+    fn read(&self, w: &mut Work, job: &Source) -> Result<i64, String> {
+        let agent = crate::sync::agent();
+        let (plans, failed, every) = match &self.catalogue {
+            Some((url, dir)) if *url == job.url => {
+                let (plans, failed) = crate::catalogue::read(&agent, url, dir);
+                (plans, failed, None)
+            }
+            _ => {
+                // A feed nobody follows any more is read no more.
+                let Some(s) = w.with(|p| held(p, |db| db.subscription.get(&job.url)))? else {
+                    return Ok(0);
+                };
+                let mut failed = 0;
+                let plan = crate::feeds::read(&agent, &s, &self.feeds, &mut failed);
+                (vec![plan], failed, Some(crate::feeds::EVERY))
+            }
+        };
+        let mut authored = 0;
+        for plan in &plans {
+            let n = w.with(|p| author(p, plan))?;
+            self.said(n, &plan.what);
+            authored += n;
+        }
+        if failed > 0 {
+            return Err(format!("{failed} files could not be had"));
+        }
+        if let Some(every) = every {
+            w.again(ark_peer::now_ms() + every.as_millis() as i64);
+        }
+        Ok(authored as i64)
+    }
+
+    /// A [`Fetch`]: a file still to come downloaded, saying how it goes,
+    /// and heard once it is here when it is an episode. Its download gone
+    /// — the file here, or its row taken out — is nothing to do.
+    fn fetch(&self, w: &mut Work, job: &Fetch) -> Result<i64, String> {
+        let id = job.media_id;
+        let row = w.with(|p| held(p, |db| Some((db.media.get(id)?, db.download.get(id)?))))?;
+        let Some((media, download)) = row else {
+            return Ok(0);
+        };
+        let (path, file) = (self.path_of(&media.file), media.file.clone());
+        let say = |w: &mut Work, state: &str, bytes: u64, total: u64, error: &str| {
+            let (state, error) = (state.to_string(), error.to_string());
+            let (bytes, total) = (bytes as i64, total as i64);
+            let input = DownloadProgress {
+                file: file.clone(),
+                state,
+                bytes,
+                total,
+                error,
+            };
+            w.with(|p| p.mutate_new(DOWNLOAD_PROGRESS, &input))?
+        };
+        let mut bytes = 0;
+        if !path.exists() {
+            // Refused, its row is gone: not downloaded.
+            if say(w, "downloading", 0, 0, "").is_err() {
+                return Ok(0);
+            }
+            let mut last = std::time::Instant::now();
+            let got = crate::sync::download(
+                &crate::sync::agent(),
+                &download.source,
+                &path,
+                |n, total| {
+                    bytes = n;
+                    if last.elapsed() >= crate::sync::EVERY_SAID {
+                        last = std::time::Instant::now();
+                        let _ = say(w, "downloading", n, total, "");
+                    }
+                },
+            );
+            if let Err(e) = got {
+                tracing::warn!(file, "{e}");
+                let _ = say(w, "failed", 0, 0, &e);
+                return Err(e);
+            }
+            std::thread::sleep(crate::sync::PAUSE);
+        }
+        w.mutate(DOWNLOADED, &Downloaded { file: file.clone() })?;
+        if crate::domain::shows::KINDS.contains(&media.kind.as_str()) {
+            w.with(|p| self.to_hear(p, &file))?;
+        }
+        Ok(bytes as i64)
+    }
+
+    /// A [`Hearing`]: an episode here heard, unless its captions came
+    /// meanwhile, and its captions read.
+    fn hear(&self, w: &mut Work, job: &Hearing) -> Result<i64, String> {
+        let id = job.media_id;
+        let Some(m) = w.with(|p| held(p, |db| db.media.get(id)))? else {
+            return Ok(0);
+        };
+        let path = self.path_of(&m.file);
+        let captions = crate::transcribe::captions_of(&path);
+        if let (false, Some(program)) = (captions.exists(), &self.transcriber) {
+            // A sermon is its preacher's: one voice throughout.
+            crate::transcribe::hear(program, &path, &m.title, m.kind == "sermon")?;
+        }
+        Ok(w.with(|p| self.captions(p, &captions))? as i64)
+    }
+
+    /// Entries authored, counted and said.
+    fn said(&self, authored: usize, what: &str) {
+        if authored > 0 {
+            self.counts.authored.fetch_add(authored, Ordering::Relaxed);
+            tracing::info!(authored, "{what}");
         }
     }
 
@@ -608,7 +693,7 @@ impl Scan {
     /// them: the transcriber, another machine that heard it, a hand)
     /// authored as its transcript, and its chapters made from them when it
     /// has none (`chapters.rs`). Said again the same, it writes nothing.
-    fn captions(&self, peer: &mut ark_peer::Peer, path: &Path) -> usize {
+    fn captions(&self, peer: &mut Peer, path: &Path) -> usize {
         let Some(file) = path
             .to_str()
             .and_then(|p| p.strip_suffix(".vtt"))
@@ -616,7 +701,7 @@ impl Scan {
         else {
             return 0;
         };
-        let episode = ark::db::read::<Harken, _>(&peer.log.store, |db| {
+        let episode = held(peer, |db| {
             let m = db
                 .media
                 .by(crate::domain::Media::FILE)
@@ -633,7 +718,7 @@ impl Scan {
         let crate::captions::Captions { cues, voices } = match std::fs::read_to_string(path) {
             Ok(text) => crate::captions::captions(&text),
             Err(e) => {
-                eprintln!("harken-server: library: {}: {e}", path.display());
+                tracing::warn!("{}: {e}", path.display());
                 return 0;
             }
         };
@@ -646,7 +731,6 @@ impl Scan {
             input,
             if_there: false,
         };
-        let mut calls = vec![];
         let about = crate::chapters::About {
             title: &title,
             description: &description,
@@ -655,406 +739,65 @@ impl Scan {
             true => vec![],
             false => crate::chapters::first(&self.chapters, &about, &cues),
         };
-        calls.push(call(
-            "library.set_transcript",
-            SetTranscript {
-                file: file.clone(),
-                cues,
-                voices,
-            }
-            .to_bytes(),
-        ));
+        let transcript = SetTranscript {
+            file: file.clone(),
+            cues,
+            voices,
+        };
+        let mut calls = vec![call("library.set_transcript", transcript.to_bytes())];
         if !made.is_empty() {
-            calls.push(call(
-                "library.set_chapters",
-                SetChapters {
-                    file,
-                    chapters: made,
-                }
-                .to_bytes(),
-            ));
+            let chapters = SetChapters {
+                file,
+                chapters: made,
+            };
+            calls.push(call("library.set_chapters", chapters.to_bytes()));
         }
-        let plan = crate::sync::Plan {
+        let plan = Plan {
             what: title.clone(),
             calls,
             gate: false,
             files: vec![],
         };
-        hear(peer, Said::Plan(Box::new(plan), channel().0))
-    }
-}
-
-/// The scanner's peer pumped — what the link said given to it, what it
-/// says back, and the looks its handler does — and a refused entry said
-/// out loud.
-fn pump(peer: &mut ark_peer::Peer) {
-    peer.pump();
-    for (_, why) in peer.take_refusals(ark::schema::Space::Durable) {
-        eprintln!("harken-server: library: an entry was refused: {why}");
-    }
-}
-
-/// The scanner's whole life: a peer whose handler does each look asked of
-/// the library (a [`Look`] row, `docs/plan-v5.md` S3a), and a loop turning
-/// what it is told to look at into looks asked.
-fn run(
-    mut scan: Scan,
-    mut peer: ark_peer::Peer,
-    hub: Handle<Authority>,
-    rx: Receiver<Nudge>,
-    heard: Receiver<Said>,
-    stop: &AtomicBool,
-    counts: Arc<Counts>,
-) {
-    catch_up(&mut peer, &hub, stop);
-    let root = scan.root.clone();
-    let synced = counts.clone();
-    scan.follow(&peer);
-    scan.sweep(&mut peer);
-    // The look's handler and the loop both have the scan: the handler runs
-    // inside the loop's pump, one at a time.
-    let watch = Arc::new(Mutex::new(scan));
-    let looks = watch.clone();
-    peer.handle::<Look>(move |p, job| {
-        let Ok(mut scan) = looks.lock() else {
-            return Ok(Looked {
-                read: 0,
-                authored: 0,
-            });
-        };
-        let scan = &mut *scan;
-        let nudges = match job.paths.is_empty() {
-            true => vec![Nudge::All],
-            false => job
-                .paths
-                .iter()
-                .map(|r| Nudge::One(scan.root.join(r)))
-                .collect(),
-        };
-        // A full look is every source read too: at boot, and the rescan a
-        // person asks for.
-        if job.paths.is_empty() {
-            if let Some(sync) = &scan.sync {
-                sync.read();
-            }
-            scan.follow.read();
-        }
-        let (authored, read) = look(p, scan, nudges);
-        counts.read.fetch_add(read, Ordering::Relaxed);
-        if authored > 0 {
-            counts.authored.fetch_add(authored, Ordering::Relaxed);
-            println!("harken-server: library +{authored}");
-        }
-        let (read, authored) = (read as i64, authored as i64);
-        Ok(Looked { read, authored })
-    });
-    while !stop.load(Ordering::Relaxed) {
-        let first = match rx.recv_timeout(IDLE) {
-            Ok(n) => Some(n),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-        if let Some(first) = first {
-            let mut nudges = vec![first];
-            // A watched path settles first; everything that arrives in the
-            // meantime is part of the same look.
-            if matches!(nudges[0], Nudge::One(_)) {
-                std::thread::sleep(SETTLE);
-            }
-            nudges.extend(rx.try_iter());
-            // Captions are read here; anything else is a look.
-            let (captions, nudges): (Vec<Nudge>, Vec<Nudge>) = nudges.into_iter().partition(
-                |n| matches!(n, Nudge::One(p) if p.extension().is_some_and(|e| e == "vtt")),
-            );
-            if let Ok(scan) = watch.lock() {
-                for n in captions {
-                    if let Nudge::One(p) = n {
-                        let authored = scan.captions(&mut peer, &p);
-                        synced.authored.fetch_add(authored, Ordering::Relaxed);
-                    }
-                }
-            }
-            ask(&mut peer, &root, nudges);
-        }
-        // What the sources read and how their downloads go, authored.
-        for said in heard.try_iter() {
-            let authored = hear(&mut peer, said);
-            synced.authored.fetch_add(authored, Ordering::Relaxed);
-        }
-        // Whatever that produced, and whatever the log has for us — the
-        // looks asked among it. Not conditional on a nudge: a quiet
-        // scanner still has to take the entries other peers wrote.
-        pump(&mut peer);
-        if let Ok(mut scan) = watch.lock() {
-            scan.follow(&peer);
-            scan.transcribe(&peer);
-        }
-    }
-    // Off the hub, with what is pending written down for the next start (the
-    // client writes its pending intents as they change).
-    pump(&mut peer);
-}
-
-/// A look asked for: at the paths the nudges name, under the media root,
-/// or at everything.
-fn ask(peer: &mut ark_peer::Peer, root: &Path, nudges: Vec<Nudge>) {
-    let all = nudges.iter().any(|n| matches!(n, Nudge::All));
-    let paths = nudges.into_iter().filter_map(|n| match n {
-        Nudge::One(p) if !all => relative(root, &p),
-        _ => None,
-    });
-    let paths: Vec<String> = paths.collect::<BTreeSet<_>>().into_iter().collect();
-    if all || !paths.is_empty() {
-        if let Err(why) = peer.mutate(LOOK, &LookAt { paths }) {
-            eprintln!("harken-server: library: a look was refused: {why}");
-        }
-    }
-}
-
-/// Pump until the replica has what the log had when it started, so that
-/// "already a song" means the library and not an empty replica. Bounded: a
-/// scanner that cannot catch up still scans, and the procedure keeps the
-/// library right.
-fn catch_up(peer: &mut ark_peer::Peer, hub: &Handle<Authority>, stop: &AtomicBool) {
-    let head = hub.with(|h| h.log.log().head().0).unwrap_or(0);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
-        pump(peer);
-        if peer.linked && peer.log.log().head().0 >= head && peer.log.pending().is_empty() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    if !stop.load(Ordering::Relaxed) {
-        eprintln!("harken-server: library: not caught up with the log after 30s; scanning anyway");
-    }
-}
-
-/// One look at whatever the nudges name. Says how many entries it authored
-/// and how many files it read.
-fn look(peer: &mut ark_peer::Peer, scan: &mut Scan, nudges: Vec<Nudge>) -> (usize, usize) {
-    let mut paths = BTreeSet::new();
-    for n in nudges {
-        match n {
-            Nudge::All => {
-                walk(&scan.music, &mut paths);
-                for (dir, _) in SHOWS {
-                    walk(&scan.root.join(dir), &mut paths);
-                }
-            }
-            // A *directory* appearing is the case that matters, and it is not
-            // the same as a file appearing. Dropping an album folder in
-            // creates the directory and its tracks in the same breath, and a
-            // recursive watch has to add a watch for the new directory before
-            // it can report anything inside it — so the tracks land in the gap
-            // and are never announced. What is announced is the directory, so
-            // that is what gets walked.
-            Nudge::One(p) if p.is_dir() => walk(&p, &mut paths),
-            // A picture added, replaced or taken away is every track below
-            // its directory offered again: an album's cover is its own
-            // directory's, and an artist's picture is the albums' under it.
-            Nudge::One(p) if covers::is_image(&p) => {
-                if let Some(dir) = p.parent() {
-                    walk(dir, &mut paths)
-                }
-            }
-            Nudge::One(p) => {
-                paths.insert(p);
-            }
-        }
-    }
-    let mut covers = Covers::new(&scan.root, &scan.music, &scan.art, scan.prints.art());
-    let (mut authored, mut read) = (0, 0);
-    for p in &paths {
-        match offer(peer, scan, &mut covers, p) {
-            Offered::Authored => {
-                authored += 1;
-                read += 1;
-            }
-            Offered::Read => read += 1,
-            Offered::Not => {}
-        }
-    }
-    scan.prints.save(covers.written());
-    (authored, read)
-}
-
-/// Whether the library already has a file: asked of the replica's
-/// optimistic store through the `media (file)` index — one row looked at
-/// (`docs/plan-perf.md` R4). The store holds what this look has already
-/// authored, so a file authored a moment ago is known without a set to
-/// remember it in.
-fn known_file(store: &Store, file: &str) -> bool {
-    let schema = store.schema_arc().clone();
-    let Some((_, media)) = schema.table("media") else {
-        return false;
-    };
-    let col = media.columns.iter().position(|c| c.name == "file");
-    let index = media
-        .indexes
-        .iter()
-        .position(|i| Some(i.columns.as_slice()) == col.as_ref().map(std::slice::from_ref));
-    let mut key = vec![];
-    ark::format::put_key(file, &mut key);
-    let range = Range::prefix(index, &key, Dir::Asc, 1);
-    !store.scan("media", &range).is_empty()
-}
-
-/// What a source said, authored: a plan's rows and its files queued, or
-/// how one of its downloads goes. How many entries it authored.
-fn hear(peer: &mut ark_peer::Peer, said: Said) -> usize {
-    match said {
-        Said::Plan(plan, answer) => {
-            let (authored, yes) = author(peer, &plan);
-            let _ = answer.send(yes);
-            if authored > 0 {
-                println!("harken-server: {} +{authored}", plan.what);
-            }
-            authored
-        }
-        // Refused, its row is gone: not downloaded.
-        Said::Start(file, answer) => {
-            let going = progress(&file, "downloading", 0, 0, "");
-            let yes = !matches!(would(peer, DOWNLOAD_PROGRESS, &going), Would::Refuse);
-            let authored = yes && author_one(peer, DOWNLOAD_PROGRESS, &file, going);
-            let _ = answer.send(yes);
-            authored as usize
-        }
-        Said::Progress(file, bytes, total) => {
-            let going = progress(&file, "downloading", bytes as i64, total as i64, "");
-            author_one(peer, DOWNLOAD_PROGRESS, &file, going) as usize
-        }
-        Said::Failed(file, why) => {
-            let failed = progress(&file, "failed", 0, 0, &why);
-            author_one(peer, DOWNLOAD_PROGRESS, &file, failed) as usize
-        }
-        Said::Here(file) => {
-            let here = Downloaded { file: file.clone() }.to_bytes();
-            author_one(peer, DOWNLOADED, &file, here) as usize
-        }
-    }
-}
-
-fn progress(file: &str, state: &str, bytes: i64, total: i64, error: &str) -> Vec<u8> {
-    DownloadProgress {
-        file: file.to_string(),
-        state: state.to_string(),
-        bytes,
-        total,
-        error: error.to_string(),
-    }
-    .to_bytes()
-}
-
-/// An entry authored if it would change something, a refusal said: whether
-/// one was.
-fn author_one(peer: &mut ark_peer::Peer, name: &str, what: &str, input: Vec<u8>) -> bool {
-    if !would_change(peer, name, &input) {
-        return false;
-    }
-    match peer.mutate(name, input) {
-        Ok(_) => true,
-        Err(why) => {
-            eprintln!("harken-server: library: {what} ({name}) was refused: {why}");
-            false
-        }
+        author(peer, &plan)
     }
 }
 
 /// A plan authored: each of its mutations that would change something,
 /// then each of its files queued, or said to be here when it already is.
-/// How many entries it authored, and whether its files are to be
-/// downloaded — not when it is gated and its first mutation is refused.
-fn author(peer: &mut ark_peer::Peer, plan: &crate::sync::Plan) -> (usize, bool) {
+/// How many entries it authored: none when it is gated and its first
+/// mutation is refused.
+fn author(p: &mut Peer, plan: &Plan) -> usize {
     let mut authored = 0;
     for (n, call) in plan.calls.iter().enumerate() {
-        match would(peer, call.name, &call.input) {
-            Would::Nothing => continue,
-            Would::Refuse if plan.gate && n == 0 => return (0, false),
+        match p.mutate_new(call.name, call.input.clone()) {
+            Ok(n) => authored += n.is_some() as usize,
+            Err(_) if plan.gate && n == 0 => return 0,
             // A describe of a work this library has not got.
-            Would::Refuse if call.if_there => continue,
-            Would::Change | Would::Refuse => {}
-        }
-        match peer.mutate(call.name, call.input.clone()) {
-            Ok(_) => authored += 1,
-            Err(why) => eprintln!(
-                "harken-server: {}: {} ({}) was refused: {why}",
-                plan.what, call.what, call.name
-            ),
+            Err(_) if call.if_there => {}
+            Err(why) => {
+                tracing::warn!(what = %plan.what, "{} ({}) was refused: {why}", call.what, call.name)
+            }
         }
     }
     for want in &plan.files {
+        let file = want.file.clone();
         let input = match want.here() {
-            true => (
-                DOWNLOADED,
-                Downloaded {
-                    file: want.file.clone(),
-                }
-                .to_bytes(),
-            ),
-            // Queued again only from nothing or a failure: a file queued
-            // or downloading already is as it was.
-            false if queued(peer, &want.file) => continue,
+            true => (DOWNLOADED, Downloaded { file }.to_bytes()),
             false => (
                 QUEUE_DOWNLOAD,
-                QueueDownload {
-                    file: want.file.clone(),
+                crate::domain::QueueDownload {
+                    file,
                     source: want.url.clone(),
                 }
                 .to_bytes(),
             ),
         };
-        authored += author_one(peer, input.0, &want.file, input.1) as usize;
+        match p.mutate_new(input.0, input.1) {
+            Ok(n) => authored += n.is_some() as usize,
+            Err(why) => tracing::warn!(file = %want.file, "{} was refused: {why}", input.0),
+        }
     }
-    (authored, true)
-}
-
-/// Whether a file is queued or downloading already, as the replica has it.
-fn queued(peer: &ark_peer::Peer, file: &str) -> bool {
-    ark::db::read::<Harken, _>(&peer.log.store, |db| {
-        let media = db
-            .media
-            .by(crate::domain::Media::FILE)
-            .from(&file.to_string())
-            .first();
-        media
-            .filter(|m| m.file == file)
-            .and_then(|m| db.download.get(m.id))
-            .is_some_and(|d| d.state != "failed")
-    })
-}
-
-/// Whether an entry would write anything over what the replica holds: the
-/// mutation run over it, its changes looked at and thrown away. What the
-/// procedure does with an entry saying nothing new is write nothing, so
-/// not authoring one is the same library with one entry fewer in the log.
-fn would_change(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> bool {
-    !matches!(would(peer, name, input), Would::Nothing)
-}
-
-/// What an entry would do over what the replica holds.
-enum Would {
-    Change,
-    Nothing,
-    Refuse,
-}
-
-fn would(peer: &ark_peer::Peer, name: &str, input: &[u8]) -> Would {
-    let me = &peer.log.me;
-    let ctx = Ctx {
-        id: peer.log.next_id(),
-        now: ark_peer::now_ms(),
-        ..me.clone()
-    };
-    let Some(f) = peer.domain().get(name).and_then(|f| f.proc.clone()) else {
-        return Would::Change;
-    };
-    let mut store = peer.log.store.clone();
-    match f(&mut store, &ctx, input) {
-        Ok(changes) if changes.is_empty() => Would::Nothing,
-        Ok(_) => Would::Change,
-        Err(_) => Would::Refuse,
-    }
+    authored
 }
 
 /// Every file under `dir`. A directory that cannot be read is skipped rather
@@ -1122,10 +865,31 @@ enum Offered {
     Authored,
 }
 
+/// Whether the library already has a file: asked of the replica's
+/// optimistic store through the `media (file)` index — one row looked at
+/// (`docs/plan-perf.md` R4). The store holds what this look has already
+/// authored, so a file authored a moment ago is known without a set to
+/// remember it in.
+fn known_file(p: &Peer, file: &str) -> bool {
+    let media = held(p, |db| {
+        db.media
+            .by(crate::domain::Media::FILE)
+            .from(&file.to_string())
+            .first()
+    });
+    media.is_some_and(|m| m.file == file)
+}
+
 /// Offer one path to the log.
-fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: &Path) -> Offered {
+fn offer(
+    peer: &mut Peer,
+    scan: &Scan,
+    prints: &mut Prints,
+    covers: &mut Covers,
+    path: &Path,
+) -> Offered {
     if let Some((kind, show)) = is_episode(&scan.root, path) {
-        return offer_episode(peer, scan, covers, path, kind, &show);
+        return offer_episode(peer, scan, prints, covers, path, kind, &show);
     }
     if !is_track(&scan.music, path) {
         return Offered::Not;
@@ -1141,7 +905,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         return Offered::Not;
     };
     let (size, mtime) = (meta.len() as i64, covers::mtime(&meta) as i64);
-    if let Some(was) = scan.prints.get(&rel) {
+    if let Some(was) = prints.get(&rel) {
         let now = Print {
             path: rel.clone(),
             size,
@@ -1149,7 +913,7 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
             artist: was.artist.clone(),
             covers: covers.beside(dir, &was.artist).print(),
         };
-        if was == now && known_file(&peer.log.store, &rel) {
+        if was == now && known_file(peer, &rel) {
             return Offered::Not;
         }
     }
@@ -1206,20 +970,16 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
         folder: String::new(),
     }
     .to_bytes();
-    if !would_change(peer, ADD_SONG, &call) {
-        scan.prints.set(print);
-        return Offered::Read;
-    }
-    match peer.mutate(ADD_SONG, call) {
-        Ok(_) => {
-            scan.prints.set(print);
-            Offered::Authored
+    match peer.mutate_new(ADD_SONG, call) {
+        Ok(authored) => {
+            prints.set(print);
+            match authored {
+                Some(_) => Offered::Authored,
+                None => Offered::Read,
+            }
         }
         Err(why) => {
-            eprintln!(
-                "harken-server: library: {} was refused: {why}",
-                path.display()
-            );
+            tracing::warn!("{} was refused: {why}", path.display());
             Offered::Read
         }
     }
@@ -1231,8 +991,9 @@ fn offer(peer: &mut ark_peer::Peer, scan: &mut Scan, covers: &mut Covers, path: 
 /// name), who made it and its number; a folder has no dates, so it says
 /// none, and the show lists its episodes as they were added.
 fn offer_episode(
-    peer: &mut ark_peer::Peer,
-    scan: &mut Scan,
+    peer: &mut Peer,
+    scan: &Scan,
+    prints: &mut Prints,
     covers: &mut Covers,
     path: &Path,
     kind: &str,
@@ -1254,8 +1015,8 @@ fn offer_episode(
             .as_ref()
             .map_or(String::new(), |i| format!("{}@{}", i.rel, i.print)),
     };
-    if let Some(was) = scan.prints.get(&rel) {
-        if was == print(was.artist.clone()) && known_file(&peer.log.store, &rel) {
+    if let Some(was) = prints.get(&rel) {
+        if was == print(was.artist.clone()) && known_file(peer, &rel) {
             return Offered::Not;
         }
     }
@@ -1295,21 +1056,16 @@ fn offer_episode(
     .to_bytes();
     let mut authored = false;
     for (name, input) in [(ADD_SHOW, add_show), (ADD_EPISODE, add_episode)] {
-        if !would_change(peer, name, &input) {
-            continue;
-        }
-        match peer.mutate(name, input) {
-            Ok(_) => authored = true,
+        match peer.mutate_new(name, input) {
+            Ok(n) => authored |= n.is_some(),
             Err(why) => {
-                eprintln!(
-                    "harken-server: library: {} was refused: {why}",
-                    path.display()
-                );
+                tracing::warn!("{} was refused: {why}", path.display());
                 return Offered::Read;
             }
         }
     }
-    scan.prints.set(print(track.artist));
+    prints.set(print(track.artist));
+    scan.to_hear(peer, &rel);
     match authored {
         true => Offered::Authored,
         false => Offered::Read,

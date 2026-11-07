@@ -1,7 +1,9 @@
 //! Podcasts and sermons read off the feeds the library follows (a
 //! `subscription` row each, added from a client): a source of the library
-//! (`sync.rs`). Each feed is read — its RSS, and its pictures downloaded
-//! into the data directory — and said as a plan: what was read
+//! (`sync.rs`), read as a job (`library.rs`) every hour and whenever it is
+//! followed or more of it is asked for. Each feed is read — its RSS, and
+//! its pictures downloaded into the data directory — and said as a plan:
+//! what was read
 //! (`library.feed_read`), the show (`library.add_show`) and its newest
 //! episodes (`library.add_episode`, as many as the subscription keeps),
 //! each episode's file still to come and then downloaded and served at
@@ -15,7 +17,6 @@
 //! stays, until the feed is unfollowed.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ark::format::Encode;
@@ -24,7 +25,7 @@ use crate::domain::keys::show_key;
 use crate::domain::{
     AddEpisode, AddShow, ChapterAt, FeedRead, PersonOn, SetChapters, SetPeople, Subscription,
 };
-use crate::sync::{self, Call, Plan, Source, Want};
+use crate::sync::{self, Call, Plan, Want};
 
 /// Where under `/media` the downloads are served.
 pub const DIR: &str = ".feeds";
@@ -48,53 +49,23 @@ pub fn dir(data: &Path) -> PathBuf {
     data.join("feeds")
 }
 
-/// The feeds the library follows, as the scanner last read them off its
-/// replica, kept in `dir`.
-pub struct Follow {
-    pub subscriptions: Arc<Mutex<Vec<Subscription>>>,
-    pub dir: PathBuf,
-}
-
-impl Source for Follow {
-    fn name(&self) -> &str {
-        "feeds"
-    }
-
-    /// Every feed followed, a plan each, gated on it still being followed.
-    fn read(&mut self) -> (Vec<Plan>, usize) {
-        let subscriptions = self
-            .subscriptions
-            .lock()
-            .map(|s| s.clone())
-            .unwrap_or_default();
-        let agent = sync::agent();
-        let mut failed = 0;
-        let plans = subscriptions
-            .iter()
-            .map(|s| match plan(&agent, s, &self.dir, &mut failed) {
-                Ok(plan) => plan,
-                Err(error) => {
-                    eprintln!("harken-server: feeds: {error}");
-                    let read = FeedRead {
-                        url: s.url.clone(),
-                        error,
-                        ..FeedRead::default()
-                    };
-                    Plan {
-                        what: s.url.clone(),
-                        calls: vec![call("library.feed_read", &s.url, &read)],
-                        gate: true,
-                        files: vec![],
-                    }
-                }
-            })
-            .collect();
-        (plans, failed)
-    }
-
-    fn every(&self) -> Option<Duration> {
-        Some(EVERY)
-    }
+/// A followed feed read, as a plan gated on it still being followed: or
+/// what could not be read of it said on its subscription.
+pub fn read(agent: &ureq::Agent, s: &Subscription, dir: &Path, failed: &mut usize) -> Plan {
+    plan(agent, s, dir, failed).unwrap_or_else(|error| {
+        tracing::warn!("{error}");
+        let read = FeedRead {
+            url: s.url.clone(),
+            error,
+            ..FeedRead::default()
+        };
+        Plan {
+            what: s.url.clone(),
+            calls: vec![call("library.feed_read", &s.url, &read)],
+            gate: true,
+            files: vec![],
+        }
+    })
 }
 
 fn call(name: &'static str, what: &str, input: &impl Encode) -> Call {
@@ -395,7 +366,7 @@ fn json_chapters(agent: &ureq::Agent, url: &str, dir: &Path, failed: &mut usize)
     if !want.here() {
         if let Err(e) = sync::download(agent, url, &want.path, |_, _| {}) {
             *failed += 1;
-            eprintln!("harken-server: feeds: chapters: {e}");
+            tracing::warn!("chapters: {e}");
             return vec![];
         }
     }

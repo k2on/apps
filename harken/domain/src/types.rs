@@ -298,6 +298,21 @@ pub struct DownloadProgress {
     pub error: String,
 }
 
+/// Somewhere the library comes from, to be read now: a followed feed's
+/// URL, or the catalogue's.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Read {
+    #[ark(trim, non_empty, why = "a read needs a URL")]
+    pub url: String,
+}
+
+/// An episode's file to be heard.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
+pub struct Hear {
+    #[ark(trim)]
+    pub file: String,
+}
+
 /// A file downloaded: it is on the server now.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
 pub struct Downloaded {

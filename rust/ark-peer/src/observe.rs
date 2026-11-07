@@ -252,10 +252,17 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 }
             }
         }
+        let m = event.metadata();
+        // A server's own say, on its standard error too, for its service's
+        // journal: its app's at `info` or louder, ark's at `warn`.
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(sink, Kept::Files(_)) && (m.target() != "ark" || *m.level() <= Level::WARN) {
+            let said: String = seen.fields.iter().map(|(k, v)| format!(" {k}={v}")).collect();
+            eprintln!("{}: {}{said}", m.target(), seen.msg);
+        }
         fields.extend(seen.fields);
         let peer = fields.iter().rev().find(|(k, _)| k == "peer").map(|(_, v)| v.clone()).unwrap_or_default();
         fields.retain(|(k, _)| k != "peer");
-        let m = event.metadata();
         if m.target() != "ark" {
             fields.insert(0, ("target".into(), m.target().to_string()));
         }

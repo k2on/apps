@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 /// The tables the scope fed only its person's rows of, and the one it fed
 /// none of; every other one it fed whole.
 const THEIRS: &[&str] = &["sign_in", "role"];
-const NONE: &[&str] = &[];
+const NONE: &[&str] = &["asking", "syncing"];
 
 /// A value of `t` as JSON, every `user` in it `user`.
 fn zero(t: &Type, user: &str) -> Value {

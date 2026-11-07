@@ -1483,6 +1483,154 @@
         }
       ],
       "space": "durable"
+    },
+    {
+      "name": "asking",
+      "columns": [
+        {
+          "name": "id",
+          "ty": {
+            "Id": "bank_ask"
+          },
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobInt",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "syncing",
+      "columns": [
+        {
+          "name": "id",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobInt",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
     }
   ]
 }

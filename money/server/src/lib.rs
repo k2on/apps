@@ -45,7 +45,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 use ark_auth::server::Auth;
-use ark_auth::Account;
 use ark_peer::{Running, ServerConfig};
 
 use importer::{Banks, Importer};
@@ -258,25 +257,7 @@ pub async fn start(config: Config) -> Result<Server> {
         eprintln!("money-server: importing receipts dropped in {}", d.display());
     }
     let importer = match config.banks.is_some() || stores.any() {
-        true => {
-            let account = Account {
-                id: importer::ACCOUNT.into(),
-                name: "Bank".into(),
-                roles: vec![money_domain::BANK.into()],
-                ..Account::default()
-            };
-            let auth = auth.clone();
-            let login = tokio::task::spawn_blocking(move || auth.own(&account, importer::DEVICE))
-                .await?
-                .map_err(|e| anyhow!("signing the importer in: {e}"))?;
-            Some(Importer::start(
-                config.banks.clone(),
-                stores.clone(),
-                hub.clone(),
-                config.data.clone(),
-                login,
-            )?)
-        }
+        true => Some(Importer::start(config.banks.clone(), stores.clone(), &hub, &auth, config.data.clone())?),
         false => None,
     };
 

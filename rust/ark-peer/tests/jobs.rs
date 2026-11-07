@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ark::effect::{Cancel, Job};
 use ark::prelude::*;
-use ark_peer::{dev, now_ms, Authority, Config, ConnId, Memory, Peer};
+use ark_peer::{dev, now_ms, Authority, Config, ConnId, Memory, Peer, Work};
 
 /// Something to fetch for its owner: the job, its outcome the body.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Row)]
@@ -112,9 +112,9 @@ impl Net {
     }
 }
 
-fn counting(n: &Arc<AtomicUsize>) -> impl FnMut(&mut Peer, &Fetch) -> Result<String, String> + Send + 'static {
+fn counting(n: &Arc<AtomicUsize>) -> impl Fn(&mut Work, &Fetch) -> Result<String, String> + Send + Sync + 'static {
     let n = n.clone();
-    move |_: &mut Peer, f: &Fetch| {
+    move |_: &mut Work, f: &Fetch| {
         n.fetch_add(1, Ordering::Relaxed);
         Ok(format!("body of {}", f.url))
     }
@@ -171,7 +171,7 @@ fn a_handler_runs_once_across_a_restart() {
     let mut net = Net::new(1);
     let n = Arc::new(AtomicUsize::new(0));
     net.d(0)
-        .handle::<Fetch>(|_: &mut Peer, _: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
+        .handle::<Fetch>(|_: &mut Work, _: &Fetch| -> Result<String, String> { panic!("this process stopped before it ran") });
     asked(&mut net, 0);
     net.d(0).pump();
     net.carry();

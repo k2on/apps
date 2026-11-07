@@ -138,8 +138,8 @@ fn a_job_runs_in_the_trace_of_what_made_it_due() {
     let mut net = Net::new(2);
     let seen: Arc<Mutex<Option<Span>>> = Arc::default();
     let s = seen.clone();
-    net.d(0).handle::<Fetch>(move |p, _| {
-        *s.lock().unwrap() = p.cause(Space::Durable, now_ms());
+    net.d(0).handle::<Fetch>(move |w, _| {
+        *s.lock().unwrap() = w.with(|p| p.cause(Space::Durable, now_ms()))?;
         Ok("body".into())
     });
     let tap = net.d(1).begin("tap");

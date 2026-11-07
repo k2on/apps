@@ -266,6 +266,31 @@ pub struct Asked {
     pub asked_ms: i64,
 }
 
+/// An ask about a bank connection ([`BankAsk`], the same id) as a job
+/// (`ark::effect`) the server's importer claims and answers: a page opened
+/// and asked after until somebody finishes it, or a bank disconnected.
+/// Several at once, each as long as Plaid's page lasts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
+#[effect(role = crate::BANK, lease_ms = 2_400_000, at_once = 4)]
+pub struct Asking {
+    #[ark(key)]
+    pub id: Id<BankAsk>,
+    pub state: Job<i64>,
+}
+
+/// The household's ask that the banks and the stores be imported now
+/// (`banks.sync`, [`Asked`]) as a job the server's importer claims and
+/// runs: one, asked again while it runs, run again after.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
+#[effect(role = crate::BANK, lease_ms = 600_000)]
+pub struct Syncing {
+    #[ark(key)]
+    pub id: String,
+    pub state: Job<i64>,
+}
+
 /// One line of a split transaction: part of its amount, for a category of
 /// its own. A split is by amounts, whatever told them — somebody typing, or
 /// a receipt's items ([`crate::receipts`]) — and its lines add up to the
@@ -532,6 +557,8 @@ pub struct Money {
     pub item: Item,
     pub charge: Charge,
     pub photo: Photo,
+    pub asking: Asking,
+    pub syncing: Syncing,
 }
 
 ark_auth::install!(Money);

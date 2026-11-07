@@ -1586,6 +1586,229 @@
         }
       ],
       "space": "durable"
+    },
+    {
+      "name": "fetch",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobInt",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "source",
+      "columns": [
+        {
+          "name": "url",
+          "ty": "Text",
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobInt",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
+    },
+    {
+      "name": "hearing",
+      "columns": [
+        {
+          "name": "media_id",
+          "ty": {
+            "Id": "media"
+          },
+          "default": null
+        },
+        {
+          "name": "state",
+          "ty": {
+            "Sum": [
+              "JobInt",
+              [
+                [
+                  "Pending",
+                  [
+                    [
+                      "due_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Claimed",
+                  [
+                    [
+                      "by",
+                      "Text"
+                    ],
+                    [
+                      "at_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Done",
+                  [
+                    [
+                      "value",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Failed",
+                  [
+                    [
+                      "why",
+                      "Text"
+                    ],
+                    [
+                      "retry_ms",
+                      "Int"
+                    ]
+                  ]
+                ],
+                [
+                  "Cancelled",
+                  []
+                ]
+              ]
+            ]
+          },
+          "default": null
+        }
+      ],
+      "key": 1,
+      "indexes": [],
+      "refs": [],
+      "space": "durable"
     }
   ]
 }
