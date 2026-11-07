@@ -1172,7 +1172,7 @@ fn second_login(app: &mut App) {
         accounts: vec![account("wf-chk", "Everyday Checking", "4321", "checking", 182_340)],
         ..Import::default()
     };
-    assert!(app.author("import", "banks.import", &first), "{}", app.note);
+    assert!(app.author("import", plaid::IMPORT, &first), "{}", app.note);
     let second = Import {
         bank: "wells-fargo".into(),
         institution: "Wells Fargo".into(),
@@ -1184,7 +1184,7 @@ fn second_login(app: &mut App) {
         choose: true,
         ..Import::default()
     };
-    assert!(app.author("import", "banks.import", &second), "{}", app.note);
+    assert!(app.author("import", plaid::IMPORT, &second), "{}", app.note);
 }
 
 /// A waiting account is chosen for with one control, a menu: a new account
@@ -1298,7 +1298,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
         balance: 50_000,
         date: TODAY.into(),
     };
-    app.author("open", "accounts.open_account", &open);
+    app.author("open", accounts::OPEN_ACCOUNT, &open);
 
     let _ = app.update(Message::Banks(Msg::Connect));
     assert_eq!(app.page, Page::Settings);
@@ -1309,7 +1309,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     assert!(app.opened.is_empty(), "nothing to open before the server answers");
     let ask = app.peer.asks.rows[0].id;
     let answer = |importer: &mut crate::client::Replica, a: Answer| {
-        importer.mutate("banks.answer", &a).expect("the importer answers");
+        importer.mutate(banks::ANSWER, &a).expect("the importer answers");
     };
     let held = ark_peer::link::until(std::time::Duration::from_secs(10), std::time::Duration::from_millis(10), || {
         importer.pump();
@@ -1359,7 +1359,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
         from_start: true,
         ..money_domain::plaid::import_of("wells-fargo", "Wells Fargo", &accounts, &Default::default())
     };
-    importer.mutate("banks.import", &import).expect("the importer imports");
+    importer.mutate(plaid::IMPORT, &import).expect("the importer imports");
     settle(&mut app, &mut importer, &|a| a.peer.linked.rows.len() == 2);
     assert_eq!(app.banks_wanting(), 2, "two accounts wait for a choice");
     drop(app.view());

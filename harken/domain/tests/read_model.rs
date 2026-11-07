@@ -21,7 +21,7 @@ fn on(p: &Id<Playlist>, m: &Id<Media>) -> AddToPlaylist {
 }
 
 fn names(c: &Lib, who: &str) -> Vec<String> {
-    each(&c.query::<Vec<Playlist>>(who, "playlists", &()).unwrap(), |p| p.name.clone())
+    each(&c.query(who, playlists::PLAYLISTS, &()).unwrap(), |p| p.name.clone())
 }
 
 /// Falsified by `playlist_pos` reading the item's `added_ms`: the
@@ -43,13 +43,13 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
     assert_eq!(all[0].user_id, "alice");
     assert_eq!(all[0].kind, "song");
     assert!(all.iter().all(|s| s.playlist_pos.is_none()), "nothing on the playlist yet");
-    let on_it = |c: &Lib| c.list::<LibraryEntry>("playlist", &PlaylistInput { playlist_id: favs });
+    let on_it = |c: &Lib| c.list(playlists::PLAYLIST, &PlaylistInput { playlist_id: favs });
     assert!(on_it(&c).is_empty());
 
     // The third, then the first: the playlist is in the order they joined it.
     let (third, first) = (all[2].id, all[0].id);
-    c.mutate("alice", "add_to_playlist", &on(&favs, &third)).unwrap();
-    c.mutate("alice", "add_to_playlist", &on(&favs, &first)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &third)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &first)).unwrap();
     let playlist = on_it(&c);
     assert_eq!(titles(&playlist), ["Gosh", "Glue"], "playlist order is the item's pos");
     assert_eq!(each(&playlist, |r| r.playlist_pos), [Some(1), Some(2)]);
@@ -61,11 +61,11 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
     assert_eq!(all[0].id, playlist[1].id);
 
     // Taking it off leaves the song; adding it twice keeps its first place.
-    c.mutate("alice", "add_to_playlist", &on(&favs, &third)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &third)).unwrap();
     assert_eq!(each(&on_it(&c), |r| r.playlist_pos), [Some(1), Some(2)], "a playlist holds an item once");
     c.mutate(
         "alice",
-        "remove_from_playlist",
+        playlists::REMOVE_FROM_PLAYLIST,
         &RemoveFromPlaylist {
             playlist_id: favs,
             media_id: first,
@@ -75,8 +75,14 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
     assert_eq!(c.library(&favs).len(), 3);
     assert_eq!(on_it(&c).len(), 1);
     // Somebody else's playlist is not theirs to change.
-    assert_eq!(c.mutate("bob", "add_to_playlist", &on(&favs, &first)), Err("not your playlist".into()));
-    assert_eq!(c.mutate("", "add_to_playlist", &on(&favs, &first)), Err("not your playlist".into()));
+    assert_eq!(
+        c.mutate("bob", playlists::ADD_TO_PLAYLIST, &on(&favs, &first)),
+        Err("not your playlist".into())
+    );
+    assert_eq!(
+        c.mutate("", playlists::ADD_TO_PLAYLIST, &on(&favs, &first)),
+        Err("not your playlist".into())
+    );
 }
 
 /// A name a person already has is numbered with the smallest free n.
@@ -85,7 +91,7 @@ fn library_and_a_playlist_agree_with_what_apply_wrote() {
 #[test]
 fn a_second_playlist_of_one_name_is_numbered() {
     let mut c = Lib::new();
-    let make = |c: &mut Lib, who: &str, name: &str| c.mutate(who, "create_playlist", &CreatePlaylist { name: name.into() });
+    let make = |c: &mut Lib, who: &str, name: &str| c.mutate(who, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: name.into() });
     make(&mut c, "alice", "Favorites").unwrap();
     assert_eq!(make(&mut c, "alice", "Favorites"), Ok(1), "a second playlist, not nothing");
     make(&mut c, "alice", "  Favorites  ").unwrap();
@@ -106,8 +112,8 @@ fn a_second_playlist_of_one_name_is_numbered() {
     // The same entry twice is one playlist, not "(3)".
     let ctx = c.ctx("alice", &[]);
     let gym = CreatePlaylist { name: "Gym".into() };
-    assert_eq!(c.mutate_as(&ctx, "create_playlist", &gym), Ok(1));
-    assert_eq!(c.mutate_as(&ctx, "create_playlist", &gym), Ok(0));
+    assert_eq!(c.mutate_as(&ctx, playlists::CREATE_PLAYLIST, &gym), Ok(1));
+    assert_eq!(c.mutate_as(&ctx, playlists::CREATE_PLAYLIST, &gym), Ok(0));
     assert_eq!(names(&c, "alice").iter().filter(|n| n.starts_with("Gym")).count(), 1);
 
     make(&mut c, "bob", "Favorites").unwrap();
@@ -127,7 +133,7 @@ fn two_people_each_get_a_playlist_of_one_name() {
     let b = c.playlist("bob", "Favorites");
     assert_ne!(a, b);
     for who in ["alice", "bob"] {
-        let mine: Vec<Playlist> = c.query(who, "playlists", &()).unwrap();
+        let mine: Vec<Playlist> = c.query(who, playlists::PLAYLISTS, &()).unwrap();
         assert_eq!(each(&mine, |p| p.user_id.clone()), [who]);
         assert_eq!(each(&mine, |p| p.name.clone()), ["Favorites"]);
     }
@@ -148,7 +154,7 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
     ] {
         c.add(song(title, artist, album));
     }
-    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    let albums: Vec<AlbumsEntry> = c.list(browse::ALBUMS, &());
     let got = each(&albums, |a| (a.name.clone(), a.creator.clone(), a.tracks));
     assert_eq!(
         got,
@@ -159,13 +165,13 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
         ],
         "one row per album, in name order, with the tracks counted"
     );
-    let artists: Vec<ArtistsEntry> = c.list("artists", &());
+    let artists: Vec<ArtistsEntry> = c.list(browse::ARTISTS, &());
     assert_eq!(each(&artists, |a| a.name.clone()), ["Beethoven", "Debussy"]);
     assert_eq!(each(&artists, |a| a.tracks), [3, 1]);
 
     let album = |c: &Lib, name: &str| {
-        c.list::<LibraryEntry>(
-            "album",
+        c.list(
+            browse::ALBUM,
             &AlbumInput {
                 playlist_id: favs,
                 id: c.album_id(name),
@@ -175,7 +181,7 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
     let symphony = album(&c, "Symphony No. 5");
     assert_eq!(titles(&symphony), ["Symphony No. 5 - I", "Symphony No. 5 - III"]);
     let beethoven: Vec<LibraryEntry> = c.list(
-        "artist",
+        browse::ARTIST,
         &Artist {
             playlist_id: favs,
             name: "Beethoven".into(),
@@ -186,20 +192,17 @@ fn albums_and_artists_group_the_library_and_select_it_back() {
         playlist_id: favs,
         id: "/nocturnes".into(),
     };
-    assert!(c.list::<LibraryEntry>("album", &nocturnes).is_empty());
+    assert!(c.list(browse::ALBUM, &nocturnes).is_empty());
 
-    c.mutate("alice", "add_to_playlist", &on(&favs, &symphony[0].id)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &symphony[0].id)).unwrap();
     let symphony = album(&c, "Symphony No. 5");
     assert_eq!(symphony[0].playlist_pos, Some(1), "the membership survives the album view");
     assert!(symphony[1].playlist_pos.is_none());
 
     let clair = c.library(&favs).into_iter().find(|r| r.title == "Clair de lune").unwrap();
-    c.mutate("alice", "remove_media", &RemoveMedia { id: clair.id }).unwrap();
-    assert_eq!(
-        each(&c.list::<AlbumsEntry>("albums", &()), |a| a.name.clone()),
-        ["Bagatelles", "Symphony No. 5"]
-    );
-    assert_eq!(each(&c.list::<ArtistsEntry>("artists", &()), |a| a.name.clone()), ["Beethoven"]);
+    c.mutate("alice", library::REMOVE_MEDIA, &RemoveMedia { id: clair.id }).unwrap();
+    assert_eq!(each(&c.list(browse::ALBUMS, &()), |a| a.name.clone()), ["Bagatelles", "Symphony No. 5"]);
+    assert_eq!(each(&c.list(browse::ARTISTS, &()), |a| a.name.clone()), ["Beethoven"]);
 }
 
 /// An album comes back in the order it plays, not the library's: by track,
@@ -226,7 +229,7 @@ fn an_album_is_in_the_order_it_plays_and_not_the_librarys() {
         ..song("Air", "Handel", "Water Music")
     });
     let water: Vec<LibraryEntry> = c.list(
-        "album",
+        browse::ALBUM,
         &AlbumInput {
             playlist_id: favs,
             id: c.album_id("Water Music"),
@@ -252,15 +255,15 @@ fn a_track_knows_which_playlists_it_is_on() {
     }
     let all = c.library(&favs);
     let (air, gigue) = (all[0].id, all[1].id);
-    let names = |c: &Lib, id: &Id<Media>| each(&c.list::<Playlist>("playlists_of", &PlaylistsOf { media_id: *id }), |p| p.name.clone());
+    let names = |c: &Lib, id: &Id<Media>| each(&c.list(playlists::PLAYLISTS_OF, &PlaylistsOf { media_id: *id }), |p| p.name.clone());
     assert!(names(&c, &air).is_empty(), "on nothing to begin with");
-    c.mutate("alice", "add_to_playlist", &on(&evening, &air)).unwrap();
-    c.mutate("alice", "add_to_playlist", &on(&favs, &air)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&evening, &air)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &air)).unwrap();
     assert_eq!(names(&c, &air), ["Favorites", "Evening"], "in the order the playlists were made");
     assert!(names(&c, &gigue).is_empty(), "and only this track's");
     c.mutate(
         "alice",
-        "remove_from_playlist",
+        playlists::REMOVE_FROM_PLAYLIST,
         &RemoveFromPlaylist {
             playlist_id: favs,
             media_id: air,
@@ -269,12 +272,12 @@ fn a_track_knows_which_playlists_it_is_on() {
     .unwrap();
     assert_eq!(names(&c, &air), ["Evening"], "taking it off shows");
 
-    c.mutate("alice", "remove_media", &RemoveMedia { id: air }).unwrap();
+    c.mutate("alice", library::REMOVE_MEDIA, &RemoveMedia { id: air }).unwrap();
     assert!(names(&c, &air).is_empty());
-    assert!(c.list::<LibraryEntry>("playlist", &PlaylistInput { playlist_id: evening }).is_empty());
+    assert!(c.list(playlists::PLAYLIST, &PlaylistInput { playlist_id: evening }).is_empty());
     assert_eq!(titles(&c.library(&favs)), ["Gigue"]);
     assert_eq!(
-        c.mutate("alice", "add_to_playlist", &on(&evening, &air)),
+        c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&evening, &air)),
         Ok(0),
         "no longer in the library is a no-op"
     );
@@ -289,7 +292,7 @@ fn the_same_file_twice_is_one_song() {
     let elise = |title: &str, file: &str| with(file, song(title, "Beethoven", "Bagatelles"));
     c.add(elise("Für Elise", "beethoven/fur-elise.mp3"));
     assert_eq!(
-        c.mutate("alice", "add_song", &elise("Für Elise", "beethoven/fur-elise.mp3")),
+        c.mutate("alice", library::ADD_SONG, &elise("Für Elise", "beethoven/fur-elise.mp3")),
         Ok(0),
         "the same entry again writes no row"
     );
@@ -298,10 +301,13 @@ fn the_same_file_twice_is_one_song() {
     c.add(elise("Für Elise", "beethoven/fur-elise-live.mp3"));
     assert_eq!(c.library(&favs).len(), 2);
     for n in 3..=5 {
-        assert!(c.mutate("alice", "add_song", &song("Untitled", "", "")).unwrap() > 0);
+        assert!(c.mutate("alice", library::ADD_SONG, &song("Untitled", "", "")).unwrap() > 0);
         assert_eq!(c.library(&favs).len(), n, "no file means no collision");
     }
-    assert_eq!(c.mutate("alice", "add_song", &song("  ", "X", "")), Err("a song needs a title".into()));
+    assert_eq!(
+        c.mutate("alice", library::ADD_SONG, &song("  ", "X", "")),
+        Err("a song needs a title".into())
+    );
 }
 
 /// A retagged file is the song it was. Falsified by minting the id afresh
@@ -314,7 +320,7 @@ fn a_retagged_file_is_the_same_song_saying_the_new_tags() {
     c.add(with("music/b.flac", song("Opal", "Bicep", "Isles")));
     let before = c.library(&favs);
     let glue = before[0].id;
-    c.mutate("alice", "add_to_playlist", &on(&favs, &glue)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &glue)).unwrap();
     c.add(AddSong {
         duration_ms: 242_000,
         track: 3,
@@ -325,9 +331,9 @@ fn a_retagged_file_is_the_same_song_saying_the_new_tags() {
     assert_eq!(after[0].id, glue, "the same song");
     assert_eq!(after[0].added_ms, before[0].added_ms, "added when it was added");
     assert_eq!(after[0].duration_ms, 242_000);
-    let playlist: Vec<LibraryEntry> = c.list("playlist", &PlaylistInput { playlist_id: favs });
+    let playlist: Vec<LibraryEntry> = c.list(playlists::PLAYLIST, &PlaylistInput { playlist_id: favs });
     assert_eq!(titles(&playlist), ["Glue (Remastered)"], "the playlist holds it still");
-    let details: Vec<TrackDetailsEntry> = c.list("track_details", &());
+    let details: Vec<TrackDetailsEntry> = c.list(browse::TRACK_DETAILS, &());
     assert_eq!(details.iter().find(|d| d.media_id == glue).map(|d| d.track), Some(3));
     assert_eq!(
         c.rows::<Recording>("recording").len(),
@@ -355,7 +361,7 @@ fn a_file_moved_to_another_album_takes_nothing_with_it_that_is_still_used() {
     assert_eq!(tables(&c), [2, 3, 3, 3, 3]);
     let album = |c: &Lib, name: &str| {
         titles(&c.list(
-            "album",
+            browse::ALBUM,
             &AlbumInput {
                 playlist_id: favs,
                 id: c.album_id(name),
@@ -368,15 +374,15 @@ fn a_file_moved_to_another_album_takes_nothing_with_it_that_is_still_used() {
     c.add(bach("music/g1.flac", "Inventions", "BWV 774", "Invention 3", 3));
     assert_eq!(tables(&c), [2, 3, 3, 3, 3]);
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
     );
     assert_eq!(each(&works, |w| w.catalogue.clone()), ["BWV 772", "BWV 773", "BWV 774"]);
     assert!(works.iter().all(|w| w.tracks == 1));
-    assert_eq!(each(&c.list::<AlbumsEntry>("albums", &()), |a| a.name.clone()), ["Inventions"]);
-    let composers: Vec<ComposersEntry> = c.list("composers", &());
+    assert_eq!(each(&c.list(browse::ALBUMS, &()), |a| a.name.clone()), ["Inventions"]);
+    let composers: Vec<ComposersEntry> = c.list(browse::COMPOSERS, &());
     assert_eq!(each(&composers, |p| p.works), [3]);
     assert_eq!(c.library(&favs).len(), 3, "three files, three songs");
 }
@@ -396,8 +402,8 @@ fn artwork_reaches_the_lists_it_is_drawn_on() {
     };
     let arts = |c: &Lib| {
         (
-            each(&c.list::<AlbumsEntry>("albums", &()), |a| a.art.clone()),
-            each(&c.list::<ArtistsEntry>("artists", &()), |a| a.art.clone()),
+            each(&c.list(browse::ALBUMS, &()), |a| a.art.clone()),
+            each(&c.list(browse::ARTISTS, &()), |a| a.art.clone()),
         )
     };
     c.add(handel("music/a.mp3", "https://example.com/thames.jpg", "https://example.com/denner.jpg"));
@@ -433,7 +439,7 @@ fn artwork_reaches_the_lists_it_is_drawn_on() {
         track: 3,
         ..song("Clair de lune", "Claude Debussy", "Suite bergamasque")
     });
-    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    let albums: Vec<AlbumsEntry> = c.list(browse::ALBUMS, &());
     assert_eq!(each(&albums, |a| a.name.clone()), ["Suite bergamasque", "Water Music"]);
     assert_eq!(
         each(&albums, |a| a.art.clone()),
@@ -464,7 +470,7 @@ fn one_work_holds_every_recording_of_it() {
             ));
         }
     }
-    let composers: Vec<ComposersEntry> = c.list("composers", &());
+    let composers: Vec<ComposersEntry> = c.list(browse::COMPOSERS, &());
     assert_eq!(each(&composers, |p| p.name.clone()), ["Johann Sebastian Bach"]);
     assert_eq!(each(&composers, |p| p.works), [1], "one work, however many recordings");
     assert_eq!(each(&composers, |p| p.tracks), [6]);
@@ -475,7 +481,7 @@ fn one_work_holds_every_recording_of_it() {
     );
 
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
@@ -486,14 +492,14 @@ fn one_work_holds_every_recording_of_it() {
     assert_eq!(each(&works, |w| w.recordings), [2]);
     assert_eq!(each(&works, |w| w.tracks), [6]);
     assert_eq!(
-        c.list::<WorkSummary>("work", &WorkInput { id: works[0].id.clone() }),
+        c.list(browse::WORK, &WorkInput { id: works[0].id.clone() }),
         works,
         "one work by its key is the same summary"
     );
-    assert!(c.list::<WorkSummary>("work", &WorkInput { id: "nobody/nothing".into() }).is_empty());
+    assert!(c.list(browse::WORK, &WorkInput { id: "nobody/nothing".into() }).is_empty());
 
     let takes: Vec<RecordingsEntry> = c.list(
-        "recordings",
+        browse::RECORDINGS,
         &Recordings {
             work_id: works[0].id.clone(),
         },
@@ -503,7 +509,7 @@ fn one_work_holds_every_recording_of_it() {
     who.sort();
     assert_eq!(who, ["Glenn Gould", "Kimiko Ishizaka"]);
     let one: Vec<LibraryEntry> = c.list(
-        "recording",
+        browse::RECORDING,
         &RecordingInput {
             playlist_id: favs,
             id: takes[0].id.clone(),
@@ -539,15 +545,15 @@ fn a_recording_runs_as_long_as_its_tracks_and_a_record_is_whoever_played_most_of
         }
     }
     let id = harken_domain::host::work_key("Johann Sebastian Bach", "BWV 988", "");
-    let runs: Vec<RecordingsEntry> = c.list("recordings", &Recordings { work_id: id });
+    let runs: Vec<RecordingsEntry> = c.list(browse::RECORDINGS, &Recordings { work_id: id });
     assert_eq!(
         each(&runs, |r| (r.performers.clone(), r.duration_ms)),
         [("Kimiko Ishizaka".to_string(), 360_000), ("Glenn Gould".to_string(), 60_000)]
     );
-    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    let albums: Vec<AlbumsEntry> = c.list(browse::ALBUMS, &());
     assert_eq!(each(&albums, |a| a.performer.clone()), ["Kimiko Ishizaka"]);
     c.add(song("Northerly", "The Quiet Hours", "Northerly"));
-    let albums: Vec<AlbumsEntry> = c.list("albums", &());
+    let albums: Vec<AlbumsEntry> = c.list(browse::ALBUMS, &());
     let pop = albums.iter().find(|a| a.name == "Northerly").unwrap();
     assert_eq!(pop.performer, "The Quiet Hours", "a pop record's is its artist's");
 }
@@ -569,12 +575,12 @@ fn a_pop_track_has_a_recording_and_no_work() {
         "",
         0,
     ));
-    assert!(c.list::<ComposersEntry>("composers", &()).is_empty(), "nobody wrote a work");
-    assert_eq!(each(&c.list::<ArtistsEntry>("artists", &()), |a| a.name.clone()), ["The Quiet Hours"]);
-    assert_eq!(c.list::<AlbumsEntry>("albums", &()).len(), 1);
+    assert!(c.list(browse::COMPOSERS, &()).is_empty(), "nobody wrote a work");
+    assert_eq!(each(&c.list(browse::ARTISTS, &()), |a| a.name.clone()), ["The Quiet Hours"]);
+    assert_eq!(c.list(browse::ALBUMS, &()).len(), 1);
     assert_eq!(
-        c.list::<LibraryEntry>(
-            "album",
+        c.list(
+            browse::ALBUM,
             &AlbumInput {
                 playlist_id: favs,
                 id: c.album_id("Northerly")
@@ -583,7 +589,7 @@ fn a_pop_track_has_a_recording_and_no_work() {
         .len(),
         1
     );
-    let details: Vec<TrackDetailsEntry> = c.list("track_details", &());
+    let details: Vec<TrackDetailsEntry> = c.list(browse::TRACK_DETAILS, &());
     assert_eq!(details[0].performer, "The Quiet Hours", "the artist is a credit on a recording");
     assert_eq!(details[0].catalogue, "", "no work, so no catalogue number");
     assert_eq!(
@@ -618,7 +624,7 @@ fn a_track_number_is_not_a_movement_number() {
         ));
     }
     let record: Vec<LibraryEntry> = c.list(
-        "album",
+        browse::ALBUM,
         &AlbumInput {
             playlist_id: favs,
             id: c.album_id("Piano Favourites"),
@@ -626,19 +632,19 @@ fn a_track_number_is_not_a_movement_number() {
     );
     assert_eq!(titles(&record), ["III. Presto", "I. Adagio"], "an album page is in the release's order");
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Ludwig van Beethoven".into(),
         },
     );
     let takes: Vec<RecordingsEntry> = c.list(
-        "recordings",
+        browse::RECORDINGS,
         &Recordings {
             work_id: works[0].id.clone(),
         },
     );
     let in_the_work: Vec<LibraryEntry> = c.list(
-        "recording",
+        browse::RECORDING,
         &RecordingInput {
             playlist_id: favs,
             id: takes[0].id.clone(),
@@ -660,7 +666,7 @@ fn an_entry_without_a_work_title_still_names_one() {
         ..song("Variatio 12", "Johann Sebastian Bach", "Goldberg Variations")
     });
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
@@ -670,15 +676,9 @@ fn an_entry_without_a_work_title_still_names_one() {
         ["Goldberg Variations"],
         "a catalogue number means there is a work"
     );
+    assert_eq!(each(&c.list(browse::TRACK_DETAILS, &()), |d| d.catalogue.clone()), ["BWV 988"]);
     assert_eq!(
-        each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| d.catalogue.clone()),
-        ["BWV 988"]
-    );
-    assert_eq!(
-        each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| (
-            d.work.clone(),
-            d.composer.clone()
-        )),
+        each(&c.list(browse::TRACK_DETAILS, &()), |d| (d.work.clone(), d.composer.clone())),
         [("Goldberg Variations".to_string(), "Johann Sebastian Bach".to_string())],
         "a track names the work it is a movement of, and who wrote it"
     );
@@ -695,14 +695,8 @@ fn an_entry_without_a_work_title_still_names_one() {
         part: "Suite No. 2 in D major".into(),
         ..song("Alla Hornpipe", "George Frideric Handel", "Water Music")
     });
-    assert_eq!(
-        each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| d.part.clone()),
-        ["Suite No. 2 in D major"]
-    );
-    assert_eq!(
-        each(&c.list::<ComposersEntry>("composers", &()), |p| p.name.clone()),
-        ["George Frideric Handel"]
-    );
+    assert_eq!(each(&c.list(browse::TRACK_DETAILS, &()), |d| d.part.clone()), ["Suite No. 2 in D major"]);
+    assert_eq!(each(&c.list(browse::COMPOSERS, &()), |p| p.name.clone()), ["George Frideric Handel"]);
 }
 
 /// `credit_recording` turns one lumped string into people with roles.
@@ -723,29 +717,29 @@ fn a_lumped_performer_becomes_people_with_roles() {
         44,
     ));
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "George Frideric Handel".into(),
         },
     );
-    let id = c.list::<RecordingsEntry>(
-        "recordings",
+    let id = c.list(
+        browse::RECORDINGS,
         &Recordings {
             work_id: works[0].id.clone(),
         },
     )[0]
     .id
     .clone();
-    let performer = |c: &Lib| each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| d.performer.clone());
+    let performer = |c: &Lib| each(&c.list(browse::TRACK_DETAILS, &()), |d| d.performer.clone());
     assert_eq!(performer(&c), ["London Symphony Orchestra, Hermann Scherchen"]);
-    let lumped: Vec<CreditsEntry> = c.list("credits", &Credits { recording_id: id.clone() });
+    let lumped: Vec<CreditsEntry> = c.list(browse::CREDITS, &Credits { recording_id: id.clone() });
     assert_eq!(each(&lumped, |r| r.role.clone()), ["performer"]);
     assert_eq!(each(&lumped, |r| r.pos), [0], "the fallback is at 0");
 
     let credit = |c: &mut Lib, name: &str, role: &str, pos: i64| {
         c.mutate(
             "alice",
-            "credit_recording",
+            library::CREDIT_RECORDING,
             &CreditRecording {
                 recording_id: id.clone(),
                 person_name: name.into(),
@@ -758,7 +752,7 @@ fn a_lumped_performer_becomes_people_with_roles() {
     credit(&mut c, "Hermann Scherchen", "conductor", 2).unwrap();
     credit(&mut c, "London Symphony Orchestra", "orchestra", 1).unwrap();
     let takes: Vec<RecordingsEntry> = c.list(
-        "recordings",
+        browse::RECORDINGS,
         &Recordings {
             work_id: works[0].id.clone(),
         },
@@ -769,13 +763,13 @@ fn a_lumped_performer_becomes_people_with_roles() {
         "billing order, the lumped string displaced"
     );
     assert_eq!(performer(&c), ["London Symphony Orchestra, Hermann Scherchen"]);
-    let credits: Vec<CreditsEntry> = c.list("credits", &Credits { recording_id: id.clone() });
+    let credits: Vec<CreditsEntry> = c.list(browse::CREDITS, &Credits { recording_id: id.clone() });
     assert_eq!(each(&credits, |r| r.name.clone()), ["London Symphony Orchestra", "Hermann Scherchen"]);
     assert_eq!(each(&credits, |r| r.role.clone()), ["orchestra", "conductor"]);
 
     credit(&mut c, "Hermann Scherchen", "conductor", 0).unwrap();
     credit(&mut c, "Somebody Else", "", 0).unwrap();
-    let credits: Vec<CreditsEntry> = c.list("credits", &Credits { recording_id: id.clone() });
+    let credits: Vec<CreditsEntry> = c.list(browse::CREDITS, &Credits { recording_id: id.clone() });
     assert_eq!(
         each(&credits, |r| (r.name.clone(), r.role.clone(), r.pos)),
         [
@@ -792,7 +786,7 @@ fn a_lumped_performer_becomes_people_with_roles() {
         pos: 1,
     };
     assert_eq!(
-        c.mutate("alice", "credit_recording", &none),
+        c.mutate("alice", library::CREDIT_RECORDING, &none),
         Err("no recording nobody/nothing@x to credit anybody on".into())
     );
 }
@@ -814,8 +808,8 @@ fn describing_fills_in_and_never_erases() {
         1,
     ));
     let works = |c: &Lib| {
-        c.list::<WorkSummary>(
-            "works",
+        c.list(
+            browse::WORKS,
             &Works {
                 composer: "Ludwig van Beethoven".into(),
             },
@@ -831,7 +825,7 @@ fn describing_fills_in_and_never_erases() {
             composed,
             ..DescribeWork::default()
         };
-        c.mutate("alice", "describe_work", &input)
+        c.mutate("alice", library::DESCRIBE_WORK, &input)
     };
     describe(&mut c, &id, "C Minor", "Symphony", "", 1808).unwrap();
     describe(&mut c, &id, "", "", "Classical", 0).unwrap();
@@ -845,7 +839,7 @@ fn describing_fills_in_and_never_erases() {
         Err("no work nobody/nothing; a work exists because a song named it".into())
     );
 
-    let rid = c.list::<RecordingsEntry>("recordings", &Recordings { work_id: id.clone() })[0].id.clone();
+    let rid = c.list(browse::RECORDINGS, &Recordings { work_id: id.clone() })[0].id.clone();
     let recorded = |c: &mut Lib, id: &str, year: i64, licence: &str| {
         let input = DescribeRecording {
             id: id.into(),
@@ -854,14 +848,14 @@ fn describing_fills_in_and_never_erases() {
             licence: licence.into(),
             ..DescribeRecording::default()
         };
-        c.mutate("alice", "describe_recording", &input)
+        c.mutate("alice", library::DESCRIBE_RECORDING, &input)
     };
     recorded(&mut c, &rid, 1975, "CC BY 4.0").unwrap();
     recorded(&mut c, &rid, 0, "").unwrap();
-    let take = &c.list::<RecordingsEntry>("recordings", &Recordings { work_id: id.clone() })[0];
+    let take = &c.list(browse::RECORDINGS, &Recordings { work_id: id.clone() })[0];
     assert_eq!((take.recorded, take.licence.as_str()), (1975, "CC BY 4.0"));
     assert_eq!(
-        each(&c.list::<TrackDetailsEntry>("track_details", &()), |d| d.licence.clone()),
+        each(&c.list(browse::TRACK_DETAILS, &()), |d| d.licence.clone()),
         ["CC BY 4.0"],
         "the licence reaches the table"
     );
@@ -873,7 +867,7 @@ fn describing_fills_in_and_never_erases() {
     let person = |c: &mut Lib, name: &str, sort: &str, born: i64| {
         c.mutate(
             "alice",
-            "describe_person",
+            library::DESCRIBE_PERSON,
             &DescribePerson {
                 name: name.into(),
                 sort_name: sort.into(),
@@ -884,15 +878,15 @@ fn describing_fills_in_and_never_erases() {
     };
     person(&mut c, "Ludwig van Beethoven", "Beethoven, Ludwig van", 1770).unwrap();
     person(&mut c, "Ludwig van Beethoven", "", 0).unwrap();
-    let composers: Vec<ComposersEntry> = c.list("composers", &());
+    let composers: Vec<ComposersEntry> = c.list(browse::COMPOSERS, &());
     assert_eq!(each(&composers, |p| p.sort_name.clone()), ["Beethoven, Ludwig van"]);
     assert_eq!(each(&composers, |p| p.born), [1770]);
-    let artists: Vec<ArtistsEntry> = c.list("artists", &());
+    let artists: Vec<ArtistsEntry> = c.list(browse::ARTISTS, &());
     let beethoven = artists.iter().find(|a| a.name == "Ludwig van Beethoven").map(|a| (a.born, a.died));
     assert_eq!(beethoven, Some((1770, 0)), "an artist's years are their person's");
     person(&mut c, "Clara Schumann", "", 1819).unwrap();
     assert_eq!(
-        each(&c.list::<ComposersEntry>("composers", &()), |p| p.name.clone()),
+        each(&c.list(browse::COMPOSERS, &()), |p| p.name.clone()),
         ["Ludwig van Beethoven"],
         "not a composer until a work is theirs"
     );
@@ -933,13 +927,13 @@ fn the_whole_library_onto_a_playlist() {
         c.add(with(f, song(t, "X", "")));
     }
     let b = c.library(&favs)[1].id;
-    c.mutate("alice", "add_to_playlist", &on(&favs, &b)).unwrap();
+    c.mutate("alice", playlists::ADD_TO_PLAYLIST, &on(&favs, &b)).unwrap();
     let all = AddAllToPlaylist { playlist_id: favs };
-    c.mutate("alice", "add_all_to_playlist", &all).unwrap();
-    let on_it: Vec<LibraryEntry> = c.list("playlist", &PlaylistInput { playlist_id: favs });
+    c.mutate("alice", playlists::ADD_ALL_TO_PLAYLIST, &all).unwrap();
+    let on_it: Vec<LibraryEntry> = c.list(playlists::PLAYLIST, &PlaylistInput { playlist_id: favs });
     assert_eq!(titles(&on_it), ["B", "A", "C"]);
     assert_eq!(each(&on_it, |r| r.playlist_pos), [Some(1), Some(2), Some(3)]);
-    assert_eq!(c.mutate("alice", "add_all_to_playlist", &all), Ok(0));
+    assert_eq!(c.mutate("alice", playlists::ADD_ALL_TO_PLAYLIST, &all), Ok(0));
 }
 
 /// A first sign-in's welcome makes the person's Favorites, theirs, once
@@ -953,12 +947,12 @@ fn the_welcome_is_the_servers_and_makes_one_favorites() {
         user: "alice".into(),
         name: "Alice".into(),
     };
-    assert!(c.mutate("mallory", "welcome", &alice).is_err(), "only the server welcomes");
+    assert!(c.mutate("mallory", playlists::WELCOME, &alice).is_err(), "only the server welcomes");
     assert!(names(&c, "alice").is_empty());
-    c.mutate("authority", "welcome", &alice).unwrap();
-    c.mutate("authority", "welcome", &alice).unwrap();
+    c.mutate("authority", playlists::WELCOME, &alice).unwrap();
+    c.mutate("authority", playlists::WELCOME, &alice).unwrap();
     assert_eq!(names(&c, "alice"), ["Favorites"]);
-    let mine: Vec<Playlist> = c.query("alice", "playlists", &()).unwrap();
+    let mine: Vec<Playlist> = c.query("alice", playlists::PLAYLISTS, &()).unwrap();
     assert_eq!((mine[0].id, mine[0].user_id.as_str()), (playlists::favorites_of("alice"), "alice"));
 }
 
@@ -977,13 +971,13 @@ fn a_recording_wears_its_albums_cover() {
         ..song("Aria", "Johann Sebastian Bach", "Goldberg Variations")
     });
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
     );
     let takes: Vec<RecordingsEntry> = c.list(
-        "recordings",
+        browse::RECORDINGS,
         &Recordings {
             work_id: works[0].id.clone(),
         },
@@ -1027,7 +1021,7 @@ fn a_record_of_two_works_plays_in_track_order() {
         playlist_id: favs,
         id: c.album_id("The Four Seasons"),
     };
-    let order = |c: &Lib| titles(&c.list::<LibraryEntry>("album", &album));
+    let order = |c: &Lib| titles(&c.list(browse::ALBUM, &album));
     assert_eq!(order(&c), ["Spring I", "Spring II", "Summer I", "Summer II"]);
     // The catalogue says Summer's part, and the file, read again, says none.
     c.add(AddSong {

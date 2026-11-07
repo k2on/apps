@@ -105,16 +105,16 @@ impl App {
                 };
                 match self.peer.client.put_file(&p.bytes[..], &media) {
                     Ok(file) => {
-                        self.author("add the photo", "receipts.add_photo", &AddPhoto { file, txn_id: Some(txn_id) });
+                        self.author("add the photo", receipts::ADD_PHOTO, &AddPhoto { file, txn_id: Some(txn_id) });
                     }
                     Err(e) => self.note = format!("could not keep the photo: {e}"),
                 }
             }
             Msg::Attach(receipt_id) => {
-                self.author("attach the receipt", "receipts.pay", &MatchReceipt { receipt_id, txn_id: txn });
+                self.author("attach the receipt", receipts::PAY, &MatchReceipt { receipt_id, txn_id: txn });
             }
             Msg::Detach(receipt_id) => {
-                self.author("detach the receipt", "receipts.pay", &MatchReceipt { receipt_id, txn_id: None });
+                self.author("detach the receipt", receipts::PAY, &MatchReceipt { receipt_id, txn_id: None });
             }
             Msg::Write(id) => {
                 let t = self.open_txn().cloned().unwrap_or_default();
@@ -182,7 +182,7 @@ impl App {
                     total: None,
                     items,
                 };
-                if self.author("save the receipt", "receipts.write_receipt", &write) {
+                if self.author("save the receipt", receipts::WRITE_RECEIPT, &write) {
                     self.paper = None;
                 }
             }

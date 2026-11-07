@@ -1,11 +1,10 @@
 //! What the domain's queries answer, as plain Rust a screen can hold.
 //!
 //! A query answers a list of the domain's own records (the bindings'
-//! `…Entry` types, `crate::domain`), each row its bytes; a view function
-//! wants plain fields it can borrow and copy, and an id it can compare. Each
-//! type here is one query's row, read leniently: bytes that do not read as
-//! the record — a module this build was not made with — read as empty rather
-//! than as a panic in the middle of a frame.
+//! `…Entry` types, `crate::domain`); a view function wants plain fields it
+//! can borrow and copy, and an id it can compare. Each type here is one
+//! query's row, made from the record (`From`), which is what a view held
+//! (`ark_peer::Watched`) reads its rows as.
 
 use crate::domain::{
     AlbumsEntry, ArtistsEntry, ChaptersEntry, ComposersEntry, CreditsEntry, DownloadsEntry, EpisodeDetailsEntry, LibraryEntry, PeopleEntry,
@@ -55,10 +54,6 @@ impl From<LibraryEntry> for Item {
 }
 
 impl Item {
-    pub fn from_bytes(b: &[u8]) -> Item {
-        LibraryEntry::from_bytes(b).map_or_else(|_| Item::default(), Item::from)
-    }
-
     /// On the playlist it was read against.
     pub fn on_playlist(&self) -> bool {
         self.playlist_pos.is_some()
@@ -76,12 +71,6 @@ pub struct Playlist {
 impl From<crate::domain::Playlist> for Playlist {
     fn from(p: crate::domain::Playlist) -> Playlist {
         Playlist { id: p.id.0, name: p.name }
-    }
-}
-
-impl Playlist {
-    pub fn from_bytes(b: &[u8]) -> Playlist {
-        crate::domain::Playlist::from_bytes(b).map_or_else(|_| Playlist::default(), Playlist::from)
     }
 }
 
@@ -118,12 +107,6 @@ impl From<AlbumsEntry> for Album {
     }
 }
 
-impl Album {
-    pub fn from_bytes(b: &[u8]) -> Album {
-        AlbumsEntry::from_bytes(b).map_or_else(|_| Album::default(), Album::from)
-    }
-}
-
 /// A podcast or a series of sermons, as the shows pages list them
 /// (`shows`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -153,12 +136,6 @@ impl From<ShowsEntry> for Show {
             episodes: e.episodes,
             newest_ms: e.newest_ms,
         }
-    }
-}
-
-impl Show {
-    pub fn from_bytes(b: &[u8]) -> Show {
-        ShowsEntry::from_bytes(b).map_or_else(|_| Show::default(), Show::from)
     }
 }
 
@@ -199,10 +176,6 @@ impl From<SubscriptionsEntry> for Subscription {
 }
 
 impl Subscription {
-    pub fn from_bytes(b: &[u8]) -> Subscription {
-        SubscriptionsEntry::from_bytes(b).map_or_else(|_| Subscription::default(), Subscription::from)
-    }
-
     /// Whether the feed has older episodes than the library keeps of it.
     pub fn has_older(&self) -> bool {
         self.keep > 0 && self.items > self.keep
@@ -234,10 +207,6 @@ impl From<DownloadsEntry> for Download {
 }
 
 impl Download {
-    pub fn from_bytes(b: &[u8]) -> Download {
-        DownloadsEntry::from_bytes(b).map_or_else(|_| Download::default(), Download::from)
-    }
-
     /// What a row says in place of its length, short enough for the
     /// column: queued, how far it has got, or that it failed.
     pub fn short(&self) -> String {
@@ -281,12 +250,6 @@ impl From<EpisodeDetailsEntry> for EpisodeDetail {
     }
 }
 
-impl EpisodeDetail {
-    pub fn from_bytes(b: &[u8]) -> EpisodeDetail {
-        EpisodeDetailsEntry::from_bytes(b).map_or_else(|_| EpisodeDetail::default(), EpisodeDetail::from)
-    }
-}
-
 /// How far somebody has listened to an episode (`my_progress`,
 /// `show_progress`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -313,10 +276,6 @@ impl From<ProgressEntry> for Listened {
 }
 
 impl Listened {
-    pub fn from_bytes(b: &[u8]) -> Listened {
-        ProgressEntry::from_bytes(b).map_or_else(|_| Listened::default(), Listened::from)
-    }
-
     /// How far, short: played, or a share of it.
     pub fn short(&self) -> String {
         match (self.finished, self.duration_ms) {
@@ -443,12 +402,6 @@ impl From<ArtistsEntry> for Artist {
     }
 }
 
-impl Artist {
-    pub fn from_bytes(b: &[u8]) -> Artist {
-        ArtistsEntry::from_bytes(b).map_or_else(|_| Artist::default(), Artist::from)
-    }
-}
-
 /// Somebody some work is by (`composers`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Composer {
@@ -476,12 +429,6 @@ impl From<ComposersEntry> for Composer {
             banner: e.banner,
             description: e.description,
         }
-    }
-}
-
-impl Composer {
-    pub fn from_bytes(b: &[u8]) -> Composer {
-        ComposersEntry::from_bytes(b).map_or_else(|_| Composer::default(), Composer::from)
     }
 }
 
@@ -518,12 +465,6 @@ impl From<WorkSummary> for Work {
     }
 }
 
-impl Work {
-    pub fn from_bytes(b: &[u8]) -> Work {
-        WorkSummary::from_bytes(b).map_or_else(|_| Work::default(), Work::from)
-    }
-}
-
 /// One performance of a work (`recordings`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Recording {
@@ -551,12 +492,6 @@ impl From<RecordingsEntry> for Recording {
             duration_ms: e.duration_ms,
             art: e.art,
         }
-    }
-}
-
-impl Recording {
-    pub fn from_bytes(b: &[u8]) -> Recording {
-        RecordingsEntry::from_bytes(b).map_or_else(|_| Recording::default(), Recording::from)
     }
 }
 
@@ -622,35 +557,5 @@ impl From<CreditsEntry> for Credit {
             role: e.role,
             instrument: e.instrument,
         }
-    }
-}
-
-impl Credit {
-    pub fn from_bytes(b: &[u8]) -> Credit {
-        CreditsEntry::from_bytes(b).map_or_else(|_| Credit::default(), Credit::from)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A row that does not read as its record reads as empty rather than
-    /// panicking in a frame. Falsified by reading with `unwrap`: it panics.
-    #[test]
-    fn a_row_that_does_not_read_is_empty() {
-        let a = Album::from_bytes(&[1, 2, 3]);
-        assert_eq!((a.name.as_str(), a.creator.as_str(), a.tracks), ("", "", 0));
-        let good = AlbumsEntry {
-            art: String::new(),
-            creator: "Handel".into(),
-            id: "music/water-music".into(),
-            label: String::new(),
-            name: "Water Music".into(),
-            performer: String::new(),
-            released: 0,
-            tracks: 3,
-        };
-        assert_eq!(Album::from_bytes(&good.to_bytes()).name, "Water Music");
     }
 }

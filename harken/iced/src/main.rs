@@ -61,6 +61,7 @@ use arkui::picker::{Choice, Picked, Picker};
 use arkui::vim;
 use iced::{Point, Size, Subscription, Task};
 
+use crate::domain::{library, playlists, progress, shows};
 use crate::domain::{AddToPlaylist, CreatePlaylist, NameVoice, RemoveFromPlaylist};
 #[cfg(not(feature = "demo"))]
 use client::Replica;
@@ -1174,8 +1175,8 @@ impl App {
     /// Author a change, and remember what it was. A refusal here is the
     /// domain's own verdict — a guard, a check — and is said at once; one the
     /// server reaches later is matched back to this by its id.
-    pub fn author(&mut self, what: String, name: &str, input: &impl ark::format::Encode) -> bool {
-        match self.peer.client.lock().mutate(name, input) {
+    pub fn author<I: ark::format::Encode>(&mut self, what: String, f: ark_peer::Func<I>, input: &I) -> bool {
+        match self.peer.client.lock().mutate(f, input) {
             Ok(id) => {
                 self.edits.push(Edit { id, what });
                 true
@@ -2282,7 +2283,7 @@ impl App {
             voice,
             name,
         };
-        let _ = self.author(what, "library.name_voice", &input);
+        let _ = self.author(what, shows::NAME_VOICE, &input);
         self.ctx.close_picker();
     }
 
@@ -2676,7 +2677,7 @@ impl App {
                 // A full look: the server walks its music again and syncs
                 // its catalogue. Refused, `author` says why on the status
                 // line; only the library's role may ask.
-                let asked = self.author("resync the library".into(), "library.look", &crate::domain::LookAt { paths: Vec::new() });
+                let asked = self.author("resync the library".into(), library::LOOK, &crate::domain::LookAt { paths: Vec::new() });
                 self.resync = Some(match asked {
                     true => "Asked. New music appears as the server finds it.".into(),
                     false => self.note.clone(),
@@ -2755,7 +2756,7 @@ impl App {
                     kind: kind.into(),
                     url: url.trim().to_string(),
                 };
-                let followed = self.author("follow the feed".into(), "library.subscribe", &input);
+                let followed = self.author("follow the feed".into(), shows::SUBSCRIBE, &input);
                 let note = self.note.clone();
                 if let Some(adding) = self.adding.as_mut() {
                     adding.said = (!followed).then_some(note);
@@ -2772,12 +2773,12 @@ impl App {
                 self.menu_about = None;
             }
             Message::Unfollow(url) => {
-                let _ = self.author("unfollow the feed".into(), "library.unsubscribe", &crate::domain::Unsubscribe { url });
+                let _ = self.author("unfollow the feed".into(), shows::UNSUBSCRIBE, &crate::domain::Unsubscribe { url });
             }
             Message::FetchOlder(url, more) => {
                 let _ = self.author(
                     "fetch older episodes".into(),
-                    "library.fetch_older",
+                    shows::FETCH_OLDER,
                     &crate::domain::FetchOlder { url, more },
                 );
             }
@@ -2972,14 +2973,14 @@ impl App {
                                 playlist_id: key(value),
                                 media_id: key(media),
                             };
-                            self.author(format!("put {title} on {list}"), "playlists.add_to_playlist", &a)
+                            self.author(format!("put {title} on {list}"), playlists::ADD_TO_PLAYLIST, &a)
                         }
                         false => {
                             let a = RemoveFromPlaylist {
                                 playlist_id: key(value),
                                 media_id: key(media),
                             };
-                            self.author(format!("take {title} off {list}"), "playlists.remove_from_playlist", &a)
+                            self.author(format!("take {title} off {list}"), playlists::REMOVE_FROM_PLAYLIST, &a)
                         }
                     };
                     // Refused at once: the tick the panel shows is not true.
@@ -3011,7 +3012,7 @@ impl App {
                 // one tap away, on a row that now exists.
                 if self.author(
                     format!("make the playlist {}", name.trim()),
-                    "playlists.create_playlist",
+                    playlists::CREATE_PLAYLIST,
                     &CreatePlaylist { name },
                 ) {
                     self.peer.refresh();
@@ -3084,7 +3085,7 @@ impl App {
                     name: String::new(),
                 };
                 let what = if finished { "mark it played" } else { "mark it unplayed" };
-                let _ = self.author(what.into(), "mark_played", &input);
+                let _ = self.author(what.into(), progress::MARK_PLAYED, &input);
             }
             // The performance's movements, read when it is pressed: the page
             // it is pressed on lists performances, not tracks.

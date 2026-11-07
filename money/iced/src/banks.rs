@@ -67,15 +67,15 @@ impl App {
         match m {
             Msg::Connect => {
                 let _ = self.step(Message::Go(Page::Settings));
-                self.ask_page("connect a bank", "banks.connect", &());
+                self.ask_page("connect a bank", banks::CONNECT, &());
             }
-            Msg::Reconnect(bank) => self.ask_page("reconnect the bank", "banks.reconnect", &BankName { bank }),
+            Msg::Reconnect(bank) => self.ask_page("reconnect the bank", banks::RECONNECT, &BankName { bank }),
             Msg::Disconnect(bank) => self.modal = Some(Modal::Disconnect(bank)),
             Msg::Disconnected(bank) => {
                 self.modal = None;
                 if self.server.is_none() {
                     self.note = "the demo has no server to disconnect a bank from".into();
-                } else if self.author("disconnect the bank", "banks.disconnect", &BankName { bank }) {
+                } else if self.author("disconnect the bank", banks::DISCONNECT, &BankName { bank }) {
                     self.dismissed = None;
                     self.note = "asked the server to disconnect the bank".into();
                 }
@@ -85,25 +85,25 @@ impl App {
                     plaid_account_id,
                     name: String::new(),
                 };
-                if self.author("open an account for it", "banks.open", &open) {
+                if self.author("open an account for it", plaid::OPEN, &open) {
                     self.note = "opened \u{2014} its history arrives with the bank's next import".into();
                 }
             }
             Msg::Pick(plaid) => self.pick(&plaid),
-            Msg::AddAccounts(bank) => self.ask_page("add accounts", "banks.add_accounts", &BankName { bank }),
+            Msg::AddAccounts(bank) => self.ask_page("add accounts", banks::ADD_ACCOUNTS, &BankName { bank }),
             Msg::Link(plaid_account_id, account_id) => {
                 self.modal = None;
                 let l = LinkAccount {
                     plaid_account_id,
                     account_id,
                 };
-                if self.author("link it", "banks.link", &l) {
+                if self.author("link it", plaid::LINK, &l) {
                     self.note = "linked \u{2014} the bank's next import writes there".into();
                 }
             }
             Msg::Ignore(plaid_account_id, ignored) => {
                 let i = IgnoreLinked { plaid_account_id, ignored };
-                self.author(if ignored { "ignore it" } else { "follow it" }, "ignore", &i);
+                self.author(if ignored { "ignore it" } else { "follow it" }, plaid::IGNORE, &i);
             }
             Msg::OpenPage(url) => self.open_page(url),
             Msg::Dismiss => self.dismissed = self.peer.asks.rows.first().map(|a| a.id),
@@ -188,14 +188,14 @@ impl App {
 
     /// An ask for a Plaid page: a tab kept for it now, while the click
     /// counts, and the page opened in it when the server answers.
-    fn ask_page(&mut self, what: &str, name: &str, input: &impl ark::format::Encode) {
+    fn ask_page<I: ark::format::Encode>(&mut self, what: &str, f: ark_peer::Func<I>, input: &I) {
         if self.server.is_none() {
             self.note = "the demo has no server to connect a bank through".into();
             return;
         }
         browser::reserve();
         let now = ark_peer::now_ms();
-        if self.author(what, name, input) {
+        if self.author(what, f, input) {
             (self.awaiting, self.dismissed) = (Some(now), None);
             self.note = "asked the server for Plaid's page".into();
         } else {

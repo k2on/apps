@@ -19,12 +19,13 @@
 
 mod common;
 
+use ark::domain::Func;
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::plan::{splice, Patch};
 use ark::store::Store;
-use common::{domain, full, song, track, with, Lib};
+use common::{domain, song, track, with, Lib};
 use harken_domain::Id;
 use harken_domain::LIBRARY;
 use harken_domain::*;
@@ -121,15 +122,13 @@ fn seeded() -> Seeded {
         c.add(with(f, song(t, a, al)));
     }
     let works: Vec<WorkSummary> = c.list(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
     );
     let work = works.iter().find(|w| w.catalogue == "BWV 988").expect("the Goldberg").id.clone();
-    let recording = c.list::<RecordingsEntry>("recordings", &Recordings { work_id: work.clone() })[0]
-        .id
-        .clone();
+    let recording = c.list(browse::RECORDINGS, &Recordings { work_id: work.clone() })[0].id.clone();
     let credit = CreditRecording {
         recording_id: recording.clone(),
         person_name: "Glenn Gould".into(),
@@ -137,7 +136,7 @@ fn seeded() -> Seeded {
         instrument: "piano".into(),
         pos: 1,
     };
-    c.mutate("alice", "credit_recording", &credit).unwrap();
+    c.mutate("alice", library::CREDIT_RECORDING, &credit).unwrap();
     let bach = DescribePerson {
         name: "Johann Sebastian Bach".into(),
         sort_name: "Bach, Johann Sebastian".into(),
@@ -146,12 +145,12 @@ fn seeded() -> Seeded {
         art: "bach.jpg".into(),
         ..DescribePerson::default()
     };
-    c.mutate("alice", "describe_person", &bach).unwrap();
+    c.mutate("alice", library::DESCRIBE_PERSON, &bach).unwrap();
     let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id).collect();
     for i in [0, 3, 6] {
         c.mutate(
             "alice",
-            "add_to_playlist",
+            playlists::ADD_TO_PLAYLIST,
             &AddToPlaylist {
                 playlist_id: favs,
                 media_id: ids[i],
@@ -212,11 +211,11 @@ fn churn(c: &mut Lib, r: &mut Rng) {
                 album_art: r.pick(&["", "a.jpg", "b.jpg"]).into(),
                 ..song(r.pick(&titles), r.pick(&artists), r.pick(&albums))
             };
-            c.mutate("alice", "add_song", &s)
+            c.mutate("alice", library::ADD_SONG, &s)
         }
         2 => c.mutate(
             "alice",
-            "create_playlist",
+            playlists::CREATE_PLAYLIST,
             &CreatePlaylist {
                 name: r.pick(&["Favorites", "Late", "Mix"]).into(),
             },
@@ -224,7 +223,7 @@ fn churn(c: &mut Lib, r: &mut Rng) {
         3 | 4 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
             (Some(m), Some(p)) => c.mutate(
                 "alice",
-                "add_to_playlist",
+                playlists::ADD_TO_PLAYLIST,
                 &AddToPlaylist {
                     playlist_id: *p,
                     media_id: m,
@@ -235,7 +234,7 @@ fn churn(c: &mut Lib, r: &mut Rng) {
         5 => match (some_media(r), mine.get(r.below(mine.len().max(1)))) {
             (Some(m), Some(p)) => c.mutate(
                 "alice",
-                "remove_from_playlist",
+                playlists::REMOVE_FROM_PLAYLIST,
                 &RemoveFromPlaylist {
                     playlist_id: *p,
                     media_id: m,
@@ -244,14 +243,14 @@ fn churn(c: &mut Lib, r: &mut Rng) {
             _ => Ok(0),
         },
         6 => match some_media(r) {
-            Some(id) if r.below(2) == 0 => c.mutate("alice", "remove_media", &RemoveMedia { id }),
+            Some(id) if r.below(2) == 0 => c.mutate("alice", library::REMOVE_MEDIA, &RemoveMedia { id }),
             _ => {
                 let p = DescribePerson {
                     name: r.pick(&people).into(),
                     art: r.pick(&["", "x.jpg", "y.jpg"]).into(),
                     ..DescribePerson::default()
                 };
-                c.mutate("alice", "describe_person", &p)
+                c.mutate("alice", library::DESCRIBE_PERSON, &p)
             }
         },
         7 => match recordings.get(r.below(recordings.len().max(1))) {
@@ -264,14 +263,14 @@ fn churn(c: &mut Lib, r: &mut Rng) {
                     instrument: String::new(),
                     pos,
                 };
-                c.mutate("alice", "credit_recording", &cr)
+                c.mutate("alice", library::CREDIT_RECORDING, &cr)
             }
             None => Ok(0),
         },
         _ => match recordings.get(r.below(recordings.len().max(1))) {
             Some(id) => c.mutate(
                 "alice",
-                "describe_recording",
+                library::DESCRIBE_RECORDING,
                 &DescribeRecording {
                     id: id.clone(),
                     recorded: r.below(3) as i64 * 1000,
@@ -301,10 +300,9 @@ struct Tally {
 
 /// The query `name` on `input` as alice, maintained over every seed's
 /// churn: after every push the view is the query, and the patches splice.
-fn hold(name: &str, input: &impl Encode) -> Tally {
-    let d = domain();
-    let (f, input) = (full(name), input.to_bytes());
-    let fresh = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
+fn hold<I: Encode, T>(f: Func<I, T>, input: &I) -> Tally {
+    let (d, name, input) = (domain(), f.name, input.to_bytes());
+    let fresh = |store: &Store, ctx: &Ctx| d.watch(store, ctx, name, &input).unwrap().rows();
     let ctx = Ctx {
         id: EntryId::of("q", 0),
         actor: "alice".into(),
@@ -314,7 +312,7 @@ fn hold(name: &str, input: &impl Encode) -> Tally {
     let mut sum = Tally::default();
     for seed in 0..SEEDS {
         let mut c = seeded().lib;
-        let mut v = d.watch(&c.store, &ctx, &f, &input).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut v = d.watch(&c.store, &ctx, name, &input).unwrap_or_else(|e| panic!("{name}: {e}"));
         let mut shown = v.rows();
         assert!(seed > 0 || !shown.is_empty(), "{name}: the seed answers something to maintain");
         let mut r = Rng(seed);
@@ -353,7 +351,7 @@ fn search() {
     let s = seeded();
     for needle in ["ari", "BACH", "a"] {
         let t = hold(
-            "search",
+            browse::SEARCH,
             &Search {
                 playlist_id: s.favs,
                 needle: needle.into(),
@@ -362,7 +360,7 @@ fn search() {
         assert!(t.inserts + t.removes + t.updates > 0, "{needle}: {t:?}");
     }
     let hits: Vec<LibraryEntry> = s.lib.list(
-        "search",
+        browse::SEARCH,
         &Search {
             playlist_id: s.favs,
             needle: "BACH".into(),
@@ -374,29 +372,29 @@ fn search() {
 #[test]
 fn library() {
     let s = seeded();
-    assert!(moved(&hold("library", &Library { playlist_id: s.favs })));
+    assert!(moved(&hold(browse::LIBRARY, &Library { playlist_id: s.favs })));
 }
 
 #[test]
 fn albums() {
-    assert!(moved(&hold("albums", &())));
+    assert!(moved(&hold(browse::ALBUMS, &())));
 }
 
 #[test]
 fn artists() {
-    assert!(moved(&hold("artists", &())));
+    assert!(moved(&hold(browse::ARTISTS, &())));
 }
 
 #[test]
 fn track_details() {
-    assert!(moved(&hold("track_details", &())));
+    assert!(moved(&hold(browse::TRACK_DETAILS, &())));
 }
 
 #[test]
 fn album() {
     let s = seeded();
     let t = hold(
-        "album",
+        browse::ALBUM,
         &AlbumInput {
             playlist_id: s.favs,
             id: keys::album_id("", "Goldberg Variations"),
@@ -409,7 +407,7 @@ fn album() {
 fn artist() {
     let s = seeded();
     let t = hold(
-        "artist",
+        browse::ARTIST,
         &Artist {
             playlist_id: s.favs,
             name: "Bicep".into(),
@@ -420,14 +418,14 @@ fn artist() {
 
 #[test]
 fn composers() {
-    let t = hold("composers", &());
+    let t = hold(browse::COMPOSERS, &());
     assert!(t.updates > 0, "{t:?}");
 }
 
 #[test]
 fn works() {
     let t = hold(
-        "works",
+        browse::WORKS,
         &Works {
             composer: "Johann Sebastian Bach".into(),
         },
@@ -438,21 +436,21 @@ fn works() {
 #[test]
 fn work() {
     let s = seeded();
-    let t = hold("work", &WorkInput { id: s.work });
+    let t = hold(browse::WORK, &WorkInput { id: s.work });
     assert!(t.updates > 0, "{t:?}");
 }
 
 #[test]
 fn recordings() {
     let s = seeded();
-    let t = hold("recordings", &Recordings { work_id: s.work });
+    let t = hold(browse::RECORDINGS, &Recordings { work_id: s.work });
     assert!(t.inserts + t.removes + t.updates > 0, "{t:?}");
 }
 
 #[test]
 fn credits() {
     let s = seeded();
-    let t = hold("credits", &Credits { recording_id: s.recording });
+    let t = hold(browse::CREDITS, &Credits { recording_id: s.recording });
     assert!(t.inserts + t.removes > 0, "{t:?}");
 }
 
@@ -460,7 +458,7 @@ fn credits() {
 fn recording() {
     let s = seeded();
     let t = hold(
-        "recording",
+        browse::RECORDING,
         &RecordingInput {
             playlist_id: s.favs,
             id: s.recording,
@@ -471,21 +469,21 @@ fn recording() {
 
 #[test]
 fn playlists() {
-    let t = hold("playlists", &());
+    let t = hold(playlists::PLAYLISTS, &());
     assert!(t.inserts > 0, "{t:?}");
 }
 
 #[test]
 fn playlists_of() {
     let s = seeded();
-    let t = hold("playlists_of", &PlaylistsOf { media_id: s.media });
+    let t = hold(playlists::PLAYLISTS_OF, &PlaylistsOf { media_id: s.media });
     assert!(t.inserts > 0 && t.removes > 0, "{t:?}");
 }
 
 #[test]
 fn playlist() {
     let s = seeded();
-    assert!(moved(&hold("playlist", &PlaylistInput { playlist_id: s.favs })));
+    assert!(moved(&hold(playlists::PLAYLIST, &PlaylistInput { playlist_id: s.favs })));
 }
 
 /// v4's `tests/view.rs` through the domain's own mutations: the library
@@ -498,15 +496,15 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let favs = c.playlist("alice", "Favorites");
     let other = c.playlist("alice", "Other");
     let d = domain();
-    let (f, input) = (full("library"), Library { playlist_id: favs }.to_bytes());
-    let query = |store: &Store, ctx: &Ctx| d.watch(store, ctx, &f, &input).unwrap().rows();
+    let (f, input) = (browse::LIBRARY.name, Library { playlist_id: favs }.to_bytes());
+    let query = |store: &Store, ctx: &Ctx| d.watch(store, ctx, f, &input).unwrap().rows();
     let ctx = Ctx {
         id: EntryId::of("q", 0),
         actor: "alice".into(),
         session: "q".into(),
         ..Default::default()
     };
-    let mut v = d.watch(&c.store, &ctx, &f, &input).unwrap();
+    let mut v = d.watch(&c.store, &ctx, f, &input).unwrap();
     let mut shown = v.rows();
     let mut patched = 0;
     let mut kept: Option<Store> = None;
@@ -519,12 +517,12 @@ fn the_library_follows_the_mutations_and_a_rollback() {
         let fresh = query(&c.store, &ctx);
         assert_eq!(v.rows(), fresh, "{name}: the view is the query");
         assert_eq!(shown, fresh, "{name}: the spliced list is the query");
-        if kept.is_none() && name == "add_to_playlist" {
+        if kept.is_none() && name == "playlists.add_to_playlist" {
             kept = Some(c.store.clone());
         }
     };
     for (t, file) in [("Glue", "a"), ("Opal", "b"), ("Gosh", "c"), ("Air", "d")] {
-        step(&mut c, "add_song", with(file, song(t, "X", "Y")).to_bytes());
+        step(&mut c, "library.add_song", with(file, song(t, "X", "Y")).to_bytes());
     }
     let ids: Vec<Id<Media>> = c.library(&favs).iter().map(|r| r.id).collect();
     let on = |p: &Id<Playlist>, m: &Id<Media>| {
@@ -534,13 +532,13 @@ fn the_library_follows_the_mutations_and_a_rollback() {
         }
         .to_bytes()
     };
-    step(&mut c, "add_to_playlist", on(&favs, &ids[2]));
-    step(&mut c, "add_to_playlist", on(&favs, &ids[0]));
-    step(&mut c, "add_to_playlist", on(&other, &ids[1]));
-    step(&mut c, "remove_from_playlist", on(&favs, &ids[2]));
-    step(&mut c, "add_all_to_playlist", AddAllToPlaylist { playlist_id: favs }.to_bytes());
-    step(&mut c, "remove_media", RemoveMedia { id: ids[0] }.to_bytes());
-    step(&mut c, "add_song", with("e", song("Late", "Z", "")).to_bytes());
+    step(&mut c, "playlists.add_to_playlist", on(&favs, &ids[2]));
+    step(&mut c, "playlists.add_to_playlist", on(&favs, &ids[0]));
+    step(&mut c, "playlists.add_to_playlist", on(&other, &ids[1]));
+    step(&mut c, "playlists.remove_from_playlist", on(&favs, &ids[2]));
+    step(&mut c, "playlists.add_all_to_playlist", AddAllToPlaylist { playlist_id: favs }.to_bytes());
+    step(&mut c, "library.remove_media", RemoveMedia { id: ids[0] }.to_bytes());
+    step(&mut c, "library.add_song", with("e", song("Late", "Z", "")).to_bytes());
     assert!(patched > 0);
     let entries: Vec<LibraryEntry> = shown.iter().map(|r| LibraryEntry::from_bytes(r).unwrap()).collect();
     let got: Vec<(String, Option<i64>)> = entries.iter().map(|e| (e.title.clone(), e.playlist_pos)).collect();
@@ -556,7 +554,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
 
     // A rollback: the view made again over the store as it was is the query.
     c.store = kept.expect("a store to roll back to");
-    let v = d.watch(&c.store, &ctx, &f, &input).unwrap();
+    let v = d.watch(&c.store, &ctx, f, &input).unwrap();
     assert_eq!(v.rows(), query(&c.store, &ctx));
     assert_eq!(v.rows().len(), c.library(&favs).len());
 }

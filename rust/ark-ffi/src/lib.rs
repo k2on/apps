@@ -23,14 +23,13 @@
 //! made again by itself, and says so as its patches: its rows removed and
 //! inserted.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark_peer::handle::{Handle, Locked};
 use ark_peer::link::Dial;
-use ark_peer::{Config, Files, Patch, Watched};
+use ark_peer::{Config, Files, Patch};
 
 uniffi::setup_scaffolding!();
 
@@ -156,21 +155,13 @@ pub trait Listener: Send + Sync {
     fn changed(&self);
 }
 
-/// A view as the bridge keeps it (`ark_peer::Watched`, its rows read from
-/// the peer as they are asked for), and what it did since taken.
-struct Kept {
-    view: Watched<()>,
-    patches: Vec<Patch>,
-}
-
-/// What the bridge keeps beside the peer: its views, and what the app was
-/// last told of.
+/// What the bridge keeps beside the peer: why the server last turned the
+/// login away, and how many patches its views had when the app was last
+/// told ([`ark_peer::Peer::moves`]).
 #[derive(Default)]
 struct State {
-    views: BTreeMap<u64, Kept>,
-    next: u64,
-    /// Why the server last turned the login away.
     denied: Option<String>,
+    told: u64,
 }
 
 /// The peer held, and the bridge's state beside it.
@@ -180,24 +171,10 @@ struct Held<'a> {
 }
 
 impl Held<'_> {
-    /// Every view's updates taken from the peer into what the app has not
-    /// taken; a view opened for another login, or refused, opened again.
-    /// Whether any moved.
-    fn settle(&mut self) -> bool {
-        let (peer, s) = (&mut *self.peer, &mut *self.state);
-        let mut moved = false;
-        for k in s.views.values_mut() {
-            let ps = k.view.settle(peer, true);
-            moved |= !ps.is_empty();
-            k.patches.extend(ps);
-        }
-        moved
-    }
-
-    /// A view's number and name, while it answers.
-    fn kept(&self, id: u64) -> Option<(usize, String)> {
-        let k = self.state.views.get(&id)?;
-        Some((k.view.view()?, k.view.name().to_string()))
+    /// Whether a view moved since the app was last told.
+    fn moved(&mut self) -> bool {
+        let was = std::mem::replace(&mut self.state.told, self.peer.moves());
+        was != self.state.told
     }
 }
 
@@ -218,13 +195,13 @@ impl Shared {
         }
     }
 
-    /// `f` on the peer, its views settled after; the listener told when
-    /// anything moved. Let go, the driver sends what the peer said.
+    /// `f` on the peer; the listener told when it moved a view. Let go, the
+    /// driver sends what the peer said.
     fn act<T>(&self, f: impl FnOnce(&mut Held) -> T) -> T {
         let (out, moved) = {
             let mut s = self.lock();
             let out = f(&mut s);
-            (out, s.settle())
+            (out, s.moved())
         };
         if moved {
             self.tell();
@@ -239,8 +216,8 @@ impl Shared {
         }
     }
 
-    /// What the driver's pumps took in — or, pumped by hand, a pump now —
-    /// settled into the views: whether anything moved, the app told so.
+    /// What the driver's pumps took in — or, pumped by hand, a pump now:
+    /// whether anything moved, the app told so.
     fn pump(&self) -> bool {
         let p = self.peer.pump();
         let moved = {
@@ -248,7 +225,7 @@ impl Shared {
             if p.denied.is_some() {
                 s.state.denied = p.denied;
             }
-            s.settle() | p.moved
+            s.moved() | p.moved
         };
         if moved {
             self.tell();
@@ -320,18 +297,16 @@ impl Peer {
         self.shared.pump()
     }
 
-    /// A maintained view of `name` on its input's bytes.
+    /// A maintained view of `name` on its input's bytes, or its refusal.
     pub(crate) fn view_bytes(&self, name: String, args: Vec<u8>) -> Result<Arc<ViewHandle>, Refusal> {
-        let id = self.shared.act(|s| -> Result<u64, String> {
-            let view = Watched::try_open(&mut s.peer, &name, args, |_| ())?;
-            let id = s.state.next;
-            s.state.views.insert(id, Kept { view, patches: vec![] });
-            s.state.next += 1;
-            Ok(id)
+        let view = self.shared.act(|s| {
+            let (view, made) = s.peer.view(&name, &args);
+            made.map(|_| view).inspect_err(|_| s.peer.unwatch(view))
         })?;
         Ok(Arc::new(ViewHandle {
             shared: self.shared.clone(),
-            id,
+            view,
+            name,
         }))
     }
 }
@@ -515,7 +490,8 @@ impl Peer {
 #[derive(uniffi::Object)]
 pub struct ViewHandle {
     shared: Arc<Shared>,
-    id: u64,
+    view: usize,
+    name: String,
 }
 
 #[uniffi::export]
@@ -536,26 +512,19 @@ impl ViewHandle {
     /// Rows of this view, each its JSON.
     fn json(&self, rows: Vec<Vec<u8>>) -> Vec<String> {
         let s = self.shared.lock();
-        let Some((_, name)) = s.kept(self.id) else { return vec![] };
-        rows.iter().map(|r| text(s.peer.element_json(&name, r))).collect()
+        rows.iter().map(|r| text(s.peer.element_json(&self.name, r))).collect()
     }
 
     /// Its rows as they stand, each its bytes.
     pub(crate) fn rows_bytes(&self) -> Vec<Vec<u8>> {
-        let s = self.shared.lock();
-        s.kept(self.id).and_then(|(at, _)| s.peer.rows(at)).unwrap_or_default()
+        self.shared.lock().peer.rows(self.view).unwrap_or_default()
     }
 
     /// What it did since last taken, and the rows that came with it, each
     /// its bytes: each insert's and update's, in order.
     pub(crate) fn take_bytes(&self) -> (Vec<Op>, Vec<Vec<u8>>) {
-        let mut s = self.shared.lock();
-        s.settle();
-        let Some(k) = s.state.views.get_mut(&self.id) else {
-            return (vec![], vec![]);
-        };
         let (mut ops, mut rows) = (vec![], vec![]);
-        for p in std::mem::take(&mut k.patches) {
+        for p in self.shared.lock().peer.update(self.view) {
             ops.push(match p {
                 Patch::Insert { at, node } => {
                     rows.push(node);
@@ -574,10 +543,7 @@ impl ViewHandle {
 
 impl Drop for ViewHandle {
     fn drop(&mut self) {
-        let mut s = self.shared.lock();
-        if let Some(k) = s.state.views.remove(&self.id) {
-            k.view.close(&mut s.peer);
-        }
+        self.shared.lock().peer.unwatch(self.view);
     }
 }
 

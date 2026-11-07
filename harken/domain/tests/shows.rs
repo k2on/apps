@@ -38,7 +38,7 @@ const NONE: Id<Playlist> = Id::new([0; 16]);
 fn an_episode_is_media_of_its_shows_kind_and_not_music() {
     let mut c = Lib::new();
     c.add(song("Glue", "Bicep", ""));
-    c.mutate("library", "add_show", &show("sermon", "Gospel in Life")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("sermon", "Gospel in Life")).unwrap();
     let id = keys::show_key("sermon", "Gospel in Life");
     assert_eq!(id, "sermon/gospel-in-life");
     for (t, f, at) in [
@@ -46,10 +46,10 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
         ("Newer", ".feeds/b.mp3", 20),
         ("Undated", ".feeds/c.mp3", 0),
     ] {
-        c.mutate("library", "add_episode", &episode(&id, t, f, at)).unwrap();
+        c.mutate("library", shows::ADD_EPISODE, &episode(&id, t, f, at)).unwrap();
     }
-    let rows = c.list::<LibraryEntry>(
-        "show",
+    let rows = c.list(
+        shows::SHOW,
         &ShowInput {
             playlist_id: NONE,
             id: id.clone(),
@@ -58,15 +58,15 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
     assert_eq!(each(&rows, |r| r.title.clone()), ["Newer", "Older", "Undated"]);
     assert!(rows.iter().all(|r| r.kind == "sermon" && r.creator == "Gospel in Life"));
     assert_eq!(each(&c.library(&NONE), |r| r.title.clone()), ["Glue"]);
-    assert_eq!(each(&c.list::<ArtistsEntry>("artists", &()), |a| a.name.clone()), ["Bicep"]);
-    let shows = c.list::<ShowsEntry>("shows", &());
+    assert_eq!(each(&c.list(browse::ARTISTS, &()), |a| a.name.clone()), ["Bicep"]);
+    let shows = c.list(shows::SHOWS, &());
     assert_eq!(
         each(&shows, |s| (s.kind.clone(), s.episodes, s.newest_ms)),
         [("sermon".to_string(), 3, 20)]
     );
     assert_eq!(shows[0].author, "Timothy Keller");
-    let details = c.list::<EpisodeDetailsEntry>(
-        "episode_details",
+    let details = c.list(
+        shows::EPISODE_DETAILS,
         &ShowInput {
             playlist_id: NONE,
             id: id.clone(),
@@ -75,8 +75,8 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
     assert!(details.iter().all(|d| d.show == "Gospel in Life" && d.show_id == id));
     assert_eq!(each(&details, |d| d.published_ms), [20, 10, 0], "as `show` lists them, newest first");
     assert!(c
-        .list::<EpisodeDetailsEntry>(
-            "episode_details",
+        .list(
+            shows::EPISODE_DETAILS,
             &ShowInput {
                 playlist_id: NONE,
                 id: "podcast/nobody".into(),
@@ -92,18 +92,18 @@ fn an_episode_is_media_of_its_shows_kind_and_not_music() {
 fn a_feed_read_again_writes_nothing() {
     let mut c = Lib::new();
     let s = show("podcast", "Full Time Nix");
-    assert!(c.mutate("library", "add_show", &s).unwrap() > 0);
-    assert_eq!(c.mutate("library", "add_show", &s), Ok(0));
+    assert!(c.mutate("library", shows::ADD_SHOW, &s).unwrap() > 0);
+    assert_eq!(c.mutate("library", shows::ADD_SHOW, &s), Ok(0));
     let id = keys::show_key("podcast", "Full Time Nix");
     let e = episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5);
-    assert!(c.mutate("library", "add_episode", &e).unwrap() > 0);
-    assert_eq!(c.mutate("library", "add_episode", &e), Ok(0));
+    assert!(c.mutate("library", shows::ADD_EPISODE, &e).unwrap() > 0);
+    assert_eq!(c.mutate("library", shows::ADD_EPISODE, &e), Ok(0));
     let before = c.rows::<Media>("media");
     let more = AddEpisode {
         description: "Wild takes.".into(),
         ..e
     };
-    assert!(c.mutate("library", "add_episode", &more).unwrap() > 0);
+    assert!(c.mutate("library", shows::ADD_EPISODE, &more).unwrap() > 0);
     let after = c.rows::<Media>("media");
     assert_eq!(each(&after, |m| (m.id, m.pos)), each(&before, |m| (m.id, m.pos)));
     assert_eq!(c.rows::<Episode>("episode")[0].description, "Wild takes.");
@@ -117,15 +117,15 @@ fn a_show_is_the_librarys_and_an_episode_needs_one() {
     let mut c = Lib::new();
     let as_alice = c.ctx("alice", &[]);
     assert_eq!(
-        c.mutate_as(&as_alice, "add_show", &show("podcast", "X")),
+        c.mutate_as(&as_alice, shows::ADD_SHOW, &show("podcast", "X")),
         Err("only the library writes the library".into())
     );
     assert!(c
-        .mutate("library", "add_show", &show("audiobook", "X"))
+        .mutate("library", shows::ADD_SHOW, &show("audiobook", "X"))
         .unwrap_err()
         .contains("a show is a podcast or a sermon"));
     assert!(c
-        .mutate("library", "add_episode", &episode("podcast/x", "One", "a.mp3", 0))
+        .mutate("library", shows::ADD_EPISODE, &episode("podcast/x", "One", "a.mp3", 0))
         .unwrap_err()
         .contains("no show podcast/x"));
 }
@@ -135,13 +135,13 @@ fn a_show_is_the_librarys_and_an_episode_needs_one() {
 #[test]
 fn an_episode_removed_is_gone_from_its_show() {
     let mut c = Lib::new();
-    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Full Time Nix")).unwrap();
     let id = keys::show_key("podcast", "Full Time Nix");
-    c.mutate("library", "add_episode", &episode(&id, "Bump", ".feeds/b.mp3", 1)).unwrap();
+    c.mutate("library", shows::ADD_EPISODE, &episode(&id, "Bump", ".feeds/b.mp3", 1)).unwrap();
     let media = c.rows::<Media>("media")[0].id;
-    c.mutate("library", "remove_media", &RemoveMedia { id: media }).unwrap();
+    c.mutate("library", library::REMOVE_MEDIA, &RemoveMedia { id: media }).unwrap();
     assert!(c.rows::<Episode>("episode").is_empty());
-    assert_eq!(c.list::<ShowsEntry>("shows", &())[0].episodes, 0);
+    assert_eq!(c.list(shows::SHOWS, &())[0].episodes, 0);
 }
 
 const FEED: &str = "https://feeds.transistor.fm/full-time-nix";
@@ -161,22 +161,22 @@ fn subscribe(kind: &str) -> Subscribe {
 #[test]
 fn a_feed_is_followed_and_read() {
     let mut c = Lib::new();
-    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    c.mutate("library", shows::SUBSCRIBE, &subscribe("podcast")).unwrap();
     let read = FeedRead {
         url: FEED.into(),
         title: "Full Time Nix".into(),
         items: 51,
         error: String::new(),
     };
-    c.mutate("library", "feed_read", &read).unwrap();
-    assert_eq!(c.mutate("library", "feed_read", &read), Ok(0));
+    c.mutate("library", shows::FEED_READ, &read).unwrap();
+    assert_eq!(c.mutate("library", shows::FEED_READ, &read), Ok(0));
     let failed = FeedRead {
         error: "connection refused".into(),
         ..FeedRead::default()
     };
-    c.mutate("library", "feed_read", &FeedRead { url: FEED.into(), ..failed }).unwrap();
-    c.mutate("library", "subscribe", &subscribe("sermon")).unwrap();
-    let subs = c.list::<SubscriptionsEntry>("subscriptions", &());
+    c.mutate("library", shows::FEED_READ, &FeedRead { url: FEED.into(), ..failed }).unwrap();
+    c.mutate("library", shows::SUBSCRIBE, &subscribe("sermon")).unwrap();
+    let subs = c.list(shows::SUBSCRIPTIONS, &());
     assert_eq!(
         each(&subs, |s| (s.kind.clone(), s.title.clone(), s.items, s.keep, s.error.clone())),
         [(
@@ -190,7 +190,7 @@ fn a_feed_is_followed_and_read() {
     assert!(c
         .mutate(
             "library",
-            "subscribe",
+            shows::SUBSCRIBE,
             &Subscribe {
                 url: "feed.xml".into(),
                 ..subscribe("podcast")
@@ -200,7 +200,7 @@ fn a_feed_is_followed_and_read() {
         .contains("a feed is an http or https URL"));
     let as_alice = c.ctx("alice", &[]);
     assert_eq!(
-        c.mutate_as(&as_alice, "subscribe", &subscribe("podcast")),
+        c.mutate_as(&as_alice, shows::SUBSCRIBE, &subscribe("podcast")),
         Err("only the library writes the library".into())
     );
 }
@@ -211,18 +211,18 @@ fn a_feed_is_followed_and_read() {
 #[test]
 fn older_episodes_are_more_kept() {
     let mut c = Lib::new();
-    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    c.mutate("library", shows::SUBSCRIBE, &subscribe("podcast")).unwrap();
     let keep = |c: &mut Lib| c.rows::<Subscription>("subscription")[0].keep;
     let more = |n| FetchOlder { url: FEED.into(), more: n };
-    c.mutate("library", "fetch_older", &more(20)).unwrap();
+    c.mutate("library", shows::FETCH_OLDER, &more(20)).unwrap();
     assert_eq!(keep(&mut c), 40);
-    c.mutate("library", "fetch_older", &more(0)).unwrap();
+    c.mutate("library", shows::FETCH_OLDER, &more(0)).unwrap();
     assert_eq!(keep(&mut c), 0);
-    assert_eq!(c.mutate("library", "fetch_older", &more(20)), Ok(0));
+    assert_eq!(c.mutate("library", shows::FETCH_OLDER, &more(20)), Ok(0));
     assert!(c
         .mutate(
             "library",
-            "fetch_older",
+            shows::FETCH_OLDER,
             &FetchOlder {
                 url: "https://elsewhere".into(),
                 more: 1
@@ -238,18 +238,18 @@ fn older_episodes_are_more_kept() {
 #[test]
 fn an_episode_is_listed_before_its_file_is_here() {
     let mut c = Lib::new();
-    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Full Time Nix")).unwrap();
     let id = keys::show_key("podcast", "Full Time Nix");
-    c.mutate("library", "add_episode", &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
+    c.mutate("library", shows::ADD_EPISODE, &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
         .unwrap();
     let queue = QueueDownload {
         file: ".feeds/51.mp3".into(),
         source: "https://media/51.mp3".into(),
     };
-    c.mutate("library", "queue_download", &queue).unwrap();
-    assert_eq!(c.mutate("library", "queue_download", &queue), Ok(0));
+    c.mutate("library", downloads::QUEUE_DOWNLOAD, &queue).unwrap();
+    assert_eq!(c.mutate("library", downloads::QUEUE_DOWNLOAD, &queue), Ok(0));
     let downloads = |c: &mut Lib| {
-        each(&c.list::<DownloadsEntry>("downloads", &()), |d| {
+        each(&c.list(downloads::DOWNLOADS, &()), |d| {
             (d.title.clone(), d.state.clone(), d.bytes, d.total)
         })
     };
@@ -261,12 +261,12 @@ fn an_episode_is_listed_before_its_file_is_here() {
         total: 10,
         error: String::new(),
     };
-    c.mutate("library", "download_progress", &going).unwrap();
+    c.mutate("library", downloads::DOWNLOAD_PROGRESS, &going).unwrap();
     assert_eq!(downloads(&mut c), [("Nix Freaks 51".to_string(), "downloading".to_string(), 5, 10)]);
     assert!(c
         .mutate(
             "library",
-            "download_progress",
+            downloads::DOWNLOAD_PROGRESS,
             &DownloadProgress {
                 state: "lost".into(),
                 ..going.clone()
@@ -276,7 +276,7 @@ fn an_episode_is_listed_before_its_file_is_here() {
         .contains("queued, downloading or failed"));
     c.mutate(
         "library",
-        "downloaded",
+        downloads::DOWNLOADED,
         &Downloaded {
             file: ".feeds/51.mp3".into(),
         },
@@ -286,7 +286,7 @@ fn an_episode_is_listed_before_its_file_is_here() {
     assert_eq!(
         c.mutate(
             "library",
-            "downloaded",
+            downloads::DOWNLOADED,
             &Downloaded {
                 file: ".feeds/51.mp3".into()
             }
@@ -294,13 +294,13 @@ fn an_episode_is_listed_before_its_file_is_here() {
         Ok(0)
     );
     assert!(c
-        .mutate("library", "download_progress", &going)
+        .mutate("library", downloads::DOWNLOAD_PROGRESS, &going)
         .unwrap_err()
         .contains("not being downloaded"));
     assert!(c
         .mutate(
             "library",
-            "queue_download",
+            downloads::QUEUE_DOWNLOAD,
             &QueueDownload {
                 file: ".feeds/none.mp3".into(),
                 ..queue
@@ -317,44 +317,46 @@ fn an_episode_is_listed_before_its_file_is_here() {
 #[test]
 fn a_feed_unfollowed_takes_its_show_with_it() {
     let mut c = Lib::new();
-    c.mutate("library", "subscribe", &subscribe("podcast")).unwrap();
+    c.mutate("library", shows::SUBSCRIBE, &subscribe("podcast")).unwrap();
     c.mutate(
         "library",
-        "add_show",
+        shows::ADD_SHOW,
         &AddShow {
             feed: FEED.into(),
             ..show("podcast", "Full Time Nix")
         },
     )
     .unwrap();
-    c.mutate("library", "add_show", &show("sermon", "Gospel in Life")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("sermon", "Gospel in Life")).unwrap();
     let nix = keys::show_key("podcast", "Full Time Nix");
     let gil = keys::show_key("sermon", "Gospel in Life");
-    c.mutate("library", "add_episode", &episode(&nix, "Fifty", ".feeds/50.mp3", 1)).unwrap();
-    c.mutate("library", "add_episode", &episode(&nix, "Fifty-one", ".feeds/51.mp3", 2))
+    c.mutate("library", shows::ADD_EPISODE, &episode(&nix, "Fifty", ".feeds/50.mp3", 1))
         .unwrap();
-    c.mutate("library", "add_episode", &episode(&gil, "Grace", ".feeds/g.mp3", 3)).unwrap();
+    c.mutate("library", shows::ADD_EPISODE, &episode(&nix, "Fifty-one", ".feeds/51.mp3", 2))
+        .unwrap();
+    c.mutate("library", shows::ADD_EPISODE, &episode(&gil, "Grace", ".feeds/g.mp3", 3))
+        .unwrap();
     let queue = QueueDownload {
         file: ".feeds/51.mp3".into(),
         source: "https://media/51.mp3".into(),
     };
-    c.mutate("library", "queue_download", &queue).unwrap();
+    c.mutate("library", downloads::QUEUE_DOWNLOAD, &queue).unwrap();
     assert_eq!(
-        each(&c.list::<SubscriptionsEntry>("subscriptions", &()), |s| (s.show_id.clone(), s.episodes)),
+        each(&c.list(shows::SUBSCRIPTIONS, &()), |s| (s.show_id.clone(), s.episodes)),
         [(nix.clone(), 2)]
     );
-    c.mutate("library", "unsubscribe", &Unsubscribe { url: FEED.into() }).unwrap();
-    assert!(c.list::<SubscriptionsEntry>("subscriptions", &()).is_empty());
-    assert_eq!(each(&c.list::<ShowsEntry>("shows", &()), |s| s.id.clone()), [gil]);
+    c.mutate("library", shows::UNSUBSCRIBE, &Unsubscribe { url: FEED.into() }).unwrap();
+    assert!(c.list(shows::SUBSCRIPTIONS, &()).is_empty());
+    assert_eq!(each(&c.list(shows::SHOWS, &()), |s| s.id.clone()), [gil]);
     assert_eq!(each(&c.rows::<Media>("media"), |m| m.title.clone()), ["Grace"]);
     assert!(c.rows::<Download>("download").is_empty());
 }
 
 /// An episode in the library, its media id.
 fn one_episode(c: &mut Lib) -> Id<Media> {
-    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Full Time Nix")).unwrap();
     let id = keys::show_key("podcast", "Full Time Nix");
-    c.mutate("library", "add_episode", &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
+    c.mutate("library", shows::ADD_EPISODE, &episode(&id, "Nix Freaks 51", ".feeds/51.mp3", 5))
         .unwrap();
     c.rows::<Media>("media")[0].id
 }
@@ -379,25 +381,25 @@ fn each_person_keeps_their_own_place_and_everybody_sees_it() {
     c.add(song("Glue", "Bicep", ""));
     let glue = c.rows::<Media>("media").into_iter().find(|m| m.title == "Glue").unwrap().id;
     let alice = c.ctx("alice", &[]);
-    c.mutate_as(&alice, "report_progress", &report(ep, 600_000, "Alice")).unwrap();
+    c.mutate_as(&alice, progress::REPORT_PROGRESS, &report(ep, 600_000, "Alice")).unwrap();
     let bob = c.ctx("bob", &[]);
-    c.mutate_as(&bob, "report_progress", &report(ep, 1_790_000, "Bob")).unwrap();
+    c.mutate_as(&bob, progress::REPORT_PROGRESS, &report(ep, 1_790_000, "Bob")).unwrap();
     let alice = c.ctx("alice", &[]);
     assert_eq!(
-        c.mutate_as(&alice, "report_progress", &report(ep, 600_000, "Alice")),
+        c.mutate_as(&alice, progress::REPORT_PROGRESS, &report(ep, 600_000, "Alice")),
         Ok(0),
         "where it was: nothing"
     );
     assert_eq!(
-        c.mutate_as(&alice, "report_progress", &report(glue, 10_000, "Alice")),
+        c.mutate_as(&alice, progress::REPORT_PROGRESS, &report(glue, 10_000, "Alice")),
         Ok(0),
         "a song keeps no place"
     );
     let nobody = c.ctx("", &[]);
-    assert!(c.mutate_as(&nobody, "report_progress", &report(ep, 1, "")).is_err());
+    assert!(c.mutate_as(&nobody, progress::REPORT_PROGRESS, &report(ep, 1, "")).is_err());
 
     let id = keys::show_key("podcast", "Full Time Nix");
-    let all: Vec<ProgressEntry> = c.query("carol", "show_progress", &ShowInput { playlist_id: NONE, id }).unwrap();
+    let all: Vec<ProgressEntry> = c.query("carol", progress::SHOW_PROGRESS, &ShowInput { playlist_id: NONE, id }).unwrap();
     let mut seen = each(&all, |p| (p.name.clone(), p.position_ms, p.duration_ms, p.finished));
     seen.sort();
     assert_eq!(
@@ -407,7 +409,7 @@ fn each_person_keeps_their_own_place_and_everybody_sees_it() {
             ("Bob".to_string(), 1_790_000, 1_800_000, true)
         ]
     );
-    let mine: Vec<ProgressEntry> = c.query("alice", "my_progress", &()).unwrap();
+    let mine: Vec<ProgressEntry> = c.query("alice", progress::MY_PROGRESS, &()).unwrap();
     assert_eq!(each(&mine, |p| p.user_id.clone()), ["alice"]);
 }
 
@@ -419,11 +421,11 @@ fn an_episode_is_marked_played_or_not() {
     let mut c = Lib::new();
     let ep = one_episode(&mut c);
     let alice = c.ctx("alice", &[]);
-    c.mutate_as(&alice, "report_progress", &report(ep, 60_000, "Alice")).unwrap();
+    c.mutate_as(&alice, progress::REPORT_PROGRESS, &report(ep, 60_000, "Alice")).unwrap();
     let alice = c.ctx("alice", &[]);
     c.mutate_as(
         &alice,
-        "mark_played",
+        progress::MARK_PLAYED,
         &MarkPlayed {
             media_id: ep,
             finished: true,
@@ -439,7 +441,7 @@ fn an_episode_is_marked_played_or_not() {
     let alice = c.ctx("alice", &[]);
     c.mutate_as(
         &alice,
-        "mark_played",
+        progress::MARK_PLAYED,
         &MarkPlayed {
             media_id: ep,
             finished: false,
@@ -466,21 +468,24 @@ fn an_episodes_chapters_are_its_feeds() {
         file: ".feeds/51.mp3".into(),
         chapters,
     };
-    c.mutate("library", "set_chapters", &set(vec![at(90_000, "News"), at(0, "Intro")]))
+    c.mutate("library", shows::SET_CHAPTERS, &set(vec![at(90_000, "News"), at(0, "Intro")]))
         .unwrap();
-    assert_eq!(c.mutate("library", "set_chapters", &set(vec![at(0, "Intro"), at(90_000, "News")])), Ok(0));
+    assert_eq!(
+        c.mutate("library", shows::SET_CHAPTERS, &set(vec![at(0, "Intro"), at(90_000, "News")])),
+        Ok(0)
+    );
     let read = |c: &Lib| {
-        each(&c.list::<ChaptersEntry>("chapters", &EpisodeInput { media_id: ep }), |c| {
+        each(&c.list(shows::CHAPTERS, &EpisodeInput { media_id: ep }), |c| {
             (c.start_ms, c.title.clone())
         })
     };
     assert_eq!(read(&c), [(0, "Intro".to_string()), (90_000, "News".to_string())]);
-    c.mutate("library", "set_chapters", &set(vec![at(0, "Intro"), at(120_000, "Interview")]))
+    c.mutate("library", shows::SET_CHAPTERS, &set(vec![at(0, "Intro"), at(120_000, "Interview")]))
         .unwrap();
     assert_eq!(read(&c), [(0, "Intro".to_string()), (120_000, "Interview".to_string())]);
     let alice = c.ctx("alice", &[]);
-    c.mutate_as(&alice, "report_progress", &report(ep, 1, "Alice")).unwrap();
-    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    c.mutate_as(&alice, progress::REPORT_PROGRESS, &report(ep, 1, "Alice")).unwrap();
+    c.mutate("library", library::REMOVE_MEDIA, &RemoveMedia { id: ep }).unwrap();
     assert!(c.rows::<Chapter>("chapter").is_empty() && c.rows::<Progress>("progress").is_empty());
 }
 
@@ -495,7 +500,7 @@ fn an_episodes_people_are_its_feeds() {
     let ep = one_episode(&mut c);
     c.mutate(
         "library",
-        "describe_person",
+        library::DESCRIBE_PERSON,
         &DescribePerson {
             name: "Jacek Galowicz".into(),
             art: "art/jacek.jpg".into(),
@@ -514,10 +519,10 @@ fn an_episodes_people_are_its_feeds() {
         people,
     };
     let both = vec![on("Shahar \"Dawn\" Or", "Host"), on("Jacek Galowicz", "Guest")];
-    c.mutate("library", "set_people", &set(both.clone())).unwrap();
-    assert_eq!(c.mutate("library", "set_people", &set(both)), Ok(0));
+    c.mutate("library", shows::SET_PEOPLE, &set(both.clone())).unwrap();
+    assert_eq!(c.mutate("library", shows::SET_PEOPLE, &set(both)), Ok(0));
     let read = |c: &Lib| {
-        each(&c.list::<PeopleEntry>("people", &EpisodeInput { media_id: ep }), |p| {
+        each(&c.list(shows::PEOPLE, &EpisodeInput { media_id: ep }), |p| {
             (p.name.clone(), p.role.clone(), p.art.clone())
         })
     };
@@ -533,13 +538,14 @@ fn an_episodes_people_are_its_feeds() {
             name: name.into(),
             ..Artist::default()
         };
-        each(&c.list::<LibraryEntry>("appearances", &on), |e| e.title.clone())
+        each(&c.list(shows::APPEARANCES, &on), |e| e.title.clone())
     };
     assert_eq!(page(&c, "Jacek Galowicz"), ["Nix Freaks 51"]);
-    c.mutate("library", "set_people", &set(vec![on("Shahar \"Dawn\" Or", "Host")])).unwrap();
+    c.mutate("library", shows::SET_PEOPLE, &set(vec![on("Shahar \"Dawn\" Or", "Host")]))
+        .unwrap();
     assert!(page(&c, "Jacek Galowicz").is_empty());
     assert_eq!(read(&c).len(), 1);
-    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    c.mutate("library", library::REMOVE_MEDIA, &RemoveMedia { id: ep }).unwrap();
     assert!(c.rows::<Appearance>("appearance").is_empty());
 }
 
@@ -563,23 +569,23 @@ fn an_episodes_transcript_is_its_feeds() {
     };
     c.mutate(
         "library",
-        "set_transcript",
+        shows::SET_TRANSCRIPT,
         &set(vec![at(3_000, "Hi, Jacek."), at(0, "Hello."), at(5_000, " ")]),
     )
     .unwrap();
     assert_eq!(
-        c.mutate("library", "set_transcript", &set(vec![at(0, "Hello."), at(3_000, "Hi, Jacek.")])),
+        c.mutate("library", shows::SET_TRANSCRIPT, &set(vec![at(0, "Hello."), at(3_000, "Hi, Jacek.")])),
         Ok(0)
     );
     let read = |c: &Lib| {
-        each(&c.list::<TranscriptEntry>("transcript", &EpisodeInput { media_id: ep }), |c| {
+        each(&c.list(shows::TRANSCRIPT, &EpisodeInput { media_id: ep }), |c| {
             (c.start_ms, c.text.clone())
         })
     };
     assert_eq!(read(&c), [(0, "Hello.".to_string()), (3_000, "Hi, Jacek.".to_string())]);
-    c.mutate("library", "set_transcript", &set(vec![at(0, "Hello.")])).unwrap();
+    c.mutate("library", shows::SET_TRANSCRIPT, &set(vec![at(0, "Hello.")])).unwrap();
     assert_eq!(read(&c), [(0, "Hello.".to_string())]);
-    c.mutate("library", "remove_media", &RemoveMedia { id: ep }).unwrap();
+    c.mutate("library", library::REMOVE_MEDIA, &RemoveMedia { id: ep }).unwrap();
     assert!(c.rows::<Cue>("cue").is_empty());
 }
 
@@ -589,8 +595,8 @@ fn an_episodes_transcript_is_its_feeds() {
 #[test]
 fn a_shows_people_are_read_at_once() {
     let mut c = Lib::new();
-    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
-    c.mutate("library", "add_show", &show("podcast", "Other")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Other")).unwrap();
     let ftn = keys::show_key("podcast", "Full Time Nix");
     let other = keys::show_key("podcast", "Other");
     for (s, title, file, at) in [
@@ -598,7 +604,7 @@ fn a_shows_people_are_read_at_once() {
         (&ftn, "New", ".feeds/2.mp3", 2),
         (&other, "Elsewhere", ".feeds/3.mp3", 3),
     ] {
-        c.mutate("library", "add_episode", &episode(s, title, file, at)).unwrap();
+        c.mutate("library", shows::ADD_EPISODE, &episode(s, title, file, at)).unwrap();
     }
     let on = |name: &str, role: &str| PersonOn {
         name: name.into(),
@@ -610,10 +616,10 @@ fn a_shows_people_are_read_at_once() {
         (".feeds/2.mp3", vec![on("Shahar", "Host"), on("Kiara", "Guest")]),
         (".feeds/3.mp3", vec![on("Somebody", "Host")]),
     ] {
-        c.mutate("library", "set_people", &SetPeople { file: file.into(), people }).unwrap();
+        c.mutate("library", shows::SET_PEOPLE, &SetPeople { file: file.into(), people }).unwrap();
     }
-    let read = c.list::<ShowPeopleEntry>(
-        "show_people",
+    let read = c.list(
+        shows::SHOW_PEOPLE,
         &ShowInput {
             id: ftn,
             ..ShowInput::default()
@@ -629,10 +635,10 @@ fn a_shows_people_are_read_at_once() {
 #[test]
 fn a_voice_named_once_is_known_by_its_print() {
     let mut c = Lib::new();
-    c.mutate("library", "add_show", &show("podcast", "Full Time Nix")).unwrap();
+    c.mutate("library", shows::ADD_SHOW, &show("podcast", "Full Time Nix")).unwrap();
     let ftn = keys::show_key("podcast", "Full Time Nix");
-    c.mutate("library", "add_episode", &episode(&ftn, "One", ".feeds/1.mp3", 1)).unwrap();
-    c.mutate("library", "add_episode", &episode(&ftn, "Two", ".feeds/2.mp3", 2)).unwrap();
+    c.mutate("library", shows::ADD_EPISODE, &episode(&ftn, "One", ".feeds/1.mp3", 1)).unwrap();
+    c.mutate("library", shows::ADD_EPISODE, &episode(&ftn, "Two", ".feeds/2.mp3", 2)).unwrap();
     let id = |c: &Lib, file: &str| c.rows::<Media>("media").into_iter().find(|m| m.file == file).unwrap().id;
     let (one, two) = (id(&c, ".feeds/1.mp3"), id(&c, ".feeds/2.mp3"));
     let heard = |file: &str, voices: &[(&str, [i64; 3])]| SetTranscript {
@@ -656,13 +662,13 @@ fn a_voice_named_once_is_known_by_its_print() {
             .collect(),
     };
     let both = [("Speaker 1", [100, 0, 0]), ("Speaker 2", [0, 100, 0])];
-    c.mutate("library", "set_transcript", &heard(".feeds/1.mp3", &both)).unwrap();
+    c.mutate("library", shows::SET_TRANSCRIPT, &heard(".feeds/1.mp3", &both)).unwrap();
     let alike = [("Speaker 1", [0, 0, 100]), ("Speaker 2", [80, 50, 0]), ("Speaker 3", [95, 10, 0])];
-    c.mutate("library", "set_transcript", &heard(".feeds/2.mp3", &alike)).unwrap();
+    c.mutate("library", shows::SET_TRANSCRIPT, &heard(".feeds/2.mp3", &alike)).unwrap();
     let name = |c: &mut Lib, media_id, voice: &str, name: &str| {
         c.mutate(
             "library",
-            "name_voice",
+            shows::NAME_VOICE,
             &NameVoice {
                 media_id,
                 voice: voice.into(),
@@ -671,7 +677,7 @@ fn a_voice_named_once_is_known_by_its_print() {
         )
     };
     let said = |c: &Lib, media_id| {
-        each(&c.list::<TranscriptEntry>("transcript", &EpisodeInput { media_id }), |e| {
+        each(&c.list(shows::TRANSCRIPT, &EpisodeInput { media_id }), |e| {
             format!("{}={}", e.voice, e.speaker)
         })
     };
@@ -687,9 +693,9 @@ fn a_voice_named_once_is_known_by_its_print() {
     assert!(name(&mut c, two, "Speaker 9", "Shahar").is_err());
 
     // Heard again without its second voice, the name given it goes too.
-    c.mutate("library", "set_transcript", &heard(".feeds/1.mp3", &both[..1])).unwrap();
+    c.mutate("library", shows::SET_TRANSCRIPT, &heard(".feeds/1.mp3", &both[..1])).unwrap();
     assert_eq!(each(&c.rows::<VoiceName>("voice_name"), |n| n.person_name.clone()), ["Shahar"]);
-    c.mutate("library", "remove_media", &RemoveMedia { id: one }).unwrap();
+    c.mutate("library", library::REMOVE_MEDIA, &RemoveMedia { id: one }).unwrap();
     assert_eq!(c.rows::<Voice>("voice").len(), 3);
     assert!(c.rows::<VoiceName>("voice_name").is_empty());
 }

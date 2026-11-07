@@ -131,6 +131,52 @@ fn fitted<I: Input>(b: &[u8], e: String) -> Result<I, String> {
     I::decode(&crate::json::fit(&I::describe(), b).ok_or(e)?)?.refine()
 }
 
+/// A function by its whole name, typed: what it takes (`I`) and, a view,
+/// the rows it answers (`O`) — what `#[mutator]` and `#[view]` write beside
+/// a function, its name in capitals, for a caller in Rust to call it by.
+pub struct Func<I, O = ()> {
+    pub name: &'static str,
+    _p: std::marker::PhantomData<fn(I) -> O>,
+}
+
+impl<I, O> Func<I, O> {
+    pub const fn new(name: &'static str) -> Func<I, O> {
+        Func {
+            name,
+            _p: std::marker::PhantomData,
+        }
+    }
+
+    /// It on `input`: a view to keep, typed by its rows alone.
+    pub fn on(self, input: &I) -> On<O>
+    where
+        I: crate::format::Encode,
+    {
+        On {
+            name: self.name,
+            input: input.to_bytes(),
+            _p: std::marker::PhantomData,
+        }
+    }
+}
+
+/// A function on its input's encoding, typed by the rows it answers: what
+/// a view is of ([`Func::on`]).
+#[derive(Clone, PartialEq, Eq)]
+pub struct On<O> {
+    pub name: &'static str,
+    pub input: Vec<u8>,
+    _p: std::marker::PhantomData<fn() -> O>,
+}
+
+impl<I, O> Clone for Func<I, O> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<I, O> Copy for Func<I, O> {}
+
 /// A mutator's function (`P` the space it writes).
 pub type WriteFn<S, P, I> = fn(&Ctx, &mut Db<S, P>, I) -> Result<(), String>;
 

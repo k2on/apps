@@ -482,11 +482,51 @@ pub fn schema(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// `#[mutator("name")]` and the rest: the function as it is. What declares
-/// it is the attribute itself, which [`functions`] reads.
-pub fn function(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    syn::parse2::<LitStr>(attr)?;
-    Ok(item)
+/// `#[mutator("name")]` and `#[view("name")]`: the function as it is, and
+/// beside it its typed handle (`ark::domain::Func`), its name in capitals,
+/// of what it takes — its third parameter's type — and, a view, the rows it
+/// answers: the last type of its `Plan<..>` (or of an alias's, `View<T>`).
+/// What declares it is the attribute itself, which [`functions`] reads.
+pub fn function(attr: TokenStream, item: TokenStream, view: bool) -> syn::Result<TokenStream> {
+    let name = syn::parse2::<LitStr>(attr)?;
+    let f: syn::ItemFn = syn::parse2(item)?;
+    let input = match f.sig.inputs.iter().nth(2) {
+        Some(syn::FnArg::Typed(t)) => &t.ty,
+        _ => return err(f.sig.ident.span(), "a function takes (&Ctx, &Db, input)"),
+    };
+    let output = match (&f.sig.output, view) {
+        (_, false) => quote!(()),
+        (syn::ReturnType::Type(_, t), true) => {
+            last_arg(t, true).ok_or_else(|| syn::Error::new_spanned(t, "a view answers Result<Plan<.., T>, String>"))?
+        }
+        _ => return err(f.sig.ident.span(), "a view answers Result<Plan<.., T>, String>"),
+    };
+    let (vis, handle) = (&f.vis, format_ident!("{}", f.sig.ident.to_string().to_uppercase()));
+    let doc = format!("`{}`, typed: what calls it by its name.", name.value());
+    Ok(quote! {
+        #f
+        #[doc = #doc]
+        #[allow(dead_code)]
+        #vis const #handle: ::ark::domain::Func<#input, #output> = ::ark::domain::Func::new(#name);
+    })
+}
+
+/// The last type argument of `t`'s path — of its first, when `t` is a
+/// `Result` (`in_result`).
+fn last_arg(t: &Type, in_result: bool) -> Option<TokenStream> {
+    let Type::Path(p) = t else { return None };
+    let seg = p.path.segments.last()?;
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+    let mut tys = args.args.iter().filter_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t),
+        _ => None,
+    });
+    match in_result && seg.ident == "Result" {
+        true => last_arg(tys.next()?, false),
+        false => tys.next_back().map(|t| t.to_token_stream()),
+    }
 }
 
 /// `functions!(domain)`: `domain` with every function of the file it is

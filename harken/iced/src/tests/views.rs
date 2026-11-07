@@ -78,7 +78,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         media_id: key(off),
     };
 
-    peer.client.lock().mutate("playlists.add_to_playlist", &on).unwrap();
+    peer.client.lock().mutate(crate::domain::playlists::ADD_TO_PLAYLIST, &on).unwrap();
     assert!(peer.refresh());
     check(&peer, "a toggle");
     assert_eq!(patched(&peer), BTreeSet::from(["library", "album"]));
@@ -88,7 +88,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         art: "handel.jpg".into(),
         ..DescribePerson::default()
     };
-    peer.client.lock().mutate("library.describe_person", &person).unwrap();
+    peer.client.lock().mutate(crate::domain::library::DESCRIBE_PERSON, &person).unwrap();
     assert!(peer.refresh());
     check(&peer, "a person described");
     assert_eq!(patched(&peer), BTreeSet::from(["artists", "composers"]));
@@ -97,7 +97,7 @@ fn every_list_on_screen_is_its_query_after_every_change() {
     song.track = 30;
     // On the catalogue's Water Music, the page open, by being in its folder.
     song.folder = crate::domain::catalogue::DIR.into();
-    peer.client.lock().mutate("library.add_song", &song).unwrap();
+    peer.client.lock().mutate(crate::domain::library::ADD_SONG, &song).unwrap();
     peer.refresh();
     check(&peer, "a song added");
     assert!(peer.shown().iter().any(|i| i.title == "Hornpipe again"), "on the open page");
@@ -106,12 +106,18 @@ fn every_list_on_screen_is_its_query_after_every_change() {
         playlist_id: key(favorites),
         media_id: key(off),
     };
-    peer.client.lock().mutate("playlists.remove_from_playlist", &off_it).unwrap();
+    peer.client
+        .lock()
+        .mutate(crate::domain::playlists::REMOVE_FROM_PLAYLIST, &off_it)
+        .unwrap();
     peer.refresh();
     check(&peer, "the toggle undone");
 
     let gone = peer.items()[3].id;
-    peer.client.lock().mutate("library.remove_media", &RemoveMedia { id: key(gone) }).unwrap();
+    peer.client
+        .lock()
+        .mutate(crate::domain::library::REMOVE_MEDIA, &RemoveMedia { id: key(gone) })
+        .unwrap();
     peer.refresh();
     check(&peer, "a song removed");
     assert!(!peer.details.contains_key(&gone));
@@ -169,7 +175,7 @@ fn the_search_box_drives_a_view() {
         .client
         .lock()
         .mutate(
-            "library.add_song",
+            crate::domain::library::ADD_SONG,
             &super::song("Hornpipe again", "George Frideric Handel", "", "music/hornpipe.mp3"),
         )
         .unwrap();

@@ -17,7 +17,8 @@
 
 use std::collections::BTreeMap;
 
-use ark::domain::{Domain, Function};
+use ark::domain::{Domain, Func, Function};
+
 use ark::format::Encode;
 use ark::frames::Reply;
 use ark::hash::StateHash;
@@ -45,6 +46,41 @@ impl Arg for Vec<u8> {
     }
 }
 
+/// What a caller names a function by, and its input as that name takes it:
+/// the function's whole name with a value or an encoding ([`Arg`]), or its
+/// typed handle ([`Func`], `playlists::CREATE_PLAYLIST`) with its own input.
+pub trait Named<A> {
+    fn name(&self) -> &str;
+    fn bytes(input: A) -> Vec<u8>;
+}
+
+impl<A: Arg> Named<A> for &str {
+    fn name(&self) -> &str {
+        self
+    }
+    fn bytes(input: A) -> Vec<u8> {
+        input.bytes()
+    }
+}
+
+impl<A: Arg> Named<A> for &String {
+    fn name(&self) -> &str {
+        self
+    }
+    fn bytes(input: A) -> Vec<u8> {
+        input.bytes()
+    }
+}
+
+impl<I: Encode, O> Named<&I> for Func<I, O> {
+    fn name(&self) -> &str {
+        self.name
+    }
+    fn bytes(input: &I) -> Vec<u8> {
+        input.to_bytes()
+    }
+}
+
 /// What has become of an intent this device authored: pending, taken by
 /// the authority, or refused by it and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,8 +97,10 @@ pub(crate) struct Told {
     /// refusals of each space not yet taken.
     outcomes: BTreeMap<EntryId, Outcome>,
     pub refused: [Vec<(EntryId, String)>; 2],
-    /// What each view did since it was last asked: its patches, in order.
+    /// What each view did since it was last asked: its patches, in order;
+    /// and how many it was ever told.
     pub updates: BTreeMap<usize, Vec<Patch>>,
+    moves: u64,
     /// The calls of its server's functions sent and not yet answered, the
     /// next one's id, and the answers not yet taken.
     asking: std::collections::BTreeSet<u64>,
@@ -111,6 +149,7 @@ impl Told {
 
     pub fn patched(&mut self, view: usize, patches: Vec<Patch>) {
         if !patches.is_empty() {
+            self.moves += patches.len() as u64;
             self.updates.entry(view).or_default().extend(patches);
         }
     }
@@ -167,14 +206,14 @@ impl Peer {
     /// here and now. A live one the config relays (`Config::ephemeral`)
     /// goes through the relay, under the id it is sent with when nothing
     /// goes first.
-    pub fn mutate(&mut self, name: &str, input: impl Arg) -> Result<EntryId, String> {
-        self.mutate_at(name, input, now_ms())
+    pub fn mutate<A, F: Named<A>>(&mut self, f: F, input: A) -> Result<EntryId, String> {
+        self.mutate_at(f, input, now_ms())
     }
 
     /// [`Peer::mutate`] at `now`: a simulator's clock.
-    pub fn mutate_at(&mut self, name: &str, input: impl Arg, now: i64) -> Result<EntryId, String> {
-        let (space, f, id) = self.intent(name)?;
-        if let Err(why) = self.author(space, &f, input.bytes(), now) {
+    pub fn mutate_at<A, F: Named<A>>(&mut self, f: F, input: A, now: i64) -> Result<EntryId, String> {
+        let (space, f, id) = self.intent(f.name())?;
+        if let Err(why) = self.author(space, &f, F::bytes(input), now) {
             // Said here, as the answer; not again among the refusals.
             self.told.refused[space as usize].retain(|(r, _)| *r != id);
             return Err(why);
@@ -183,16 +222,25 @@ impl Peer {
         Ok(id)
     }
 
-    /// A maintained view (§1.10) over the optimistic state, as this login
-    /// reads it: its number, or the view's refusal.
-    pub fn view(&mut self, name: &str, input: &[u8]) -> Result<usize, String> {
-        let (ctx, b) = (self.ctx(), self.function(name)?.name.clone());
-        self.watch(Space::Durable, &b, input, ctx)
+    /// A maintained view (§1.10) of the function `name` over the
+    /// optimistic state of the space it is of, as whoever is signed in reads
+    /// it — made again for each login — its number; and, when it cannot be
+    /// made now, why. Refused, it is kept with no rows, and made again as
+    /// its space changes.
+    pub fn view(&mut self, name: &str, input: &[u8]) -> (usize, Result<(), String>) {
+        let space = self.function(name).map_or(Space::Durable, |f| f.space);
+        self.keep(space, name, input, self.ctx(), true)
     }
 
     /// What a view did since it was last asked: its patches, in order.
     pub fn update(&mut self, view: usize) -> Vec<Patch> {
         self.told.updates.remove(&view).unwrap_or_default()
+    }
+
+    /// How many patches its views were ever told: a count taken before
+    /// says whether any moved since.
+    pub fn moves(&self) -> u64 {
+        self.told.moves
     }
 
     /// What became of the intent `id` on the log: none for one this run

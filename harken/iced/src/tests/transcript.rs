@@ -23,7 +23,7 @@ fn episode(p: &mut Replica) {
         title: "Full Time Nix".into(),
         ..AddShow::default()
     };
-    p.mutate("library.add_show", &show).unwrap();
+    p.mutate(crate::domain::shows::ADD_SHOW, &show).unwrap();
     let e = AddEpisode {
         show: "podcast/full-time-nix".into(),
         title: "Nix 2.23.0 release with Jacek Galowicz".into(),
@@ -31,7 +31,7 @@ fn episode(p: &mut Replica) {
         file: FILE.into(),
         ..AddEpisode::default()
     };
-    p.mutate("library.add_episode", &e).unwrap();
+    p.mutate(crate::domain::shows::ADD_EPISODE, &e).unwrap();
     let said = [
         "Hello and welcome to Full Time Nix.",
         "This is an episode about release notes of Nix 2.23.0 with Jacek Galowicz.",
@@ -50,7 +50,7 @@ fn episode(p: &mut Replica) {
         })
         .collect();
     p.mutate(
-        "library.set_transcript",
+        crate::domain::shows::SET_TRANSCRIPT,
         &SetTranscript {
             file: FILE.into(),
             cues,
@@ -186,7 +186,7 @@ fn a_voice_named_from_its_line_says_all_its_lines() {
         .client
         .lock()
         .mutate(
-            "library.set_transcript",
+            crate::domain::shows::SET_TRANSCRIPT,
             &SetTranscript {
                 file: FILE.into(),
                 cues,

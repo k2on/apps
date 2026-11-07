@@ -122,7 +122,7 @@ impl App {
                         category_id: c,
                         from: Some(self.peer.month.clone()),
                     };
-                    if self.author("remove the formula", "categories.clear_formula", &r) {
+                    if self.author("remove the formula", formulas::CLEAR_FORMULA, &r) {
                         self.note = format!("assigned by hand from {}", month_name(&self.peer.month));
                         self.load_formula();
                     }
@@ -206,7 +206,7 @@ impl App {
             from: Some(self.peer.month.clone()),
             terms,
         };
-        if self.author("save the formula", "categories.set_formula", &f) {
+        if self.author("save the formula", formulas::SET_FORMULA, &f) {
             self.note = format!("assigned by formula from {}", month_name(&self.peer.month));
             self.load_formula();
         }

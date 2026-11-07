@@ -149,14 +149,14 @@ fn views_at(copies: usize) {
         let started = Instant::now();
         match round % 2 {
             0 => client.mutate(
-                "playlists.add_to_playlist",
+                crate::domain::playlists::ADD_TO_PLAYLIST,
                 &AddToPlaylist {
                     playlist_id: key(favorites),
                     media_id: key(track),
                 },
             ),
             _ => client.mutate(
-                "playlists.remove_from_playlist",
+                crate::domain::playlists::REMOVE_FROM_PLAYLIST,
                 &RemoveFromPlaylist {
                     playlist_id: key(favorites),
                     media_id: key(track),
@@ -171,7 +171,7 @@ fn views_at(copies: usize) {
             ..DescribePerson::default()
         };
         let started = Instant::now();
-        client.mutate("library.describe_person", &person).unwrap();
+        client.mutate(crate::domain::library::DESCRIBE_PERSON, &person).unwrap();
         describe.push(started.elapsed());
     }
     eprintln!(

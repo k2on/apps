@@ -9,12 +9,13 @@ mod common;
 
 use std::collections::BTreeMap;
 
+use ark::domain::Func;
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark_peer::Config;
 use arkdb::sim::{Net, Op};
-use common::{domain, full, song};
+use common::{domain, song};
 use harken_domain::Id;
 use harken_domain::LIBRARY;
 use harken_domain::*;
@@ -40,12 +41,12 @@ impl Fleet {
     }
 
     /// Author on client `i` as whoever it believes it is.
-    fn mutate(&mut self, i: i64, name: &str, input: &impl Encode) {
-        self.net.run(&Op::Mutate(i, full(name), input.to_bytes()));
+    fn mutate<I: Encode>(&mut self, i: i64, f: Func<I>, input: &I) {
+        self.net.run(&Op::Mutate(i, f.name.into(), input.to_bytes()));
     }
 
     /// What client `i` shows, as `user`: its optimistic view.
-    fn query<T: Encode>(&self, i: i64, user: &str, name: &str, input: &impl Encode) -> T {
+    fn query<I: Encode, T: Encode>(&self, i: i64, user: &str, Func { name, .. }: Func<I, T>, input: &I) -> Vec<T> {
         let ctx = Ctx {
             id: EntryId::of("q", 0),
             actor: user.into(),
@@ -53,9 +54,9 @@ impl Fleet {
             ..Default::default()
         };
         let b = domain()
-            .ask(&self.net.clients[&i].log.store, &ctx, &full(name), &input.to_bytes())
+            .ask(&self.net.clients[&i].log.store, &ctx, name, &input.to_bytes())
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        T::from_bytes(&b).unwrap()
+        Vec::from_bytes(&b).unwrap()
     }
 
     fn converged(&self) {
@@ -83,27 +84,27 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
     let mut f = Fleet::new(19, (0..3).map(login).collect());
     for round in 0..3 {
         for i in 0..3 {
-            f.mutate(i, "add_song", &track(&format!("c{i}-{round}")));
+            f.mutate(i, library::ADD_SONG, &track(&format!("c{i}-{round}")));
             f.net.step();
         }
     }
     f.net.partition(2);
     for round in 0..4 {
-        f.mutate(2, "add_song", &track(&format!("dark-{round}")));
-        f.mutate(0, "add_song", &track(&format!("lit-{round}")));
+        f.mutate(2, library::ADD_SONG, &track(&format!("dark-{round}")));
+        f.mutate(0, library::ADD_SONG, &track(&format!("lit-{round}")));
         f.net.step();
     }
-    f.mutate(0, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
+    f.mutate(0, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: "Favorites".into() });
     f.net.settle().unwrap();
 
-    let favs = f.query::<Vec<Playlist>>(0, "peer-0", "playlists", &())[0].id;
+    let favs = f.query(0, "peer-0", playlists::PLAYLISTS, &())[0].id;
     f.net.partition(2);
     for i in [0, 2] {
-        let lib: Vec<LibraryEntry> = f.query(i, "peer-0", "library", &Library { playlist_id: favs });
+        let lib: Vec<LibraryEntry> = f.query(i, "peer-0", browse::LIBRARY, &Library { playlist_id: favs });
         for e in lib {
             f.mutate(
                 i,
-                "add_to_playlist",
+                playlists::ADD_TO_PLAYLIST,
                 &AddToPlaylist {
                     playlist_id: favs,
                     media_id: e.id,
@@ -113,7 +114,7 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
         f.net.step();
     }
     // Somebody else's playlist is refused by their own view, and never sent.
-    f.mutate(1, "add_all_to_playlist", &AddAllToPlaylist { playlist_id: favs });
+    f.mutate(1, playlists::ADD_ALL_TO_PLAYLIST, &AddAllToPlaylist { playlist_id: favs });
     assert_eq!(f.net.refused, [(1, "not your playlist".to_string())]);
     assert!(f.net.clients[&1].log.pending().is_empty());
     f.net.refused.clear();
@@ -121,12 +122,12 @@ fn the_domain_converges_when_peers_go_dark_and_come_back() {
 
     f.converged();
     assert!(f.net.refused.is_empty(), "{:?}", f.net.refused);
-    let lib: Vec<LibraryEntry> = f.query(1, "peer-1", "library", &Library { playlist_id: favs });
+    let lib: Vec<LibraryEntry> = f.query(1, "peer-1", browse::LIBRARY, &Library { playlist_id: favs });
     assert_eq!(lib.len(), 17, "9 shared + 4 dark + 4 lit, none lost and none duplicated");
     let mut pos: Vec<i64> = lib.iter().map(|r| r.pos).collect();
     pos.sort_unstable();
     assert_eq!(pos, (1..=17).collect::<Vec<_>>(), "library positions are 1..n after the replay");
-    let on: Vec<LibraryEntry> = f.query(0, "peer-0", "playlist", &PlaylistInput { playlist_id: favs });
+    let on: Vec<LibraryEntry> = f.query(0, "peer-0", playlists::PLAYLIST, &PlaylistInput { playlist_id: favs });
     assert_eq!(on.len(), 17, "every item once, though both devices added every one");
     assert_eq!(
         on.iter().map(|r| r.playlist_pos.unwrap()).collect::<Vec<_>>(),
@@ -152,12 +153,12 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     ];
     let mut f = Fleet::new(23, logins);
     for k in 0..6 {
-        f.mutate(0, "add_song", &track(&format!("t{k}")));
+        f.mutate(0, library::ADD_SONG, &track(&format!("t{k}")));
     }
     f.net.settle().unwrap();
     let none = Id::new([0; 16]);
     let ids: Vec<Id<Media>> = f
-        .query::<Vec<LibraryEntry>>(1, "", "library", &Library { playlist_id: none })
+        .query(1, "", browse::LIBRARY, &Library { playlist_id: none })
         .into_iter()
         .map(|e| e.id)
         .collect();
@@ -169,15 +170,15 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
     let mut made = BTreeMap::new();
     for i in 0..3 {
         let me = f.net.clients[&i].log.me.actor.clone();
-        f.mutate(i, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
-        let on: Vec<Playlist> = f.query(i, &me, "playlists", &());
+        f.mutate(i, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: "Favorites".into() });
+        let on: Vec<Playlist> = f.query(i, &me, playlists::PLAYLISTS, &());
         assert_eq!(on.len(), 1, "apart, each device sees only its own");
         assert_eq!(on[0].name, "Favorites", "and calls it what it was called");
         let fav = on[0].id;
         for k in [2 * i, 2 * i + 1] {
             f.mutate(
                 i,
-                "add_to_playlist",
+                playlists::ADD_TO_PLAYLIST,
                 &AddToPlaylist {
                     playlist_id: fav,
                     media_id: ids[k as usize],
@@ -186,7 +187,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
         }
         made.insert(fav, vec![format!("t{}", 2 * i), format!("t{}", 2 * i + 1)]);
     }
-    f.mutate(3, "create_playlist", &CreatePlaylist { name: "Favorites".into() });
+    f.mutate(3, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: "Favorites".into() });
     // The peer nobody had signed in on: its connection is peer-0's now.
     let signed = who("peer-0", "dev-1", &[]);
     f.net.logins.insert(signed.session.clone(), signed.clone());
@@ -195,14 +196,14 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
 
     f.converged();
     assert!(f.net.refused.is_empty(), "{:?}", f.net.refused);
-    let mine: Vec<Playlist> = f.query(1, "peer-0", "playlists", &());
+    let mine: Vec<Playlist> = f.query(1, "peer-0", playlists::PLAYLISTS, &());
     assert_eq!(
         mine.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
         ["Favorites", "Favorites (1)", "Favorites (2)"],
         "numbered in log order"
     );
     for p in &mine {
-        let on: Vec<LibraryEntry> = f.query(2, "peer-0", "playlist", &PlaylistInput { playlist_id: p.id });
+        let on: Vec<LibraryEntry> = f.query(2, "peer-0", playlists::PLAYLIST, &PlaylistInput { playlist_id: p.id });
         assert_eq!(
             on.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
             made[&p.id],
@@ -210,7 +211,7 @@ fn same_named_playlists_made_apart_are_numbered_in_log_order() {
             p.name
         );
     }
-    let theirs: Vec<Playlist> = f.query(3, "peer-3", "playlists", &());
+    let theirs: Vec<Playlist> = f.query(3, "peer-3", playlists::PLAYLISTS, &());
     assert_eq!(
         theirs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
         ["Favorites"],
@@ -235,23 +236,23 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     ];
     let mut f = Fleet::new(31, logins);
     for t in ["removed", "attempted", "kept"] {
-        f.mutate(0, "add_song", &track(t));
+        f.mutate(0, library::ADD_SONG, &track(t));
     }
     f.net.settle().unwrap();
     let none = Id::new([0; 16]);
     let ids: Vec<Id<Media>> = f
-        .query::<Vec<LibraryEntry>>(0, "peer-0", "library", &Library { playlist_id: none })
+        .query(0, "peer-0", browse::LIBRARY, &Library { playlist_id: none })
         .into_iter()
         .map(|e| e.id)
         .collect();
     let (removed, attempted) = (ids[0], ids[1]);
     for i in [1, 3] {
-        f.mutate(i, "create_playlist", &CreatePlaylist { name: "Mine".into() });
-        let list = f.query::<Vec<Playlist>>(i, &format!("peer-{i}"), "playlists", &())[0].id;
+        f.mutate(i, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: "Mine".into() });
+        let list = f.query(i, &format!("peer-{i}"), playlists::PLAYLISTS, &())[0].id;
         for media in &ids {
             f.mutate(
                 i,
-                "add_to_playlist",
+                playlists::ADD_TO_PLAYLIST,
                 &AddToPlaylist {
                     playlist_id: list,
                     media_id: *media,
@@ -271,7 +272,7 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     };
     assert_eq!(items(&f).len(), 6, "three tracks on each of two people's playlists");
 
-    f.mutate(0, "remove_media", &RemoveMedia { id: removed });
+    f.mutate(0, library::REMOVE_MEDIA, &RemoveMedia { id: removed });
     f.net.settle().unwrap();
     let left = items(&f);
     assert_eq!(left.len(), 4, "{left:?}");
@@ -281,13 +282,13 @@ fn the_library_takes_a_removed_track_off_everybodys_playlists() {
     assert_eq!(owners, ["peer-1", "peer-1", "peer-3", "peer-3"], "each person keeps their other two");
 
     // Somebody without the role: refused on the device, never sent…
-    f.mutate(1, "remove_media", &RemoveMedia { id: attempted });
+    f.mutate(1, library::REMOVE_MEDIA, &RemoveMedia { id: attempted });
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
     assert!(f.net.clients[&1].log.pending().is_empty(), "nothing pending");
     f.net.refused.clear();
     // …and by the server, from a device that believes a role it was never given.
     f.net.clients.get_mut(&1).unwrap().log.me.roles = vec![LIBRARY.into()];
-    f.mutate(1, "remove_media", &RemoveMedia { id: attempted });
+    f.mutate(1, library::REMOVE_MEDIA, &RemoveMedia { id: attempted });
     f.net.settle().unwrap();
     assert_eq!(f.net.refused, [(1, "only the library writes the library".to_string())]);
     assert_eq!(items(&f).len(), 4, "nothing moved");

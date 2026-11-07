@@ -87,15 +87,15 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
   Volatile>` it writes the live space's tables (§1.9) and its intents
   are on that space: a peer's `mutate` sends each to the space its
   function writes.
-- **A query** (`Domain::query`, as a job's `due` is) is `fn(&Ctx, &Db<S>,
-  I) -> Result<T, String>`, answered once.
-- **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date.
+- **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date or
+  answered once (as a job's `due` is).
 - **A scope** (`#[scope]`) says per table which rows a connection fed by
   it holds (§1.8); a table it does not name, as the row says.
 
 A helper or a guard takes `&Db<S>` and cannot write: the borrow checker
-is the effect system. The attribute only names a function; `functions!`
-registers each one its file and modules declare (not under `#[cfg]`):
+is the effect system. The attribute names a function and writes beside it
+its typed handle (`ADD_TO_PLAYLIST: Func<AddToPlaylist>`), which Rust calls
+it by; `functions!` registers each one its file and modules declare (not under `#[cfg]`):
 
 ```rust
 #[scope("demo.top_two")]

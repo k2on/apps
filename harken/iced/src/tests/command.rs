@@ -16,7 +16,7 @@ fn app() -> App {
     ] {
         p.client
             .lock()
-            .mutate("library.add_song", &song(t, who, album, &format!("music/{t}.mp3")))
+            .mutate(crate::domain::library::ADD_SONG, &song(t, who, album, &format!("music/{t}.mp3")))
             .unwrap();
     }
     p.refresh();

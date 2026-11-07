@@ -22,7 +22,7 @@ use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::Store;
-use ark_peer::{Config, Disk, Memory, Peer as Replica};
+use ark_peer::{Config, Disk, Func, Memory, Peer as Replica};
 
 use money_domain::dates::{add_days, add_months, day_of_ms, month_of};
 use money_domain::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
@@ -258,7 +258,7 @@ impl Seeder {
 
     /// One mutation by its function's name, as `who`. A seed
     /// mutation is refused only by a mistake, so a refusal is a panic.
-    fn run(&mut self, who: &str, name: &str, input: &impl Encode) {
+    fn run<I: Encode>(&mut self, who: &str, Func { name, .. }: Func<I>, input: &I) {
         self.local += 1;
         self.ctx.id = EntryId::of(LOCAL, self.local);
         self.ctx.now += 1;
@@ -270,7 +270,7 @@ impl Seeder {
         f(&mut self.store, &self.ctx, &input.to_bytes()).unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
     }
 
-    fn ask<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
+    fn ask<I: Encode, T: Encode>(&self, Func { name, .. }: Func<I, T>, input: &I) -> Vec<T> {
         let bytes = domain()
             .ask(&self.store, &self.ctx, name, &input.to_bytes())
             .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
@@ -305,7 +305,7 @@ impl Seeder {
             balance,
             date: date.into(),
         };
-        self.run(ME, "accounts.open_account", &a);
+        self.run(ME, accounts::OPEN_ACCOUNT, &a);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -319,7 +319,7 @@ impl Seeder {
             cleared,
             ..AddTransaction::default()
         };
-        self.run(who, "transactions.add_transaction", &t);
+        self.run(who, transactions::ADD_TRANSACTION, &t);
     }
 
     fn transfer(&mut self, from: &str, to: &str, date: &str, amount: i64) {
@@ -331,7 +331,7 @@ impl Seeder {
             transfer_to: Some(self.account(to)),
             ..AddTransaction::default()
         };
-        self.run(ME, "transactions.add_transaction", &t);
+        self.run(ME, transactions::ADD_TRANSACTION, &t);
     }
 
     fn assign(&mut self, month: &str, category: &str, cents: i64) {
@@ -340,11 +340,11 @@ impl Seeder {
             category_id: self.category(category),
             amount: cents,
         };
-        self.run(ME, "budget.assign", &a);
+        self.run(ME, budget::ASSIGN, &a);
     }
 
     fn ready_to_assign(&self, month: &str) -> i64 {
-        self.ask::<Summary>("budget.summary", &Month { month: month.into() })
+        self.ask(budget::SUMMARY, &Month { month: month.into() })
             .first()
             .map_or(0, |s| s.ready_to_assign)
     }
@@ -405,14 +405,14 @@ fn household(today: &str, now: i64) -> Store {
     let mut s = Seeder::new(now - 1_000_000);
     let mut draw = Draw(7);
 
-    s.run(ME, "budget.setup", &());
+    s.run(ME, budget::SETUP, &());
     s.open("Checking", "checking", true, 284_250, &first);
     s.open("Savings", "savings", true, 615_000, &first);
     s.open("Cash", "cash", true, 12_000, &first);
     s.open("Mortgage", "loan", false, -31_245_000, &first);
     s.open("Retirement", "investment", false, 6_430_000, &first);
     for (group, categories) in BUDGET {
-        s.run(ME, "categories.add_group", &AddGroup { name: group.to_string() });
+        s.run(ME, categories::ADD_GROUP, &AddGroup { name: group.to_string() });
         let g = s
             .rows::<Group>()
             .into_iter()
@@ -422,14 +422,14 @@ fn household(today: &str, now: i64) -> Store {
         for (name, target) in *categories {
             s.run(
                 ME,
-                "categories.add_category",
+                categories::ADD_CATEGORY,
                 &AddCategory {
                     group_id: g,
                     name: name.to_string(),
                 },
             );
             let id = s.category(name);
-            s.run(ME, "categories.set_target", &SetTarget { id, target: target * 100 });
+            s.run(ME, categories::SET_TARGET, &SetTarget { id, target: target * 100 });
         }
     }
 
@@ -442,12 +442,12 @@ fn household(today: &str, now: i64) -> Store {
             // Checking reconciled at the end of last month, as the
             // statement said.
             let checking = s.account("Checking");
-            let accounts = s.ask::<AccountLine>("accounts.accounts", &());
+            let accounts = s.ask(accounts::ACCOUNTS, &());
             let balance = accounts.iter().find(|a| a.id == checking).map_or(0, |a| a.cleared);
             let date = add_days(&format!("{month}-01"), -1);
             s.run(
                 ME,
-                "transactions.reconcile",
+                transactions::RECONCILE,
                 &Reconcile {
                     account_id: checking,
                     balance,
@@ -539,9 +539,9 @@ fn household(today: &str, now: i64) -> Store {
             cursor: format!("cursor-{month}"),
             ..Pulled::default()
         };
-        s.run(ME, "banks.import", &import_of(BANK_NAME, INSTITUTION, &[card(owed)], &pulled));
+        s.run(ME, plaid::IMPORT, &import_of(BANK_NAME, INSTITUTION, &[card(owed)], &pulled));
         let card = s.account(CARD_NAME);
-        let lines = s.ask::<TxnLine>("transactions.register", &Register { account_id: Some(card) });
+        let lines = s.ask(transactions::REGISTER, &Register { account_id: Some(card) });
         let recent = add_days(today, -4);
         let mut filed: BTreeMap<Id<Category>, Vec<Id<Txn>>> = BTreeMap::new();
         for l in lines.iter().filter(|l| !l.approved && !l.transfer && !(current && l.date >= recent)) {
@@ -550,11 +550,11 @@ fn household(today: &str, now: i64) -> Store {
             }
         }
         for (c, ids) in filed {
-            s.run(ME, "transactions.categorize", &Categorize { ids, category_id: Some(c) });
+            s.run(ME, transactions::CATEGORIZE, &Categorize { ids, category_id: Some(c) });
         }
         let approve: Vec<Id<Txn>> = lines.iter().filter(|l| !l.approved && l.transfer).map(|l| l.id).collect();
         if !approve.is_empty() {
-            s.run(ME, "transactions.approve", &Txns { ids: approve });
+            s.run(ME, transactions::APPROVE, &Txns { ids: approve });
         }
         // What the card bought beyond its categories' money is debt the
         // household covers at the month's end, from the emergency fund —
@@ -563,7 +563,7 @@ fn household(today: &str, now: i64) -> Store {
         if !current {
             let pay = money_domain::cards::payment_category(card);
             let short = s
-                .ask::<BudgetLine>("budget.month", &Month { month: month.clone() })
+                .ask(budget::MONTH, &Month { month: month.clone() })
                 .into_iter()
                 .find(|l| l.category_id == pay)
                 .map_or(0, |l| l.underfunded);
@@ -574,7 +574,7 @@ fn household(today: &str, now: i64) -> Store {
                     to: Some(pay),
                     amount: short,
                 };
-                s.run(ME, "budget.move_money", &m);
+                s.run(ME, budget::MOVE_MONEY, &m);
             }
         }
     }
@@ -587,14 +587,14 @@ fn household(today: &str, now: i64) -> Store {
         let parent_id = s.category(parent);
         s.run(
             ME,
-            "categories.add_subcategory",
+            categories::ADD_SUBCATEGORY,
             &AddSubcategory {
                 parent_id,
                 name: kind.into(),
             },
         );
     }
-    let all = s.ask::<TxnLine>("transactions.register", &Register { account_id: None });
+    let all = s.ask(transactions::REGISTER, &Register { account_id: None });
     let newest = |payee: &str| {
         all.iter()
             .filter(|t| t.payee == payee && t.amount < 0)
@@ -636,7 +636,7 @@ fn household(today: &str, now: i64) -> Store {
         };
         s.run(
             ME,
-            "receipts.add_receipts",
+            receipts::ADD_RECEIPTS,
             &ReceiptImport {
                 store: "target".into(),
                 receipts: vec![r],
@@ -670,7 +670,7 @@ fn household(today: &str, now: i64) -> Store {
         };
         s.run(
             ME,
-            "receipts.add_receipts",
+            receipts::ADD_RECEIPTS,
             &ReceiptImport {
                 store: "costco".into(),
                 receipts: vec![r],
@@ -714,7 +714,7 @@ fn household(today: &str, now: i64) -> Store {
             ],
         }],
     };
-    s.run(ME, "receipts.add_receipts", &amazon);
+    s.run(ME, receipts::ADD_RECEIPTS, &amazon);
     let charge = |date: String, amount| StoreCharge {
         order_id: "112-4417120-2026102".into(),
         date,
@@ -725,7 +725,7 @@ fn household(today: &str, now: i64) -> Store {
         store: "amazon".into(),
         charges: vec![charge(add_days(today, -1), -1_798), charge(today.to_string(), -2_399)],
     };
-    s.run(ME, "receipts.add_charges", &charges);
+    s.run(ME, receipts::ADD_CHARGES, &charges);
     s.store
 }
 

@@ -6,31 +6,21 @@
 
 use std::sync::OnceLock;
 
-use ark::domain::Domain;
+use ark::domain::{Domain, Func};
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
-use harken_domain::CreatePlaylist;
 use harken_domain::Id;
 use harken_domain::Playlist;
 use harken_domain::LIBRARY;
+use harken_domain::{browse, library, playlists, CreatePlaylist};
 use harken_domain::{AddSong, LibraryEntry};
 
 /// The module, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
     D.get_or_init(harken_domain::domain)
-}
-
-/// A function's binding by its last name: `create_playlist` is
-/// `playlists.create_playlist`.
-pub fn full(name: &str) -> String {
-    let hit: Vec<&String> = domain().fns.keys().filter(|b| b.rsplit('.').next() == Some(name)).collect();
-    match hit[..] {
-        [b] => b.clone(),
-        _ => panic!("{name}: {hit:?}"),
-    }
 }
 
 pub struct Lib {
@@ -75,20 +65,20 @@ impl Lib {
 
     /// Author as `user` holding the library's role, as the scanner does:
     /// the number of changes, or the refusal's text.
-    pub fn mutate(&mut self, user: &str, name: &str, input: &impl Encode) -> Result<usize, String> {
+    pub fn mutate<I: Encode>(&mut self, user: &str, f: Func<I>, input: &I) -> Result<usize, String> {
         let ctx = self.ctx(user, &[LIBRARY]);
-        self.mutate_as(&ctx, name, input)
+        self.mutate_as(&ctx, f, input)
     }
 
     /// Author the entry `ctx`.
-    pub fn mutate_as(&mut self, ctx: &Ctx, name: &str, input: &impl Encode) -> Result<usize, String> {
-        self.mutate_bytes(ctx, name, &input.to_bytes())
+    pub fn mutate_as<I: Encode>(&mut self, ctx: &Ctx, f: Func<I>, input: &I) -> Result<usize, String> {
+        self.mutate_bytes(ctx, f.name, &input.to_bytes())
     }
 
     /// Author the entry `ctx`, its input as bytes.
     pub fn mutate_bytes(&mut self, ctx: &Ctx, name: &str, input: &[u8]) -> Result<usize, String> {
         let f = domain()
-            .get(&full(name))
+            .get(name)
             .and_then(|f| f.proc.clone())
             .unwrap_or_else(|| panic!("{name} writes nothing"));
         self.last = f(&mut self.store, ctx, input)?;
@@ -96,7 +86,7 @@ impl Lib {
     }
 
     /// Ask as `user`: the answer, or the refusal's text.
-    pub fn query<T: Encode>(&self, user: &str, name: &str, input: &impl Encode) -> Result<T, String> {
+    pub fn query<I: Encode, T: Encode>(&self, user: &str, Func { name, .. }: Func<I, T>, input: &I) -> Result<Vec<T>, String> {
         let ctx = Ctx {
             id: EntryId::of("q", 0),
             actor: user.into(),
@@ -104,18 +94,18 @@ impl Lib {
             now: self.now,
             ..Default::default()
         };
-        let b = domain().ask(&self.store, &ctx, &full(name), &input.to_bytes())?;
-        Ok(T::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
+        let b = domain().ask(&self.store, &ctx, name, &input.to_bytes())?;
+        Ok(Vec::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
     }
 
     /// A query that must answer, as alice.
-    pub fn list<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
-        self.query("alice", name, input).unwrap_or_else(|e| panic!("{name}: {e}"))
+    pub fn list<I: Encode, T: Encode>(&self, f: Func<I, T>, input: &I) -> Vec<T> {
+        self.query("alice", f, input).unwrap_or_else(|e| panic!("{}: {e}", f.name))
     }
 
     /// The key of the album of that name the albums page lists.
     pub fn album_id(&self, name: &str) -> String {
-        let albums = self.list::<harken_domain::AlbumsEntry>("albums", &());
+        let albums = self.list(browse::ALBUMS, &());
         albums
             .into_iter()
             .find(|a| a.name == name)
@@ -125,20 +115,20 @@ impl Lib {
 
     /// Make a playlist as `user` and answer its id: the newest of theirs.
     pub fn playlist(&mut self, user: &str, name: &str) -> Id<Playlist> {
-        self.mutate(user, "create_playlist", &CreatePlaylist { name: name.into() })
+        self.mutate(user, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: name.into() })
             .unwrap_or_else(|e| panic!("{e}"));
-        let mine: Vec<Playlist> = self.query(user, "playlists", &()).unwrap();
+        let mine: Vec<Playlist> = self.query(user, playlists::PLAYLISTS, &()).unwrap();
         mine.into_iter().max_by_key(|p| p.pos).expect("the playlist just made").id
     }
 
     /// The library read against a playlist.
     pub fn library(&self, playlist: &Id<Playlist>) -> Vec<LibraryEntry> {
-        self.list("library", &harken_domain::Library { playlist_id: *playlist })
+        self.list(browse::LIBRARY, &harken_domain::Library { playlist_id: *playlist })
     }
 
     /// Add a song as the scanner would: a refusal here is a bug.
     pub fn add(&mut self, s: AddSong) {
-        self.mutate("alice", "add_song", &s).unwrap_or_else(|e| panic!("add_song: {e}"));
+        self.mutate("alice", library::ADD_SONG, &s).unwrap_or_else(|e| panic!("add_song: {e}"));
     }
 
     /// A table's rows, decoded.

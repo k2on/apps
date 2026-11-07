@@ -53,23 +53,24 @@ pub fn schema(input: TokenStream) -> TokenStream {
 
 /// `#[mutator("name")]`: declares `fn(&Ctx, &mut Db<S, P>, I) ->
 /// Result<(), String>` by name, on the space `P` it writes (`Db<S>` the
-/// log's, `Db<S, Volatile>` the live space's).
+/// log's, `Db<S, Volatile>` the live space's), and beside it its typed
+/// handle, its name in capitals (`add_song`'s `ADD_SONG: Func<AddSong>`).
 #[proc_macro_attribute]
 pub fn mutator(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::function(attr.into(), item.into()))
+    out(domain::function(attr.into(), item.into(), false))
 }
 
 /// `#[view("name")]`: declares `fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>,
-/// String>`, a query kept up to date.
+/// String>`, a query kept up to date, and its typed handle (`Func<I, T>`).
 #[proc_macro_attribute]
 pub fn view(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::function(attr.into(), item.into()))
+    out(domain::function(attr.into(), item.into(), true))
 }
 
 /// `#[scope("name")]`: declares `fn() -> Scope<S>`.
 #[proc_macro_attribute]
 pub fn scope(attr: TokenStream, item: TokenStream) -> TokenStream {
-    out(domain::function(attr.into(), item.into()))
+    out(syn::parse::<syn::LitStr>(attr).map(|_| item.into()))
 }
 
 /// `functions!(domain)`: `domain` with every function the file it is

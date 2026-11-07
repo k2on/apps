@@ -93,7 +93,9 @@ use ark::store::Change;
 use ark::Domain;
 use local::Replica;
 
-pub use app::{nobody, Arg, Outcome};
+pub use app::{nobody, Arg, Named, Outcome};
+pub use ark::domain::{Func, On};
+
 pub use ark::file::FileRef;
 pub use ark::peer::{Fold, Scoping};
 pub use authority::{Authority, Call, Called, ConnId, Deliver, ServerConfig, Sink};
@@ -176,13 +178,14 @@ pub struct Core {
 pub(crate) type Apart = (Box<dyn Disk>, Box<dyn Disk>, files::Store);
 
 /// A view a device keeps (§1.10): what it is made of — its space, the
-/// domain's function, its input and who reads — and the view, while it
-/// can be made.
+/// domain's function, its input and who reads (`mine`: whoever is signed
+/// in, made again for each login) — and the view, while it can be made.
 struct Kept {
     space: Space,
     name: String,
     input: Vec<u8>,
     ctx: Ctx,
+    mine: bool,
     view: Option<Box<dyn Maintained>>,
 }
 
@@ -340,7 +343,9 @@ pub struct Peer {
     pub link: link::Link,
     /// Frames for its server.
     frames: Vec<Vec<u8>>,
-    views: Vec<Option<Kept>>,
+    /// Its views by number, and the next number: one is never given again.
+    views: BTreeMap<usize, Kept>,
+    viewed: usize,
     relay: BTreeMap<String, (Vec<u8>, i64, Option<Span>)>,
     relayed: Option<i64>,
     /// The span it authors under: the one opened ([`Peer::begin`],
@@ -409,7 +414,8 @@ impl Peer {
             linked: false,
             link,
             frames: vec![],
-            views: vec![],
+            views: BTreeMap::new(),
+            viewed: 0,
             relay: BTreeMap::new(),
             relayed: None,
             span: None,
@@ -484,7 +490,7 @@ impl Peer {
 
     /// The tables its views of `space` read: what its fill takes first.
     fn reads(&self, space: Space) -> Vec<String> {
-        let views = self.views.iter().flatten().filter(|w| w.space == space);
+        let views = self.views.values().filter(|w| w.space == space);
         views.filter_map(|w| w.view.as_ref()).flat_map(|v| v.reads()).collect()
     }
 
@@ -531,7 +537,7 @@ impl Peer {
     /// is, under its number: its rows as they were removed, and as they are
     /// inserted ([`watched::again`]).
     fn changed(&mut self, space: Space, cs: &[Change]) {
-        if !self.views.iter().flatten().any(|w| w.space == space) {
+        if !self.views.values().any(|w| w.space == space) {
             return;
         }
         let domain = self.machine(space).map(|m| m.domain.clone());
@@ -541,8 +547,7 @@ impl Peer {
         let cs: Vec<Change> = cs.iter().filter(|c| reads.iter().any(|t| t == c.table())).cloned().collect();
         let store = &self.core.machine(space).expect("a machine that spoke").store;
         let p = ark::plan::Pushed::of(store, &cs);
-        for (i, w) in self.views.iter_mut().enumerate() {
-            let Some(w) = w.as_mut().filter(|w| w.space == space) else { continue };
+        for (&i, w) in self.views.iter_mut().filter(|(_, w)| w.space == space) {
             let pushed = w.view.as_mut().map(|v| v.pushed(&p));
             match pushed {
                 Some(Ok(patches)) => self.told.patched(i, patches),
@@ -731,41 +736,87 @@ impl Peer {
             Record::Pending(local::Kept::all(pending, None, local)),
         ];
         self.step(Space::Durable, Input::Open(records));
+        self.rewatch();
         if self.linked {
             self.connected();
         }
     }
 
+    /// The roles this login holds ([`Core::set_roles`]), its views made
+    /// again for them.
+    pub fn set_roles(&mut self, roles: impl IntoIterator<Item = impl Into<String>>) {
+        self.core.set_roles(roles);
+        self.rewatch();
+    }
+
     /// A view's rows as they stand, each its bytes; none while it cannot be
     /// made.
     pub fn rows(&self, view: usize) -> Option<Vec<Vec<u8>>> {
-        self.views.get(view)?.as_ref()?.view.as_ref().map(|v| v.rows())
+        self.views.get(&view)?.view.as_ref().map(|v| v.rows())
     }
 
     /// A maintained view of the domain's function `name` on `input` over
     /// `space`'s optimistic state, as `ctx` reads it (§1.16); what it does
     /// comes as its patches ([`Peer::update`]), under its number for as
-    /// long as it is held.
+    /// long as it is held. Refused, it is not kept.
     pub fn watch(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx) -> Result<usize, String> {
-        let m = self.machine(space).ok_or_else(|| String::from("no machine of that space"))?;
-        let view = Some(m.domain.watch(&m.store, &ctx, name, input)?);
+        let (view, made) = self.keep(space, name, input, ctx, false);
+        made.map(|_| view).inspect_err(|_| self.unwatch(view))
+    }
+
+    /// A view kept under a number of its own, made now if it can be — and
+    /// if not, kept all the same, with no rows, made again when its space
+    /// changes — and why it could not.
+    pub(crate) fn keep(&mut self, space: Space, name: &str, input: &[u8], ctx: Ctx, mine: bool) -> (usize, Result<(), String>) {
+        let made = match self.machine(space) {
+            Some(m) => m.domain.watch(&m.store, &ctx, name, input),
+            None => Err("no machine of that space".into()),
+        };
         let (name, input) = (name.into(), input.to_vec());
-        self.views.push(Some(Kept {
+        let (view, why) = match made {
+            Ok(v) => (Some(v), Ok(())),
+            Err(why) => (None, Err(why)),
+        };
+        let id = self.viewed;
+        self.viewed += 1;
+        let kept = Kept {
             space,
             name,
             input,
             ctx,
+            mine,
             view,
-        }));
-        Ok(self.views.len() - 1)
+        };
+        self.views.insert(id, kept);
+        (id, why)
+    }
+
+    /// Every view kept for whoever is signed in made again for who is now:
+    /// its rows as they were removed, and as they are now inserted.
+    fn rewatch(&mut self) {
+        let ctx = self.ctx();
+        let who = |c: &Ctx| (c.actor.clone(), c.session.clone(), c.roles.clone());
+        let mine: Vec<usize> = self
+            .views
+            .iter()
+            .filter(|(_, w)| w.mine && who(&w.ctx) != who(&ctx))
+            .map(|(&i, _)| i)
+            .collect();
+        for i in mine {
+            let w = self.views.get_mut(&i).expect("kept");
+            let old = w.view.as_ref().map_or(0, |v| v.rows().len());
+            let m = self.core.machine(w.space);
+            w.view = m.and_then(|m| m.domain.watch(&m.store, &ctx, &w.name, &w.input).ok());
+            w.ctx = ctx.clone();
+            let rows = w.view.as_ref().map(|v| v.rows()).unwrap_or_default();
+            self.told.patched(i, watched::again(old, rows));
+        }
     }
 
     /// A view held no more: no change is pushed into it again, and its
     /// number is not given to another.
     pub fn unwatch(&mut self, view: usize) {
-        if let Some(w) = self.views.get_mut(view) {
-            *w = None;
-        }
+        self.views.remove(&view);
         self.told.updates.remove(&view);
     }
 
