@@ -74,7 +74,7 @@ impl Say for Calls<'_> {
     /// nothing is still one every peer is sent.
     fn progress(&mut self, place: harken_domain::ReportProgress) -> Result<(), String> {
         let id = place.media_id;
-        if !ark::db::read::<harken_domain::Harken, _>(&self.peer.log.store, |db| db.episode.has(id)) {
+        if !self.peer.log.read::<harken_domain::Harken, _>(|db| db.episode.has(id)) {
             return Err("not an episode".into());
         }
         self.peer.mutate("library.report_progress", &place).map(|_| ()).map_err(|why| {

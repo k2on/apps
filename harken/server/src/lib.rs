@@ -4,8 +4,8 @@
 //! the listening session's volatile space on the hub, the socket at
 //! `/sync`, `/healthz`, the sign-in routes and the web build's validator
 //! are `ark_peer`'s and `ark_auth`'s, generic over any app; the domain
-//! is `harken/domain`'s ArkLang, called through the bindings `build.rs`
-//! generates ([`domain`]). What is harken's is the things only harken has,
+//! is `harken/domain`'s plain Rust, linked and called as it is
+//! ([`domain`]). What is harken's is the things only harken has,
 //! each a module a test can reach:
 //!
 //! - [`library`]: the media directory, the feeds and the catalogue as a
@@ -15,9 +15,9 @@
 //! - [`covers`]: where a track's cover comes from, and `/media`;
 //! - [`assistant`]: the house's speakers, as devices in each account's
 //!   listening session — which is the domain's live state
-//!   (`harken/domain/listening.ark`), sequenced by the hub's volatile
+//!   (`harken/domain/src/listening.rs`), sequenced by the hub's volatile
 //!   authority, and needs nothing of this crate;
-//! - [`domain`]: the domain's bindings and the host's Rust beside them;
+//! - [`domain`]: the domain crate, as this crate calls it;
 //! - [`hosted`]: the domain the hub runs, harken's own, as this build compiled it;
 //! - and [`start`], which is the wiring: a [`Config`] read from the
 //!   environment (what the NixOS module sets) and the server built from it.
@@ -29,7 +29,7 @@
 //! the phone all sign in the same way. Without a provider it refuses to
 //! start, unless told it is on a laptop (`HARKEN_DEV_AUTH=1`).
 //!
-//! A device is a session (`harken/domain/devices.ark`): a connection's
+//! A device is a session (`harken/domain/src/devices.rs`): a connection's
 //! volatile `Hello` says what the device is, and the hub authors `on_join`
 //! with it, its user and id the verified login's ([`device`]).
 

@@ -48,10 +48,11 @@ what is true of a `media` row as an episode of one), `album` and `person`, `work
 `credit` (a work is not a recording, and neither is an album),
 `playlist` and `playlist_item`, and `play`, a track somebody heard. Every
 reference is checked, and `play` has none: it carries the track as it was
-heard, so a removed track keeps its plays. `library` is
-the router the scanner and the describing verbs are on; `playlists` has the
-`owned` middleware, which hands a body the playlist its input names if it
-is the caller's and refuses `not your playlist` otherwise.
+heard, so a removed track keeps its plays. What the scanner and the
+describing verbs author in `library` asks the library's role
+(`library::is_library`); a function of `playlists` reads the playlist its
+input names through `playlists::owned`, which refuses `not your playlist`
+when it is not the caller's.
 
 Four decisions that each show on screen:
 

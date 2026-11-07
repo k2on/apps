@@ -449,7 +449,7 @@ struct Scan {
 
 /// What `f` reads of what a peer holds.
 fn held<T>(p: &Peer, f: impl FnOnce(&ark::db::Db<Harken>) -> T) -> T {
-    ark::db::read::<Harken, _>(&p.log.store, f)
+    p.log.read::<Harken, _>(f)
 }
 
 impl Scan {
