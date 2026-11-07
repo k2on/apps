@@ -2,7 +2,7 @@
 # Type-check what of money's iOS app Linux can: every file under Money/ that
 # imports nothing of Apple's but Foundation and Combine — the budget's
 # arithmetic, the first run's machine, the session and the model — with the
-# generated types (Gen/Money.swift), the Swift UniFFI writes for money's
+# Swift UniFFI writes for money's
 # library and the bridge's typed half, against the library's C headers, a
 # stand-in for the two things of Combine's that Model.swift names
 # (ObservableObject, @Published) and ArkUI's Foundation half (ArkUICore).
@@ -28,7 +28,7 @@ OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
 # The app's files Linux can read: none of Apple's frameworks but Foundation and Combine.
-SOURCES=("$APP/Gen/Money.swift")
+SOURCES=()
 for f in "$APP"/*.swift; do
   if ! grep -qE '^import (SwiftUI|UIKit|AVFoundation|AVKit|MediaPlayer|AuthenticationServices|ImageIO|CoreGraphics|UniformTypeIdentifiers|Charts)' "$f"; then
     SOURCES+=("$f")
