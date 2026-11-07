@@ -11,7 +11,7 @@
 //! or expired, or of a person whose roles changed ([`Auth::watcher`]).
 //!
 //! ```ignore
-//! let auth = Arc::new(Auth::open::<App>(Mode::Dev, "http://127.0.0.1:8787", &data)?.allow_redirect("myapp://"));
+//! let auth = Arc::new(Auth::open(Mode::Dev, "http://127.0.0.1:8787", &data)?.allow_redirect("myapp://"));
 //! // ark-peer does the rest: `.auth(auth)` mounts these routes, hands the
 //! // hub over (`Auth::serve`) and plugs in the authenticator and watcher.
 //! ```
@@ -31,7 +31,7 @@ use ark::row::Row;
 use ark::store::{Change, Store};
 
 use crate::oidc::{Challenge, Provider};
-use crate::rows::{current, live, AuthTables, Role, SignIn, Signed};
+use crate::rows::{current, live, Role, SignIn, Signed};
 use crate::{Account, Login};
 
 #[cfg(feature = "server")]
@@ -150,9 +150,8 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Signing in by `mode` at `public_url` to an app of schema `S`,
-    /// tokens signed with `key`.
-    pub fn new<S: AuthTables>(mode: Mode, public_url: &str, key: &[u8]) -> Self {
+    /// Signing in by `mode` at `public_url`, tokens signed with `key`.
+    pub fn new(mode: Mode, public_url: &str, key: &[u8]) -> Self {
         Auth {
             mode,
             public_url: public_url.trim_end_matches('/').to_string(),
@@ -170,8 +169,8 @@ impl Auth {
     }
 
     /// [`Auth::new`] with the key kept in `data` ([`key_file`]).
-    pub fn open<S: AuthTables>(mode: Mode, public_url: &str, data: &Path) -> std::io::Result<Self> {
-        Ok(Auth::new::<S>(mode, public_url, &key_file(&data.join("session.key"))?))
+    pub fn open(mode: Mode, public_url: &str, data: &Path) -> std::io::Result<Self> {
+        Ok(Auth::new(mode, public_url, &key_file(&data.join("session.key"))?))
     }
 
     /// How long a session lasts from issue.

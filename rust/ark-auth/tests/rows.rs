@@ -45,7 +45,7 @@ fn signed_in(hub: &Memory, id: &str, user: &str, expires_ms: i64) {
 }
 
 fn dev_auth() -> Auth {
-    Auth::new::<App>(Mode::Dev, "https://app.example/", b"the key").allow_redirect("myapp://")
+    Auth::new(Mode::Dev, "https://app.example/", b"the key").allow_redirect("myapp://")
 }
 
 /// An auth writing to a hub of its own.
@@ -167,7 +167,7 @@ fn a_token_is_judged_by_its_signature() {
     let a = dev_auth();
     let token = a.mint("s1");
     assert_eq!(a.verify(&token), Some("s1"));
-    let other = Auth::new::<App>(Mode::Dev, "https://app.example/", b"another key").mint("s1");
+    let other = Auth::new(Mode::Dev, "https://app.example/", b"another key").mint("s1");
     assert_eq!(a.verify(&other), None, "another server's key");
     let (_, sig) = token.split_once('.').unwrap();
     assert_eq!(a.verify(&format!("s2.{sig}")), None, "another session under this one's signature");
@@ -190,7 +190,7 @@ fn a_token_proves_a_live_session_only() {
     let login = auth.issue(&alice(), "a laptop").unwrap();
     let who = authenticate(&login.token).expect("a live session");
     assert_eq!((who.actor.as_str(), who.session.as_str()), ("alice", login.session.as_str()));
-    let forged = Auth::new::<App>(Mode::Dev, "https://app.example/", b"another key").mint(&login.session);
+    let forged = Auth::new(Mode::Dev, "https://app.example/", b"another key").mint(&login.session);
     assert!(authenticate(&forged).is_none(), "another key");
     assert!(authenticate(&auth.mint("nobody-wrote-this")).is_none(), "no row");
     let expires = login.expires_ms;
@@ -306,7 +306,7 @@ fn a_code_goes_only_where_it_is_allowed() {
 /// `scanner`.
 #[test]
 fn a_login_holds_its_own_roles_and_the_configured_ones() {
-    let (a, hub) = served(Auth::new::<App>(Mode::Dev, "https://app.example/", b"k").with_roles([("library", vec!["alice"])]));
+    let (a, hub) = served(Auth::new(Mode::Dev, "https://app.example/", b"k").with_roles([("library", vec!["alice"])]));
     let account = Account {
         roles: vec!["scanner".into()],
         ..alice()
@@ -336,9 +336,9 @@ fn the_key_is_kept() {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
-    let a = Auth::open::<App>(Mode::Dev, "http://x", &dir).unwrap();
+    let a = Auth::open(Mode::Dev, "http://x", &dir).unwrap();
     assert_eq!(
-        a.verify(&Auth::new::<App>(Mode::Dev, "http://x", &key).mint("s")),
+        a.verify(&Auth::new(Mode::Dev, "http://x", &key).mint("s")),
         Some("s"),
         "opened with the kept key"
     );

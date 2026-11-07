@@ -490,5 +490,3 @@ pub struct Harken {
     pub source: Source,
     pub hearing: Hearing,
 }
-
-ark_auth::install!(Harken);

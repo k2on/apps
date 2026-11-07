@@ -291,7 +291,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // account's (`library::Scanner::start`): the scanner is the library,
     // and the role is what the library's mutations are guarded by
     // (`is_library`).
-    let auth = config.auth::<crate::domain::Harken>(PHONE_SCHEME).await?;
+    let auth = config.auth(PHONE_SCHEME).await?;
     tracing::info!("data in {}", config.data.display());
     // A person's Favorites, made once, here, at their first sign-in.
     let auth = Arc::new(auth.welcome("playlists.welcome"));

@@ -14,10 +14,9 @@
 //! by scope ([`FEED`]) holds only its person's sign-ins and roles.
 //!
 //! The functions are written once over any schema holding the two tables
-//! ([`AuthTables`], which [`install!`] implements) and registered by
-//! [`register`].
+//! (`db.tab::<SignIn>()`) and registered by [`register`]:
+//! `.with(ark_auth::register::<App>)`.
 
-use ark::db::Tab;
 use ark::prelude::*;
 
 /// The role that grants roles.
@@ -91,39 +90,8 @@ pub struct Grant {
     pub role: String,
 }
 
-/// A schema holding the two tables: their handles.
-pub trait AuthTables: Tables + Sized {
-    fn sign_in<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, SignIn>;
-    fn sign_in_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, SignIn>;
-    fn role<'a, 't>(db: &'a Db<'t, Self>) -> &'a Tab<'t, Role>;
-    fn role_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Role>;
-}
-
-/// `install!(App)`: [`AuthTables`] for a schema whose tables `sign_in` and
-/// `role` are [`SignIn`] and [`Role`]. The app registers the functions
-/// with `.with(ark_auth::register::<App>)`.
-#[macro_export]
-macro_rules! install {
-    ($s:ty) => {
-        impl $crate::AuthTables for $s {
-            fn sign_in<'a, 't>(db: &'a ::ark::db::Db<'t, Self>) -> &'a ::ark::db::Tab<'t, $crate::SignIn> {
-                &db.sign_in
-            }
-            fn sign_in_mut<'a, 't>(db: &'a mut ::ark::db::Db<'t, Self>) -> &'a mut ::ark::db::Tab<'t, $crate::SignIn> {
-                &mut db.sign_in
-            }
-            fn role<'a, 't>(db: &'a ::ark::db::Db<'t, Self>) -> &'a ::ark::db::Tab<'t, $crate::Role> {
-                &db.role
-            }
-            fn role_mut<'a, 't>(db: &'a mut ::ark::db::Db<'t, Self>) -> &'a mut ::ark::db::Tab<'t, $crate::Role> {
-                &mut db.role
-            }
-        }
-    };
-}
-
 /// The functions, registered by name.
-pub fn register<S: AuthTables>(d: Domain) -> Domain {
+pub fn register<S: Tables>(d: Domain) -> Domain {
     d.mutator(REVOKE, revoke::<S>)
         .mutator(GRANT, grant::<S>)
         .mutator(UNGRANT, revoke_role::<S>)
@@ -140,9 +108,9 @@ pub fn live(s: &SignIn, now: i64) -> bool {
 /// this store does not hold is nothing here — a device signing out before
 /// its session synced — and the server's run, which holds every one,
 /// judges it.
-pub fn revoke<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result<(), String> {
-    match S::sign_in(db).get(input.id) {
-        Some(s) if s.user == ctx.user() => S::sign_in_mut(db).update(SignIn { revoked: true, ..s }),
+pub fn revoke<S: Tables>(ctx: &Ctx, db: &mut Db<S>, input: Revoke) -> Result<(), String> {
+    match db.tab::<SignIn>().get(input.id) {
+        Some(s) if s.user == ctx.user() => db.tab::<SignIn>().update(SignIn { revoked: true, ..s }),
         Some(_) => Err("not your session".into()),
         None => Ok(()),
     }
@@ -156,18 +124,18 @@ fn admin(ctx: &Ctx) -> Result<(), String> {
 }
 
 /// A role granted; held already, nothing.
-pub fn grant<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
+pub fn grant<S: Tables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
     admin(ctx)?;
-    S::role_mut(db).put(Role {
+    db.tab::<Role>().put(Role {
         user: input.user,
         role: input.role,
     })
 }
 
 /// A grant taken back; not held, nothing.
-pub fn revoke_role<S: AuthTables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
+pub fn revoke_role<S: Tables>(ctx: &Ctx, db: &mut Db<S>, input: Grant) -> Result<(), String> {
     admin(ctx)?;
-    S::role_mut(db).delete((input.user, input.role))
+    db.tab::<Role>().delete((input.user, input.role))
 }
 
 /// The two tables alone: what [`current`] reads any store holding them as.
@@ -192,7 +160,7 @@ pub fn current(ctx: &Ctx, store: &ark::store::Store) -> Option<SignIn> {
 }
 
 /// The caller's live sign-ins, newest first.
-pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn>, String> {
+pub fn mine<S: Tables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn>, String> {
     let (user, now) = (ctx.user().to_string(), ctx.now);
     Ok(scan::<S, SignIn>()
         .filter(move |s| s.user == user && live(s, now))

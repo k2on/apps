@@ -49,8 +49,6 @@ pub struct App {
     pub role: Role,
 }
 
-ark_auth::install!(App);
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Input)]
 pub struct Ask {
     pub id: String,
@@ -91,7 +89,7 @@ fn config() -> Config {
 /// A server signing people in, and a worker of its: the account `bot`,
 /// holding the `worker` role.
 fn worker() -> (Handle<Authority>, Handle<Peer>) {
-    let auth = Arc::new(Auth::new::<App>(Mode::Dev, "http://localhost", b"key"));
+    let auth = Arc::new(Auth::new(Mode::Dev, "http://localhost", b"key"));
     let (hub, _) = Server::new(config()).auth(auth.clone()).build().unwrap();
     let bot = Account {
         id: "bot".into(),

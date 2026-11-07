@@ -23,8 +23,6 @@ pub struct App {
     pub role: ark_auth::Role,
 }
 
-ark_auth::install!(App);
-
 pub fn domain() -> Domain {
     Domain::new::<App>("app", "1").with(ark_auth::register::<App>)
 }

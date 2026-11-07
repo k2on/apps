@@ -46,8 +46,6 @@ pub struct App {
     pub role: Role,
 }
 
-ark_auth::install!(App);
-
 #[mutator("app.create_playlist")]
 fn create_playlist(ctx: &Ctx, db: &mut Db<App>, input: CreatePlaylist) -> Result<(), String> {
     db.playlist.insert(Playlist {
@@ -79,11 +77,7 @@ fn fixture() -> PathBuf {
 }
 
 fn auth(data: &Path) -> Arc<Auth> {
-    Arc::new(
-        Auth::open::<App>(Mode::Dev, "http://localhost", data)
-            .unwrap()
-            .with_ttl(100 * 365 * 86_400_000),
-    )
+    Arc::new(Auth::open(Mode::Dev, "http://localhost", data).unwrap().with_ttl(100 * 365 * 86_400_000))
 }
 
 /// The server over `data`: its hub, and its sign-in.

@@ -559,5 +559,3 @@ pub struct Money {
     pub asking: Asking,
     pub syncing: Syncing,
 }
-
-ark_auth::install!(Money);

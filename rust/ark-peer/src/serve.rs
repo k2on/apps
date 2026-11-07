@@ -136,15 +136,15 @@ impl Server {
 }
 
 impl Serve {
-    /// Sign-in as this says, over `S`'s sign-in rows (`ark_auth::server`):
+    /// Sign-in as this says (`ark_auth::server`):
     /// its key kept in the data directory; the app's own `scheme`
     /// (`harken://`) and the redirects allowed; the picture hosts trusted;
     /// and the roles granted. The app adds what is its own (its roles, its
     /// welcome).
-    pub async fn auth<S: ark_auth::AuthTables>(&self, scheme: &str) -> Result<Auth> {
+    pub async fn auth(&self, scheme: &str) -> Result<Auth> {
         std::fs::create_dir_all(&self.data).with_context(|| format!("creating {}", self.data.display()))?;
         let mode = self.sign_in.mode().await?;
-        let mut auth = Auth::open::<S>(mode, &self.public_url(), &self.data)
+        let mut auth = Auth::open(mode, &self.public_url(), &self.data)
             .context("the session key")?
             .allow_redirect(scheme)
             .with_roles(self.roles.clone());

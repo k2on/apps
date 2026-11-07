@@ -15,10 +15,10 @@ them in with two fields, one line and one registration.
   `Grant`; the functions `session.revoke` (its owner's only),
   `session.current` (the caller's live session, granted roles merged),
   `session.mine` (a view), `role.grant` and `role.revoke` (an `ADMIN`'s
-  only), written once over any schema that is `AuthTables`; `feed(scope)`
+  only), written once over any schema holding the two tables; `feed(scope)`
   adds that a connection holds its person's sign-ins and roles only.
-- **server** (natively): the one relying party. `Auth::open::<App>(mode,
-  public_url, data)` (or `Auth::new::<App>(.., key)`) holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
+- **server** (natively): the one relying party. `Auth::open(mode,
+  public_url, data)` (or `Auth::new(.., key)`) holds the mode (`Mode::Oidc(Provider)` or `Mode::Dev`), the pending
   logins and the one-minute single-use codes; `server::router(auth)` is
   `/auth/login`, `/auth/callback`, `/auth/exchange` as an axum 0.7 `Router`.
 - **sessions**: a session is one login on one device, and a `SignIn` row
@@ -79,8 +79,7 @@ them in with two fields, one line and one registration.
 ## A server
 
 ```rust
-// the app's schema: `sign_in: ark_auth::SignIn, role: ark_auth::Role`, then
-ark_auth::install!(App);
+// the app's schema holds `sign_in: ark_auth::SignIn, role: ark_auth::Role`,
 // and its domain: `.with(ark_auth::register::<App>)`.
 
 use std::sync::Arc;
@@ -92,7 +91,7 @@ let mode = match issuer {
     None => Mode::Dev, // only when asked for, and said loudly
 };
 let auth = Arc::new(
-    Auth::open::<App>(mode, &public_url, &data)?
+    Auth::open(mode, &public_url, &data)?
         .allow_redirect("myapp://")
         // role → the account ids holding it: the provider's `sub`, or a dev name
         .with_roles([("library", vec!["scanner"]), ("admin", vec!["a1b2-sub"])]),

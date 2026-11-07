@@ -16,7 +16,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
-use common::{App, Memory};
+use common::Memory;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
@@ -83,7 +83,7 @@ fn serve() -> (tokio::runtime::Runtime, Arc<Mutex<Fake>>, String) {
     rt.spawn(async move { axum::serve(pl, app).await.unwrap() });
     let provider = Provider::discover(&issuer, "harken", SECRET, &["openid", "profile", "email"]).expect("discovered");
     let (sl, server) = listen(&rt);
-    let auth = Arc::new(Auth::new::<App>(Mode::Oidc(provider), &server, b"key"));
+    let auth = Arc::new(Auth::new(Mode::Oidc(provider), &server, b"key"));
     auth.serve(Box::new(fake.lock().unwrap().rows.clone()));
     rt.spawn(async move { axum::serve(sl, router(auth)).await.unwrap() });
     (rt, fake, server)

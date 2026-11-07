@@ -209,7 +209,7 @@ pub async fn start(config: Config) -> Result<Server> {
     // The roles the configuration grants, and the importer's own `bank`,
     // by construction: asked at every connection and stamped on every
     // entry that connection pushes.
-    let auth = config.auth::<money_domain::Money>(PHONE_SCHEME).await?;
+    let auth = config.auth(PHONE_SCHEME).await?;
     eprintln!("money-server: data in {}", config.data.display());
     eprintln!("money-server: {}", auth.mode().announce());
     let auth = Arc::new(auth.with_roles([(money_domain::BANK, vec![importer::ACCOUNT])]));

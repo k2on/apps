@@ -89,10 +89,7 @@ fn a_login_is_a_row_and_its_token_is_judged_by_it() {
 #[test]
 fn an_expired_session_is_closed_and_turned_away() {
     let rt = runtime();
-    let auth = Arc::new(
-        Auth::new::<harken_server::domain::Harken>(Mode::Dev, "http://127.0.0.1", b"key")
-            .with_ttl(1_500),
-    );
+    let auth = Arc::new(Auth::new(Mode::Dev, "http://127.0.0.1", b"key").with_ttl(1_500));
     let config = harken_player::config::hub(&harken_domain::shared(), Some(100));
     let running = rt
         .block_on(

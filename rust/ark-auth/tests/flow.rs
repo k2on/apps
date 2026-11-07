@@ -7,14 +7,14 @@ mod common;
 use std::sync::Arc;
 
 use ark_auth::server::{router, Auth, Mode};
-use common::{App, Memory};
+use common::Memory;
 
 fn serve() -> (tokio::runtime::Runtime, String, Arc<Auth>, Memory) {
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
     let (addr, auth) = rt.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let auth = Arc::new(Auth::new::<App>(Mode::Dev, &format!("http://{addr}"), b"key"));
+        let auth = Arc::new(Auth::new(Mode::Dev, &format!("http://{addr}"), b"key"));
         let app = router(auth.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (addr, auth)
