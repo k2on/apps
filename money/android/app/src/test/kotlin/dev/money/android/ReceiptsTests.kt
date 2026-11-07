@@ -47,7 +47,7 @@ class ReceiptsTests {
         // Taken off, it waits for another to say what paid for it.
         book.pay(r.id, null)
         assertTrue(l.receiptsOf(t.id, "").isEmpty())
-        assertTrue(l.unmatched.any { it.id == r.id })
+        assertTrue(l.unmatched(t.amount, t.date).any { it.id == r.id })
         book.pay(r.id, t.id)
         assertEquals(r.id, book.register(acc).first { it.id == t.id }.receipt)
     }

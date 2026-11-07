@@ -14,7 +14,7 @@ import SwiftUI
 struct MoneyApp: App {
     @StateObject private var model: Model
     /// The views the screens hold (`.holding`), told what moved by the model.
-    @State private var watched: Watched<MoneyView>
+    @StateObject private var watched: Watched<MoneyView>
     @Environment(\.scenePhase) private var phase
     @State private var wasAway = false
 
@@ -28,14 +28,14 @@ struct MoneyApp: App {
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }
         _model = StateObject(wrappedValue: model)
-        _watched = State(initialValue: watched)
+        _watched = StateObject(wrappedValue: watched)
     }
 
     var body: some Scene {
         WindowGroup {
             Root()
                 .environmentObject(model)
-                .environment(watched)
+                .environmentObject(watched)
                 .tint(Color.accent)
                 // The derived square in the green (ArkUI's are neutral).
                 .environment(\.squares, .green)

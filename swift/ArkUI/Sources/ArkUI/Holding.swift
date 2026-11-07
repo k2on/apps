@@ -10,18 +10,20 @@
 // Nothing here splices, counts or keeps rows: the core holds each view by
 // count, keeps its rows spliced and says which views moved; this turns that
 // into SwiftUI's observation. The app puts one `Watched` in the environment
-// (`.environment(watched)`), its `hold` the session's.
-import Observation
+// (`.environmentObject(watched)`), its `hold` the session's.
+//
+// An `ObservableObject`, not `@Observable`: the Observation macros need the
+// compiler's plugin server, which a sandboxed nix build cannot run.
+import Combine
 import SwiftUI
 
 /// An app's views by key `V` (its `MoneyView`, its `HarkenView`): `hold` is
 /// its session's hold, and `moved` is told — on the main actor — which views
 /// moved, which whatever reads them through `read` is drawn again for.
 @MainActor
-@Observable
-public final class Watched<V: Hashable> {
-    private var ticks = [V: Int]()
-    @ObservationIgnored private let holdOf: (V) -> AnyObject?
+public final class Watched<V: Hashable>: ObservableObject {
+    @Published private var ticks = [V: Int]()
+    private let holdOf: (V) -> AnyObject?
 
     public init(hold: @escaping (V) -> AnyObject?) {
         holdOf = hold
@@ -50,14 +52,14 @@ public final class Watched<V: Hashable> {
 /// `view` held while the modified view is on screen; none holds nothing.
 private struct Holding<V: Hashable>: ViewModifier {
     let view: V?
-    @Environment(Watched<V>.self) private var watched: Watched<V>?
+    @EnvironmentObject private var watched: Watched<V>
     @State private var held: AnyObject?
 
     func body(content: Content) -> some View {
         content
-            .onAppear { held = view.flatMap { watched?.hold($0) } }
+            .onAppear { held = view.flatMap { watched.hold($0) } }
             .onDisappear { held = nil }
-            .onChange(of: view) { _, now in held = now.flatMap { watched?.hold($0) } }
+            .onChange(of: view) { _, now in held = now.flatMap { watched.hold($0) } }
     }
 }
 

@@ -68,7 +68,7 @@ extension EnvironmentValues {
 
 struct Shell: View {
     @EnvironmentObject private var model: Model
-    @Environment(Watched<MoneyView>.self) private var watched
+    @EnvironmentObject private var watched: Watched<MoneyView>
     @State private var tab: Pane = .budget
     @State private var sheet: Sheet? = nil
     /// Each tab's back stack (ArkUI's `Navigator`), of money's routes.
@@ -99,7 +99,7 @@ struct Shell: View {
         .sheet(item: $sheet) { s in
             sheetView(s)
                 .environmentObject(model)
-                .environment(watched)
+                .environmentObject(watched)
                 .environment(\.present) { next in present(next) }
         }
         .toast($model.notice)

@@ -6,6 +6,7 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
+import uniffi.money_domain.AccountKind
 import uniffi.money_domain.cardGroupId
 import dev.arkui.Landing
 import dev.arkui.landing
@@ -199,7 +200,7 @@ class ReorderTests {
 
     @Test fun theCardsPaymentsAreDraggedAmongThemselves() {
         // A second card, so the cards' group has two to put in order.
-        book.openAccount("Visa", "credit", onBudget = true, balance = 0)
+        book.openAccount("Visa", AccountKind.CREDIT, onBudget = true, balance = 0)
         val pays = budget.first().second
         assertEquals(2, pays.size)
         val after = drop(categoryKey(pays[0].categoryId), categoryKey(pays[1].categoryId))
