@@ -829,9 +829,10 @@ impl Peer {
 
     /// What this peer said of itself since, out of the outbox and to its
     /// server as a call nobody answers ([`ark::frames::EVENTS`]), a page at
-    /// a time.
+    /// a time — what it said before a sign-in among it.
     pub(crate) fn ship(&mut self) {
-        let events = observe::take(&self.label(), 256);
+        let origin = self.label().split_off(self.log.me.session.len());
+        let events = observe::take(&origin, 256);
         if !events.is_empty() {
             self.call(0, ark::frames::EVENTS, events.to_bytes());
         }

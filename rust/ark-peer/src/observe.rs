@@ -97,10 +97,11 @@ pub(crate) fn collect(events: Vec<Event>) {
     }
 }
 
-/// The outbox's events of `peer`, up to `n`, taken.
-pub(crate) fn take(peer: &str, n: usize) -> Vec<Event> {
+/// The outbox's events of the peers whose names end `origin` (its origin,
+/// whoever was signed in when it said them), up to `n`, taken.
+pub(crate) fn take(origin: &str, n: usize) -> Vec<Event> {
     let mut out = OUT.lock().unwrap_or_else(|p| p.into_inner());
-    let (mine, rest): (Vec<Event>, Vec<Event>) = out.drain(..).partition(|e| e.peer == peer);
+    let (mine, rest): (Vec<Event>, Vec<Event>) = out.drain(..).partition(|e| e.peer.ends_with(origin));
     out.extend(rest);
     let mut mine: VecDeque<Event> = mine.into();
     let taken: Vec<Event> = mine.drain(..n.min(mine.len())).collect();

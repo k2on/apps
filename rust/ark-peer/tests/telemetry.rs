@@ -12,11 +12,17 @@ use ark_peer::observe::{install, Event, Sink};
 use ark_peer::{dev, Authority, Config, Memory, Peer};
 use arkdb::demo::{demo, CreatePlaylist};
 
+/// The process's sink, the outbox, installed once for every test here.
+fn outbox() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| assert!(install(Sink::Outbox).is_ok()));
+}
+
 /// Falsified by the hub taking the events' call for one of its app's
 /// (`take_calls`): nothing came back marked as sent by the device's login.
 #[test]
 fn a_devices_events_reach_its_server_named_by_its_login() {
-    assert!(install(Sink::Outbox).is_ok());
+    outbox();
     let config = || Config::of(Arc::new(demo()));
     let mut hub = Authority::serve(config(), Box::new(Memory::default()), 0).unwrap();
     let mut d = Peer::open(config(), dev("alice@phone").unwrap(), Box::new(Memory::default()));
@@ -50,4 +56,24 @@ fn a_devices_events_reach_its_server_named_by_its_login() {
         .filter(|e| e.fields.iter().any(|(k, v)| k == "from" && v.contains("phone")))
         .count();
     assert!(from > 0, "the server collected the device's events, marked: {back:?}");
+}
+
+/// What a device said of itself under one login is shipped under the next
+/// (its origin's, whoever was signed in). Falsified by the outbox taken by
+/// the whole name, session and all: what it said as `bob@phone` stayed.
+#[test]
+fn what_a_device_said_before_a_sign_in_is_shipped_after() {
+    outbox();
+    let mut d = Peer::open(Config::of(Arc::new(demo())), dev("bob@phone").unwrap(), Box::new(Memory::default()));
+    d.connected();
+    d.linked = true;
+    d.sign_in(dev("bob@tablet").unwrap());
+    let shipped: Vec<Event> = (d.take_frames().iter())
+        .filter_map(|b| match ark::frames::Frame::dec(b) {
+            Ok(ark::frames::Frame::Call { name, input, .. }) if name == ark::frames::EVENTS => Vec::<Event>::from_bytes(&input).ok(),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(shipped.iter().any(|e| e.peer.starts_with("bob@phone/")), "{shipped:?}");
 }

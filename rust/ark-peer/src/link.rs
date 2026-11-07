@@ -317,6 +317,10 @@ impl Peer {
         self.dial_if_due(crate::monotonic_ms());
         self.tick(crate::now_ms());
         self.jobs(crate::now_ms());
+        // What it said of itself, once a pump.
+        if self.linked && self.link.wire.is_some() {
+            self.ship();
+        }
         self.flush();
         p.shown |= !self.told.updates.is_empty() || std::mem::take(&mut self.transfers.arrived);
         p
@@ -325,9 +329,6 @@ impl Peer {
     /// What the machines have to say, sent — when there is a connection to
     /// send it on; a driver carrying frames by hand takes them itself.
     pub fn flush(&mut self) {
-        if self.linked && self.link.wire.is_some() {
-            self.ship();
-        }
         if let Some(w) = &mut self.link.wire {
             for f in std::mem::take(&mut self.frames) {
                 w.send(f);
