@@ -12,9 +12,9 @@
 // **The lists are spliced, not re-read.** The accounts, the groups, the
 // month's lines and its summary, what the month spent, what needs a look,
 // the payees, the banks, what their accounts feed and the reader's asks
-// of them are the kernel's maintained views (`LiveView<T>` over UniFFI's
-// records, no JSON per row), read once and, after every change, asked what
-// they did and their patches spliced into the lists the screens hold. The
+// of them are the kernel's maintained views (`LiveView<T>`, each row read
+// from its bytes), read once and, after every change, asked what they did
+// and their patches spliced into their rows. The
 // month's three are opened again when the month on screen changes. A
 // register is a view too, held by its account while a screen shows it
 // ([hold]) and let go when the last one leaves; so are what paid for a
@@ -72,36 +72,7 @@ extension Registers {
     static func key(_ account: Id?) -> String { account?.hex ?? all }
 }
 
-/// What the peer says when anything moved: the session's queue is told.
-private final class Told: Listener, @unchecked Sendable {
-    private let then: () -> Void
-    init(_ then: @escaping () -> Void) { self.then = then }
-    func changed() { then() }
-}
-
-/// A view and the list it is spliced into; on the session's queue only.
-final class Held<E> {
-    private let open: (Money) throws -> LiveView<E>
-    private var view: LiveView<E>? = nil
-    private(set) var rows = [E]()
-    init(_ open: @escaping (Money) throws -> LiveView<E>) { self.open = open }
-
-    func hydrate(_ m: Money) {
-        view = try? open(m)
-        rows = view?.rows() ?? []
-    }
-
-    /// What it did since last asked, spliced; true when it moved.
-    func update() -> Bool {
-        guard let v = view else { return false }
-        switch v.take() {
-        case .unchanged: return false
-        case .patched(let changes):
-            rows.splice(changes)
-            return true
-        }
-    }
-}
+typealias Held<E> = Kept<Money, E>
 
 /// How the session's peer is had: the household on a server, or the demo's.
 enum Opening {
@@ -138,11 +109,11 @@ final class Bridge {
     private var lines: Held<BudgetLine>
     private var summary: Held<Summary>
     private var spending: Held<SpendingLine>
-    private var registers = [String: (held: Held<TxnLine>, refs: Int)]()
+    private let registers = KeptBy<Money, Id?, TxnLine> { m, account in try m.register(Register(accountId: account)) }
     private let receipts = Held<ReceiptLine> { try $0.receipts() }
     private let photos = Held<PhotoLine> { try $0.photos() }
-    private var paid = [String: (held: Held<ReceiptLine>, refs: Int)]()
-    private var items = [String: (held: Held<ItemLine>, refs: Int)]()
+    private let paid = KeptBy<Money, Id, ReceiptLine> { m, txn in try m.forTxn(OneTxn(id: txn)) }
+    private let items = KeptBy<Money, String, ItemLine> { m, receipt in try m.receiptItems(OneReceipt(receiptId: receipt)) }
     /// The files asked for and not on the phone yet: the peer fetches them,
     /// and each drain looks again.
     private var wanted = [String: FileRef]()
@@ -204,7 +175,7 @@ final class Bridge {
         }
         let m = Money(peer: peer)
         money = m
-        peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
+        peer.setListener(listener: listener { [weak self] in self?.drainSoon() })
         accounts.hydrate(m)
         groups.hydrate(m)
         lines.hydrate(m)
@@ -217,9 +188,9 @@ final class Bridge {
         asks.hydrate(m)
         receipts.hydrate(m)
         photos.hydrate(m)
-        for (_, r) in registers { r.held.hydrate(m) }
-        for (_, r) in paid { r.held.hydrate(m) }
-        for (_, r) in items { r.held.hydrate(m) }
+        registers.hydrate(m)
+        paid.hydrate(m)
+        items.hydrate(m)
         copyAll()
         snap.loaded = true
         drain()
@@ -238,9 +209,9 @@ final class Bridge {
         snap.asks = asks.rows
         snap.receipts = receipts.rows
         snap.photos = photos.rows
-        for (k, r) in registers { snap.registers[k] = r.held.rows }
-        for (k, r) in paid { snap.paid[k] = r.held.rows }
-        for (k, r) in items { snap.items[k] = r.held.rows }
+        for (a, rows) in registers.rows { snap.registers[Registers.key(a)] = rows }
+        for (t, rows) in paid.rows { snap.paid[t.hex] = rows }
+        for (k, rows) in items.rows { snap.items[k] = rows }
     }
 
     private func drainSoon() {
@@ -281,11 +252,11 @@ final class Bridge {
         if banks.update() { snap.banks = banks.rows }
         if linked.update() { snap.linked = linked.rows }
         if asks.update() { snap.asks = asks.rows }
-        for (k, r) in registers where r.held.update() { snap.registers[k] = r.held.rows }
+        for (a, rows) in registers.update() { snap.registers[Registers.key(a)] = rows }
         if receipts.update() { snap.receipts = receipts.rows }
         if photos.update() { snap.photos = photos.rows }
-        for (k, r) in paid where r.held.update() { snap.paid[k] = r.held.rows }
-        for (k, r) in items where r.held.update() { snap.items[k] = r.held.rows }
+        for (t, rows) in paid.update() { snap.paid[t.hex] = rows }
+        for (k, rows) in items.update() { snap.items[k] = rows }
         fetch()
     }
 
@@ -336,100 +307,53 @@ final class Bridge {
 
     /// A register held once more while a screen shows it: `account`'s, or every account's.
     func hold(register account: Id?) {
-        let k = Registers.key(account)
         queue.async {
-            if var e = self.registers[k] {
-                e.refs += 1
-                self.registers[k] = e
-                return
-            }
-            let input = Register(accountId: account)
-            let h = Held<TxnLine> { try $0.register(input) }
-            self.registers[k] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.registers[k] = h.rows
+            guard let rows = self.registers.hold(account, self.money) else { return }
+            self.snap.registers[Registers.key(account)] = rows
             self.show()
         }
     }
 
     /// Held once less; let go when no screen holds it.
     func release(register account: Id?) {
-        let k = Registers.key(account)
         queue.async {
-            guard var e = self.registers[k] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.registers[k] = e
-            } else {
-                self.registers[k] = nil
-                self.snap.registers[k] = nil
-                self.show()
-            }
+            guard self.registers.release(account) else { return }
+            self.snap.registers[Registers.key(account)] = nil
+            self.show()
         }
     }
 
     /// What paid for a transaction held while a sheet shows it.
     func hold(paid txn: Id) {
-        let k = txn.hex
         queue.async {
-            if var e = self.paid[k] {
-                e.refs += 1
-                self.paid[k] = e
-                return
-            }
-            let h = Held<ReceiptLine> { try $0.forTxn(OneTxn(id: txn)) }
-            self.paid[k] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.paid[k] = h.rows
+            guard let rows = self.paid.hold(txn, self.money) else { return }
+            self.snap.paid[txn.hex] = rows
             self.show()
         }
     }
 
     func release(paid txn: Id) {
-        let k = txn.hex
         queue.async {
-            guard var e = self.paid[k] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.paid[k] = e
-            } else {
-                self.paid[k] = nil
-                self.snap.paid[k] = nil
-                self.show()
-            }
+            guard self.paid.release(txn) else { return }
+            self.snap.paid[txn.hex] = nil
+            self.show()
         }
     }
 
     /// A receipt's items held while a sheet shows them.
     func hold(items receipt: String) {
         queue.async {
-            if var e = self.items[receipt] {
-                e.refs += 1
-                self.items[receipt] = e
-                return
-            }
-            let h = Held<ItemLine> { try $0.receiptItems(OneReceipt(receiptId: receipt)) }
-            self.items[receipt] = (h, 1)
-            guard let m = self.money else { return }
-            h.hydrate(m)
-            self.snap.items[receipt] = h.rows
+            guard let rows = self.items.hold(receipt, self.money) else { return }
+            self.snap.items[receipt] = rows
             self.show()
         }
     }
 
     func release(items receipt: String) {
         queue.async {
-            guard var e = self.items[receipt] else { return }
-            e.refs -= 1
-            if e.refs > 0 {
-                self.items[receipt] = e
-            } else {
-                self.items[receipt] = nil
-                self.snap.items[receipt] = nil
-                self.show()
-            }
+            guard self.items.release(receipt) else { return }
+            self.snap.items[receipt] = nil
+            self.show()
         }
     }
 
@@ -530,9 +454,9 @@ final class Bridge {
         queue.async {
             self.closed = true
             self.money?.peer.setListener(listener: nil)
-            self.registers = [:]
-            self.paid = [:]
-            self.items = [:]
+            self.registers.clear()
+            self.paid.clear()
+            self.items.clear()
             self.wanted = [:]
             self.money = nil
             self.bank = nil

@@ -1,9 +1,9 @@
 // The typed half of the bridge (`docs/plan-v5.md` §1.16, N3), beside the
 // bindings UniFFI writes: what the Kotlin `arkdb gen` writes for a domain
 // stands on — a row id, a value read from its bytes in the kernel's format
-// (how a view's rows cross), a view's rows read as their type with what it
-// did, and JSON as the kernel reads and writes it (how an input crosses,
-// and the app's own JSON is read: Android's `org.json`).
+// (how a view's rows cross), a view's rows read as their type and kept, and
+// JSON as the kernel reads and writes it (how an input crosses, and the
+// app's own JSON is read: Android's `org.json`).
 package dev.arkdb.ffi
 
 import org.json.JSONArray
@@ -61,48 +61,38 @@ class Reader(private val b: ByteArray) {
 }
 
 /**
- * A view's rows read as `T`, and what it did since last taken (its [Op]s and the rows that came
- * with them): each row its bytes read by `read`. A view made again says so as its changes: its
- * rows removed and inserted.
+ * A view's rows read as `T` and kept: read when it is opened, and what the view did since spliced
+ * in by [update]. Each row is its bytes read by `read`. A view made again says so as its changes:
+ * its rows removed and inserted.
  */
-class View<T>(private val handle: ViewHandle, private val read: (Reader) -> T) : AutoCloseable {
-    fun rows(): List<T> = handle.rows().map { read(Reader(it)) }
+class View<T> private constructor(private val handle: ViewHandle, private val read: (Reader) -> T, private val held: ArrayList<T>) :
+    AutoCloseable {
+    constructor(handle: ViewHandle, read: (Reader) -> T) : this(handle, read, handle.rows().mapTo(ArrayList()) { read(Reader(it)) })
 
-    fun take(): Update<T> =
-        handle.take().let { t ->
-            if (t.ops.isEmpty()) Update.Unchanged
-            else t.rows.iterator().let { r ->
-                Update.Patched(t.ops.map { o ->
-                    when (o) {
-                        is Op.Insert -> Change.Insert(o.at.toInt(), read(Reader(r.next())))
-                        is Op.Remove -> Change.Remove(o.at.toInt())
-                        is Op.Update -> Change.Update(o.at.toInt(), read(Reader(r.next())))
-                    }
-                })
-            }
+    /** Its rows as of the last [update]. */
+    val rows: List<T> get() = held
+
+    /** What the view did since, spliced into [rows]: whether anything moved. */
+    fun update(): Boolean {
+        val t = handle.take()
+        val r = t.rows.iterator()
+        for (o in t.ops) when (o) {
+            is Op.Insert -> held.add(o.at.toInt(), read(Reader(r.next())))
+            is Op.Remove -> held.removeAt(o.at.toInt())
+            is Op.Update -> held[o.at.toInt()] = read(Reader(r.next()))
         }
+        return t.ops.isNotEmpty()
+    }
+
+    /** This view with each row made `f` of it: what is held from now on, in place of this. */
+    fun <U> map(f: (T) -> U): View<U> = View(handle, { f(read(it)) }, held.mapTo(ArrayList(), f))
 
     override fun close() = handle.close()
 }
 
-sealed class Update<out T> {
-    data object Unchanged : Update<Nothing>()
-    data class Patched<T>(val changes: List<Change<T>>) : Update<T>()
-}
-
-sealed class Change<out T> {
-    data class Insert<T>(val at: Int, val row: T) : Change<T>()
-    data class Remove(val at: Int) : Change<Nothing>()
-    data class Update<T>(val at: Int, val row: T) : Change<T>()
-}
-
-/** [changes] made to the list a screen holds. */
-fun <T> MutableList<T>.splice(changes: List<Change<T>>) {
-    for (c in changes) when (c) {
-        is Change.Insert -> add(c.at, c.row)
-        is Change.Remove -> removeAt(c.at)
-        is Change.Update -> set(c.at, c.row)
-    }
+/** What the peer says when anything moved: `f`, on the peer's thread. */
+fun listener(f: () -> Unit): Listener = object : Listener {
+    override fun changed() = f()
 }
 
 /** JSON as the kernel reads and writes it. */

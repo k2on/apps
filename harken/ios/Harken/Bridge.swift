@@ -80,81 +80,8 @@ struct Snapshot {
     var moved = 0
 }
 
-/// What the peer says when anything moved: the session's queue is told.
-private final class Told: Listener, @unchecked Sendable {
-    private let then: () -> Void
-    init(_ then: @escaping () -> Void) { self.then = then }
-    func changed() { then() }
-}
-
-/// A view and the list it is spliced into; on the session's queue only.
-private final class Held<E> {
-    let open: (Harken) throws -> LiveView<E>?
-    var view: LiveView<E>? = nil
-    var rows = [E]()
-    init(_ open: @escaping (Harken) throws -> LiveView<E>?) { self.open = open }
-
-    func hydrate(_ h: Harken) {
-        view = (try? open(h)) ?? nil
-        rows = view?.rows() ?? []
-    }
-
-    /// What it did since last asked, spliced; true when it moved.
-    func update() -> Bool {
-        guard let v = view else { return false }
-        switch v.take() {
-        case .unchanged: return false
-        case .patched(let changes):
-            rows.splice(changes)
-            return true
-        }
-    }
-}
-
-/// Views opened by a key while some page holds them, each held as many
-/// times as pages hold it, spliced like the rest and let go with the last;
-/// on the session's queue only.
-private final class Holds<E> {
-    private let open: (Harken, String) throws -> LiveView<E>
-    private var held = [String: (view: Held<E>, refs: Int)]()
-    init(_ open: @escaping (Harken, String) throws -> LiveView<E>) { self.open = open }
-
-    /// Held once more; its rows when it was opened just now, none when it was already held.
-    func hold(_ key: String, _ h: Harken?) -> [E]? {
-        if var e = held[key] {
-            e.refs += 1
-            held[key] = e
-            return nil
-        }
-        let open = self.open
-        let v = Held<E> { try open($0, key) }
-        held[key] = (v, 1)
-        guard let h = h else { return nil }
-        v.hydrate(h)
-        return v.rows
-    }
-
-    /// Held once less; true when nothing holds it now and it is let go.
-    func release(_ key: String) -> Bool {
-        guard var e = held[key] else { return false }
-        e.refs -= 1
-        if e.refs > 0 {
-            held[key] = e
-            return false
-        }
-        held[key] = nil
-        return true
-    }
-
-    /// Every held view that moved, and its rows now.
-    func update() -> [(String, [E])] {
-        var moved = [(String, [E])]()
-        for (k, e) in held where e.view.update() { moved.append((k, e.view.rows)) }
-        return moved
-    }
-
-    func clear() { held = [:] }
-}
+private typealias Held<E> = Kept<Harken, E>
+private typealias Holds<E> = KeptBy<Harken, String, E>
 
 final class Bridge {
     let server: String
@@ -190,7 +117,7 @@ final class Bridge {
     private let episodes = Holds<EpisodeDetailsEntry> { h, show in try h.episodeDetails(ShowInput(playlistId: Phone.noPlaylist, id: show)) }
     private let details = Held<TrackDetailsEntry> { try $0.trackDetails() }
     private let played = Held<Play> { try $0.lastPlayed() }
-    private var pages = [Page: (held: Held<LibraryEntry>, refs: Int)]()
+    private let pages = KeptBy<Harken, Page, LibraryEntry> { h, page in try Phone.view(h, page) }
     private let works = Holds<WorkSummary> { h, composer in try h.works(Works(composer: composer)) }
     private let work = Holds<WorkSummary> { h, id in try h.work(WorkInput(id: id)) }
     private let recordings = Holds<RecordingsEntry> { h, work in try h.recordings(Recordings(workId: work)) }
@@ -253,7 +180,7 @@ final class Bridge {
         let p = Player(peer: h.peer, me: login.session, dir: dir.path)
         p.attach(sound: sound)
         player = p
-        h.peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
+        h.peer.setListener(listener: listener { [weak self] in self?.drainSoon() })
         library.hydrate(h)
         playlists.hydrate(h)
         albums.hydrate(h)
@@ -353,7 +280,7 @@ final class Bridge {
         for (k, rows) in episodes.update() { snap.episodes[k] = Bridge.episodesByMedia(rows) }
         if details.update() { snap.details = Bridge.byMedia(details.rows) }
         if played.update() { snap.lastPlayed = played.rows.first }
-        for (page, p) in pages where p.held.update() { snap.pages[page] = p.held.rows }
+        for (page, rows) in pages.update() { snap.pages[page] = rows }
         for (k, rows) in works.update() { snap.works[k] = rows }
         for (k, rows) in work.update() { snap.work[k] = rows.first }
         for (k, rows) in recordings.update() { snap.recordings[k] = rows }
@@ -429,16 +356,8 @@ final class Bridge {
 
     // On `queue`: a page's tracks held once more; true when they were read just now.
     private func holdTracks(_ page: Page) -> Bool {
-        if var p = pages[page] {
-            p.refs += 1
-            pages[page] = p
-            return false
-        }
-        let held = Held<LibraryEntry> { try Phone.view($0, page) }
-        pages[page] = (held, 1)
-        guard let h = harken else { return false }
-        held.hydrate(h)
-        snap.pages[page] = held.rows
+        guard let rows = pages.hold(page, harken) else { return false }
+        snap.pages[page] = rows
         return true
     }
 
@@ -474,14 +393,7 @@ final class Bridge {
     func release(_ page: Page) {
         queue.async {
             for l in page.listings { self.release(l) }
-            guard var p = self.pages[page] else { return }
-            p.refs -= 1
-            if p.refs > 0 {
-                self.pages[page] = p
-                return
-            }
-            self.pages[page] = nil
-            self.snap.pages[page] = nil
+            if self.pages.release(page) { self.snap.pages[page] = nil }
         }
     }
 
@@ -639,7 +551,7 @@ final class Bridge {
             self.harken?.peer.setListener(listener: nil)
             self.player?.attach(sound: nil)
             self.player = nil
-            self.pages = [:]
+            self.pages.clear()
             self.works.clear()
             self.work.clear()
             self.recordings.clear()

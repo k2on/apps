@@ -12,7 +12,7 @@
 // at rest runs nothing: there is no clock here.
 //
 // **The lists are spliced, not re-read**, as harken's are: each view is read
-// once and then asked what it did (`Held`). The month's three views are
+// once and then asked what it did (`View.update`). The month's three views are
 // opened again for another month; a register is held while a screen shows
 // it and let go after the last one leaves.
 //
@@ -23,12 +23,10 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.Refusal
-import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
-import dev.arkdb.ffi.splice
+import dev.arkdb.ffi.listener
 import dev.money.android.gen.AddCategory
 import dev.money.android.gen.AddPhoto
 import dev.money.android.gen.FileRef
@@ -192,23 +190,6 @@ data class Ledger(
     }
 }
 
-/** A view read once and then spliced: the rows a screen holds. */
-private class Held<T>(private val view: View<T>) : AutoCloseable {
-    val rows: ArrayList<T> = ArrayList(view.rows())
-
-    /** What the view did since, spliced in; whether anything moved. */
-    fun settle(): Boolean =
-        when (val u = view.take()) {
-            is Update.Unchanged -> false
-            is Update.Patched -> {
-                rows.splice(u.changes)
-                true
-            }
-        }
-
-    override fun close() = view.close()
-}
-
 /** A transaction being entered or corrected: what the form holds. */
 data class TxnForm(
     /** The one corrected; none for a new one. */
@@ -272,20 +253,20 @@ private constructor(
 
     // Held on `run`'s thread only.
     private var month: String = today.take(7)
-    private var accounts: Held<AccountLine>? = null
-    private var groups: Held<GroupLine>? = null
-    private var lines: Held<BudgetLine>? = null
-    private var summary: Held<Summary>? = null
-    private var spending: Held<SpendingLine>? = null
-    private var inbox: Held<TxnLine>? = null
-    private var payees: Held<PayeeLine>? = null
-    private var banks: Held<BankLine>? = null
-    private var linked: Held<LinkedLine>? = null
-    private var asks: Held<AskLine>? = null
-    private var photos: Held<PhotoLine>? = null
-    private var receipts: Held<ReceiptLine>? = null
-    private val items = HashMap<String, Pair<Held<ItemLine>, Int>>()
-    private val registers = HashMap<String, Pair<Held<TxnLine>, Int>>()
+    private var accounts: View<AccountLine>? = null
+    private var groups: View<GroupLine>? = null
+    private var lines: View<BudgetLine>? = null
+    private var summary: View<Summary>? = null
+    private var spending: View<SpendingLine>? = null
+    private var inbox: View<TxnLine>? = null
+    private var payees: View<PayeeLine>? = null
+    private var banks: View<BankLine>? = null
+    private var linked: View<LinkedLine>? = null
+    private var asks: View<AskLine>? = null
+    private var photos: View<PhotoLine>? = null
+    private var receipts: View<ReceiptLine>? = null
+    private val items = HashMap<String, Pair<View<ItemLine>, Int>>()
+    private val registers = HashMap<String, Pair<View<TxnLine>, Int>>()
     private var syncing = false
 
     /**
@@ -297,21 +278,18 @@ private constructor(
     private class Awaiting(val after: Id?)
 
     private fun start() {
-        accounts = Held(money.accounts())
-        groups = Held(money.groups())
+        accounts = money.accounts()
+        groups = money.groups()
         openMonth()
-        inbox = Held(money.inbox())
-        payees = Held(money.payees())
-        banks = Held(money.banks())
-        linked = Held(money.linked())
-        asks = Held(money.asks())
-        photos = Held(money.photos())
-        receipts = Held(money.receipts())
+        inbox = money.inbox()
+        payees = money.payees()
+        banks = money.banks()
+        linked = money.linked()
+        asks = money.asks()
+        photos = money.photos()
+        receipts = money.receipts()
         if (listen) {
-            peer.setListener(
-                object : Listener {
-                    override fun changed() = drainSoon()
-                })
+            peer.setListener(listener { drainSoon() })
         }
         drain()
     }
@@ -319,9 +297,9 @@ private constructor(
     private fun openMonth() {
         listOf(lines, summary, spending).forEach { it?.close() }
         val m = Month(month)
-        lines = Held(money.month(m))
-        summary = Held(money.summary(m))
-        spending = Held(money.spending(m))
+        lines = money.month(m)
+        summary = money.summary(m)
+        spending = money.spending(m)
     }
 
     private fun post(f: () -> Unit) {
@@ -350,9 +328,9 @@ private constructor(
     private fun drain() {
         draining.set(false)
         if (closed) return
-        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.settle()
-        for ((h, _) in items.values) h.settle()
-        for ((h, _) in registers.values) h.settle()
+        for (h in listOf(accounts, groups, lines, summary, spending, inbox, payees, banks, linked, asks, photos, receipts)) h?.update()
+        for ((h, _) in items.values) h.update()
+        for ((h, _) in registers.values) h.update()
         for (r in peer.takeRefusals()) say("The server didn't take a change: ${r.refused}")
         awaiting?.let { w ->
             when (val f = follow(asks?.rows.orEmpty(), w.after)) {
@@ -621,7 +599,7 @@ private constructor(
         val k = Ledger.key(account)
         val had = registers[k]
         registers[k] =
-            if (had != null) had.first to had.second + 1 else Held(money.register(Register(account))) to 1
+            if (had != null) had.first to had.second + 1 else money.register(Register(account)) to 1
     }
 
     fun releaseRegister(account: Id?) = post {
@@ -638,7 +616,7 @@ private constructor(
     /** Hold a receipt's items while a screen shows it. */
     fun holdItems(receipt: String) = post {
         val had = items[receipt]
-        items[receipt] = if (had != null) had.first to had.second + 1 else Held(money.receiptItems(OneReceipt(receipt))) to 1
+        items[receipt] = if (had != null) had.first to had.second + 1 else money.receiptItems(OneReceipt(receipt)) to 1
     }
 
     fun releaseItems(receipt: String) = post {

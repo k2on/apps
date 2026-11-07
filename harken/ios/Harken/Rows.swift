@@ -273,12 +273,12 @@ enum Phone {
     /// A page's tracks once, and the view let go; none for a page of none, or when it is refused.
     static func rows(_ h: Harken, _ page: Page) -> [LibraryEntry] {
         guard let v = try? view(h, page) else { return [] }
-        return v.rows()
+        return v.rows
     }
 
     /// A view's rows once, and the view let go; none when it is refused.
     static func once<E>(_ v: () throws -> LiveView<E>) -> [E] {
-        (try? v().rows()) ?? []
+        (try? v().rows) ?? []
     }
 
     /// The library's rows whose title or creator holds `needle` (the domain's `search`).

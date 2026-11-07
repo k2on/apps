@@ -21,12 +21,10 @@
 // is said once, in a sentence, as a notice.
 package dev.harken.android
 
-import dev.arkdb.ffi.Change
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Refusal
 import dev.arkdb.ffi.Outcome
 import dev.arkdb.ffi.Status
-import dev.arkdb.ffi.Update
 import dev.arkdb.ffi.View
 import dev.harken.android.gen.Credits
 import dev.harken.android.gen.CreditsEntry
@@ -213,16 +211,6 @@ data class Diagnostics(
     val changes: List<Pair<String, String>>,
 )
 
-/** `changes` made to `rows`, each row read by `of`. */
-fun <E, T> MutableList<T>.splice(changes: List<Change<E>>, of: (E) -> T) {
-    for (c in changes)
-        when (c) {
-            is Change.Insert -> add(c.at, of(c.row))
-            is Change.Remove -> removeAt(c.at)
-            is Change.Update -> set(c.at, of(c.row))
-        }
-}
-
 class Library(private val session: ArkSession) {
     /** Who is signed in. */
     val user: String = session.login.user
@@ -321,27 +309,27 @@ class Library(private val session: ArkSession) {
     /** How many changes the session has reported: what the diagnostics read again on, rather than on a clock. */
     val moved: StateFlow<Long> = movedFlow.asStateFlow()
 
-    // A view of the domain's and the list it is spliced into; on the session's thread only.
-    private class Held<E, T>(val open: (Harken) -> View<E>, val of: (E) -> T, val set: (List<T>) -> Unit = {}) {
-        var view: View<E>? = null
-        val rows = ArrayList<T>()
+    // A view of the domain's, its rows what the screens draw (`View.map`); on the session's thread only.
+    private class Held<T>(val open: (Harken) -> View<T>, val set: (List<T>) -> Unit = {}) {
+        var view: View<T>? = null
+        val rows: List<T> get() = view?.rows.orEmpty()
 
         fun publish() = set(rows.toList())
     }
 
-    private val library = Held({ Phone.library(it, null) }, Track::of) { tracksFlow.value = it }
-    private val playlistsHeld = Held({ it.playlists() }, { p: Playlist -> p }) { playlistsFlow.value = it }
-    private val albumsHeld = Held({ it.albums() }, Album::of) { albumsFlow.value = it }
-    private val artistsHeld = Held({ it.artists() }, Artist::of) { artistsFlow.value = it }
-    private val composersHeld = Held({ it.composers() }, Composer::of) { composersFlow.value = it }
-    private val showsHeld = Held({ it.shows() }, Show::of) { showsFlow.value = it }
-    private val subscriptionsHeld = Held({ it.subscriptions() }, Subscription::of) { subscriptionsFlow.value = it }
-    private val downloadsHeld = Held({ it.downloads() }, Download::of) { r -> downloadsFlow.value = r.associateBy { it.mediaId } }
-    private val mineHeld = Held({ it.myProgress() }, Listened::of) { r -> mineFlow.value = r.associateBy { it.mediaId } }
-    private val detailsHeld = Held({ it.trackDetails() }, TrackDetail::of) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
-    private val playedHeld = Held({ it.lastPlayed() }, Played::of) { lastFlow.value = it.firstOrNull() }
-    private val home = listOf<Held<*, *>>(library, playlistsHeld, albumsHeld)
-    private val rest = listOf<Held<*, *>>(artistsHeld, composersHeld, showsHeld, subscriptionsHeld, downloadsHeld, mineHeld, detailsHeld, playedHeld)
+    private val library = Held({ Phone.library(it, null).map(Track::of) }) { tracksFlow.value = it }
+    private val playlistsHeld = Held({ it.playlists() }) { playlistsFlow.value = it }
+    private val albumsHeld = Held({ it.albums().map(Album::of) }) { albumsFlow.value = it }
+    private val artistsHeld = Held({ it.artists().map(Artist::of) }) { artistsFlow.value = it }
+    private val composersHeld = Held({ it.composers().map(Composer::of) }) { composersFlow.value = it }
+    private val showsHeld = Held({ it.shows().map(Show::of) }) { showsFlow.value = it }
+    private val subscriptionsHeld = Held({ it.subscriptions().map(Subscription::of) }) { subscriptionsFlow.value = it }
+    private val downloadsHeld = Held({ it.downloads().map(Download::of) }) { r -> downloadsFlow.value = r.associateBy { it.mediaId } }
+    private val mineHeld = Held({ it.myProgress().map(Listened::of) }) { r -> mineFlow.value = r.associateBy { it.mediaId } }
+    private val detailsHeld = Held({ it.trackDetails().map(TrackDetail::of) }) { r -> detailsFlow.value = r.associateBy { it.mediaId } }
+    private val playedHeld = Held({ it.lastPlayed().map(Played::of) }) { lastFlow.value = it.firstOrNull() }
+    private val home = listOf<Held<*>>(library, playlistsHeld, albumsHeld)
+    private val rest = listOf<Held<*>>(artistsHeld, composersHeld, showsHeld, subscriptionsHeld, downloadsHeld, mineHeld, detailsHeld, playedHeld)
     private val lastFlow = MutableStateFlow<Played?>(null)
 
     /**
@@ -355,7 +343,7 @@ class Library(private val session: ArkSession) {
     // [Page], a catalogue's list by the view and its input ("works:Bach"). The map is shared with
     // the main thread; each entry's view is touched on the session's thread only. Null until the
     // page's view has been read: a page told "none yet" from "none".
-    private class Opened<T>(val held: Held<*, T>, val flow: MutableStateFlow<List<T>?>) {
+    private class Opened<T>(val held: Held<T>, val flow: MutableStateFlow<List<T>?>) {
         var refs = 0
     }
 
@@ -390,7 +378,7 @@ class Library(private val session: ArkSession) {
         session.ready()
     }
 
-    private fun <E, T> hydrate(h: Harken, held: Held<E, T>) {
+    private fun <T> hydrate(h: Harken, held: Held<T>) {
         held.view?.close()
         held.view =
             try {
@@ -398,22 +386,11 @@ class Library(private val session: ArkSession) {
             } catch (e: Refusal) {
                 null
             }
-        held.rows.clear()
-        held.view?.rows()?.mapTo(held.rows, held.of)
         held.publish()
     }
 
-    // What a view did since it was last asked, spliced into its list; true when it moved.
-    private fun <E, T> update(held: Held<E, T>): Boolean {
-        val v = held.view ?: return false
-        return when (val u = v.take()) {
-            is Update.Unchanged -> false
-            is Update.Patched -> {
-                held.rows.splice(u.changes, held.of)
-                true
-            }
-        }
-    }
+    // What a view did since it was last asked, spliced into its rows; true when it moved.
+    private fun update(held: Held<*>): Boolean = held.view?.update() == true
 
     private fun splice() {
         for (held in home + rest) if (update(held)) held.publish()
@@ -437,13 +414,13 @@ class Library(private val session: ArkSession) {
     // Pages -------------------------------------------------------------------
 
     // A page's tracks; none for a page that is not a list of them (a work's).
-    private fun pageView(page: Page): Held<*, Track>? =
+    private fun pageView(page: Page): Held<Track>? =
         when (page) {
-            is Page.ForAlbum -> Held({ Phone.album(it, page.id) }, Track::of)
-            is Page.ForArtist -> Held({ Phone.artist(it, page.name) }, Track::of)
-            is Page.ForPlaylist -> Held({ Phone.playlist(it, page.id) }, Track::of)
-            is Page.ForRecording -> Held({ Phone.recording(it, page.id) }, Track::of)
-            is Page.ForShow -> Held({ Phone.show(it, page.id) }, Track::of)
+            is Page.ForAlbum -> Held({ Phone.album(it, page.id).map(Track::of) })
+            is Page.ForArtist -> Held({ Phone.artist(it, page.name).map(Track::of) })
+            is Page.ForPlaylist -> Held({ Phone.playlist(it, page.id).map(Track::of) })
+            is Page.ForRecording -> Held({ Phone.recording(it, page.id).map(Track::of) })
+            is Page.ForShow -> Held({ Phone.show(it, page.id).map(Track::of) })
             is Page.ForWork, is Page.Songs -> null
         }
 
@@ -455,7 +432,7 @@ class Library(private val session: ArkSession) {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> open(key: Any, make: () -> Held<*, T>): StateFlow<List<T>?> {
+    private fun <T> open(key: Any, make: () -> Held<T>): StateFlow<List<T>?> {
         val o = pages.computeIfAbsent(key) { Opened(make(), MutableStateFlow(null)) } as Opened<T>
         synchronized(o) { o.refs++ }
         session.post { h ->
@@ -468,40 +445,40 @@ class Library(private val session: ArkSession) {
     }
 
     /** The works somebody wrote (`works`), in catalogue order — none for somebody who wrote none; [release] [worksKey]. */
-    fun works(composer: String): StateFlow<List<WorkSummary>?> = open(worksKey(composer)) { Held({ it.works(Works(composer)) }, { w: WorkSummary -> w }) }
+    fun works(composer: String): StateFlow<List<WorkSummary>?> = open(worksKey(composer)) { Held({ it.works(Works(composer)) }) }
 
     /** One work's own row (`work`), by its key: none for a work this peer has not got. */
-    fun work(id: String): StateFlow<List<WorkSummary>?> = open(workKey(id)) { Held({ it.work(WorkInput(id)) }, { w: WorkSummary -> w }) }
+    fun work(id: String): StateFlow<List<WorkSummary>?> = open(workKey(id)) { Held({ it.work(WorkInput(id)) }) }
 
     /** A work's performances (`recordings`), the most complete first. */
-    fun recordings(work: String): StateFlow<List<RecordingsEntry>?> = open(recordingsKey(work)) { Held({ it.recordings(Recordings(work)) }, { r: RecordingsEntry -> r }) }
+    fun recordings(work: String): StateFlow<List<RecordingsEntry>?> = open(recordingsKey(work)) { Held({ it.recordings(Recordings(work)) }) }
 
     /** Who is on a performance (`credits`), in billing order. */
-    fun credits(recording: String): StateFlow<List<CreditsEntry>?> = open(creditsKey(recording)) { Held({ it.credits(Credits(recording)) }, { c: CreditsEntry -> c }) }
+    fun credits(recording: String): StateFlow<List<CreditsEntry>?> = open(creditsKey(recording)) { Held({ it.credits(Credits(recording)) }) }
 
     /** How far everybody has listened to a show's episodes (`show_progress`); [release] [progressKey]. */
-    fun showProgress(show: String): StateFlow<List<Listened>?> = open(progressKey(show)) { Held({ Phone.showProgress(it, show) }, Listened::of) }
+    fun showProgress(show: String): StateFlow<List<Listened>?> = open(progressKey(show)) { Held({ Phone.showProgress(it, show).map(Listened::of) }) }
 
     /** What a show's episodes are about and when each came out (`episode_details`); [release] [episodesKey]. */
-    fun episodeDetails(show: String): StateFlow<List<EpisodeDetail>?> = open(episodesKey(show)) { Held({ Phone.episodeDetails(it, show) }, EpisodeDetail::of) }
+    fun episodeDetails(show: String): StateFlow<List<EpisodeDetail>?> = open(episodesKey(show)) { Held({ Phone.episodeDetails(it, show).map(EpisodeDetail::of) }) }
 
     /** An episode's chapters once, in order. */
     suspend fun chapters(media: Id): List<Chapter> = session.run { h -> Phone.once({ Phone.chapters(h, media) }, Chapter::of) }
 
     /** Who is on an episode (`people`), in its feed's order; [release] [peopleKey]. */
-    fun people(media: Id): StateFlow<List<OnEpisode>?> = open(peopleKey(media)) { Held({ Phone.people(it, media) }, OnEpisode::of) }
+    fun people(media: Id): StateFlow<List<OnEpisode>?> = open(peopleKey(media)) { Held({ Phone.people(it, media).map(OnEpisode::of) }) }
 
     /** Who is on each of a show's episodes (`show_people`), held by its page; [release] [showPeopleKey]. */
-    fun showPeople(show: String): StateFlow<List<Appearing>?> = open(showPeopleKey(show)) { Held({ Phone.showPeople(it, show) }, Appearing::of) }
+    fun showPeople(show: String): StateFlow<List<Appearing>?> = open(showPeopleKey(show)) { Held({ Phone.showPeople(it, show).map(Appearing::of) }) }
 
     /**
      * An episode's transcript (`transcript`), in the order it is said: held, so a transcript the server
      * reads after the episode began comes in while it plays; [release] [transcriptKey].
      */
-    fun transcript(media: Id): StateFlow<List<Cue>?> = open(transcriptKey(media)) { Held({ Phone.transcript(it, media) }, Cue::of) }
+    fun transcript(media: Id): StateFlow<List<Cue>?> = open(transcriptKey(media)) { Held({ Phone.transcript(it, media).map(Cue::of) }) }
 
     /** Every episode somebody is on (`appearances`), newest first; [release] [appearancesKey]. */
-    fun appearances(name: String): StateFlow<List<Track>?> = open(appearancesKey(name)) { Held({ Phone.appearances(it, name) }, Track::of) }
+    fun appearances(name: String): StateFlow<List<Track>?> = open(appearancesKey(name)) { Held({ Phone.appearances(it, name).map(Track::of) }) }
 
     /** Let go of what [hold], [works], [work], [recordings] or [credits] held, by its key. */
     fun release(key: Any) {

@@ -55,9 +55,9 @@ Reader)`), no JSON per row: `accounts` (`AccountLine`), `groups`
 (`GroupLine`), `month` (`BudgetLine`), `summary` (`Summary`, one row),
 `spending` (`SpendingLine`), `register` and `inbox` (`TxnLine`),
 `payees` (`PayeeLine`), `banks` (`BankLine`), `linked` (`LinkedLine`, each of a
-bank's accounts and the one it feeds, what `link` and `ignore` act on). A `LiveView<T>` is read
-once (`rows()`), then asked what it did (`take()`: unchanged, its patches,
-or a reset with every row) and spliced into the list the screen holds.
+bank's accounts and the one it feeds, what `link` and `ignore` act on). A `LiveView<T>` keeps
+its rows: read once when opened (`rows`), then what the view did spliced
+into them (`update()`, whether anything moved).
 `peer.setListener` says when anything moved, on the kernel's thread; the
 app takes its views then and publishes — an `@Observable` model on iOS,
 a `StateFlow` on Android. Nothing runs on a clock.

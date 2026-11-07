@@ -414,7 +414,7 @@ object Phone {
     /** A view's rows once, and the view let go. */
     fun <E, T> once(v: () -> View<E>, of: (E) -> T): List<T> =
         try {
-            v().use { it.rows().map(of) }
+            v().use { it.rows.map(of) }
         } catch (e: Refusal) {
             emptyList()
         }

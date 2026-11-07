@@ -27,9 +27,9 @@
 // denial finds their pending intents where they left them.
 package dev.harken.android.onboarding
 
-import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Login
 import dev.arkdb.ffi.Refusal
+import dev.arkdb.ffi.listener
 import dev.harken.android.gen.Device
 import dev.harken.android.gen.Harken
 import dev.harken.ffi.harkenOpen
@@ -137,10 +137,7 @@ private constructor(
 
     private fun start(h: Harken) {
         harken = h
-        h.peer.setListener(
-            object : Listener {
-                override fun changed() = drainSoon()
-            })
+        h.peer.setListener(listener { drainSoon() })
         drain()
     }
 
