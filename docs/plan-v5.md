@@ -180,7 +180,9 @@ every replica; its own intents are previewed over what it holds and
 confirmed by the authority's facts, a difference being the authority's
 answer and never a divergence. Whole replicas are the case where the
 view is everything. `scope.rs`, the `held`/`partial`/`upto` fields and
-the projection of facts are gone.
+the projection of facts are gone. A table a scope does not name is fed
+as its row says: whole, its person's (`#[ark(owner = user)]`) or not at
+all (`#[ark(unfed)]`); `session.feed`, ark-auth's, names none.
 
 ### 1.9 Live state is a second machine over volatile tables
 

@@ -100,7 +100,7 @@ pub fn present(_: &Ctx, _: &Db<Room>, _: ()) -> Result<Plan<Room, Here>, String>
 /// who is here, and of the pointers its own.
 #[scope("demo.top_two")]
 pub fn room_top_two() -> Scope<Room> {
-    Scope::new().on::<Here>(|_, _| true).on::<Pointer>(|ctx, p| p.session == ctx.device())
+    Scope::new().on::<Pointer>(|ctx, p| p.session == ctx.device())
 }
 
 /// The room, every function registered.

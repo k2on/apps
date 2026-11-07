@@ -141,7 +141,8 @@ type OnRow = Arc<dyn Fn(&Ctx, &[u8]) -> Result<bool, String> + Send + Sync>;
 pub type ViewFn<S, I, T> = fn(&Ctx, &Db<S>, I) -> Result<Plan<S, T>, String>;
 
 /// Which rows a connection fed by a scope holds (§1.8): per table, a
-/// predicate on its rows; a table the scope does not name holds none.
+/// predicate on its rows; a table the scope does not name holds what its
+/// row declares ([`Row::fed`]): every row, its owner's, or none.
 pub struct Scope<S> {
     tables: BTreeMap<&'static str, OnRow>,
     _p: std::marker::PhantomData<fn() -> S>,
@@ -220,7 +221,7 @@ impl Domain {
 
     pub fn scope<S: Tables>(self, name: &str, scope: Scope<S>) -> Domain {
         let tables = scope.tables;
-        let holds: Holds = Arc::new(move |ctx, table, row| tables.get(table).map_or(Ok(false), |f| f(ctx, row)));
+        let holds: Holds = Arc::new(move |ctx, table, row| tables.get(table).map_or_else(|| S::fed(ctx, table, row), |f| f(ctx, row)));
         self.add(Function {
             scope: Some(holds),
             ..function::<()>(name, Kind::Scope, None)

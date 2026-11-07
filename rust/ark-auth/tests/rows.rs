@@ -125,10 +125,10 @@ fn only_an_admin_grants() {
     assert!(roles(&hub).is_empty());
 }
 
-/// A connection fed by `feed` holds its person's sessions and roles and
-/// nobody else's, and the app's own tables as the app says; `session.mine`
-/// lists the caller's live ones. Falsified by `feed` holding every
-/// session: bob's was held for alice.
+/// A connection fed by `session.feed` holds its person's sessions and roles
+/// and nobody else's, and the app's own tables whole; `session.mine` lists
+/// the caller's live ones. Falsified by `SignIn` saying no owner: bob's
+/// was held for alice.
 #[test]
 fn nobody_else_s_sessions_are_held_or_listed() {
     let hub = Memory::new();
@@ -136,7 +136,7 @@ fn nobody_else_s_sessions_are_held_or_listed() {
     signed_in(&hub, "a2", "alice", 10_000);
     signed_in(&hub, "b1", "bob", 10_000);
     let alice = on("alice", "a1", &[], 2_000);
-    let feed = domain().get("feed").and_then(|f| f.scope.clone()).unwrap();
+    let feed = domain().get(ark_auth::FEED).and_then(|f| f.scope.clone()).unwrap();
     let held: Vec<String> = hub
         .sign_ins()
         .into_iter()

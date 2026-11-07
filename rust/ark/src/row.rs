@@ -289,6 +289,12 @@ pub trait Row: Value + Describe {
     /// The table: its columns (the fields, in order), key, indexes,
     /// references and space.
     fn table() -> Table;
+    /// Whether a connection fed by scope, as `ctx`, holds this row (§1.8):
+    /// any, unless the row says its owner (`#[ark(owner = field)]`: its
+    /// person's) or that it is fed to none (`#[ark(unfed)]`).
+    fn fed(_: &Ctx, _: &[u8]) -> Result<bool, String> {
+        Ok(true)
+    }
     /// The key, as the store holds it.
     fn key_bytes(&self) -> Vec<u8> {
         let mut out = vec![];

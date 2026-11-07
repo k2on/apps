@@ -35,7 +35,9 @@ its columns (`Item::PLAYLIST_ID_POS`; `as NAME` renames). `refs(T)` makes
 a column name a row of `T` (an `Option` only when `Some`); the store
 refuses a write that breaks it, and a delete of a row still named.
 `#[ark(volatile)]` puts a table in live state (§1.9): never logged or
-hashed. `#[derive(Schema)]` makes the schema, tables in field order.
+hashed. A scope (§1.8) feeds a table whole unless `#[ark(owner = user)]`
+(its person's rows) or `#[ark(unfed)]` (none). `#[derive(Schema)]` makes
+the schema, tables in field order.
 
 A column is an `i64`, `String`, `bool`, `Vec<u8>`, `Id<T>`, `Option`,
 `Vec`, a tuple, or a record or enum deriving `Describe`; no floats. A row
@@ -89,17 +91,16 @@ pub fn add_to_playlist(_: &Ctx, db: &mut Db<Demo>, input: AddToPlaylist) -> Resu
   I) -> Result<T, String>`, answered once.
 - **A view** (`#[view]`) returns a `Plan<S, T>`, kept up to date.
 - **A scope** (`#[scope]`) says per table which rows a connection fed by
-  it holds (§1.8).
+  it holds (§1.8); a table it does not name, as the row says.
 
 A helper or a guard takes `&Db<S>` and cannot write: the borrow checker
-is the effect system. The attribute only declares a function by name;
-`ark::functions!` registers every one its file and that file's modules
-declare (none under `#[cfg]` or at a `#[path]`), so none is listed by hand:
+is the effect system. The attribute only names a function; `functions!`
+registers each one its file and modules declare (not under `#[cfg]`):
 
 ```rust
 #[scope("demo.top_two")]
 pub fn top_two() -> Scope<Demo> {
-    Scope::new().on::<Playlist>(|_, _| true).on::<Item>(|_, i| i.pos <= 2)
+    Scope::new().on::<Item>(|_, i| i.pos <= 2)
 }
 
 /// The demo, every function registered.
@@ -110,10 +111,9 @@ pub fn demo() -> Domain {
 
 **Determinism is an API rule.** A run is a function of the store, its
 input and its `Ctx` (`user`, `session`, `roles`, `now`, `device`).
-`ctx.now` and `ctx.new_id()` — the entry's `n`-th id — are its only
-non-determinism, both frozen in the entry. A function reads no clock, no
-randomness and nothing of its host; when replicas disagree anyway, the
-authority's facts win.
+`ctx.now` and `ctx.new_id()` (the entry's `n`-th id) are its only
+non-determinism, both frozen in the entry. It reads no clock, randomness
+or host; when replicas disagree anyway, the authority's facts win.
 
 ## Reads and writes
 

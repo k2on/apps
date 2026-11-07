@@ -199,10 +199,19 @@ pub fn describe_derive(input: DeriveInput) -> syn::Result<TokenStream> {
 pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let fields = fields_of(&input)?;
-    let (mut table, mut volatile, mut indexes) = (snake(&name.to_string()), false, vec![]);
+    let (mut table, mut volatile, mut indexes, mut fed) = (snake(&name.to_string()), false, vec![], quote!());
+    let ctx = quote!(::ark::peer::Ctx);
     for it in items(&input.attrs)?.into_iter().flatten() {
         match it {
             Item::Flag(f) if f == "volatile" => volatile = true,
+            Item::Flag(f) if f == "unfed" => fed = quote!(fn fed(_: &#ctx, _: &[u8]) -> Result<bool, String> { Ok(false) }),
+            Item::Is(n, Expr::Path(f)) if n == "owner" => {
+                fed = quote! {
+                    fn fed(ctx: &#ctx, row: &[u8]) -> Result<bool, String> {
+                        Ok(<Self as ::ark::row::Value>::decode(row)?.#f == ctx.user())
+                    }
+                }
+            }
             Item::Flag(f) if f == "ffi" || f == "ffi_view" => {}
             Item::Is(n, Expr::Lit(l)) if n == "table" => match &l.lit {
                 syn::Lit::Str(s) => table = s.value(),
@@ -212,7 +221,7 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
             _ => {
                 return err(
                     name.span(),
-                    "#[ark(..)] on a row: table = \"..\", volatile, index(..), unique(..), ffi, ffi_view",
+                    "#[ark(..)] on a row: table = \"..\", volatile, owner = field, unfed, index(..), unique(..), ffi, ffi_view",
                 )
             }
         }
@@ -299,6 +308,7 @@ pub fn row(input: DeriveInput) -> syn::Result<TokenStream> {
                     space: #space,
                 }
             }
+            #fed
         }
 
         /// A row is an input as it is, refined by nothing: what a table's
@@ -450,6 +460,12 @@ pub fn schema(input: DeriveInput) -> syn::Result<TokenStream> {
             }
             fn schema() -> ::ark::schema::Schema {
                 ::ark::schema::Schema { tables: vec![#(<#tys as ::ark::row::Row>::table()),*] }
+            }
+            fn fed(ctx: &::ark::peer::Ctx, table: &str, row: &[u8]) -> Result<bool, String> {
+                #(if table == <#tys as ::ark::row::Row>::TABLE {
+                    return <#tys as ::ark::row::Row>::fed(ctx, row);
+                })*
+                Ok(false)
             }
         }
     })

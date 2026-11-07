@@ -10,8 +10,8 @@
 //! one with [`revoke`]; the hub closes every connection of a session
 //! revoked or expired. Roles are granted by an admin ([`grant`],
 //! [`revoke_role`]); a session holds the roles it was opened with and
-//! those granted its person. [`feed`] adds to an app's scope that a
-//! connection holds only its person's sign-ins and roles.
+//! those granted its person. Each row says its owner, so a connection fed
+//! by scope ([`FEED`]) holds only its person's sign-ins and roles.
 //!
 //! The functions are written once over any schema holding the two tables
 //! ([`AuthTables`], which [`install!`] implements) and registered by
@@ -27,12 +27,15 @@ pub const REVOKE: &str = "session.revoke";
 pub const MINE: &str = "session.mine";
 pub const GRANT: &str = "role.grant";
 pub const UNGRANT: &str = "role.revoke";
+/// The scope a server feeds every connection by when it feeds one by
+/// scope (§1.8): each table whole, unless its row says its owner.
+pub const FEED: &str = "session.feed";
 
 /// One sign-in on one device (`sign_in`: a `session` table's type would be
 /// named as an app's own sessions are). Kept after it ends, revoked or
 /// expired: an entry authored under it is still its person's.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
-#[ark(index(user))]
+#[ark(index(user), owner = user)]
 pub struct SignIn {
     #[ark(key)]
     pub id: String,
@@ -56,6 +59,7 @@ pub struct SignIn {
 
 /// A role granted to a person.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
+#[ark(owner = user)]
 pub struct Role {
     #[ark(key)]
     pub user: String,
@@ -124,6 +128,7 @@ pub fn register<S: AuthTables>(d: Domain) -> Domain {
         .mutator(GRANT, grant::<S>)
         .mutator(UNGRANT, revoke_role::<S>)
         .view(MINE, mine::<S>)
+        .scope(FEED, Scope::<S>::new())
 }
 
 /// Whether a session still proves its person at `now`.
@@ -192,12 +197,4 @@ pub fn mine<S: AuthTables>(ctx: &Ctx, _: &Db<S>, _: ()) -> Result<Plan<S, SignIn
     Ok(scan::<S, SignIn>()
         .filter(move |s| s.user == user && live(s, now))
         .sort(|s| (Desc(s.issued_ms), s.id.clone())))
-}
-
-/// `scope` holding, of the sign-ins and the roles, only the connection's
-/// person's (§1.8).
-pub fn feed<S: AuthTables>(scope: Scope<S>) -> Scope<S> {
-    scope
-        .on::<SignIn>(|ctx, s| s.user == ctx.user())
-        .on::<Role>(|ctx, r| r.user == ctx.user())
 }

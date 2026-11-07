@@ -16,7 +16,9 @@ fn out(r: syn::Result<proc_macro2::TokenStream>) -> TokenStream {
 /// `#[derive(Row)]`: a struct as a table's row — `#[ark(key)]` on its
 /// leading fields, `#[ark(refs(Row))]` on a column naming another row,
 /// `#[ark(index(a, b))]`, `#[ark(unique(a, b))]` (each `as NAME`
-/// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct. A
+/// optionally), `#[ark(volatile)]`, `#[ark(table = "..")]` on the struct,
+/// and `#[ark(owner = field)]` (a connection fed by scope holds a row
+/// whose `field` is its person) or `#[ark(unfed)]` (it holds none). A
 /// column appended with `#[serde(default)]` takes its type's default in a
 /// row written before it. A row whose `state` field is an
 /// `ark::effect::Job<T>` is a job (`ark::effect::Effect`), `#[effect(lease_ms

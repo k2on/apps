@@ -8,21 +8,21 @@
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
 //! per part. Who is signed in is `ark-auth`'s two tables and functions, and
-//! [`feed`]. [`domain`] registers every function by its name. Behind a
+//! its scope. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
 //! `money/ffi`). The demo's household is beside the app, not in it: `money/seed`.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
 //! same accounts, categories and transactions: no table is anybody's, and
-//! every connection is fed every row ([`feed`]). A row's `user_id` says who
+//! every connection fed by scope (`session.feed`) is fed every row but the
+//! sign-ins and roles of others, the only rows that say their owner
+//! (`#[ark(owner = user)]`). A row's `user_id` says who
 //! wrote it, for the register to show, and decides nothing.
 
 use std::sync::{Arc, OnceLock};
 
-use ark::domain::{Domain, Scope};
-use ark::peer::Ctx;
-use ark::prelude::scope;
+use ark::domain::Domain;
 
 pub mod accounts;
 pub mod banks;
@@ -62,34 +62,6 @@ pub fn domain() -> Domain {
     ark::functions!(Domain::new::<Money>("money", VERSION))
         .with(ark_auth::register::<Money>)
         .with(<Photo as ark::effect::Effect>::register::<Money>)
-}
-
-/// What a connection fed by scope holds (§1.8): the budget whole — it is
-/// the household's — and, of the sign-ins and the roles, its person's.
-#[scope("session.feed")]
-pub fn feed() -> Scope<Money> {
-    fn all<R>(_: &Ctx, _: &R) -> bool {
-        true
-    }
-    ark_auth::feed(
-        Scope::new()
-            .on::<Account>(all)
-            .on::<Category>(all)
-            .on::<Assigned>(all)
-            .on::<Txn>(all)
-            .on::<Bank>(all)
-            .on::<Linked>(all)
-            .on::<Asked>(all)
-            .on::<BankAsk>(all)
-            .on::<Rule>(all)
-            .on::<SavedFilter>(all)
-            .on::<Formula>(all)
-            .on::<Split>(all)
-            .on::<Receipt>(all)
-            .on::<Item>(all)
-            .on::<Charge>(all)
-            .on::<Photo>(all),
-    )
 }
 
 /// [`domain`], once.

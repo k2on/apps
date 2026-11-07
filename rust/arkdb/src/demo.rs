@@ -115,7 +115,7 @@ pub fn items(_: &Ctx, _: &Db<Demo>, input: Items) -> Result<Plan<Demo, Item>, St
 /// Every playlist, and of each the items in its first two places.
 #[scope("demo.top_two")]
 pub fn top_two() -> Scope<Demo> {
-    Scope::new().on::<Playlist>(|_, _| true).on::<Item>(|_, i| i.pos <= 2)
+    Scope::new().on::<Item>(|_, i| i.pos <= 2)
 }
 
 /// The demo, every function registered.

@@ -196,7 +196,7 @@ pub struct Play {
 // and nothing ordered reads.
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
-#[ark(volatile)]
+#[ark(volatile, owner = user)]
 pub struct Listening {
     #[ark(key)]
     pub user: String,
@@ -204,7 +204,7 @@ pub struct Listening {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
-#[ark(volatile)]
+#[ark(volatile, owner = user)]
 pub struct ListeningDevice {
     #[ark(key)]
     pub user: String,
@@ -214,7 +214,7 @@ pub struct ListeningDevice {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Row)]
-#[ark(volatile)]
+#[ark(volatile, owner = user)]
 pub struct ListeningScrub {
     #[ark(key)]
     pub user: String,
@@ -227,6 +227,7 @@ pub struct ListeningScrub {
 /// under it, or the whole of it): a job (`ark::effect`) the scanner's
 /// handler claims and does, done with what it read and authored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Row)]
+#[ark(unfed)]
 #[effect(role = crate::LIBRARY, lease_ms = 600_000)]
 pub struct Look {
     #[ark(key)]

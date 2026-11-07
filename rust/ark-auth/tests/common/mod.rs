@@ -25,14 +25,8 @@ pub struct App {
 
 ark_auth::install!(App);
 
-fn all<R>(_: &Ctx, _: &R) -> bool {
-    true
-}
-
 pub fn domain() -> Domain {
-    Domain::new::<App>("app", "1")
-        .with(ark_auth::register::<App>)
-        .scope("feed", ark_auth::feed(Scope::<App>::new().on::<Note>(all)))
+    Domain::new::<App>("app", "1").with(ark_auth::register::<App>)
 }
 
 /// The hub: a store every sign-in is written to, and what its authority was

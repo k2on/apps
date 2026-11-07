@@ -169,6 +169,9 @@ pub trait Tables: 'static {
     type Db<'t, P: Writes>;
     fn handles<'t, P: Writes>(txn: &'t RefCell<Txn<'t>>) -> Self::Db<'t, P>;
     fn schema() -> Schema;
+    /// [`Row::fed`](crate::row::Row::fed) of the table named; a table the
+    /// schema does not have holds none.
+    fn fed(ctx: &crate::peer::Ctx, table: &str, row: &[u8]) -> Result<bool, String>;
 }
 
 /// The store as `S`'s tables, in a run writing `P`'s.
