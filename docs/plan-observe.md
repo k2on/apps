@@ -116,10 +116,11 @@ All seven steps, each a commit on main. What differs from the plan:
   every press (the phone, the web, the desktop), and an app's `mutate`
   through the bridge is a root unless the app opened a span; a job's
   `claim`, `finish` and `cancel` still answer what made the job due.
-- **The house's speakers** are raw machines in harken-server (`ha::Wires`),
-  not `ark_peer::Peer`s: they keep the span of what woke them and author
-  under it, say their steps through `observe::step`, and what Home
-  Assistant is told is said inside a `house` span in the trace it answers.
+- **The house's speakers** are `ark_peer::Peer`s of the live space alone
+  (`Config::live_only`, harken-server's `ha::Wires`): they keep the span
+  of what woke them and author under it as every device does, and what
+  Home Assistant is told is said inside a `house` span in the trace it
+  answers.
 - **Not built: replay from the stream.** Events carry no input bytes, so
   `arkdb peer P --at SEQ` (a peer replayed to a moment) is not there; the
   recorder (`Peer::open(…, record: true)`, `arkdb::trace`) still is, apart.

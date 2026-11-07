@@ -120,8 +120,10 @@ pub const TRACE_MS: i64 = 30_000;
 /// What a device is made of: the log's domain and the live space's, each
 /// its schema and its functions by name (§1.16, §1.9); what it says it is
 /// at each connection (a call before its `Hello`s, `ark::frames::DEVICE`);
-/// and the live functions it relays as ephemeral, and how often. A
-/// server's is a [`ServerConfig`].
+/// the live functions it relays as ephemeral, and how often; and whether
+/// it is of the live space alone — a server's speaker standing in a
+/// session — which says no `Hello` for the log, and takes nothing of it.
+/// A server's is a [`ServerConfig`].
 #[derive(Clone)]
 pub struct Config {
     pub log: Arc<Domain>,
@@ -129,6 +131,7 @@ pub struct Config {
     pub device: Option<Vec<u8>>,
     pub ephemeral: BTreeSet<String>,
     pub every_ms: i64,
+    pub live_only: bool,
 }
 
 impl Config {
@@ -140,6 +143,7 @@ impl Config {
             device: None,
             ephemeral: BTreeSet::new(),
             every_ms: 0,
+            live_only: false,
         }
     }
 }
@@ -649,7 +653,9 @@ impl Peer {
         if let Some(input) = self.config.live.as_ref().and(self.config.device.clone()) {
             self.call(0, ark::frames::DEVICE, input);
         }
-        self.step(Space::Durable, Input::Connected);
+        if !self.config.live_only {
+            self.step(Space::Durable, Input::Connected);
+        }
         self.step(Space::Volatile, Input::Connected);
         self.files_connected();
     }
@@ -686,6 +692,7 @@ impl Peer {
         match f {
             Frame::Reply { id, reply } => self.told.replied(id, reply),
             f if f.is_file() => self.file_told(f),
+            f if f.space() == Space::Durable && self.config.live_only => {}
             f => drop(self.step(f.space(), Input::Frame { from: None, frame: f })),
         }
         if self.update_needed().is_some() && !self.link.offline {

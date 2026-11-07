@@ -929,7 +929,7 @@ speaker is never behind the reading after `Wires::receive` (a job's frames
 go out before the next job, the read among them), but can be ahead, and
 two speakers apart — `Handle::with` answers from inside its job
 (`ark-peer/src/serve.rs`), so the next job's frames can reach one
-speaker's channel and not yet another's before they are taken. Now a rule:
+speaker and not yet another before they are taken. Now a rule:
 **a session is acted on only when every speaker standing in it has heard
 the volatile log to the head it was read at, no more, and has nothing
 unanswered** (`Wires::agree`); otherwise it waits for the next frame. It

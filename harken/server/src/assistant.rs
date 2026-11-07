@@ -5,8 +5,8 @@
 //! stands in an account's session, is handed the sound, and says what
 //! happens to it — and nothing in that says the far end has to be
 //! somebody's screen. So nothing here extends the session; what is here is
-//! the thing that is a device on a speaker's behalf: a connection to the
-//! hub in this process ([`ha`]), a volatile machine of its own saying in
+//! the thing that is a device on a speaker's behalf: a device of the live
+//! space alone linked to the hub in this process ([`ha`]), saying before
 //! its `Hello` that it is a speaker, standing in each account's session for
 //! each configured speaker, reconciled against the state by **the same
 //! reconciler a phone's player is** (`harken-player`, S3b), which says what
@@ -2921,11 +2921,12 @@ mod tests {
 /// not a problem worth a runtime.
 ///
 /// **Each speaker is a device**, one connection to the hub per session it
-/// stands in ([`ark_peer::Handle::connect`]): a volatile machine of its
-/// own, signed in as the session's account on a session of its own
-/// ([`speaker`]), which says in its `Hello` that it is a speaker — so the
-/// hub authors its `on_join`, and its `on_leave` when the connection
-/// closes. It has no log and no socket. The frames it is sent keep its
+/// stands in ([`ark_peer::Handle::dialer`]): an `ark_peer::Peer` of the
+/// live space alone (`ark_peer::Config::live_only`), linked as the
+/// session's account on a session of its own ([`speaker`]), which says
+/// before its `Hello` that it is a speaker — so the hub authors its
+/// `on_join`, and its `on_leave` when the connection closes. It is fed
+/// none of the log and has no socket. The frames it is sent keep its live
 /// machine current and wake the thread, which reads the sessions whole
 /// from the hub, which is in this process.
 ///
@@ -2946,7 +2947,7 @@ mod tests {
 /// only the speakers standing: a server whose house nobody is listening in
 /// makes no requests at all.
 pub mod ha {
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::Arc;
@@ -2957,10 +2958,10 @@ pub mod ha {
     use crate::domain::{Device, Output as Sound};
     use crate::domain::{Listening as Row, ListeningDevice};
     use ark::format::Encode;
-    use ark::peer::{Ctx, Input, Output, Peer, Role, To};
+    use ark::peer::Ctx;
     use ark::schema::Space;
     use ark::store::{Read, Scan};
-    use ark_peer::{now_ms, ConnId};
+    use ark_peer::{now_ms, Memory};
     use ark_peer::{Authority, Handle};
 
     use super::{input, listening, playing, Act, Playing, Speaker, Speakers, GROUPING, VOLUME_SET};
@@ -3087,18 +3088,8 @@ pub mod ha {
                 let mut bridge = Speakers::new(config.players.clone(), &config.media)
                     .lowering(config.lower.clone());
                 let house = House::new(&config);
-                let mut wires = Wires {
-                    hub,
-                    hosted,
-                    entities: config.players.iter().map(|(e, _)| e.clone()).collect(),
-                    machines: HashMap::new(),
-                    standing: HashMap::new(),
-                    woke: HashMap::new(),
-                    frames: channel(),
-                    waker,
-                    sign_in,
-                    recorders: HashMap::new(),
-                };
+                let entities = config.players.iter().map(|(e, _)| e.clone()).collect();
+                let mut wires = Wires::new(hub, hosted, entities, waker, sign_in);
                 run(&config, &house, &mut bridge, &mut wires, &woken, &flag);
             })
             .ok();
@@ -3112,18 +3103,6 @@ pub mod ha {
     /// and so its id there.
     pub fn speaker(user: &str, entity: &str) -> String {
         format!("{user}@{entity}")
-    }
-
-    /// Who a speaker's machine is among the events: its id in the session.
-    fn label(k: &(String, String)) -> String {
-        speaker(&k.0, &k.1)
-    }
-
-    /// A step of `k`'s speaker, inside its span: what the machine says in it
-    /// is the speaker's among the events.
-    fn stepped<T>(k: &(String, String), step: impl FnOnce() -> T) -> T {
-        tracing::debug_span!(target: "ark", "step", peer = %label(k), space = "volatile")
-            .in_scope(step)
     }
 
     /// `user`'s session with each of `entities`' ids ([`speaker`]) read as
@@ -3197,27 +3176,22 @@ pub mod ha {
         (head, read)
     }
 
-    /// A frame the hub sent the speaker at (account, entity).
-    type Framed = ((String, String), Vec<u8>);
-
-    /// The speakers' machines and their connections to the hub.
+    /// The speakers and their connections to the hub.
     struct Wires {
         hub: Handle<Authority>,
         hosted: Hosted,
         /// The entities offered.
         entities: Vec<String>,
-        /// Each speaker's volatile machine in each session it has stood
-        /// in, by (account, entity): kept, so its `local` goes on.
-        machines: HashMap<(String, String), Peer>,
-        /// The connections of those standing now.
-        standing: HashMap<(String, String), ConnId>,
-        /// The span of the entry whose change each speaker was last told:
-        /// what it says in answer is authored under it, as a device's peer
-        /// does (`ark_peer::Peer::cause`), and what the house is told for it
-        /// is said inside it.
-        woke: HashMap<(String, String), ark::log::Span>,
-        /// Frames the hub sent a speaker, and the thread woken for them.
-        frames: (Sender<Framed>, Receiver<Framed>),
+        /// Each speaker in each session it has stood in, by (account,
+        /// entity): a device of the live space alone, linked to the hub in
+        /// this process as its id there ([`speaker`]); kept, so its `local`
+        /// goes on. What it says is authored under the span of the entry
+        /// whose change it was last told (`ark_peer::Peer::cause`), and what
+        /// the house is told for it is said inside it.
+        speakers: HashMap<(String, String), ark_peer::Peer>,
+        /// Those standing now.
+        standing: HashSet<(String, String)>,
+        /// The thread's bell, rung by a frame for a speaker.
         waker: Sender<()>,
         /// The house's sign-in of a listener, which their plays and their
         /// places are written in the log by.
@@ -3232,6 +3206,25 @@ pub mod ha {
     pub type SignIn = Arc<dyn Fn(&str) -> Result<Handle<ark_peer::Peer>, String> + Send + Sync>;
 
     impl Wires {
+        fn new(
+            hub: Handle<Authority>,
+            hosted: Hosted,
+            entities: Vec<String>,
+            waker: Sender<()>,
+            sign_in: SignIn,
+        ) -> Wires {
+            Wires {
+                hub,
+                hosted,
+                entities,
+                speakers: HashMap::new(),
+                standing: HashSet::new(),
+                waker,
+                sign_in,
+                recorders: HashMap::new(),
+            }
+        }
+
         /// Whether every speaker standing in `user`'s session has heard the
         /// hub's volatile log to `head` — the head the sessions were read at
         /// ([`sessions`]) — no more and no less, and has nothing of its own
@@ -3242,125 +3235,84 @@ pub mod ha {
         /// leaves a speaker no further behind than its last unanswered call
         /// (a job's frames are delivered before the next job, the read
         /// among them), but not never ahead: [`Handle::with`] answers from
-        /// inside its job, so the next job's frames can reach one speaker's
-        /// channel and not yet another's before [`Wires::receive`] takes
-        /// them. The rule is kept here, not left to that order.
+        /// inside its job, so the next job's frames can reach one speaker
+        /// and not yet another before [`Wires::receive`] takes them. The
+        /// rule is kept here, not left to that order.
         fn agree(&self, user: &str, head: i64) -> bool {
-            self.standing.keys().filter(|(u, _)| u == user).all(|k| {
-                self.machines
-                    .get(k)
-                    .is_some_and(|m| m.pending().is_empty() && m.log().head().0 == head)
+            self.standing.iter().filter(|(u, _)| u == user).all(|k| {
+                let live = self.speakers.get(k).and_then(|p| p.live.as_ref());
+                live.is_some_and(|m| m.pending().is_empty() && m.log().head().0 == head)
             })
         }
 
         fn stands(&self, k: &(String, String)) -> bool {
-            self.standing.contains_key(k)
+            self.standing.contains(k)
         }
 
-        /// The speaker `entity`, called `name`, standing in `user`'s session.
+        /// The speaker `entity`, called `name`, standing in `user`'s
+        /// session: linked, saying what it is before its `Hello`, as a
+        /// device does.
         fn stand(&mut self, user: &str, entity: &str, name: &str) {
             let k = (user.to_string(), entity.to_string());
-            let who = Ctx::who(user, speaker(user, entity), vec![]);
-            let domain = &self.hosted.domain;
-            let peer = self.machines.entry(k.clone()).or_insert_with(|| {
-                Peer::new(domain.clone(), Role::Replica, who.clone()).in_space(Space::Volatile)
+            let (hub, domain, waker) = (&self.hub, &self.hosted.domain, self.waker.clone());
+            let peer = self.speakers.entry(k.clone()).or_insert_with(|| {
+                let said = Device {
+                    can_play: true,
+                    id: entity.into(),
+                    kind: Kind::Speaker.name().into(),
+                    name: name.into(),
+                    user: user.into(),
+                };
+                let config = ark_peer::Config {
+                    live: Some(domain.clone()),
+                    device: Some(said.to_bytes()),
+                    live_only: true,
+                    ..ark_peer::Config::of(domain.clone())
+                };
+                let who = Ctx::who(user, speaker(user, entity), vec![]);
+                let mut p = ark_peer::Peer::open(config, who.clone(), Box::new(Memory::default()));
+                p.set_waker(Arc::new(move || _ = waker.send(())));
+                p.set_token(Some(String::new()));
+                p.connect_with("", hub.dialer(Arc::new(move |_: &str| Some(who.clone()))));
+                p
             });
-            let said = Device {
-                can_play: true,
-                id: entity.into(),
-                kind: Kind::Speaker.name().into(),
-                name: name.into(),
-                user: user.into(),
-            };
-            let (to, wake, key) = (self.frames.0.clone(), self.waker.clone(), k.clone());
-            let c = self.hub.connect(
-                who,
-                Box::new(move |b| {
-                    let _ = wake.send(());
-                    to.send((key.clone(), b)).is_ok()
-                }),
-            );
-            // What it is, before its `Hello`s, as a device's driver says it.
-            let (id, name, input) = (0, ark::frames::DEVICE.into(), said.to_bytes());
-            let mut out = vec![Output::Send(
-                To::Back,
-                ark::frames::Frame::Call { id, name, input },
-            )];
-            out.extend(peer.step(Input::Connected));
-            self.standing.insert(k, c);
-            self.send(c, out);
+            peer.reconnect();
+            peer.pump();
+            self.standing.insert(k);
         }
 
         /// The speaker out of the session: its connection closed, which is
         /// its `on_leave`.
         fn leave(&mut self, k: &(String, String)) {
-            if let Some(c) = self.standing.remove(k) {
-                self.hub.close(c);
+            if let (true, Some(p)) = (self.standing.remove(k), self.speakers.get_mut(k)) {
+                p.disconnect();
             }
         }
 
-        /// A speaker's machine's frames to its connection; a refusal of
-        /// what it said, said out loud.
-        fn send(&self, c: ConnId, out: Vec<Output>) {
-            for o in out {
-                match o {
-                    Output::Send(To::Back, f) => self.hub.frame(c, f.enc()),
-                    Output::Settled(_, Err(why)) => {
-                        tracing::warn!("a speaker's transition was refused: {why}")
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        /// What the hub sent each speaker, to its machine.
+        /// What the hub sent each speaker, taken in; a refusal of what one
+        /// said, said out loud.
         fn receive(&mut self) {
-            let got: Vec<_> = self.frames.1.try_iter().collect();
-            for (k, bytes) in got {
-                let (Some(peer), Some(c)) =
-                    (self.machines.get_mut(&k), self.standing.get(&k).copied())
-                else {
-                    continue;
-                };
-                let Ok(frame) = ark::frames::Frame::dec(&bytes) else {
-                    continue;
-                };
-                let input = Input::Frame { from: None, frame };
-                let out = stepped(&k, || peer.step(input));
-                for o in &out {
-                    if let Output::Changes(told) = o {
-                        if let Some(by) = told.iter().rev().find_map(|t| t.by) {
-                            self.woke.insert(k.clone(), by);
-                        }
-                    }
+            for p in self.speakers.values_mut() {
+                p.pump();
+                for (_, why) in p.take_refusals(Space::Volatile) {
+                    tracing::warn!("a speaker's transition was refused: {why}");
                 }
-                self.send(c, out);
             }
-        }
-
-        /// The span `k`'s speaker answers under at `now`: what woke it, while
-        /// that trace lasts.
-        fn cause(&self, k: &(String, String), now: i64) -> Option<ark::log::Span> {
-            self.woke
-                .get(k)
-                .copied()
-                .filter(|w| now - w.began < ark_peer::TRACE_MS)
         }
 
         /// The span what the house is told for `entity` is said inside: the
         /// newest a speaker of it was woken by.
         fn span_of(&self, entity: &str) -> tracing::Span {
-            let woke = self
-                .woke
-                .iter()
+            let now = now_ms();
+            let woke = (self.speakers.iter())
                 .filter(|(k, _)| k.1 == entity)
-                .map(|(k, s)| (k, *s))
+                .filter_map(|(k, p)| Some((k, p.cause(Space::Volatile, now)?)))
                 .max_by_key(|(_, s)| s.began);
             match woke {
                 Some((k, s)) => tracing::info_span!(
                     target: "ark",
                     "house",
-                    peer = %label(k),
+                    peer = %speaker(&k.0, &k.1),
                     trace = %ark::hash::hex(&s.trace.0),
                     span = %ark::hash::hex(&s.id)
                 ),
@@ -3371,29 +3323,15 @@ pub mod ha {
         /// A transition of `user`'s session, called as the speaker `entity`.
         fn call(&mut self, user: &str, entity: &str, transition: &str, input: Vec<u8>) {
             let k = (user.to_string(), entity.to_string());
-            let Some(c) = self.standing.get(&k).copied() else {
-                return;
-            };
-            let Some(func) = self.hosted.get(&format!("listening.{transition}")) else {
-                return;
-            };
-            let now = now_ms();
-            let cause = self.cause(&k, now);
-            let input = Input::Mutate {
-                func,
-                input,
-                now,
-                cause,
-            };
-            let Some(peer) = self.machines.get_mut(&k) else {
-                return;
-            };
-            let out = stepped(&k, || peer.step(input));
-            self.send(c, out);
+            if let (true, Some(p)) = (self.standing.contains(&k), self.speakers.get_mut(&k)) {
+                if let Err(why) = p.mutate(&format!("listening.{transition}"), input) {
+                    tracing::warn!("a speaker's transition was refused: {why}");
+                }
+            }
         }
 
         fn drain(&mut self) {
-            let all: Vec<_> = self.standing.keys().cloned().collect();
+            let all: Vec<_> = self.standing.iter().cloned().collect();
             for k in all {
                 self.leave(&k);
             }
@@ -3502,7 +3440,7 @@ pub mod ha {
             // is listening for longer than `idle` goes, pausing what it held.
             let gone: Vec<(String, String)> = wires
                 .standing
-                .keys()
+                .iter()
                 .filter(|(key, entity)| !wanted(key, entity))
                 .cloned()
                 .collect();
@@ -3549,7 +3487,7 @@ pub mod ha {
                     .players()
                     .iter()
                     .map(|(e, _)| e.clone())
-                    .filter(|e| wires.standing.keys().any(|(_, w)| w == e))
+                    .filter(|e| wires.standing.iter().any(|(_, w)| w == e))
                     .collect();
                 for entity in standing {
                     let reading = house.read(&entity);
@@ -4054,18 +3992,9 @@ pub mod ha {
             )
             .unwrap(),
         );
-        let mut w = Wires {
-            hub,
-            hosted,
-            entities: vec![KITCHEN.into(), STUDY.into()],
-            machines: HashMap::new(),
-            standing: HashMap::new(),
-            woke: HashMap::new(),
-            frames: channel(),
-            waker: channel().0,
-            sign_in: Arc::new(|_: &str| Err("no sign-ins here".to_string())),
-            recorders: HashMap::new(),
-        };
+        let entities = vec![KITCHEN.into(), STUDY.into()];
+        let no = Arc::new(|_: &str| Err("no sign-ins here".to_string()));
+        let mut w = Wires::new(hub, hosted, entities, channel().0, no);
         // Read and heard, as the thread does, until max's speakers agree.
         let settled = |w: &mut Wires| {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -4096,17 +4025,10 @@ pub mod ha {
         assert_eq!(sessions(&w.hub, &w.entities).0, read);
         w.call("ann", KITCHEN, "scrub", scrub(2));
         w.hub.with(|_| ());
-        let (study, rest): (Vec<Framed>, Vec<Framed>) = w
-            .frames
-            .1
-            .try_iter()
-            .partition(|((u, e), _)| u == "max" && e == STUDY);
-        assert!(!study.is_empty(), "the study is sent ann's change");
-        assert!(rest.iter().any(|((u, e), _)| u == "max" && e == KITCHEN));
-        for f in rest {
-            w.frames.0.send(f).unwrap();
+        let study = ("max".to_string(), STUDY.to_string());
+        for (_, p) in w.speakers.iter_mut().filter(|(k, _)| **k != study) {
+            p.pump();
         }
-        w.receive();
         assert!(
             !w.agree("max", read),
             "the kitchen has heard past what was read"
@@ -4114,9 +4036,6 @@ pub mod ha {
         let now = sessions(&w.hub, &w.entities).0;
         assert!(now > read);
         assert!(!w.agree("max", now), "the study has not heard it yet");
-        for f in study {
-            w.frames.0.send(f).unwrap();
-        }
         w.receive();
         assert!(w.agree("max", now), "both have heard what was read");
     }

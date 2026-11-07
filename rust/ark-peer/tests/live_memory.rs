@@ -15,7 +15,9 @@
 //!
 //! And the live space follows the log's rules (§1.8, §1.9): a connection
 //! fed by a scope holds, of the live rows, only what the scope gives it
-//! (`a_scoped_connection_holds_only_its_live_rows`).
+//! (`a_scoped_connection_holds_only_its_live_rows`). A device of the live
+//! space alone (`Config::live_only`) is fed none of the log
+//! (`a_live_only_device_is_fed_the_live_space_alone`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -55,8 +57,10 @@ fn device(k: usize) -> Peer {
     p
 }
 
-/// Every frame each side has, carried until none is left.
-fn carry(hub: &mut Authority, ds: &mut [(Peer, u64)]) {
+/// Every frame each side has, carried until none is left: the frames the
+/// devices were sent, each to its connection.
+fn carry(hub: &mut Authority, ds: &mut [(Peer, u64)]) -> Vec<(u64, Vec<u8>)> {
+    let mut sent = vec![];
     loop {
         let mut q = vec![];
         for (d, c) in ds.iter_mut() {
@@ -65,12 +69,13 @@ fn carry(hub: &mut Authority, ds: &mut [(Peer, u64)]) {
             }
         }
         if q.is_empty() {
-            return;
+            return sent;
         }
         for (to, b) in q {
             if let Some((d, _)) = ds.iter_mut().find(|(_, c)| *c == to) {
-                d.receive(b);
+                d.receive(b.clone());
             }
+            sent.push((to, b));
         }
     }
 }
@@ -192,5 +197,40 @@ fn a_scoped_connection_holds_only_its_live_rows() {
     assert_eq!(pointers(&hub), ["u0@d0", "u1@d1"]);
     assert_eq!(pointers(&ds[0].0), ["u0@d0", "u1@d1"], "fed whole");
     assert_eq!(pointers(&ds[1].0), ["u0@d0"], "fed by its scope");
+    assert!(live(&ds[1].0).pending().is_empty());
+}
+
+/// A device of the live space alone (a server's speaker) stands in the room
+/// and points there as any device does, and holds none of the log: it is
+/// not filled, and the entry another device's playlist was is not
+/// taken in. Falsified by saying `Hello` for the log all the same: it was
+/// answered; and by taking in the log's frames: it held the playlist.
+#[test]
+fn a_live_only_device_is_fed_the_live_space_alone() {
+    let mut hub = hub();
+    let mut ds = vec![];
+    for k in [0, 1] {
+        let mut d = device(k);
+        d.config.live_only = k == 1;
+        let conn = hub.accept(d.me().clone());
+        d.connected();
+        ds.push((d, conn));
+    }
+    let list = arkdb::demo::CreatePlaylist { name: "Road".into() };
+    ds[0].0.mutate_at("demo.create_playlist", list.to_bytes(), 1).unwrap();
+    ds[1].0.mutate_at("room.point", Point { x: 3 }.to_bytes(), 1).unwrap();
+    let sent = carry(&mut hub, &mut ds);
+    let log = |c: u64| {
+        let of_log = |b: &[u8]| ark::frames::Frame::dec(b).is_ok_and(|f| f.space() == Space::Durable);
+        sent.iter().filter(|(to, b)| *to == c && of_log(b)).count()
+    };
+    assert!(
+        log(ds[1].1) < log(ds[0].1),
+        "the speaker said no `Hello` for the log, and is answered none"
+    );
+    let playlists = |p: &ark_peer::Core| p.log.store.rows("playlist").count();
+    assert_eq!((playlists(&hub), playlists(&ds[0].0)), (1, 1));
+    assert_eq!(playlists(&ds[1].0), 0, "the speaker holds none of the log");
+    assert_eq!(live(&ds[1].0).store, live(&hub).store, "and the room as the server has it");
     assert!(live(&ds[1].0).pending().is_empty());
 }
