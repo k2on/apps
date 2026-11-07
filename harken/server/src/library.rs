@@ -262,6 +262,7 @@ impl Scanner {
                 }
             }
         });
+        let downloads = feeds.to_path_buf();
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let Ok(event) = event else { return };
             // Creates and writes, and a picture going. A removed *track* is
@@ -269,17 +270,18 @@ impl Scanner {
             // disappearing is not evidence that somebody meant to delete
             // the song — an unplugged disk looks exactly the same. A
             // removed cover is only a directory whose tracks are offered
-            // again, with whatever cover they have now.
+            // again, with whatever cover they have now. Of the feeds'
+            // downloads, only captions: a download is written as it comes.
             let gone = matches!(event.kind, notify::EventKind::Remove(_));
             let made = matches!(
                 event.kind,
                 notify::EventKind::Create(_) | notify::EventKind::Modify(_)
             );
-            for path in event
-                .paths
-                .into_iter()
-                .filter(|p| made || gone && covers::is_image(p))
-            {
+            let wanted = |p: &PathBuf| {
+                let captions = p.extension().is_some_and(|e| e == "vtt");
+                (made || gone && covers::is_image(p)) && (captions || !p.starts_with(&downloads))
+            };
+            for path in event.paths.into_iter().filter(wanted) {
                 let _ = events.send(path);
             }
         });
