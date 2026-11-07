@@ -5,11 +5,10 @@
 
 use std::sync::OnceLock;
 
-use ark::domain::Domain;
+use ark::domain::{Domain, Sandbox};
 use ark::format::Encode;
-use ark::log::EntryId;
 use ark::peer::Ctx;
-use ark::store::{Change, Store};
+use ark::store::Change;
 use money_domain::*;
 
 /// The domain, assembled once.
@@ -27,12 +26,20 @@ pub fn full(name: &str) -> String {
     }
 }
 
-pub struct Book {
-    pub store: Store,
-    /// What the last mutation changed.
-    pub last: Vec<Change>,
-    local: i64,
-    now: i64,
+/// The budget's store: a [`Sandbox`] authored in as session `s`.
+pub struct Book(pub Sandbox);
+
+impl std::ops::Deref for Book {
+    type Target = Sandbox;
+    fn deref(&self) -> &Sandbox {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Book {
+    fn deref_mut(&mut self) -> &mut Sandbox {
+        &mut self.0
+    }
 }
 
 impl Default for Book {
@@ -43,26 +50,17 @@ impl Default for Book {
 
 impl Book {
     pub fn new() -> Book {
-        Book {
-            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
-            last: vec![],
-            local: 0,
+        let ctx = Ctx {
+            session: "s".into(),
             // 2026-10-26.
             now: 1_793_000_000_000,
-        }
+            ..Default::default()
+        };
+        Book(Sandbox::new(money_domain::shared(), ctx))
     }
 
     pub fn ctx(&mut self, user: &str, roles: &[&str]) -> Ctx {
-        self.local += 1;
-        self.now += 1;
-        Ctx {
-            id: EntryId::of("s", self.local),
-            actor: user.into(),
-            session: "s".into(),
-            roles: roles.iter().map(|r| r.to_string()).collect(),
-            now: self.now,
-            ..Default::default()
-        }
+        self.0.as_(user, roles).entry()
     }
 
     /// Author as `user`: the number of changes, or the refusal's text.
@@ -83,26 +81,17 @@ impl Book {
     }
 
     pub fn apply(&mut self, ctx: &Ctx, name: &str, input: &impl Encode) -> Result<usize, String> {
-        let f = domain()
-            .get(&full(name))
-            .and_then(|f| f.proc.clone())
-            .unwrap_or_else(|| panic!("{name} writes nothing"));
-        self.last = f(&mut self.store, ctx, &input.to_bytes())?;
-        Ok(self.last.len())
+        self.run_at(ctx, &full(name), &input.to_bytes())
     }
 
     /// A query that must answer.
     pub fn list<T: Encode>(&self, name: &str, input: &impl Encode) -> Vec<T> {
         let ctx = Ctx {
-            id: EntryId::of("q", 0),
             actor: "bob".into(),
-            session: "q".into(),
-            now: self.now,
-            ..Default::default()
+            roles: vec![],
+            ..self.ctx.clone()
         };
-        let b = domain()
-            .ask(&self.store, &ctx, &full(name), &input.to_bytes())
-            .unwrap_or_else(|r| panic!("{name}: {r}"));
+        let b = (self.domain.ask(&self.store, &ctx, &full(name), &input.to_bytes())).unwrap_or_else(|r| panic!("{name}: {r}"));
         Vec::<T>::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}"))
     }
 

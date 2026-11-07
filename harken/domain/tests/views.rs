@@ -510,7 +510,7 @@ fn the_library_follows_the_mutations_and_a_rollback() {
     let mut kept: Option<Store> = None;
     let mut step = |c: &mut Lib, name: &str, bytes: Vec<u8>| {
         let author = c.ctx("alice", &[LIBRARY]);
-        c.mutate_bytes(&author, name, &bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+        c.run_at(&author, name, &bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
         let ps = v.push(&c.last, &c.store).unwrap();
         patched += ps.len();
         shown = splice(&ps, &shown);

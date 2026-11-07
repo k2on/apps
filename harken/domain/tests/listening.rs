@@ -19,8 +19,8 @@ mod common;
 
 use std::collections::BTreeMap;
 
+use ark::domain::Sandbox;
 use ark::format::Encode;
-use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::row::Row;
 use ark::store::{Change, Store};
@@ -36,18 +36,16 @@ const T0: i64 = 1_700_000_000_000;
 
 /// The session's tables, and the devices standing in them.
 struct House {
-    store: Store,
+    sb: Sandbox,
     devices: BTreeMap<String, Device>,
-    local: i64,
     now: i64,
 }
 
 impl House {
     fn new() -> House {
         House {
-            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
+            sb: Sandbox::new(harken_domain::shared(), Ctx::default()),
             devices: BTreeMap::new(),
-            local: 0,
             now: T0,
         }
     }
@@ -58,38 +56,18 @@ impl House {
 
     /// An entry of `name`, authored as `user` on `session`.
     fn author(&mut self, user: &str, session: &str, name: &str, input: &impl Encode) -> Result<(), String> {
-        self.local += 1;
-        let ctx = Ctx {
-            id: EntryId::of(session, self.local),
-            actor: user.into(),
-            session: session.into(),
-            now: self.now,
-            ..Default::default()
-        };
-        let f = domain()
-            .get(&format!("listening.{name}"))
-            .and_then(|f| f.proc.clone())
-            .ok_or(format!("no function {name}"))?;
-        f(&mut self.store, &ctx, &input.to_bytes())?;
-        Ok(())
+        self.author_bytes(user, session, name, &input.to_bytes())
     }
 
     /// An entry of `name` from its input's bytes, as `user` on `session`:
     /// nothing, or the refusal.
     fn author_bytes(&mut self, user: &str, session: &str, name: &str, input: &[u8]) -> Result<(), String> {
-        self.local += 1;
+        (self.sb.ctx.actor, self.sb.ctx.session) = (user.into(), session.into());
         let ctx = Ctx {
-            id: EntryId::of(session, self.local),
-            actor: user.into(),
-            session: session.into(),
             now: self.now,
-            ..Default::default()
+            ..self.sb.entry()
         };
-        let f = domain()
-            .get(&format!("listening.{name}"))
-            .and_then(|f| f.proc.clone())
-            .ok_or(format!("no function {name}"))?;
-        f(&mut self.store, &ctx, input).map(|_| ())
+        self.sb.run_at(&ctx, &format!("listening.{name}"), input).map(|_| ())
     }
 
     /// A device of `user` connects, saying what it is: `on_join`.
@@ -122,7 +100,7 @@ impl House {
             table: ark_auth::SignIn::TABLE.into(),
             row: row.to_bytes(),
         };
-        self.store.apply(&c).unwrap();
+        self.sb.store.apply(&c).unwrap();
     }
 
     /// Its connection goes: `on_leave`. Not a decision about the music.
@@ -143,7 +121,7 @@ impl House {
     }
 
     fn state_of(&self, user: &str) -> Listening {
-        Listening::of(&self.store, user)
+        Listening::of(&self.sb.store, user)
     }
 
     fn state(&self) -> Listening {
@@ -814,10 +792,10 @@ fn a_restart_restores_the_session_paused_with_no_output_and_nobody_here() {
     let restart = |h: &House, later: i64| {
         let kept: Vec<(String, Vec<Vec<u8>>)> = ["listening", "listening_device"]
             .iter()
-            .map(|t| (t.to_string(), h.store.rows(t).map(|r| r.to_vec()).collect()))
+            .map(|t| (t.to_string(), h.sb.store.rows(t).map(|r| r.to_vec()).collect()))
             .collect();
         let mut back = House::new();
-        back.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap();
+        back.sb.store = Store::from_rows(domain().schema.clone(), ark::schema::Space::Durable, &kept).unwrap();
         back.now = later;
         back.author("authority", "authority", "on_restore", &()).unwrap();
         back
@@ -873,7 +851,7 @@ fn two_accounts_are_two_sessions() {
     assert_eq!(bob.devices.len(), 1);
     assert_eq!(h.state().devices.len(), 2, "alice's laptop and phone, in one");
     assert_eq!(h.state_of("alice").session.map(|a| a.queue.len()), Some(2));
-    assert_eq!(h.store.rows("listening").count(), 1, "one session row: alice's");
+    assert_eq!(h.sb.store.rows("listening").count(), 1, "one session row: alice's");
 }
 
 /// A call this module cannot read is refused and changes nothing: no
@@ -886,7 +864,7 @@ fn a_call_nobody_can_read_changes_nothing() {
     h.playing_on("laptop", 0);
     let before = h.state();
     assert!(domain().get("listening.rewind").is_none(), "no transition rewind");
-    assert_eq!(h.call("laptop", "rewind", &()), Err("no function rewind".to_string()));
+    assert_eq!(h.call("laptop", "rewind", &()), Err("listening.rewind writes nothing".to_string()));
     assert_eq!(
         h.call("laptop", "skip", &Skip { by: 0 }),
         Err("a skip is one track either way".to_string())
@@ -942,12 +920,12 @@ fn a_scrub_is_ephemeral_and_nothing_ordered_reads_it() {
         "on_restore",
     ];
     let others = |h: &House| -> Vec<(String, Vec<Vec<u8>>)> {
-        h.store
+        h.sb.store
             .schema_arc()
             .tables
             .iter()
             .filter(|t| t.name != "listening_scrub")
-            .map(|t| (t.name.clone(), h.store.rows(&t.name).map(|r| r.to_vec()).collect()))
+            .map(|t| (t.name.clone(), h.sb.store.rows(&t.name).map(|r| r.to_vec()).collect()))
             .collect()
     };
     let input = |t: &str| -> Vec<u8> {

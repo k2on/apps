@@ -6,11 +6,9 @@
 
 use std::sync::OnceLock;
 
-use ark::domain::{Domain, Func};
+use ark::domain::{Domain, Func, Sandbox};
 use ark::format::Encode;
-use ark::log::EntryId;
 use ark::peer::Ctx;
-use ark::store::{Change, Store};
 use harken_domain::Id;
 use harken_domain::Playlist;
 use harken_domain::LIBRARY;
@@ -23,13 +21,20 @@ pub fn domain() -> &'static Domain {
     D.get_or_init(harken_domain::domain)
 }
 
-pub struct Lib {
-    pub store: Store,
-    /// What the last mutation changed.
-    pub last: Vec<Change>,
-    /// The session's next entry, and the clock.
-    local: i64,
-    now: i64,
+/// The library's store: a [`Sandbox`] authored in as session `s`.
+pub struct Lib(pub Sandbox);
+
+impl std::ops::Deref for Lib {
+    type Target = Sandbox;
+    fn deref(&self) -> &Sandbox {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Lib {
+    fn deref_mut(&mut self) -> &mut Sandbox {
+        &mut self.0
+    }
 }
 
 impl Default for Lib {
@@ -40,61 +45,39 @@ impl Default for Lib {
 
 impl Lib {
     pub fn new() -> Lib {
-        Lib {
-            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
-            last: vec![],
-            local: 0,
+        let ctx = Ctx {
+            session: "s".into(),
             now: 1_000,
-        }
+            ..Default::default()
+        };
+        Lib(Sandbox::new(harken_domain::shared(), ctx))
     }
 
     /// A fresh entry's context, as a peer authors one: its id from the
     /// session and the next local number, the clock moved on.
     pub fn ctx(&mut self, user: &str, roles: &[&str]) -> Ctx {
-        self.local += 1;
-        self.now += 1;
-        Ctx {
-            id: EntryId::of("s", self.local),
-            actor: user.into(),
-            session: "s".into(),
-            roles: roles.iter().map(|r| r.to_string()).collect(),
-            now: self.now,
-            ..Default::default()
-        }
+        self.as_(user, roles).entry()
     }
 
     /// Author as `user` holding the library's role, as the scanner does:
     /// the number of changes, or the refusal's text.
     pub fn mutate<I: Encode>(&mut self, user: &str, f: Func<I>, input: &I) -> Result<usize, String> {
-        let ctx = self.ctx(user, &[LIBRARY]);
-        self.mutate_as(&ctx, f, input)
+        self.as_(user, &[LIBRARY]).run(f, input)
     }
 
     /// Author the entry `ctx`.
     pub fn mutate_as<I: Encode>(&mut self, ctx: &Ctx, f: Func<I>, input: &I) -> Result<usize, String> {
-        self.mutate_bytes(ctx, f.name, &input.to_bytes())
-    }
-
-    /// Author the entry `ctx`, its input as bytes.
-    pub fn mutate_bytes(&mut self, ctx: &Ctx, name: &str, input: &[u8]) -> Result<usize, String> {
-        let f = domain()
-            .get(name)
-            .and_then(|f| f.proc.clone())
-            .unwrap_or_else(|| panic!("{name} writes nothing"));
-        self.last = f(&mut self.store, ctx, input)?;
-        Ok(self.last.len())
+        self.run_at(ctx, f.name, &input.to_bytes())
     }
 
     /// Ask as `user`: the answer, or the refusal's text.
     pub fn query<I: Encode, T: Encode>(&self, user: &str, Func { name, .. }: Func<I, T>, input: &I) -> Result<Vec<T>, String> {
         let ctx = Ctx {
-            id: EntryId::of("q", 0),
             actor: user.into(),
-            session: "q".into(),
-            now: self.now,
-            ..Default::default()
+            roles: vec![],
+            ..self.ctx.clone()
         };
-        let b = domain().ask(&self.store, &ctx, name, &input.to_bytes())?;
+        let b = self.domain.ask(&self.store, &ctx, name, &input.to_bytes())?;
         Ok(Vec::from_bytes(&b).unwrap_or_else(|e| panic!("{name}: {e}")))
     }
 

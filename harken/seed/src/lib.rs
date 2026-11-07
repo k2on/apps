@@ -28,11 +28,10 @@
 
 use std::sync::{Arc, OnceLock};
 
-use ark::domain::Domain;
+use ark::domain::{Domain, Sandbox};
 use ark::format::Encode;
 use ark::log::{EntryId, Record};
 use ark::peer::Ctx;
-use ark::store::Store;
 use ark_peer::{Disk, Func, Memory};
 use harken_domain::catalogue::Catalogue;
 use harken_domain::shows::Shelf;
@@ -80,78 +79,53 @@ fn domain() -> &'static Arc<Domain> {
 /// of four hundred entries every load. Here each mutation runs once, as the
 /// machine runs it, over one store, with the entry a peer would have authored
 /// (numbered from one, so the demo is the same library every load) — the
-/// same changes the log would have recorded, and no log.
-struct Seeder {
-    store: Store,
-    ctx: Ctx,
-    local: i64,
+/// same changes the log would have recorded, and no log. The demo authors
+/// its own library, as a server's scanner does, so it holds the role the
+/// library's guard asks (`docs/plan-guards.md` D1).
+fn seeder() -> Sandbox {
+    let ctx = Ctx {
+        id: EntryId::of(LOCAL, 0),
+        actor: DEMO.into(),
+        session: LOCAL.into(),
+        roles: vec![LIBRARY.into()],
+        now: 1_700_000_000_000,
+        ..Default::default()
+    };
+    Sandbox::new(domain().clone(), ctx)
 }
 
-impl Seeder {
-    fn new() -> Seeder {
-        Seeder {
-            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
-            // The demo authors its own library, as a server's scanner does,
-            // so it holds the role the library's guard asks
-            // (`docs/plan-guards.md` D1).
-            ctx: Ctx {
-                id: EntryId::of(LOCAL, 0),
-                actor: DEMO.into(),
-                session: LOCAL.into(),
-                roles: vec![LIBRARY.into()],
-                now: 1_700_000_000_000,
-                ..Default::default()
-            },
-            local: 0,
-        }
-    }
+/// One mutation, by its full name. A seed mutation can only be refused
+/// by a mistake — an argument that moved, a key computed two different
+/// ways — and every one of those presents on the page as something
+/// silently absent, so it is an assertion rather than a `let _`.
+fn apply(seed: &mut Sandbox, what: &str, name: &str, input: &[u8]) {
+    let ctx = seed.entry();
+    seed.run_at(&ctx, name, input)
+        .unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
+}
 
-    /// One mutation, by its full name. A seed mutation can only be refused
-    /// by a mistake — an argument that moved, a key computed two different
-    /// ways — and every one of those presents on the page as something
-    /// silently absent, so it is an assertion rather than a `let _`.
-    fn apply(&mut self, what: &str, name: &str, input: &[u8]) {
-        self.local += 1;
-        self.ctx.id = EntryId::of(LOCAL, self.local);
-        self.ctx.now += 1;
-        let f = domain()
-            .get(name)
-            .and_then(|f| f.proc.clone())
-            .unwrap_or_else(|| panic!("{name} writes nothing"));
-        f(&mut self.store, &self.ctx, input).unwrap_or_else(|r| panic!("the demo could not author {what}: {r}"));
-    }
+/// One mutation by its function's typed handle.
+fn author<I: Encode>(seed: &mut Sandbox, what: &str, f: Func<I>, input: &I) {
+    apply(seed, what, f.name, &input.to_bytes());
+}
 
-    /// One mutation by its function's typed handle.
-    fn mutate<I: Encode>(&mut self, what: &str, f: Func<I>, input: &I) {
-        self.apply(what, f.name, &input.to_bytes());
-    }
+/// Which playlist is called `name`.
+fn playlist(seed: &Sandbox, name: &str) -> Option<[u8; 16]> {
+    let all = seed.ask(playlists::PLAYLISTS, &()).expect("the demo reads its playlists");
+    all.into_iter().find(|p| p.name == name).map(|p| p.id.0)
+}
 
-    fn query<I: Encode, T: Encode>(&self, Func { name, .. }: Func<I, T>, input: &I) -> Vec<T> {
-        let bytes = domain()
-            .ask(&self.store, &self.ctx, name, &input.to_bytes())
-            .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
-        Vec::<T>::from_bytes(&bytes).unwrap_or_else(|r| panic!("{name}: {r}"))
-    }
-
-    /// Which playlist is called `name`.
-    fn playlist(&self, name: &str) -> Option<[u8; 16]> {
-        self.query(playlists::PLAYLISTS, &()).into_iter().find(|p| p.name == name).map(|p| p.id.0)
-    }
-
-    /// The library's ids by title.
-    fn ids(&self, titles: &[&str]) -> Vec<[u8; 16]> {
-        let items = self.query(
-            browse::LIBRARY,
-            &Library {
-                playlist_id: Key::new([0; 16]),
-            },
-        );
-        titles
-            .iter()
-            .filter_map(|t| items.iter().find(|i| i.title == *t))
-            .map(|i| i.id.0)
-            .collect()
-    }
+/// The library's ids by title.
+fn ids(seed: &Sandbox, titles: &[&str]) -> Vec<[u8; 16]> {
+    let library = Library {
+        playlist_id: Key::new([0; 16]),
+    };
+    let items = seed.ask(browse::LIBRARY, &library).expect("the demo reads its library");
+    titles
+        .iter()
+        .filter_map(|t| items.iter().find(|i| i.title == *t))
+        .map(|i| i.id.0)
+        .collect()
 }
 
 /// The catalogue as copy `k` of it: every name and file with ` (k)` after
@@ -187,7 +161,7 @@ fn copy_of(c: &Catalogue, k: usize) -> Catalogue {
 /// for measuring how a list's cost grows with the library; the playlists
 /// are the first copy's.
 pub fn seeded_disk(copies: usize) -> Memory {
-    let mut seed = Seeder::new();
+    let mut seed = seeder();
     // People, then tracks, then what a track could not carry, copy by copy:
     // the order `Catalogue::calls` gives. The demo has every file it names:
     // they are URLs, played from where they are. What it describes that
@@ -197,25 +171,25 @@ pub fn seeded_disk(copies: usize) -> Memory {
             if call.if_there {
                 continue;
             }
-            seed.apply(&call.what, call.name, &call.input);
+            apply(&mut seed, &call.what, call.name, &call.input);
         }
     }
 
     // Then the shows, each and its episodes.
     for (show, episodes) in shelf().calls() {
-        seed.mutate(&show.title, shows::ADD_SHOW, &show);
+        author(&mut seed, &show.title, shows::ADD_SHOW, &show);
         for e in episodes {
-            seed.mutate(&e.title, shows::ADD_EPISODE, &e);
+            author(&mut seed, &e.title, shows::ADD_EPISODE, &e);
         }
     }
     // …and what their feeds say beside them: who is on each, and what is
     // said in it.
     let (people, transcripts) = shelf().besides();
     for p in people {
-        seed.mutate(&p.file, shows::SET_PEOPLE, &p);
+        author(&mut seed, &p.file, shows::SET_PEOPLE, &p);
     }
     for t in transcripts {
-        seed.mutate(&t.file, shows::SET_TRANSCRIPT, &t);
+        author(&mut seed, &t.file, shows::SET_TRANSCRIPT, &t);
     }
 
     // Three playlists, so the sidebar shows what a playlist *is* here: an
@@ -237,14 +211,14 @@ pub fn seeded_disk(copies: usize) -> Memory {
         ("Water Music", &["Alla Hornpipe", "Bourrée", "Sarabande", "Gigue"]),
     ];
     for (name, titles) in SETS {
-        seed.mutate(name, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: name.to_string() });
-        let list = seed.playlist(name).expect("the playlist just made");
-        for id in seed.ids(titles) {
+        author(&mut seed, name, playlists::CREATE_PLAYLIST, &CreatePlaylist { name: name.to_string() });
+        let list = playlist(&seed, name).expect("the playlist just made");
+        for id in ids(&seed, titles) {
             let a = AddToPlaylist {
                 playlist_id: Key::new(list),
                 media_id: Key::new(id),
             };
-            seed.mutate(name, playlists::ADD_TO_PLAYLIST, &a);
+            author(&mut seed, name, playlists::ADD_TO_PLAYLIST, &a);
         }
     }
 
@@ -262,7 +236,7 @@ pub fn seeded_disk(copies: usize) -> Memory {
 mod tests {
     /// Falsified by a catalogue or a show the domain refuses, or a playlist
     /// the library cannot be read for: each mutation is an assertion
-    /// (`Seeder::apply`), so the seed panics.
+    /// (`apply`), so the seed panics.
     #[test]
     fn the_library_is_seeded() {
         assert!(!super::catalogue().albums.is_empty());

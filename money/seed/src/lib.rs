@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 
+use ark::domain::Sandbox;
 use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
@@ -234,51 +235,34 @@ fn day_in(month: &str, d: i64, today: &str) -> Option<String> {
 }
 
 /// The demo's mutations, run once each over one store.
-struct Seeder {
-    store: Store,
-    ctx: Ctx,
-    local: i64,
-}
+struct Seeder(Sandbox);
 
 impl Seeder {
     fn new(now: i64) -> Seeder {
-        Seeder {
-            store: Store::new(domain().schema.clone(), ark::schema::Space::Durable),
-            ctx: Ctx {
-                id: EntryId::of(LOCAL, 0),
-                actor: ME.into(),
-                session: LOCAL.into(),
-                roles: vec![BANK.into()],
-                now,
-                ..Default::default()
-            },
-            local: 0,
-        }
+        let ctx = Ctx {
+            id: EntryId::of(LOCAL, 0),
+            actor: ME.into(),
+            session: LOCAL.into(),
+            roles: vec![BANK.into()],
+            now,
+            ..Default::default()
+        };
+        Seeder(Sandbox::new(domain(), ctx))
     }
 
     /// One mutation by its function's name, as `who`. A seed
     /// mutation is refused only by a mistake, so a refusal is a panic.
-    fn run<I: Encode>(&mut self, who: &str, Func { name, .. }: Func<I>, input: &I) {
-        self.local += 1;
-        self.ctx.id = EntryId::of(LOCAL, self.local);
-        self.ctx.now += 1;
-        self.ctx.actor = who.into();
-        let f = domain()
-            .get(name)
-            .and_then(|f| f.proc.clone())
-            .unwrap_or_else(|| panic!("the demo authors {name}"));
-        f(&mut self.store, &self.ctx, &input.to_bytes()).unwrap_or_else(|r| panic!("the demo could not {name}: {r}"));
+    fn run<I: Encode>(&mut self, who: &str, f: Func<I>, input: &I) {
+        self.0.ctx.actor = who.into();
+        self.0.run(f, input).unwrap_or_else(|r| panic!("the demo could not {}: {r}", f.name));
     }
 
-    fn ask<I: Encode, T: Encode>(&self, Func { name, .. }: Func<I, T>, input: &I) -> Vec<T> {
-        let bytes = domain()
-            .ask(&self.store, &self.ctx, name, &input.to_bytes())
-            .unwrap_or_else(|r| panic!("the demo reads {name}: {r}"));
-        Vec::<T>::from_bytes(&bytes).unwrap_or_else(|r| panic!("{name}: {r}"))
+    fn ask<I: Encode, T: Encode>(&self, f: Func<I, T>, input: &I) -> Vec<T> {
+        self.0.ask(f, input).unwrap_or_else(|r| panic!("the demo reads {}: {r}", f.name))
     }
 
     fn rows<R: ark::row::Row>(&self) -> Vec<R> {
-        ark::plan::rows::<R>(&self.store)
+        self.0.rows()
     }
 
     fn account(&self, name: &str) -> Id<Account> {
@@ -726,7 +710,7 @@ fn household(today: &str, now: i64) -> Store {
         charges: vec![charge(add_days(today, -1), -1_798), charge(today.to_string(), -2_399)],
     };
     s.run(ME, receipts::ADD_CHARGES, &charges);
-    s.store
+    s.0.store
 }
 
 /// The demo's peer: the seeded household, with no server, holding the

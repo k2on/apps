@@ -17,13 +17,17 @@
 //!   rows a connection fed by it holds (§1.8).
 //!
 //! What a function must not do — act on the world outside — is a job
-//! ([`effect`]): a row a handler claims and finishes.
+//! ([`effect`]): a row a handler claims and finishes. A [`Sandbox`] runs a
+//! domain over one store with no log: a seed's, a domain's tests'.
 //!
 //! Determinism is an API rule: `ctx.now` and `ctx.new_id()` are a
 //! function's only non-determinism; a function reads nothing else that
 //! differs between runs (no clock, no randomness, no host state).
 
 pub mod effect;
+mod sandbox;
+
+pub use sandbox::Sandbox;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
