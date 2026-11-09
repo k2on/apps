@@ -108,9 +108,12 @@ step() {
   fi
 }
 
-# The window that has the focus, as the window manager says it
-# ("Window{… <package>/<activity>}"), or nothing.
-focus() { adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -m1 -oE 'mCurrentFocus=Window\{[^}]*\}' || true; }
+# The window that has the focus now, as the window manager's list of
+# windows says it ("Window{… <package>/<activity>}"), or nothing. Of that
+# section alone: the whole `dumpsys window` begins with the last ANR's
+# state, the focus as it was then (a launcher slow to boot), which read as
+# now says the launcher has it while the app is drawn and resumed.
+focus() { adb shell dumpsys window windows 2>/dev/null | tr -d '\r' | grep -oE 'mCurrentFocus=Window\{[^}]*\}' | tail -1 || true; }
 
 # Until the window with the focus is package `$1`'s own activity (not its
 # splash, not a dialog over it), up to `$2` seconds.
@@ -127,11 +130,15 @@ front() {
 # a "keeps stopping" off the screen, so only the crash log says so).
 why() {
   echo "focus: $(focus)"
+  echo "== every focus dumpsys window names, by its section"
+  adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -E '^WINDOW MANAGER|mCurrentFocus|mFocusedApp' || true
+  echo "== the activity manager's"
   adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E 'ResumedActivity|mFocusedApp' || true
   echo "== crashes"
   adb logcat -d -b crash 2>/dev/null | tail -n 80 || true
-  echo "== the activity manager"
-  adb logcat -d -s ActivityTaskManager:I ActivityManager:I AndroidRuntime:E 2>/dev/null | tail -n 80 || true
+  echo "== starts, draws, deaths, ANRs"
+  adb logcat -d -s ActivityTaskManager:I ActivityManager:I AndroidRuntime:E 2>/dev/null |
+    grep -E 'START u0|Displayed|has died|ANR|FATAL|preloadRecents|setVisibility' | tail -n 60 || true
 }
 
 # The app opened afresh as the launcher opens it (its MAIN/LAUNCHER
@@ -146,6 +153,7 @@ open_app() {
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
+    adb exec-out screencap -p > "$out/stuck.png" || true
     return 1
   fi
   # What it shows first (a list, a cover) a moment to draw.
