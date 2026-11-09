@@ -175,6 +175,7 @@ version = "0.1.0"
 dependencies = [
  "ark-modules",
  "ark-peer",
+ "arkui-macros",
 ]
 
 [[package]]
@@ -271,6 +272,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ui-gen"
+version = "0.1.0"
+dependencies = [
+ "ark-app",
+]
+
+[[package]]
 name = "arkdb"
 version = "0.1.0"
 dependencies = [
@@ -284,6 +292,7 @@ dependencies = [
 name = "arkui"
 version = "0.1.0"
 dependencies = [
+ "ark-app",
  "ark-format",
  "ark-router",
  "chrono",
@@ -299,6 +308,15 @@ dependencies = [
  "wayland-protocols",
  "web-sys",
  "zbus",
+]
+
+[[package]]
+name = "arkui-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3569,6 +3587,8 @@ dependencies = [
  "ark-format",
  "ark-modules",
  "ark-peer",
+ "ark-ui-gen",
+ "arkui",
  "money-domain",
  "money-seed",
  "uniffi",
@@ -3594,10 +3614,13 @@ name = "money-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-ffi",
  "ark-format",
+ "ark-modules",
  "ark-peer",
  "image",
+ "money-app",
  "money-domain",
  "money-seed",
  "serde_json",
@@ -3611,12 +3634,14 @@ name = "money-iced"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-auth",
  "ark-peer",
  "arkui",
  "arkui-shots",
  "iced",
  "iced_test",
+ "money-app",
  "money-domain",
  "money-seed",
  "money-server",

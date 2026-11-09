@@ -204,6 +204,12 @@ impl<A: App> Runtime<A> {
         host.read(|store| A::screen(&self.state, &Data { store, now_ms }))
     }
 
+    /// What the screen shows of `store` at `now_ms`: for a host that
+    /// draws from a shared borrow (iced's `view`).
+    pub fn screen_of(&self, store: &Store<A::Key>, now_ms: i64) -> A::Screen {
+        A::screen(&self.state, &Data { store, now_ms })
+    }
+
     /// `msg` taken: the state updated and its commands carried out, each
     /// message they come back as taken in turn.
     pub fn dispatch(&mut self, msg: A::Msg, host: &mut impl Host<A>) {
@@ -300,6 +306,12 @@ impl Inbox {
         std::mem::take(&mut *self.answers.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
+
+pub mod view;
+
+/// `#[view]`: a function of a screen's record laid out once for every
+/// toolkit ([`view`]).
+pub use arkui_macros::view;
 
 #[cfg(test)]
 mod tests;

@@ -39,6 +39,10 @@ final class Model: ObservableObject {
     /// The views, held and kept by the core: what a screen holding one
     /// (ArkUI's `.holding`) reads it from.
     private(set) var session: Session? = nil
+    /// The Accounts tab's runtime (Screens.swift), while a session is open.
+    @Published private(set) var accounts: AccountsScreen? = nil
+    /// The phone's modules, given every screen run in Rust (Modules.swift).
+    var modules = PhoneModules()
     /// Told which views moved, on the main queue: the app's `Watched`.
     var onMoved: ([MoneyView]) -> Void = { _ in }
 
@@ -151,16 +155,25 @@ final class Model: ObservableObject {
                         notice: { [weak self] n in self?.notice = n },
                         denied: { [weak self] d in self?.send(.denied(reason: d)) },
                         failed: { [weak self] w in self?.failed(w) },
-                        opened: { [weak self] s in self?.session = s },
+                        opened: { [weak self] s in self?.opened(s) },
                         moved: { [weak self] views in
                             self?.moves += 1
+                            self?.accounts?.reload()
                             self?.onMoved(views)
                         })
+    }
+
+    private func opened(_ s: Session) {
+        session = s
+        accounts = AccountsScreen(session: s, modules: modules,
+                                  refresh: { [weak self] in Task { await self?.refresh() } },
+                                  nowMs: { Int64(Date().timeIntervalSince1970 * 1000) })
     }
 
     private func close() {
         bridge?.close()
         bridge = nil
+        accounts = nil
         session = nil
         snapshot = Snapshot()
     }

@@ -10,3 +10,5 @@ description = "An Ark app's runtime: its state, its messages and its update in R
 ark-peer = { path = "../ark-peer", default-features = false }
 # What an update asks of the device.
 ark-modules = { path = "../ark-modules" }
+# `#[view]`.
+arkui-macros = { path = "../arkui-macros" }

@@ -546,7 +546,9 @@ rec {
             features = [ "async-io" "blocking-api" ];
           }
         ];
-
+        features = {
+          "app" = [ "dep:ark-app" ];
+        };
       };
       "arrayref" = rec {
         crateName = "arrayref";

@@ -166,7 +166,7 @@ pub trait Changed: Send + Sync {
 /// money's views over a peer.
 #[derive(uniffi::Object)]
 pub struct Session {
-    inner: Arc<ark_ffi::Session<domain::MoneyView>>,
+    pub(crate) inner: Arc<ark_ffi::Session<domain::MoneyView>>,
 }
 
 /// A view held while a screen shows it: let go when dropped (or

@@ -32,6 +32,7 @@ mod filter;
 mod formula;
 mod live;
 mod look;
+mod overview;
 mod palette;
 mod peer;
 mod receipt;
@@ -69,6 +70,9 @@ pub use money_domain::routes::Route;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Budget,
+    /// Every account and what the household is worth: the page money_app
+    /// lays out once for every platform.
+    Accounts,
     Reflect,
     Settings,
     Ledger(Ledger),
@@ -195,6 +199,8 @@ pub enum Modal {
 #[derive(Debug, Clone)]
 pub enum Message {
     Go(Page),
+    /// The Accounts page's own messages (`money_app::accounts`).
+    Accounts(money_app::accounts::AccountsMsg),
     /// A month earlier or later; zero is this one.
     Month(i64),
     ThisMonth,
@@ -346,6 +352,8 @@ pub enum Message {
 pub struct App {
     pub peer: Peer,
     pub page: Page,
+    /// The Accounts page, running.
+    pub accounts: ark_app::Runtime<money_app::accounts::Accounts>,
     pub today: String,
     /// The category the inspector is about; none is the month's summary.
     pub selected: Option<Id<Category>>,
@@ -434,6 +442,7 @@ impl App {
         let mut app = App {
             peer: Peer::open(client, &month_of(today)),
             page: Page::Budget,
+            accounts: ark_app::Runtime::new(),
             today: today.into(),
             selected: None,
             assigning: None,
@@ -802,6 +811,8 @@ impl App {
         match self.page {
             Page::Budget => Route::Budget,
             Page::Reflect => Route::Reflect,
+            // The overview has no path of its own yet: the bar says All Accounts.
+            Page::Accounts => Route::Accounts,
             Page::Ledger(Ledger::All) => Route::Accounts,
             Page::Settings => Route::Settings,
             Page::Ledger(Ledger::Inbox) => Route::Inbox,
@@ -833,7 +844,7 @@ impl App {
     /// by its id (an older link's by its name, `Route::names`); conditions
     /// not saved, the last ones this window had. The banks are Settings'
     /// here, and a category is the budget's.
-    fn page_of(&self, route: &Route) -> Option<Page> {
+    pub(crate) fn page_of(&self, route: &Route) -> Option<Page> {
         Some(match route {
             Route::Budget | Route::Category { .. } => Page::Budget,
             Route::Reflect => Page::Reflect,
@@ -852,6 +863,7 @@ impl App {
 
     fn step(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Accounts(m) => return self.accounts_step(m),
             Message::Go(page) => {
                 self.page = page;
                 self.form = None;
@@ -1597,7 +1609,7 @@ impl App {
             (Pane::Sidebar, _) => self.sidebar_act(action),
             (Pane::Page, Page::Budget) => self.act(action),
             (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect | Page::Settings) => {
+            (Pane::Page, Page::Reflect | Page::Settings | Page::Accounts) => {
                 if let vim::Action::Move(vim::Motion::Left(_)) = action {
                     self.pane = Pane::Sidebar;
                 }

@@ -1815,3 +1815,23 @@ fn the_cursors_receipt_is_beside_the_register() {
     let _ = app.update(Message::Go(Page::Budget));
     assert!(app.peer.txn().is_none(), "none off the register");
 }
+
+/// The Accounts page money_app lays out runs in the window: drawn, a new
+/// account kept through the window's own changes, a row opening its register.
+#[test]
+fn the_accounts_page_runs_in_the_window() {
+    use money_app::accounts::AccountsMsg as A;
+    let mut a = app();
+    let _ = a.update(Message::Go(Page::Accounts));
+    let _ = a.view();
+    let before = a.peer.accounts().len();
+    for m in [A::Add, A::DraftName { name: "Jar".into() }, A::SaveDraft] {
+        let _ = a.update(Message::Accounts(m));
+    }
+    assert_eq!(a.peer.accounts().len(), before + 1);
+    assert!(a.accounts.state().adding.is_none());
+    let _ = a.view();
+    let jar = a.peer.accounts().iter().find(|x| x.name == "Jar").unwrap().id;
+    let _ = a.update(Message::Accounts(A::OpenAccount { id: jar.hex() }));
+    assert_eq!(a.page, Page::Ledger(Ledger::Account(jar)));
+}

@@ -25,6 +25,7 @@ struct MoneyApp: App {
         Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let model = Model(shelf: DefaultsShelf(), root: support)
+        model.modules = PhoneModules(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare())
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }
         _model = StateObject(wrappedValue: model)

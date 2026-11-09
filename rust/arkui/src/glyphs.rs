@@ -239,6 +239,15 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "volume-2" => VOLUME,
         "volume-x" => MUTED,
         "log-out" => SIGN_OUT,
+        "link" => LINK,
+        "layers" => PLAYLIST,
+        "pencil" => RENAME,
+        "archive" => HIDE,
+        "wallet" => WALLET,
+        "credit-card" => CARD,
+        "landmark" => DEBT,
+        "trending-up" => GROWTH,
+        "building-2" | "piggy-bank" => BANK,
         _ => return None,
     })
 }

@@ -305,6 +305,9 @@
           # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
           # DATA` writes what that app's server boots seeded from.
           money-seed = crate { packageId = "money-seed"; };
+          # `money-ui`: the phones' screens written from money's views
+          # (money/app, docs/ark-app.md), SwiftUI and Compose.
+          money-ui = crate { packageId = "money-app"; features = [ "gen" ]; };
           harken-seed = crate { packageId = "harken-seed"; };
           # The catalogue's covers, kept in the repository (harken/seed/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
@@ -1229,6 +1232,13 @@
           update-theme = pkgs.writeShellScriptBin "update-theme" ''
             ${pkgs.python3}/bin/python3 arkui/theme.py write
           '';
+          # `nix run .#update-ui`, from the repository's root: the phones'
+          # screens that are laid out once in Rust (`#[view]`, money/app),
+          # written as SwiftUI and Compose from their recording. iced and the
+          # browser draw the same functions directly and have nothing generated.
+          update-ui = pkgs.writeShellScriptBin "update-ui" ''
+            ${money-ui}/bin/money-ui write
+          '';
           # The catalogue as its repository builds it, and the copy the demo
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
@@ -1252,6 +1262,9 @@
             # `nix run .#update-theme`: the theme's generated files, from
             # arkui/theme.toml.
             inherit update-theme;
+            # `nix run .#update-ui`: the phones' screens written from the
+            # views laid out in Rust.
+            inherit update-ui money-ui;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -1314,6 +1327,20 @@
               for f in $(python3 ${./arkui}/theme.py files); do
                 cmp "generated/$f" "${self}/$f" || {
                   echo "$f is not what arkui/theme.toml makes: nix run .#update-theme" >&2
+                  status=1
+                }
+              done
+              if [ $status != 0 ]; then exit 1; fi
+              touch $out
+            '';
+            # What is written from the views laid out in Rust is what is
+            # committed: change the view, then `nix run .#update-ui`.
+            ui = pkgs.runCommand "ui-current" { } ''
+              ${money-ui}/bin/money-ui write generated > /dev/null
+              status=0
+              for f in $(${money-ui}/bin/money-ui files); do
+                cmp "generated/$f" "${self}/$f" || {
+                  echo "$f is not what its view makes: nix run .#update-ui" >&2
                   status=1
                 }
               done

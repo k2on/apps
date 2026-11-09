@@ -490,6 +490,11 @@ public enum ArkGlyphs {
         case "volume-2": return "speaker.wave.2.fill"
         case "volume-x": return "speaker.slash.fill"
         case "log-out": return "rectangle.portrait.and.arrow.right"
+        case "layers": return "tray.full.fill"
+        case "link": return "link"
+        case "pencil": return "pencil"
+        case "copy": return "doc.on.doc"
+        case "archive": return "xmark.bin"
         default: return nil
         }
     }

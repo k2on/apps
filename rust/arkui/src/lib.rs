@@ -66,6 +66,8 @@ pub mod touchpad;
 /// Percent-encoding, which is `ark-router`'s: a domain spells its routes with it.
 pub use ark_router::url;
 pub mod velocity;
+#[cfg(feature = "app")]
+pub mod view;
 pub mod vim;
 pub mod wake;
 pub mod which;

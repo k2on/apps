@@ -16,6 +16,8 @@ ark-format = { path = "../ark-format" }
 # How an app's routes are spelled: UI-free, so a domain spells its `Route`
 # enum with it too; `router` is the address bar over it.
 ark-router = { path = "../ark-router" }
+# A view laid out once in Rust (`view.rs` draws it), and `#[view]`.
+ark-app = { path = "../ark-app", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced a timer and an executor on the desktop; a browser already
@@ -67,3 +69,7 @@ wasm-bindgen = "0.2"
 # `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+
+[features]
+# `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.
+app = ["dep:ark-app"]

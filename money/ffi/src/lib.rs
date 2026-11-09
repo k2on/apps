@@ -27,11 +27,13 @@ uniffi::setup_scaffolding!();
 /// come with the app's, and the phones print what the desktop prints.
 pub use ark_format;
 
+mod app;
 mod demo;
 mod hall;
 #[cfg(feature = "page")]
 mod page;
 mod session;
+pub use app::{AccountsApp, AppShell};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 #[cfg(feature = "page")]

@@ -127,6 +127,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-ui-gen" = rec {
+      packageId = "ark-ui-gen";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-ui-gen";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "arkdb" = rec {
       packageId = "arkdb";
       build = internal.buildRustCrateWithFeatures {
@@ -141,6 +151,16 @@ rec {
       packageId = "arkui";
       build = internal.buildRustCrateWithFeatures {
         packageId = "arkui";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "arkui-macros" = rec {
+      packageId = "arkui-macros";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-macros";
       };
 
       # Debug support which might change between releases.
@@ -761,6 +781,10 @@ rec {
             packageId = "ark-peer";
             usesDefaultFeatures = false;
           }
+          {
+            name = "arkui-macros";
+            packageId = "arkui-macros";
+          }
         ];
 
       };
@@ -1165,6 +1189,20 @@ rec {
         ];
 
       };
+      "ark-ui-gen" = rec {
+        crateName = "ark-ui-gen";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-ui-gen; };
+        libName = "ark_ui_gen";
+        dependencies = [
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+        ];
+
+      };
       "arkdb" = rec {
         crateName = "arkdb";
         version = "0.1.0";
@@ -1205,6 +1243,11 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui; };
         dependencies = [
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+            optional = true;
+          }
           {
             name = "ark-format";
             packageId = "ark-format";
@@ -1297,6 +1340,34 @@ rec {
             name = "iced_test";
             packageId = "iced_test";
             target = {target, features}: (!("wasm32" == target."arch" or null));
+          }
+        ];
+        features = {
+          "app" = [ "dep:ark-app" ];
+        };
+        resolvedDefaultFeatures = [ "app" ];
+      };
+      "arkui-macros" = rec {
+        crateName = "arkui-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-macros; };
+        procMacro = true;
+        libName = "arkui_macros";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" "visit-mut" ];
           }
         ];
 
@@ -11192,6 +11263,13 @@ rec {
         crateName = "money-app";
         version = "0.1.0";
         edition = "2021";
+        crateBin = [
+          {
+            name = "money-ui";
+            path = "src/bin/money-ui.rs";
+            requiredFeatures = [ "gen" ];
+          }
+        ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/app; };
         libName = "money_app";
         dependencies = [
@@ -11215,6 +11293,16 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-ui-gen";
+            packageId = "ark-ui-gen";
+            optional = true;
+          }
+          {
+            name = "arkui";
+            packageId = "arkui";
+            optional = true;
           }
           {
             name = "money-domain";
@@ -11241,8 +11329,10 @@ rec {
         ];
         features = {
           "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-modules/ffi" ];
+          "gen" = [ "dep:ark-ui-gen" ];
+          "iced" = [ "dep:arkui" "arkui/app" ];
         };
-        resolvedDefaultFeatures = [ "ffi" ];
+        resolvedDefaultFeatures = [ "ffi" "gen" "iced" "web" ];
       };
       "money-domain" = rec {
         crateName = "money-domain";
@@ -11312,6 +11402,10 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-ffi";
             packageId = "ark-ffi";
           }
@@ -11321,9 +11415,19 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-modules";
+            packageId = "ark-modules";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "money-app";
+            packageId = "money-app";
+            features = [ "ffi" ];
           }
           {
             name = "money-domain";
@@ -11392,6 +11496,10 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
@@ -11421,6 +11529,11 @@ rec {
             packageId = "iced";
             target = { target, features }: ("wasm32" == target."arch" or null);
             features = [ "webgl" "svg" "image" "advanced" "fira-sans" ];
+          }
+          {
+            name = "money-app";
+            packageId = "money-app";
+            features = [ "iced" ];
           }
           {
             name = "money-domain";

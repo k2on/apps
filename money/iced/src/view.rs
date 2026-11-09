@@ -185,6 +185,7 @@ impl App {
             Page::Budget => self.view_budget(),
             Page::Reflect => self.view_reflect(),
             Page::Settings => self.view_settings(),
+            Page::Accounts => self.view_accounts(),
             Page::Ledger(l) => self.view_ledger(l),
         };
         // A swipe's arrow over the page, not the sidebar.
@@ -292,6 +293,7 @@ impl App {
         let pages = [
             (glyphs::HOME, crate::Route::Budget.title(), None, Page::Budget),
             (glyphs::LIBRARY, crate::Route::Reflect.title(), None, Page::Reflect),
+            (glyphs::BANK, "Accounts".into(), None, Page::Accounts),
             (glyphs::PLAYLIST, crate::Route::Accounts.title(), None, Page::Ledger(Ledger::All)),
             (glyphs::WRENCH, crate::Route::Settings.title(), None, Page::Settings),
         ];

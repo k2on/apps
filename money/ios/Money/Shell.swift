@@ -84,7 +84,14 @@ struct Shell: View {
                 stack(.budget) { BudgetView() }
             }
             Tab("Accounts", systemImage: "building.columns.fill", value: Pane.accounts) {
-                stack(.accounts) { AccountsView() }
+                stack(.accounts) {
+                    // Written from Rust (Generated/AccountsView.swift), over its runtime.
+                    if let a = model.accounts {
+                        AccountsView()
+                            .environmentObject(a)
+                            .onAppear { a.open = { r in navs[.accounts, default: Navigator()].push(r) } }
+                    }
+                }
             }
             Tab("Transactions", systemImage: "list.bullet.rectangle.portrait.fill", value: Pane.transactions) {
                 stack(.transactions) { TransactionsView() }

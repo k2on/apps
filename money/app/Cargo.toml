@@ -18,11 +18,25 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
 money-domain = { path = "../domain" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
+ark-ui-gen = { path = "../../rust/ark-ui-gen", optional = true }
+arkui = { path = "../../rust/arkui", optional = true }
 
 [features]
 # The state's records and messages as UniFFI's, for the phones (money/ffi).
 ffi = ["dep:uniffi", "money-domain/ffi", "ark-modules/ffi"]
+# The writer of the phones' screens.
+gen = ["dep:ark-ui-gen"]
+# `accounts::iced(&page)`: the views as iced draws them.
+iced = ["dep:arkui", "arkui/app"]
+# `accounts::web(&page)`: the views as the browser draws them.
+web = []
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-seed = { path = "../seed", default-features = false }
+
+# `money-ui`: the phones' screens written from the views (`nix run .#update-ui`).
+[[bin]]
+name = "money-ui"
+path = "src/bin/money-ui.rs"
+required-features = ["gen"]
