@@ -55,3 +55,34 @@ screenshots (run 42710930719) showed these, each fixed minimally:
 - iPadOS restored the previous launch's sidebar and inspector (shots without
   `-columns all` / `-inspector 1` showed them), so the app's saved state is
   wiped before each launch and each landscape shot is its own test run.
+
+## Seen in the final shots (run 42715731248) and left as they are
+
+Not fixed, as fixing them would mean redesigning rather than a small change:
+
+- Built with the iOS 26 / macOS 26 SDK, so the system draws Liquid Glass:
+  floating glass toolbar capsules and a floating tab bar on iPhone.
+- iPhone: the tab bar has a fifth **More** tab. The account tabs in the
+  `TabSection`s, though `.defaultVisibility(.hidden, for: .tabBar)`, still
+  count towards the tab bar's limit.
+- iPhone and iPad: `-screen review` filters the list, but the search field
+  with its "Needs Review" token is not on screen (on iPhone the search field
+  is not shown at all in Transactions; on iPad it is a toolbar search
+  button). On the Mac the token is in the toolbar search field.
+- iPhone: an account register (`account:visa`) has no visible title; the
+  search field and balances bar sit under the toolbar buttons.
+- iPhone: the editor sheet shows no number pad (the simulator has a hardware
+  keyboard attached).
+- iPad landscape (13-inch): the sidebar shows on every screen, with or
+  without `-columns all`, even from a wiped state.
+- Spending by Category: the category names sit above the bars (the y-axis
+  labels), not beside them.
+- Net Worth: the household's net worth is negative (the mortgage), so the
+  area under the line fills from the line up to $0, a large tinted block.
+- Mac: the "Needs Category" menu in the table is not orange (the menu's
+  foreground style is not applied); the Kept tile is taller than Income and
+  Spending (it has a detail line), so the three tiles' tops do not align.
+- Sample data: Electricity is overspent by $4.08 as well as Dining Out
+  (by $21.02, not the $44.10 DESIGN.md gives as an example); the summary
+  still reads "2 overspent · 2 underfunded" and Ready to Assign is $412.37
+  as designed.
