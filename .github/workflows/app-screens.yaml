@@ -360,7 +360,7 @@ jobs:
         # driver and shots on each; a job of their own so that the phone's
         # come as soon as before, and one job, not two, so that the large
         # screens pay one nix, one server and one wait for the APK.
-        device: [phone, large]
+        device: [large]
     name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
@@ -456,7 +456,7 @@ jobs:
       # (<app>/android-tablet/), then on a Pixel Fold, open and then folded
       # (<app>/fold-unfolded/, <app>/fold-folded/), each its own AVD.
       - name: Capture (tablet)
-        if: matrix.device == 'large'
+        if: false
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -531,7 +531,7 @@ jobs:
     needs: which
     # Built from the run's own commit, so only a run of this repository's.
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      false && needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: macos-15
     # One at a time on a branch: a newer commit's (or the same commit's
@@ -804,7 +804,7 @@ jobs:
     # Built from the run's own commit and then run, so only a run of this
     # repository's.
     if: >-
-      needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
+      false && needs.which.outputs.mode != '' && needs.which.outputs.desktop != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     strategy:
       fail-fast: false
