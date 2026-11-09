@@ -1016,6 +1016,28 @@ impl App {
         }
     }
 
+    /// This window becomes `app`, the one its replica, read on a thread
+    /// ([`App::opening`]), opened — keeping what it was told meanwhile that
+    /// is not the library's: its size, and the command box. Ctrl+K is the
+    /// window's from its first frame, and a library that arrives while the
+    /// box is up does not close it or lose what was typed in it; what it
+    /// finds is found again in the library that came. The keys are sent to
+    /// its text box again, as the window under it is a new one; a key
+    /// typed before they land is the box's all the same
+    /// ([`arkui::command::missed`]).
+    #[cfg_attr(feature = "demo", allow(dead_code))]
+    fn turn_into(&mut self, mut app: App) -> Task<Message> {
+        app.window = self.window;
+        app.command = self.command.take();
+        app.command_leaving = self.command_leaving.take();
+        *self = app;
+        self.arrive();
+        match self.command {
+            Some(_) => iced::widget::operation::focus(COMMAND_INPUT),
+            None => Task::none(),
+        }
+    }
+
     fn open() -> (App, Task<Message>) {
         #[cfg(feature = "demo")]
         {
@@ -1766,7 +1788,9 @@ impl App {
     }
 
     /// A key for the command box: Ctrl+K opens it, the keys in its box, or
-    /// closes it; `<Esc>` closes it; the arrows walk what it found.
+    /// closes it; `<Esc>` closes it; the arrows walk what it found; and
+    /// what is typed before its box has the keys (the focus is a task,
+    /// landing after the key that opened it) goes in the box all the same.
     fn command_key(&mut self, press: arkui::command::Press) -> Task<Message> {
         use arkui::command::Press;
         let now = iced::time::Instant::now();
@@ -1786,6 +1810,17 @@ impl App {
                 let groups = self.command_groups();
                 if let Some(c) = self.command.as_mut() {
                     return c.step(press == Press::Down, &groups, COMMAND_LIST);
+                }
+            }
+            Press::Type(_) | Press::Erase => {
+                if let Some(c) = self.command.as_mut() {
+                    return c.missed(&press, COMMAND_LIST);
+                }
+            }
+            Press::Choose => {
+                let groups = self.command_groups();
+                if let Some(chosen) = self.command.as_ref().and_then(|c| c.chosen(&groups)) {
+                    return self.step(chosen);
                 }
             }
         }
@@ -2733,11 +2768,8 @@ impl App {
             Message::Started(server) => {
                 #[cfg(not(feature = "demo"))]
                 {
-                    let (mut app, task) = App::opening(server, self.user.clone());
-                    app.window = self.window;
-                    *self = app;
-                    self.arrive();
-                    return task;
+                    let (app, task) = App::opening(server, self.user.clone());
+                    return Task::batch([self.turn_into(app), task]);
                 }
                 #[cfg(feature = "demo")]
                 let _ = server;
@@ -2746,14 +2778,11 @@ impl App {
             Message::Opened(server, opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {
-                    let (mut app, task) = match server {
+                    let (app, task) = match server {
                         Some(server) => App::open_server(server, self.user.clone(), opened),
                         None => (App::alone(self.user.clone(), opened), Task::none()),
                     };
-                    app.window = self.window;
-                    *self = app;
-                    self.arrive();
-                    return task;
+                    return Task::batch([self.turn_into(app), task]);
                 }
                 #[cfg(feature = "demo")]
                 let _ = (server, opened);
