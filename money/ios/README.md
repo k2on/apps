@@ -206,7 +206,7 @@ made opaque at 1024 by `tools/icon.sh` with Inkscape.
 
 CI (`.github/workflows/ios.yaml`) does the same on `macos-15` for
 every push touching `money/ios`, `money/ffi`, `money/domain`, `rust/` or
-`swift/ArkUI`, and on demand: the kernel for the phone, the simulator and
+`ui/swift`, and on demand: the kernel for the phone, the simulator and
 the Mac, the bindings, the xcframework, the project, the archive, then the
 tests on the newest iOS 26 iPhone simulator. The upload to TestFlight runs
 only on `main` and only when the repository variable `MONEY_IOS_UPLOAD` is
@@ -248,7 +248,7 @@ Apple's — compiled by CI: `MoneyApp`, `Shell` (tabs, routes, sheets),
 `RegisterView`, `TransactionsView`, `InsightsView`, `Sheets`,
 `SettingsView`, `OnboardingViews`, `Theme`.
 
-**From ArkUI** (`swift/ArkUI`, any Ark app's, harken's use of it unchanged):
+**From ArkUI** (`ui/swift`, any Ark app's, harken's use of it unchanged):
 in ArkUICore, `Cents` (amounts as typed, the keypad's digits), `Order`
 (rows moved as Edit mode hands them over) and the
 first run's server half — `Address`, `Probe`, `Health`, `Shelf` — which

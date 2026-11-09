@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # An app's desktop screenshots (apps.md), the same for every app: what is
 # the app's is its <app>/screens/shots.json, its `desktop`. The window nix
-# built at the commit, run with no window by arkui-shots (rust/arkui-shots,
+# built at the commit, run with no window by arkui-shots (ui/rust/shots,
 # asked for by ARK_SHOTS): it signs in to the server CI started
 # (app-server.sh) as the window would, the server's dev sign-in coming
 # straight back to its loopback with no browser, then does each shot's

@@ -19,7 +19,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"
+          "ui/swift: Space, Squares, \\.squares, Color(light:dark:)"
         ],
         "how": [
           "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
@@ -98,7 +98,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Square, Art (ArkUICore)"
+          "ui/swift: Square, Art (ArkUICore)"
         ],
         "how": [
           "Square(seed:): the same square for the same name as Android's and the desktop's.",
@@ -186,7 +186,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Reorderable, ReorderHandle"
+          "ui/swift: Reorderable, ReorderHandle"
         ],
         "how": [
           "Reorderable(items, key:, onMove:) { item, handle in … }: the row places the handle it is given, and is dragged by it, as the Music app's queue is.",
@@ -422,7 +422,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"
+          "ui/swift: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"
         ],
         "how": [
           "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
@@ -449,7 +449,7 @@
       "desktop": [],
       "android": {
         "at": [
-          "kotlin/arkui/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"
+          "ui/kotlin/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"
         ],
         "how": [
           "GlassContainer(modifier, spacing = Space.s) { … }: one surface for every piece of glass in it, as SwiftUI's GlassEffectContainer. Two pieces nearer than `spacing` are joined by a neck that thickens as they close; a piece appearing buds out of its nearest neighbour, and one going shrinks back into it. Best as large as the screen, since a menu opens over all of it.",
@@ -549,7 +549,7 @@
       },
       "ios": {
         "at": [
-          "swift/ArkUI: Springs"
+          "ui/swift: Springs"
         ],
         "how": [
           "Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."

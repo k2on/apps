@@ -1,5 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken. The player is paused and put halfway before it is taken, so that what it shows is the same each run. `desktop` is the iced window's (rust/arkui-shots): its size, and its shots, each clicking or typing what a text on the screen says. It has no player shot: nothing on the desktop can play.",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken. The player is paused and put halfway before it is taken, so that what it shows is the same each run. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says. It has no player shot: nothing on the desktop can play.",
   "server": {
     "port": 8787,
     "user": "alex",

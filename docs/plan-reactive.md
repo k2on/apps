@@ -77,7 +77,7 @@ rest (desktop/web). Falsify each once.
 
 ## Landed: the Rust half
 
-`rust/ark-client`, `rust/arkui`, `harken/iced` and `harken-peer`. The engine,
+`rust/ark-client`, `ui/rust/arkui`, `harken/iced` and `harken-peer`. The engine,
 the protocol, `spec/vectors` and the trace corpus did not change. The
 Android half is a later round.
 

@@ -240,9 +240,9 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
 ## The desktop
 
 The desktop windows are iced apps (`harken/iced`, `money/iced`, over
-`rust/arkui`), so there is no emulator to run them in and no accessibility
+`ui/rust/arkui`), so there is no emulator to run them in and no accessibility
 tree to drive them by; what there is, is iced's own headless runtime.
-`rust/arkui-shots` is that, for any app: the app's `main` hands it the same
+`ui/rust/shots` is that, for any app: the app's `main` hands it the same
 `iced::application(...)` it would run, when `ARK_SHOTS` names its
 shots.json, and otherwise runs its window as ever. Nothing the window
 draws is different, and the hook only captures.

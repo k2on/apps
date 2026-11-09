@@ -1,5 +1,5 @@
-// money's look on the phone, over ArkUI's (swift/ArkUI: the spacing, the
-// springs, the figures, the colours): arkui's theme (arkui/theme.toml) — the
+// money's look on the phone, over ArkUI's (ui/swift: the spacing, the
+// springs, the figures, the colours): arkui's theme (ui/theme.toml) — the
 // neutrals every Ark app shares, as `.ink`, `.quiet` and the rest, and
 // money's accent, the green, which `MoneyApp` names (`Accent.use(.green)`)
 // and `AccentColor` in the asset catalog holds too. Liquid Glass brings its
@@ -47,7 +47,7 @@ extension Summary {
 /// An account's mark: its kind's symbol in its colour on a faint wash of
 /// that colour, a rounded square as Settings' tinted rows draw one (ArkUI's
 /// `Tile`). The
-/// colours are the theme's chart palette (arkui/theme.toml), which the
+/// colours are the theme's chart palette (ui/theme.toml), which the
 /// Android app draws its marks in too.
 struct AccountMark: View {
     let kind: String

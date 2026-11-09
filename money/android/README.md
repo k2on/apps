@@ -10,7 +10,7 @@ its model and its way in. Every change it makes is one of the domain's
 own records (`uniffi.money_domain`), and what a row says — a line's tone,
 story and captions, an ask's sentence, the form's rules (`Draft`) — is the
 records' own methods: nothing crosses as JSON, and no rule is the app's.
-The look it shares with harken is `kotlin/arkui` (package `dev.arkui`),
+The look it shares with harken is `ui/kotlin` (package `dev.arkui`),
 compiled in from its sources.
 
 The installed app is `us.koon.money`; its sign-in comes back on
@@ -39,7 +39,7 @@ From the repository root, with nothing but nix:
     nix build .#money-android-screens   # result/index.html and the PNGs
 
 `money-apk` is harken's derivation (`androidApp` in `flake.nix`) over
-`money-android-lib`, with `kotlin/arkui` added to its source. **The Maven
+`money-android-lib`, with `ui/kotlin` added to its source. **The Maven
 graph is harken's**, replayed as it is: `deps.json` is a copy of
 `harken/android/deps.json`, and `app/build.gradle.kts` asks for exactly
 harken's libraries — the player's included, unused — so that Gradle

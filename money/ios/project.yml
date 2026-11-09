@@ -26,11 +26,11 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
-# ArkUI for SwiftUI, any Ark app's (swift/ArkUI): the spacing, the springs,
+# ArkUI for SwiftUI, any Ark app's (ui/swift): the spacing, the springs,
 # the figures, the first run's page, the server probe, cents.
 packages:
   ArkUI:
-    path: ../../swift/ArkUI
+    path: ../../ui/swift
 targets:
   Money:
     type: application

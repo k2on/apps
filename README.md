@@ -30,8 +30,7 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   Swift runtime.
 - `rust/arkdb` — the demo, the simulator over real peers in both roles,
   the trace recorder and player, the fuzzer (`arkdb fuzz`), the vector
-  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect)
-  and `arkui` (the iced components).
+  writer, `gen`. Beside it `ark-auth` (dev sign-in and OpenID Connect).
 - `spec/` — the vectors the kernel is held to (the bytes, the machine, the
   frames, the views), `RUNNERS.md` (how `arkdb` runs them) and
   `AUTHORING.md` (writing a domain).
@@ -44,9 +43,17 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   drawn by arkui itself, its own Cargo workspace so that it
   and the apps never rebuild each other: arkui's components by component,
   each for the desktop and both phones (https://k2on.github.io/apps/docs/).
-- `swift/ArkUI` — ArkUI for SwiftUI, any Ark app's on iOS: the spacing,
-  the springs, the derived square (`ArkUICore`, Foundation alone, and
-  `ArkUI`, the views). harken's iOS app is over it.
+- `ui/` — ArkUI, everything an app is drawn with (`ui/README.md` says
+  what is where): the theme (`ui/theme.toml`), the iced components
+  (`ui/rust/arkui`), ArkUI for SwiftUI (`ui/swift`) and for Compose
+  (`ui/kotlin`), the runtime that runs an app's screens in Rust
+  (`ui/rust/app`, `ui/docs/app.md`) and the generator that writes them
+  for the phones (`ui/rust/gen`), and the standing rule for motion
+  (`ui/docs/motion.md`).
+- `modules/` — what an app asks of the device, one package each, Expo's
+  way (`modules/haptics`, `clipboard`, `share`, `camera`, `media-player`,
+  `notifications`, `secure-store`): a crate with the trait and its fake,
+  its Swift and Kotlin implementations, and a README of its permissions.
 - `showcase/` — the shared components on their own, an app per phone, which
   the docs' captures are taken from (`.github/workflows/screens.yaml`).
 - `docs/plan-v5.md` — the design, how it landed and what it measures
@@ -128,7 +135,7 @@ what it will draw with: `renderer: wgpu (Vulkan, Apple M2 (G14G), integrated
 GPU)`, or `renderer: tiny-skia (CPU) — no GPU adapter: <why>`, the why being
 what refused iced's device or which driver library would not load and what
 the dynamic loader said. Settings says the same under "Display". iced
-otherwise falls back to the CPU without a word (`rust/arkui/src/renderer.rs`).
+otherwise falls back to the CPU without a word (`ui/rust/arkui/src/renderer.rs`).
 `ARK_RENDERER=cpu` draws on the CPU; `ARK_RENDERER=gpu` refuses to, and the
 window does not open without a device.
 

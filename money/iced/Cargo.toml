@@ -22,11 +22,11 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
-arkui = { path = "../../rust/arkui" }
-# The screens run in Rust once for every platform (docs/ark-app.md), and
+arkui = { path = "../../ui/rust/arkui" }
+# The screens run in Rust once for every platform (ui/docs/app.md), and
 # their runtime.
 money-app = { path = "../app", features = ["iced"] }
-ark-app = { path = "../../rust/ark-app" }
+ark-app = { path = "../../ui/rust/app" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `smol` gives iced an executor on the desktop; `svg` is every glyph, `image` a
@@ -36,7 +36,7 @@ ark-app = { path = "../../rust/ark-app" }
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
 # The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
 # (.github/screens/apps.md): this same application, run headless.
-arkui-shots = { path = "../../rust/arkui-shots" }
+arkui-shots = { path = "../../ui/rust/shots" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach, as harken's page.

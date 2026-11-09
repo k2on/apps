@@ -13,7 +13,7 @@
 #
 # - the app's build at the commit, `<app>-ios-simulator`'s store path for
 #   the Mac (aarch64-darwin), which moves only with what it is built from
-#   (flake.nix's `only`: the app's ios/ and swift/ArkUI; its kernel's Rust;
+#   (flake.nix's `only`: the app's ios/ and ui/swift; its kernel's Rust;
 #   the pinned Xcode);
 # - of the scripts' checkout (main's, which a workflow_run runs), what the
 #   shots are taken by: each package its <app>/screens/server.sh builds

@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-/** arkui, the look every Ark app on Android shares (kotlin/arkui), compiled from its sources. */
-val arkUi = rootProject.file("../../kotlin/arkui/src")
+/** arkui, the look every Ark app on Android shares (ui/kotlin), compiled from its sources. */
+val arkUi = rootProject.file("../../ui/kotlin/src")
 
 android {
     namespace = "dev.arkui.showcase"

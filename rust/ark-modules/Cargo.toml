@@ -8,7 +8,7 @@ description = "What an Ark app asks of the device, Expo's way: haptics, the clip
 # No UI and no platform of its own: the traits, the calls an app's update
 # makes of them (`Call`, `Answer`), the registry a shell fills at startup
 # (`Modules`) and the fakes. Each platform's implementation is in its
-# ArkUI library (swift/ArkUI, kotlin/arkui, rust/arkui) or, for the
+# ArkUI library (ui/swift, ui/kotlin, ui/rust/arkui) or, for the
 # browser, in the app's web crate over web-sys.
 
 [dependencies]

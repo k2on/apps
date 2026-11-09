@@ -1,11 +1,11 @@
 // The iPhone's implementations of the device modules a screen run in Rust
-// asks for (`ark_modules`, docs/ark-app.md): each one the foreign trait
+// asks for (`ark_modules`, ui/docs/app.md): each one the foreign trait
 // UniFFI writes as a Swift protocol, registered once at launch
 // (MoneyApp.swift). The camera's QR scan stays the hand-written page it was
 // (`QrScanner`, the join sheet) until a screen that scans moves to Rust.
 import UIKit
 
-/// `docs/motion.md`'s haptics: a success, a selection step, a warning.
+/// `ui/docs/motion.md`'s haptics: a success, a selection step, a warning.
 final class PhoneHaptics: Haptics, @unchecked Sendable {
     func perform(haptic: Haptic) {
         DispatchQueue.main.async {

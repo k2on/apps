@@ -779,7 +779,7 @@ rec {
         crateName = "ark-app";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-app; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/app; };
         libName = "ark_app";
         dependencies = [
           {
@@ -1189,7 +1189,7 @@ rec {
         crateName = "ark-router";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-router; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/router; };
         libName = "ark_router";
         dependencies = [
           {
@@ -1203,7 +1203,7 @@ rec {
         crateName = "ark-router-macros";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-router-macros; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/router-macros; };
         procMacro = true;
         libName = "ark_router_macros";
         dependencies = [
@@ -1228,7 +1228,7 @@ rec {
         crateName = "ark-ui-gen";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-ui-gen; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/gen; };
         libName = "ark_ui_gen";
         dependencies = [
           {
@@ -1276,7 +1276,7 @@ rec {
         crateName = "arkui";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/arkui; };
         dependencies = [
           {
             name = "ark-app";
@@ -1386,7 +1386,7 @@ rec {
         crateName = "arkui-macros";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-macros; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/arkui-macros; };
         procMacro = true;
         libName = "arkui_macros";
         dependencies = [
@@ -1411,7 +1411,7 @@ rec {
         crateName = "arkui-shots";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./arkui-shots; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/shots; };
         libName = "arkui_shots";
         dependencies = [
           {

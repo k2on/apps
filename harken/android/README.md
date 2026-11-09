@@ -130,7 +130,7 @@ carries its own build's random key and needs one uninstall, as above.
 ## What it does
 
 `MainActivity` is one line of harken and the rest is the onboarding
-(`onboarding/`, the app's own code, drawn with arkui — `kotlin/arkui`, the look
+(`onboarding/`, the app's own code, drawn with arkui — `ui/kotlin`, the look
 harken shares with money, compiled in from its sources):
 
 ```kotlin
@@ -226,7 +226,7 @@ exactly what the app draws):
   pulled down from its top. A page opened from no cover rises. Each tab
   keeps its own stack and switches to it at once; the tab already shown
   goes back to its root, or scrolls its root to the top; back at Search's
-  or the Library's root goes Home, previewed like a page. How is arkui's (`kotlin/arkui`: `Motion.kt`, `ExpandingCard.kt`,
+  or the Library's root goes Home, previewed like a page. How is arkui's (`ui/kotlin`: `Motion.kt`, `ExpandingCard.kt`,
   `Springs.kt`), shared with money; `PlayerSheet.kt`
   here says which faces the player's card has, and `docs/plan-android.md`
   why.

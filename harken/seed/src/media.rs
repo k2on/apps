@@ -139,7 +139,7 @@ fn fetch(agent: &ureq::Agent, url: &str) -> Option<(Vec<u8>, &'static str)> {
     Some((bytes, ext))
 }
 
-/// harken's derived squares against white, as `art.gold` in arkui/theme.toml.
+/// harken's derived squares against white, as `art.gold` in ui/theme.toml.
 const GOLD: [([u8; 3], [u8; 3]); 6] = [
     ([0xE8, 0xD1, 0x9A], [0xC9, 0xA8, 0x5F]),
     ([0xEF, 0xDC, 0xAE], [0xD2, 0xB3, 0x70]),
@@ -153,7 +153,7 @@ const GOLD: [([u8; 3], [u8; 3]); 6] = [
 /// `seed`'s hash, so an album without its cover still has one of its own,
 /// the same every time.
 fn gradient(seed: &str) -> Vec<u8> {
-    // One of harken's own squares (arkui/theme.toml, `art.gold`, light),
+    // One of harken's own squares (ui/theme.toml, `art.gold`, light),
     // picked by the hash: a cover that could not be had reads as the app's,
     // not as whatever two colours the hash happened to name.
     let h = Sha256::digest(seed.as_bytes());

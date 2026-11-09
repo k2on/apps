@@ -2,7 +2,7 @@
 //! capability one trait, written once here, implemented natively on every
 //! platform and registered when the app starts.
 //!
-//! - [`Haptics`] — the phone's answer in the hand (`docs/motion.md`,
+//! - [`Haptics`] — the phone's answer in the hand (`ui/docs/motion.md`,
 //!   Haptics): a success, a selection step, a warning.
 //! - [`Clipboard`] and [`Share`] — text put where the person can paste it,
 //!   or handed to the system's share sheet.
@@ -37,7 +37,7 @@ pub mod fake;
 
 // * The calls
 
-/// What a haptic says: `docs/motion.md`'s three, kept for what matters.
+/// What a haptic says: `ui/docs/motion.md`'s three, kept for what matters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Haptic {
@@ -112,7 +112,7 @@ pub enum ModuleAnswer {
 // * The modules
 
 /// The phone's answer in the hand. Fired on the change itself, never on a
-/// tap that might change nothing (`docs/motion.md`, Haptics).
+/// tap that might change nothing (`ui/docs/motion.md`, Haptics).
 #[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
 pub trait Haptics: Send + Sync {
     fn perform(&self, haptic: Haptic);
@@ -228,7 +228,7 @@ pub trait MediaListener: Send + Sync {
 }
 
 /// A player of one sound at a time: harken's `PhoneSound` and
-/// `harken_player::Sound`, generalised (docs/ark-app.md, MediaPlayer). The
+/// `harken_player::Sound`, generalised (ui/docs/app.md, MediaPlayer). The
 /// app's update drives it; what it did comes back through the listener.
 #[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
 pub trait MediaPlayer: Send + Sync {

@@ -1569,7 +1569,7 @@ impl App {
                 },
                 'd' => self.update(Message::OpenDevices),
                 // From the keys the queue is there, or gone, at once
-                // (docs/motion.md, the frequency rule); its button slides it.
+                // (ui/docs/motion.md, the frequency rule); its button slides it.
                 'q' => {
                     let task = self.update(Message::OpenQueue);
                     if let Some(sheet) = self.queue_sheet.as_mut() {

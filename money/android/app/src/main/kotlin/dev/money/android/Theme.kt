@@ -1,5 +1,5 @@
 // money's look: Material You (arkui's `MaterialYou`) in arkui's theme
-// (arkui/theme.toml) — the neutrals every Ark app shares and money's accent,
+// (ui/theme.toml) — the neutrals every Ark app shares and money's accent,
 // the green, with the shared caution in the tertiary slot, which is what
 // "worth a look" is drawn in. The wallpaper's colours are there for asking
 // (`dynamic`), and off by default: money is green on every phone, as it is

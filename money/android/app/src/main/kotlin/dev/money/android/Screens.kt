@@ -1,4 +1,4 @@
-// The screens whose state, rules and layout are Rust's (docs/ark-app.md):
+// The screens whose state, rules and layout are Rust's (ui/docs/app.md):
 // what their generated Compose (generated/) reads and sends to. Each holds
 // its runtime over the bridge (`AccountsApp`, money_app run behind
 // money_ffi) and publishes the record it shows, read again after every
@@ -66,7 +66,7 @@ class AccountsHolder(session: Session, refresh: () -> Unit, haptics: Haptics?, c
     }
 }
 
-/** `docs/motion.md`'s haptics, on the view the app is drawn in. */
+/** `ui/docs/motion.md`'s haptics, on the view the app is drawn in. */
 class PhoneHaptics(private val view: View) : Haptics {
     override fun perform(haptic: Haptic) {
         // A warning is a success's weight here: ArkUI's two are what Android has an answer for.

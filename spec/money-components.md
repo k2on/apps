@@ -3,7 +3,7 @@
 What money draws that is money's, so stays in the app — the same component,
 the same inputs, in every shell (Android `money/android`, iPhone
 `money/ios`, desktop `money/iced`), and what a web client builds. Everything
-generic they are made of is ArkUI's (`docs/arkui-parts.md`): a grouped
+generic they are made of is ArkUI's (`ui/docs/parts.md`): a grouped
 card, a section's heading, a pill, a tile, a badge, a pager, a progress bar.
 
 | Component | Inputs | Made of | Android | iPhone | Desktop |

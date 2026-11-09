@@ -28,7 +28,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn source(&self) -> String {
-        format!("rust/arkui/src/{}.rs", self.module)
+        format!("ui/rust/arkui/src/{}.rs", self.module)
     }
 }
 

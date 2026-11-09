@@ -73,7 +73,7 @@
       # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
+      rustDirs = [ "rust" "ui/rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
@@ -306,7 +306,7 @@
           # DATA` writes what that app's server boots seeded from.
           money-seed = crate { packageId = "money-seed"; };
           # `money-ui`: the phones' screens written from money's views
-          # (money/app, docs/ark-app.md), SwiftUI and Compose.
+          # (money/app, ui/docs/app.md), SwiftUI and Compose.
           money-ui = crate { packageId = "money-app"; features = [ "gen" ]; };
           harken-seed = crate { packageId = "harken-seed"; };
           # The catalogue's covers, kept in the repository (harken/seed/covers,
@@ -349,7 +349,7 @@
           # of it on LD_LIBRARY_PATH kept every Mesa driver from loading, so
           # iced drew on the CPU without a word (the script says why, in
           # full). The window then says which renderer it got, on stderr
-          # (rust/arkui/src/renderer.rs). money's demo window is the same.
+          # (ui/rust/arkui/src/renderer.rs). money's demo window is the same.
           icedLibs = lib.makeLibraryPath (with pkgs; [
             wayland libxkbcommon vulkan-loader libGL xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr
           ]);
@@ -568,7 +568,7 @@
           # dark (nix/screens-index.py). `flags` are the app's own gradle
           # properties; `title` and `note` head that page. `shared` are the
           # directories of this tree the app compiles beside its own:
-          # `kotlin/arkui`, the look every Ark app on Android shares.
+          # `ui/kotlin`, the look every Ark app on Android shares.
           androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note }:
             let
               dir = "${name}/android";
@@ -660,7 +660,7 @@
             name = "harken";
             appid = "dev.harken.android";
             flags = [ "-PharkenLib=${harken-android-lib}" ];
-            shared = [ "kotlin/arkui" ];
+            shared = [ "ui/kotlin" ];
             title = "Harken";
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
@@ -669,7 +669,7 @@
           harken-android-screens = harken.screens;
 
           # money's phone (money/android/README.md): Compose over
-          # `money-android-lib`, the look shared with harken (kotlin/arkui).
+          # `money-android-lib`, the look shared with harken (ui/kotlin).
           # Its Maven graph is harken's, replayed (money/android/deps.json).
           # `appid` here is the package the screenshots are named by; the
           # installed app is us.koon.money.
@@ -677,7 +677,7 @@
             name = "money";
             appid = "dev.money.android";
             flags = [ "-PmoneyLib=${money-android-lib}" ];
-            shared = [ "kotlin/arkui" ];
+            shared = [ "ui/kotlin" ];
             title = "money";
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
@@ -1056,7 +1056,7 @@
             pkgs.stdenv.mkDerivation {
               pname = "${name}-ios-${kind}";
               version = "0.1.0";
-              src = only [ "${name}/ios" "swift/ArkUI" ];
+              src = only [ "${name}/ios" "ui/swift" ];
               nativeBuildInputs = [ xcodegen ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
@@ -1227,10 +1227,10 @@
             '';
           };
           # `nix run .#update-theme`, from the repository's root: the colours
-          # every app is drawn in, written from arkui/theme.toml into the
-          # Kotlin, Swift and Rust each platform's arkui reads (arkui/README.md).
+          # every app is drawn in, written from ui/theme.toml into the
+          # Kotlin, Swift and Rust each platform's arkui reads (ui/README.md).
           update-theme = pkgs.writeShellScriptBin "update-theme" ''
-            ${pkgs.python3}/bin/python3 arkui/theme.py write
+            ${pkgs.python3}/bin/python3 ui/theme.py write
           '';
           # `nix run .#update-ui`, from the repository's root: the phones'
           # screens that are laid out once in Rust (`#[view]`, money/app),
@@ -1260,7 +1260,7 @@
             # demo's copy of the catalogue made from the `classical` input.
             inherit classical update-catalogue update-cargo-nix update-covers;
             # `nix run .#update-theme`: the theme's generated files, from
-            # arkui/theme.toml.
+            # ui/theme.toml.
             inherit update-theme;
             # `nix run .#update-ui`: the phones' screens written from the
             # views laid out in Rust.
@@ -1319,14 +1319,14 @@
               }
               touch $out
             '';
-            # What is generated from arkui/theme.toml is what is committed:
+            # What is generated from ui/theme.toml is what is committed:
             # edit the tokens, then `nix run .#update-theme`.
             theme = pkgs.runCommand "theme-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              python3 ${./arkui}/theme.py write generated > /dev/null
+              python3 ${./ui}/theme.py write generated > /dev/null
               status=0
-              for f in $(python3 ${./arkui}/theme.py files); do
+              for f in $(python3 ${./ui}/theme.py files); do
                 cmp "generated/$f" "${self}/$f" || {
-                  echo "$f is not what arkui/theme.toml makes: nix run .#update-theme" >&2
+                  echo "$f is not what ui/theme.toml makes: nix run .#update-theme" >&2
                   status=1
                 }
               done
@@ -1351,7 +1351,7 @@
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
             theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              python3 ${./arkui}/theme.py contrast
+              python3 ${./ui}/theme.py contrast
               touch $out
             '';
             # The fleet run mixed (docs/plan-db.md D1): every pinned
@@ -1411,7 +1411,7 @@
                 name = "docs";
                 build = docsCrate;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
-                dirs = [ "docs/site" "rust/arkui" "rust/Cargo.toml" ];
+                dirs = [ "docs/site" "ui/rust/arkui" "rust/Cargo.toml" ];
               })
             ] ++ memberClippy docsCrate { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
@@ -1467,7 +1467,7 @@
             # SwiftUI. The views are SwiftUI's and are not checked here.
             harken-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "harken-ios-typecheck";
-              src = only [ "harken/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
+              src = only [ "harken/ios" "rust/ark-ffi/swift" "ui/swift" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               # nixpkgs' Swift 5.8 on Linux reports x86_64-pc-linux-gnu where
@@ -1491,7 +1491,7 @@
             # types, UniFFI's Swift for money's library and ArkUICore.
             money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "money-ios-typecheck";
-              src = only [ "money/ios" "rust/ark-ffi/swift" "swift/ArkUI" ];
+              src = only [ "money/ios" "rust/ark-ffi/swift" "ui/swift" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               buildPhase = ''

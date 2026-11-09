@@ -835,7 +835,7 @@ covers or the keyboard. Every number above is HotSpot's and layoutlib's.
 The owner asked for the components, the animations and their timing, and
 some of the onboarding, in a library other apps reuse: `kotlin/ark-ui`,
 package `dev.arkdb.ui`, Gradle project `:ark-ui` — an Android library on
-Compose alone, with no ArkDB in it, the Kotlin twin of `rust/arkui`
+Compose alone, with no ArkDB in it, the Kotlin twin of `ui/rust/arkui`
 (`kotlin/ark-ui/README.md`). The SwiftUI twin is a plan,
 `docs/plan-arkui-swift.md`. Nothing about how anything looks or moves
 changed: the move was held to byte-identical screenshots.

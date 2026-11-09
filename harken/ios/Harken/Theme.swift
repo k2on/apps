@@ -1,6 +1,6 @@
-// harken's look on the phone, over ArkUI's (swift/ArkUI: the spacing, the
+// harken's look on the phone, over ArkUI's (ui/swift: the spacing, the
 // springs, the derived square, the colours): arkui's theme
-// (arkui/theme.toml) — the neutrals every Ark app shares, as `.ink`, `.quiet`
+// (ui/theme.toml) — the neutrals every Ark app shares, as `.ink`, `.quiet`
 // and the rest, and harken's accent, the gold, which `HarkenApp` names
 // (`Accent.use(.gold)`) — and the derived square in the gold. Liquid Glass
 // brings its own materials: what is here is only what the glass is tinted
@@ -10,7 +10,7 @@ import SwiftUI
 import UIKit
 
 // Space, Springs, the derived square and the colour helpers are ArkUI's
-// (swift/ArkUI), any app's; what follows is harken's own.
+// (ui/swift), any app's; what follows is harken's own.
 
 extension Space {
     /// A record's cover beside its title, as a catalogue's page opens.

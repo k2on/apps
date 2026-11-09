@@ -90,7 +90,7 @@ struct InsightsView: View {
     }
 
     /// The groups' colours, in the order the most spent takes them: the
-    /// theme's chart palette (arkui/theme.toml), the Android app's too.
+    /// theme's chart palette (ui/theme.toml), the Android app's too.
     static let palette: [Color] = Color.chart
 
     private func share(_ part: Int64, _ whole: Int64) -> String { formatPercent(part: part, whole: whole) }

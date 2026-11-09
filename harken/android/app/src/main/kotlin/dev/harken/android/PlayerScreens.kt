@@ -438,7 +438,7 @@ val COVER_CORNER = 16.dp
 val COVER_SHADOW = 16.dp
 
 /**
- * How much of the cover shows through behind the full player: the theme's wash (arkui/theme.toml),
+ * How much of the cover shows through behind the full player: the theme's wash (ui/theme.toml),
  * faint enough that the title, the album and the gold read over a pale cover.
  */
 @Composable

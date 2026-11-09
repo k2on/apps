@@ -379,7 +379,7 @@ rust/ark-dev/       the demo, simulator, trace player, fuzzer, vector writer (wi
 rust/ark-auth/      dev sign-in and OpenID Connect
 rust/ark-explorer/  the admin page (its routes behind `server`) and the explorer
                     over a replica
-rust/arkui/         the iced components
+ui/rust/arkui/         the iced components
 harken/domain/      harken's domain, a crate of plain Rust
 harken/server/, harken/iced/, harken/ffi/ (with android/ and ios/)
 spec/               README.md, RUNNERS.md, AUTHORING.md and vectors/

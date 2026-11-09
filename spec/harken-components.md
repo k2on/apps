@@ -3,7 +3,7 @@
 What harken draws that is harken's, so stays in the app — the same
 component, the same inputs, in every shell (Android `harken/android`,
 iPhone `harken/ios`, desktop `harken/iced`), and what a web client builds.
-Everything generic they are made of is ArkUI's (`docs/arkui-parts.md`): a
+Everything generic they are made of is ArkUI's (`ui/docs/parts.md`): a
 page's header, a banner, the catalogue's banner, headings, entries and "See
 All", chips, the scrubber and the volume.
 

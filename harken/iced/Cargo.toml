@@ -24,7 +24,7 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the browser on the desktop, the page's
 # own address in a browser; and the logins a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
-arkui = { path = "../../rust/arkui" }
+arkui = { path = "../../ui/rust/arkui" }
 # The podcast directory's answer, read (`directory.rs`).
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -44,7 +44,7 @@ tungstenite = { version = "0.24", default-features = false, features = ["handsha
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
 # (.github/screens/apps.md): this same application, run headless.
-arkui-shots = { path = "../../rust/arkui-shots" }
+arkui-shots = { path = "../../ui/rust/shots" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WebGL rather than WebGPU, for reach: without it wgpu finds no backend and

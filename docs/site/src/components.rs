@@ -5,7 +5,7 @@
 //! whatever each platform calls it. Only what is shared: on the desktop it
 //! is arkui's, and its page shows it drawn by arkui itself; on a phone it is the
 //! shared Compose (`ui/`, ark-ui for Android) or SwiftUI (ArkUI for SwiftUI,
-//! `swift/ArkUI`), and its page says where and how, with the latest capture
+//! `ui/swift`), and its page says where and how, with the latest capture
 //! from a real emulator and simulator: `shots` names them, the showcase apps
 //! draw them (`showcase/`), the `screens` workflow takes them
 //! (`.github/workflows/screens.yaml`), and the page fetches what it last
@@ -136,7 +136,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Space, Squares, \\.squares, Color(light:dark:)"],
+            at: &["ui/swift: Space, Squares, \\.squares, Color(light:dark:)"],
             how: &[
                 "import ArkUI. Space.xs … Space.xxl, Space.page, Space.corner: the spacing, Android's.",
                 "Set the derived square's colours once at the root: .environment(\\.squares, Squares(light:dark:)); Squares.neutral until an app does.",
@@ -192,7 +192,7 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Square(seed, modifier)", "Cover(seed, art, side, modifier, round = false, corner = Space.corner): the square until the picture loads.", "Art.hash is FNV-1a over UTF-16, the desktop's."],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Square, Art (ArkUICore)"],
+            at: &["ui/swift: Square, Art (ArkUICore)"],
             how: &["Square(seed:): the same square for the same name as Android's and the desktop's.", "Art.hash and Art.pick are in ArkUICore, which needs only Foundation."],
         }),
         shots: &[shot("art", "Squares derived from twelve names.", BOTH)],
@@ -242,7 +242,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Reorderable, ReorderHandle"],
+            at: &["ui/swift: Reorderable, ReorderHandle"],
             how: &[
                 "Reorderable(items, key:, onMove:) { item, handle in … }: the row places the handle it is given, and is dragged by it, as the Music app's queue is.",
                 "The rows that make way move on Springs.move; the row keeps its tap and its context menu.",
@@ -384,7 +384,7 @@ pub const COMPONENTS: &[Component] = &[
             ],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"],
+            at: &["ui/swift: View.expandingCard(isPresented:bar:expanded:) (iOS 26)"],
             how: &[
                 "On a TabView: tabView.expandingCard(isPresented: $open) { bar } expanded: { screen }. The bar sits on glass above the tab bar (tabViewBottomAccessory) and zooms into the screen and back (navigationTransition(.zoom)).",
                 "The system does the motion, a swipe down on the screen included; `isPresented` going false zooms it back into the bar.",
@@ -400,7 +400,7 @@ pub const COMPONENTS: &[Component] = &[
         summary: "Buttons and chips on glass that changes shape: pieces near each other in one space join, a piece that appears buds from its neighbour, and a button's glass grows into the menu or the sheet it opens and shrinks back. On Android it is iOS 26's Liquid Glass as it moves, and only that: the shape and the motion, on a solid fill.",
         desktop: &[],
         android: Some(Mobile {
-            at: &["kotlin/arkui/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"],
+            at: &["ui/kotlin/src/dev/arkui/Glass.kt: GlassContainer, Modifier.glass, GlassMorph, GlassShape, Glass"],
             how: &[
                 "GlassContainer(modifier, spacing = Space.s) { … }: one surface for every piece of glass in it, as SwiftUI's GlassEffectContainer. Two pieces nearer than `spacing` are joined by a neck that thickens as they close; a piece appearing buds out of its nearest neighbour, and one going shrinks back into it. Best as large as the screen, since a menu opens over all of it.",
                 "Modifier.glass(shape = GlassShape.Capsule, id = null): this element on glass, a capsule or GlassShape.rounded(corner). Moved in its layout, it glides there on Springs.MOVE, its content with it. `id` is what the container knows it by, as glassEffectID.",
@@ -452,7 +452,7 @@ pub const COMPONENTS: &[Component] = &[
             how: &["Springs.settle() and the rest: spring specs with a cap on how long any move takes."],
         }),
         ios: Some(Mobile {
-            at: &["swift/ArkUI: Springs"],
+            at: &["ui/swift: Springs"],
             how: &["Springs.move, Springs.size, Springs.fade: Android's springs converted exactly (docs/plan-arkui-swift.md)."],
         }),
         shots: &[],

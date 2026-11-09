@@ -1,4 +1,4 @@
-// The screens whose state, rules and layout are Rust's (docs/ark-app.md):
+// The screens whose state, rules and layout are Rust's (ui/docs/app.md):
 // what their generated SwiftUI (Generated/) reads and sends to. Each holds
 // its runtime over the bridge (`AccountsApp`, money_app run behind
 // money_ffi) and publishes the record it shows, read again after every

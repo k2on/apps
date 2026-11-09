@@ -1,4 +1,4 @@
-//! money's screens as Ark apps on the phones (docs/ark-app.md): the
+//! money's screens as Ark apps on the phones (ui/docs/app.md): the
 //! runtime (`ark_app::Runtime`) behind the bridge, over the session's
 //! store. A screen's generated SwiftUI or Compose reads its record
 //! ([`AccountsApp::page`]) and sends it messages ([`AccountsApp::send`]);

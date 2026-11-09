@@ -1,5 +1,5 @@
 //! The Accounts page, run in Rust once for every platform (money_app,
-//! docs/ark-app.md): the window is its host — the store it reads is the
+//! ui/docs/app.md): the window is its host — the store it reads is the
 //! window's, a change goes through the window's own [`App::change`], a
 //! route becomes a page, and the clipboard is iced's. The page is the view
 //! `money_app::accounts::view::accounts` drawn by `arkui::view`.

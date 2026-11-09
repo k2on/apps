@@ -1,5 +1,5 @@
-// The drawings: the desktop's Lucide glyphs (`rust/arkui/src/glyphs.rs`,
-// ISC; the licence is `rust/arkui/src/LICENSE.lucide`), as the same paths
+// The drawings: the desktop's Lucide glyphs (`ui/rust/arkui/src/glyphs.rs`,
+// ISC; the licence is `ui/rust/arkui/src/LICENSE.lucide`), as the same paths
 // with the same butt caps and miter joins, so a play button is one shape
 // on every client. A circle or a rect there is a path here, written out.
 // `repeat`, `repeat-1`, `bell`, and `captions`, `locate-fixed` and

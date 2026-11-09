@@ -22,9 +22,9 @@ APP="$HERE/../Harken"
 TESTS="$HERE/../HarkenTests"
 BINDINGS="$1"
 TYPED="${TYPED:-$HERE/../../../rust/ark-ffi/swift/Typed.swift}"
-# ArkUI's Foundation half (swift/ArkUI), which the rows import: built first
+# ArkUI's Foundation half (ui/swift), which the rows import: built first
 # as a module of its own, as Xcode builds the package.
-CORE="${ARKUI_CORE:-$HERE/../../../swift/ArkUI/Sources/ArkUICore}"
+CORE="${ARKUI_CORE:-$HERE/../../../ui/swift/Sources/ArkUICore}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 

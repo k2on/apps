@@ -18,10 +18,10 @@ ark-ffi = { path = "../../rust/ark-ffi" }
 ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-domain = { path = "../domain", features = ["ffi"] }
-# The screens moved into Rust (docs/ark-app.md): their runtime, their
+# The screens moved into Rust (ui/docs/app.md): their runtime, their
 # records and messages, and the device modules they ask.
 money-app = { path = "../app", features = ["ffi"] }
-ark-app = { path = "../../rust/ark-app" }
+ark-app = { path = "../../ui/rust/app" }
 ark-modules = { path = "../../rust/ark-modules", features = ["ffi"] }
 # The demo's household (`money/seed`), which `money_demo` opens on.
 money-seed = { path = "../seed", default-features = false }

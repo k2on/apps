@@ -16,7 +16,7 @@ plugins {
 val moneyLib: String = providers.gradleProperty("moneyLib").getOrElse(rootProject.file("../ffi/android").path)
 
 /** arkui, the look every Ark app on Android shares, compiled from its sources as harken does. */
-val arkUi = rootProject.file("../../kotlin/arkui/src")
+val arkUi = rootProject.file("../../ui/kotlin/src")
 
 android {
     namespace = "dev.money.android"

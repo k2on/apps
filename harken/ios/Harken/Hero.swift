@@ -6,7 +6,7 @@
 // and a record's small print. The banner itself, a section's heading, an
 // entry over its hairline and the "See All" under a list of them are
 // ArkUI's (`HeroBanner`, `HeroHeading`, `HeroEntry`, `HeroMore`, the twins
-// of `rust/arkui/src/hero.rs`). The pages (Pages.swift) put them together.
+// of `ui/rust/arkui/src/hero.rs`). The pages (Pages.swift) put them together.
 import ArkUI
 import SwiftUI
 import UIKit

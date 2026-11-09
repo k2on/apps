@@ -240,7 +240,7 @@ fun Offline(host: String) {
 // A catalogue's pieces ---------------------------------------------------------------------------
 //
 // What the pages about a composer, a work, a performance and a record are made of, as the
-// desktop's are (`rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a header with the cover
+// desktop's are (`ui/rust/arkui/src/hero.rs`, `harken/iced/src/view.rs`): a header with the cover
 // beside the words, the one thing set apart with a Play, a work's heading over its movements,
 // and a record's small print. The banner with the name on it, a section's heading, a listing's
 // entry over its hairline and the line that opens the rest are ArkUI's (`HeroBanner`,

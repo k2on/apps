@@ -4,7 +4,7 @@ version = "0.1.0"
 workspace = "../../rust"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "money as an Ark app (docs/ark-app.md): its screens' state, messages, update and views in Rust, run by ark-app on every platform; the views are drawn natively by iced, Leptos, SwiftUI and Compose."
+description = "money as an Ark app (ui/docs/app.md): its screens' state, messages, update and views in Rust, run by ark-app on every platform; the views are drawn natively by iced, Leptos, SwiftUI and Compose."
 
 [lib]
 name = "money_app"
@@ -12,14 +12,14 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-ark-app = { path = "../../rust/ark-app" }
+ark-app = { path = "../../ui/rust/app" }
 ark-modules = { path = "../../rust/ark-modules" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
 money-domain = { path = "../domain" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
-ark-ui-gen = { path = "../../rust/ark-ui-gen", optional = true }
-arkui = { path = "../../rust/arkui", optional = true }
+ark-ui-gen = { path = "../../ui/rust/gen", optional = true }
+arkui = { path = "../../ui/rust/arkui", optional = true }
 
 [features]
 # The state's records and messages as UniFFI's, for the phones (money/ffi).

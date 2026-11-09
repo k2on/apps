@@ -1,4 +1,4 @@
-//! money's colours: the shared neutrals and the green, arkui/theme.toml's
+//! money's colours: the shared neutrals and the green, ui/theme.toml's
 //! `accent.green`, and the three colours a budget is read by, the shared
 //! signals: positive for money that has a job, caution for a category short
 //! of its target, error for one overspent.

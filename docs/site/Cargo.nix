@@ -418,7 +418,7 @@ rec {
         crateName = "ark-router";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../ui/rust/router; };
         libName = "ark_router";
         dependencies = [
           {
@@ -432,7 +432,7 @@ rec {
         crateName = "ark-router-macros";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router-macros; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../ui/rust/router-macros; };
         procMacro = true;
         libName = "ark_router_macros";
         dependencies = [
@@ -457,7 +457,7 @@ rec {
         crateName = "arkui";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/arkui; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../ui/rust/arkui; };
         dependencies = [
           {
             name = "ark-format";

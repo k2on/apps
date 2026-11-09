@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "ark-format", "ark-router", "ark-router-macros", "ark-app", "ark-modules", "arkui-macros", "ark-ui-gen", "arkui", "arkui-shots", "../harken/domain", "../money/domain", "../money/app", "../money/iced", "../money/server", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player", "../money/ffi", "../money/seed", "../harken/seed"]
+members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "ark-format", "ark-modules", "../ui/rust/router", "../ui/rust/router-macros", "../ui/rust/app", "../ui/rust/arkui-macros", "../ui/rust/gen", "../ui/rust/arkui", "../ui/rust/shots", "../harken/domain", "../money/domain", "../money/app", "../money/iced", "../money/server", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player", "../money/ffi", "../money/seed", "../harken/seed"]
 
 [workspace.package]
 edition = "2021"

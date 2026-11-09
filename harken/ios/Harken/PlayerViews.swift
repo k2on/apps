@@ -230,7 +230,7 @@ struct FullPlayer: View {
                 CoverView(seed: now.seed, url: now.art, side: 64, corner: 0)
                     .aspectRatio(1, contentMode: .fill)
                     .blur(radius: 80)
-                    // The theme's wash (arkui/theme.toml): faint enough that the
+                    // The theme's wash (ui/theme.toml): faint enough that the
                     // title, the album and the gold read over a pale cover.
                     .opacity(Tokens.washOpacity(dark: scheme == .dark))
                     .ignoresSafeArea()
