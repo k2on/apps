@@ -351,3 +351,26 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
     assert_eq!(entry.span().trace, cause.trace, "in the root's trace");
     assert_ne!(cause.trace.0, entry.id.0, "a trace begun by the app, not by the entry");
 }
+
+/// A view's rows read as they stand are its base: what it did before they
+/// were read is in them, and the next `take` says only what came after.
+/// Falsified by `rows` leaving the patches gathered since the view opened
+/// (the driver's thread settling the server's rows as an app opens): the
+/// next `take` said the same insert again, and a list spliced from the rows
+/// held the row twice (money's budget, a category twice, the app gone).
+#[test]
+fn a_views_rows_are_its_base_and_take_says_what_came_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
+    let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
+    // Settled into the view before the app reads its rows.
+    d.mutate("fetch.ask".into(), r#"{"id":"b","after_ms":0}"#.into()).unwrap();
+    let rows = every.rows();
+    assert_eq!(rows.len(), 1, "the rows as they stand: {rows:?}");
+    assert_eq!(every.take(), ViewUpdate::Unchanged, "nothing came after the rows were read");
+    d.mutate("fetch.ask".into(), r#"{"id":"c","after_ms":0}"#.into()).unwrap();
+    let ViewUpdate::Patched { patches } = every.take() else {
+        panic!("patched")
+    };
+    assert_eq!(patches.len(), 1, "only what came after: {patches:?}");
+}
