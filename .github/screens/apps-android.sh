@@ -55,6 +55,11 @@ posture() {
   id=$(grep -o "identifier=[0-9]*, name='$name'" <<< "$states" | grep -o '[0-9]\+' | head -1)
   [ -n "$id" ] || return 1
   echo "$1: device_state $id ($name): $(adb shell cmd device_state state "$id" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+  sleep 5
+  echo "DEBUG wm size: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')"
+  adb shell dumpsys display | tr -d '\r' | grep -E "DisplayDeviceInfo|mBaseDisplayInfo|mOverrideDisplayInfo|mViewports" | cut -c1-400
+  adb shell dumpsys device_state | tr -d '\r' | head -30
+  mkdir -p "$out/debug"; adb exec-out screencap -p > "$out/debug/$1.png"
   moved "$before"
 }
 
