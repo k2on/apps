@@ -47,6 +47,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-app" = rec {
+      packageId = "ark-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-auth" = rec {
       packageId = "ark-auth";
       build = internal.buildRustCrateWithFeatures {
@@ -81,6 +91,16 @@ rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
         packageId = "ark-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-modules" = rec {
+      packageId = "ark-modules";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-modules";
       };
 
       # Debug support which might change between releases.
@@ -191,6 +211,16 @@ rec {
       packageId = "harken-server";
       build = internal.buildRustCrateWithFeatures {
         packageId = "harken-server";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-app" = rec {
+      packageId = "money-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-app";
       };
 
       # Debug support which might change between releases.
@@ -715,6 +745,25 @@ rec {
         ];
 
       };
+      "ark-app" = rec {
+        crateName = "ark-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-app; };
+        libName = "ark_app";
+        dependencies = [
+          {
+            name = "ark-modules";
+            packageId = "ark-modules";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
       "ark-auth" = rec {
         crateName = "ark-auth";
         version = "0.1.0";
@@ -970,6 +1019,25 @@ rec {
           }
         ];
 
+      };
+      "ark-modules" = rec {
+        crateName = "ark-modules";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-modules; };
+        libName = "ark_modules";
+        dependencies = [
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "ark-peer" = rec {
         crateName = "ark-peer";
@@ -11119,6 +11187,62 @@ rec {
           "os-ext" = [ "os-poll" "windows-sys/Win32_System_Pipes" "windows-sys/Win32_Security" ];
         };
         resolvedDefaultFeatures = [ "default" "log" "net" "os-ext" "os-poll" ];
+      };
+      "money-app" = rec {
+        crateName = "money-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/app; };
+        libName = "money_app";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
+          {
+            name = "ark-modules";
+            packageId = "ark-modules";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-domain";
+            packageId = "money-domain";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-modules/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "money-domain" = rec {
         crateName = "money-domain";

@@ -170,6 +170,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-app"
+version = "0.1.0"
+dependencies = [
+ "ark-modules",
+ "ark-peer",
+]
+
+[[package]]
 name = "ark-auth"
 version = "0.1.0"
 dependencies = [
@@ -223,6 +231,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "ark-modules"
+version = "0.1.0"
+dependencies = [
+ "uniffi",
 ]
 
 [[package]]
@@ -3543,6 +3558,20 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "money-app"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-app",
+ "ark-format",
+ "ark-modules",
+ "ark-peer",
+ "money-domain",
+ "money-seed",
+ "uniffi",
 ]
 
 [[package]]
