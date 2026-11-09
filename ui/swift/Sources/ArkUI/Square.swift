@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// The derived square, filling its box: a gradient in the name's colour, from
 /// full strength to a third, and a note knocked back on it. Right on its own;
@@ -15,7 +14,7 @@ public struct Square: View {
 
     public var body: some View {
         let set = squares.of(dark: scheme == .dark)
-        let tint = Color(uiColor: UIColor(rgb: set[Art.pick(set.count, seed)]))
+        let tint = Color(rgb: set[Art.pick(set.count, seed)])
         Canvas { ctx, size in
             let r = CGRect(origin: .zero, size: size)
             ctx.fill(Path(r), with: .linearGradient(Gradient(colors: [tint, tint.opacity(0.33)]), startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)))

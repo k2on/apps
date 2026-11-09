@@ -10,8 +10,6 @@
 import ArkUI
 import PhotosUI
 import SwiftUI
-import UIKit
-import VisionKit
 
 extension ReceiptDraft: Identifiable {
     var id: String { receiptId.isEmpty ? "new" : receiptId }
@@ -39,10 +37,10 @@ struct ReceiptSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .holding(txn.map { MoneyView.paid(txn: $0) })
-            .fullScreenCover(isPresented: $acts.scanning) {
-                DocumentScanner { image in
+            .sheet(isPresented: $acts.scanning) {
+                DocumentScanner { jpeg in
                     acts.scanning = false
-                    if let j = image?.jpegData(compressionQuality: 0.8) { keep(j) }
+                    if let jpeg { keep(jpeg) }
                 }
                 .ignoresSafeArea()
             }
@@ -52,7 +50,7 @@ struct ReceiptSheets: ViewModifier {
                 Task {
                     // A photo in whatever the library keeps it as (HEIC), sent as JPEG.
                     if let d = try? await item.loadTransferable(type: Data.self),
-                       let j = UIImage(data: d)?.jpegData(compressionQuality: 0.8) {
+                       let j = jpeg(d) {
                         keep(j)
                     }
                 }
@@ -122,7 +120,7 @@ struct ReceiptSection: View {
 
     /// The ways to give a transaction its receipt.
     @ViewBuilder private func adding(_ s: Snapshot) -> some View {
-        if VNDocumentCameraViewController.isSupported {
+        if DocumentScanner.isSupported {
             Button { acts.scanning = true } label: { Label("Scan Receipt", systemImage: "doc.viewfinder") }
         }
         PhotosPicker(selection: $acts.picked, matching: .images) { Label("Choose Photo", systemImage: "photo.on.rectangle") }
@@ -194,16 +192,16 @@ struct ReceiptForm: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Store", text: $draft.place).textInputAutocapitalization(.words)
+                    TextField("Store", text: $draft.place).capitals(.words)
                     DatePicker("Date", selection: Binding(get: { Days.date(draft.date) ?? Date() }, set: { draft.date = Days.day($0) }),
                                displayedComponents: .date)
                 }
                 Section {
                     ForEach($draft.items) { $i in
                         HStack {
-                            TextField("Item", text: $i.name).textInputAutocapitalization(.characters)
+                            TextField("Item", text: $i.name).capitals(.characters)
                             TextField("0.00", text: $i.amount)
-                                .keyboardType(.numbersAndPunctuation)
+                                .keypad(.numbersAndPunctuation)
                                 .multilineTextAlignment(.trailing)
                                 .font(.body.monospacedDigit())
                                 .frame(maxWidth: 96)
@@ -223,7 +221,7 @@ struct ReceiptForm: View {
                 }
             }
             .navigationTitle(draft.receiptId.isEmpty ? "New Receipt" : "Receipt")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }
@@ -267,7 +265,7 @@ struct MatchReceiptList: View {
             .foregroundStyle(.ink)
         }
         .navigationTitle("Match a Receipt")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineTitle()
     }
 }
 
@@ -279,9 +277,9 @@ struct ReceiptPhotoView: View {
 
     var body: some View {
         Group {
-            if let d = model.file(file), let image = UIImage(data: d) {
+            if let d = model.file(file), let image = picture(d) {
                 ScrollView([.horizontal, .vertical]) {
-                    Image(uiImage: image).resizable().scaledToFit().containerRelativeFrame(.horizontal)
+                    image.resizable().scaledToFit().containerRelativeFrame(.horizontal)
                 }
             } else {
                 VStack(spacing: Space.m) {
@@ -291,37 +289,6 @@ struct ReceiptPhotoView: View {
             }
         }
         .navigationTitle("Receipt Photo")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// VisionKit's document camera, as Notes scans a document: the page's edges
-/// found and drawn over it live, the picture taken when it is steady, and
-/// squared up. The first page is the receipt; none when it was cancelled
-/// or failed.
-struct DocumentScanner: UIViewControllerRepresentable {
-    let done: (UIImage?) -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(done) }
-
-    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
-        let c = VNDocumentCameraViewController()
-        c.delegate = context.coordinator
-        return c
-    }
-
-    func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
-
-    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
-        private let done: (UIImage?) -> Void
-        init(_ done: @escaping (UIImage?) -> Void) { self.done = done }
-
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
-            done(scan.pageCount > 0 ? scan.imageOfPage(at: 0) : nil)
-        }
-
-        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { done(nil) }
-
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) { done(nil) }
+        .inlineTitle()
     }
 }

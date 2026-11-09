@@ -23,6 +23,7 @@ options:
   bundleIdPrefix: us.koon
   deploymentTarget:
     iOS: "26.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 settings:
   base:
@@ -37,9 +38,14 @@ packages:
   ArkUI:
     path: ../../ui/swift
 targets:
+  # One multiplatform target: the iPhone, the iPad and the Mac (its menu
+  # bar's commands and its Settings window are the shell's, written from
+  # Rust: Generated/MoneyCommands.swift, MoneySettingsView.swift). What only
+  # one platform has is asked inside ArkUI (`#if os` nowhere else).
   Money:
     type: application
-    platform: iOS
+    platform: auto
+    supportedDestinations: [iOS, macOS]
     templates: [ArkModules]
     sources:
       - path: Money

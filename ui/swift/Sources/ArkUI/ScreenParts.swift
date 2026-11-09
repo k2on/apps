@@ -5,7 +5,7 @@
 // previews and checks it. Two things an app adds: the face at a tab's
 // title (`\.tabFace`) and the mark a row of its own kind wears
 // (`\.rowMark`), each set once at the app's root.
-#if os(iOS)
+#if canImport(SwiftUI)
 import SwiftUI
 
 // MARK: what the app provides
@@ -75,7 +75,7 @@ public struct TabPage<Content: View, Top: View>: View {
             TitleSection(title, fold: $fold) { face() } below: { top } rows: { EmptyView() }
             content
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .refreshable { onRefresh?() }
         .largeTitleBar(title, fold: fold)
     }
@@ -264,7 +264,7 @@ public struct FormSheet<Content: View>: View {
                 NavigationStack {
                     Form { content }
                         .navigationTitle(title)
-                        .navigationBarTitleDisplayMode(.inline)
+                        .inlineTitle()
                         .toolbar {
                             if let confirm, let onConfirm {
                                 ToolbarItem(placement: .cancellationAction) {
@@ -341,7 +341,7 @@ public struct AmountField: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             TextField(label, text: Binding(get: { text }, set: onChange))
-                .keyboardType(.decimalPad)
+                .keypad(.decimal)
                 .monospacedDigit()
             if let problem {
                 Text(problem).font(.caption).foregroundStyle(Color.error)

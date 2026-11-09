@@ -46,11 +46,58 @@ final class AccountsScreen: ObservableObject {
     }
 }
 
+/// money's shell running in Rust (money/app/src/shell): its sections,
+/// toolbar, inspector, search and commands, which the generated
+/// `MoneyShellView`, `MoneySettingsView` and `MoneyCommands` read and send
+/// to. It is the app's for its whole life — the Mac's menu bar is made
+/// before any session is open — and runs once one is (`connect`); until
+/// then it shows Budget and takes nothing. A command only a hosted screen
+/// can carry out comes back by name (`native`).
+@MainActor
+final class MoneyShellScreen: ObservableObject {
+    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, toReview: nil)
+    /// A command the hosted screens carry out: "new-transaction", "refresh", "search <text>"…
+    var native: (String) -> Void = { _ in }
+
+    private var app: ShellApp? = nil
+    private var shell: ScreenShell? = nil
+
+    /// Running over `session`.
+    func connect(session: Session, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        shell.other = { [weak self] name in self?.native(name) }
+        self.shell = shell
+        let app = ShellApp(session: session, shell: shell)
+        self.app = app
+        page = app.page()
+    }
+
+    /// The session closed: back to Budget, taking nothing.
+    func disconnect() {
+        app = nil
+        shell = nil
+    }
+
+    /// `msg` taken by the shell; the page read again.
+    func send(_ msg: ShellMsg) {
+        guard let app else { return }
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    /// The page read again: a view it holds moved.
+    func reload() {
+        if let app { page = app.page() }
+    }
+}
+
 /// What a screen's runtime asks of the shell, on the thread it sends on
 /// (the main one: every message comes from a view).
 final class ScreenShell: AppShell, @unchecked Sendable {
     var opened: @MainActor (Route) -> Void = { _ in }
     var reconciled: @MainActor (Id) -> Void = { _ in }
+    /// Any other native request: the shell's commands, by name.
+    var other: @MainActor (String) -> Void = { _ in }
     private let refresh: () -> Void
     private let day: () -> String
 
@@ -65,10 +112,13 @@ final class ScreenShell: AppShell, @unchecked Sendable {
     }
 
     func native(name: String) {
-        if name == "refresh" { refresh() }
-        if name.hasPrefix("reconcile ") {
+        if name == "refresh" {
+            refresh()
+        } else if name.hasPrefix("reconcile ") {
             let id = Id(String(name.dropFirst("reconcile ".count)))
             Task { @MainActor in self.reconciled(id) }
+        } else {
+            Task { @MainActor in self.other(name) }
         }
     }
 

@@ -57,6 +57,7 @@ mod root;
 pub mod router;
 pub mod scroll;
 pub mod sheet;
+pub mod shell;
 pub mod sidebar;
 pub mod style;
 pub mod swipe;

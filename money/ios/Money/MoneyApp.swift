@@ -5,7 +5,9 @@
 // then the tabs (Shell.swift); the sign-in's browser sheet run whenever the
 // model asks for one; `money://auth` links handed to the model; and the app
 // coming back to the front said, which dials the server and is when a
-// sign-in that came back empty may go again.
+// sign-in that came back empty may go again. One multiplatform target: the
+// iPhone, the iPad and the Mac (its menu bar's commands and its Settings
+// window are the shell's, written from Rust).
 import ArkUI
 import AuthenticationServices
 import SwiftUI
@@ -48,6 +50,20 @@ struct MoneyApp: App {
                 wasAway = false
                 model.send(.foreground)
             }
+        }
+        // The menu bar's commands, written from Rust (Generated/MoneyCommands.swift):
+        // the Mac's menus, the iPad's hardware keyboard.
+        .commands { MoneyCommands(screen: model.shell) }
+        // Settings: the Mac's Settings window (⌘,), written from Rust
+        // (Generated/MoneySettingsView.swift); on the iPhone and the iPad,
+        // the account sheet's Settings.
+        ArkSettings {
+            MoneySettingsView()
+                .environmentObject(model.shell)
+                .environmentObject(model)
+                .environmentObject(watched)
+                .environment(\.hostedScreens) { name in AnyView(SettingsHosted(name: name)) }
+                .tint(Color.accent)
         }
     }
 }

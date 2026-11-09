@@ -5,6 +5,7 @@
 
 use std::fmt::Debug;
 
+use ark_app::shell::CommandMenu;
 use ark_app::view::{Call, Given};
 
 use crate::*;
@@ -90,7 +91,43 @@ fn given<M: Debug>(g: &Given<'_, M>) -> String {
             let items: Vec<String> = cs.iter().map(|c| format!("{}({})", c.name, args(c).join(", "))).collect();
             format!("[{}]", items.join(", "))
         }
+        Given::Case { case, .. } => format!(".{case}"),
     }
+}
+
+/// The Swift file for an app's commands: a `Commands` whose menus are
+/// ArkUI's `ArkCommands` (each where its [`MenuPlace`] puts it) and whose
+/// items are `CommandButton`s sending to the shell's holder.
+pub fn emit_commands<M: Debug>(menus: &[CommandMenu<M>], s: &Screen) -> String {
+    let mut o = Out::default();
+    for l in header("//", s).lines() {
+        o.line(l);
+    }
+    o.line("import ArkUI");
+    o.line("import SwiftUI");
+    o.line("");
+    o.block(format!("struct {}: Commands {{", s.name), "}", |o| {
+        o.line(format!("let screen: {}", s.holder));
+        o.line("");
+        o.block("var body: some Commands {", "}", |o| {
+            for m in menus {
+                o.block(format!("ArkCommands(.{}) {{", m.place.case()), "}", |o| {
+                    for c in &m.items {
+                        let keys = match c.shortcut {
+                            Some(k) => format!(", key: {}, shift: {}, option: {}", quoted(k.key), k.shift, k.option),
+                            None => String::new(),
+                        };
+                        o.line(format!(
+                            "CommandButton({}{keys}) {{ screen.send({}) }}",
+                            quoted(c.title),
+                            msg(&Msg::of(&c.run))
+                        ));
+                    }
+                });
+            }
+        });
+    });
+    o.text()
 }
 
 /// A message as UniFFI's Swift enum spells it: `.openAccount(id: a.id)`.

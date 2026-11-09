@@ -33,7 +33,7 @@ mod hall;
 #[cfg(feature = "page")]
 mod page;
 mod session;
-pub use app::{AccountsApp, AppShell};
+pub use app::{AccountsApp, AppShell, ShellApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 #[cfg(feature = "page")]

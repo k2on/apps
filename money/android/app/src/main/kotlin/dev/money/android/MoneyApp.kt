@@ -70,6 +70,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import dev.arkui.LocalHostedScreens
+import dev.arkui.shellShortcuts
+import uniffi.money_app.ShellMsg
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -96,11 +99,11 @@ import uniffi.money_domain.newDraft
 import uniffi.money_domain.routeFromPath
 
 /** The four tabs. */
-enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector) {
-    Budget("budget", "Budget", Glyphs.Budget, Glyphs.BudgetFilled),
-    Accounts("accounts", "Accounts", Glyphs.Accounts, Glyphs.AccountsFilled),
-    Activity("activity", "Transactions", Glyphs.Activity, Glyphs.ActivityFilled),
-    Insights("insights", "Insights", Glyphs.Insights, Glyphs.InsightsFilled),
+enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
+    Budget("budget", "Budget", Glyphs.Budget, Glyphs.BudgetFilled, "budget"),
+    Accounts("accounts", "Accounts", Glyphs.Accounts, Glyphs.AccountsFilled, "accounts"),
+    Activity("activity", "Transactions", Glyphs.Activity, Glyphs.ActivityFilled, "transactions"),
+    Insights("insights", "Insights", Glyphs.Insights, Glyphs.InsightsFilled, "insights"),
 }
 
 /** What a page can ask of the app: a transaction's form, a page, the snackbar. */
@@ -144,6 +147,8 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         }
     }
 
+    val sections =
+        remember(book) { MoneyShellHolder(book.session, { book.sync() }, { book.state.value.today }) }
     val shell =
         remember(book, nav) {
             Shell(
@@ -153,7 +158,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 onEdit = { t -> form = TxnForm.of(t) },
                 onAccount = { id -> nav.navigate(register(book.state.value.accounts.firstOrNull { it.id == id }?.let { Route.Account(it.id.hex, it.name) } ?: Route.Accounts)) },
                 onSettings = { nav.navigate("settings") { launchSingleTop = true } },
-                onTab = { t -> nav.go(t) },
+                onTab = { t -> sections.send(ShellMsg.Select(tag = t.section)) },
                 onSignOut = onSignOut,
                 onAccountSheet = { account = true },
                 addDevice = addDevice,
@@ -166,9 +171,9 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         Navigator(nav, ::destination).handle(link, "money", ::routeFromPath) { r ->
             when (r) {
                 is Route.Join -> true
-                is Route.Budget, is Route.Category -> true.also { nav.go(Tab.Budget) }
-                is Route.Reflect -> true.also { nav.go(Tab.Insights) }
-                is Route.Inbox -> true.also { nav.go(Tab.Activity) }
+                is Route.Budget, is Route.Category -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
+                is Route.Reflect -> true.also { sections.send(ShellMsg.Select(tag = "insights")) }
+                is Route.Inbox -> true.also { sections.send(ShellMsg.Select(tag = "transactions")) }
                 else -> false
             }
         }
@@ -179,72 +184,41 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     val tab = Tab.entries.firstOrNull { it.route == route }
     val reduced = reducedMotion()
 
-    CompositionLocalProvider(LocalShell provides shell) {
-        Scaffold(
-            contentWindowInsets = WindowInsets(0),
-            bottomBar = {
-                AnimatedVisibility(
-                    visible = tab != null || route == null,
-                    // Up from the foot as a tab comes back, and down through it as a page covers it.
-                    enter = Transitions.riseIn(reduced),
-                    exit = Transitions.sinkOut(reduced)) {
-                        NavigationBar {
-                            for (t in Tab.entries) {
-                                val on = t == tab
-                                NavigationBarItem(
-                                    selected = on,
-                                    onClick = { nav.go(t) },
-                                    icon = {
-                                        val count = if (t == Tab.Activity) ledger.inbox.size else 0
-                                        BadgedBox(badge = { if (count > 0) Badge { Text("$count") } }) {
-                                            Icon(if (on) t.selected else t.icon, contentDescription = null)
-                                        }
-                                    },
-                                    label = { Text(t.label) },
-                                )
-                            }
-                        }
-                    }
-            },
-        ) { pad ->
-            NavHost(
-                nav,
-                startDestination = Tab.Budget.route,
-                modifier = Modifier.padding(bottom = pad.calculateBottomPadding()),
-                enterTransition = { enter(reduced) },
-                exitTransition = { exit(reduced) },
-                popEnterTransition = { popEnter(reduced) },
-                popExitTransition = { popExit(reduced) },
-            ) {
-                composable(Tab.Budget.route) { BudgetScreen(ledger) }
-                composable(Tab.Accounts.route) {
-                    // Written from Rust (generated/AccountsScreen.kt), over its runtime.
-                    val view = androidx.compose.ui.platform.LocalView.current
-                    val holder = remember(book) {
-                        AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(view), PhoneClipboard(view.context))
-                    }
-                    var reconciling by remember { mutableStateOf<Id?>(null) }
-                    holder.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }
-                    holder.reconciling = { reconciling = it }
-                    LaunchedEffect(ledger) { holder.reload() }
-                    ScreenFrame { AccountsScreen(holder) }
-                    reconciling?.let { id ->
-                        ledger.accounts.firstOrNull { it.id == id }?.let { acc ->
-                            ReconcileDialog(acc.cleared, acc.name, onReconcile = { book.reconcile(id, it); reconciling = null }, onDismiss = { reconciling = null })
-                        }
-                    }
+    // The shell, written from Rust (generated/MoneyShell.kt, ui/docs/apps/money.md): the sections
+    // Budget, Accounts, Transactions and Insights — a navigation bar, a rail or a drawer by the
+    // window's width — each its top bar, search and inspector, hosting money's own screens.
+    LaunchedEffect(ledger) { sections.reload() }
+    sections.native = { name ->
+        when (name) {
+            "new-transaction" -> form = newForm(book.state.value, null)
+            "new-account" -> shell.onAccountSheet()
+            else -> {}
+        }
+    }
+    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav) }
+
+    CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
+        NavHost(
+            nav,
+            startDestination = "shell",
+            enterTransition = { enter(reduced) },
+            exitTransition = { exit(reduced) },
+            popEnterTransition = { popEnter(reduced) },
+            popExitTransition = { popExit(reduced) },
+        ) {
+            composable("shell") {
+                ScreenFrame {
+                    androidx.compose.foundation.layout.Box(Modifier.shellShortcuts(moneyCommands(sections))) { MoneyShell(sections) }
                 }
-                composable(Tab.Activity.route) { ActivityScreen(ledger) }
-                composable(Tab.Insights.route) { InsightsScreen(ledger) }
-                composable("register/{arg}") { e ->
-                    // The route names the account by its id (an older link's by its name, `names`), so a
-                    // renamed one keeps its register; one that is gone is the route's fallback, All Accounts.
-                    val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
-                    val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { a.names(it.id.hex, it.name) }?.id }
-                    RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
-                }
-                composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
             }
+            composable("register/{arg}") { e ->
+                // The route names the account by its id (an older link's by its name, `names`), so a
+                // renamed one keeps its register; one that is gone is the route's fallback, All Accounts.
+                val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
+                val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { a.names(it.id.hex, it.name) }?.id }
+                RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
+            }
+            composable("settings") { SettingsScreen(ledger, onBack = { nav.popBackStack() }) }
         }
         form?.let { f -> TxnSheet(ledger, f, onDismiss = { form = null }) }
         if (account) AccountOf(ledger, shell, onDismiss = { account = false })
@@ -438,3 +412,35 @@ fun <T : Any> rememberSheet(): androidx.compose.runtime.MutableState<T?> = remem
 /** Whether a bool survives rotation. */
 @Composable
 fun rememberFlag(initial: Boolean = false): androidx.compose.runtime.MutableState<Boolean> = rememberSaveable { mutableStateOf(initial) }
+
+/**
+ * A screen the shell hosts (ark_app::shell::hosted): money's own, until each moves into Rust.
+ * Accounts' list is the generated Accounts slice, over its runtime.
+ */
+@Composable
+private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController) {
+    when (name) {
+        "budget" -> BudgetScreen(ledger)
+        "accounts" -> {
+            // Written from Rust (generated/AccountsScreen.kt), over its runtime.
+            val view = androidx.compose.ui.platform.LocalView.current
+            val holder = remember(book) {
+                AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(view), PhoneClipboard(view.context))
+            }
+            var reconciling by remember { mutableStateOf<Id?>(null) }
+            holder.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }
+            holder.reconciling = { reconciling = it }
+            LaunchedEffect(ledger) { holder.reload() }
+            AccountsScreen(holder)
+            reconciling?.let { id ->
+                ledger.accounts.firstOrNull { it.id == id }?.let { acc ->
+                    ReconcileDialog(acc.cleared, acc.name, onReconcile = { book.reconcile(id, it); reconciling = null }, onDismiss = { reconciling = null })
+                }
+            }
+        }
+        "transactions" -> ActivityScreen(ledger)
+        "insights" -> InsightsScreen(ledger)
+        "settings.server" -> SettingsScreen(ledger, onBack = {})
+        else -> Text("Nothing Selected", modifier = Modifier.padding(16.dp))
+    }
+}

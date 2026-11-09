@@ -2,20 +2,52 @@
 // move, colours given for both sides, and the derived square's palette as an
 // environment value an app sets once at its root.
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 extension Color {
     /// One colour for light and another for dark, as the trait collection says.
     public init(light: UInt32, dark: UInt32) {
-        self.init(uiColor: UIColor { t in UIColor(rgb: t.userInterfaceStyle == .dark ? dark : light) })
+        self = .dynamic { $0 ? dark : light }
+    }
+
+    /// A colour that follows light and dark by itself, `rgb(dark)` on each
+    /// side: the trait collection's on the iPhone and the iPad, the
+    /// appearance's on the Mac. The one place ArkUI asks which.
+    public static func dynamic(_ rgb: @escaping (Bool) -> UInt32) -> Color {
+        #if canImport(UIKit)
+        Color(uiColor: UIColor { t in UIColor(rgb: rgb(t.userInterfaceStyle == .dark)) })
+        #else
+        Color(nsColor: NSColor(name: nil) { a in
+            NSColor(rgb: rgb(a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua))
+        })
+        #endif
     }
 }
 
+extension Color {
+    /// One colour, the same on either side.
+    public init(rgb: UInt32) {
+        self.init(.sRGB, red: Double((rgb >> 16) & 0xff) / 255, green: Double((rgb >> 8) & 0xff) / 255, blue: Double(rgb & 0xff) / 255)
+    }
+}
+
+#if canImport(UIKit)
 extension UIColor {
     public convenience init(rgb: UInt32, alpha: CGFloat = 1) {
         self.init(red: CGFloat((rgb >> 16) & 0xff) / 255, green: CGFloat((rgb >> 8) & 0xff) / 255, blue: CGFloat(rgb & 0xff) / 255, alpha: alpha)
     }
 }
+#elseif canImport(AppKit)
+extension NSColor {
+    public convenience init(rgb: UInt32, alpha: CGFloat = 1) {
+        self.init(srgbRed: CGFloat((rgb >> 16) & 0xff) / 255, green: CGFloat((rgb >> 8) & 0xff) / 255, blue: CGFloat(rgb & 0xff) / 255, alpha: alpha)
+    }
+}
+#endif
 
 /// The spacings, so every screen has the same rhythm: Android's `Space`.
 public enum Space {

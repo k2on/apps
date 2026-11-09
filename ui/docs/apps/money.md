@@ -47,10 +47,26 @@ disclosure: `ListRow(pushes:)`), and the inspector is a sheet.
   demo).
 - **Refresh** asks the bank (`Command::Native("refresh")`).
 
-Not yet in the slice: the split view itself (the register opens as a
-pushed page through the shell's navigator), the inspector, the toolbar
-placements and the section's search; they wait for those parts in ark-app
-(ui/docs/app.md, What Is Left).
+## The Shell (Written)
+
+`money/app/src/shell` is the design above in ark-app's shell vocabulary:
+`MoneyShell` (its state: the section, the inspector, the search, a pushed
+detail), `money_shell` (the four sections, each `toolbar` over
+`searchable`/`split_view`/`inspector` and a hosted screen), `money_settings`
+(the four panes) and `commands()` (File, View, Go). Generated as
+`MoneyShellView`, `MoneySettingsView`, `MoneyCommands` (Swift) and
+`MoneyShell`, `MoneySettings`, `moneyCommands` (Kotlin); run on the phones
+through money-ffi's `ShellApp`; drawn on the desktop by
+`arkui::view::shell` (money/iced/src/sections.rs).
+
+What each section shows is still the platform's own screen, hosted by
+name (`hosted("budget")`): Accounts' list is the generated Accounts
+slice; Budget, Transactions, Insights and Settings' Server pane are the
+hand-written screens; the registers' detail beside Accounts is the iced
+window's register (a placeholder on the phones), and the inspectors and
+the Household and Appearance panes are placeholders. A command only a
+hosted screen can carry out (New Transaction, the month) comes back to
+the platform by name (`Command::Native`).
 
 ## Keyboard
 

@@ -33,9 +33,9 @@ struct BanksView: View {
                 Text(model.isDemo ? "The demo's bank has a few days of news for its first two syncs." : "The server asks the bank every hour; this asks it now.")
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .navigationTitle("Bank Connections")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineTitle()
         .refreshable { await model.refresh() }
     }
 }

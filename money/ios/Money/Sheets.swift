@@ -46,7 +46,7 @@ struct TransactionSheet: View {
                     TextField("Payee", text: $draft.payee, axis: .vertical)
                         .lineLimit(1...4)
                         .focused($payeeFocused)
-                        .textInputAutocapitalization(.words)
+                        .capitals(.words)
                         .submitLabel(.done)
                         .disabled(draft.transferTo != nil)
                         .onChange(of: draft.payee) { _, p in
@@ -135,7 +135,7 @@ struct TransactionSheet: View {
             }
             .modifier(ReceiptSheets(txn: draft.editing, acts: $receiptActs))
             .navigationTitle(draft.editing == nil ? "New Transaction" : "Transaction")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }
@@ -233,9 +233,9 @@ struct CategoryPicker: View {
                 Section { row("No Category", nil, chosen == nil) { pick(.category(nil)) } }
             }
         }
-        .searchable(text: $needle, placement: .navigationBarDrawer(displayMode: .always), prompt: "Category")
+        .searchable(text: $needle, prompt: "Category")
         .navigationTitle("Category")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineTitle()
     }
 
     private func row(_ name: String, _ cents: Int64?, _ on: Bool, _ then: @escaping () -> Void) -> some View {
@@ -320,7 +320,7 @@ struct AssignSheet: View {
             }
             .padding(Space.page)
             .navigationTitle(l?.name ?? "Assign")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
@@ -390,7 +390,7 @@ struct MoveSheet: View {
                 }
             }
             .navigationTitle(covering ? "Cover Overspending" : id == nil ? "Assign" : "Move Money")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
@@ -449,7 +449,7 @@ struct TargetSheet: View {
             }
             .padding(Space.page)
             .navigationTitle(l.map { "\($0.name) Target" } ?? "Target")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
@@ -486,7 +486,7 @@ struct AddAccountSheet: View {
             Form {
                 Section {
                     TextField("Name", text: $name)
-                        .textInputAutocapitalization(.words)
+                        .capitals(.words)
                     Picker("Type", selection: $kind) {
                         ForEach(accountKinds(), id: \.self) { k in
                             Label(k.title(), systemImage: Accounts.symbol(k.key())).tag(k)
@@ -511,7 +511,7 @@ struct AddAccountSheet: View {
                 }
             }
             .navigationTitle("Add Account")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
@@ -586,7 +586,7 @@ struct ReconcileSheet: View {
             }
             .padding(Space.page)
             .navigationTitle("Reconcile \(a?.name ?? "")")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
@@ -619,7 +619,7 @@ struct NewCategorySheet: View {
             Form {
                 TextField("Name", text: $name)
                     .focused($focused)
-                    .textInputAutocapitalization(.words)
+                    .capitals(.words)
                     .submitLabel(.done)
                     .onSubmit(add)
                 Picker("Group", selection: $chosen) {
@@ -628,7 +628,7 @@ struct NewCategorySheet: View {
                 }
             }
             .navigationTitle("New Category")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")

@@ -18,6 +18,7 @@ use ark_haptics::Haptics;
 use ark_peer::store::Store;
 use ark_share::Share;
 use money_app::accounts::{Accounts, AccountsMsg, AccountsPage};
+use money_app::shell::{MoneyShell, ShellMsg, ShellPage};
 use money_domain::{self as domain, routes::Route, MoneyChange};
 
 use crate::Session;
@@ -149,6 +150,80 @@ impl AccountsApp {
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
         m.set(haptics).set(clipboard).set(share);
+    }
+}
+
+/// money's shell, running: its sections, toolbar, inspector, search and
+/// commands (money/app/src/shell). Its generated SwiftUI and Compose
+/// (`MoneyShellView`, `MoneySettingsView`, `MoneyCommands`) read its page
+/// and send it messages; a command only a hosted screen can carry out
+/// goes to the [`AppShell`]'s `native` by name.
+#[derive(uniffi::Object)]
+pub struct ShellApp {
+    session: Arc<ark_ffi::Session<domain::MoneyView>>,
+    shell: Arc<dyn AppShell>,
+    runtime: Mutex<Runtime<MoneyShell>>,
+    _holds: Vec<ark_ffi::Hold<domain::MoneyView>>,
+}
+
+/// The phone, as the shell's host.
+struct Window<'a> {
+    app: &'a ShellApp,
+}
+
+impl Host<MoneyShell> for Window<'_> {
+    fn read<R>(&self, f: impl FnOnce(&Store<domain::MoneyView>) -> R) -> R {
+        self.app.session.read(|st, _| f(st))
+    }
+    fn now_ms(&self) -> i64 {
+        session_now(self.app.shell.now_ms(), &self.app.shell.today())
+    }
+    fn send(&mut self, change: MoneyChange) -> Result<(), String> {
+        match self.app.session.send(|p| p.mutate_encoded(change.name(), change.input())) {
+            Ok(_) => Ok(()),
+            Err(Refusal::Refused { why }) => Err(why),
+        }
+    }
+    fn open(&mut self, route: Route) {
+        self.app.shell.open_route(route)
+    }
+    fn ask(&mut self, _: Ticket, _: ModuleCall) {}
+    fn native(&mut self, name: &str) {
+        self.app.shell.native(name.into())
+    }
+}
+
+#[uniffi::export]
+impl ShellApp {
+    /// The shell over `session`, its views held for as long as it lives.
+    #[uniffi::constructor]
+    pub fn new(session: Arc<Session>, shell: Arc<dyn AppShell>) -> Arc<ShellApp> {
+        let inner = session.inner.clone();
+        let rt = Runtime::<MoneyShell>::new();
+        let holds = rt.holds().into_iter().map(|k| inner.hold(k)).collect();
+        Arc::new(ShellApp {
+            session: inner,
+            shell,
+            runtime: Mutex::new(rt),
+            _holds: holds,
+        })
+    }
+
+    /// `msg` taken.
+    pub fn send(&self, msg: ShellMsg) {
+        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        rt.dispatch(msg, &mut Window { app: self });
+    }
+
+    /// What the shell shows now.
+    pub fn page(&self) -> ShellPage {
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        rt.screen(&Window { app: self })
+    }
+
+    /// A number that grows with every message taken.
+    pub fn version(&self) -> u64 {
+        self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 }
 

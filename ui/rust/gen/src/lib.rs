@@ -305,9 +305,9 @@ mod tests {
             m.fields,
             vec![("id".into(), Arg::Path("a.id".into())), ("n".into(), Arg::Number("3".into()))]
         );
-        let typed = Msg::typed(&Input(|name| M::Named { name }));
+        let typed = Msg::typed(&Input::new(|name| M::Named { name }));
         assert_eq!(typed.fields, vec![("name".into(), Arg::Path(INPUT.into()))]);
-        let switched = Msg::switched(&Input(|on| M::On { on, id: "x, \"y\"".into() }));
+        let switched = Msg::switched(&Input::new(|on| M::On { on, id: "x, \"y\"".into() }));
         assert_eq!(
             switched.fields,
             vec![("on".into(), Arg::Path(INPUT.into())), ("id".into(), Arg::Text("x, \"y\"".into()))]

@@ -36,6 +36,7 @@ mod overview;
 mod palette;
 mod peer;
 mod receipt;
+mod sections;
 mod settings;
 mod stores;
 mod view;
@@ -46,7 +47,7 @@ mod tests;
 use ark_auth::onboarding::{Effect, Event, Onboarding};
 use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
-use iced::keyboard::{key::Named, Key, Modifiers};
+use iced::keyboard::{Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
 use money_domain::dates::{add_months, day_of_ms, month_of};
 use money_domain::*;
@@ -55,13 +56,10 @@ use money_seed as seed;
 
 use peer::{Ledger, Peer};
 
-/// Which pane has the keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pane {
-    Sidebar,
-    Page,
-}
+/// Which pane has the keys: ArkUI's panes (`arkui::shell`), every app's.
+pub use arkui::shell::Pane;
 
+use money_app::shell::{ShellMsg, SECTIONS};
 /// Where the window is: money's routes (`money_domain::routes`), which the
 /// address bar spells by their paths (`arkui::router`).
 pub use money_domain::routes::Route;
@@ -201,6 +199,8 @@ pub enum Message {
     Go(Page),
     /// The Accounts page's own messages (`money_app::accounts`).
     Accounts(money_app::accounts::AccountsMsg),
+    /// A message of the shell's: a section, the inspector, the search, a command.
+    Shell(ShellMsg),
     /// A month earlier or later; zero is this one.
     Month(i64),
     ThisMonth,
@@ -373,8 +373,10 @@ pub struct App {
     pub bank: seed::Bank,
     /// The server this window is on; none for the demo, its own authority.
     pub server: Option<live::Server>,
-    /// The grammar, with money's sequences bound (`cc`, `cg`, `rc`, `rg`).
-    pub keys: vim::Keys,
+    /// The keyboard every Ark app gets (`arkui::shell::Keyboard`): the
+    /// grammar, with money's sequences bound (`cc`, `cg`, `rc`, `rg`), the
+    /// which-key panel, and which pane has the keys.
+    pub keyboard: arkui::shell::Keyboard,
     /// The other end of a visual selection from `selected`: where `v` was.
     pub anchor: Option<Id<Category>>,
     /// The last `/` search, for `n` and `N`.
@@ -386,8 +388,9 @@ pub struct App {
     /// A row's or a heading's menu.
     pub ctx: arkui::context::Context<Message, ()>,
     pub renaming: Option<(Naming, String)>,
-    /// Which pane has the keys: the sidebar or the page beside it.
-    pub pane: Pane,
+    /// The shell (money/app/src/shell): the sections, their toolbars,
+    /// search and inspector, the commands, in Rust as on the phones.
+    pub shell: ark_app::Runtime<money_app::shell::MoneyShell>,
     /// Where the window has been: the address bar, and back and forward by
     /// `^O`/`^I` and a swipe (`arkui::history`).
     pub history: arkui::history::History<Route>,
@@ -423,9 +426,6 @@ pub struct App {
     /// The signed-in person's picture, for the account button: fetched
     /// once, kept on disk as harken's covers are (`arkui::images`).
     pub pictures: arkui::images::Images,
-    /// The which-key panel: what can follow a prefix half typed, or with
-    /// `?` every key (`arkui::which`), read from [`KEYS`] and the grammar's.
-    pub which: arkui::which::Which,
     /// The note, said for a moment over the page's foot (`arkui::toast`).
     pub toast: arkui::toast::Toast,
     /// How far down Reflect or Settings is scrolled, as it last said.
@@ -460,7 +460,11 @@ impl App {
             // demo, who it is signed in as) is not news, and the toast is
             // for news (`arkui::toast`).
             note: String::new(),
-            keys: money_keys(),
+            keyboard: arkui::shell::Keyboard {
+                keys: money_keys(),
+                which: arkui::which::Which::new(),
+                focus: Pane::Content,
+            },
             anchor: None,
             search: String::new(),
             drag: None,
@@ -469,7 +473,7 @@ impl App {
             window: Size::new(1200.0, 760.0),
             ctx: arkui::context::Context::new(),
             renaming: None,
-            pane: Pane::Page,
+            shell: ark_app::Runtime::new(),
             history: arkui::history::History::new(),
             txn_at: None,
             txn_anchor: None,
@@ -485,7 +489,6 @@ impl App {
             paper: None,
             photo: None,
             pictures: arkui::images::Images::new("money/pictures"),
-            which: arkui::which::Which::new(),
             toast: arkui::toast::Toast::new(),
             top_y: 0.0,
             compact: arkui::compact::Compact::new(iced::time::Instant::now()),
@@ -718,6 +721,8 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The shell's section is the page's.
+        self.sync_shell();
         // The account's picture is asked for once somebody is signed in,
         // whichever message signed them in.
         let task = Task::batch([task, self.want_picture()]);
@@ -829,6 +834,7 @@ impl App {
     fn step(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Accounts(m) => return self.accounts_step(m),
+            Message::Shell(m) => return self.shell_step(m),
             Message::Go(page) => {
                 self.page = page;
                 self.form = None;
@@ -1100,7 +1106,7 @@ impl App {
                 return self.open_dropdown(Choosing::Txns(ids), at);
             }
             Message::TxnClick(id) => {
-                self.pane = Pane::Page;
+                self.keyboard.focus = Pane::Content;
                 self.txn_anchor = None;
                 if self.txn_at == Some(id) {
                     return self.update(Message::EditTxn(id));
@@ -1405,7 +1411,7 @@ impl App {
                 let _ = opened;
             }
             Message::Picture(done) => self.pictures.loaded(done),
-            Message::WhichDue(key) => self.which.due(key),
+            Message::WhichDue(key) => self.keyboard.which.due(key),
             Message::ToastDue(key) => self.toast.due(key),
         }
         Task::none()
@@ -1509,96 +1515,62 @@ impl App {
 
     /// Whether the budget has the keyboard.
     pub fn budget_keys(&self) -> bool {
-        self.page == Page::Budget && self.pane == Pane::Page && self.keys_free()
+        self.page == Page::Budget && self.keyboard.focus == Pane::Content && self.keys_free()
     }
 
     fn key(&mut self, key: Key, mods: Modifiers) -> Task<Message> {
-        if key == Key::Named(Named::Escape) {
-            self.keys.press(&key, mods);
-            self.which.dismiss();
-            return self.update(Message::Escape);
+        // A command's shortcut, the menu bar's on a Mac: ⌘ there, Ctrl here.
+        if let Some(run) = self.shortcut(&key, mods) {
+            return self.update(Message::Shell(run));
         }
+        let free = self.keys_free();
+        let before = self.keyboard.focus;
+        let panes = self.panes();
+        let section = self.sidebar_at();
         // The budget binds its sequences; the register none, so its `c`
         // categorizes at once rather than waiting for a second key.
-        self.keys.set_bindings(match (self.pane, self.page) {
-            (Pane::Page, Page::Budget) => &MONEY_KEYS,
+        let bindings: &[&'static str] = match self.page {
+            Page::Budget => &MONEY_KEYS,
             _ => &[],
-        });
-        let action = self.keys.press(&key, mods);
-        // The which-key panel follows what is half typed; a search is
-        // typed, not a prefix.
-        let prefix = match self.keys.mode() {
-            vim::Mode::Normal => self.keys.pending(),
-            vim::Mode::Search(_) => String::new(),
         };
-        self.which.typed(&prefix);
-        let Some(action) = action else {
-            return Task::none();
-        };
-        if action == vim::Action::Key('?') {
-            self.which.ask();
-            return Task::none();
+        let routed = self.keyboard.press(&key, mods, &panes, section, SECTIONS.len(), bindings);
+        // Nothing moves between panes while something is over the window.
+        if !free {
+            self.keyboard.focus = before;
         }
-        // A menu that is up has the keys.
-        if self.ctx.is_open() {
-            return match action {
+        use arkui::shell::Routed;
+        match routed {
+            Routed::Done => Task::none(),
+            Routed::Escape => self.update(Message::Escape),
+            // Back and forward, the way the browser's buttons go: the bar
+            // moves, and the next update arrives where it went.
+            Routed::Jump(by) => {
+                self.history.go(by);
+                Task::none()
+            }
+            Routed::Section(i) if free => {
+                // A cursor walking is a scrub: one history entry, not one a place.
+                self.history.replace_next();
+                self.update(Message::Shell(ShellMsg::Select { tag: SECTIONS[i].into() }))
+            }
+            Routed::Scroll(place) if free => self.scroll_cursor(place),
+            Routed::Pane(_, action) if self.ctx.is_open() => match action {
+                // A menu that is up has the keys.
                 vim::Action::Move(m) => match self.ctx.travel(m) {
                     Some(msg) => self.update(msg),
                     None => Task::none(),
                 },
                 vim::Action::Activate => self.update(Message::MenuActivate),
                 _ => Task::none(),
-            };
+            },
+            Routed::Pane(pane, action) if free => match (pane, self.page) {
+                (Pane::Sidebar, _) => Task::none(),
+                (_, Page::Budget) => self.act(action),
+                (_, Page::Ledger(_)) => self.register_act(action),
+                _ => Task::none(),
+            },
+            _ => Task::none(),
         }
-        // Back and forward, the way the browser's buttons go: the bar moves,
-        // and the next update arrives where it went.
-        if let vim::Action::Jump(by) = action {
-            self.history.go(by);
-            return Task::none();
-        }
-        if !self.keys_free() {
-            return Task::none();
-        }
-        if action == vim::Action::Cycle {
-            self.pane = match self.pane {
-                Pane::Sidebar => Pane::Page,
-                Pane::Page => Pane::Sidebar,
-            };
-            return Task::none();
-        }
-        if let vim::Action::Scroll(place) = action {
-            return self.scroll_cursor(place);
-        }
-        match (self.pane, self.page) {
-            (Pane::Sidebar, _) => self.sidebar_act(action),
-            (Pane::Page, Page::Budget) => self.act(action),
-            (Pane::Page, Page::Ledger(_)) => self.register_act(action),
-            (Pane::Page, Page::Reflect | Page::Settings | Page::Accounts) => {
-                if let vim::Action::Move(vim::Motion::Left(_)) = action {
-                    self.pane = Pane::Sidebar;
-                }
-                Task::none()
-            }
-        }
-    }
-
-    /// A command with the sidebar's keys: `j` and `k` walk the places, the
-    /// page following, and `l` or `<Enter>` give the keys to the page.
-    fn sidebar_act(&mut self, action: vim::Action) -> Task<Message> {
-        let places = self.places();
-        match action {
-            vim::Action::Move(vim::Motion::Right(_)) | vim::Action::Activate => self.pane = Pane::Page,
-            vim::Action::Move(m) => {
-                if let Some(i) = vim::Grid::column(places.len()).step(self.sidebar_at(), m) {
-                    // A cursor walking is a scrub: one history entry, not one
-                    // a place.
-                    self.history.replace_next();
-                    return self.update(Message::Go(places[i].3));
-                }
-            }
-            _ => {}
-        }
-        Task::none()
     }
 
     /// One command of the grammar, on the budget.
@@ -1608,7 +1580,7 @@ impl App {
         let n = ids.len();
         match action {
             // The budget is one column: `h` is the sidebar, beside it.
-            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
+            vim::Action::Move(vim::Motion::Left(_)) => self.keyboard.focus = Pane::Sidebar,
             vim::Action::Move(m) => {
                 let grid = vim::Grid::column(n);
                 let to = match self.at() {
@@ -1874,7 +1846,7 @@ impl App {
             .collect();
         let n = rows.len();
         match action {
-            vim::Action::Move(vim::Motion::Left(_)) => self.pane = Pane::Sidebar,
+            vim::Action::Move(vim::Motion::Left(_)) => self.keyboard.focus = Pane::Sidebar,
             vim::Action::Move(m) => {
                 let grid = vim::Grid::column(n);
                 let to = match self.txn_cursor() {
@@ -2010,12 +1982,13 @@ impl App {
     /// a dropdown's corner: above, if there is no room under it.
     fn under(&self, y: f32) -> (Point, bool) {
         let all = self.register_account().is_none();
-        let left = view::SIDEBAR + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
+        let origin = self.page_origin();
+        let left = origin.x + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
         let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 116.0;
-        let width = self.window.width - view::SIDEBAR - 1.0 - receipt::SIDE - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
+        let width = self.window.width - origin.x - 1.0 - receipt::SIDE - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
         let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
         let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
-        let top = view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
+        let top = origin.y + view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
         let y = top + y - self.register_scroll;
         let above = y + arkui::command::LIST_HEIGHT > self.window.height;
         // Above: its bottom on the cell's top.
@@ -2224,15 +2197,15 @@ impl App {
     /// `zz`, `zt` and `zb`: the page's list scrolled so its cursor's row is
     /// in the middle, at the top or at the foot, the cursor where it was.
     fn scroll_cursor(&mut self, place: arkui::scroll::Place) -> Task<Message> {
-        match (self.pane, self.page) {
-            (Pane::Page, Page::Budget) => match self.at() {
+        match (self.keyboard.focus, self.page) {
+            (Pane::Content, Page::Budget) => match self.at() {
                 Some(n) => {
                     let (line, lines) = outline::line_of(&self.sizes(), n);
                     arkui::scroll::follow(look::BUDGET, line, lines, place)
                 }
                 None => Task::none(),
             },
-            (Pane::Page, Page::Ledger(_)) => {
+            (Pane::Content, Page::Ledger(_)) => {
                 let Some(i) = self.txn_at.and_then(|id| self.peer.register().iter().position(|t| t.id == id)) else {
                     return Task::none();
                 };
@@ -2498,7 +2471,7 @@ impl App {
         }
         // A prefix half typed: the which-key panel after its delay. Keyed
         // from the top of the range, clear of the deadlines' milliseconds.
-        if let Some(key) = self.which.waiting() {
+        if let Some(key) = self.keyboard.which.waiting() {
             subs.push(
                 arkui::wake::at(u64::MAX - key, arkui::which::DELAY)
                     .with(key)

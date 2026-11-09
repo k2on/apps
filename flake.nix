@@ -691,12 +691,15 @@
           # workspace (`--locked --offline`), and a desktop window's or a
           # server's change is no phone's.
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
-          iosRust = rust.override { targets = iosTargets; };
+          # The Mac's slice, for the same app's macOS destination (one
+          # multiplatform target: money/ios/project.yml).
+          iosRust = rust.override { targets = iosTargets ++ [ "aarch64-apple-darwin" ]; };
           # Each target's slice of the xcframework: its directory and its
           # platform variant.
           iosSlice = {
-            aarch64-apple-ios = { id = "ios-arm64"; variant = ""; };
-            aarch64-apple-ios-sim = { id = "ios-arm64-simulator"; variant = "simulator"; };
+            aarch64-apple-ios = { id = "ios-arm64"; variant = ""; platform = "ios"; };
+            aarch64-apple-ios-sim = { id = "ios-arm64-simulator"; variant = "simulator"; platform = "ios"; };
+            aarch64-apple-darwin = { id = "macos-arm64"; variant = ""; platform = "macos"; };
           };
           # The workspace's crates, by directory from the repository's root,
           # and by package name.
@@ -770,8 +773,9 @@
               # iPhoneOS platform, so `xcrun --sdk iphoneos` (cc-rs asks it)
               # fails under them: both are taken back for these targets.
               build = ''
-                # The apps' own deployment target: what ios.yaml's cargo had.
-                export IPHONEOS_DEPLOYMENT_TARGET=17.0
+                # The apps' own deployment target: what ios.yaml's cargo had;
+                # the Mac's, the app's macOS destination's.
+                export IPHONEOS_DEPLOYMENT_TARGET=17.0 MACOSX_DEPLOYMENT_TARGET=15.0
                 ${if xcode == null then ''
                   export PATH=/usr/bin:$PATH
                   export DEVELOPER_DIR="$(/usr/bin/xcode-select -p)"
@@ -859,7 +863,7 @@
                   slice() {
                     echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
                     echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
-                    echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string>"
+                    echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>$3</string>"
                     [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
                     echo "</dict>"
                   }
@@ -868,7 +872,7 @@
                     echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
                     echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
                     ${lib.concatMapStrings (t: ''
-                      slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}"
+                      slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}" ${iosSlice.${t}.platform}
                     '') targets}
                     echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
                     echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
@@ -952,8 +956,10 @@
           # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
           # `framework` its kernel's; `kind` "simulator" (the .app, for its
-          # screenshots) or "archive" (the unsigned .xcarchive ios.yaml signs
-          # and sends to TestFlight, giving it its build number there). Its
+          # screenshots), "archive" (the unsigned .xcarchive ios.yaml signs
+          # and sends to TestFlight, giving it its build number there) or
+          # "macos" (the same target's Mac destination, the .app, for the
+          # Mac's screenshots: `<name>-macos`). Its
           # bundle id is `bundlePrefix`.<name>, every app's; its version
           # project.yml's.
           iosApp = { name, App, ffi, framework, kind }:
@@ -963,7 +969,7 @@
               # app, the phone's for the archive.
               kernel = iosKernel {
                 inherit ffi framework;
-                targets = { simulator = [ "aarch64-apple-ios-sim" ]; archive = [ "aarch64-apple-ios" ]; }.${kind};
+                targets = { simulator = [ "aarch64-apple-ios-sim" ]; archive = [ "aarch64-apple-ios" ]; macos = [ "aarch64-apple-darwin" ]; }.${kind};
               };
               dev = xcode.developer;
               common = ''
@@ -986,14 +992,20 @@
                     -destination 'generic/platform=iOS' \
                     -archivePath $TMPDIR/${App}.xcarchive
                 '';
+                macos = ''
+                  xcodebuild build ${common} \
+                    -destination 'generic/platform=macOS' \
+                    ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+                '';
               }.${kind};
               install = {
                 simulator = "cp -R $TMPDIR/derived/Build/Products/Release-iphonesimulator/${App}.app $out/";
                 archive = "cp -R $TMPDIR/${App}.xcarchive $out/";
+                macos = "cp -R $TMPDIR/derived/Build/Products/Release/${App}.app $out/";
               }.${kind};
             in
             pkgs.stdenv.mkDerivation {
-              pname = "${name}-ios-${kind}";
+              pname = if kind == "macos" then "${name}-macos" else "${name}-ios-${kind}";
               version = "0.1.0";
               # The app, ArkUI, and the device modules its modules.yml
               # compiles in (modules/<name>/swift, ui/docs/app.md).
@@ -1046,6 +1058,9 @@
           money-ios-simulator = iosApp (moneyIos // { kind = "simulator"; });
           harken-ios-simulator = iosApp (harkenIos // { kind = "simulator"; });
           money-ios-archive = iosApp (moneyIos // { kind = "archive"; });
+          # The same target's Mac destination, built by nix for the Mac's
+          # screenshots (the shell's sidebar, toolbar, inspector, Settings).
+          money-macos = iosApp (moneyIos // { kind = "macos"; });
           harken-ios-archive = iosApp (harkenIos // { kind = "archive"; });
 
           # harken's domain (harken/domain: plain Rust, §1.16) built, and
@@ -1201,7 +1216,7 @@
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
-            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
+            inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the

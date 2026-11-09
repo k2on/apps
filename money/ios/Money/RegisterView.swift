@@ -69,7 +69,7 @@ struct RegisterView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .holding(searched.isEmpty ? nil : MoneyView.search(account: account, text: searched))
         .navigationTitle(a?.name ?? "All Accounts")
         .navigationSubtitle(a.map { $0.subtitle() } ?? "Every transaction in the household")
@@ -79,7 +79,7 @@ struct RegisterView: View {
         .holding(MoneyView.register(account: account))
         .toolbar {
             if let a {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button { present(.reconcile(a.id)) } label: { Label("Reconcile…", systemImage: "checkmark.seal") }
                             .disabled(a.closed)
@@ -97,7 +97,7 @@ struct RegisterView: View {
                     .accessibilityLabel("Account options")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) { AddTransactionButton(account: account) }
+            ToolbarItem(placement: .primaryAction) { AddTransactionButton(account: account) }
         }
     }
 

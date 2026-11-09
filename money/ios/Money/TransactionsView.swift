@@ -52,7 +52,7 @@ struct TransactionsView: View {
             case .all: everything(all)
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .largeTitleBar("Transactions", fold: fold)
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)

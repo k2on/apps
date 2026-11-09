@@ -21,8 +21,8 @@ struct ServerScreen: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 TextField(usualServer, text: Binding(get: { typed }, set: { model.send(.typed(text: $0)) }))
                     .textContentType(.URL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
+                    .keypad(.url)
+                    .capitals(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.go)
                     .onSubmit { model.send(.check) }

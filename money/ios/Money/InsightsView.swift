@@ -84,7 +84,7 @@ struct InsightsView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .refreshable { await model.refresh() }
         .largeTitleBar("Insights", fold: fold)
     }

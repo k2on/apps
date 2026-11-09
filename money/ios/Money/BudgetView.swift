@@ -106,7 +106,7 @@ struct BudgetView: View {
         .onChange(of: Arranging.shape(groups)) { _, now in
             if let a = ahead, Arranging.shape(a) == now { ahead = nil }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .listSectionSpacing(.compact)
         .refreshable { await model.refresh() }
         .largeTitleBar("Budget", fold: fold)

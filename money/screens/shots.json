@@ -62,6 +62,9 @@
         "id": "accounts",
         "steps": [
           {
+            "click": "Accounts"
+          },
+          {
             "click": "Checking"
           }
         ]
@@ -70,7 +73,7 @@
         "id": "transactions",
         "steps": [
           {
-            "click": "All Accounts"
+            "click": "Transactions"
           }
         ]
       },
@@ -78,7 +81,7 @@
         "id": "insights",
         "steps": [
           {
-            "click": "Reflect"
+            "click": "Insights"
           }
         ]
       },

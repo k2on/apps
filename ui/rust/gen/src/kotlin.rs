@@ -5,6 +5,7 @@
 
 use std::fmt::Debug;
 
+use ark_app::shell::CommandMenu;
 use ark_app::view::{Call, Given};
 
 use crate::*;
@@ -115,7 +116,51 @@ fn given<M: Debug>(g: &Given<'_, M>, ty: &str) -> String {
                 .collect();
             format!("listOf({})", items.join(", "))
         }
+        Given::Case { of, case } => format!("{of}.{}", pascal(case)),
     }
+}
+
+fn pascal(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// The Kotlin file for an app's commands: a function of the shell's holder
+/// giving ArkUI's `ShellMenu`s, each a list of `ShellCommand`s, which the
+/// shell binds to the hardware keyboard and puts in the app bar's menu.
+pub fn emit_commands<M: Debug>(menus: &[CommandMenu<M>], s: &Screen) -> String {
+    let ty = std::any::type_name::<M>().rsplit("::").next().unwrap_or("Msg").to_string();
+    let mut o = Out::default();
+    for l in header("//", s).lines() {
+        o.line(l);
+    }
+    o.line(format!("package {}", s.package));
+    o.line("");
+    let mut imports: Vec<String> = vec!["dev.arkui.*".into()];
+    imports.extend(s.imports.iter().map(|i| i.to_string()));
+    imports.sort();
+    for i in imports {
+        o.line(format!("import {i}"));
+    }
+    o.line("");
+    o.block(format!("fun {}(screen: {}): List<ShellMenu> = listOf(", s.name, s.holder), ")", |o| {
+        for m in menus {
+            o.block(format!("ShellMenu(MenuPlace.{}, listOf(", pascal(m.place.case())), ")),", |o| {
+                for c in &m.items {
+                    let keys = match c.shortcut {
+                        Some(k) => format!(", key = {}, shift = {}, option = {}", quoted(k.key), k.shift, k.option),
+                        None => String::new(),
+                    };
+                    o.line(format!(
+                        "ShellCommand({}{keys}) {{ screen.send({}) }},",
+                        quoted(c.title),
+                        msg(&Msg::of(&c.run), &ty)
+                    ));
+                }
+            });
+        }
+    });
+    o.text()
 }
 
 /// A message as UniFFI's Kotlin sealed class spells it: `AccountsMsg.OpenAccount(id = a.id)`.

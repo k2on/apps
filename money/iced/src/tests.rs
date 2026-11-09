@@ -689,22 +689,23 @@ fn the_budget_drawn() {
 }
 
 /// `h` from the budget gives the sidebar the keys, `j` there walks the
-/// places with the page following, and `l` hands the keys back.
+/// shell's sections with the page following, and `l` hands the keys back.
 #[test]
 fn the_keys_cross_into_the_sidebar_and_back() {
     let mut app = app();
     let _ = app.act(Action::Move(Motion::Left(1)));
-    assert_eq!(app.pane, Pane::Sidebar);
+    assert_eq!(app.keyboard.focus, Pane::Sidebar);
     let _ = app.update(Message::Key(
         iced::keyboard::Key::Character("j".into()),
         iced::keyboard::Modifiers::default(),
     ));
-    assert_eq!(app.page, Page::Reflect, "the page follows the sidebar's cursor");
+    assert_eq!(app.page, Page::Accounts, "the page follows the sidebar's cursor: Budget, then Accounts");
+    assert_eq!(app.shell.state().section, "accounts", "and the shell's section with it");
     let _ = app.update(Message::Key(
         iced::keyboard::Key::Character("l".into()),
         iced::keyboard::Modifiers::default(),
     ));
-    assert_eq!(app.pane, Pane::Page);
+    assert_eq!(app.keyboard.focus, Pane::Content);
 }
 
 /// On the budget, `c` waits for the rest of `cc` or `cg`, and after the
@@ -721,10 +722,10 @@ fn a_prefix_shows_what_can_follow_it() {
         ));
     };
     key(&mut app, "c");
-    assert_eq!(app.which.showing(), None, "not before the delay");
-    let due = app.which.waiting().expect("a timer for the panel");
+    assert_eq!(app.keyboard.which.showing(), None, "not before the delay");
+    let due = app.keyboard.which.waiting().expect("a timer for the panel");
     let _ = app.update(Message::WhichDue(due));
-    assert_eq!(app.which.showing(), Some("c"));
+    assert_eq!(app.keyboard.which.showing(), Some("c"));
     let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], "c");
     let keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
     assert_eq!(keys, ["c", "g"], "cc and cg");
@@ -734,9 +735,9 @@ fn a_prefix_shows_what_can_follow_it() {
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
         iced::keyboard::Modifiers::default(),
     ));
-    assert_eq!(app.which.showing(), None);
+    assert_eq!(app.keyboard.which.showing(), None);
     key(&mut app, "?");
-    assert_eq!(app.which.showing(), Some(""), "every key");
+    assert_eq!(app.keyboard.which.showing(), Some(""), "every key");
 }
 
 /// `^O` goes back where the window was, and `^I` forward again.
@@ -1194,7 +1195,7 @@ fn the_demo_shows_its_bank_and_cannot_connect_one() {
         iced::keyboard::Key::Character("h".into()),
         iced::keyboard::Modifiers::default(),
     ));
-    assert_eq!(app.pane, Pane::Sidebar);
+    assert_eq!(app.keyboard.focus, Pane::Sidebar);
     assert_eq!(app.peer.banks().len(), 1);
     let card = app.peer.linked().first().expect("the card's link");
     assert!(!card.waiting && !card.account.is_empty());
@@ -1435,13 +1436,8 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
     );
     assert_eq!(app.route().path(), format!("filter/{}/acme-pay", saved.id.hex()));
     assert_eq!(saved.total, app.peer.total().total);
-    let places = app.places();
-    let entry = places
-        .iter()
-        .position(|p| p.3 == Page::Ledger(Ledger::Saved(saved.id)))
-        .expect("in the sidebar");
-    assert_eq!((places[entry].1.as_str(), places[entry].2), ("Acme pay", Some("Filters")));
-    assert_eq!(app.sidebar_at(), entry, "lit");
+    let entry = app.sidebar_at();
+    assert_eq!(app.places()[entry].1, "Transactions", "a saved filter is in Transactions, lit");
     // Changed: the saved one, changed; the sidebar still lights it.
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
     assert_eq!((app.page, app.peer.base), (Page::Ledger(Ledger::Adhoc), Ledger::Saved(saved.id)));
@@ -1494,7 +1490,7 @@ fn an_accounts_register_is_its_filter() {
     assert_eq!(app.register_account(), None);
     assert!(app.peer.register().iter().all(|t| t.account_id == checking && t.amount < 0));
     let lit = app.sidebar_at();
-    assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Account(checking)), "the account stays lit");
+    assert_eq!(app.places()[lit].1, "Accounts", "the account's section stays lit");
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
     assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
     assert_eq!(
@@ -1521,11 +1517,12 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
     let edits = acme(&app);
     let id = saved_filter(&mut app, "Acme pay", &edits);
     let _ = app.update(Message::Go(Page::Budget));
-    app.pane = crate::Pane::Sidebar;
+    app.keyboard.focus = crate::Pane::Sidebar;
     let n = app.places().len();
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("G".into()), iced::keyboard::Modifiers::SHIFT));
     assert_eq!(app.sidebar_at(), n - 1);
-    assert_eq!(app.page, Page::Ledger(Ledger::Saved(id)), "the last place is the filter");
+    assert_eq!(app.page, Page::Reflect, "the last section is Insights");
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Saved(id))));
     let f = app.peer.saved(id).unwrap().filter.clone();
     assert!(app.peer.register().iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
     let checking = account(&app, "Checking").id;
@@ -1631,7 +1628,7 @@ fn the_keys_work_in_a_filtered_register() {
     assert!(app.peer.register().iter().all(|t| t.category_id.is_none()));
     // `h` is the sidebar from here too.
     let _ = app.register_act(Action::Move(Motion::Left(1)));
-    assert_eq!(app.pane, crate::Pane::Sidebar);
+    assert_eq!(app.keyboard.focus, crate::Pane::Sidebar);
 }
 
 /// A category's assignment set by formula in its inspector: a saved
@@ -1695,7 +1692,7 @@ fn a_category_is_assigned_by_formula_from_its_inspector() {
     assert!(rows.iter().all(|t| t.date.starts_with("2026-10")));
     assert_eq!(app.peer.total().total, 630_000);
     let lit = app.sidebar_at();
-    assert_eq!(app.places()[lit].3, Page::Ledger(Ledger::Saved(pay)));
+    assert_eq!(app.places()[lit].1, "Transactions");
     // September was before it; off again from October.
     let _ = app.update(Message::Go(Page::Budget));
     let _ = app.update(Message::Month(-1));
@@ -1834,4 +1831,41 @@ fn the_accounts_page_runs_in_the_window() {
     let jar = a.peer.accounts().iter().find(|x| x.name == "Jar").unwrap().id;
     let _ = a.update(Message::Accounts(A::OpenAccount { id: jar.hex() }));
     assert_eq!(a.page, Page::Ledger(Ledger::Account(jar)));
+}
+
+/// The window is money's shell: its four sections in the sidebar, a
+/// section chosen is its page, a register opened from Accounts is that
+/// section's detail beside the list, and back from it is the list; a
+/// command's shortcut runs it (Ctrl-3 is Transactions, Ctrl-Alt-I the
+/// inspector). Falsified by keeping the old sidebar of every account.
+#[test]
+fn the_window_is_the_shell() {
+    let mut app = app();
+    let names: Vec<String> = app.places().into_iter().map(|p| p.1).collect();
+    assert_eq!(names, ["Budget", "Accounts", "Transactions", "Insights"]);
+    let _ = app.update(Message::Shell(money_app::shell::ShellMsg::Select { tag: "accounts".into() }));
+    assert_eq!(app.page, Page::Accounts);
+    let checking = account(&app, "Checking").id;
+    let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
+    assert_eq!(app.shell.state().section, "accounts");
+    assert!(app.shell_page().showing, "the register is the detail");
+    let _ = app.update(Message::Shell(money_app::shell::ShellMsg::Back));
+    assert_eq!(app.page, Page::Accounts);
+    let ctrl = iced::keyboard::Modifiers::CTRL;
+    let _ = app.update(Message::Key(iced::keyboard::Key::Character("3".into()), ctrl));
+    assert_eq!(
+        (app.page, app.shell.state().section.as_str()),
+        (Page::Ledger(Ledger::All), "transactions")
+    );
+    assert!(!app.shell_page().inspector);
+    let _ = app.update(Message::Key(
+        iced::keyboard::Key::Character("i".into()),
+        ctrl | iced::keyboard::Modifiers::ALT,
+    ));
+    assert!(app.shell_page().inspector, "Ctrl-Alt-I shows the inspector");
+    // Wide, the inspector is a pane the keys reach; narrow, a sheet they do not.
+    app.window = iced::Size::new(1440.0, 900.0);
+    assert!(app.panes().contains(&Pane::Inspector));
+    app.window = iced::Size::new(390.0, 800.0);
+    assert_eq!(app.panes(), vec![Pane::Content]);
 }

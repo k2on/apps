@@ -6,7 +6,6 @@
 // so `.foregroundStyle(.quiet)` and `Color.quiet` both read. An app names
 // its accent once, before its first view: `Accent.use(.gold)`.
 import SwiftUI
-import UIKit
 
 extension Color {
     /// A token's two sides as one colour, following the trait collection.
@@ -24,7 +23,7 @@ public enum Accent {
     public static func use(_ set: AccentSet) { current = set }
 
     static func color(_ pick: @escaping (AccentSet) -> Sides) -> Color {
-        Color(uiColor: UIColor { t in UIColor(rgb: pick(current).of(dark: t.userInterfaceStyle == .dark)) })
+        Color.dynamic { pick(current).of(dark: $0) }
     }
 }
 

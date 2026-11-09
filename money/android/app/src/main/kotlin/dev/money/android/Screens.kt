@@ -21,12 +21,15 @@ import dev.arkui.LocalTabFrame
 import dev.money.ffi.AccountsApp
 import dev.money.ffi.AppShell
 import dev.money.ffi.Session
+import dev.money.ffi.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import uniffi.ark_clipboard.Clipboard
 import uniffi.ark_haptics.Haptics
 import uniffi.money_app.AccountsMsg
 import uniffi.money_app.AccountsPage
+import uniffi.money_app.ShellMsg
+import uniffi.money_app.ShellPage
 import uniffi.money_domain.Route
 
 /** The Accounts tab, running in Rust. */
@@ -62,6 +65,43 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
 
     /** `msg` taken by the app; the page read again. */
     fun send(msg: AccountsMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
+    /** The page read again: the book moved. */
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/**
+ * money's shell, running in Rust (money/app/src/shell): its sections, toolbar, inspector, search
+ * and commands, which the generated `MoneyShell`, `MoneySettings` and `moneyCommands` read and send
+ * to. A command only a hosted screen can carry out comes back by name (`native`).
+ */
+class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> String) {
+    /** A command the hosted screens carry out: "new-transaction", "search <text>"… */
+    var native: (String) -> Unit = {}
+
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun native(name: String) {
+                if (name == "refresh") refresh() else native.invoke(name)
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = ShellApp(session, shell)
+    private val _page = MutableStateFlow(app.page())
+    val page: StateFlow<ShellPage> = _page
+
+    /** `msg` taken by the shell; the page read again. */
+    fun send(msg: ShellMsg) {
         app.send(msg)
         _page.value = app.page()
     }

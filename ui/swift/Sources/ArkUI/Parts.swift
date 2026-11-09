@@ -8,7 +8,7 @@
 // a volume, and the glyphs by their shared names. `Pill` and `Pager` are in
 // Figures.swift, `SearchField` in Search.swift. Nothing here names a thing
 // any app is about; every colour is the theme's.
-#if os(iOS)
+#if canImport(SwiftUI)
 import SwiftUI
 #if canImport(Charts)
 import Charts

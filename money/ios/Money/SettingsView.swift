@@ -270,9 +270,9 @@ struct BankView: View {
                 if !model.connectsBanks { Text("The demo's bank stays connected: there is no server to ask.") }
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineTitle()
         .refreshable { await model.refresh() }
         .confirmationDialog("Disconnect \(title)?", isPresented: $disconnecting, titleVisibility: .visible) {
             Button("Disconnect", role: .destructive) { model.disconnect(bank: b.name) }

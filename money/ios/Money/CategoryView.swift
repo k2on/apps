@@ -155,10 +155,10 @@ struct CategoryView: View {
                 Button(role: .destructive) { deleting = true } label: { Label("Delete Category", systemImage: "trash") }
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .navigationTitle(l.name)
         .navigationSubtitle(l.group)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { AddTransactionButton() } }
+        .toolbar { ToolbarItem(placement: .primaryAction) { AddTransactionButton() } }
         .holding(MoneyView.register(account: nil))
         .sensoryFeedback(.success, trigger: assigned)
         .alert("Rename Category", isPresented: $renaming) {
@@ -265,10 +265,10 @@ struct CategoryView: View {
                 Text("Named as the card is, it goes when the card is closed.")
             }
         }
-        .listStyle(.insetGrouped)
+        .groupedList()
         .navigationTitle(l.name)
         .navigationSubtitle(l.group)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { AddTransactionButton(account: l.card) } }
+        .toolbar { ToolbarItem(placement: .primaryAction) { AddTransactionButton(account: l.card) } }
         .holding(MoneyView.register(account: nil))
         .sensoryFeedback(.success, trigger: assigned)
     }

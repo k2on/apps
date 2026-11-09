@@ -39,6 +39,7 @@
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 /// A value a view reads: plain data.
 pub trait Value: Clone + Debug + 'static {}
@@ -247,9 +248,26 @@ pub enum View<M> {
     Part(Part<M>),
 }
 
-/// A message a field's input makes.
-#[derive(Clone, Copy)]
-pub struct Input<T, M>(pub fn(T) -> M);
+/// A message a field's input makes: shared, so that a view can be mapped
+/// into another app's messages ([`View::map`]).
+pub struct Input<T, M>(pub Rc<dyn Fn(T) -> M>);
+
+impl<T, M> Input<T, M> {
+    pub fn new(f: impl Fn(T) -> M + 'static) -> Input<T, M> {
+        Input(Rc::new(f))
+    }
+
+    /// The message `t` makes.
+    pub fn call(&self, t: T) -> M {
+        (self.0)(t)
+    }
+}
+
+impl<T, M> Clone for Input<T, M> {
+    fn clone(&self) -> Self {
+        Input(self.0.clone())
+    }
+}
 
 impl<T, M> Debug for Input<T, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -362,6 +380,130 @@ pub enum Part<M> {
         enabled: Val<bool>,
         tap: M,
     },
+
+    // The shell (ui/docs/design.md): what a standard Mac app is made of,
+    // each part adapting to the size class inside itself.
+    /// The app's sections: a sidebar on a regular width and the Mac, a tab
+    /// bar when compact (SwiftUI's `TabView` `.sidebarAdaptable`, Compose's
+    /// navigation suite, iced's sidebar). `tabs` are [`Part::SectionTab`]s;
+    /// `selected` is the shown one's tag, `select` sends another's.
+    Tabs {
+        selected: Val<String>,
+        select: Input<String, M>,
+        tabs: Box<View<M>>,
+    },
+    /// One section: its title, glyph and tag, a count at its end, what it shows.
+    SectionTab {
+        title: &'static str,
+        glyph: &'static str,
+        tag: &'static str,
+        badge: Option<Val<Option<i64>>>,
+        content: Box<View<M>>,
+    },
+    /// A list beside what it opens: `NavigationSplitView`'s content and
+    /// detail, a stack when compact (the detail pushed while `showing`,
+    /// `back` to leave it).
+    Split {
+        content: Box<View<M>>,
+        detail: Box<View<M>>,
+        showing: Val<bool>,
+        back: M,
+    },
+    /// A section's title and toolbar over its content: its items
+    /// ([`Part::BarItem`]s) by placement.
+    Toolbar {
+        title: Val<String>,
+        items: Box<View<M>>,
+        content: Box<View<M>>,
+    },
+    /// A toolbar's button.
+    BarItem {
+        title: &'static str,
+        glyph: &'static str,
+        placement: Placement,
+        enabled: Val<bool>,
+        tap: M,
+    },
+    /// `content`'s search field: in the toolbar on a regular width and the
+    /// Mac, under the title when compact; `/` on a keyboard.
+    Searchable {
+        prompt: &'static str,
+        text: Val<String>,
+        typed: Input<String, M>,
+        content: Box<View<M>>,
+    },
+    /// A pane at the trailing edge beside `content` (a sheet when compact):
+    /// `.inspector`, shown while `shown`.
+    Inspector {
+        title: &'static str,
+        shown: Val<bool>,
+        toggle: Input<bool, M>,
+        content: Box<View<M>>,
+        inspector: Box<View<M>>,
+    },
+    /// A screen the shell hosts by name: the app's own on each platform
+    /// (hand-written, or a view generated apart), until it is moved here.
+    Hosted {
+        name: &'static str,
+    },
+    /// A question before something that cannot be undone
+    /// (`.confirmationDialog`): its actions, then Cancel.
+    Confirm {
+        title: Val<String>,
+        message: Val<String>,
+        actions: Vec<DialogAction<M>>,
+        cancel: M,
+    },
+    /// Something the person has to know (`.alert`): OK.
+    Alert {
+        title: Val<String>,
+        message: Val<String>,
+        ok: M,
+    },
+    /// The Settings scene: its panes ([`Part::SettingsPane`]), a window of
+    /// tabs on the Mac and the desktop, a list of screens elsewhere.
+    SettingsPanes {
+        panes: Box<View<M>>,
+    },
+    SettingsPane {
+        title: &'static str,
+        glyph: &'static str,
+        content: Box<View<M>>,
+    },
+}
+
+/// Where a toolbar item goes (SwiftUI's `ToolbarItemPlacement`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placement {
+    /// At the leading edge: back, the sidebar's toggle.
+    Navigation,
+    /// In the middle: a month's pager.
+    Principal,
+    /// The section's main action, at the trailing edge (an app bar's
+    /// action on Android).
+    Primary,
+    /// Less used: in the overflow menu on a phone.
+    Secondary,
+}
+
+impl Placement {
+    /// As the parts' enum spells it in Swift and Kotlin (`BarPlacement`).
+    pub fn case(self) -> &'static str {
+        match self {
+            Placement::Navigation => "navigation",
+            Placement::Principal => "principal",
+            Placement::Primary => "primary",
+            Placement::Secondary => "secondary",
+        }
+    }
+}
+
+/// One action of a [`Part::Confirm`].
+#[derive(Clone, Debug)]
+pub struct DialogAction<M> {
+    pub title: Val<String>,
+    pub destructive: bool,
+    pub tap: M,
 }
 
 impl<M> From<Part<M>> for View<M> {
@@ -774,11 +916,16 @@ impl<M> From<FormSectionBuilder<M>> for View<M> {
 
 /// One of `choices` ([`picker_choice`]s), the one tagged `selected` chosen;
 /// choosing another sends `pick` with its tag.
-pub fn option_picker<M>(label: &'static str, selected: impl Into<Val<String>>, pick: fn(String) -> M, choices: impl Into<View<M>>) -> View<M> {
+pub fn option_picker<M: 'static>(
+    label: &'static str,
+    selected: impl Into<Val<String>>,
+    pick: fn(String) -> M,
+    choices: impl Into<View<M>>,
+) -> View<M> {
     Part::Picker {
         label,
         selected: selected.into(),
-        pick: Input(pick),
+        pick: Input::new(pick),
         choices: Box::new(choices.into()),
     }
     .into()
@@ -795,7 +942,7 @@ pub fn picker_choice<M>(title: impl Into<Val<String>>, glyph: impl Into<Val<Stri
 }
 
 /// An amount entered the app's way (see [`Part::AmountEntry`]).
-pub fn amount_entry<M>(
+pub fn amount_entry<M: 'static>(
     label: impl Into<Val<String>>,
     prompt: impl Into<Val<String>>,
     typed: impl Into<Val<String>>,
@@ -810,18 +957,25 @@ pub fn amount_entry<M>(
         typed: typed.into(),
         cents: cents.into(),
         problem: problem.into(),
-        on_typed: Input(on_typed),
-        on_cents: Input(on_cents),
+        on_typed: Input::new(on_typed),
+        on_cents: Input::new(on_cents),
     }
     .into()
 }
 
 /// An alert with one text field.
-pub fn prompt<M>(title: &'static str, text: impl Into<Val<String>>, typed: fn(String) -> M, confirm: &'static str, ok: M, cancel: M) -> View<M> {
+pub fn prompt<M: 'static>(
+    title: &'static str,
+    text: impl Into<Val<String>>,
+    typed: fn(String) -> M,
+    confirm: &'static str,
+    ok: M,
+    cancel: M,
+) -> View<M> {
     Part::Prompt {
         title,
         text: text.into(),
-        typed: Input(typed),
+        typed: Input::new(typed),
         confirm,
         ok,
         cancel,
@@ -830,18 +984,23 @@ pub fn prompt<M>(title: &'static str, text: impl Into<Val<String>>, typed: fn(St
 }
 
 /// A field for a name, the domain's sentence under it.
-pub fn name_field<M>(label: &'static str, value: impl Into<Val<String>>, problem: impl Into<Val<Option<String>>>, typed: fn(String) -> M) -> View<M> {
+pub fn name_field<M: 'static>(
+    label: &'static str,
+    value: impl Into<Val<String>>,
+    problem: impl Into<Val<Option<String>>>,
+    typed: fn(String) -> M,
+) -> View<M> {
     Part::NameField {
         label,
         value: value.into(),
         problem: problem.into(),
-        typed: Input(typed),
+        typed: Input::new(typed),
     }
     .into()
 }
 
 /// A field for an amount.
-pub fn amount_field<M>(
+pub fn amount_field<M: 'static>(
     label: impl Into<Val<String>>,
     typed: impl Into<Val<String>>,
     problem: impl Into<Val<Option<String>>>,
@@ -851,7 +1010,7 @@ pub fn amount_field<M>(
         label: label.into(),
         typed: typed.into(),
         problem: problem.into(),
-        on: Input(on),
+        on: Input::new(on),
     }
     .into()
 }
@@ -872,23 +1031,23 @@ pub fn chip<M>(label: impl Into<Val<String>>, glyph: impl Into<Val<String>>, sel
 }
 
 /// A switch with its title and a note under it.
-pub fn switch_row<M>(title: &'static str, note: impl Into<Val<String>>, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
+pub fn switch_row<M: 'static>(title: &'static str, note: impl Into<Val<String>>, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
     Part::Toggle {
         title,
         note: Some(note.into()),
         on: on.into(),
-        change: Input(change),
+        change: Input::new(change),
     }
     .into()
 }
 
 /// A switch with its title alone (its note in the form section's footer).
-pub fn switch<M>(title: &'static str, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
+pub fn switch<M: 'static>(title: &'static str, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
     Part::Toggle {
         title,
         note: None,
         on: on.into(),
-        change: Input(change),
+        change: Input::new(change),
     }
     .into()
 }
@@ -921,6 +1080,9 @@ pub enum Given<'a, M> {
     Counted(&'a Input<i64, M>),
     /// Several of another part (a row's menu).
     Items(Vec<Call<'a, M>>),
+    /// One case of a parts' enum: `.primary` in Swift, `BarPlacement.Primary`
+    /// in Kotlin.
+    Case { of: &'static str, case: &'static str },
 }
 
 /// A part as a call: its name (the same in Swift and Kotlin, the Rust
@@ -1161,6 +1323,413 @@ impl<M> Part<M> {
                 vec![("enabled", G::Val(lit(enabled))), ("onTap", G::Act(tap))],
                 vec![],
             ),
+            Part::Tabs { selected, select, tabs } => c(
+                "AdaptiveTabs",
+                None,
+                vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))],
+                vec![("", &**tabs)],
+            ),
+            Part::SectionTab {
+                title,
+                glyph,
+                tag,
+                badge,
+                content,
+            } => {
+                let mut args = vec![("glyph", G::Text(glyph)), ("tag", G::Text(tag))];
+                if let Some(b) = badge {
+                    args.push(("badge", G::Val(lit(b))));
+                }
+                c("SectionTab", Some(G::Text(title)), args, vec![("", &**content)])
+            }
+            Part::Split {
+                content,
+                detail,
+                showing,
+                back,
+            } => c(
+                "SplitColumns",
+                None,
+                vec![("showing", G::Val(lit(showing))), ("onBack", G::Act(back))],
+                vec![("", &**content), ("detail", &**detail)],
+            ),
+            Part::Toolbar { title, items, content } => c(
+                "WithToolbar",
+                Some(G::Val(lit(title))),
+                vec![],
+                vec![("", &**content), ("items", &**items)],
+            ),
+            Part::BarItem {
+                title,
+                glyph,
+                placement,
+                enabled,
+                tap,
+            } => c(
+                "BarButton",
+                Some(G::Text(title)),
+                vec![
+                    ("glyph", G::Text(glyph)),
+                    (
+                        "placement",
+                        G::Case {
+                            of: "BarPlacement",
+                            case: placement.case(),
+                        },
+                    ),
+                    ("enabled", G::Val(lit(enabled))),
+                    ("onTap", G::Act(tap)),
+                ],
+                vec![],
+            ),
+            Part::Searchable {
+                prompt,
+                text,
+                typed,
+                content,
+            } => c(
+                "WithSearch",
+                Some(G::Text(prompt)),
+                vec![("text", G::Val(lit(text))), ("onChange", G::Typed(typed))],
+                vec![("", &**content)],
+            ),
+            Part::Inspector {
+                title,
+                shown,
+                toggle,
+                content,
+                inspector,
+            } => c(
+                "WithInspector",
+                Some(G::Text(title)),
+                vec![("isShown", G::Val(lit(shown))), ("onToggle", G::Switched(toggle))],
+                vec![("", &**content), ("inspector", &**inspector)],
+            ),
+            Part::Hosted { name } => c("HostedScreen", Some(G::Text(name)), vec![], vec![]),
+            Part::Confirm {
+                title,
+                message,
+                actions,
+                cancel,
+            } => {
+                let items = actions
+                    .iter()
+                    .map(|a| {
+                        c(
+                            "DialogAction",
+                            Some(G::Val(lit(&a.title))),
+                            vec![("destructive", G::Val(a.destructive.to_string())), ("onTap", G::Act(&a.tap))],
+                            vec![],
+                        )
+                    })
+                    .collect();
+                c(
+                    "ConfirmDialog",
+                    Some(G::Val(lit(title))),
+                    vec![
+                        ("message", G::Val(lit(message))),
+                        ("actions", G::Items(items)),
+                        ("onCancel", G::Act(cancel)),
+                    ],
+                    vec![],
+                )
+            }
+            Part::Alert { title, message, ok } => c(
+                "NoticeAlert",
+                Some(G::Val(lit(title))),
+                vec![("message", G::Val(lit(message))), ("onOk", G::Act(ok))],
+                vec![],
+            ),
+            Part::SettingsPanes { panes } => c("SettingsPanes", None, vec![], vec![("", &**panes)]),
+            Part::SettingsPane { title, glyph, content } => c(
+                "SettingsPane",
+                Some(G::Text(title)),
+                vec![("glyph", G::Text(glyph))],
+                vec![("", &**content)],
+            ),
+        }
+    }
+}
+
+// * Mapping a view's messages
+
+impl<M: 'static> View<M> {
+    /// The same view sending `f` of each of its messages: a screen hosted
+    /// in another's messages (the iced window draws the shell's view in
+    /// its own).
+    pub fn map<N: 'static>(self, f: impl Fn(M) -> N + 'static) -> View<N> {
+        let f: Rc<dyn Fn(M) -> N> = Rc::new(f);
+        self.map_rc(&f)
+    }
+
+    fn map_rc<N: 'static>(self, f: &Rc<dyn Fn(M) -> N>) -> View<N> {
+        let b = |v: Box<View<M>>| Box::new(v.map_rc(f));
+        match self {
+            View::Empty => View::Empty,
+            View::List(vs) => View::List(vs.into_iter().map(|v| v.map_rc(f)).collect()),
+            View::Each { list, item, body } => View::Each { list, item, body: b(body) },
+            View::When { cond, yes, no } => View::When {
+                cond,
+                yes: b(yes),
+                no: b(no),
+            },
+            View::WhenSome { opt, item, yes, no } => View::WhenSome {
+                opt,
+                item,
+                yes: b(yes),
+                no: b(no),
+            },
+            View::Part(p) => View::Part(p.map_rc(f)),
+        }
+    }
+}
+
+fn input<T: 'static, M: 'static, N: 'static>(i: Input<T, M>, f: &Rc<dyn Fn(M) -> N>) -> Input<T, N> {
+    let f = f.clone();
+    Input::new(move |t| f(i.call(t)))
+}
+
+impl<M: 'static> Part<M> {
+    fn map_rc<N: 'static>(self, f: &Rc<dyn Fn(M) -> N>) -> Part<N> {
+        let b = |v: Box<View<M>>| Box::new(v.map_rc(f));
+        match self {
+            Part::Page {
+                title,
+                refresh,
+                top,
+                content,
+            } => Part::Page {
+                title,
+                refresh: refresh.map(|m| f(m)),
+                top: b(top),
+                content: b(content),
+            },
+            Part::Hero { label, cents, note } => Part::Hero { label, cents, note },
+            Part::Section(s) => Part::Section(Section {
+                title: s.title,
+                amount: s.amount,
+                shows: s.shows,
+                footer: s.footer,
+                rows: b(s.rows),
+            }),
+            Part::Row(r) => {
+                let r = *r;
+                Part::Row(Box::new(ListRow {
+                    title: r.title,
+                    subtitle: r.subtitle,
+                    picture: r.picture,
+                    badge: r.badge,
+                    amount: r.amount,
+                    quiet: r.quiet,
+                    accent: r.accent,
+                    pushes: r.pushes,
+                    tap: r.tap.map(|m| f(m)),
+                    said: r.said,
+                    menu: r
+                        .menu
+                        .into_iter()
+                        .map(|m| MenuItem {
+                            title: m.title,
+                            glyph: m.glyph,
+                            tap: f(m.tap),
+                            destructive: m.destructive,
+                            shown: m.shown,
+                        })
+                        .collect(),
+                }))
+            }
+            Part::Sheet {
+                title,
+                dismiss,
+                confirm,
+                content,
+            } => Part::Sheet {
+                title,
+                dismiss: f(dismiss),
+                confirm: confirm.map(|k| Confirm {
+                    title: k.title,
+                    enabled: k.enabled,
+                    tap: f(k.tap),
+                }),
+                content: b(content),
+            },
+            Part::FormSection { header, footer, content } => Part::FormSection {
+                header,
+                footer,
+                content: b(content),
+            },
+            Part::Picker {
+                label,
+                selected,
+                pick,
+                choices,
+            } => Part::Picker {
+                label,
+                selected,
+                pick: input(pick, f),
+                choices: b(choices),
+            },
+            Part::Choice { title, glyph, tag } => Part::Choice { title, glyph, tag },
+            Part::AmountEntry {
+                label,
+                prompt,
+                typed,
+                cents,
+                problem,
+                on_typed,
+                on_cents,
+            } => Part::AmountEntry {
+                label,
+                prompt,
+                typed,
+                cents,
+                problem,
+                on_typed: input(on_typed, f),
+                on_cents: input(on_cents, f),
+            },
+            Part::Prompt {
+                title,
+                text,
+                typed,
+                confirm,
+                ok,
+                cancel,
+            } => Part::Prompt {
+                title,
+                text,
+                typed: input(typed, f),
+                confirm,
+                ok: f(ok),
+                cancel: f(cancel),
+            },
+            Part::NameField {
+                label,
+                value,
+                problem,
+                typed,
+            } => Part::NameField {
+                label,
+                value,
+                problem,
+                typed: input(typed, f),
+            },
+            Part::AmountField { label, typed, problem, on } => Part::AmountField {
+                label,
+                typed,
+                problem,
+                on: input(on, f),
+            },
+            Part::Chips(c) => Part::Chips(b(c)),
+            Part::Chip { label, glyph, selected, tap } => Part::Chip {
+                label,
+                glyph,
+                selected,
+                tap: f(tap),
+            },
+            Part::Toggle { title, note, on, change } => Part::Toggle {
+                title,
+                note,
+                on,
+                change: input(change, f),
+            },
+            Part::Button { title, enabled, tap } => Part::Button { title, enabled, tap: f(tap) },
+            Part::Tabs { selected, select, tabs } => Part::Tabs {
+                selected,
+                select: input(select, f),
+                tabs: b(tabs),
+            },
+            Part::SectionTab {
+                title,
+                glyph,
+                tag,
+                badge,
+                content,
+            } => Part::SectionTab {
+                title,
+                glyph,
+                tag,
+                badge,
+                content: b(content),
+            },
+            Part::Split {
+                content,
+                detail,
+                showing,
+                back,
+            } => Part::Split {
+                content: b(content),
+                detail: b(detail),
+                showing,
+                back: f(back),
+            },
+            Part::Toolbar { title, items, content } => Part::Toolbar {
+                title,
+                items: b(items),
+                content: b(content),
+            },
+            Part::BarItem {
+                title,
+                glyph,
+                placement,
+                enabled,
+                tap,
+            } => Part::BarItem {
+                title,
+                glyph,
+                placement,
+                enabled,
+                tap: f(tap),
+            },
+            Part::Searchable {
+                prompt,
+                text,
+                typed,
+                content,
+            } => Part::Searchable {
+                prompt,
+                text,
+                typed: input(typed, f),
+                content: b(content),
+            },
+            Part::Inspector {
+                title,
+                shown,
+                toggle,
+                content,
+                inspector,
+            } => Part::Inspector {
+                title,
+                shown,
+                toggle: input(toggle, f),
+                content: b(content),
+                inspector: b(inspector),
+            },
+            Part::Hosted { name } => Part::Hosted { name },
+            Part::Confirm {
+                title,
+                message,
+                actions,
+                cancel,
+            } => Part::Confirm {
+                title,
+                message,
+                actions: actions
+                    .into_iter()
+                    .map(|a| DialogAction {
+                        title: a.title,
+                        destructive: a.destructive,
+                        tap: f(a.tap),
+                    })
+                    .collect(),
+                cancel: f(cancel),
+            },
+            Part::Alert { title, message, ok } => Part::Alert { title, message, ok: f(ok) },
+            Part::SettingsPanes { panes } => Part::SettingsPanes { panes: b(panes) },
+            Part::SettingsPane { title, glyph, content } => Part::SettingsPane {
+                title,
+                glyph,
+                content: b(content),
+            },
         }
     }
 }

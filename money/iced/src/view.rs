@@ -16,7 +16,6 @@ use crate::look::{self, Looks, Tone};
 use crate::peer::Ledger;
 use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, SplitRow, TxnForm};
 
-pub const SIDEBAR: f32 = 250.0;
 /// How tall a line of the budget is, a group's heading or a category:
 /// one height, so a drag is arithmetic (`arkui::outline`).
 pub const LINE: f32 = 54.0;
@@ -29,11 +28,6 @@ pub const LEDGER_BALANCES: f32 = 52.0;
 pub const LEDGER_HEAD: f32 = 28.0;
 pub const LEDGER_GAP: f32 = 14.0;
 pub const TXN_ROW: f32 = 34.0;
-/// The sidebar's scrollable.
-const SIDEBAR_SCROLL: &str = "sidebar";
-
-/// A section of the sidebar's accounts: its heading, and which belong.
-type Section = (&'static str, fn(&AccountLine) -> bool);
 const INSPECTOR: f32 = 310.0;
 pub const PAD: f32 = 18.0;
 
@@ -79,7 +73,7 @@ impl App {
             container(small)
                 .padding(Padding {
                     top: PAD,
-                    left: SIDEBAR + 1.0 + PAD - 6.0,
+                    left: self.page_origin().x + 1.0 + PAD - 6.0,
                     right: PAD + arkui::account::HEIGHT + PAD,
                     bottom: 0.0,
                 })
@@ -156,43 +150,11 @@ fn glyph_button<'a>(shape: &'static [u8], msg: Message) -> Element<'a, Message> 
     arkui::button::icon(shape, msg)
 }
 
-/// What an account is, drawn beside it in the sidebar.
-fn glyph(a: &AccountLine) -> &'static [u8] {
-    match a.kind.as_str() {
-        "cash" => glyphs::WALLET,
-        "credit" => glyphs::CARD,
-        "loan" => glyphs::DEBT,
-        "investment" => glyphs::GROWTH,
-        _ => glyphs::BANK,
-    }
-}
-
-/// An amount as the sidebar shows one: red below nothing, the same on the
-/// cursor's entry as off it.
-fn balance<'a>(cents: i64, lit: bool) -> Element<'a, Message> {
-    text(money(cents))
-        .size(12)
-        .style(move |theme| text::Style {
-            color: Some(match cents < 0 {
-                true => arkui::theme::of(theme).danger.base.color,
-                false => style::entry_text(theme, lit).scale_alpha(0.75),
-            }),
-            ..Default::default()
-        })
-        .into()
-}
-
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
-        let page: Element<'_, Message> = match self.page {
-            Page::Budget => self.view_budget(),
-            Page::Reflect => self.view_reflect(),
-            Page::Settings => self.view_settings(),
-            Page::Accounts => self.view_accounts(),
-            Page::Ledger(l) => self.view_ledger(l),
-        };
-        // A swipe's arrow over the page, not the sidebar.
-        let page = self.history.view(page, iced::time::Instant::now());
+        // The shell (sections.rs): its sections, toolbars, search and
+        // inspector, each section's page hosted in it; a swipe's arrow over it.
+        let page = self.history.view(self.view_shell(), iced::time::Instant::now());
         // Nothing under the page: it runs to the window's foot. What the
         // last thing done came to, and a search or a count as it is typed,
         // are said for a moment in a pill laid over it (`arkui::toast`,
@@ -200,10 +162,7 @@ impl App {
         // always there, cut off whatever the page had at its foot.
         // The sidebar is a surface, a step off the page's ground, with a
         // hairline where it meets the page, as harken's is.
-        let base = container(row![self.view_sidebar(), rule::vertical(1).style(style::edge), page].height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(style::page);
+        let base = container(page).width(Length::Fill).height(Length::Fill).style(style::page);
         // Where the pointer is, so a press knows where a drag starts.
         let mut layers = stack![mouse_area(base).on_move(Message::Pointer)];
         // While a row or a heading is held, one layer over everything follows
@@ -232,7 +191,7 @@ impl App {
             layers = layers.push(small);
         }
         // What the keys can do next, at the bottom right, over the page.
-        if let Some(prefix) = self.which.showing() {
+        if let Some(prefix) = self.keyboard.which.showing() {
             let entries = arkui::which::entries(&[arkui::vim::GRAMMAR, crate::KEYS], &[arkui::vim::GROUPS, crate::GROUPS], prefix);
             if !entries.is_empty() {
                 layers = layers.push(arkui::which::view(prefix, &entries, arkui::toast::MARGIN));
@@ -279,7 +238,7 @@ impl App {
         // moment, at the foot of the window, over everything — a modal's
         // refusal is said over the modal. It hears nothing, so what is
         // under it still does.
-        let pending = self.keys.pending();
+        let pending = self.keyboard.keys.pending();
         if let Some(words) = arkui::toast::says(&self.toast, &pending) {
             layers = layers.push(arkui::toast::view(words, arkui::toast::MARGIN));
         }
@@ -289,86 +248,9 @@ impl App {
 
     // * The sidebar
 
-    /// The sidebar's places, in order: the pages, All Accounts, the accounts
-    /// under their headings, then the saved filters — every register one is
-    /// a filter's. What the keys walk is what is drawn.
-    pub fn places(&self) -> Vec<(&'static [u8], String, Option<&'static str>, Page)> {
-        let pages = [
-            (glyphs::HOME, crate::Route::Budget.title(), None, Page::Budget),
-            (glyphs::LIBRARY, crate::Route::Reflect.title(), None, Page::Reflect),
-            (glyphs::BANK, "Accounts".into(), None, Page::Accounts),
-            (glyphs::PLAYLIST, crate::Route::Accounts.title(), None, Page::Ledger(Ledger::All)),
-            (glyphs::WRENCH, crate::Route::Settings.title(), None, Page::Settings),
-        ];
-        let sections: [Section; 3] = [
-            ("On Budget", |a| a.on_budget && !a.closed),
-            ("Tracking", |a| !a.on_budget && !a.closed),
-            ("Closed", |a| a.closed),
-        ];
-        let accounts = sections.into_iter().flat_map(|(name, keep)| {
-            self.peer.accounts().iter().filter(move |a| keep(a)).map(move |a| {
-                let label = match a.mask.is_empty() {
-                    true => a.name.clone(),
-                    false => format!("{} \u{2022}\u{2022}{}", a.name, a.mask),
-                };
-                (glyph(a), label, Some(name), Page::Ledger(Ledger::Account(a.id)))
-            })
-        });
-        // The saved filters, after the accounts: registers like theirs.
-        let saved = self
-            .peer
-            .filters()
-            .iter()
-            .map(|f| (glyphs::SEARCH, f.name.clone(), Some("Filters"), Page::Ledger(Ledger::Saved(f.id))));
-        pages.into_iter().chain(accounts).chain(saved).collect()
-    }
-
-    /// The sidebar's cursor: the page shown. The inbox is All Accounts,
-    /// filtered, and a register changed here is what it was changed from,
-    /// so their rows stay the ones lit.
-    pub fn sidebar_at(&self) -> usize {
-        let here = match self.page {
-            Page::Ledger(Ledger::Inbox) => Page::Ledger(Ledger::All),
-            Page::Ledger(Ledger::Adhoc) => match self.peer.base {
-                Ledger::Inbox | Ledger::Adhoc => Page::Ledger(Ledger::All),
-                b => Page::Ledger(b),
-            },
-            p => p,
-        };
-        self.places().iter().position(|p| p.3 == here).unwrap_or(0)
-    }
-
-    fn view_sidebar(&self) -> Element<'_, Message> {
-        let cursor = self.sidebar_at();
-        let focused = self.pane == Pane::Sidebar && self.keys_free();
-        let inbox = self.peer.inbox().len();
-        let items = self
-            .places()
-            .into_iter()
-            .enumerate()
-            .map(|(i, (glyph, label, heading, page))| {
-                let lit = arkui::sidebar::lit(i, cursor, focused);
-                let trailing = match page {
-                    Page::Ledger(Ledger::All) => (inbox > 0).then(|| arkui::parts::badge(inbox)),
-                    Page::Ledger(Ledger::Account(id)) => self.peer.account(id).map(|a| balance(a.balance, lit)),
-                    Page::Ledger(Ledger::Saved(id)) => self.peer.saved(id).map(|f| balance(f.total, lit)),
-                    _ => None,
-                };
-                arkui::sidebar::Item {
-                    glyph,
-                    label,
-                    heading,
-                    trailing,
-                    press: Message::Go(page),
-                }
-            })
-            .collect();
-        arkui::sidebar::view(items, cursor, focused, SIDEBAR, PAD, SIDEBAR_SCROLL)
-    }
-
     // * The budget
 
-    fn view_budget(&self) -> Element<'_, Message> {
+    pub(crate) fn view_budget(&self) -> Element<'_, Message> {
         let s = self.peer.summary();
         let this = month_of(&self.today);
         let home = (self.peer.month != this).then_some(("Today", Message::ThisMonth));
@@ -981,7 +863,7 @@ impl App {
     /// account's balances and tools when it is exactly one account's, the
     /// household's tools on every account's, the bar of its conditions,
     /// and its transactions.
-    fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
+    pub(crate) fn view_ledger(&self, ledger: Ledger) -> Element<'_, Message> {
         let rows = self.peer.register();
         let account = self.register_account().and_then(|a| self.peer.account(a));
         // The account column, unless every row is one account's.
@@ -1064,7 +946,7 @@ impl App {
             body = body.push(self.view_form(f, all));
         }
         let lit = self.txn_lit();
-        let focused = self.pane == Pane::Page && self.keys_free();
+        let focused = self.keyboard.focus == Pane::Content && self.keys_free();
         for (i, t) in rows.iter().enumerate() {
             match &self.form {
                 Some(f) if f.editing == Some(t.id) => body = body.push(self.view_form(f, all)),
@@ -1420,7 +1302,7 @@ impl App {
 
     // * Reflect
 
-    fn view_reflect(&self) -> Element<'_, Message> {
+    pub(crate) fn view_reflect(&self) -> Element<'_, Message> {
         let s = self.peer.summary();
         let spending = self.peer.spending();
         let total: i64 = spending.iter().map(|g| g.spent).sum();

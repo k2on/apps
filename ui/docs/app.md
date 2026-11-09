@@ -349,24 +349,46 @@ In the order the owner asked for it, with the design rules first
 then written in this vocabulary, then its domain underneath;
 ui/docs/apps/money.md for money):
 
-1. **The shell's vocabulary**: scenes (`WindowGroup`, `Settings`,
-   `Commands`), the sidebar-adaptable tabs, the split view (collapsing to
-   a stack), toolbar placements, the inspector, `searchable`,
-   `confirmationDialog`, swipe actions — each a part that adapts by size
-   class inside itself (design.md's table: SwiftUI, Compose with
-   NavigationSuiteScaffold/ListDetailPaneScaffold and WindowManager's
-   postures, iced, Leptos), and the keyboard model (vim layer, keys panel,
-   command box, pane focus) as ark-app's, every app's.
-2. **money in that shell**: the sidebar sections, Accounts as content +
-   register detail + inspector; then Budget, Transactions, Insights,
-   Settings, sign-in and receipts ported in that order (ui/docs/apps/
-   money.md). harken's design doc and port after it; revelation is not an
-   Ark app (plain Kotlin) and stays as it is.
+1. **The shell's vocabulary** — written (`ui/rust/app/src/shell.rs`):
+   `adaptive_tabs`/`section_tab` (with a badge), `split_view`, `toolbar`
+   with `bar_item`s by `Placement`, `searchable`, `inspector`, `hosted`,
+   `confirmation_dialog`, `alert`, `settings_panes`, and the menu bar's
+   `CommandMenu`s; `View::map` hosts a shell in another app's messages.
+   The size classes are `ui/theme.toml`'s `[layout]` (`LayoutTokens`,
+   `arkui::layout_tokens`), decided by the parts alone (`arkui::shell::
+   SizeClass`). Parts by hand: `ShellParts.swift` (TabView
+   `.sidebarAdaptable`, `.toolbar`, `.searchable`, `.inspector`, the
+   `Settings` scene as `ArkSettings`, `ArkCommands`), `ShellParts.kt`
+   (bar/rail/drawer by width, side-by-side panes or one at a time,
+   `TopAppBar` with overflow, `SearchBar`, a supporting pane or a bottom
+   sheet, hardware-keyboard shortcuts), `arkui::view::shell` (iced). The
+   keyboard is `arkui::shell::Keyboard`, every desktop app's. Left: swipe
+   actions; Compose on material3-adaptive (`NavigationSuiteScaffold`,
+   `ListDetailPaneScaffold`) and WindowManager's postures, which need the
+   Gradle graph (`deps.json`) regenerated with them — the parts are
+   material3's own until then; a split view that is SwiftUI's
+   `NavigationSplitView` (it is columns in the section's one stack, so the
+   toolbar and search stay the section's); Settings as a second iced
+   window (it is the shell's panes in the window); the commands in the
+   iced command box and keys panel (they are shortcuts).
+2. **money in that shell** — started: the sections, toolbars, search,
+   inspector, Settings and commands on iced, the iPhone/iPad/Mac and
+   Android, hosting the existing screens (ui/docs/apps/money.md, The
+   Shell). Next: the inspectors' and details' content, then Budget,
+   Transactions, Insights, Settings, sign-in and receipts ported in that
+   order. harken's design doc and port after it; revelation is not an Ark
+   app (plain Kotlin) and stays as it is.
 3. **The browser**: `ui/rust/web` drawing a `View` with Leptos over the
    real DOM, the theme as CSS variables generated from ui/theme.toml, the
    same context menu in the DOM, and `money/web` running the demo
    household in wasm.
-4. **macOS, iPad, Android tablets and foldables**: money's and harken's
+4. **macOS, iPad, Android tablets and foldables**: money's target is one
+   multiplatform target with a macOS destination (`project.yml`,
+   `supportedDestinations`), its kernel's Mac slice and `money-macos`
+   (flake.nix) built by nix; ArkUI builds for the Mac (its colours
+   through `Color.dynamic`, what only the iPhone has behind
+   `Platform.swift`'s shims, the document scanner in ArkUI). Never built
+   here: no Mac. money's and harken's
    iPhone targets take the iPad (`TARGETED_DEVICE_FAMILY` 1,2, every
    orientation on an iPad, no `UIRequiresFullScreen`), not yet built on a
    Mac; Android's activities have no fixed orientation and are resizeable

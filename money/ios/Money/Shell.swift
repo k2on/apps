@@ -1,11 +1,12 @@
-// money, once the first run has handed it a session: the system's tab bar
-// in Liquid Glass — Budget, Accounts, Transactions (badged with what needs a
-// look) and Insights — which shrinks as a list scrolls
-// (`tabBarMinimizeBehavior(.onScrollDown)`); each tab its own
-// `NavigationStack`, so a tab switch finds the tab as it was left; the
-// sheets a screen raises, each with its detents, one at a time; Plaid's
-// page in Safari's view when a bank is being connected; and what the app
-// says once, on glass at the top. This file wires; what each
+// money, once the first run has handed it a session: the shell written
+// from Rust (Generated/MoneyShellView.swift, ui/docs/apps/money.md) — the
+// sections Budget, Accounts (badged with what needs a look), Transactions
+// and Insights, a tab bar on the iPhone and a sidebar on the iPad and the
+// Mac, each its toolbar, search and inspector — hosting money's own
+// screens by name, each section its own back stack so a switch finds it as
+// it was left; the sheets a screen raises, each with its detents, one at a
+// time; Plaid's page in Safari's view when a bank is being connected; and
+// what the app says once, on glass at the top. This file wires; what each
 // screen draws is the screen's.
 import ArkUI
 import SwiftUI
@@ -39,11 +40,6 @@ enum Sheet: Identifiable {
     }
 }
 
-/// The tabs. (`Tab` is SwiftUI's.)
-enum Pane: Hashable {
-    case budget, accounts, transactions, insights
-}
-
 private struct PresentKey: EnvironmentKey {
     static let defaultValue: (Sheet) -> Void = { _ in }
 }
@@ -69,62 +65,94 @@ extension EnvironmentValues {
 struct Shell: View {
     @EnvironmentObject private var model: Model
     @EnvironmentObject private var watched: Watched<MoneyView>
-    @State private var tab: Pane = .budget
     @State private var sheet: Sheet? = nil
-    /// Each tab's back stack (ArkUI's `Navigator`), of money's routes.
-    @State private var navs: [Pane: Navigator<Route>] = [:]
+    /// Each section's back stack, by its tag, of money's routes.
+    @State private var paths: [String: NavigationPath] = [:]
 
-    private func path(_ t: Pane) -> Binding<[Route]> {
-        Binding(get: { navs[t]?.path ?? [] }, set: { navs[t, default: Navigator()].path = $0 })
+    private func path(_ tag: String) -> Binding<NavigationPath> {
+        Binding(get: { paths[tag] ?? NavigationPath() }, set: { paths[tag] = $0 })
+    }
+
+    private func push(_ tag: String, _ r: Route) {
+        paths[tag, default: NavigationPath()].append(r)
     }
 
     var body: some View {
-        TabView(selection: $tab) {
-            Tab("Budget", systemImage: "dollarsign.circle.fill", value: Pane.budget) {
-                stack(.budget) { BudgetView() }
+        // Written from Rust (Generated/MoneyShellView.swift), over its
+        // runtime: the sections, their toolbars, search and inspectors.
+        MoneyShellView()
+            .environmentObject(model.shell)
+            .environment(\.hostedScreens) { name in AnyView(hosted(name)) }
+            .environment(\.sectionPath) { tag in path(tag) }
+            .environment(\.present) { s in present(s) }
+            .onAppear { model.shell.native = { name in run(name) } }
+            .sheet(item: $sheet) { s in
+                sheetView(s)
+                    .environmentObject(model)
+                    .environmentObject(watched)
+                    .environment(\.present) { next in present(next) }
             }
-            Tab("Accounts", systemImage: "building.columns.fill", value: Pane.accounts) {
-                stack(.accounts) {
-                    // Written from Rust (Generated/AccountsView.swift), over its runtime.
-                    if let a = model.accounts {
-                        AccountsView()
-                            .environmentObject(a)
-                            .environment(\.tabFace) { AnyView(AccountButton()) }
-                            .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
-                            .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
-                            .onAppear {
-                                a.open = { r in navs[.accounts, default: Navigator()].push(r) }
-                                a.reconcile = { id in present(.reconcile(id)) }
-                            }
-                    }
+            .toast($model.notice)
+            // A link the app was opened with: its route, pushed on the section shown.
+            .onChange(of: model.link) {
+                guard let url = model.link else { return }
+                model.link = nil
+                let tag = model.shell.page.section
+                var nav = Navigator<Route>()
+                if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }, take: model.takes) {
+                    for r in nav.path { push(tag, r) }
                 }
             }
-            Tab("Transactions", systemImage: "list.bullet.rectangle.portrait.fill", value: Pane.transactions) {
-                stack(.transactions) { TransactionsView() }
+            // Plaid's page, as soon as the server answers with it, wherever the
+            // person is; closed by its Done, or once the server is finished.
+            .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
+    }
+
+    /// A screen the shell hosts (ark_app::shell::hosted): money's own,
+    /// until each moves into Rust; each opens what it opens on its
+    /// section's stack.
+    @ViewBuilder private func hosted(_ name: String) -> some View {
+        let section = String(name.split(separator: ".").first ?? "")
+        SwiftUI.Group {
+            switch name {
+            case "budget": BudgetView()
+            case "accounts":
+                if let a = model.accounts {
+                    // Written from Rust (Generated/AccountsView.swift), over its runtime.
+                    AccountsView()
+                        .environmentObject(a)
+                        .environment(\.tabFace) { AnyView(AccountButton()) }
+                        .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
+                        .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
+                        .onAppear {
+                            a.open = { r in push("accounts", r) }
+                            a.reconcile = { id in present(.reconcile(id)) }
+                        }
+                }
+            case "transactions": TransactionsView()
+            case "insights": InsightsView()
+            case "accounts.register": ContentUnavailableView("No Account Selected", systemImage: "building.columns")
+            case "transactions.detail": ContentUnavailableView("No Transaction Selected", systemImage: "list.bullet.rectangle.portrait")
+            case "settings.server": SettingsView()
+            case "settings.banks": BanksView()
+            case "settings.household": ContentUnavailableView("Household", systemImage: "house", description: Text("Who shares this budget, and their roles."))
+            case "settings.appearance": ContentUnavailableView("Appearance", systemImage: "circle.lefthalf.filled", description: Text("Follows the system's light and dark."))
+            default: ContentUnavailableView("Nothing Selected", systemImage: "sidebar.right")
             }
-            .badge(model.snapshot.inbox.count)
-            Tab("Insights", systemImage: "chart.pie.fill", value: Pane.insights) {
-                stack(.insights) { InsightsView() }
-            }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
-        .environment(\.present) { s in present(s) }
-        .sheet(item: $sheet) { s in
-            sheetView(s)
-                .environmentObject(model)
-                .environmentObject(watched)
-                .environment(\.present) { next in present(next) }
+        .navigationDestination(for: Route.self) { r in destination(r) }
+        .environment(\.open) { r in push(section, r) }
+    }
+
+    /// A command the shell hands back by name: what only money's own screens do yet.
+    private func run(_ name: String) {
+        switch name {
+        case "new-transaction":
+            let a = usualAccount(accounts: model.snapshot.accounts)
+            present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
+        case "new-account": present(.addAccount)
+        default: break
         }
-        .toast($model.notice)
-        // A link the app was opened with: its route, navigated to on the tab shown.
-        .onChange(of: model.link) {
-            guard let url = model.link else { return }
-            model.link = nil
-            navs[tab, default: Navigator()].handle(url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }, take: model.takes)
-        }
-        // Plaid's page, as soon as the server answers with it, wherever the
-        // person is; closed by its Done, or once the server is finished.
-        .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
     }
 
     private func present(_ s: Sheet) {
@@ -134,15 +162,6 @@ struct Shell: View {
         }
         sheet = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { sheet = s }
-    }
-
-    /// A tab's stack: its root, and every page it can open.
-    private func stack<Root: View>(_ t: Pane, @ViewBuilder root: () -> Root) -> some View {
-        NavigationStack(path: path(t)) {
-            root()
-                .navigationDestination(for: Route.self) { r in destination(r) }
-        }
-        .environment(\.open) { r in navs[t, default: Navigator()].push(r) }
     }
 
     /// What a route on the back stack draws. An account and a category are
@@ -254,5 +273,20 @@ struct AddTransactionButton: View {
             Image(systemName: "plus")
         }
         .accessibilityLabel("Add Transaction")
+    }
+}
+
+/// A pane of Settings (Generated/MoneySettingsView.swift): money's own
+/// screens, until each moves into Rust.
+struct SettingsHosted: View {
+    let name: String
+
+    var body: some View {
+        switch name {
+        case "settings.server": SettingsView()
+        case "settings.banks": BanksView()
+        case "settings.household": ContentUnavailableView("Household", systemImage: "house", description: Text("Who shares this budget, and their roles."))
+        default: ContentUnavailableView("Appearance", systemImage: "circle.lefthalf.filled", description: Text("Follows the system's light and dark."))
+        }
     }
 }

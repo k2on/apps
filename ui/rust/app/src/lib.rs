@@ -307,6 +307,7 @@ impl Inbox {
     }
 }
 
+pub mod shell;
 pub mod view;
 
 /// `#[view]`: a function of a screen's record laid out once for every

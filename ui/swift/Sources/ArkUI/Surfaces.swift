@@ -7,8 +7,11 @@
 // the person's text size (`scaledFont`), for a figure or a mark larger than
 // any text style.
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
+#if canImport(UIKit)
 extension ShapeStyle where Self == Color {
     /// A hairline that holds its own: the theme's (`hairline`), or under
     /// Increase Contrast the stronger edge of a control (`outline`).
@@ -26,6 +29,15 @@ extension ShapeStyle where Self == Color {
         })
     }
 }
+#else
+extension ShapeStyle where Self == Color {
+    /// A hairline (the Mac's: its own Increase Contrast draws the edges).
+    public static var edge: Color { Color(Tokens.hairline) }
+
+    /// The track a value fills: the quiet colour, faint.
+    public static var track: Color { Color(Tokens.quiet).opacity(0.25) }
+}
+#endif
 
 #if os(iOS)
 @available(iOS 26.0, *)

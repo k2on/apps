@@ -41,6 +41,9 @@ final class Model: ObservableObject {
     private(set) var session: Session? = nil
     /// The Accounts tab's runtime (Screens.swift), while a session is open.
     @Published private(set) var accounts: AccountsScreen? = nil
+    /// The shell's runtime (Screens.swift): the app's for its life, running
+    /// while a session is open.
+    let shell = MoneyShellScreen()
     /// The phone's modules, given every screen run in Rust (Modules.swift).
     var modules = PhoneModules()
     /// Told which views moved, on the main queue: the app's `Watched`.
@@ -159,6 +162,7 @@ final class Model: ObservableObject {
                         moved: { [weak self] views in
                             self?.moves += 1
                             self?.accounts?.reload()
+                            self?.shell.reload()
                             self?.onMoved(views)
                         })
     }
@@ -168,12 +172,16 @@ final class Model: ObservableObject {
         accounts = AccountsScreen(session: s, modules: modules,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
                                   today: { [weak self] in self?.today ?? moneyToday() })
+        shell.connect(session: s,
+                      refresh: { [weak self] in Task { await self?.refresh() } },
+                      today: { [weak self] in self?.today ?? moneyToday() })
     }
 
     private func close() {
         bridge?.close()
         bridge = nil
         accounts = nil
+        shell.disconnect()
         session = nil
         snapshot = Snapshot()
     }
