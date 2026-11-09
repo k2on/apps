@@ -19,6 +19,13 @@
 # {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
+#
+# Which device it is, as the environment says (apps-android.sh sets it for
+# each emulator profile): DEVICE_NAME, what device.json and the phone's
+# own name say (a Pixel 7's); CORNER and CUTOUT, how hero.py draws it.
+# SIGNED_IN=1: the app installed and signed in already on this emulator
+# (the Fold's second posture), so it is neither installed afresh nor
+# cleared, and not signed in again.
 set -euo pipefail
 out=$1
 apk=$2
@@ -30,6 +37,8 @@ shots="$app/screens/shots.json"
 aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
 pkg=$("$aapt2" dump packagename "$apk")
 user=$(jq -r '.server.user // empty' "$shots")
+name=${DEVICE_NAME:-Pixel 7}
+signed_in=${SIGNED_IN:-}
 mkdir -p "$out"
 
 # The screen as uiautomator reads it.
@@ -99,14 +108,14 @@ open_app() {
   sleep 4
 }
 
-adb install -r "$apk" >/dev/null
-adb shell pm clear "$pkg" >/dev/null
-read -r w h < <(adb shell wm size | tr -d '\r' | awk -F'[ x]' '/Physical/ {print $3, $4}')
-printf '{"name":"Pixel 7","width":%s,"height":%s,"corner":110,"cutout":"hole"}\n' "$w" "$h" > "$out/device.json"
-# The phone's name, as a Pixel 7 out of the box has it (Settings, About
-# phone, Device name): the emulator's own is its build's ("sdk_gphone64…"),
-# which the app's device chip and picker would say.
-adb shell settings put global device_name "Pixel 7"
+if [ -z "$signed_in" ]; then
+  adb install -r "$apk" >/dev/null
+  adb shell pm clear "$pkg" >/dev/null
+fi
+# The phone's name, as a Pixel 7 (or the device it is) out of the box has
+# it (Settings, About phone, Device name): the emulator's own is its build's
+# ("sdk_gphone64…"), which the app's device chip and picker would say.
+adb shell settings put global device_name "$name"
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1
@@ -120,7 +129,7 @@ demo notifications -e visible false
 
 # Signed in once, through arkui's onboarding; the login is kept for every
 # shot after.
-if [ -n "$server" ]; then
+if [ -n "$server" ] && [ -z "$signed_in" ]; then
   # Chrome straight to the page: no first run, no sign-in to Google.
   adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
   adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1 || true
@@ -172,7 +181,7 @@ for theme in ${THEMES:-light dark}; do
     open_app
     # What the screen was after each step, for the run's results (not the
     # shots): where a shot went other than it was written to.
-    steps="${RESULTS:-$out/../steps}/$app/$theme/$id"
+    steps="${RESULTS:-$out/../steps}/$app/$(basename "$out")/$theme/$id"
     mkdir -p "$steps"
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
@@ -192,3 +201,9 @@ for theme in ${THEMES:-light dark}; do
     dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
   done 3< <(jq -c '.shots[]' "$shots")
 done
+
+# The device, from what it drew: the screen as it was taken (a tablet's
+# landscape, a Fold's open or folded), not the panel's own size.
+first=$(find "$out" -mindepth 2 -maxdepth 2 -name '*.png' | sort | head -1)
+read -r w h < <(python3 -I -c 'import struct, sys; d = open(sys.argv[1], "rb").read(24); print(*struct.unpack(">II", d[16:24]))' "$first")
+printf '{"name":"%s","width":%s,"height":%s,"corner":%s,"cutout":"%s"}\n' "$name" "$w" "$h" "${CORNER:-110}" "${CUTOUT:-hole}" > "$out/device.json"

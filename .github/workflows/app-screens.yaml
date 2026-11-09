@@ -14,6 +14,11 @@
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
 # the desktop `nix build .#<app>-iced` at the commit (flake.nix, `icedApp`;
 # `publish.desktop` the list), photographed with no window by arkui-shots.
+# The larger screens in the same jobs: Android's tablet and Fold beside each
+# phone's job, from the same APK; the iPad on the iPhone's Mac, only for an
+# app whose build takes it (its UIDeviceFamily), and the Mac's own window,
+# only for an app whose commit has `<app>-macos` (apps.md, "The larger
+# screens"). An app with neither boots nothing more.
 #
 # **After the publish.** This runs when build finishes (Android) and when
 # ios has ended (the iPhone, which builds the commit itself, after ios, so as
@@ -94,6 +99,14 @@ on:
         description: "A pull request's number: its iPhone shots, not every app's"
         required: false
         default: ""
+      # Every app taken as by hand, and nothing published (no `screens`
+      # branch, no cache): to try this file as a branch has it, run on that
+      # branch, before it is merged.
+      dry:
+        description: "Without a PR: take every app, publish nothing"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -341,13 +354,20 @@ jobs:
         # minutes of its ten). Their captures meet in the same
         # <app>/android/ (merge-multiple), whole when both are there.
         theme: [light, dark]
-    name: android (${{ matrix.app }}, ${{ matrix.theme }})
+        # The phone (a Pixel 7); and the large screens, one emulator after
+        # the other in a job of their own: a Pixel Tablet in landscape, then
+        # a Pixel Fold open and folded (apps-android.sh). The same APK,
+        # driver and shots on each; a job of their own so that the phone's
+        # come as soon as before, and one job, not two, so that the large
+        # screens pay one nix, one server and one wait for the APK.
+        device: [phone, large]
+    name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
     # same commit's again, from another event: on main both a script
     # change and build) takes over from the one going.
     concurrency:
-      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 90
     env:
@@ -420,6 +440,7 @@ jobs:
       # others still taken. One line: the action runs each line of `script`
       # as its own command.
       - name: Capture
+        if: matrix.device == 'phone'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -431,6 +452,33 @@ jobs:
           # if the run is still making it (none: apps-android.sh skips it).
           script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
+      # The large screens: the same, on a Pixel Tablet held in landscape
+      # (<app>/android-tablet/), then on a Pixel Fold, open and then folded
+      # (<app>/fold-unfolded/, <app>/fold-folded/), each its own AVD.
+      - name: Capture (tablet)
+        if: matrix.device == 'large'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_tablet
+          avd-name: tablet
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=tablet RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+      - name: Capture (Fold)
+        if: ${{ !cancelled() && matrix.device == 'large' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_fold
+          avd-name: fold
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # The APK as the tablet's step left it (awaited there, if the run was still making it).
+          script: bash .github/screens/meanwhile.sh wait servers && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+
       - name: The servers' logs
         if: always()
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
@@ -440,14 +488,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}
+          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
           path: ${{ runner.temp }}/steps
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}
+          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
@@ -489,7 +537,7 @@ jobs:
       INPUTS: ${{ needs.which.outputs.ios-inputs }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
-      PUSH: ${{ needs.which.outputs.mode == 'release' }}
+      PUSH: ${{ needs.which.outputs.mode == 'release' && inputs.dry != true }}
     steps:
       # The queue for a Mac can be an hour: a PR merged or closed meanwhile
       # is taken nothing of. Every step after says `open`, so the job ends
@@ -514,6 +562,10 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
+          # The driver, built once for the iPhone and the iPad (app-ios.sh);
+          # and each app any of whose shots failed (apps-ios.sh,
+          # apps-mac.sh), for which no hash is kept.
+          { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -614,6 +666,31 @@ jobs:
         continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
+      # The iPad, only when an app's build takes it (its Info.plist's
+      # UIDeviceFamily has 2: ios-family.sh): booting under the iPhone's
+      # shots, the newest iPad Pro 13-inch (else an iPad Air 13-inch, else
+      # the newest iPad), its shots after the iPhone's. With none, nothing
+      # booted, and nothing more on this Mac.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: The iPad, if an app takes it
+        run: |
+          ipad=$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" $APPS | tr '\n' ' ')
+          echo "IPAD_APPS=${ipad% }" >> "$GITHUB_ENV"
+          if [ -z "${ipad// /}" ]; then
+            echo "no app's build takes the iPad: none booted"
+            exit 0
+          fi
+          echo "the iPad's: $ipad"
+          # Of the newest iOS's simulators, the first kind there is.
+          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
+            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
+            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
+            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
+            | "\(.udid) \(.name)"')
+          echo "Booting $name ($udid)"
+          echo "$name" > "$RUNNER_TEMP/ipad"
+          bash .github/screens/meanwhile.sh start ipad bash -c 'xcrun simctl boot "$0" && xcrun simctl bootstatus "$0" -b' "$udid"
+
       - if: steps.open.outputs.open == 'true'
         name: The servers, and the driver's tools
         run: |
@@ -633,6 +710,26 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
 
+      # The iPad's, after the iPhone's, with the iPhone shut down: each app
+      # whose build takes it, in portrait and then on its side, light and
+      # dark, on the same driver (apps-ios.sh, FAMILY=ipad).
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
+        name: Capture (iPad)
+        env:
+          RESULTS: ${{ runner.temp }}/results
+          FAMILY: ipad
+        run: |
+          xcrun simctl shutdown "$(xcrun simctl list devices booted -j | jq -r --arg d "$(cat "$RUNNER_TEMP/device")" '[.devices[][] | select(.state == "Booted" and .name == $d)][0].udid')" || true
+          bash .github/screens/meanwhile.sh wait ipad
+          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/ipad")" $IPAD_APPS
+
+      # The Mac's own window, of each app whose commit has a Mac build
+      # (`<app>-macos`, apps-mac.sh): on this Mac, signed in to the same
+      # server. None has one yet, and each is passed over in seconds.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: Capture (Mac)
+        run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
+
       # Beside each app's shots, taken whole, the hash of what they were
       # taken from (`which`, ios-inputs.sh): the next run that has the same
       # takes none. One taken in part keeps none, and is taken again.
@@ -642,7 +739,10 @@ jobs:
           for a in $APPS; do
             at=$RUNNER_TEMP/out/$a/ios
             hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
-            if [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
+            # A shot of it failed (its iPhone's, iPad's or Mac's): taken again next time, whole.
+            if [ -f "$PARTIAL" ] && grep -qx "$a" "$PARTIAL"; then
+              echo "$a: a shot of it failed; no hash kept"
+            elif [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
               echo "$hash" > "$at/inputs"
               echo "$a: $hash"
             else
@@ -759,7 +859,7 @@ jobs:
   # run replaced, the rest as it was.
   publish:
     needs: [which, android, ios, desktop]
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' }}
+    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with screens.yaml's publish.
     concurrency:
