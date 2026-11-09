@@ -1,6 +1,5 @@
 # Everything a push to main publishes, in one run: each page at
-# https://k2on.github.io/apps/<name>/ (the browser peer at harken/, arkui's
-# docs at docs/, …) and every Android app in one F-Droid repository at
+# https://k2on.github.io/apps/<name>/ (arkui's docs at docs/, …) and every Android app in one F-Droid repository at
 # https://k2on.github.io/apps/fdroid/repo. A `v*` tag builds the APKs alone
 # and attaches them to a release.
 #
@@ -172,12 +171,10 @@ jobs:
   # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
   # job has built downloads them rather than compiling them on the host.
-  # After the pages: the web directory it serves is the browser peer's
-  # crates compiled to wasm, the page's own, which it then substitutes
-  # rather than compiling beside it. On a tag no page is built, and it runs
-  # all the same.
+  # No browser client yet: iced is the desktop's alone, and the web client
+  # (Leptos, ui/docs/app.md) is not written, so a server serves the socket.
   server:
-    needs: page
+    needs: plan
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -189,7 +186,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build what the server runs
-        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#money-server .#money-web-server .#arkdb
+        run: nix build --print-build-logs --no-link .#harken-server .#money-server .#arkdb
 
   apk:
     needs: plan

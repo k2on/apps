@@ -73,10 +73,7 @@ impl App {
                 self.call("amazon", calls::AMAZON, &login, Asked::Stores);
             }
             Msg::ForgetAmazon => self.call("amazon", calls::FORGET_AMAZON, &(), Asked::Stores),
-            Msg::SignInCostco => {
-                browser::reserve();
-                self.call("costco", calls::COSTCO_SIGN_IN, &(), Asked::BrowserPage);
-            }
+            Msg::SignInCostco => self.call("costco", calls::COSTCO_SIGN_IN, &(), Asked::BrowserPage),
         }
     }
 
@@ -97,12 +94,7 @@ impl App {
                 self.settings.refused = None;
                 self.settings.waiting.push((id, asked, section));
             }
-            Err(why) => {
-                if asked == Asked::BrowserPage {
-                    browser::release();
-                }
-                self.settings.refused = Some((section, why));
-            }
+            Err(why) => self.settings.refused = Some((section, why)),
         }
     }
 
@@ -144,12 +136,7 @@ impl App {
                         self.opened.push(url);
                     }
                 }
-                Err(why) => {
-                    if asked == Asked::BrowserPage {
-                        browser::release();
-                    }
-                    self.settings.refused = Some((section, why));
-                }
+                Err(why) => self.settings.refused = Some((section, why)),
             }
         }
     }

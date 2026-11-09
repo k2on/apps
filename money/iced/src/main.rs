@@ -321,7 +321,6 @@ pub enum Message {
     /// A sign-in came back.
     SignedIn(Result<ark_auth::Login, String>),
     /// The replica [`App::boot`] read on a thread.
-    #[cfg(not(target_arch = "wasm32"))]
     Opened(arkui::later::Slot<Result<client::Replica, String>>),
     /// The account's picture, fetched.
     Picture(arkui::images::Loaded),
@@ -532,11 +531,6 @@ impl App {
     fn boot() -> (App, Task<Message>) {
         let (url, _) = live::config();
         let login = live::logins().recall(&url);
-        #[cfg(target_arch = "wasm32")]
-        {
-            App::opened(live::open(&url, login.as_ref()))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let today = day_of_ms(ark_peer::now_ms());
             let mut app = App::with_peer(client::open(Box::new(ark_peer::Memory::default())), &today);
@@ -576,9 +570,6 @@ impl App {
         // came back from signing in — trading the code it came with. Who is
         // signed in is the account button's to show, all the time; a note
         // says only what is news.
-        #[cfg(target_arch = "wasm32")]
-        let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
-        #[cfg(not(target_arch = "wasm32"))]
         let (code, returned) = (None, false);
         let remembered = ark_auth::onboarding::Remembered {
             server: app.server.as_ref().map(|s| s.url.clone()),
@@ -639,40 +630,14 @@ impl App {
                 Task::none()
             }
             Effect::Browse { server, .. } => {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    ark_auth::web::go_sign_in(&server, s.user.as_deref());
-                    Task::none()
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let user = s.user.clone();
-                    off_thread(
-                        move || ark_auth::client::code(&server, user.as_deref(), ark_auth::client::open_browser),
-                        Message::Coded,
-                    )
-                }
+                let user = s.user.clone();
+                off_thread(
+                    move || ark_auth::client::code(&server, user.as_deref(), ark_auth::client::open_browser),
+                    Message::Coded,
+                )
             }
-            Effect::Exchange { server, code } => {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(async move { ark_auth::web::exchange(&server, &code).await }, Message::SignedIn)
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    off_thread(move || ark_auth::client::exchange(&server, &code), Message::SignedIn)
-                }
-            }
-            Effect::Redeem { server, code } => {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(async move { ark_auth::web::redeem(&server, &code).await }, Message::SignedIn)
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    off_thread(move || ark_auth::client::redeem(&server, &code), Message::SignedIn)
-                }
-            }
+            Effect::Exchange { server, code } => off_thread(move || ark_auth::client::exchange(&server, &code), Message::SignedIn),
+            Effect::Redeem { server, code } => off_thread(move || ark_auth::client::redeem(&server, &code), Message::SignedIn),
             Effect::OpenSession { login, .. } => {
                 let login: ark_auth::Login = login.into();
                 if s.login.as_ref() != Some(&login) {
@@ -1428,7 +1393,6 @@ impl App {
             // Said once, and not tried again until a reload: going straight
             // back would be a loop the person cannot stop.
             Message::SignedIn(Err(why)) => return self.onboard(Event::SignInFailed { why }),
-            #[cfg(not(target_arch = "wasm32"))]
             Message::Opened(opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {
@@ -2581,7 +2545,6 @@ pub fn split_lines(rows: &[SplitRow], whole: i64) -> Result<Vec<SplitPart>, Stri
 
 /// A desktop sign-in's step, which waits on a loopback listener for the
 /// browser or on the server, on a thread of its own.
-#[cfg(not(target_arch = "wasm32"))]
 fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: fn(Result<T, String>) -> Message) -> Task<Message> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
@@ -2593,16 +2556,7 @@ fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send
     )
 }
 
-#[cfg(target_arch = "wasm32")]
-fn panic_to_console() {
-    std::panic::set_hook(Box::new(|info| {
-        web_sys::console::error_1(&info.to_string().into());
-    }));
-}
-
 pub fn main() -> iced::Result {
-    #[cfg(target_arch = "wasm32")]
-    panic_to_console();
     // Which renderer draws the window, decided before iced starts and said
     // on stderr (`arkui::renderer`): iced would fall back to the CPU silently.
     arkui::renderer::choose();
@@ -2612,16 +2566,13 @@ pub fn main() -> iced::Result {
     // The app's boot, and what every arkui window starts with (a trackpad's
     // resting fingers heard, on Wayland).
     let boot = || {
-        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let (mut app, task) = App::boot();
         // The link the desktop was opened with (`money://account/<id>/checking`),
         // put in the address bar for the next update to arrive at, as a
         // browser's own link is. A sign-in link (`money://join?server=…`) is
         // not a page: it goes to the sign-in machine as `Event::Joined`, which
         // asks first.
-        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut joined = Task::none();
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(link) = arkui::navigator::link_arg("money") {
             use arkui::navigator::Navigator;
             let mut join = None;
@@ -2650,7 +2601,6 @@ pub fn main() -> iced::Result {
         .font(arkui::fonts::FIRA_MONO);
     // The screenshots' run (.github/screens/apps.md): this application, its
     // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(shots) = arkui_shots::asked() {
         shots.run(app);
     }

@@ -76,7 +76,6 @@ impl App {
             return Task::none();
         };
         let server = s.url.clone();
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let (tx, rx) = iced::futures::channel::oneshot::channel();
             std::thread::spawn(move || {
@@ -86,11 +85,6 @@ impl App {
                 async move { rx.await.unwrap_or_else(|_| Err("the thread went away".into())) },
                 Message::DeviceCode,
             )
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (server, token);
-            Task::done(Message::DeviceCode(Err("make the code on the desktop or a phone".into())))
         }
     }
 

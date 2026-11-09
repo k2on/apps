@@ -11,10 +11,10 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            transactions.rs; plaid.rs, the bank import; receipts.rs and
            stores.rs, the stores' receipts; migrations.rs. The demo's
            household is beside the app, in seed/
-server/    money-server: the hub, sign-in, the browser client, and the
+server/    money-server: the hub, sign-in, a web directory if given one, the
            bank importer (src/importer.rs, Plaid over src/plaid.rs);
            nix/module.nix is services.money
-iced/      the client, desktop and browser, on arkui and ark-peer: signed
+iced/      the desktop client, on arkui and ark-peer: signed
            in to a server, or (--features demo) a seeded household on a
            peer that is its own authority
 ffi/       the library the phones load (ffi/README.md): ark-ffi with the
@@ -313,7 +313,7 @@ end-to-end check walked Actual through, using the same mock answers.
 ```
 MONEY_DEV_AUTH=1 cargo run -p money-server        # from rust/; 127.0.0.1:8788
 cargo run -p money-iced -- --server http://127.0.0.1:8788 --user alice
-nix build .#money-server .#money-web-server       # what services.money runs
+nix build .#money-server                          # what services.money runs
 ```
 
 `money-server` is harken-server's shape around money's domain
@@ -424,7 +424,7 @@ and their accounts' choices live now.
 
 `money-iced` without features is the household's client, as harken-iced
 is (`iced/src/live.rs`): it opens this device's replica of the server's
-budget (`--server`, `?server=`, or whoever served the page), signs in as
+budget (`--server`), signs in as
 above, remembers the login per server, and pumps the socket when it
 rings. **Sync** there is `banks.sync`. **Settings**, as harken has them
 (the account button at the top right: its menu opens Settings and signs
@@ -434,16 +434,14 @@ lists each connection with how its last import went (a dim line), Reconnect (onl
 with one control for what it feeds, a menu: a new account of its kind (the cursor on the account another login to the bank feeds from the same last digits, when there is one), every account here, or
 nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
-the server answers: in the system's browser on the desktop; in a browser,
-in a tab opened empty at the click (a browser opens tabs only right after
-one) and pointed at the page when the answer arrives, with the page's
-link in Settings if the tab was blocked. `money-web-server` is that
-page, which `services.money` serves at `/`; `money-web` is the demo.
+the server answers, in the system's browser, with the page's link in
+Settings too. There is no browser client yet: iced is the desktop's
+alone, and money's web client will be Leptos over the DOM
+(ui/docs/app.md, What Is Left).
 
 ## The demo
 
 ```
-nix build .#money-web                       # the page, as GitHub Pages would serve it
 cargo run -p money-iced --features demo     # the window, from rust/
 ```
 
@@ -524,10 +522,7 @@ opened under Xvfb and each page looked at.
 sites serve it today; the phones built against the regenerated types; a real OpenID
 provider in front of this server (the routes are ark-auth's, which
 harken's deployment uses); the module on a booted machine (the timer's
-signal, the credentials, the hardening); the live window drawn, on the
-desktop or in a browser (the browser build compiles for wasm32 with and
-without `demo`), and the desktop's hand-off to a browser to sign in
-or to Plaid's page (the browser build's tab opened at the click is
-unverified in a real browser);
+signal, the credentials, the hardening); the live window drawn, and the desktop's hand-off to a browser to sign
+in or to Plaid's page;
 typing into the demo's fields under Xvfb; and a phone, which does not
 exist yet.

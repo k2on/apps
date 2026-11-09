@@ -170,20 +170,16 @@ impl App {
         self.ctx.open_menu(m);
     }
 
-    /// An ask for a Plaid page: a tab kept for it now, while the click
-    /// counts, and the page opened in it when the server answers.
+    /// An ask for a Plaid page, opened when the server answers.
     fn ask_page(&mut self, what: &str, name: &str, input: &impl ark::format::Encode) {
         if self.server.is_none() {
             self.note = "the demo has no server to connect a bank through".into();
             return;
         }
-        browser::reserve();
         let since = self.peer.asks().first().map(|a| a.id);
         if self.author(what, name, input) {
             (self.awaiting, self.dismissed) = (Some(since), None);
             self.note = "asked the server for Plaid's page".into();
-        } else {
-            browser::release();
         }
     }
 
@@ -197,10 +193,7 @@ impl App {
                 self.awaiting = None;
                 self.open_page(url);
             }
-            money_domain::banks::Follow::Over => {
-                self.awaiting = None;
-                browser::release();
-            }
+            money_domain::banks::Follow::Over => self.awaiting = None,
         }
     }
 

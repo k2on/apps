@@ -208,17 +208,7 @@ pub fn system_coasts() -> bool {
     {
         true
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::sync::OnceLock;
-        static MAC: OnceLock<bool> = OnceLock::new();
-        *MAC.get_or_init(|| {
-            web_sys::window()
-                .and_then(|w| w.navigator().platform().ok())
-                .is_some_and(|p| p.starts_with("Mac"))
-        })
-    }
-    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+    #[cfg(not(target_os = "macos"))]
     {
         false
     }
@@ -236,7 +226,7 @@ static TOLD: AtomicBool = AtomicBool::new(false);
 /// on macOS, on Wayland once [`crate::touchpad::listen`] has seen the
 /// window's display, or once the desktop has said so ([`TOLD`]).
 fn told() -> bool {
-    crate::touchpad::says_lift() || (!cfg!(target_arch = "wasm32") && TOLD.load(Ordering::Relaxed))
+    crate::touchpad::says_lift() || TOLD.load(Ordering::Relaxed)
 }
 
 /// How many pixels a band is drawn for each pixel of pull at the edge:
@@ -1285,7 +1275,6 @@ mod tests {
 
     /// Where a list in an [`elastic`] is scrolled to after each of `wheel`'s
     /// events, as its `on_scroll` says, leaving out where it already was.
-    #[cfg(not(target_arch = "wasm32"))]
     fn scrolled_by(wheel: &[ScrollDelta]) -> Vec<i32> {
         use iced::widget::{column, scrollable, text};
         let rows = column((0..50).map(|n| text(format!("row {n}")).height(40).into()));
@@ -1308,7 +1297,6 @@ mod tests {
     /// Falsified by the wheel handed to the list while it is pulled (it
     /// scrolled 60), or by banding the notches (the notch back gave the
     /// band back and did not scroll).
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_list_pulled_past_its_top_gives_the_band_back_before_it_scrolls() {
         let px = |y| ScrollDelta::Pixels { x: 0.0, y };
@@ -1328,7 +1316,6 @@ mod tests {
     /// took it, slowing, and stops; it never goes the other way. Falsified
     /// by a list that stopped where the fingers left it (no coast), or by
     /// one that coasted for ever (no stop).
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_flick_coasts_on_in_a_window() {
         use iced::widget::{column, scrollable, text};
@@ -1363,7 +1350,7 @@ mod tests {
     /// [`crate::touchpad`] hears it): the coast goes no further than the
     /// frame they landed in. Falsified by a coast that read the fingers
     /// only on the wheel (it ran on to its end).
-    #[cfg(not(any(target_arch = "wasm32", target_os = "macos")))]
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn fingers_landing_stop_a_coast_in_a_window() {
         use iced::widget::{column, scrollable, text};
@@ -2162,7 +2149,6 @@ mod tests {
     /// top, held, and let go (`pull`). Each frame is a PNG in
     /// `$ARK_KINETIC_FRAMES/<gesture>/`, and `<gesture>.csv` has every
     /// draw: when, the true offset, the band, the thumb.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "writes pictures: ARK_KINETIC_FRAMES=<dir> cargo test -p arkui --lib frames -- --ignored"]
     fn frames() {

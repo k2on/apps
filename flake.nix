@@ -81,26 +81,10 @@
         "money/android/app/src/main/kotlin/dev/money/android/gen" "money/ios/Money/Gen"
       ];
 
-      # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
-      # crate the workspace locked, or the glue it writes does not match the
-      # module's imports and the page fails at load with a name nobody
-      # recognises. So the version is read out of the lockfile rather than
-      # written down, and the two hashes beside it are the only thing to move
-      # when the crate moves — a stale hash fails and prints the right one.
-      wasmBindgenVersion =
-        let lock = builtins.fromTOML (builtins.readFile ./rust/Cargo.lock);
-        in (lib.findFirst (p: p.name == "wasm-bindgen") (throw "rust/Cargo.lock has no wasm-bindgen") lock.package).version;
-      wasmBindgenHashes = {
-        "0.2.129" = {
-          hash = "sha256-pcecKQd7E8Opw6bkFoE569epUi7gh5qpQF1e5PJY6V8=";
-          cargoHash = "sha256-/uK14uPcftMFwlBx28Z1qHkm1edIWVVXi6hRRQRmYec=";
-        };
-      };
-
       perSystem = pkgs:
         let
           rust = pkgs.rust-bin.stable.latest.default;
-          # Only for the wasm-bindgen CLI below, which nixpkgs builds itself.
+          # For the tools nixpkgs builds with cargo itself (UniFFI's bindgen).
           rustPlatform = pkgs.makeRustPlatform { cargo = rust; rustc = rust; };
 
           # Every Rust build is a derivation per crate (nix/rust.nix):
@@ -112,7 +96,7 @@
           # compiled once and substituted from the cache after, whatever
           # else moves: an edit to a manifest compiles the crates whose
           # inputs it moved and what depends on them, an edit to harken the
-          # crates of harken. Each target (the host, wasm32, each Android
+          # crates of harken. Each target (the host, each Android
           # ABI) is nixpkgs for that platform (`importPkgs`'s `crossSystem`)
           # and the toolchain with the target added.
           rustCrates = import ./nix/rust.nix {
@@ -206,67 +190,6 @@
               ${out}
             '';
 
-          # The browser peer: `harken/iced` compiled to wasm32 and bound by
-          # wasm-bindgen, beside its page — one static directory. The same
-          # crate as the desktop; `demo` is the seeded library with no
-          # server that Pages publishes, and without it the page signs in
-          # against the server it is served from. The toolchain is the
-          # workspace's with the wasm target added, and the CLI is built from
-          # the crate at the version the lockfile names.
-          wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
-          # nixpkgs for wasm32: its compiler is rustc's own linker, and
-          # nixpkgs has no C toolchain for `wasm32-unknown-none`, which no
-          # crate here asks for.
-          wasmPkgs = importPkgs {
-            localSystem = pkgs.stdenv.buildPlatform.system;
-            crossSystem = { config = "wasm32-unknown-none"; rust.rustcTarget = "wasm32-unknown-unknown"; };
-            config = { allowUnfree = true; allowUnsupportedSystem = true; };
-          };
-          wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
-            inherit rustPlatform;
-            version = wasmBindgenVersion;
-          } // (wasmBindgenHashes.${wasmBindgenVersion}
-            or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
-          # One wasm page: a binary of the workspace compiled to wasm32 and
-          # bound by wasm-bindgen, beside the static files it is loaded from —
-          # the browser peer, with and without its demo.
-          wasmPage = { pname, crate, bin ? crate, features ? [ "default" ], files }:
-            let
-              wasm = rustCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = crate; inherit features; };
-            in
-            pkgs.runCommand pname { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; } ''
-              wasm-bindgen --target web --no-typescript --out-dir pkg ${wasm}/bin/${bin}.wasm
-              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
-                -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
-              # The page names the module and the wasm with `?v=dev`; this
-              # output's own hash replaces it, so a browser holding an older
-              # build is sent URLs its cache has never seen (harken/iced/web).
-              mkdir -p $out
-              cp -r pkg $out/
-              ${lib.concatMapStrings (f: "cp ${f} $out/${baseNameOf f}\n") files}
-              chmod u+w $out/index.html
-              substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
-            '';
-          icedWeb = { pname, crate ? "harken-iced", demo, files ? [ ./harken/iced/web/index.html ./harken/iced/web/favicon.svg ] }: wasmPage {
-            inherit pname crate files;
-            features = [ "default" ] ++ lib.optional demo "demo";
-          };
-          # What GitHub Pages publishes.
-          harken-web = icedWeb { pname = "harken-web"; demo = true; };
-          # What harken-server serves as its web directory.
-          harken-web-server = icedWeb { pname = "harken-web-server"; demo = false; };
-          # money's demo in a browser: a seeded household, its own authority,
-          # nothing to sign in to (money/README.md); and what money-server
-          # serves as its web directory, the same page signing in against
-          # the server it is served from.
-          moneyWeb = { pname, demo }: icedWeb {
-            inherit pname demo;
-            crate = "money-iced";
-            files = [ ./money/iced/web/index.html ./money/iced/web/favicon.svg ];
-          };
-          money-web = moneyWeb { pname = "money-web"; demo = true; };
-          money-web-server = moneyWeb { pname = "money-web-server"; demo = false; };
           # The docs (docs/site): a Cargo workspace of its own, with a
           # lockfile and a docs/site/Cargo.nix of its own, from a source
           # that is only the docs and the crates they name by path: arkui.
@@ -707,8 +630,8 @@
                 apk = harken-apk;
                 apkName = "harken.apk";
                 metadata = ./harken/android/fdroid/metadata/us.koon.harken.yml;
-                # The trumpet the browser's tab draws.
-                icon = ./harken/iced/web/favicon.svg;
+                # The trumpet the desktop window and the docs draw.
+                icon = ./harken/iced/icon.svg;
               }
               {
                 appid = "${bundlePrefix}.revelation";
@@ -1282,8 +1205,8 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-web harken-web-server harken-iced docs screens-ffmpeg screens-python xcodegen;
-            inherit money-iced money-web money-web-server money-server;
+            inherit harken-iced docs screens-ffmpeg screens-python xcodegen;
+            inherit money-iced money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
@@ -1584,7 +1507,6 @@
             in
             {
               pages = [
-                (page "harken" "harken-web" "harken" "the browser peer: the same engine compiled to wasm. Open it alone to run it entirely in the tab, or point it at a harken server.")
                 (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each, pictured by arkui itself, and catalogue.json beside it.")
               ];
               apks = [
@@ -1620,12 +1542,6 @@
             rust = pkgs.mkShell ({
               packages = [ (rust.override { extensions = [ "rust-src" "rust-analyzer" ]; }) pkgs.pkg-config ];
             } // cargoJobs);
-            # What `nix build .#harken-web` builds with, for doing it by hand
-            # (harken/iced/README.md); pages.yml also keeps it as a gc root so
-            # the cached store holds the wasm-bindgen CLI it compiled.
-            harken-web = pkgs.mkShell {
-              packages = [ wasmRust wasm-bindgen-cli pkgs.binaryen ];
-            };
             default = pkgs.mkShell ({
               packages = [ rust pkgs.pkg-config ];
             } // cargoJobs);

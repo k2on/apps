@@ -1,15 +1,12 @@
 //! Files a person gives a window: dropped on it ([`dropped`]), or chosen
-//! from a file chooser ([`choose`]) — on the desktop and in a browser
-//! alike, each [`Picked`] its name, its media type when known, and its
-//! bytes.
+//! from a file chooser ([`choose`]), each [`Picked`] its name, its media
+//! type when known, and its bytes.
 //!
-//! - **Dropped**: on the desktop, the window's own drop (iced's
-//!   `FileDropped`), read from where it is; in a browser, the page's
-//!   `drop`, each file's bytes read from the browser.
+//! - **Dropped**: the window's own drop (iced's `FileDropped`), read from
+//!   where it is.
 //! - **Chosen**: on Linux, the desktop's own chooser through its portal
 //!   (`org.freedesktop.portal.FileChooser` over D-Bus, the bus the theme
-//!   is already read from), on a thread of its own; in a browser, a file
-//!   input, clicked while the press that asked is still the person's.
+//!   is already read from), on a thread of its own.
 
 use iced::{Subscription, Task};
 
@@ -17,14 +14,14 @@ use iced::{Subscription, Task};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picked {
     pub name: String,
-    /// What the browser says it is (`image/jpeg`), or blank: then its
+    /// What the system says it is (`image/jpeg`), or blank: then its
     /// name's extension says ([`media_of`]).
     pub media: String,
     pub bytes: Vec<u8>,
 }
 
 impl Picked {
-    /// Its media type: the browser's, else its name's.
+    /// Its media type: the system's, else its name's.
     pub fn media(&self) -> Option<String> {
         match self.media.trim() {
             "" => media_of(&self.name).map(String::from),
@@ -50,7 +47,6 @@ pub fn media_of(name: &str) -> Option<&'static str> {
 /// Every file dropped on the window, read; one that does not read is
 /// passed over.
 pub fn dropped() -> Subscription<Picked> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         iced::event::listen_with(|e, _, _| match e {
             iced::Event::Window(iced::window::Event::FileDropped(path)) => {
@@ -65,27 +61,17 @@ pub fn dropped() -> Subscription<Picked> {
             _ => None,
         })
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        Subscription::run(web::drops)
-    }
 }
 
 /// A file chosen, of these media types (`image/*`), or none when the
 /// person closed the chooser.
 pub fn choose(title: &str, accept: &[&str]) -> Task<Option<Picked>> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let (title, accept) = (title.to_string(), accept.iter().map(|a| a.to_string()).collect::<Vec<_>>());
         std::thread::spawn(move || {
             let _ = tx.send(native::choose(&title, &accept));
         });
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = title;
-        web::choose(&accept.join(","), tx);
     }
     Task::perform(async move { rx.await.ok().flatten() }, |p| p)
 }
@@ -109,7 +95,6 @@ pub fn path_of_uri(uri: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::Picked;
 
@@ -179,108 +164,10 @@ mod native {
 }
 
 /// A number no two choosers of this process share.
-#[cfg(not(target_arch = "wasm32"))]
 fn tick() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     N.fetch_add(1, Ordering::Relaxed)
-}
-
-#[cfg(target_arch = "wasm32")]
-mod web {
-    use std::cell::RefCell;
-
-    use iced::futures::channel::{mpsc, oneshot};
-    use wasm_bindgen::closure::Closure;
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-    use web_sys::{DragEvent, Event, File, HtmlInputElement};
-
-    use super::Picked;
-
-    thread_local! {
-        static DROPS: RefCell<Option<mpsc::UnboundedSender<Picked>>> = const { RefCell::new(None) };
-    }
-
-    /// A file's bytes, read from the browser.
-    async fn read(f: File) -> Option<Picked> {
-        let buf = JsFuture::from(f.array_buffer()).await.ok()?;
-        Some(Picked {
-            name: f.name(),
-            media: f.type_(),
-            bytes: js_sys::Uint8Array::new(&buf).to_vec(),
-        })
-    }
-
-    /// The page's drops, heard once: a drag over the page is let drop
-    /// (rather than the browser opening the file), and each file dropped
-    /// read and sent.
-    pub fn drops() -> mpsc::UnboundedReceiver<Picked> {
-        let (tx, rx) = mpsc::unbounded();
-        let first = DROPS.with(|d| d.borrow_mut().replace(tx).is_none());
-        if first {
-            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-                let over = Closure::<dyn FnMut(Event)>::new(|e: Event| e.prevent_default());
-                let drop = Closure::<dyn FnMut(DragEvent)>::new(|e: DragEvent| {
-                    e.prevent_default();
-                    let Some(files) = e.data_transfer().and_then(|d| d.files()) else {
-                        return;
-                    };
-                    for f in (0..files.length()).filter_map(|i| files.get(i)) {
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Some(p) = read(f).await {
-                                DROPS.with(|d| d.borrow().as_ref().map(|tx| tx.unbounded_send(p)));
-                            }
-                        });
-                    }
-                });
-                let _ = doc.add_event_listener_with_callback("dragover", over.as_ref().unchecked_ref());
-                let _ = doc.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref());
-                over.forget();
-                drop.forget();
-            }
-        }
-        rx
-    }
-
-    /// A file input of these types, clicked; what is chosen read and sent,
-    /// or none for a chooser closed.
-    pub fn choose(accept: &str, tx: oneshot::Sender<Option<Picked>>) {
-        let Some(input) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.create_element("input").ok())
-            .and_then(|e| e.dyn_into::<HtmlInputElement>().ok())
-        else {
-            let _ = tx.send(None);
-            return;
-        };
-        input.set_type("file");
-        input.set_accept(accept);
-        let tx = std::rc::Rc::new(RefCell::new(Some(tx)));
-        let (sent, cancelled) = (tx.clone(), tx);
-        let chosen = input.clone();
-        let change = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-            let Some(tx) = sent.borrow_mut().take() else { return };
-            let file = chosen.files().and_then(|f| f.get(0));
-            wasm_bindgen_futures::spawn_local(async move {
-                let picked = match file {
-                    Some(f) => read(f).await,
-                    None => None,
-                };
-                let _ = tx.send(picked);
-            });
-        });
-        let cancel = Closure::<dyn FnMut(Event)>::new(move |_: Event| {
-            if let Some(tx) = cancelled.borrow_mut().take() {
-                let _ = tx.send(None);
-            }
-        });
-        let _ = input.add_event_listener_with_callback("change", change.as_ref().unchecked_ref());
-        let _ = input.add_event_listener_with_callback("cancel", cancel.as_ref().unchecked_ref());
-        change.forget();
-        cancel.forget();
-        input.click();
-    }
 }
 
 #[cfg(test)]

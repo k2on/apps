@@ -8,13 +8,6 @@ pub use ark_format::*;
 /// [`published`] takes to find the day an instant fell on where the person
 /// is: the system's time zone on the desktop, the browser's in a page.
 pub fn utc_offset_minutes(now_ms: i64) -> i32 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        // `getTimezoneOffset` is minutes *west* of UTC.
-        let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(now_ms as f64));
-        -(d.get_timezone_offset() as i32)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
     {
         use chrono::{Local, Offset, TimeZone};
         match Local.timestamp_millis_opt(now_ms) {

@@ -306,11 +306,11 @@ pub fn notes(component: &str) -> &'static [&'static str] {
         ],
         "command" => &["Ctrl+K opens it from anywhere; ↑ and ↓ walk what it found, ⏎ chooses, <Esc> or a click on the dimmed page closes it."],
         "reorder" => &["A press that moves less than reorder::THRESHOLD is a click; past it the row lifts, and the rows it passes slide a row's height out of its way on reorder::SLIDING, a spring."],
-        "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe). In a browser the browser's own back does it."],
+        "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe)."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
         "routes" => &["A route is its path (ark-router's #[derive(Routes)]): walking a sidebar writes the bar, and back and forward come back through Router::poll."],
-        "waking" => &["A window that runs no loop sleeps until something rings its Bell: a page's hashchange and popstate ring it (wake::page_changes)."],
+        "waking" => &["A window that runs no loop sleeps until something rings its Bell: a socket's reader thread, a media key, a deadline (wake::at)."],
         _ => &[],
     }
 }

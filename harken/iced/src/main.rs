@@ -69,11 +69,6 @@ use peer::{key, Peer};
 use player::{Player, Track};
 use routes::{Focus, Glyph, Pane, Route};
 use rows::Id;
-// The tab's title and the platform's media controller are the browser's, the
-// way the `<audio>` element is; the desktop build has neither.
-#[cfg(target_arch = "wasm32")]
-use player::Remote;
-
 /// Where a track's bytes are.
 ///
 /// `file` is one of two things, and which is not a mode: the demo's
@@ -231,7 +226,6 @@ pub enum Message {
     Started(Option<String>),
     /// The replica [`App::opening`] read on a thread, of that server's or,
     /// with none, this device's own.
-    #[cfg(not(target_arch = "wasm32"))]
     Opened(Option<String>, arkui::later::Slot<Result<client::Replica, String>>),
     /// The browser's sign-in came back with a code, or why not.
     Coded(Result<String, String>),
@@ -836,10 +830,9 @@ pub struct App {
     /// this load goes to sign in once by itself, and a sign-in that came
     /// back refused or empty is said, not tried again.
     pub onboarding: Onboarding,
-    /// The page stays on its splash ([`auth::reveal`]): this window is
-    /// finding out whether it has a server, trading a sign-in's code, or
-    /// going to sign in. What it would draw meanwhile is a player it is
-    /// about to leave.
+    /// This window is finding out whether it has a server, trading a
+    /// sign-in's code, or going to sign in. What it would draw meanwhile is
+    /// a player it is about to leave.
     pub held: bool,
     /// What the connect entry holds, while this window is alone.
     pub connect: String,
@@ -868,7 +861,6 @@ impl App {
         let onboarding = App::onboarding(&server, login.as_ref());
         let bell = arkui::wake::Bell::new();
         peer.client.set_waker(wake::waker(&bell));
-        wake::page(&bell);
         App {
             pane: Pane::Tracks,
             cursors: [0; 2],
@@ -1015,9 +1007,6 @@ impl App {
         let (mut app, task) = App::open();
         let joined = app.link();
         app.arrive();
-        if !app.held {
-            auth::reveal();
-        }
         (app, Task::batch([task, joined]))
     }
 
@@ -1026,7 +1015,6 @@ impl App {
     /// A sign-in link (`harken://join?server=…&code=…`) is not a page: it
     /// goes to the sign-in machine as `Event::Joined`, which asks first.
     fn link(&mut self) -> Task<Message> {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(link) = arkui::navigator::link_arg("harken") {
             use arkui::navigator::Navigator;
             let mut joined = None;
@@ -1111,17 +1099,6 @@ impl App {
     #[cfg(not(feature = "demo"))]
     fn opening(server: Option<String>, user: Option<String>) -> (App, Task<Message>) {
         let login = server.as_ref().and_then(|s| auth::logins().recall(s));
-        #[cfg(target_arch = "wasm32")]
-        {
-            match server {
-                Some(s) => {
-                    let opened = auth::open(&s, login.as_ref());
-                    App::open_server(s, user, opened)
-                }
-                None => (App::alone(user, auth::open_alone()), Task::none()),
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let mut app = App::with_peer(Peer::open(App::alone_in_memory()), String::new(), None);
             app.user = user;
@@ -1207,9 +1184,6 @@ impl App {
     /// traded, and the desktop's hand-off to a browser.
     #[cfg(not(feature = "demo"))]
     fn sign_in(&mut self) -> Task<Message> {
-        #[cfg(target_arch = "wasm32")]
-        let (code, returned) = (ark_auth::web::take_code(), ark_auth::web::came_back());
-        #[cfg(not(target_arch = "wasm32"))]
         let (code, returned) = (None, false);
         let remembered = ark_auth::onboarding::Remembered {
             server: Some(self.server.clone()),
@@ -1248,22 +1222,12 @@ impl App {
             Effect::Browse { server, .. } => self.browse(server),
             Effect::Exchange { server, code } => {
                 self.held = true;
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(async move { ark_auth::web::exchange(&server, &code).await }, Message::SignedIn)
-                }
-                #[cfg(not(target_arch = "wasm32"))]
                 {
                     off_thread(move || ark_auth::client::exchange(&server, &code), Message::SignedIn)
                 }
             }
             Effect::Redeem { server, code } => {
                 self.held = true;
-                #[cfg(target_arch = "wasm32")]
-                {
-                    Task::perform(async move { ark_auth::web::redeem(&server, &code).await }, Message::SignedIn)
-                }
-                #[cfg(not(target_arch = "wasm32"))]
                 {
                     off_thread(move || ark_auth::client::redeem(&server, &code), Message::SignedIn)
                 }
@@ -1297,17 +1261,11 @@ impl App {
             return Task::none();
         };
         let server = self.server.clone();
-        #[cfg(not(target_arch = "wasm32"))]
         {
             off_thread(
                 move || ark_auth::client::device_code(&server, &token).map(|(code, _)| code),
                 Message::DeviceCode,
             )
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (server, token);
-            Task::done(Message::DeviceCode(Err("make the code on the desktop or a phone".into())))
         }
     }
 
@@ -1318,14 +1276,7 @@ impl App {
             let _ = server;
             Task::none()
         }
-        #[cfg(all(not(feature = "demo"), target_arch = "wasm32"))]
-        {
-            // The page goes away and comes back with a code; `boot` finishes.
-            self.held = true;
-            ark_auth::web::go_sign_in(&server, self.user.as_deref());
-            Task::none()
-        }
-        #[cfg(all(not(feature = "demo"), not(target_arch = "wasm32")))]
+        #[cfg(not(feature = "demo"))]
         {
             let user = self.user.clone();
             off_thread(
@@ -2832,9 +2783,6 @@ impl App {
     /// each call site has to remember is already broken.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
-        if !self.held {
-            auth::reveal();
-        }
         let reacted = self.react();
         self.history.sync(&self.peer.source);
         // Whatever the message came to is said for a moment over the page
@@ -2893,7 +2841,6 @@ impl App {
                 #[cfg(feature = "demo")]
                 let _ = server;
             }
-            #[cfg(not(target_arch = "wasm32"))]
             Message::Opened(server, opened) => {
                 #[cfg(not(feature = "demo"))]
                 if let Some(opened) = opened.take() {
@@ -3514,28 +3461,6 @@ impl App {
         tasks.push(self.pump());
         // A lock-screen button leaves a note and rings; it goes where every
         // transport button goes.
-        #[cfg(target_arch = "wasm32")]
-        {
-            let press = match self.player.take_remote() {
-                Some(Remote::Play) => Some(Press::Play),
-                Some(Remote::Pause) => Some(Press::Pause),
-                Some(Remote::Next) if self.jogs() => {
-                    tasks.push(self.update(Message::Jog(JOG_FORWARD)));
-                    None
-                }
-                Some(Remote::Previous) if self.jogs() => {
-                    tasks.push(self.update(Message::Jog(-JOG_BACK)));
-                    None
-                }
-                Some(Remote::Next) => Some(Press::Skip(1)),
-                Some(Remote::Previous) => Some(Press::Skip(-1)),
-                Some(Remote::Seek(secs)) => Some(Press::Seek((secs * 1000.0) as i64)),
-                None => None,
-            };
-            if let Some(press) = press {
-                tasks.push(self.press(press));
-            }
-        }
         // The listening session. A track that ran out moves on through the
         // queue, as a phone's player does — its own session, or the output,
         // whose move the reconciler says — and never on a silent device.
@@ -3580,16 +3505,6 @@ impl App {
         }
         // The line being said moves on as what plays does.
         tasks.push(self.follow());
-        #[cfg(target_arch = "wasm32")]
-        {
-            // The cover too, for the controller the system draws (the
-            // lock screen, Windows' media flyout, the browser's own).
-            let now = self.now().map(|n| {
-                let art = self.art_url(self.art_of(n.track()));
-                (n.track().clone(), art, n.playing, n.duration, n.position)
-            });
-            self.player.announce(&self.title(), now);
-        }
         Task::batch(tasks)
     }
 
@@ -3714,17 +3629,11 @@ impl App {
 /// Open somebody's web page outside the app: a tab of the browser the app
 /// is in, or the desktop's browser.
 fn open_link(url: &str) {
-    #[cfg(target_arch = "wasm32")]
-    if let Some(window) = web_sys::window() {
-        let _ = window.open_with_url_and_target(url, "_blank");
-    }
-    #[cfg(not(target_arch = "wasm32"))]
     ark_auth::client::open_browser(url);
 }
 
 /// A blocking step of signing in on a thread of its own — it takes as long
 /// as a person does — with the answer handed back as a message.
-#[cfg(not(target_arch = "wasm32"))]
 fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static, done: fn(Result<T, String>) -> Message) -> Task<Message> {
     let (tx, rx) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
@@ -3736,18 +3645,7 @@ fn off_thread<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send
     )
 }
 
-#[cfg(target_arch = "wasm32")]
-fn panic_to_console() {
-    // A panic that reaches the console beats one that reports "unreachable
-    // executed".
-    std::panic::set_hook(Box::new(|info| {
-        web_sys::console::error_1(&info.to_string().into());
-    }));
-}
-
 pub fn main() -> iced::Result {
-    #[cfg(target_arch = "wasm32")]
-    panic_to_console();
     // Which renderer draws the window, decided before iced starts and said
     // on stderr (`arkui::renderer`): iced would fall back to the CPU silently.
     arkui::renderer::choose();
@@ -3770,7 +3668,6 @@ pub fn main() -> iced::Result {
         .font(arkui::hero::FIRA_SANS_BOLD);
     // The screenshots' run (.github/screens/apps.md): this application, its
     // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(shots) = arkui_shots::asked() {
         shots.run(app);
     }

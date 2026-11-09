@@ -434,7 +434,7 @@ pub const ALWAYS_ANIMATE: bool = true;
 /// `ARK_REDUCE_MOTION` (`1` less motion, `0` all of it), then, unless
 /// [`ALWAYS_ANIMATE`], the system — GNOME's `enable-animations` on Linux,
 /// Accessibility's Reduce motion on macOS — and otherwise all of it. A
-/// system that cannot be asked (no `gsettings`, a browser) is all of it.
+/// system that cannot be asked (no `gsettings`) is all of it.
 pub fn reduced() -> bool {
     static REDUCED: OnceLock<bool> = OnceLock::new();
     *REDUCED.get_or_init(|| decide(std::env::var("ARK_REDUCE_MOTION").ok().as_deref(), ALWAYS_ANIMATE, system_reduced))
@@ -452,7 +452,7 @@ fn decide(env: Option<&str>, always: bool, system: impl FnOnce() -> Option<bool>
 }
 
 /// What a command prints, trimmed, if it ran and said it went well.
-#[cfg(all(not(target_arch = "wasm32"), any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn ask(program: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(program)
         .args(args)
@@ -464,7 +464,7 @@ fn ask(program: &str, args: &[&str]) -> Option<String> {
 }
 
 /// Whether the system asks for less motion: GNOME's animations turned off.
-#[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
+#[cfg(target_os = "linux")]
 fn system_reduced() -> Option<bool> {
     match ask("gsettings", &["get", "org.gnome.desktop.interface", "enable-animations"])?.as_str() {
         "false" => Some(true),
@@ -474,7 +474,7 @@ fn system_reduced() -> Option<bool> {
 }
 
 /// Whether the system asks for less motion: Accessibility's Reduce motion.
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 fn system_reduced() -> Option<bool> {
     match ask("defaults", &["read", "com.apple.universalaccess", "reduceMotion"])?.as_str() {
         "1" => Some(true),
@@ -484,7 +484,7 @@ fn system_reduced() -> Option<bool> {
 }
 
 /// Nowhere else is asked.
-#[cfg(any(target_arch = "wasm32", not(any(target_os = "linux", target_os = "macos"))))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn system_reduced() -> Option<bool> {
     None
 }

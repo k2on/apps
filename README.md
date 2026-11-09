@@ -105,9 +105,9 @@ One command holds all of it:
                       #   Kotlin and Swift, the generated types held to the domain;
                       # harken-ios-typecheck: the iOS app's non-UI Swift
                       #   type-checked on Linux against the library
-    nix build .#harken-server   # or harken-iced, harken-web, harken-domain,
+    nix build .#harken-server   # or harken-iced, harken-domain,
                                 # ark, vectors, trace-corpus
-    nix run .#money-iced        # money's demo; money-web is its page
+    nix run .#money-iced        # money's desktop window
     nix build .#harken-apk      # the kernel for three ABIs and the APK over it,
                                 # its JVM tests run on the real kernel
     nix build .#revelation-apk  # Revelation's APK, its JVM tests run first;

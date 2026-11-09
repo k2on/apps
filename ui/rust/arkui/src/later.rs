@@ -9,14 +9,11 @@
 //!
 //! What comes back is a [`Slot`]: a message is `Clone`, and what a thread
 //! makes (a replica) need not be, so the message carries a handle to it and
-//! whoever handles the message [`Slot::take`]s it, once. In a browser there
-//! is no thread to give it to (and a replica there is not `Send`): what a
-//! page opens it opens in boot, and only the desktop has [`off_thread`].
+//! whoever handles the message [`Slot::take`]s it, once.
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-#[cfg(not(target_arch = "wasm32"))]
 use iced::Task;
 
 /// What a thread made, waiting for the message that carries it to be
@@ -48,7 +45,6 @@ impl<T> fmt::Debug for Slot<T> {
 
 /// `work` on a thread of its own, and `done` with what it made, as the
 /// window's next message.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn off_thread<T, M>(work: impl FnOnce() -> T + Send + 'static, done: impl Fn(Slot<T>) -> M + Send + 'static) -> Task<M>
 where
     T: Send + 'static,

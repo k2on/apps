@@ -20,22 +20,16 @@ use crate::{style, theme};
 
 /// A name or a heading: the interface's face, bold.
 ///
-/// On the desktop that is the system's sans-serif, bold. In a browser there
-/// are no system fonts and iced draws everything in the Fira Sans it embeds,
-/// which is Regular alone — so [`FIRA_SANS_BOLD`] is loaded beside it, and
-/// this names the family outright: a generic sans-serif there matches no
-/// family at all.
+/// The system's sans-serif, bold; [`FIRA_SANS_BOLD`] is loaded beside it
+/// for a system that has none.
 pub const BOLD: Font = Font {
-    #[cfg(target_arch = "wasm32")]
-    family: iced::font::Family::Name("Fira Sans"),
     weight: Weight::Bold,
     ..Font::DEFAULT
 };
 
 /// Fira Sans Bold 4.203 (SIL OFL 1.1, `fonts/LICENSE.fira-sans.txt`), from
 /// google/fonts — the same release as the Regular iced embeds. An app hands
-/// it to `iced::application(...).font(...)` so [`BOLD`] has a face to draw
-/// with in a browser; on the desktop it is a fallback.
+/// it to `iced::application(...).font(...)`: a fallback for [`BOLD`].
 pub const FIRA_SANS_BOLD: &[u8] = include_bytes!("../fonts/FiraSans-Bold.ttf");
 
 /// A banner's shape: width over height.

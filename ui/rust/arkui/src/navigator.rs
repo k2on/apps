@@ -25,7 +25,6 @@ pub fn route_of_link<R: Routable>(link: &str, scheme: &str) -> Option<R> {
 /// The link a desktop app was opened with — `scheme://…` among its
 /// arguments, which is how a desktop's URL handler passes one. A browser's
 /// link is its address, which the router already reads.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn link_arg(scheme: &str) -> Option<String> {
     let prefix = format!("{scheme}://");
     std::env::args().skip(1).find(|a| a.starts_with(&prefix))

@@ -48,7 +48,7 @@ what — once. The parts decide *how*, from the size class, the platform's
 conventions and its input, in one place each (the width token is the
 parts', never an app's: SwiftUI's compact and regular).
 
-| SwiftUI (the design) | Compose (Android) | iced (desktop, wasm) | Leptos (the DOM) |
+| SwiftUI (the design) | Compose (Android) | iced (desktop) | Leptos (the DOM) |
 |---|---|---|---|
 | `App` + `WindowGroup` | the activity's root | the main window (`arkui::window`) | the page |
 | `Settings` scene | a settings screen | a second window | a route, shown as a dialog over the page |

@@ -1,9 +1,8 @@
-//! What the address bar says, in a browser — for any app's routes.
+//! Where the app is, as an address bar would say it — for any app's routes,
+//! kept in memory on the desktop ([`Memory`]) so that back and forward work
+//! as a browser's do.
 //!
-//! A page that shows a list, then a record, then a person and answers the back
-//! button by leaving the site has broken the one control every browser has.
-//! So where the app is goes in the URL's fragment, and the fragment is read
-//! back. An app's routes are its domain's `Route` enum, spelled by
+//! Where the app is goes in a fragment, and the fragment is read back. An app's routes are its domain's `Route` enum, spelled by
 //! `ark-router` ([`Routable`]: a path such as `album/Water%20Music`); this
 //! file owns the address bar, which says that path after a `#`.
 //!
@@ -17,17 +16,9 @@
 //! which also decides what a stale link does: land somewhere that is a page,
 //! rather than on a heading with nothing under it.
 //!
-//! **Read when it moves, not on a clock.** It used to be polled on the app's
-//! 50 ms tick, on the reasoning that an app with a tick already has a loop;
-//! an app with no loop (`docs/plan-reactive.md`) has nothing to poll on. So
-//! the browser's `popstate` and `hashchange` wake it
-//! ([`crate::wake::page_changes`]) and the app calls [`Router::poll`] after
-//! every update — a string compare, which also catches a deep link that was
-//! not yet resolvable when it arrived.
-//!
-//! **The history API, not `location.hash = …`.** Both change the URL; the
-//! second also fires a `hashchange` that would read back as somebody pressing
-//! the back button.
+//! **Read after every update, not on a clock.** The app calls
+//! [`Router::poll`] after every update — a string compare, which also
+//! catches a deep link that was not yet resolvable when it arrived.
 //!
 //! **The bar is reconciled, not pushed.** There are several ways what is shown
 //! can change — a click, a key, a menu's "Go to", the back button itself — and
@@ -60,7 +51,7 @@ pub enum Nav {
     Replace,
 }
 
-/// Where fragments are read from and written to. [`Browser`] is the real one;
+/// Where fragments are read from and written to. [`Memory`] is the real one;
 /// a test can hand a [`Router`] anything else.
 pub trait AddressBar {
     /// The fragment, `#` included, or `None` when there is none (or no bar).
@@ -79,72 +70,16 @@ pub trait AddressBar {
     }
 }
 
-/// The browser's address bar. On the desktop there is none, so this keeps
-/// one in memory — the entries written and which is current — so that back
-/// and forward (`^O`, `^I`, a swipe) mean the same in both builds, and the
-/// one place an app records a change is written once.
+/// An address bar kept in memory — the entries written and which is
+/// current — so that back and forward (`^O`, `^I`, a swipe) work as a
+/// browser's do, and the one place an app records a change is written once.
 #[derive(Debug, Default, Clone)]
-pub struct Browser {
-    #[cfg(not(target_arch = "wasm32"))]
+pub struct Memory {
     entries: Vec<String>,
-    #[cfg(not(target_arch = "wasm32"))]
     at: usize,
 }
 
-// Which entry of this app's own the browser is on: each is written with its
-// index as its state, counting from the one the app opened on (no state, 0),
-// and the furthest written is kept, so back stops at the first and forward at
-// the last. A reload forgets the furthest, and so whatever was forward of it.
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    static FURTHEST: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(target_arch = "wasm32")]
-fn entry(history: &web_sys::History) -> i32 {
-    history.state().ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as i32
-}
-
-#[cfg(target_arch = "wasm32")]
-impl AddressBar for Browser {
-    fn read(&self) -> Option<String> {
-        let hash = web_sys::window()?.location().hash().ok()?;
-        (!hash.is_empty()).then_some(hash)
-    }
-
-    fn write(&mut self, fragment: &str, nav: Nav) {
-        let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
-            return;
-        };
-        let at = entry(&history);
-        let _ = match nav {
-            Nav::Push => {
-                // A new place drops whatever was forward of here.
-                FURTHEST.with(|f| f.set(at + 1));
-                history.push_state_with_url(&(at + 1).into(), "", Some(fragment))
-            }
-            Nav::Replace => history.replace_state_with_url(&at.into(), "", Some(fragment)),
-        };
-    }
-
-    fn go(&mut self, by: isize) {
-        if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
-            let _ = history.go_with_delta(by as i32);
-        }
-    }
-
-    fn can_go(&self, by: isize) -> bool {
-        let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
-            return false;
-        };
-        let at = entry(&history);
-        let to = at + by as i32;
-        to >= 0 && to <= FURTHEST.with(|f| f.get()).max(at)
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl AddressBar for Browser {
+impl AddressBar for Memory {
     fn read(&self) -> Option<String> {
         self.entries.get(self.at).cloned()
     }
@@ -173,7 +108,7 @@ impl AddressBar for Browser {
 }
 
 /// Keeps the address bar and what an app is showing in agreement.
-pub struct Router<R, B = Browser> {
+pub struct Router<R, B = Memory> {
     bar: B,
     /// The last route this app acted on or wrote. Without it every update
     /// would re-resolve the same fragment — and a fragment naming something
@@ -185,13 +120,13 @@ pub struct Router<R, B = Browser> {
     nav: Nav,
 }
 
-impl<R: Routable> Default for Router<R, Browser> {
+impl<R: Routable> Default for Router<R, Memory> {
     fn default() -> Self {
-        Router::with_bar(Browser::default())
+        Router::with_bar(Memory::default())
     }
 }
 
-impl<R: Routable> Router<R, Browser> {
+impl<R: Routable> Router<R, Memory> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -428,7 +363,6 @@ mod tests {
     /// The desktop's bar in memory goes back and forward as a browser's
     /// does, and a new place drops what was forward. Falsified by not
     /// truncating in `write`: the last `go(1)` still found the album.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_desktop_bar_goes_back_and_forward() {
         let mut router: Router<Here> = Router::new();

@@ -68,20 +68,11 @@ pub fn logins() -> Logins {
 
 /// Where the server is, and a name to offer a dev server.
 pub fn config() -> (String, Option<String>) {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let args: Vec<String> = std::env::args().collect();
         let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
         let server = flag("--server").unwrap_or_else(|| DEFAULT_SERVER.into());
         (server.trim_end_matches('/').to_string(), flag("--user"))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let location = web_sys::window().map(|w| w.location());
-        let query = location.as_ref().and_then(|l| l.search().ok()).unwrap_or_default();
-        let origin = location.as_ref().and_then(|l| l.origin().ok()).unwrap_or_else(|| DEFAULT_SERVER.into());
-        let server = ark_auth::query_value(&query, "server").unwrap_or(origin);
-        (server.trim_end_matches('/').to_string(), ark_auth::query_value(&query, "user"))
     }
 }
 
@@ -96,23 +87,16 @@ pub fn open(server: &str, login: Option<&Login>) -> Result<Replica, String> {
 
 /// Where a server's replica is kept.
 fn disk(server: &str) -> Result<Box<dyn Disk>, String> {
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let dir = data_dir(server);
         ark_peer::Files::new(&dir)
             .map(|f| Box::new(f) as Box<dyn Disk>)
             .map_err(|e| format!("{}: {e}", dir.display()))
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = server;
-        Ok(Box::new(ark_peer::Memory::default()))
-    }
 }
 
 /// `$XDG_DATA_HOME/money/<server>`, or `~/.local/share/…`, or the temp
 /// directory on a machine with neither.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn data_dir(server: &str) -> std::path::PathBuf {
     use std::path::PathBuf;
     let base = std::env::var_os("XDG_DATA_HOME")
@@ -124,24 +108,15 @@ pub fn data_dir(server: &str) -> std::path::PathBuf {
 
 /// A server's address as one path segment: `http://127.0.0.1:8788` is
 /// `http___127_0_0_1_8788`.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn server_key(server: &str) -> String {
     let server = server.trim_end_matches('/');
     server.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
 }
 
-/// The socket's wake: ring the window's bell, from the socket's thread
-/// natively and from the `WebSocket`'s callbacks in a browser.
+/// The socket's wake: ring the window's bell, from the socket's thread.
 pub fn waker(bell: &arkui::wake::Bell) -> ark_peer::Wake {
     let bell = bell.clone();
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::sync::Arc::new(move || bell.ring())
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        std::rc::Rc::new(move || bell.ring())
-    }
+    std::sync::Arc::new(move || bell.ring())
 }
 
 /// The name Settings gives a login.

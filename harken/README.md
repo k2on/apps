@@ -4,7 +4,7 @@ A self-hosted music system: a library a server scans from a directory,
 podcasts and sermons it follows by their feeds and downloads, playlists, one listening session per account across every device, and the
 speakers in the house as devices in it. All of it runs on ArkDB at spec v5
 (`docs/plan-v5.md`): one log, one domain written once in plain Rust and
-linked by the server, the desktop, the browser and the phones, and every
+linked by the server, the desktop and the phones, and every
 query a view a client keeps up to date by the rows a change touched.
 
 ```
@@ -17,10 +17,10 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            file; host.rs, what an app knows
            of it beside its functions
 server/    an ark-peer that listens, with harken's own parts: the scanner, the Home Assistant
-           bridge, sign-in, /media, the web build;
+           bridge, sign-in, /media, a web directory when given one;
            the NixOS module (server/README.md)
-iced/      the desktop and browser client, on arkui and ark-peer; the `demo`
-           feature is the seeded library GitHub Pages publishes
+iced/      the desktop client, on arkui and ark-peer; the `demo`
+           feature is a seeded library with no server
 ffi/       the phones' library: ark-ffi (the kernel through UniFFI) with the
            domain linked in — `harken_open`, the listening session as JSON,
            and a Hall, a harken server in the process for the apps' tests
@@ -31,7 +31,7 @@ ios/       SwiftUI over ffi/, through the Swift `arkdb gen swift` writes
 ```
 
 **What runs where.** The domain is Rust and runs everywhere as Rust: the
-server, the desktop and the browser (wasm) link it, and each phone loads
+server and the desktop link it, and each phone loads
 it inside one native library, `libharken_ffi` (`ffi/`, `docs/plan-v5.md`
 §1.16) — the kernel, the link, the disk and the views are the same code on
 every device. A phone's own code is its screens, its player and its
@@ -279,8 +279,6 @@ Everything is `nix`, from the repository root:
     nix build .#harken-server      # the server, and harken-peer beside it
     nix run .#harken-serve         # …in dev auth: anyone is whoever they say
     nix build .#harken-iced        # the desktop window
-    nix build .#harken-web         # the browser demo, as a static directory (Pages)
-    nix build .#harken-web-server  # the browser client harken-server serves
     nix build .#harken-domain      # the domain crate, its schema hash held to its pin
     nix flake check                # fmt, clippy and every Rust test; the domain
                                    # builds, its schema hash pinned;
@@ -293,9 +291,10 @@ options). The phones:
     nix build .#harken-apk         # the APK, its JVM tests run first (android/README.md)
     nix build .#harken-ios-xcframework  # a Mac only: HarkenFFI.xcframework (ios/README.md)
 
-One workflow builds from `main` (`.github/workflows/build.yaml`): it
-publishes `harken-web` at <https://k2on.github.io/apps/harken/>; the
-F-Droid repository is `nix build .#fdroid-repo` over the APKs. That
+One workflow builds from `main` (`.github/workflows/build.yaml`). The
+browser demo that Pages published was iced compiled to wasm; iced is the
+desktop's alone now, and harken leaves Pages until its Leptos client
+exists (ui/docs/app.md). The F-Droid repository is `nix build .#fdroid-repo` over the APKs. That
 is the workflow once `.github/workflows/build.yaml` is updated for the native tree (its cache keys name files that no longer exist), and the
 patch predates the APK's return: its APK job is not in it.
 
@@ -329,7 +328,7 @@ first asks whoever served it: when its `/healthz` answers — a harken
 server serving its own page — it opens on that server, as it always did;
 from anywhere else (GitHub Pages, a file) it opens alone. Alone is this
 device's own replica in a fixed place — `local` under
-`$XDG_DATA_HOME/harken`, in a browser in the page's memory, until it has a disk that can hold a library —
+`$XDG_DATA_HOME/harken` —
 and it is not a demo: the peer is its own authority, every change is
 sequenced as it is made and kept, and the debug view (`D`) says `alone`. The
 line above the table has a server address and **connect**: that joins the
@@ -498,9 +497,9 @@ run on, through the same UniFFI Kotlin — alone and in a Hall; it has not
 been installed. The iOS app has not been built: the xcframework needs a
 Mac, and its Swift has not met a compiler (android/README.md,
 ios/README.md say what was checked).
-No desktop window has been opened: the browser build was drawn in
-headless Chromium under v4 and has not been drawn on v5, and the desktop
-is only driven through its tests. Nothing
+No desktop window has been opened: the desktop is only driven through its
+tests (the browser build, iced in wasm, is gone: harken's browser client
+will be Leptos, ui/docs/app.md). Nothing
 here has met a real Home Assistant or a real OpenID Connect provider.
 The listening session has run between real sockets, peers and the bridge
 against a stand-in house, and the reconcilers against a stand-in player;

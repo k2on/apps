@@ -471,32 +471,18 @@ rec {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "clock" ];
           }
           {
             name = "iced";
             packageId = "iced";
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "smol" "svg" "image" "advanced" "fira-sans" ];
-          }
-          {
-            name = "iced";
-            packageId = "iced";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "webgl" "svg" "image" "advanced" "fira-sans" ];
           }
           {
             name = "image";
             packageId = "image";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "jpeg" "png" ];
-          }
-          {
-            name = "js-sys";
-            packageId = "js-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "raw-window-handle";
@@ -507,18 +493,7 @@ rec {
             name = "ureq";
             packageId = "ureq";
             usesDefaultFeatures = false;
-            target = { target, features }: (!("wasm32" == target."arch" or null));
             features = [ "tls" ];
-          }
-          {
-            name = "wasm-bindgen";
-            packageId = "wasm-bindgen";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-          }
-          {
-            name = "wasm-bindgen-futures";
-            packageId = "wasm-bindgen-futures";
-            target = { target, features }: ("wasm32" == target."arch" or null);
           }
           {
             name = "wayland-client";
@@ -531,12 +506,6 @@ rec {
             packageId = "wayland-protocols";
             target = { target, features }: ("linux" == target."os" or null);
             features = [ "client" "unstable" ];
-          }
-          {
-            name = "web-sys";
-            packageId = "web-sys";
-            target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "History" "Location" "EventTarget" "Navigator" "Clipboard" "Document" "Element" "HtmlElement" "HtmlInputElement" "Event" "DragEvent" "DataTransfer" "FileList" "File" "Blob" ];
           }
           {
             name = "zbus";
@@ -4680,7 +4649,7 @@ rec {
           "wgpu-bare" = [ "iced_renderer/wgpu-bare" "iced_widget/wgpu" ];
           "x11" = [ "iced_renderer/x11" "iced_winit/x11" ];
         };
-        resolvedDefaultFeatures = [ "advanced" "crisp" "default" "fira-sans" "image" "image-without-codecs" "linux-theme-detection" "smol" "svg" "thread-pool" "tiny-skia" "wayland" "web-colors" "webgl" "wgpu" "wgpu-bare" "x11" ];
+        resolvedDefaultFeatures = [ "advanced" "crisp" "default" "fira-sans" "image" "image-without-codecs" "linux-theme-detection" "smol" "svg" "thread-pool" "tiny-skia" "wayland" "web-colors" "wgpu" "wgpu-bare" "x11" ];
       };
       "iced_core" = rec {
         crateName = "iced_core";
@@ -4960,7 +4929,7 @@ rec {
           "wgpu-bare" = [ "iced_wgpu" ];
           "x11" = [ "iced_tiny_skia?/x11" ];
         };
-        resolvedDefaultFeatures = [ "fira-sans" "iced_tiny_skia" "iced_wgpu" "image" "svg" "tiny-skia" "wayland" "web-colors" "webgl" "wgpu" "wgpu-bare" "x11" ];
+        resolvedDefaultFeatures = [ "fira-sans" "iced_tiny_skia" "iced_wgpu" "image" "svg" "tiny-skia" "wayland" "web-colors" "wgpu" "wgpu-bare" "x11" ];
       };
       "iced_runtime" = rec {
         crateName = "iced_runtime";
@@ -5141,7 +5110,7 @@ rec {
           "web-colors" = [ "iced_graphics/web-colors" ];
           "webgl" = [ "wgpu/webgl" ];
         };
-        resolvedDefaultFeatures = [ "default" "image" "resvg" "svg" "web-colors" "webgl" ];
+        resolvedDefaultFeatures = [ "default" "image" "resvg" "svg" "web-colors" ];
       };
       "iced_widget" = rec {
         crateName = "iced_widget";
@@ -16052,7 +16021,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "Clipboard" "CssStyleDeclaration" "DataTransfer" "Document" "DomException" "DomRect" "DomRectReadOnly" "DragEvent" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FocusEvent" "History" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlInputElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PremultiplyAlpha" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Screen" "ScreenOrientation" "UiEvent" "Url" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AngleInstancedArrays" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CssStyleDeclaration" "Document" "DomException" "DomRect" "DomRectReadOnly" "Element" "Event" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "FocusEvent" "HtmlCanvasElement" "HtmlElement" "HtmlImageElement" "HtmlMediaElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PremultiplyAlpha" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Screen" "ScreenOrientation" "UiEvent" "Url" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
@@ -16313,7 +16282,7 @@ rec {
           "wgpu-core" = [ "dep:wgpu-core" ];
           "wgsl" = [ "wgpu-core?/wgsl" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgl" "webgpu" "wgpu-core" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "parking_lot" "std" "vulkan" "web" "webgpu" "wgsl" ];
       };
       "wgpu-core" = rec {
         crateName = "wgpu-core";
@@ -16426,12 +16395,6 @@ rec {
             target = { target, features }: ("emscripten" == target."os" or null);
           }
           {
-            name = "wgpu-core-deps-wasm";
-            packageId = "wgpu-core-deps-wasm";
-            optional = true;
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-          }
-          {
             name = "wgpu-core-deps-windows-linux-android";
             packageId = "wgpu-core-deps-windows-linux-android";
             optional = true;
@@ -16481,7 +16444,7 @@ rec {
           "wgpu-core-deps-windows-linux-android" = [ "dep:wgpu-core-deps-windows-linux-android" ];
           "wgsl" = [ "naga/wgsl-in" ];
         };
-        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "raw-window-handle" "renderdoc" "std" "vulkan" "webgl" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-wasm" "wgpu-core-deps-windows-linux-android" "wgsl" ];
+        resolvedDefaultFeatures = [ "default" "dx12" "gles" "metal" "portable-atomic" "raw-window-handle" "renderdoc" "std" "vulkan" "wgpu-core-deps-apple" "wgpu-core-deps-emscripten" "wgpu-core-deps-windows-linux-android" "wgsl" ];
       };
       "wgpu-core-deps-apple" = rec {
         crateName = "wgpu-core-deps-apple";
@@ -16526,27 +16489,6 @@ rec {
           "gles" = [ "wgpu-hal/gles" ];
         };
         resolvedDefaultFeatures = [ "gles" ];
-      };
-      "wgpu-core-deps-wasm" = rec {
-        crateName = "wgpu-core-deps-wasm";
-        version = "27.0.0";
-        edition = "2021";
-        sha256 = "1dshg8m7qg3crlscvy1hi1brhbhfxdydy6a8wivsh9xhygf2f44v";
-        libName = "wgpu_core_deps_wasm";
-        authors = [
-          "gfx-rs developers"
-        ];
-        dependencies = [
-          {
-            name = "wgpu-hal";
-            packageId = "wgpu-hal";
-            target = { target, features }: (("wasm32" == target."arch" or null) && (!("emscripten" == target."os" or null)));
-          }
-        ];
-        features = {
-          "webgl" = [ "wgpu-hal/gles" ];
-        };
-        resolvedDefaultFeatures = [ "webgl" ];
       };
       "wgpu-core-deps-windows-linux-android" = rec {
         crateName = "wgpu-core-deps-windows-linux-android";

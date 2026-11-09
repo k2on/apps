@@ -13,13 +13,10 @@
 //! here, where the fetch already is, and what reaches the renderer is
 //! `Handle::from_rgba` at most [`BOUND`] on its longest side.
 //!
-//! **Two caches, because the two targets have different ones to offer.** On a
-//! desktop it is a directory under `XDG_CACHE_HOME`, so a picture survives a
-//! restart. In a browser the disk belongs to the browser, so it is the Cache
-//! API — keyed by URL, which is exactly the shape of this question. Both sit
-//! behind one [`Images::want`] / [`Images::handle`] pair.
+//! **The cache is a directory** under `XDG_CACHE_HOME`, so a picture
+//! survives a restart, behind one [`Images::want`] / [`Images::handle`] pair.
 //!
-//! What both cache is the *encoded* original — the fetch, not the decode — so
+//! What it caches is the *encoded* original — the fetch, not the decode — so
 //! the cache could be re-shrunk if the bound ever moved, and it is a tenth of
 //! the disk. What is not cached beyond the session is the `Handle`: it holds
 //! decoded pixels, and the map here is the session's while the disk is the
@@ -58,8 +55,8 @@ enum State {
 /// Every picture this session has asked about.
 pub struct Images {
     by_url: HashMap<String, State>,
-    /// The cache's name: a directory under `XDG_CACHE_HOME` on the desktop, a
-    /// Cache API store in a browser. An app's own, so two apps never share one.
+    /// The cache's name: a directory under `XDG_CACHE_HOME`. An app's own, so
+    /// two apps never share one.
     name: String,
     bound: u32,
 }
@@ -270,7 +267,6 @@ pub struct Loaded {
 /// FNV-1a over the bytes of a URL, as sixteen hex digits: the cache's filename.
 /// Sixty-four bits, not [`crate::art::hash`]'s thirty-two — a collision there
 /// is the wrong shade of a gradient and here it is the wrong picture.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn key(url: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in url.as_bytes() {
@@ -280,7 +276,6 @@ fn key(url: &str) -> String {
     format!("{h:016x}")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 mod imp {
     use super::{key, Loaded, Rgba};
     use iced::Task;
@@ -355,75 +350,6 @@ mod imp {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-mod imp {
-    use super::{Loaded, Rgba};
-    use iced::Task;
-    use wasm_bindgen::prelude::*;
-
-    // A snippet rather than `web-sys`: `CacheStorage` is behind
-    // `web_sys_unstable_apis`, a `RUSTFLAGS` every build of the crate would
-    // have to agree on. This travels inside the module instead.
-    //
-    // `caches` needs a secure context, so it is absent on plain `http://` that
-    // is not localhost — a fall-through to a plain fetch, not a failure.
-    //
-    // The shrink is `createImageBitmap`, the browser's own decoder, off the
-    // main thread. Decoded from the fetched *blob*, never from the URL: a
-    // canvas that has drawn a cross-origin image is tainted and `getImageData`
-    // throws, while a blob the page already holds is readable whatever its
-    // origin.
-    #[wasm_bindgen(inline_js = r#"
-export async function picture(url, name, bound) {
-  let store = null;
-  try { store = await caches.open(name); } catch (e) { store = null; }
-  let response = store ? await store.match(url) : null;
-  if (!response) {
-    response = await fetch(url, { mode: 'cors' });
-    if (!response.ok) throw new Error('HTTP ' + response.status);
-    // Put the clone, read the original: a body can be consumed exactly once.
-    if (store) { try { await store.put(url, response.clone()); } catch (e) {} }
-  }
-  const source = await createImageBitmap(await response.blob());
-  const long = Math.max(source.width, source.height);
-  const scale = long > bound ? bound / long : 1;
-  const w = Math.max(1, Math.round(source.width * scale));
-  const h = Math.max(1, Math.round(source.height * scale));
-  const canvas = typeof OffscreenCanvas === 'function'
-    ? new OffscreenCanvas(w, h)
-    : Object.assign(document.createElement('canvas'), { width: w, height: h });
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  context.drawImage(source, 0, 0, w, h);
-  source.close();
-  return { width: w, height: h, data: context.getImageData(0, 0, w, h).data };
-}
-"#)]
-    extern "C" {
-        #[wasm_bindgen(catch)]
-        async fn picture(url: &str, name: &str, bound: u32) -> Result<JsValue, JsValue>;
-    }
-
-    fn field(value: &JsValue, name: &str) -> Result<JsValue, String> {
-        js_sys::Reflect::get(value, &JsValue::from_str(name)).map_err(|_| format!("the picture had no {name}"))
-    }
-
-    pub fn fetch(url: String, name: String, bound: u32) -> Task<Loaded> {
-        let back = url.clone();
-        Task::perform(
-            async move {
-                let value = picture(&back, &name, bound)
-                    .await
-                    .map_err(|e| format!("could not fetch {back}: {}", e.as_string().unwrap_or_else(|| "failed".into())))?;
-                let width = field(&value, "width")?.as_f64().unwrap_or_default() as u32;
-                let height = field(&value, "height")?.as_f64().unwrap_or_default() as u32;
-                let pixels = js_sys::Uint8Array::new(&field(&value, "data")?).to_vec();
-                Ok(Rgba { width, height, pixels })
-            },
-            move |image| Loaded { url: url.clone(), image },
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{key, Images, BOUND};
@@ -458,7 +384,6 @@ mod tests {
     /// the size it was fetched. 960×1262 was going into the atlas as 4.8 MB to
     /// be drawn 132 pixels wide. Falsified by deleting the `resize`.
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
     fn a_portrait_is_shrunk_to_what_is_drawn() {
         let mut big = ::image::RgbImage::new(960, 1262);
         // Not a flat fill: a solid image encodes to almost nothing and would
@@ -538,7 +463,6 @@ mod tests {
     /// Anything already inside the bound is left exactly as it is — a
     /// resample there only loses detail. Falsified by always resizing.
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
     fn a_small_picture_is_left_alone() {
         let small = ::image::RgbImage::new(361, 295);
         let mut png = std::io::Cursor::new(Vec::new());

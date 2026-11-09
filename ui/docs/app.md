@@ -15,6 +15,12 @@ order.
 
 ## The Layers
 
+iced is the desktop's alone. The browser is drawn by Leptos over the real
+DOM (`ui/rust/web`, not written yet); money's and harken's iced builds for
+wasm32 are gone, and with them their Pages demos until the Leptos client
+exists. What has no UI stays wasm-capable for it: ark-peer, ark-auth's
+`web`, ark-format, ark-router, ark-app and the modules' `web` impls.
+
 ```
  money/app            the app: State, Msg, update, screen records, #[view] layouts
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
@@ -192,7 +198,7 @@ them (`AccountsApp.useModules(haptics:clipboard:share:)`) and registers
 them. Each module crate is its own UniFFI namespace in the app's one
 library, so its Kotlin package is `uniffi.ark_<name>`.
 
-| Module | Crate | iPhone, iPad, Mac | Android | Desktop and wasm (iced) | Browser (DOM) |
+| Module | Crate | iPhone, iPad, Mac | Android | Desktop (iced) | Browser (DOM) |
 |---|---|---|---|---|---|
 | haptics | `ark-haptics` | `PhoneHaptics` (UIFeedbackGenerator; NSHapticFeedbackManager) | `PhoneHaptics` (ArkUI's `View.perform`) | Unavailable | Unavailable |
 | clipboard | `ark-clipboard` | `PhoneClipboard` (UIPasteboard; NSPasteboard) | `PhoneClipboard` (ClipboardManager) | `Queued` (feature `desktop`), written by `iced::clipboard::write` | `Browser` (feature `web`) |
@@ -281,9 +287,7 @@ its ffi crate's `useModules` and registers the platform's class.
   message, the keys move and run, a press outside closes it), money-app
   (Accounts over the demo household with the fakes, Reconcile, the amount
   in cents, the row's menu in order), money-iced and harken-iced with
-  `demo`, money-ffi (`--no-default-features`: the session's day);
-  `cargo check --target wasm32-unknown-unknown` of money-iced and
-  harken-iced.
+  `demo`, money-ffi (`--no-default-features`: the session's day).
 - nix: `checks.theme`, `checks.ui`, `checks.modules`,
   `checks.money-ios-typecheck` (now with the listed modules' Swift, and
   the screens' glue: three name clashes it found are fixed — the UniFFI

@@ -10,9 +10,9 @@ Most of it is lifted from harken's iced client, where each rule was paid for,
 and the doc comments keep the reasons. Read them before "simplifying" a rule
 back into the bug it fixed.
 
-It builds for the desktop (`smol`) and for a browser (`webgl`). Text is iced's
-bundled Fira Sans (the `fira-sans` feature), because with no embedded font a
-browser draws no text at all.
+It is the desktop's alone (`smol`): a browser is drawn by Leptos over the
+DOM (ui/docs/app.md), never by iced in wasm. Text is iced's bundled Fira
+Sans (the `fira-sans` feature).
 
 ## What is in it
 
@@ -39,8 +39,8 @@ there.
 | `table` | `cell`, `cell_cut` (the caller says which part goes), `heading` (each cut to its column at layout — a cell its middle, a heading its end — with `SPACING` after it), `section`, `gutter`, `row`, `GUTTER`. |
 | `cards` | `Shelf` (`columns`, `grid`, `room`, where the scrollbar is subtracted), `Card<M>`, `view`, `view_card`, `header` (laid out inside the page: the name and the numbers wrap, the rest is cut), `empty_page`. |
 | `art` | `hash` (FNV-1a over UTF-16, the same as the phone's), `pair`, `square` (the derived square), and `picture` (the real one if it has arrived, the square until then). |
-| `images` | `Images::new(name)` with `want(url) -> Option<Task<Loaded>>`, `loaded`, `handle`. Pictures are decoded and bounded (`BOUND` is 384) off the render thread. The cache is a disk directory natively and the Cache API plus `createImageBitmap` in a browser. A failure is remembered. |
-| `route` | `trait Route { fragment, parse }`, `join`/`split`, `Router<R>` with `sync` (reconciled, not pushed), `replace_next` (a scrub is one entry) and `poll` (the back button, once there is something to resolve against), `AddressBar`, `Browser`. |
+| `images` | `Images::new(name)` with `want(url) -> Option<Task<Loaded>>`, `loaded`, `handle`. Pictures are decoded and bounded (`BOUND` is 384) off the render thread. The cache is a disk directory. A failure is remembered. |
+| `route` | `trait Route { fragment, parse }`, `join`/`split`, `Router<R>` with `sync` (reconciled, not pushed), `replace_next` (a scrub is one entry) and `poll` (the back button, once there is something to resolve against), `AddressBar`, `Memory` (the bar kept in memory). |
 | `scroll` | `reveal(id, grid, at)` keeps a keyboard cursor on screen. |
 | `fit`, `format`, `url` | `Cut` (`End`, `Middle`), `tail`/`middle`, `within` (the widest cut that fits a width in pixels); `clock`/`spell`/`plural`/`span`; `encode`/`encoded`/`decode`. |
 
@@ -148,13 +148,10 @@ by breaking what it checks. The doc comment on each test says how.
 ## Not verified
 
 No window has been opened. Nothing in the container that wrote this can show
-one, so every view function has been type-checked for the host and for
-`wasm32-unknown-unknown`, and none has been seen. The arithmetic behind the
-placement, widths, card columns, dwell, focus and routing is tested. What it
-looks like on screen is not. The browser halves of `route::Browser` and
-`images` (the history API, the Cache API snippet, `createImageBitmap`) compile
-for wasm and have never run. The native picture fetch has only been run as far
-as a refused connection.
+one, so every view function has been type-checked, and none has been seen
+except through `arkui-shots`. The arithmetic behind the placement, widths,
+card columns, dwell, focus and routing is tested. The native picture fetch
+has only been run as far as a refused connection.
 
 ## Motion
 

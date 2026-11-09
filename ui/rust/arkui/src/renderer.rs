@@ -16,7 +16,7 @@
 //!   iced alone would do. When none opens, iced is told tiny-skia
 //!   (`ICED_BACKEND`) and the line says why, down to the driver library
 //!   that would not load ([`native::why_none`]).
-//! - **One line on stderr** (the console in a browser), whatever `RUST_LOG`
+//! - **One line on stderr**, whatever `RUST_LOG`
 //!   says — the apps install no logger: `renderer: wgpu (Vulkan, AMD Radeon
 //!   …, discrete GPU)` or `renderer: tiny-skia (CPU) — no GPU adapter: …`.
 //! - **What was actually drawn with.** The window's root
@@ -42,7 +42,7 @@ pub enum Found {
     None(String),
     /// `ARK_RENDERER=cpu`: not asked.
     Cpu,
-    /// Not asked: a browser, whose adapter comes later and asynchronously,
+    /// Not asked:
     /// or a window [`choose`] was not called for.
     Unasked,
 }
@@ -79,7 +79,6 @@ static SAID: Mutex<String> = Mutex::new(String::new());
 /// in `main`, before `iced::application`.
 pub fn choose() {
     ASKED.store(true, Ordering::Relaxed);
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let asked = std::env::var("ARK_RENDERER").ok().map(|a| a.trim().to_ascii_lowercase());
         let forced = match asked.as_deref() {
@@ -119,7 +118,6 @@ pub fn choose() {
     say(&line());
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn set(key: &str, value: &str) {
     // Before iced starts and before any thread of this program's: `main`'s
     // first lines are the one place this is sound.
@@ -160,8 +158,6 @@ pub fn line() -> String {
         }
         (Found::None(why), _) => format!("tiny-skia (CPU) \u{2014} no GPU adapter: {why}"),
         (Found::Unasked, 0) => "not drawn yet".into(),
-        // A browser: WebGL, through wgpu.
-        (Found::Unasked, 1) if cfg!(target_arch = "wasm32") => "wgpu (WebGL)".into(),
         (Found::Unasked, 1) => "wgpu".into(),
         (Found::Unasked, _) => "tiny-skia (CPU)".into(),
     }
@@ -169,21 +165,7 @@ pub fn line() -> String {
 
 fn say(line: &str) {
     *SAID.lock().unwrap_or_else(|e| e.into_inner()) = line.to_string();
-    #[cfg(not(target_arch = "wasm32"))]
     eprintln!("renderer: {line}");
-    #[cfg(target_arch = "wasm32")]
-    console::log(&format!("renderer: {line}"));
-}
-
-#[cfg(target_arch = "wasm32")]
-mod console {
-    use wasm_bindgen::prelude::*;
-
-    #[wasm_bindgen]
-    extern "C" {
-        #[wasm_bindgen(js_namespace = console)]
-        pub fn log(line: &str);
-    }
 }
 
 /// The line, for an app's Settings: quiet, small, selectable by eye.
@@ -195,7 +177,6 @@ pub fn about<'a, M: 'a>() -> Element<'a, M> {
         .into()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod native {
     //! Asking wgpu, before iced does.
     use super::{Adapter, Found};

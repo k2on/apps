@@ -55,12 +55,11 @@ in
 
     web = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = money.money-web-server or null;
-      defaultText = lib.literalExpression "apps.packages.\${system}.money-web-server";
+      default = null;
       description = ''
-        The browser client to serve at `/`: the build that signs in against
-        the server serving it (`money-web-server`, not the demo
-        `money-web`). Null serves the socket alone.
+        The browser client to serve at `/`, a static directory. Null serves
+        the socket alone; there is no browser client yet (the Leptos one,
+        ui/docs/app.md, is not written).
       '';
     };
 

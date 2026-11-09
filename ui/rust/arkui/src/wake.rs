@@ -7,14 +7,12 @@
 //! nothing.
 //!
 //! - A [`Bell`] is a subscription anything can ring from anywhere: a
-//!   socket's reader thread, a `WebSocket` callback, a lock-screen button's
+//!   socket's reader thread, a lock-screen button's
 //!   handler. Rings that land before the app has answered are one message.
 //! - [`at`] is a one-shot timer for a deadline — the redial after a close,
 //!   a second of quiet — keyed by the deadline itself, so the same deadline
 //!   asked for on every `subscription()` call is one timer, and a moved one
 //!   replaces it.
-//! - [`page_changes`] calls back on the browser's `popstate` and
-//!   `hashchange`: the address bar read when it moves rather than polled.
 //!
 //! A clock that is genuinely needed — an animation, a scrubber while audio
 //! plays — is still `iced::time::every`, subscribed only while it is.
@@ -139,50 +137,16 @@ impl Hash for Due {
     }
 }
 
-/// A future that is ready `d` from now: a thread natively, `setTimeout` in
-/// a browser — no runtime of its own either way.
+/// A future that is ready `d` from now: a thread, no runtime of its own.
 fn sleep(d: Duration) -> impl std::future::Future<Output = ()> {
     let (tx, rx) = iced::futures::channel::oneshot::channel::<()>();
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::thread::spawn(move || {
-            std::thread::sleep(d);
-            let _ = tx.send(());
-        });
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-        let fire = wasm_bindgen::closure::Closure::once_into_js(move || {
-            let _ = tx.send(());
-        });
-        if let Some(w) = web_sys::window() {
-            let ms = d.as_millis().min(i32::MAX as u128) as i32;
-            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(fire.unchecked_ref(), ms);
-        }
-    }
+    std::thread::spawn(move || {
+        std::thread::sleep(d);
+        let _ = tx.send(());
+    });
     async move {
         let _ = rx.await;
     }
-}
-
-/// Call `f` whenever the browser moves the address bar itself — the back
-/// button (`popstate`), a fragment typed or followed (`hashchange`) — for
-/// the life of the page. Nothing on the desktop, which has no bar. Writing
-/// the bar through the history fires neither, which is why
-/// [`crate::router::Router::sync`] does.
-pub fn page_changes(f: impl Fn() + 'static) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-        let Some(w) = web_sys::window() else { return };
-        let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(f).into_js_value();
-        for event in ["popstate", "hashchange"] {
-            let _ = w.add_event_listener_with_callback(event, cb.unchecked_ref());
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = f;
 }
 
 #[cfg(test)]

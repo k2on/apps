@@ -148,9 +148,5 @@ fn player(me: &str) -> harken_player::Player {
 /// user-agent string, which is a guess dressed as a fact. The picker marks
 /// which row is you anyway.
 fn device_name() -> String {
-    if cfg!(target_arch = "wasm32") {
-        "Browser".to_string()
-    } else {
-        "Desktop".to_string()
-    }
+    "Desktop".to_string()
 }

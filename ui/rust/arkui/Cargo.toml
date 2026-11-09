@@ -2,7 +2,7 @@
 name = "arkui"
 workspace = "../../../rust"
 version = "0.1.0"
-description = "The ui every app here shares: iced components, the vim keyboard, theming, the glyph table, routing."
+description = "The ui every app here shares, on the desktop: iced components, the vim keyboard, theming, the glyph table, routing."
 edition.workspace = true
 license.workspace = true
 
@@ -20,12 +20,13 @@ ark-router = { path = "../router" }
 # A view laid out once in Rust (`view.rs` draws it), and `#[view]`.
 ark-app = { path = "../app", optional = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# `smol` gives iced a timer and an executor on the desktop; a browser already
-# has both. `svg` is every glyph and the derived square, `image` a fetched
-# picture, `advanced` the scroll operation that keeps a keyboard cursor on
-# screen. `fira-sans` is the typeface: with no embedded font iced asks the
-# system, and wasm has no font access, so a browser draws no text at all.
+# iced is the desktop's alone: a browser is drawn by Leptos over the DOM
+# (ui/docs/app.md), never by iced in wasm.
+#
+# `smol` gives iced a timer and an executor. `svg` is every glyph and the
+# derived square, `image` a fetched picture, `advanced` the scroll operation
+# that keeps a keyboard cursor on screen. `fira-sans` is the typeface iced
+# embeds, so a system with no fonts still draws text.
 iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
 # Decoding a picture on the thread that fetched it, so the renderer is handed
 # pixels at the size they are drawn rather than a megapixel JPEG to decode
@@ -36,7 +37,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # runtime on the desktop and one picture is not a reason to start one.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # The system's time zone, for the day an instant fell on where the person
-# is (`format::utc_offset_minutes`); a browser asks its own `Date`.
+# is (`format::utc_offset_minutes`).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # A file chosen on Linux: the desktop's chooser through its portal, over the
@@ -52,24 +53,10 @@ raw-window-handle = "0.6"
 wayland-client = { version = "0.31", features = ["system"] }
 wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[dev-dependencies]
 # A window driven by hand in a test: a click at a point, and the messages
 # it gave.
 iced_test = "0.14"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# WebGL rather than WebGPU, for reach. Without it wgpu finds no backend and
-# the software fallback cannot have the canvas WebGL already claimed.
-iced = { version = "0.14", features = ["webgl", "svg", "image", "advanced", "fira-sans"] }
-# The address bar: reading the fragment and writing it through the history,
-# and hearing the browser move it (`wake::page_changes`); a file dropped on the
-# page or chosen with a file input (`files.rs`).
-web-sys = { version = "0.3", features = ["Window", "History", "Location", "EventTarget", "Navigator", "Clipboard", "Document", "Element", "HtmlElement", "HtmlInputElement", "Event", "DragEvent", "DataTransfer", "FileList", "File", "Blob"] }
-wasm-bindgen = "0.2"
-# The browser half of the picture fetch: a promise from the snippet in
-# `images.rs`, awaited, and the `Uint8Array` it resolves to copied out.
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
 
 [features]
 # `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.

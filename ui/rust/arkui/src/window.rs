@@ -2,11 +2,9 @@
 //! and the one subscription that goes with it — so that what a window
 //! needs of the platform is arkui's to know, not each app's.
 //!
-//! - **Text boxes copy, cut and paste in a browser too** (the clipboard
-//!   module, private to arkui): on the desktop iced's text box has the
-//!   system's clipboard; in a browser the root hands every text box under
-//!   it the browser's, and [`wakes`] rings when a paste the browser handed
-//!   over has arrived, so the box with the keys takes it at once.
+//! - **The renderer, known for certain** (the root module, private to
+//!   arkui): the root is drawn every frame by whichever renderer iced
+//!   settled on ([`crate::renderer`]).
 //! - **The pointer, tracked over every layer** ([`tracked`]): a `stack`
 //!   hides the pointer from the layers under the one it is over, so a
 //!   `mouse_area` on the page stops hearing it the moment a sheet, a
@@ -27,10 +25,9 @@
 use iced::widget::mouse_area;
 use iced::{Element, Point, Subscription, Task};
 
-/// The window's root: `content` with every text box in it copying,
-/// cutting and pasting in a browser as on the desktop.
+/// The window's root: `content`, drawn as the window's whole view.
 pub fn view<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
-    crate::clipboard::view(content)
+    crate::root::view(content)
 }
 
 /// [`view`], and the pointer heard wherever it moves in the window, over
@@ -39,11 +36,11 @@ pub fn tracked<'a, M: Clone + 'a>(content: impl Into<Element<'a, M>>, moved: imp
     view(mouse_area(content).on_move(moved))
 }
 
-/// Rings when something under the root needs a frame of its own — a paste
-/// arrived, fingers rested on the trackpad or lifted — for the app to
-/// answer with any message.
+/// Rings when something under the root needs a frame of its own — fingers
+/// rested on the trackpad or lifted — for the app to answer with any
+/// message.
 pub fn wakes() -> Subscription<()> {
-    Subscription::batch([crate::clipboard::pastes(), crate::touchpad::subscription()])
+    crate::touchpad::subscription()
 }
 
 /// What a window starts with, beside an app's own boot task: on Wayland,
