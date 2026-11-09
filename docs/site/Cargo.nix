@@ -414,13 +414,27 @@ rec {
           "ffi" = [ "dep:uniffi" ];
         };
       };
-      "ark-macros" = rec {
-        crateName = "ark-macros";
+      "ark-router" = rec {
+        crateName = "ark-router";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-macros; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router; };
+        libName = "ark_router";
+        dependencies = [
+          {
+            name = "ark-router-macros";
+            packageId = "ark-router-macros";
+          }
+        ];
+
+      };
+      "ark-router-macros" = rec {
+        crateName = "ark-router-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router-macros; };
         procMacro = true;
-        libName = "ark_macros";
+        libName = "ark_router_macros";
         dependencies = [
           {
             name = "proc-macro2";
@@ -435,20 +449,6 @@ rec {
             packageId = "syn 2.0.119";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
-          }
-        ];
-
-      };
-      "ark-router" = rec {
-        crateName = "ark-router";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-router; };
-        libName = "ark_router";
-        dependencies = [
-          {
-            name = "ark-macros";
-            packageId = "ark-macros";
           }
         ];
 

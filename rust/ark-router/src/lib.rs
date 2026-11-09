@@ -31,7 +31,7 @@ extern crate self as ark_router;
 
 pub mod url;
 
-pub use ark_macros::Routes;
+pub use ark_router_macros::Routes;
 
 /// Every route reads back from its path as itself — from its path and from
 /// the path as a URL's fragment — and its path read back is written the

@@ -71,6 +71,8 @@ on:
       - "rust/ark-peer/**"
       - "rust/ark-ffi/**"
       - "rust/ark-format/**"
+      - "rust/ark-router/**"
+      - "rust/ark-router-macros/**"
       - "rust/Cargo.lock"
       - "rust/Cargo.toml"
       - "swift/ArkUI/**"
