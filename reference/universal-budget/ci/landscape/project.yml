@@ -1,0 +1,39 @@
+# The iPad's landscape shots (../shots.sh): simctl cannot turn a simulator
+# on its side, XCUIDevice can, so a UI test turns it, launches the installed
+# Budget with each shot's arguments and writes the screen once it is still.
+name: Landscape
+options:
+  bundleIdPrefix: com.example.universalbudget.ci
+  deploymentTarget:
+    iOS: "18.0"
+targets:
+  Host:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+  Shots:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Shots]
+    dependencies:
+      - target: Host
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Host
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+schemes:
+  Shots:
+    build:
+      targets:
+        Host: all
+        Shots: [test]
+    test:
+      targets: [Shots]
