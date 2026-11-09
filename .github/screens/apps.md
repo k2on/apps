@@ -313,13 +313,13 @@ build, the same driver, the same shots.json, light and dark.
   the next thing to add when there is a Mac build to drive.
 - **What a run costs.** Linux: a "large" job per app and theme, beside
   the phone's, each its own nix, server and emulators (two boots), at
-  once with the phone's: some 3 (revelation) to 12 (harken) minutes each,
-  about 50 runner-minutes for every app on a run, and no longer to wait
-  for than the phone's. The Mac: for apps that take neither the iPad nor
-  the Mac, a few seconds (the iPad's check, the listing of the Mac
-  packages); for one that takes the iPad, the iPad's boot (some two
-  minutes) and its shots twice over (money's were nine minutes, both
-  ways up, light and dark).
+  once with the phone's: 5 (revelation), 12 (money) and 17 to 18
+  (harken) minutes each, some 70 runner-minutes for every app on a run;
+  the longest Android job goes from about 10 minutes to about 18. The
+  Mac: for apps that take neither the iPad nor the Mac, about five
+  seconds (the iPad's check, the listing of the Mac packages); for one
+  that takes the iPad, the iPad's boot (about a minute) and its shots
+  twice over (money's were eight minutes, both ways up, light and dark).
 
 ## The desktop
 
