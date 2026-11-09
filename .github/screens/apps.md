@@ -8,8 +8,11 @@ the docs' arkui shots use (`screens.yaml`): a real Android emulator and a
 real iOS simulator, light and dark, onto the `screens` branch with a
 manifest. Beside them a third "phone", `desktop`: the app's iced window,
 built by nix at the commit and run with no window ([below](#the-desktop)).
-On a pull request, the same shots are compared with main's and the ones
-that changed are shown on the PR.
+And the larger screens, each a "phone" of its own, in the same jobs: an
+Android tablet and a Fold, an iPad upright and on its side when the app's
+build takes the iPad, and the Mac's own window when the commit has a Mac
+build ([below](#the-larger-screens)). On a pull request, the same shots
+are compared with main's and the ones that changed are shown on the PR.
 
 `.github/workflows/app-screens.yaml` runs it. Nothing there, or in the
 scripts here, names an app.
@@ -140,8 +143,16 @@ which nix builds at the commit (see below).
 - **`app-desktop.sh`**: runs the window nix built with `ARK_SHOTS` set,
   in a home of its own, given `--server` and `--user`; it signs in, does
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
-- **`apps-android.sh`**, **`apps-ios.sh`**, **`apps-desktop.sh`**: each app
-  in turn, so one that fails does not stop the others.
+- **`apps-android.sh`**, **`apps-ios.sh`**, **`apps-desktop.sh`**,
+  **`apps-mac.sh`**: each app in turn, so one that fails does not stop the
+  others; `apps-android.sh` on the emulator profile `DEVICE` says,
+  `apps-ios.sh` on the iPhone or (`FAMILY=ipad`) the iPad.
+- **`ios-family.sh`**: of the apps built, those whose build takes the iPad
+  (the built `.app`'s `UIDeviceFamily`, which `TARGETED_DEVICE_FAMILY`
+  writes, has 2).
+- **`app-mac.sh`** (with `window.swift`, a window's id by its process):
+  opens the Mac build and takes its window ([the larger
+  screens](#the-larger-screens)).
 - **`ios-inputs.sh`**: the hash of what an iPhone app's shots are taken
   from, said on Linux ([when it runs](#when-it-runs)).
 - **`published.sh`**: each APK as the F-Droid repository offers it, for a
@@ -166,7 +177,11 @@ which nix builds at the commit (see below).
 - **`compare.py`**: a PR's shots against main's (ImageMagick, more than a
   thousandth of the pixels more than a few percent off), as the PR's
   comment. A phone is a directory under `apps/<app>/`; the comment's
-  columns are its list of them (`PHONES`: Android, iPhone, Desktop).
+  columns are its list of them (`PHONES`: Android, Android tablet, Fold
+  open, Fold folded, iPhone, iPad, iPad landscape, Desktop, Mac), each pair
+  there only when a screen shown has it on main or on the PR; a phone main
+  has none of says "new". `manifest.py` lists whatever phones an app's
+  directory has, so the new ones are in `apps/<app>/manifest.json` too.
 
 ## When it runs
 
@@ -235,7 +250,76 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   same, every iPhone app included. Run by hand with a PR's number (`pr`),
   it takes that PR's iPhone shots at its head, of each app whose hash
   moved, and updates its comment: after a Mac's run failed, or to try the
-  workflow as a branch has it.
+  workflow as a branch has it. Run by hand on a branch with `dry`, it
+  takes every app as by hand, with that branch's workflow and scripts and
+  its commit's iPhone apps, and publishes nothing (no `screens` branch, no
+  cache): its artifacts are what it took. A `workflow_run` always runs
+  main's file, so a change to it is tried this way before it is merged.
+
+## The larger screens
+
+Each is a "phone", a directory beside `android/`, `ios/` and `desktop/`
+under `apps/<app>/`, laid out, published and compared as they are. The same
+build, the same driver, the same shots.json, light and dark.
+
+| Directory | Device | Taken |
+| --- | --- | --- |
+| `android-tablet/` | Pixel Tablet (`pixel_tablet`), landscape | every Android app |
+| `fold-unfolded/` | Pixel Fold (`pixel_fold`, else the emulator's `7.6in Foldable`, its inner screen), open | every Android app |
+| `fold-folded/` | the same Fold, folded | every Android app |
+| `ipad-portrait/` | iPad Pro 13-inch (else iPad Air 13-inch) | an app whose build takes the iPad |
+| `ipad-landscape/` | the same iPad, on its side | the same |
+| `mac/` | the runner's own screen | an app whose commit has `<app>-macos` |
+
+- **Android's tablet and Fold**: each Android job is a phone job (the Pixel
+  7, as before) and a "large" one, at once, both from the same APK. The
+  large one boots a Pixel Tablet, held in landscape (rotation locked, its
+  natural way up), and takes every shot; then the Fold (the Pixel Fold's
+  profile where the runner's avdmanager lists it; GitHub's has had only
+  the emulator's `7.6in Foldable`, and device.json says which), opened
+  (`adb emu unfold`), signed in and every shot taken, then folded and
+  every shot taken again, the login kept. Folded is told three ways, until
+  the screen changes size: the emulator's hinge (`adb emu fold`), Android's
+  device state (`cmd device_state`, CLOSED, which apps read the posture
+  from), and, as GitHub's headless `7.6in Foldable` takes both and still
+  draws its one inner screen whole, the Pixel Fold's outer screen's size
+  and density given to Android (`wm size 1080x2092`, `wm density 420`).
+  So the folded shots are the app laid out for the outer screen, in the
+  folded posture; the launcher's taskbar, there since the inner screen,
+  can stay at the foot. A Fold whose screen does not change at all is
+  said, and its folded shots are not taken. device.json is from what was
+  drawn: a tablet's is wider than tall.
+- **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
+  built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
+  takes the iPad (main's apps today are the iPhone's alone), nothing is
+  booted and nothing more is done. Else, once the iPhone's shots are
+  taken, the iPhone is shut down and an iPad booted (not under the
+  iPhone's shots: a second simulator booted beside them could make them
+  flaky), and each app that takes it is taken upright and then on its side
+  (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
+  XCUITest gives in the screen's portrait frame is turned a quarter
+  counter-clockwise), signed in once. An app whose iPad shots fail keeps
+  no hash (`<app>/ios/inputs`), so it is taken whole again.
+- **The Mac**: in the same job, after the iPad. The commit's Mac packages
+  are listed by name (nothing evaluated); an app with `<app>-macos` is
+  built by `nix-xcode.sh` as the iPhone's are, opened with `--server
+  <URL> --user <name>` (what the desktop window is given; an app that takes
+  them opens signed in to the same sample-data server), and its window
+  taken with `screencapture -l` in light and dark (System Events' dark
+  mode) as one shot, `window`. No app has a Mac build yet, so every app is
+  passed over in the seconds the listing takes; this is plumbing, not yet
+  seen running an app. Steps are not driven yet: a Mac window needs a
+  macOS UI-test driver of its own (`drive-ios` is the iPhone's), which is
+  the next thing to add when there is a Mac build to drive.
+- **What a run costs.** Linux: a "large" job per app and theme, beside
+  the phone's, each its own nix, server and emulators (two boots), at
+  once with the phone's: 5 (revelation), 12 (money) and 17 to 18
+  (harken) minutes each, some 70 runner-minutes for every app on a run;
+  the longest Android job goes from about 10 minutes to about 18. The
+  Mac: for apps that take neither the iPad nor the Mac, about five
+  seconds (the iPad's check, the listing of the Mac packages); for one
+  that takes the iPad, the iPad's boot (about a minute) and its shots
+  twice over (money's were eight minutes, both ways up, light and dark).
 
 ## The desktop
 

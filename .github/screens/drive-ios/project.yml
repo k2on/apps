@@ -16,6 +16,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         SWIFT_VERSION: "5.0"
+        # The iPhone and the iPad: the same driver on each simulator.
+        TARGETED_DEVICE_FAMILY: "1,2"
   Drive:
     type: bundle.ui-testing
     platform: iOS
@@ -27,6 +29,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: Host
         SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
 schemes:
   Drive:
     build:

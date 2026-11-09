@@ -17,6 +17,9 @@
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
 //               which is what a step can name
+//   APP_ORIENTATION  "landscape": the device on its side (landscape left) for
+//               every shot; "portrait": upright; unset, as it is
+import UIKit
 import XCTest
 
 /// A shot, as shots.json has it.
@@ -63,6 +66,12 @@ final class Drive: XCTestCase {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let shots = try JSONDecoder().decode([Shot].self, from: Data(try value("APP_SHOTS").utf8))
 
+        // Turned before the app opens, and so for every launch after.
+        switch env["APP_ORIENTATION"] {
+        case "landscape"?: XCUIDevice.shared.orientation = .landscapeLeft
+        case "portrait"?: XCUIDevice.shared.orientation = .portrait
+        default: break
+        }
         app.terminate()
         app.launch()
         if let server = env["APP_SERVER"], !server.isEmpty {
@@ -237,7 +246,13 @@ final class Drive: XCTestCase {
     /// for when one is; else a tab, else a button, else any element.
     private func control(_ app: XCUIApplication, _ label: String, role: String?) -> XCUIElement {
         switch role {
-        case "tab": return app.tabBars.buttons[label]
+        case "tab":
+            // An iPad's tabs are a bar at the top, or a sidebar, which may not
+            // be a tab bar to XCUITest: then the button that says it. The
+            // iPhone's, a tab bar's alone, as ever.
+            let tab = app.tabBars.buttons[label]
+            guard UIDevice.current.userInterfaceIdiom == .pad, !tab.exists else { return tab }
+            return app.buttons[label].firstMatch
         case "button": return app.buttons[label].firstMatch
         case "field": return app.textFields[label].firstMatch
         case "text": return app.staticTexts[label].firstMatch
