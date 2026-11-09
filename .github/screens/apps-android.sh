@@ -12,7 +12,7 @@
 #
 #   phone   (pixel_7, the default)  <out>/<app>/android/
 #   tablet  (pixel_tablet)          <out>/<app>/android-tablet/, in landscape
-#   fold    (pixel_fold)            <out>/<app>/fold-unfolded/, then the same
+#   fold    (a foldable)            <out>/<app>/fold-unfolded/, then the same
 #                                   app folded, <out>/<app>/fold-folded/
 #
 # The same APK, the same driver and the same shots on each.
@@ -77,10 +77,10 @@ for a in "$@"; do
     fold)
       # Open first, signed in there; then folded, as it is, the login kept.
       posture unfold || echo "$a: the Fold did not say it opened; taken as it is"
-      if DEVICE_NAME="Pixel Fold" CORNER=60 CUTOUT=hole \
+      if DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=60 CUTOUT=hole \
         bash "$here/app-android.sh" "$out/$a/fold-unfolded" "$apk" "$a" "$server"; then
         if posture fold; then
-          DEVICE_NAME="Pixel Fold" CORNER=110 CUTOUT=hole SIGNED_IN=1 \
+          DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=110 CUTOUT=hole SIGNED_IN=1 \
             bash "$here/app-android.sh" "$out/$a/fold-folded" "$apk" "$a" "$server" ||
             echo "::error::$a's Fold (folded) screenshots failed"
         else

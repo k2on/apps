@@ -265,7 +265,7 @@ build, the same driver, the same shots.json, light and dark.
 | Directory | Device | Taken |
 | --- | --- | --- |
 | `android-tablet/` | Pixel Tablet (`pixel_tablet`), landscape | every Android app |
-| `fold-unfolded/` | Pixel Fold (`pixel_fold`), open | every Android app |
+| `fold-unfolded/` | Pixel Fold (`pixel_fold`, else the emulator's `7.6in Foldable`, its inner screen), open | every Android app |
 | `fold-folded/` | the same Fold, folded | every Android app |
 | `ipad-portrait/` | iPad Pro 13-inch (else iPad Air 13-inch) | an app whose build takes the iPad |
 | `ipad-landscape/` | the same iPad, on its side | the same |
@@ -274,7 +274,9 @@ build, the same driver, the same shots.json, light and dark.
 - **Android's tablet and Fold**: each Android job is a phone job (the Pixel
   7, as before) and a "large" one, at once, both from the same APK. The
   large one boots a Pixel Tablet, held in landscape (rotation locked, its
-  natural way up), and takes every shot; then a Pixel Fold, opened
+  natural way up), and takes every shot; then the Fold (the Pixel Fold's
+  profile where the runner's avdmanager lists it; GitHub's has had only
+  the emulator's `7.6in Foldable`, and device.json says which), opened
   (`adb emu unfold`), signed in and every shot taken, then folded
   (`adb emu fold`) and every shot taken again, the login kept. A Fold that
   does not change its screen's size when told to fold is said, and its

@@ -177,7 +177,7 @@ for theme in ${THEMES:-light dark}; do
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
-    echo "$app android $theme $id"
+    echo "$app $(basename "$out") $theme $id"
     open_app
     # What the screen was after each step, for the run's results (not the
     # shots): where a shot went other than it was written to.

@@ -464,18 +464,37 @@ jobs:
           arch: x86_64
           profile: pixel_tablet
           avd-name: tablet
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # Not saved at the end: nothing boots it again, and saving took fourteen seconds.
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=tablet RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
-      - name: Capture (Fold)
+      # The Fold's hardware profile, as this runner's avdmanager has it: the
+      # Pixel Fold's own where it is listed, else the emulator's 7.6-inch
+      # foldable, the Pixel Fold's inner screen, which folds the same way
+      # (the runner's command-line tools have had only that one).
+      - id: fold
         if: ${{ !cancelled() && matrix.device == 'large' }}
+        name: The Fold's profile
+        run: |
+          ids=$("$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list device -c)
+          if grep -qx pixel_fold <<< "$ids"; then
+            echo "profile=pixel_fold" >> "$GITHUB_OUTPUT"; echo "name=Pixel Fold" >> "$GITHUB_OUTPUT"
+          else
+            profile=$(grep -x '7.6in Foldable' <<< "$ids" || grep -i -m1 'foldable' <<< "$ids" || true)
+            echo "profile=$profile" >> "$GITHUB_OUTPUT"; echo "name=Foldable ($profile)" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+      - name: Capture (Fold)
+        if: ${{ !cancelled() && matrix.device == 'large' && steps.fold.outputs.profile != '' }}
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FOLD_NAME: ${{ steps.fold.outputs.name }}
         with:
           api-level: 34
           target: google_apis
           arch: x86_64
-          profile: pixel_fold
+          profile: ${{ steps.fold.outputs.profile }}
           avd-name: fold
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           # The APK as the tablet's step left it (awaited there, if the run was still making it).
           script: bash .github/screens/meanwhile.sh wait servers && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
