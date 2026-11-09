@@ -60,7 +60,10 @@ struct ContentView: View {
             .defaultVisibility(.hidden, for: .tabBar)
         }
         .tabViewStyle(.sidebarAdaptable)
+        #if os(iOS)
+        // iOS only: the Mac always shows the sidebar (BUILD-NOTES.md).
         .defaultAdaptableTabBarPlacement(model.prefersSidebar ? .sidebar : .automatic)
+        #endif
         .sheet(item: $model.sheet) { route in
             SheetContent(route: route)
         }

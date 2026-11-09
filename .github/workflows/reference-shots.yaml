@@ -52,6 +52,8 @@ jobs:
       # push shows every compile error of both. Unsigned for the simulator;
       # ad hoc for the Mac, which must be signed to launch.
       - name: Build (iOS Simulator and macOS)
+        id: build
+        continue-on-error: true
         run: |
           cd "$REF"
           status=0
@@ -64,7 +66,7 @@ jobs:
             echo "::group::$p"
             xcodebuild build -project UniversalBudget.xcodeproj -scheme Budget -configuration Debug \
               -destination "$dest" -derivedDataPath "$RUNNER_TEMP/dd" -quiet \
-              ENABLE_DEBUG_DYLIB=NO ENABLE_PREVIEWS=NO "${sign[@]}" > "$RUNNER_TEMP/build-$p.log" 2>&1 || status=1
+              ENABLE_DEBUG_DYLIB=NO ENABLE_PREVIEWS=NO "${sign[@]}" > "$RUNNER_TEMP/build-$p.log" 2>&1 && echo "$p=ok" >> "$GITHUB_OUTPUT" || status=1
             echo "::endgroup::"
             # The errors, once each, first.
             grep -E "error:" "$RUNNER_TEMP/build-$p.log" | sort -u | head -150 || true
@@ -82,12 +84,13 @@ jobs:
           if-no-files-found: ignore
 
       - name: Capture (iPhone, iPad)
+        if: ${{ !cancelled() && steps.build.outputs.ios == 'ok' }}
         run: |
           export PATH="$(nix build --no-link --print-out-paths .#xcodegen)/bin:$PATH"
           bash "$REF/ci/shots.sh" ios "$RUNNER_TEMP/out" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/Budget.app"
 
       - name: Capture (Mac)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outputs.mac == 'ok' }}
         run: bash "$REF/ci/shots.sh" mac "$RUNNER_TEMP/out" "$RUNNER_TEMP/dd/Build/Products/Debug/Budget.app"
 
       # A contact sheet of each device and theme, for a quick look.
@@ -122,3 +125,9 @@ jobs:
           name: reference-shots
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
+
+      - name: Both built
+        if: ${{ !cancelled() && steps.build.outcome == 'failure' }}
+        run: |
+          echo "::error::a build failed (Build says which)"
+          exit 1
