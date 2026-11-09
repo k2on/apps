@@ -84,12 +84,12 @@ done
 dims() { sips -g pixelWidth -g pixelHeight "$1" | awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w, h}'; }
 
 # On its side: a screenshot XCUITest gives in the screen's own (portrait)
-# frame is turned the way the device was, landscape left, a quarter turn
-# clockwise.
+# frame is turned the way the device was, landscape left: a quarter turn
+# counter-clockwise (seen on an iPad Pro 13-inch, Xcode 26.3).
 if [ "$orientation" = landscape ]; then
   for png in "$out"/*/*.png; do
     read -r w h < <(dims "$png")
-    if [ "$h" -gt "$w" ]; then sips -r 90 "$png" > /dev/null; fi
+    if [ "$h" -gt "$w" ]; then sips -r 270 "$png" > /dev/null; fi
   done
 fi
 

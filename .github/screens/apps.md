@@ -285,13 +285,14 @@ build, the same driver, the same shots.json, light and dark.
 - **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
   built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
   takes the iPad (main's apps today are the iPhone's alone), nothing is
-  booted and nothing more is done. Else an iPad boots under the iPhone's
-  shots, the iPhone is shut down after them, and each app that takes it is
-  taken upright and then on its side (the driver's `XCUIDevice`
-  orientation, `APP_ORIENTATION`; a screenshot XCUITest gives in the
-  screen's portrait frame is turned a quarter clockwise), signed in once.
-  An app whose iPad shots fail keeps no hash (`<app>/ios/inputs`), so it is
-  taken whole again.
+  booted and nothing more is done. Else, once the iPhone's shots are
+  taken, the iPhone is shut down and an iPad booted (not under the
+  iPhone's shots: a second simulator booted beside them could make them
+  flaky), and each app that takes it is taken upright and then on its side
+  (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
+  XCUITest gives in the screen's portrait frame is turned a quarter
+  counter-clockwise), signed in once. An app whose iPad shots fail keeps
+  no hash (`<app>/ios/inputs`), so it is taken whole again.
 - **The Mac**: in the same job, after the iPad. The commit's Mac packages
   are listed by name (nothing evaluated); an app with `<app>-macos` is
   built by `nix-xcode.sh` as the iPhone's are, opened with `--server
@@ -304,11 +305,14 @@ build, the same driver, the same shots.json, light and dark.
   macOS UI-test driver of its own (`drive-ios` is the iPhone's), which is
   the next thing to add when there is a Mac build to drive.
 - **What a run costs.** Linux: a "large" job per app and theme, beside
-  the phone's, each its own nix, server and emulators (two boots). The
-  Mac: nothing more for an app that takes neither the iPad nor the Mac
-  but the listing of the Mac packages and the iPad's check; for one that
-  takes the iPad, one more boot under the iPhone's shots and its shots
-  twice over.
+  the phone's, each its own nix, server and emulators (two boots), at
+  once with the phone's: some 3 (revelation) to 12 (harken) minutes each,
+  about 50 runner-minutes for every app on a run, and no longer to wait
+  for than the phone's. The Mac: for apps that take neither the iPad nor
+  the Mac, a few seconds (the iPad's check, the listing of the Mac
+  packages); for one that takes the iPad, the iPad's boot (some two
+  minutes) and its shots twice over (money's were nine minutes, both
+  ways up, light and dark).
 
 ## The desktop
 
