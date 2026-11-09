@@ -13,7 +13,7 @@
 
 use std::fmt::Debug;
 
-pub use ark_app::view::{Input, Part, Picture, Val, View};
+pub use ark_app::view::{Input, Part, View};
 use ark_app::view::{PROBE_CLOSE, PROBE_OPEN};
 
 pub mod kotlin;
@@ -27,17 +27,13 @@ pub struct Screen {
     /// The hand-written holder of the runtime the view reads and sends to:
     /// it has `page` (the record) and `send(msg)`.
     pub holder: &'static str,
-    /// The message's type: `AccountsMsg`.
-    pub msg: &'static str,
-    /// The record's type: `AccountsPage`.
-    pub record: &'static str,
     /// The Rust file it is written from, for the header.
     pub source: &'static str,
-    /// The app's mark of a kind (`Picture::Mark`), `{}` the kind:
-    /// `AccountMark(kind: {})`, `KindTile({})`.
-    pub mark: &'static str,
     /// The Kotlin package.
     pub package: &'static str,
+    /// The name the record is read as in the emitted code (the view
+    /// function's parameter).
+    pub root: &'static str,
     /// Kotlin imports the app's own pieces need.
     pub imports: &'static [&'static str],
 }
@@ -198,18 +194,28 @@ pub fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$"))
 }
 
-/// A value as an expression: its path, or the literal.
-pub fn val<T: Debug>(v: &Val<T>) -> String {
+/// A value as the platforms write it: a path into the record, or a
+/// literal (`nil` and `null` are each language's none).
+pub fn value(v: &str, none: &str) -> String {
     match v {
-        Val::At(p) => path(p),
-        Val::Is(t) => {
-            let d = format!("{t:?}");
-            match d.as_str() {
-                "None" => "nil".into(),
-                d if d.starts_with('"') => quoted(&unescape(&d[1..d.len() - 1])),
-                d => d.into(),
-            }
-        }
+        "None" => none.into(),
+        v if v.starts_with("Some(") && v.ends_with(')') => value(&v[5..v.len() - 1], none),
+        v if v.starts_with('"') && v.len() >= 2 => quoted(&unescape(&v[1..v.len() - 1])),
+        v if v == "true" || v == "false" || v.starts_with(|c: char| c.is_ascii_digit() || c == '-') => v.into(),
+        v => path(v),
+    }
+}
+
+/// A message's field as the platforms write it: `input` is what an input
+/// gave (`$0`, `it`).
+pub fn arg(a: &Arg, input: &str, none: &str) -> String {
+    match a {
+        Arg::Path(p) if p == INPUT => input.into(),
+        Arg::Path(p) => path(p),
+        Arg::Text(t) => quoted(t),
+        Arg::Number(n) => n.clone(),
+        Arg::Bool(b) => b.to_string(),
+        Arg::None => none.into(),
     }
 }
 
@@ -242,35 +248,19 @@ impl Out {
     pub fn text(self) -> String {
         self.text
     }
-}
 
-/// The parts of a page: the figure under its title, its sections, and what
-/// rises over it (sheets and prompts, each under the `if let` that shows it).
-pub struct Laid<'v, M> {
-    pub top: Vec<&'v View<M>>,
-    pub body: Vec<&'v View<M>>,
-    pub over: Vec<&'v View<M>>,
-}
-
-/// `content` of a page sorted into what goes where.
-pub fn lay<M>(content: &View<M>) -> Laid<'_, M> {
-    let mut laid = Laid {
-        top: vec![],
-        body: vec![],
-        over: vec![],
-    };
-    let all: Vec<&View<M>> = match content {
-        View::List(v) => v.iter().collect(),
-        v => vec![v],
-    };
-    for v in all {
-        match v {
-            View::Part(Part::Hero { .. }) if laid.body.is_empty() => laid.top.push(v),
-            View::WhenSome { yes, .. } if matches!(**yes, View::Part(Part::Sheet { .. } | Part::Prompt { .. })) => laid.over.push(v),
-            v => laid.body.push(v),
-        }
+    /// The last line's closing brace joined to what reopens it
+    /// (`} else {`), `body` in it, and closed again.
+    pub fn reopen(&mut self, s: &str, body: impl FnOnce(&mut Out)) {
+        let trimmed = self.text.trim_end_matches('\n').len();
+        self.text.truncate(trimmed - 1);
+        self.text.push_str(s);
+        self.text.push('\n');
+        self.indent += 1;
+        body(self);
+        self.indent -= 1;
+        self.line("}");
     }
-    laid
 }
 
 #[cfg(test)]
@@ -315,8 +305,9 @@ mod tests {
     #[test]
     fn paths_are_spelled_as_uniffi_spells_fields() {
         assert_eq!(path("p.net_worth"), "p.netWorth");
-        assert_eq!(val(&Val::<i64>::At("shelf.total".into())), "shelf.total");
-        assert_eq!(val(&Val::Is(String::from("Hi \"you\""))), "\"Hi \\\"you\\\"\"");
-        assert_eq!(val(&Val::<Option<String>>::Is(None)), "nil");
+        assert_eq!(value("shelf.total", "nil"), "shelf.total");
+        assert_eq!(value("\"Hi \\\"you\\\"\"", "nil"), "\"Hi \\\"you\\\"\"");
+        assert_eq!(value("None", "null"), "null");
+        assert_eq!(value("Some(3)", "nil"), "3");
     }
 }

@@ -10,6 +10,14 @@ import dev.arkui.ArkGlyphs.glyph
 import dev.arkui.ArkGlyphs.rect
 
 object Glyphs {
+    /** This app's glyphs by their shared names, for the screens written from Rust (`LocalGlyphs`). */
+    fun shared(name: String): ImageVector? =
+        when (name) {
+            "layers" -> Activity
+            "link" -> Link
+            else -> null
+        }
+
     private const val WALLET_BODY = "M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5"
     private const val WALLET_CLASP = "M21 12h-4a2 2 0 0 0 0 4h4z"
 

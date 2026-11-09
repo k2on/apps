@@ -265,6 +265,7 @@ pub enum Part<M> {
     Page {
         title: &'static str,
         refresh: Option<M>,
+        top: Box<View<M>>,
         content: Box<View<M>>,
     },
     /// The page's one large figure.
@@ -364,10 +365,11 @@ tuples!(A B C D E F G H);
 // * The parts, as builders
 
 /// A tab's page.
-pub fn page<M>(title: &'static str, content: impl Into<View<M>>) -> PageBuilder<M> {
+pub fn tab_page<M>(title: &'static str, content: impl Into<View<M>>) -> PageBuilder<M> {
     PageBuilder {
         title,
         refresh: None,
+        top: View::Empty,
         content: content.into(),
     }
 }
@@ -375,6 +377,7 @@ pub fn page<M>(title: &'static str, content: impl Into<View<M>>) -> PageBuilder<
 pub struct PageBuilder<M> {
     title: &'static str,
     refresh: Option<M>,
+    top: View<M>,
     content: View<M>,
 }
 
@@ -384,6 +387,12 @@ impl<M> PageBuilder<M> {
         self.refresh = Some(m);
         self
     }
+
+    /// What sits under the title, before the content: the page's figure.
+    pub fn top(mut self, v: impl Into<View<M>>) -> Self {
+        self.top = v.into();
+        self
+    }
 }
 
 impl<M> From<PageBuilder<M>> for View<M> {
@@ -391,6 +400,7 @@ impl<M> From<PageBuilder<M>> for View<M> {
         Part::Page {
             title: b.title,
             refresh: b.refresh,
+            top: Box::new(b.top),
             content: Box::new(b.content),
         }
         .into()
@@ -398,7 +408,7 @@ impl<M> From<PageBuilder<M>> for View<M> {
 }
 
 /// The page's one large figure.
-pub fn hero<M>(label: &'static str, cents: impl Into<Val<i64>>, note: &'static str) -> View<M> {
+pub fn hero_figure<M>(label: &'static str, cents: impl Into<Val<i64>>, note: &'static str) -> View<M> {
     Part::Hero {
         label,
         cents: cents.into(),
@@ -418,7 +428,7 @@ pub struct Section<M> {
     pub rows: Box<View<M>>,
 }
 
-pub fn section<M>(rows: impl Into<View<M>>) -> Section<M> {
+pub fn card_section<M>(rows: impl Into<View<M>>) -> Section<M> {
     Section {
         title: None,
         amount: None,
@@ -645,7 +655,7 @@ pub fn amount_field<M>(
 }
 
 /// Choices in a wrapping row.
-pub fn chips<M>(content: impl Into<View<M>>) -> View<M> {
+pub fn chip_row<M>(content: impl Into<View<M>>) -> View<M> {
     Part::Chips(Box::new(content.into())).into()
 }
 
@@ -660,7 +670,7 @@ pub fn chip<M>(label: impl Into<Val<String>>, glyph: impl Into<Val<String>>, sel
 }
 
 /// A switch with its title and a note under it.
-pub fn toggle<M>(title: &'static str, note: impl Into<Val<String>>, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
+pub fn switch_row<M>(title: &'static str, note: impl Into<Val<String>>, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
     Part::Toggle {
         title,
         note: note.into(),
@@ -671,11 +681,213 @@ pub fn toggle<M>(title: &'static str, note: impl Into<Val<String>>, on: impl Int
 }
 
 /// A form's button.
-pub fn button<M>(title: &'static str, enabled: impl Into<Val<bool>>, tap: M) -> View<M> {
+pub fn form_button<M>(title: &'static str, enabled: impl Into<Val<bool>>, tap: M) -> View<M> {
     Part::Button {
         title,
         enabled: enabled.into(),
         tap,
     }
     .into()
+}
+
+// * Each part's call, by rule
+
+/// What a part is handed, as the phones' code spells it.
+pub enum Given<'a, M> {
+    /// A value read, or a literal.
+    Val(String),
+    /// Fixed words.
+    Text(&'static str),
+    /// A message sent when it is used.
+    Act(&'a M),
+    /// A message made of what was typed.
+    Typed(&'a Input<String, M>),
+    /// A message made of where a switch was put.
+    Switched(&'a Input<bool, M>),
+    /// Several of another part (a row's menu).
+    Items(Vec<Call<'a, M>>),
+}
+
+/// A part as a call: its name (the same in Swift and Kotlin, the Rust
+/// builder's in Pascal case), its first input unlabelled when it has one,
+/// its labelled inputs, and the views it holds in its slots. This is the
+/// whole of what the emitters know of a part: the part itself is written
+/// by hand in swift/ArkUI and kotlin/arkui under this name and signature.
+pub struct Call<'a, M> {
+    pub name: &'static str,
+    pub first: Option<Given<'a, M>>,
+    pub args: Vec<(&'static str, Given<'a, M>)>,
+    /// The content slot first, then any named slots.
+    pub slots: Vec<(&'static str, &'a View<M>)>,
+}
+
+/// A value as the phones read it: its path, or the literal (`None` is `nil`/`null`, each emitter's).
+fn lit<T: Debug>(v: &Val<T>) -> String {
+    match v {
+        Val::At(p) => p.clone(),
+        Val::Is(t) => format!("{t:?}"),
+    }
+}
+
+impl<M> Part<M> {
+    /// The part as a call (see [`Call`]).
+    pub fn call(&self) -> Call<'_, M> {
+        use Given as G;
+        let c = |name, first, args, slots| Call { name, first, args, slots };
+        match self {
+            Part::Page {
+                title,
+                refresh,
+                top,
+                content,
+            } => {
+                let mut args = vec![];
+                if let Some(r) = refresh {
+                    args.push(("onRefresh", G::Act(r)));
+                }
+                c("TabPage", Some(G::Text(title)), args, vec![("", &**content), ("top", &**top)])
+            }
+            Part::Hero { label, cents, note } => c(
+                "HeroFigure",
+                Some(G::Text(label)),
+                vec![("cents", G::Val(lit(cents))), ("note", G::Text(note))],
+                vec![],
+            ),
+            Part::Section(s) => {
+                let mut args = vec![];
+                if let Some(t) = &s.title {
+                    args.push(("title", G::Val(lit(t))));
+                }
+                if let Some(a) = &s.amount {
+                    args.push(("total", G::Val(lit(a))));
+                }
+                if let Some(b) = &s.shows {
+                    args.push(("showsTotal", G::Val(lit(b))));
+                }
+                if let Some(f) = &s.footer {
+                    args.push(("footer", G::Val(lit(f))));
+                }
+                c("CardSection", None, args, vec![("", &*s.rows)])
+            }
+            Part::Row(r) => {
+                let mut args = vec![];
+                if let Some(s) = &r.subtitle {
+                    args.push(("subtitle", G::Val(lit(s))));
+                }
+                match &r.picture {
+                    Picture::None => {}
+                    Picture::Tile(g) => args.push(("tile", G::Text(g))),
+                    Picture::Mark { kind, .. } => args.push(("mark", G::Val(lit(kind)))),
+                    Picture::Glyph(g) => args.push(("glyph", G::Text(g))),
+                }
+                if let Some(b) = &r.badge {
+                    args.push(("badge", G::Val(lit(b))));
+                }
+                if let Some(a) = &r.amount {
+                    args.push(("amount", G::Val(lit(a))));
+                }
+                if r.quiet {
+                    args.push(("quiet", G::Val("true".into())));
+                }
+                if r.accent {
+                    args.push(("accent", G::Val("true".into())));
+                }
+                if let Some(s) = &r.said {
+                    args.push(("said", G::Val(lit(s))));
+                }
+                if !r.menu.is_empty() {
+                    let items = r
+                        .menu
+                        .iter()
+                        .map(|m| {
+                            c(
+                                "MenuAction",
+                                Some(G::Val(lit(&m.title))),
+                                vec![
+                                    ("glyph", G::Text(m.glyph)),
+                                    ("destructive", G::Val(lit(&m.destructive))),
+                                    ("onTap", G::Act(&m.tap)),
+                                ],
+                                vec![],
+                            )
+                        })
+                        .collect();
+                    args.push(("menu", G::Items(items)));
+                }
+                if let Some(t) = &r.tap {
+                    args.push(("onTap", G::Act(t)));
+                }
+                c("ListRow", Some(G::Val(lit(&r.title))), args, vec![])
+            }
+            Part::Sheet { title, dismiss, content } => c(
+                "Sheet",
+                Some(G::Text(title)),
+                vec![("onDismiss", G::Act(dismiss))],
+                vec![("", &**content)],
+            ),
+            Part::Prompt {
+                title,
+                text,
+                typed,
+                confirm,
+                ok,
+                cancel,
+            } => c(
+                "Prompt",
+                Some(G::Text(title)),
+                vec![
+                    ("text", G::Val(lit(text))),
+                    ("onChange", G::Typed(typed)),
+                    ("confirm", G::Text(confirm)),
+                    ("onConfirm", G::Act(ok)),
+                    ("onCancel", G::Act(cancel)),
+                ],
+                vec![],
+            ),
+            Part::NameField {
+                label,
+                value,
+                problem,
+                typed,
+            } => c(
+                "NameField",
+                Some(G::Text(label)),
+                vec![
+                    ("text", G::Val(lit(value))),
+                    ("problem", G::Val(lit(problem))),
+                    ("onChange", G::Typed(typed)),
+                ],
+                vec![],
+            ),
+            Part::AmountField { label, typed, problem, on } => c(
+                "AmountField",
+                Some(G::Val(lit(label))),
+                vec![
+                    ("text", G::Val(lit(typed))),
+                    ("problem", G::Val(lit(problem))),
+                    ("onChange", G::Typed(on)),
+                ],
+                vec![],
+            ),
+            Part::Chips(content) => c("ChipRow", None, vec![], vec![("", &**content)]),
+            Part::Chip { label, glyph, selected, tap } => c(
+                "Chip",
+                Some(G::Val(lit(label))),
+                vec![("glyph", G::Val(lit(glyph))), ("selected", G::Val(lit(selected))), ("onTap", G::Act(tap))],
+                vec![],
+            ),
+            Part::Toggle { title, note, on, change } => c(
+                "SwitchRow",
+                Some(G::Text(title)),
+                vec![("note", G::Val(lit(note))), ("isOn", G::Val(lit(on))), ("onChange", G::Switched(change))],
+                vec![],
+            ),
+            Part::Button { title, enabled, tap } => c(
+                "FormButton",
+                Some(G::Text(title)),
+                vec![("enabled", G::Val(lit(enabled))), ("onTap", G::Act(tap))],
+                vec![],
+            ),
+        }
+    }
 }

@@ -23,7 +23,7 @@ const DIALOG: f32 = 420.0;
 /// `view` as iced draws it.
 pub fn element<M: Clone + 'static>(view: View<M>) -> Element<'static, M> {
     match view {
-        View::Part(Part::Page { title, refresh: _, content }) => page(title, *content),
+        View::Part(Part::Page { title, top, content, .. }) => page(title, View::List(vec![*top, *content])),
         v => column(nodes(v)).spacing(8).into(),
     }
 }

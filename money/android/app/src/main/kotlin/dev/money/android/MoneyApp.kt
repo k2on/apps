@@ -215,7 +215,14 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 popExitTransition = { popExit(reduced) },
             ) {
                 composable(Tab.Budget.route) { BudgetScreen(ledger) }
-                composable(Tab.Accounts.route) { AccountsScreen(ledger) }
+                composable(Tab.Accounts.route) {
+                    // Written from Rust (generated/AccountsScreen.kt), over its runtime.
+                    val view = androidx.compose.ui.platform.LocalView.current
+                    val holder = remember(book) { AccountsHolder(book.session, { book.sync() }, PhoneHaptics(view), PhoneClipboard(view.context)) }
+                    holder.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }
+                    LaunchedEffect(ledger) { holder.reload() }
+                    ScreenFrame { AccountsScreen(holder) }
+                }
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }
                 composable("register/{arg}") { e ->

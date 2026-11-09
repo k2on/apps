@@ -89,6 +89,8 @@ struct Shell: View {
                     if let a = model.accounts {
                         AccountsView()
                             .environmentObject(a)
+                            .environment(\.tabFace) { AnyView(AccountButton()) }
+                            .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
                             .onAppear { a.open = { r in navs[.accounts, default: Navigator()].push(r) } }
                     }
                 }

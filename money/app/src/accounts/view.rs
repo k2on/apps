@@ -12,11 +12,10 @@ use super::{AccountItem, AccountsMsg, AccountsPage};
 /// the rename alert over it while they are up.
 #[view]
 pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
-    page(
+    tab_page(
         "Accounts",
         (
-            hero("Net Worth", p.net_worth, "Every open account, less what's owed"),
-            section(
+            card_section(
                 list_row("All Accounts")
                     .tile("layers")
                     .amount(p.all_total)
@@ -24,14 +23,14 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                     .on_tap(AccountsMsg::OpenAll),
             ),
             for shelf in p.shelves {
-                section(for a in shelf.accounts {
+                card_section(for a in shelf.accounts {
                     account_row(a)
                 })
                 .header(shelf.title)
                 .amount(shelf.total)
                 .shows_amount(shelf.shows_total)
             },
-            section((
+            card_section((
                 list_row(p.banks_title).glyph("link").on_tap(AccountsMsg::OpenBanks),
                 list_row("Add Account").glyph("plus").accent().on_tap(AccountsMsg::Add),
             ))
@@ -42,16 +41,16 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                     AccountsMsg::DismissDraft,
                     (
                         name_field("Name", form.name, form.name_problem, |name| AccountsMsg::DraftName { name }),
-                        chips(for k in form.kinds {
+                        chip_row(for k in form.kinds {
                             chip(k.title, k.glyph, k.selected, AccountsMsg::DraftKindKey { key: k.key })
                         }),
                         amount_field(form.balance_label, form.typed, form.balance_problem, |typed| AccountsMsg::DraftBalance {
                             typed,
                         }),
-                        toggle("In the Budget", form.on_budget_note, form.on_budget, |on_budget| {
+                        switch_row("In the Budget", form.on_budget_note, form.on_budget, |on_budget| {
                             AccountsMsg::DraftOnBudget { on_budget }
                         }),
-                        button("Add Account", form.can_save, AccountsMsg::SaveDraft),
+                        form_button("Add Account", form.can_save, AccountsMsg::SaveDraft),
                     ),
                 )
             },
@@ -67,6 +66,7 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
             },
         ),
     )
+    .top(hero_figure("Net Worth", p.net_worth, "Every open account, less what's owed"))
     .refresh(AccountsMsg::Refresh)
     .into()
 }

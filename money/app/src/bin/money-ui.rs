@@ -9,24 +9,34 @@
 
 use std::path::Path;
 
-use ark_ui_gen::{swift, Screen};
+use ark_ui_gen::{kotlin, swift, Screen};
 use money_app::accounts::view::accounts;
 
 const ACCOUNTS: Screen = Screen {
     name: "AccountsView",
     holder: "AccountsScreen",
-    msg: "AccountsMsg",
-    record: "AccountsPage",
     source: "money/app/src/accounts/view.rs",
-    mark: "AccountMark(kind: {})",
     package: "dev.money.android",
-    imports: &[],
+    root: "p",
+    imports: &["uniffi.money_app.AccountsMsg"],
+};
+
+const KOTLIN_ACCOUNTS: Screen = Screen {
+    name: "AccountsScreen",
+    holder: "AccountsHolder",
+    ..ACCOUNTS
 };
 
 /// Every generated file and what it holds.
 fn files() -> Vec<(&'static str, String)> {
     let recorded = accounts::record();
-    vec![("money/ios/Money/Generated/AccountsView.swift", swift::emit(&recorded, &ACCOUNTS))]
+    vec![
+        ("money/ios/Money/Generated/AccountsView.swift", swift::emit(&recorded, &ACCOUNTS)),
+        (
+            "money/android/app/src/main/kotlin/dev/money/android/generated/AccountsScreen.kt",
+            kotlin::emit(&recorded, &KOTLIN_ACCOUNTS),
+        ),
+    ]
 }
 
 fn main() {
