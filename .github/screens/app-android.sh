@@ -199,7 +199,7 @@ for theme in ${THEMES:-light dark}; do
       n=$((n + 1))
       # A step that fails fails the capture (as the iPhone's test does):
       # under `set -e`, a failure inside `a && b` would be passed over.
-      step "$s" || { echo "::error::$app android $theme $id: step $s failed"; dump | python3 -I "$here/ui.py" --tree > "$steps/$n-failed.txt" || true; exit 1; }
+      step "$s" || { echo "::error::$app $(basename "$out") $theme $id: step $s failed"; dump | python3 -I "$here/ui.py" --tree > "$steps/$n-failed.txt" || true; exit 1; }
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3

@@ -28,19 +28,34 @@ size() {
   adb exec-out screencap -p | python3 -I -c 'import struct, sys; d = sys.stdin.buffer.read(24); print(*struct.unpack(">II", d[16:24]))'
 }
 
-# The Fold in a posture, `fold` or `unfold` (the emulator's console); fails
-# when the screen it draws did not change size, as an emulator that cannot
-# fold leaves it.
-posture() {
-  local before after
-  before=$(size)
-  adb emu "$1" > /dev/null 2>&1 || return 1
+# Whether the screen's size moved from `before`, within ten seconds.
+moved() {
+  local after
   for _ in $(seq 1 10); do
     sleep 1
     after=$(size)
-    [ "$after" = "$before" ] || { sleep 2; echo "$1: $before -> $after"; return 0; }
+    [ "$after" = "$1" ] || { sleep 2; echo "  $1 -> $after"; return 0; }
   done
   return 1
+}
+
+# The Fold in a posture, `fold` or `unfold`: told by the emulator's console
+# (its hinge), else by Android's own device state (CLOSED, OPENED: `cmd
+# device_state`, as the system's posture is set from the hinge). Fails when
+# the screen it draws did not change size, as an emulator that cannot fold
+# leaves it. What each said is printed, to see why.
+posture() {
+  local before states name id
+  before=$(size)
+  echo "$1: the emulator says $(adb emu "$1" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+  moved "$before" && return 0
+  name=$([ "$1" = fold ] && echo CLOSED || echo OPENED)
+  states=$(adb shell cmd device_state print-states 2>&1 | tr -d '\r')
+  echo "$1: device states: $(tr '\n' ' ' <<< "$states")"
+  id=$(grep -o "identifier=[0-9]*, name='$name'" <<< "$states" | grep -o '[0-9]\+' | head -1)
+  [ -n "$id" ] || return 1
+  echo "$1: device_state $id ($name): $(adb shell cmd device_state state "$id" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+  moved "$before"
 }
 
 case $device in
