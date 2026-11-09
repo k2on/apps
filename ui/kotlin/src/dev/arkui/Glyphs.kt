@@ -134,9 +134,52 @@ public object ArkGlyphs {
             "m2 2 20 20",
         )
 
+    /** Renaming (`pencil`). */
+    public val Rename: ImageVector =
+        glyph(
+            "pencil",
+            "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
+            "m15 5 4 4",
+        )
+
+    /** Copying (`copy`). */
+    public val Copy: ImageVector =
+        glyph(
+            "copy",
+            "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z",
+            "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2",
+        )
+
+    /** Closing an account, putting something away (`archive`). */
+    public val Archive: ImageVector =
+        glyph(
+            "archive",
+            "M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+            "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8",
+            "M10 12h4",
+        )
+
+    /** Reopening, undoing (`undo-2`). */
+    public val Reopen: ImageVector =
+        glyph("undo-2", "M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11")
+
+    /** Agreeing with the bank (`badge-check`). */
+    public val Reconcile: ImageVector =
+        glyph(
+            "badge-check",
+            "M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z",
+            "m9 12 2 2 4-4",
+        )
+
+    /** Adding a thing of a list's own (`circle-plus`). */
+    public val Add: ImageVector = glyph("circle-plus", circle(12f, 12f, 10f), "M8 12h8", "M12 8v8")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
-        listOf(More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked, Untick, Down, Offline)
+        listOf(
+            More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked,
+            Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
+        )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }
 

@@ -4,7 +4,8 @@
 // money_ffi) and publishes the record it shows, read again after every
 // message and whenever a view it holds moved. Nothing here decides
 // anything: a message goes to Rust, and Rust says what the page is now,
-// which route to open, and what to ask of the phone (Modules.swift).
+// which route to open, and what to ask of the phone (the device modules
+// money lists in modules.toml).
 import Combine
 import Foundation
 
@@ -14,19 +15,23 @@ final class AccountsScreen: ObservableObject {
     @Published private(set) var page: AccountsPage
     /// Opens a route on the tab's back stack: the shell's navigator.
     var open: (Route) -> Void = { _ in }
+    /// Raises the reconcile sheet for an account: the shell's own, until
+    /// reconciling moves into Rust.
+    var reconcile: (Id) -> Void = { _ in }
 
     private let app: AccountsApp
     private let shell: ScreenShell
 
-    /// The tab over `session`; `refresh` asks the bank, `nowMs` is the
-    /// time (the demo's day in the demo).
-    init(session: Session, modules: PhoneModules, refresh: @escaping () -> Void, nowMs: @escaping () -> Int64) {
-        let shell = ScreenShell(refresh: refresh, nowMs: nowMs)
+    /// The tab over `session`; `refresh` asks the bank, `today` is the
+    /// session's day (the demo's in the demo).
+    init(session: Session, modules: PhoneModules, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = AccountsApp(session: session, shell: shell)
         app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
+        shell.reconciled = { [weak self] id in self?.reconcile(id) }
     }
 
     /// `msg` taken by the app; the page read again.
@@ -45,23 +50,31 @@ final class AccountsScreen: ObservableObject {
 /// (the main one: every message comes from a view).
 final class ScreenShell: AppShell, @unchecked Sendable {
     var opened: @MainActor (Route) -> Void = { _ in }
+    var reconciled: @MainActor (Id) -> Void = { _ in }
     private let refresh: () -> Void
-    private let now: () -> Int64
+    private let day: () -> String
 
-    init(refresh: @escaping () -> Void, nowMs: @escaping () -> Int64) {
+    init(refresh: @escaping () -> Void, today: @escaping () -> String) {
         self.refresh = refresh
-        now = nowMs
+        day = today
     }
 
-    func open(route: Route) {
-        MainActor.assumeIsolated { opened(route) }
+    func openRoute(route: Route) {
+        // On the main queue, after the message that asked: every message comes from a view.
+        Task { @MainActor in self.opened(route) }
     }
 
     func native(name: String) {
         if name == "refresh" { refresh() }
+        if name.hasPrefix("reconcile ") {
+            let id = Id(String(name.dropFirst("reconcile ".count)))
+            Task { @MainActor in self.reconciled(id) }
+        }
     }
 
-    func nowMs() -> Int64 { now() }
+    func nowMs() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded()) }
+
+    func today() -> String { day() }
 }
 
 /// The device modules the phone registers with every screen: the ones

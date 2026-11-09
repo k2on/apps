@@ -25,6 +25,8 @@ struct Desk<'a> {
     modules: Modules,
     clipboard: Queued,
     inbox: Inbox,
+    /// What the window does itself after the message: its own dialogs.
+    natives: Vec<Message>,
 }
 
 impl Desk<'_> {
@@ -37,6 +39,7 @@ impl Desk<'_> {
             modules,
             clipboard,
             inbox: Inbox::default(),
+            natives: vec![],
         }
     }
 }
@@ -67,6 +70,12 @@ impl Host<Accounts> for Desk<'_> {
             self.app.page = page;
         }
     }
+    fn native(&mut self, name: &str) {
+        // Reconciling is the window's own dialog until it moves into Rust.
+        if let Some(id) = name.strip_prefix("reconcile ").and_then(money_app::accounts::account_id) {
+            self.natives.push(Message::Reconcile(id));
+        }
+    }
     fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
         self.inbox.ask(&self.modules, ticket, call)
     }
@@ -88,7 +97,8 @@ impl App {
             }
         }
         // What the window does after: the clipboard written.
-        let tasks: Vec<Task<Message>> = desk.clipboard.take().into_iter().map(iced::clipboard::write).collect();
+        let mut tasks: Vec<Task<Message>> = desk.clipboard.take().into_iter().map(iced::clipboard::write).collect();
+        tasks.extend(std::mem::take(&mut desk.natives).into_iter().map(Task::done));
         self.accounts = rt;
         Task::batch(tasks)
     }

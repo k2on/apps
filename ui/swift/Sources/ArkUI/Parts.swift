@@ -495,6 +495,9 @@ public enum ArkGlyphs {
         case "pencil": return "pencil"
         case "copy": return "doc.on.doc"
         case "archive": return "xmark.bin"
+        case "undo-2": return "arrow.uturn.backward"
+        case "badge-check": return "checkmark.seal"
+        case "circle-plus": return "plus.circle.fill"
         default: return nil
         }
     }

@@ -90,6 +90,18 @@ impl Msg {
         m
     }
 
+    /// The message an amount entered makes, the field that follows it marked.
+    pub fn counted<M: Debug>(i: &Input<i64, M>) -> Msg {
+        let (one, two) = (Msg::of(&(i.0)(1)), Msg::of(&(i.0)(2)));
+        let mut m = one.clone();
+        for (k, v) in m.fields.iter_mut() {
+            if two.fields.iter().any(|(k2, v2)| k2 == k && v2 != v) {
+                *v = Arg::Path(INPUT.into());
+            }
+        }
+        m
+    }
+
     fn parse(s: &str) -> Option<Msg> {
         let s = s.trim();
         let (case, rest) = match s.find([' ', '{', '(']) {

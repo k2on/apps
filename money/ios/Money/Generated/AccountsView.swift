@@ -10,30 +10,35 @@ struct AccountsView: View {
         let p = screen.page
         TabPage("Accounts", onRefresh: { screen.send(.refresh) }) {
             CardSection {
-                ListRow("All Accounts", tile: "layers", amount: p.allTotal, quiet: true, onTap: { screen.send(.openAll) })
+                ListRow("All Accounts", tile: "layers", amount: p.allTotal, quiet: true, pushes: true, onTap: { screen.send(.openAll) })
             }
             ForEach(p.shelves, id: \.self) { shelf in
                 CardSection(title: shelf.title, total: shelf.total, showsTotal: shelf.showsTotal) {
                     ForEach(shelf.accounts, id: \.self) { a in
-                        ListRow(a.name, subtitle: a.subtitle, mark: a.kindKey, badge: a.reviews, amount: a.balance, said: a.said, menu: [MenuAction("Rename", glyph: "pencil", destructive: false, onTap: { screen.send(.rename(id: a.id)) }), MenuAction("Copy Balance", glyph: "copy", destructive: false, onTap: { screen.send(.copyBalance(id: a.id)) }), MenuAction(a.closeTitle, glyph: "archive", destructive: a.isOpen, onTap: { screen.send(.toggleClosed(id: a.id)) })], onTap: { screen.send(.openAccount(id: a.id)) })
+                        ListRow(a.name, subtitle: a.subtitle, mark: a.kindKey, badge: a.reviews, amount: a.balance, pushes: true, said: a.said, menu: [MenuAction("Rename", glyph: "pencil", destructive: false, onTap: { screen.send(.rename(id: a.id)) }), MenuAction("Reconcile…", glyph: "badge-check", destructive: false, shown: a.isOpen, onTap: { screen.send(.reconcile(id: a.id)) }), MenuAction("Copy Balance", glyph: "copy", destructive: false, onTap: { screen.send(.copyBalance(id: a.id)) }), MenuAction(a.closeTitle, glyph: a.closeGlyph, destructive: a.isOpen, onTap: { screen.send(.toggleClosed(id: a.id)) })], onTap: { screen.send(.openAccount(id: a.id)) })
                     }
                 }
             }
             CardSection(footer: p.synced) {
-                ListRow(p.banksTitle, glyph: "link", onTap: { screen.send(.openBanks) })
-                ListRow("Add Account", glyph: "plus", accent: true, onTap: { screen.send(.add) })
+                ListRow(p.banksTitle, glyph: "link", pushes: true, onTap: { screen.send(.openBanks) })
+                ListRow("Add Account", glyph: "circle-plus", accent: true, onTap: { screen.send(.add) })
             }
             if let form = p.adding {
-                Sheet("Add Account", onDismiss: { screen.send(.dismissDraft) }) {
-                    NameField("Name", text: form.name, problem: form.nameProblem, onChange: { screen.send(.draftName(name: $0)) })
-                    ChipRow {
-                        ForEach(form.kinds, id: \.self) { k in
-                            Chip(k.title, glyph: k.glyph, selected: k.selected, onTap: { screen.send(.draftKindKey(key: k.key)) })
+                FormSheet("Add Account", onDismiss: { screen.send(.dismissDraft) }, confirm: "Add Account", canConfirm: form.canSave, onConfirm: { screen.send(.saveDraft) }) {
+                    FormSection {
+                        NameField("Name", text: form.name, problem: form.nameProblem, onChange: { screen.send(.draftName(name: $0)) })
+                        OptionPicker("Type", selection: form.kindKey, onChange: { screen.send(.draftKindKey(key: $0)) }) {
+                            ForEach(form.kinds, id: \.self) { k in
+                                PickerChoice(k.title, glyph: k.glyph, tag: k.key)
+                            }
                         }
                     }
-                    AmountField(form.balanceLabel, text: form.typed, problem: form.balanceProblem, onChange: { screen.send(.draftBalance(typed: $0)) })
-                    SwitchRow("In the Budget", note: form.onBudgetNote, isOn: form.onBudget, onChange: { screen.send(.draftOnBudget(onBudget: $0)) })
-                    FormButton("Add Account", enabled: form.canSave, onTap: { screen.send(.saveDraft) })
+                    FormSection(header: form.balanceHeader) {
+                        AmountEntry(form.balanceLabel, prompt: form.balancePrompt, text: form.typed, cents: form.cents, problem: form.balanceProblem, onType: { screen.send(.draftBalance(typed: $0)) }, onCents: { screen.send(.draftCents(cents: $0)) })
+                    }
+                    FormSection(footer: form.onBudgetNote) {
+                        SwitchRow("In the Budget", isOn: form.onBudget, onChange: { screen.send(.draftOnBudget(onBudget: $0)) })
+                    }
                 }
             }
             if let r = p.renaming {

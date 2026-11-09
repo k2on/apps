@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Modules, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -32,7 +32,7 @@ pub enum SecureStoreCall {
 impl Call for SecureStoreCall {
     type Module = dyn SecureStore;
     const MODULE: &'static str = "secure-store";
-    fn run(&self, m: &dyn SecureStore, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn SecureStore, reply: Arc<ModuleReply>) {
         reply.answer(match self {
             SecureStoreCall::Get(k) => ModuleAnswer::Text { value: m.get(k.clone()) },
             SecureStoreCall::Put(k, v) => {

@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -32,7 +32,7 @@ pub enum ClipboardCall {
 impl Call for ClipboardCall {
     type Module = dyn Clipboard;
     const MODULE: &'static str = "clipboard";
-    fn run(&self, m: &dyn Clipboard, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn Clipboard, reply: Arc<ModuleReply>) {
         match self {
             ClipboardCall::Copy(t) => m.copy_text(t.clone()),
         }

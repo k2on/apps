@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Modules, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -42,7 +42,7 @@ pub enum NotificationsCall {
 impl Call for NotificationsCall {
     type Module = dyn Notifications;
     const MODULE: &'static str = "notifications";
-    fn run(&self, m: &dyn Notifications, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn Notifications, reply: Arc<ModuleReply>) {
         match self {
             NotificationsCall::Schedule(n) => m.schedule(n.clone()),
             NotificationsCall::Cancel(id) => m.cancel(id.clone()),

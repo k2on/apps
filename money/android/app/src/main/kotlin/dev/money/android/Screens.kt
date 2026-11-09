@@ -7,11 +7,16 @@ package dev.money.android
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import dev.arkui.LocalGlyphs
 import dev.arkui.LocalRowMark
+import dev.arkdb.ffi.Id
 import dev.arkui.LocalTabFrame
 import dev.money.ffi.AccountsApp
 import dev.money.ffi.AppShell
@@ -25,19 +30,26 @@ import uniffi.money_app.AccountsPage
 import uniffi.money_domain.Route
 
 /** The Accounts tab, running in Rust. */
-class AccountsHolder(session: Session, refresh: () -> Unit, haptics: Haptics?, clipboard: Clipboard?) {
+class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?, clipboard: Clipboard?) {
     /** Opens a route: the app's navigator. */
     var opened: (Route) -> Unit = {}
 
+    /** Raises the reconcile dialog for an account: the register's own, until reconciling moves to Rust. */
+    var reconciling: (Id) -> Unit = {}
+
     private val shell =
         object : AppShell {
-            override fun open(route: Route) = opened(route)
+            override fun openRoute(route: Route) = opened(route)
 
             override fun native(name: String) {
                 if (name == "refresh") refresh()
+                if (name.startsWith("reconcile ")) reconciling(Id(name.removePrefix("reconcile ")))
             }
 
             override fun nowMs(): Long = System.currentTimeMillis()
+
+            /** The session's day: the demo's in the demo, what a new account is dated with. */
+            override fun today(): String = today()
         }
     private val app = AccountsApp(session, shell)
     private val _page = MutableStateFlow(app.page())
@@ -60,11 +72,24 @@ class AccountsHolder(session: Session, refresh: () -> Unit, haptics: Haptics?, c
     }
 }
 
-/** What a screen written from Rust needs of this app: its page frame, its marks and its glyphs. */
+/**
+ * What a screen written from Rust needs of this app: its page frame (the top bar, and the tab's
+ * button that adds a transaction, as every money tab has), its marks and its glyphs.
+ */
 @Composable
 fun ScreenFrame(content: @Composable () -> Unit) {
     CompositionLocalProvider(
-        LocalTabFrame provides { title, _, inner -> Page(title = title) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } } },
+        LocalTabFrame provides { title, _, inner ->
+            val shell = LocalShell.current
+            Page(
+                title = title,
+                fab = {
+                    FloatingActionButton(onClick = { shell.onAdd(null) }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add a transaction")
+                    }
+                },
+            ) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } }
+        },
         LocalRowMark provides { kind -> KindTile(kind) },
         LocalGlyphs provides Glyphs::shared,
         content = content,

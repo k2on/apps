@@ -277,11 +277,49 @@ pub enum Part<M> {
     /// A group of rows in a card, under its heading, a note under it.
     Section(Section<M>),
     Row(Box<ListRow<M>>),
-    /// A sheet: its title, its content; put away, `dismiss`.
+    /// A sheet: its title, its content; put away, `dismiss`; kept with
+    /// its confirming action, while there is one (the iPhone's checkmark in
+    /// the sheet's bar, a full-width button under the form elsewhere).
     Sheet {
         title: &'static str,
         dismiss: M,
+        confirm: Option<Confirm<M>>,
         content: Box<View<M>>,
+    },
+    /// A group of a form's fields, a heading over it and a note under it:
+    /// a `Form`'s `Section` on the iPhone, a plain column elsewhere.
+    FormSection {
+        header: Option<Val<String>>,
+        footer: Option<Val<String>>,
+        content: Box<View<M>>,
+    },
+    /// One of several, chosen: the system's picker on the iPhone (a menu
+    /// in a form's row), filter chips on Android and the desktop. `choices`
+    /// are [`Part::Choice`]s; `selected` is the chosen one's tag.
+    Picker {
+        label: &'static str,
+        selected: Val<String>,
+        pick: Input<String, M>,
+        choices: Box<View<M>>,
+    },
+    /// One choice of a picker: its title, its glyph, and the tag choosing
+    /// it sends.
+    Choice {
+        title: Val<String>,
+        glyph: Val<String>,
+        tag: Val<String>,
+    },
+    /// An amount entered the app's way: the iPhone's large figure over its
+    /// own keypad (ArkUI's `AmountEntry`, in cents, `prompt` under it), a
+    /// text field elsewhere (`label`, what was typed, the problem with it).
+    AmountEntry {
+        label: Val<String>,
+        prompt: Val<String>,
+        typed: Val<String>,
+        cents: Val<i64>,
+        problem: Val<Option<String>>,
+        on_typed: Input<String, M>,
+        on_cents: Input<i64, M>,
     },
     /// An alert with one text field.
     Prompt {
@@ -314,7 +352,8 @@ pub enum Part<M> {
     },
     Toggle {
         title: &'static str,
-        note: Val<String>,
+        /// A line under the title, while there is one.
+        note: Option<Val<String>>,
         on: Val<bool>,
         change: Input<bool, M>,
     },
@@ -490,10 +529,12 @@ pub enum Picture {
 #[derive(Clone, Debug)]
 pub struct MenuItem<M> {
     pub title: Val<String>,
-    pub glyph: &'static str,
+    pub glyph: Val<String>,
     pub tap: M,
     /// Destructive while this holds.
     pub destructive: Val<bool>,
+    /// Offered only while this holds; always when none.
+    pub shown: Option<Val<bool>>,
 }
 
 /// ArkUI's `ListRow`.
@@ -508,6 +549,9 @@ pub struct ListRow<M> {
     pub quiet: bool,
     /// In the accent's colour: an action, not a place.
     pub accent: bool,
+    /// Its tap opens a page: a `NavigationLink`'s row on the iPhone (its
+    /// chevron, its highlight), a chevron at its end elsewhere.
+    pub pushes: bool,
     pub tap: Option<M>,
     pub said: Option<Val<String>>,
     pub menu: Vec<MenuItem<M>>,
@@ -522,6 +566,7 @@ pub fn list_row<M>(title: impl Into<Val<String>>) -> ListRow<M> {
         amount: None,
         quiet: false,
         accent: false,
+        pushes: false,
         tap: None,
         said: None,
         menu: vec![],
@@ -565,6 +610,11 @@ impl<M> ListRow<M> {
         self.accent = true;
         self
     }
+    /// Its tap opens a page (see [`ListRow::pushes`]).
+    pub fn pushes(mut self) -> Self {
+        self.pushes = true;
+        self
+    }
     pub fn on_tap(mut self, m: M) -> Self {
         self.tap = Some(m);
         self
@@ -577,9 +627,32 @@ impl<M> ListRow<M> {
     pub fn menu(mut self, title: impl Into<Val<String>>, glyph: &'static str, tap: M, destructive: impl Into<Val<bool>>) -> Self {
         self.menu.push(MenuItem {
             title: title.into(),
-            glyph,
+            glyph: glyph.into(),
             tap,
             destructive: destructive.into(),
+            shown: None,
+        });
+        self
+    }
+    /// `title` with a glyph read from the record (it changes with the row).
+    pub fn menu_glyph(mut self, title: impl Into<Val<String>>, glyph: impl Into<Val<String>>, tap: M, destructive: impl Into<Val<bool>>) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: destructive.into(),
+            shown: None,
+        });
+        self
+    }
+    /// `title`, never destructive, offered only while `shown` holds.
+    pub fn menu_when(mut self, title: &'static str, glyph: &'static str, tap: M, shown: impl Into<Val<bool>>) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(false),
+            shown: Some(shown.into()),
         });
         self
     }
@@ -590,11 +663,19 @@ impl<M> ListRow<M> {
     pub fn menu_fixed(mut self, title: &'static str, glyph: &'static str, tap: M) -> Self {
         self.menu.push(MenuItem {
             title: title.into(),
-            glyph,
+            glyph: glyph.into(),
             tap,
             destructive: Val::Is(false),
+            shown: None,
         });
         self
+    }
+}
+
+impl<M> MenuItem<M> {
+    /// Whether it is offered: what a real view draws.
+    pub fn offered(&self) -> bool {
+        self.shown.as_ref().is_none_or(|s| s.get())
     }
 }
 
@@ -604,12 +685,133 @@ impl<M> From<ListRow<M>> for View<M> {
     }
 }
 
-/// A sheet, put away with `dismiss`.
-pub fn sheet<M>(title: &'static str, dismiss: M, content: impl Into<View<M>>) -> View<M> {
-    Part::Sheet {
+/// What keeps a sheet: its title, whether it can yet, and its message.
+#[derive(Clone, Debug)]
+pub struct Confirm<M> {
+    pub title: &'static str,
+    pub enabled: Val<bool>,
+    pub tap: M,
+}
+
+/// A sheet with a form in it, put away with `dismiss`. (`FormSheet` on the
+/// phones: an app's own `Sheet` type would hide a part of that name.)
+pub fn form_sheet<M>(title: &'static str, dismiss: M, content: impl Into<View<M>>) -> SheetBuilder<M> {
+    SheetBuilder {
         title,
         dismiss,
-        content: Box::new(content.into()),
+        confirm: None,
+        content: content.into(),
+    }
+}
+
+pub struct SheetBuilder<M> {
+    title: &'static str,
+    dismiss: M,
+    confirm: Option<Confirm<M>>,
+    content: View<M>,
+}
+
+impl<M> SheetBuilder<M> {
+    /// Kept with `title` while `enabled` holds, sending `tap`.
+    pub fn confirm(mut self, title: &'static str, enabled: impl Into<Val<bool>>, tap: M) -> Self {
+        self.confirm = Some(Confirm {
+            title,
+            enabled: enabled.into(),
+            tap,
+        });
+        self
+    }
+}
+
+impl<M> From<SheetBuilder<M>> for View<M> {
+    fn from(b: SheetBuilder<M>) -> View<M> {
+        Part::Sheet {
+            title: b.title,
+            dismiss: b.dismiss,
+            confirm: b.confirm,
+            content: Box::new(b.content),
+        }
+        .into()
+    }
+}
+
+/// A group of a form's fields.
+pub fn form_section<M>(content: impl Into<View<M>>) -> FormSectionBuilder<M> {
+    FormSectionBuilder {
+        header: None,
+        footer: None,
+        content: content.into(),
+    }
+}
+
+pub struct FormSectionBuilder<M> {
+    header: Option<Val<String>>,
+    footer: Option<Val<String>>,
+    content: View<M>,
+}
+
+impl<M> FormSectionBuilder<M> {
+    pub fn header(mut self, t: impl Into<Val<String>>) -> Self {
+        self.header = Some(t.into());
+        self
+    }
+    pub fn footer(mut self, t: impl Into<Val<String>>) -> Self {
+        self.footer = Some(t.into());
+        self
+    }
+}
+
+impl<M> From<FormSectionBuilder<M>> for View<M> {
+    fn from(b: FormSectionBuilder<M>) -> View<M> {
+        Part::FormSection {
+            header: b.header,
+            footer: b.footer,
+            content: Box::new(b.content),
+        }
+        .into()
+    }
+}
+
+/// One of `choices` ([`picker_choice`]s), the one tagged `selected` chosen;
+/// choosing another sends `pick` with its tag.
+pub fn option_picker<M>(label: &'static str, selected: impl Into<Val<String>>, pick: fn(String) -> M, choices: impl Into<View<M>>) -> View<M> {
+    Part::Picker {
+        label,
+        selected: selected.into(),
+        pick: Input(pick),
+        choices: Box::new(choices.into()),
+    }
+    .into()
+}
+
+/// One choice of an [`option_picker`].
+pub fn picker_choice<M>(title: impl Into<Val<String>>, glyph: impl Into<Val<String>>, tag: impl Into<Val<String>>) -> View<M> {
+    Part::Choice {
+        title: title.into(),
+        glyph: glyph.into(),
+        tag: tag.into(),
+    }
+    .into()
+}
+
+/// An amount entered the app's way (see [`Part::AmountEntry`]).
+pub fn amount_entry<M>(
+    label: impl Into<Val<String>>,
+    prompt: impl Into<Val<String>>,
+    typed: impl Into<Val<String>>,
+    cents: impl Into<Val<i64>>,
+    problem: impl Into<Val<Option<String>>>,
+    on_typed: fn(String) -> M,
+    on_cents: fn(i64) -> M,
+) -> View<M> {
+    Part::AmountEntry {
+        label: label.into(),
+        prompt: prompt.into(),
+        typed: typed.into(),
+        cents: cents.into(),
+        problem: problem.into(),
+        on_typed: Input(on_typed),
+        on_cents: Input(on_cents),
     }
     .into()
 }
@@ -673,7 +875,18 @@ pub fn chip<M>(label: impl Into<Val<String>>, glyph: impl Into<Val<String>>, sel
 pub fn switch_row<M>(title: &'static str, note: impl Into<Val<String>>, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
     Part::Toggle {
         title,
-        note: note.into(),
+        note: Some(note.into()),
+        on: on.into(),
+        change: Input(change),
+    }
+    .into()
+}
+
+/// A switch with its title alone (its note in the form section's footer).
+pub fn switch<M>(title: &'static str, on: impl Into<Val<bool>>, change: fn(bool) -> M) -> View<M> {
+    Part::Toggle {
+        title,
+        note: None,
         on: on.into(),
         change: Input(change),
     }
@@ -704,6 +917,8 @@ pub enum Given<'a, M> {
     Typed(&'a Input<String, M>),
     /// A message made of where a switch was put.
     Switched(&'a Input<bool, M>),
+    /// A message made of an amount entered, in cents.
+    Counted(&'a Input<i64, M>),
     /// Several of another part (a row's menu).
     Items(Vec<Call<'a, M>>),
 }
@@ -792,6 +1007,9 @@ impl<M> Part<M> {
                 if r.accent {
                     args.push(("accent", G::Val("true".into())));
                 }
+                if r.pushes {
+                    args.push(("pushes", G::Val("true".into())));
+                }
                 if let Some(s) = &r.said {
                     args.push(("said", G::Val(lit(s))));
                 }
@@ -800,16 +1018,12 @@ impl<M> Part<M> {
                         .menu
                         .iter()
                         .map(|m| {
-                            c(
-                                "MenuAction",
-                                Some(G::Val(lit(&m.title))),
-                                vec![
-                                    ("glyph", G::Text(m.glyph)),
-                                    ("destructive", G::Val(lit(&m.destructive))),
-                                    ("onTap", G::Act(&m.tap)),
-                                ],
-                                vec![],
-                            )
+                            let mut args = vec![("glyph", G::Val(lit(&m.glyph))), ("destructive", G::Val(lit(&m.destructive)))];
+                            if let Some(s) = &m.shown {
+                                args.push(("shown", G::Val(lit(s))));
+                            }
+                            args.push(("onTap", G::Act(&m.tap)));
+                            c("MenuAction", Some(G::Val(lit(&m.title))), args, vec![])
                         })
                         .collect();
                     args.push(("menu", G::Items(items)));
@@ -819,11 +1033,67 @@ impl<M> Part<M> {
                 }
                 c("ListRow", Some(G::Val(lit(&r.title))), args, vec![])
             }
-            Part::Sheet { title, dismiss, content } => c(
-                "Sheet",
-                Some(G::Text(title)),
-                vec![("onDismiss", G::Act(dismiss))],
-                vec![("", &**content)],
+            Part::Sheet {
+                title,
+                dismiss,
+                confirm,
+                content,
+            } => {
+                let mut args = vec![("onDismiss", G::Act(dismiss))];
+                if let Some(k) = confirm {
+                    args.push(("confirm", G::Text(k.title)));
+                    args.push(("canConfirm", G::Val(lit(&k.enabled))));
+                    args.push(("onConfirm", G::Act(&k.tap)));
+                }
+                c("FormSheet", Some(G::Text(title)), args, vec![("", &**content)])
+            }
+            Part::FormSection { header, footer, content } => {
+                let mut args = vec![];
+                if let Some(h) = header {
+                    args.push(("header", G::Val(lit(h))));
+                }
+                if let Some(f) = footer {
+                    args.push(("footer", G::Val(lit(f))));
+                }
+                c("FormSection", None, args, vec![("", &**content)])
+            }
+            Part::Picker {
+                label,
+                selected,
+                pick,
+                choices,
+            } => c(
+                "OptionPicker",
+                Some(G::Text(label)),
+                vec![("selection", G::Val(lit(selected))), ("onChange", G::Typed(pick))],
+                vec![("", &**choices)],
+            ),
+            Part::Choice { title, glyph, tag } => c(
+                "PickerChoice",
+                Some(G::Val(lit(title))),
+                vec![("glyph", G::Val(lit(glyph))), ("tag", G::Val(lit(tag)))],
+                vec![],
+            ),
+            Part::AmountEntry {
+                label,
+                prompt,
+                typed,
+                cents,
+                problem,
+                on_typed,
+                on_cents,
+            } => c(
+                "AmountEntry",
+                Some(G::Val(lit(label))),
+                vec![
+                    ("prompt", G::Val(lit(prompt))),
+                    ("text", G::Val(lit(typed))),
+                    ("cents", G::Val(lit(cents))),
+                    ("problem", G::Val(lit(problem))),
+                    ("onType", G::Typed(on_typed)),
+                    ("onCents", G::Counted(on_cents)),
+                ],
+                vec![],
             ),
             Part::Prompt {
                 title,
@@ -876,12 +1146,15 @@ impl<M> Part<M> {
                 vec![("glyph", G::Val(lit(glyph))), ("selected", G::Val(lit(selected))), ("onTap", G::Act(tap))],
                 vec![],
             ),
-            Part::Toggle { title, note, on, change } => c(
-                "SwitchRow",
-                Some(G::Text(title)),
-                vec![("note", G::Val(lit(note))), ("isOn", G::Val(lit(on))), ("onChange", G::Switched(change))],
-                vec![],
-            ),
+            Part::Toggle { title, note, on, change } => {
+                let mut args = vec![];
+                if let Some(n) = note {
+                    args.push(("note", G::Val(lit(n))));
+                }
+                args.push(("isOn", G::Val(lit(on))));
+                args.push(("onChange", G::Switched(change)));
+                c("SwitchRow", Some(G::Text(title)), args, vec![])
+            }
             Part::Button { title, enabled, tap } => c(
                 "FormButton",
                 Some(G::Text(title)),

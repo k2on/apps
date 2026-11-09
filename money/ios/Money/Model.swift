@@ -167,7 +167,7 @@ final class Model: ObservableObject {
         session = s
         accounts = AccountsScreen(session: s, modules: modules,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
-                                  nowMs: { Int64(Date().timeIntervalSince1970 * 1000) })
+                                  today: { [weak self] in self?.today ?? moneyToday() })
     }
 
     private func close() {

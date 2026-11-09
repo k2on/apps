@@ -17,30 +17,35 @@ fun AccountsScreen(screen: AccountsHolder) {
         },
     ) {
         CardSection {
-            ListRow("All Accounts", tile = "layers", amount = p.allTotal, quiet = true, onTap = { screen.send(AccountsMsg.OpenAll) })
+            ListRow("All Accounts", tile = "layers", amount = p.allTotal, quiet = true, pushes = true, onTap = { screen.send(AccountsMsg.OpenAll) })
         }
         for (shelf in p.shelves) {
             CardSection(title = shelf.title, total = shelf.total, showsTotal = shelf.showsTotal) {
                 for (a in shelf.accounts) {
-                    ListRow(a.name, subtitle = a.subtitle, mark = a.kindKey, badge = a.reviews, amount = a.balance, said = a.said, menu = listOf(MenuAction("Rename", glyph = "pencil", destructive = false, onTap = { screen.send(AccountsMsg.Rename(id = a.id)) }), MenuAction("Copy Balance", glyph = "copy", destructive = false, onTap = { screen.send(AccountsMsg.CopyBalance(id = a.id)) }), MenuAction(a.closeTitle, glyph = "archive", destructive = a.isOpen, onTap = { screen.send(AccountsMsg.ToggleClosed(id = a.id)) })), onTap = { screen.send(AccountsMsg.OpenAccount(id = a.id)) })
+                    ListRow(a.name, subtitle = a.subtitle, mark = a.kindKey, badge = a.reviews, amount = a.balance, pushes = true, said = a.said, menu = listOf(MenuAction("Rename", glyph = "pencil", destructive = false, onTap = { screen.send(AccountsMsg.Rename(id = a.id)) }), MenuAction("Reconcile…", glyph = "badge-check", destructive = false, shown = a.isOpen, onTap = { screen.send(AccountsMsg.Reconcile(id = a.id)) }), MenuAction("Copy Balance", glyph = "copy", destructive = false, onTap = { screen.send(AccountsMsg.CopyBalance(id = a.id)) }), MenuAction(a.closeTitle, glyph = a.closeGlyph, destructive = a.isOpen, onTap = { screen.send(AccountsMsg.ToggleClosed(id = a.id)) })), onTap = { screen.send(AccountsMsg.OpenAccount(id = a.id)) })
                 }
             }
         }
         CardSection(footer = p.synced) {
-            ListRow(p.banksTitle, glyph = "link", onTap = { screen.send(AccountsMsg.OpenBanks) })
-            ListRow("Add Account", glyph = "plus", accent = true, onTap = { screen.send(AccountsMsg.Add) })
+            ListRow(p.banksTitle, glyph = "link", pushes = true, onTap = { screen.send(AccountsMsg.OpenBanks) })
+            ListRow("Add Account", glyph = "circle-plus", accent = true, onTap = { screen.send(AccountsMsg.Add) })
         }
         p.adding?.let { form ->
-            Sheet("Add Account", onDismiss = { screen.send(AccountsMsg.DismissDraft) }) {
-                NameField("Name", text = form.name, problem = form.nameProblem, onChange = { screen.send(AccountsMsg.DraftName(name = it)) })
-                ChipRow {
-                    for (k in form.kinds) {
-                        Chip(k.title, glyph = k.glyph, selected = k.selected, onTap = { screen.send(AccountsMsg.DraftKindKey(key = k.key)) })
+            FormSheet("Add Account", onDismiss = { screen.send(AccountsMsg.DismissDraft) }, confirm = "Add Account", canConfirm = form.canSave, onConfirm = { screen.send(AccountsMsg.SaveDraft) }) {
+                FormSection {
+                    NameField("Name", text = form.name, problem = form.nameProblem, onChange = { screen.send(AccountsMsg.DraftName(name = it)) })
+                    OptionPicker("Type", selection = form.kindKey, onChange = { screen.send(AccountsMsg.DraftKindKey(key = it)) }) {
+                        for (k in form.kinds) {
+                            PickerChoice(k.title, glyph = k.glyph, tag = k.key)
+                        }
                     }
                 }
-                AmountField(form.balanceLabel, text = form.typed, problem = form.balanceProblem, onChange = { screen.send(AccountsMsg.DraftBalance(typed = it)) })
-                SwitchRow("In the Budget", note = form.onBudgetNote, isOn = form.onBudget, onChange = { screen.send(AccountsMsg.DraftOnBudget(onBudget = it)) })
-                FormButton("Add Account", enabled = form.canSave, onTap = { screen.send(AccountsMsg.SaveDraft) })
+                FormSection(header = form.balanceHeader) {
+                    AmountEntry(form.balanceLabel, prompt = form.balancePrompt, text = form.typed, cents = form.cents, problem = form.balanceProblem, onType = { screen.send(AccountsMsg.DraftBalance(typed = it)) }, onCents = { screen.send(AccountsMsg.DraftCents(cents = it)) })
+                }
+                FormSection(footer = form.onBudgetNote) {
+                    SwitchRow("In the Budget", isOn = form.onBudget, onChange = { screen.send(AccountsMsg.DraftOnBudget(onBudget = it)) })
+                }
             }
         }
         p.renaming?.let { r ->

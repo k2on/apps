@@ -1,5 +1,5 @@
 //! The camera: a QR code read, a photo taken. Each shows the platform's
-//! own camera page and answers when it closes, through a [`Reply`]: a scan
+//! own camera page and answers when it closes, through a [`ModuleReply`]: a scan
 //! as `Text` (none when the person backed out), a photo as its JPEG's
 //! `Bytes`. An update asks with [`scan_qr`] or [`take_photo`].
 //!
@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Modules, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -17,9 +17,9 @@ uniffi::setup_scaffolding!();
 #[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
 pub trait Camera: Send + Sync {
     /// Answers `Text`.
-    fn scan_qr(&self, reply: Arc<Reply>);
+    fn scan_qr(&self, reply: Arc<ModuleReply>);
     /// Answers `Bytes` (a JPEG).
-    fn take_photo(&self, reply: Arc<Reply>);
+    fn take_photo(&self, reply: Arc<ModuleReply>);
 }
 
 /// What an update asks of the camera.
@@ -32,7 +32,7 @@ pub enum CameraCall {
 impl Call for CameraCall {
     type Module = dyn Camera;
     const MODULE: &'static str = "camera";
-    fn run(&self, m: &dyn Camera, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn Camera, reply: Arc<ModuleReply>) {
         match self {
             CameraCall::ScanQr => m.scan_qr(reply),
             CameraCall::TakePhoto => m.take_photo(reply),
@@ -54,8 +54,8 @@ pub fn take_photo() -> ModuleCall {
 /// answers it.
 #[derive(Clone, Default)]
 pub struct Fake {
-    scans: Arc<Mutex<Vec<Arc<Reply>>>>,
-    photos: Arc<Mutex<Vec<Arc<Reply>>>>,
+    scans: Arc<Mutex<Vec<Arc<ModuleReply>>>>,
+    photos: Arc<Mutex<Vec<Arc<ModuleReply>>>>,
 }
 
 impl Fake {
@@ -68,7 +68,7 @@ impl Fake {
         modules.register::<dyn Camera>(Arc::new(self.clone()));
     }
 
-    fn oldest(of: &Mutex<Vec<Arc<Reply>>>) -> Option<Arc<Reply>> {
+    fn oldest(of: &Mutex<Vec<Arc<ModuleReply>>>) -> Option<Arc<ModuleReply>> {
         let mut v = of.lock().unwrap_or_else(|e| e.into_inner());
         (!v.is_empty()).then(|| v.remove(0))
     }
@@ -89,11 +89,11 @@ impl Fake {
 }
 
 impl Camera for Fake {
-    fn scan_qr(&self, reply: Arc<Reply>) {
+    fn scan_qr(&self, reply: Arc<ModuleReply>) {
         self.scans.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
     }
 
-    fn take_photo(&self, reply: Arc<Reply>) {
+    fn take_photo(&self, reply: Arc<ModuleReply>) {
         self.photos.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
     }
 }

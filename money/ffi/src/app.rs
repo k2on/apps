@@ -23,13 +23,32 @@ use money_domain::{self as domain, routes::Route, MoneyChange};
 use crate::Session;
 
 /// What only the phone's shell can do for a screen: open a route on its
-/// navigator, carry out a native request ("refresh"), and say the time.
+/// navigator, carry out a native request ("refresh", "reconcile <id>"),
+/// and say the time and the session's day.
 #[uniffi::export(with_foreign)]
 pub trait AppShell: Send + Sync {
-    fn open(&self, route: Route);
+    /// Not `open`: UniFFI writes a vtable field of that name quoted into its C
+    /// header for Swift, which clang cannot read.
+    fn open_route(&self, route: Route);
     fn native(&self, name: String);
-    /// Milliseconds since the epoch: the demo's day in the demo.
+    /// Milliseconds since the epoch, by the device's clock.
     fn now_ms(&self) -> i64;
+    /// The session's day (`2026-10-26`): the demo's day in the demo, today
+    /// otherwise — what a new account is dated with.
+    fn today(&self) -> String;
+}
+
+/// The time a screen is worked out at: the device's clock on the session's
+/// day, and noon of that day when the clock is on another (the demo's
+/// fixed day), so what is dated today is dated with the session's day.
+pub fn session_now(clock_ms: i64, today: &str) -> i64 {
+    if domain::dates::day_of_ms(clock_ms) == today {
+        return clock_ms;
+    }
+    match domain::dates::parse_day(today) {
+        Some((y, m, d)) => domain::dates::days_from_civil(y, m, d) * 86_400_000 + 43_200_000,
+        None => clock_ms,
+    }
 }
 
 /// The Accounts tab, running.
@@ -53,7 +72,7 @@ impl Host<Accounts> for Phone<'_> {
         self.app.session.read(|st, _| f(st))
     }
     fn now_ms(&self) -> i64 {
-        self.app.shell.now_ms()
+        session_now(self.app.shell.now_ms(), &self.app.shell.today())
     }
     fn send(&mut self, change: MoneyChange) -> Result<(), String> {
         match self.app.session.send(|p| p.mutate_encoded(change.name(), change.input())) {
@@ -62,7 +81,7 @@ impl Host<Accounts> for Phone<'_> {
         }
     }
     fn open(&mut self, route: Route) {
-        self.app.shell.open(route)
+        self.app.shell.open_route(route)
     }
     fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
         let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -130,5 +149,22 @@ impl AccountsApp {
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
         m.set(haptics).set(clipboard).set(share);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_now;
+
+    /// On the session's own day the clock is the time; on another (the
+    /// demo's fixed day), noon of the session's day. Falsified by the
+    /// device's clock alone: an account added in the demo was dated with
+    /// the phone's day, not the demo's.
+    #[test]
+    fn the_time_is_on_the_sessions_day() {
+        let noon_26 = session_now(0, "2026-10-26");
+        assert_eq!(session_now(noon_26 + 3_600_000, "2026-10-26"), noon_26 + 3_600_000);
+        assert_eq!(session_now(noon_26 + 30 * 86_400_000, "2026-10-26"), noon_26);
+        assert_eq!(money_domain::dates::day_of_ms(session_now(0, "2026-10-26")), "2026-10-26");
     }
 }

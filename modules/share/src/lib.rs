@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Modules, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -23,7 +23,7 @@ pub enum ShareCall {
 impl Call for ShareCall {
     type Module = dyn Share;
     const MODULE: &'static str = "share";
-    fn run(&self, m: &dyn Share, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn Share, reply: Arc<ModuleReply>) {
         match self {
             ShareCall::Share { text, url } => m.share(text.clone(), url.clone()),
         }

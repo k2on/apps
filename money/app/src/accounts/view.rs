@@ -20,6 +20,7 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                     .tile("layers")
                     .amount(p.all_total)
                     .quiet()
+                    .pushes()
                     .on_tap(AccountsMsg::OpenAll),
             ),
             for shelf in p.shelves {
@@ -31,28 +32,43 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                 .shows_amount(shelf.shows_total)
             },
             card_section((
-                list_row(p.banks_title).glyph("link").on_tap(AccountsMsg::OpenBanks),
-                list_row("Add Account").glyph("plus").accent().on_tap(AccountsMsg::Add),
+                list_row(p.banks_title).glyph("link").pushes().on_tap(AccountsMsg::OpenBanks),
+                list_row("Add Account").glyph("circle-plus").accent().on_tap(AccountsMsg::Add),
             ))
             .footer(p.synced),
             if let Some(form) = p.adding {
-                sheet(
+                form_sheet(
                     "Add Account",
                     AccountsMsg::DismissDraft,
                     (
-                        name_field("Name", form.name, form.name_problem, |name| AccountsMsg::DraftName { name }),
-                        chip_row(for k in form.kinds {
-                            chip(k.title, k.glyph, k.selected, AccountsMsg::DraftKindKey { key: k.key })
-                        }),
-                        amount_field(form.balance_label, form.typed, form.balance_problem, |typed| AccountsMsg::DraftBalance {
-                            typed,
-                        }),
-                        switch_row("In the Budget", form.on_budget_note, form.on_budget, |on_budget| {
-                            AccountsMsg::DraftOnBudget { on_budget }
-                        }),
-                        form_button("Add Account", form.can_save, AccountsMsg::SaveDraft),
+                        form_section((
+                            name_field("Name", form.name, form.name_problem, |name| AccountsMsg::DraftName { name }),
+                            option_picker(
+                                "Type",
+                                form.kind_key,
+                                |key| AccountsMsg::DraftKindKey { key },
+                                for k in form.kinds {
+                                    picker_choice(k.title, k.glyph, k.key)
+                                },
+                            ),
+                        )),
+                        form_section(amount_entry(
+                            form.balance_label,
+                            form.balance_prompt,
+                            form.typed,
+                            form.cents,
+                            form.balance_problem,
+                            |typed| AccountsMsg::DraftBalance { typed },
+                            |cents| AccountsMsg::DraftCents { cents },
+                        ))
+                        .header(form.balance_header),
+                        form_section(switch("In the Budget", form.on_budget, |on_budget| AccountsMsg::DraftOnBudget {
+                            on_budget,
+                        }))
+                        .footer(form.on_budget_note),
                     ),
                 )
+                .confirm("Add Account", form.can_save, AccountsMsg::SaveDraft)
             },
             if let Some(r) = p.renaming {
                 prompt(
@@ -72,8 +88,9 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
 }
 
 /// One account: its kind's mark, its name and what feeds it, how many wait
-/// for a look, and its balance. Held, it is renamed, closed or reopened,
-/// or its balance copied.
+/// for a look, and its balance; tapped, its register. Held (right-clicked
+/// on the desktop), it is renamed, reconciled while open, its balance
+/// copied, or it is closed or reopened.
 #[view]
 pub fn account_row(a: &AccountItem) -> View<AccountsMsg> {
     list_row(a.name)
@@ -82,9 +99,11 @@ pub fn account_row(a: &AccountItem) -> View<AccountsMsg> {
         .badge(a.reviews)
         .amount(a.balance)
         .said(a.said)
+        .pushes()
         .on_tap(AccountsMsg::OpenAccount { id: a.id })
         .menu_fixed("Rename", "pencil", AccountsMsg::Rename { id: a.id })
+        .menu_when("Reconcile…", "badge-check", AccountsMsg::Reconcile { id: a.id }, a.is_open)
         .menu_fixed("Copy Balance", "copy", AccountsMsg::CopyBalance { id: a.id })
-        .menu(a.close_title, "archive", AccountsMsg::ToggleClosed { id: a.id }, a.is_open)
+        .menu_glyph(a.close_title, a.close_glyph, AccountsMsg::ToggleClosed { id: a.id }, a.is_open)
         .into()
 }

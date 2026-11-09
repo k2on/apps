@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Modules, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -101,7 +101,7 @@ pub enum MediaCall {
 impl Call for MediaCall {
     type Module = dyn MediaPlayer;
     const MODULE: &'static str = "media-player";
-    fn run(&self, m: &dyn MediaPlayer, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn MediaPlayer, reply: Arc<ModuleReply>) {
         match self {
             MediaCall::Load { url, at_ms } => m.load(url.clone(), *at_ms),
             MediaCall::Play => m.play(),

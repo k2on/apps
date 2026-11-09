@@ -17,8 +17,10 @@
 package dev.arkui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material3.LocalContentColor
@@ -80,6 +82,32 @@ public fun Modifier.pressable(
         enabled = enabled,
         onClickLabel = onClickLabel,
         role = role,
+        onClick = onClick,
+    )
+
+/**
+ * Tappable and holdable, answering the finger as it lands ([Press]) for both: a row with a menu is
+ * lit under the finger whether it is tapped or held, as one without is. `combinedClickable`, with
+ * no ripple; holding performs the system's long-press haptic.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+public fun Modifier.pressable(
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    enabled: Boolean = true,
+    onClickLabel: String? = null,
+    onLongClickLabel: String? = null,
+    role: Role? = null,
+    press: Press = Press.Give,
+): Modifier =
+    combinedClickable(
+        interactionSource = null,
+        indication = press,
+        enabled = enabled,
+        onClickLabel = onClickLabel,
+        onLongClickLabel = onLongClickLabel,
+        role = role,
+        onLongClick = onLongClick,
         onClick = onClick,
     )
 

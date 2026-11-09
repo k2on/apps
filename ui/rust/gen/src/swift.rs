@@ -85,6 +85,7 @@ fn given<M: Debug>(g: &Given<'_, M>) -> String {
         Given::Act(m) => format!("{{ screen.send({}) }}", msg(&Msg::of(m))),
         Given::Typed(i) => format!("{{ screen.send({}) }}", msg(&Msg::typed(i))),
         Given::Switched(i) => format!("{{ screen.send({}) }}", msg(&Msg::switched(i))),
+        Given::Counted(i) => format!("{{ screen.send({}) }}", msg(&Msg::counted(i))),
         Given::Items(cs) => {
             let items: Vec<String> = cs.iter().map(|c| format!("{}({})", c.name, args(c).join(", "))).collect();
             format!("[{}]", items.join(", "))

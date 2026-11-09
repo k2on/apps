@@ -233,3 +233,50 @@ fn ids_read_back_from_hex() {
     assert_eq!(id_of(&id.hex()), Some(id));
     assert_eq!(id_of("zz"), None);
 }
+
+/// Reconcile is offered for an open account and asks the shell for its
+/// sheet; a closed account's is not. Falsified by dropping the menu's
+/// Reconcile (the prototype's regression) or offering it for a closed one.
+#[test]
+fn reconcile_asks_the_shell_for_an_open_account() {
+    let mut d = Demo::new();
+    let mut rt = Runtime::<Accounts>::new();
+    let a = d.accounts().iter().find(|a| !a.closed).unwrap().id.hex();
+    run(&mut rt, &mut d, [AccountsMsg::Reconcile { id: a.clone() }]);
+    assert_eq!(d.native, vec![format!("reconcile {a}")]);
+    let p = rt.screen(&d);
+    let row = p.shelves.iter().flat_map(|s| &s.accounts).find(|r| r.id == a).unwrap();
+    assert!(row.is_open);
+    let v = view::account_row::view(row);
+    let ark_app::view::View::Part(ark_app::view::Part::Row(r)) = v else {
+        panic!("a row")
+    };
+    let offered: Vec<String> = r.menu.iter().filter(|m| m.offered()).map(|m| m.title.get()).collect();
+    assert_eq!(offered, ["Rename", "Reconcile…", "Copy Balance", "Close Account"]);
+    assert!(r.pushes, "an account's row opens its register as a pushed page");
+}
+
+/// The iPhone's amount entry says cents; the form keeps what was entered
+/// last, typed or entered, and says it back as cents.
+#[test]
+fn an_amount_entered_in_cents_is_the_balance() {
+    let mut d = Demo::new();
+    let mut rt = Runtime::<Accounts>::new();
+    run(
+        &mut rt,
+        &mut d,
+        [
+            AccountsMsg::Add,
+            AccountsMsg::DraftKindKey { key: "credit".into() },
+            AccountsMsg::DraftCents { cents: 1_250 },
+        ],
+    );
+    let f = rt.screen(&d).adding.unwrap();
+    assert_eq!(
+        (f.kind_key.as_str(), f.cents, f.balance_header.as_str()),
+        ("credit", 1_250, "Balance Owed")
+    );
+    assert_eq!(rt.state().adding.as_ref().unwrap().balance(&NumberStyle::us()), Some(-1_250));
+    run(&mut rt, &mut d, [AccountsMsg::DraftBalance { typed: "3".into() }]);
+    assert_eq!(rt.screen(&d).adding.unwrap().cents, 300);
+}

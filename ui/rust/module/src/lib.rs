@@ -19,7 +19,7 @@
 //!   `ark_app` turns it into the app's message (`Command::Ask`'s `then`, a
 //!   plain function pointer), so an update is a pure function a test runs
 //!   over the modules' fakes.
-//! - [`Reply`] — where a module that answers later (the camera, when the
+//! - [`ModuleReply`] — where a module that answers later (the camera, when the
 //!   person is done) says what came of a call, once. Under `ffi` it is a
 //!   UniFFI object the Swift and Kotlin implementations are handed.
 //! - [`Modules`] — the registry a shell fills at startup, one trait object
@@ -74,12 +74,12 @@ pub trait Call: Debug + PartialEq + Send + Sync + 'static {
     const MODULE: &'static str;
     /// `self` carried out by `module`; what came of it to `reply`, now or
     /// later, once.
-    fn run(&self, module: &Self::Module, reply: Arc<Reply>);
+    fn run(&self, module: &Self::Module, reply: Arc<ModuleReply>);
 }
 
 /// A call with its type erased: what [`ModuleCall`] holds.
 trait Erased: Send + Sync {
-    fn run(&self, modules: &Modules, reply: Arc<Reply>);
+    fn run(&self, modules: &Modules, reply: Arc<ModuleReply>);
     fn module(&self) -> &'static str;
     fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
     fn same(&self, other: &dyn Erased) -> bool;
@@ -87,7 +87,7 @@ trait Erased: Send + Sync {
 }
 
 impl<C: Call> Erased for C {
-    fn run(&self, modules: &Modules, reply: Arc<Reply>) {
+    fn run(&self, modules: &Modules, reply: Arc<ModuleReply>) {
         match modules.get::<C::Module>() {
             Some(m) => Call::run(self, &*m, reply),
             None => reply.answer(ModuleAnswer::Unavailable),
@@ -152,21 +152,21 @@ type Answering = Box<dyn FnOnce(ModuleAnswer) + Send>;
 
 /// Where a module says what came of a call, once.
 #[cfg_attr(feature = "ffi", derive(uniffi::Object))]
-pub struct Reply {
+pub struct ModuleReply {
     to: Mutex<Option<Answering>>,
 }
 
-impl Reply {
+impl ModuleReply {
     /// A reply that hands its answer to `to`.
-    pub fn new(to: impl FnOnce(ModuleAnswer) + Send + 'static) -> Arc<Reply> {
-        Arc::new(Reply {
+    pub fn new(to: impl FnOnce(ModuleAnswer) + Send + 'static) -> Arc<ModuleReply> {
+        Arc::new(ModuleReply {
             to: Mutex::new(Some(Box::new(to))),
         })
     }
 }
 
 #[cfg_attr(feature = "ffi", uniffi::export)]
-impl Reply {
+impl ModuleReply {
     /// What came of the call; only the first answer is heard.
     pub fn answer(&self, answer: ModuleAnswer) {
         let to = self.to.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -216,7 +216,7 @@ impl Modules {
     /// `call` carried out by the module registered for it; what came of it
     /// handed to `reply`, at once or (the camera) when the person is done.
     pub fn call(&self, call: ModuleCall, reply: impl FnOnce(ModuleAnswer) + Send + 'static) {
-        call.0.run(self, Reply::new(reply))
+        call.0.run(self, ModuleReply::new(reply))
     }
 }
 
@@ -241,7 +241,7 @@ mod tests {
     impl Call for Say {
         type Module = dyn Echo;
         const MODULE: &'static str = "echo";
-        fn run(&self, m: &dyn Echo, reply: Arc<Reply>) {
+        fn run(&self, m: &dyn Echo, reply: Arc<ModuleReply>) {
             reply.answer(ModuleAnswer::Text {
                 value: Some(m.echo(self.0.clone())),
             })
@@ -285,7 +285,7 @@ mod tests {
     fn a_reply_is_heard_once() {
         let got = Arc::new(Mutex::new(vec![]));
         let g = got.clone();
-        let r = Reply::new(move |a| g.lock().unwrap().push(a));
+        let r = ModuleReply::new(move |a| g.lock().unwrap().push(a));
         r.answer(ModuleAnswer::Done);
         r.answer(ModuleAnswer::Unavailable);
         assert_eq!(*got.lock().unwrap(), vec![ModuleAnswer::Done]);

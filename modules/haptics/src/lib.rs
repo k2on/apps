@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, Reply};
+use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -40,7 +40,7 @@ pub enum HapticsCall {
 impl Call for HapticsCall {
     type Module = dyn Haptics;
     const MODULE: &'static str = "haptics";
-    fn run(&self, m: &dyn Haptics, reply: Arc<Reply>) {
+    fn run(&self, m: &dyn Haptics, reply: Arc<ModuleReply>) {
         match *self {
             HapticsCall::Perform(h) => m.perform(h),
         }

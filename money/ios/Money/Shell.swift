@@ -91,7 +91,11 @@ struct Shell: View {
                             .environmentObject(a)
                             .environment(\.tabFace) { AnyView(AccountButton()) }
                             .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
-                            .onAppear { a.open = { r in navs[.accounts, default: Navigator()].push(r) } }
+                            .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
+                            .onAppear {
+                                a.open = { r in navs[.accounts, default: Navigator()].push(r) }
+                                a.reconcile = { id in present(.reconcile(id)) }
+                            }
                     }
                 }
             }

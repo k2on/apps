@@ -4,14 +4,15 @@
 //! a card rounded by 8, rows lit by the theme's pressed colour, no give.
 //!
 //! What iced has no twin for is said here, not left out silently: a row's
-//! menu is its right click, its first item (iced has no context menu on a
-//! row yet), and a sheet or a prompt is a dialog over the page.
+//! menu is ArkUI's own menu at the pointer ([`crate::context_menu`]:
+//! right click, a long press, or the menu key), a sheet or a prompt is a
+//! dialog over the page, a picker is a row of chips, and an amount is typed.
 
-use ark_app::view::{Input, ListRow, Part, Picture, Section, Val, View};
-use iced::widget::{button, checkbox, column, container, mouse_area, row, scrollable, stack, text, text_input, Column, Space};
+use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Section, Val, View};
+use iced::widget::{button, checkbox, column, container, row, scrollable, stack, text, text_input, Column, Space};
 use iced::{Alignment, Length};
 
-use crate::{glyphs, icon, layer, parts, style};
+use crate::{context_menu, glyphs, icon, layer, parts, style};
 
 pub use iced::Element;
 
@@ -87,13 +88,44 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         } => field(label, value.get(), problem.get(), typed),
         Part::AmountField { label, typed, problem, on } => field(&label.get(), typed.get(), problem.get(), on),
         Part::Chips(c) => row(nodes(*c)).spacing(4).wrap().into(),
+        Part::FormSection { header, footer, content } => {
+            let mut c = column![].spacing(6);
+            if let Some(h) = header {
+                c = c.push(text(h.get()).size(12).style(style::dim));
+            }
+            c = c.extend(nodes(*content));
+            if let Some(f) = footer {
+                c = c.push(text(f.get()).size(12).style(style::dim));
+            }
+            c.into()
+        }
+        Part::Picker { selected, pick, choices, .. } => {
+            let chosen = selected.get();
+            let chips = flatten(*choices).into_iter().filter_map(|v| match v {
+                View::Part(Part::Choice { title, tag, .. }) => {
+                    let tag = tag.get();
+                    Some(parts::chip(&title.get(), tag == chosen, (pick.0)(tag)))
+                }
+                _ => None,
+            });
+            row(chips).spacing(4).wrap().into()
+        }
+        Part::Choice { .. } => return None,
+        Part::AmountEntry {
+            label,
+            typed,
+            problem,
+            on_typed,
+            ..
+        } => field(&label.get(), typed.get(), problem.get(), on_typed),
         Part::Chip { label, selected, tap, .. } => parts::chip(&label.get(), selected.get(), tap),
-        Part::Toggle { title, note, on, change } => column![
-            checkbox(on.get()).label(title).on_toggle(change.0),
-            text(note.get()).size(12).style(style::dim),
-        ]
-        .spacing(2)
-        .into(),
+        Part::Toggle { title, note, on, change } => {
+            let mut c = column![checkbox(on.get()).label(title).on_toggle(change.0)].spacing(2);
+            if let Some(n) = note {
+                c = c.push(text(n.get()).size(12).style(style::dim));
+            }
+            c.into()
+        }
         Part::Button { title, enabled, tap } => button(text(title)).on_press_maybe(enabled.get().then_some(tap)).into(),
         Part::Page { .. } | Part::Sheet { .. } | Part::Prompt { .. } => return None,
     })
@@ -103,7 +135,25 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
 fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
     let View::Part(p) = v else { return None };
     let (dismiss, content): (M, Column<'static, M>) = match p {
-        Part::Sheet { title, dismiss, content } => (dismiss, column![text(title).size(18).font(crate::hero::BOLD)].extend(nodes(*content))),
+        Part::Sheet {
+            title,
+            dismiss,
+            confirm,
+            content,
+        } => {
+            let mut c = column![text(title).size(18).font(crate::hero::BOLD)].extend(nodes(*content));
+            if let Some(Confirm { title, enabled, tap }) = confirm {
+                c = c.push(
+                    row![
+                        Space::new().width(Length::Fill),
+                        button(text("Cancel")).on_press(dismiss.clone()),
+                        button(text(title)).on_press_maybe(enabled.get().then_some(tap)),
+                    ]
+                    .spacing(8),
+                );
+            }
+            (dismiss, c)
+        }
         Part::Prompt {
             title,
             text: t,
@@ -167,15 +217,28 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     if let Some(a) = r.amount {
         line = line.push(amount(a.get(), 14, r.quiet));
     }
+    if r.pushes {
+        line = line.push(icon::plain(glyphs::CHEVRON, true));
+    }
     let mut b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare);
     if let Some(t) = r.tap {
         b = b.on_press(t);
     }
-    let mut area = mouse_area(b);
-    if let Some(first) = r.menu.into_iter().next() {
-        area = area.on_right_press(first.tap);
+    let items: Vec<context_menu::Item<M>> = r
+        .menu
+        .into_iter()
+        .filter(|m| m.offered())
+        .map(|m| context_menu::Item {
+            glyph: glyphs::named(&m.glyph.get()),
+            label: m.title.get(),
+            destructive: m.destructive.get(),
+            message: m.tap,
+        })
+        .collect();
+    match items.is_empty() {
+        true => b.into(),
+        false => context_menu::context_menu(b, r.title.get(), items),
     }
-    area.into()
 }
 
 fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>, typed: Input<String, M>) -> Element<'static, M> {

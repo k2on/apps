@@ -220,10 +220,19 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 composable(Tab.Accounts.route) {
                     // Written from Rust (generated/AccountsScreen.kt), over its runtime.
                     val view = androidx.compose.ui.platform.LocalView.current
-                    val holder = remember(book) { AccountsHolder(book.session, { book.sync() }, PhoneHaptics(view), PhoneClipboard(view.context)) }
+                    val holder = remember(book) {
+                        AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(view), PhoneClipboard(view.context))
+                    }
+                    var reconciling by remember { mutableStateOf<Id?>(null) }
                     holder.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }
+                    holder.reconciling = { reconciling = it }
                     LaunchedEffect(ledger) { holder.reload() }
                     ScreenFrame { AccountsScreen(holder) }
+                    reconciling?.let { id ->
+                        ledger.accounts.firstOrNull { it.id == id }?.let { acc ->
+                            ReconcileDialog(acc.cleared, acc.name, onReconcile = { book.reconcile(id, it); reconciling = null }, onDismiss = { reconciling = null })
+                        }
+                    }
                 }
                 composable(Tab.Activity.route) { ActivityScreen(ledger) }
                 composable(Tab.Insights.route) { InsightsScreen(ledger) }

@@ -47,8 +47,28 @@ Material's own, and an app that imports both could not say which.
 **Glyphs.** The shared names are Lucide's: `chevron-left`,
 `chevron-right`, `chevron-down`, `ellipsis-vertical`, `x`, `plus`, `minus`,
 `check`, `circle-check`, `circle`, `search`, `wifi-off`, `volume-2`,
-`volume-x`, `log-out`. Android and the desktop draw Lucide's paths; the
+`volume-x`, `log-out`, and for a row's menu `pencil`, `copy`, `archive`,
+`undo-2`, `badge-check`, `circle-plus`. Android and the desktop draw Lucide's paths; the
 iPhone draws the SF Symbol each maps to.
+
+## A screen laid out in Rust
+
+The parts `ark_app::view` composes (ui/docs/app.md): hand-written in
+`ScreenParts.swift`, `ScreenParts.kt` and `ui/rust/arkui/src/view.rs`, called
+by the generated views by these names.
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| TabPage | title, onRefresh, top, content | the app's frame (`LocalTabFrame`) over a scrolling column | `List` (inset grouped) under the large title | a scrolling column under the title |
+| CardSection | title, total, showsTotal, footer, rows | `SectionHeader` + `GroupCard` | `Section` | `section_header` + `group_card` |
+| ListRow | title, subtitle, tile/mark/glyph, badge, amount, quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
+| MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
+| FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
+| FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |
+| OptionPicker / PickerChoice | label, selection, onChange; title, glyph, tag | `FilterChip`s in a `FlowRow` | `Picker` (a menu in the form's row), each a tagged `Label` (`\.choiceSymbol` for the app's own symbols) | chips that wrap |
+| AmountEntry | label, prompt, text, cents, problem, onType, onCents | `AmountField` (typed) | ArkUI's `AmountEntry` (the figure over the keypad, in cents) | a text field (typed) |
+| SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |
+| Prompt, NameField, AmountField, ChipRow, Chip, FormButton, HeroFigure | as they read | | | |
 
 ## A page about somebody
 

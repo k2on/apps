@@ -8,20 +8,23 @@ self-drawn or in a web view on a phone.
 
 This is a prototype on `claude/sleepy-faraday-lcbow5-app`. One vertical
 slice is moved — money's **Accounts** tab — and everything else is as it
-was. The last section says what is left and in what order.
+was. How an app is designed before any of this (Mac-first, Apple's
+multiplatform samples and the HIG) is ui/docs/design.md; money's design
+is ui/docs/apps/money.md. The last section says what is left and in what
+order.
 
 ## The Layers
 
 ```
  money/app            the app: State, Msg, update, screen records, #[view] layouts
-   └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary
+   └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
    └ ark-<name>       a device module each: modules/haptics, clipboard, share, camera, …
- ui/rust/arkui           iced: draws a View (feature `app`) — the desktop
- ui/swift          SwiftUI: the parts a generated view calls, by hand
- ui/kotlin         Compose: the same parts, by hand
- ui/rust/gen      writes SwiftUI and Compose from a recorded view (composition only)
- ui/rust/arkui-macros    #[view]
+ ui/rust/arkui        iced: draws a View (feature `app`) — the desktop
+ ui/swift             SwiftUI: the parts a generated view calls, by hand
+ ui/kotlin            Compose: the same parts, by hand
+ ui/rust/gen          writes SwiftUI and Compose from a recorded view (composition only)
+ ui/rust/arkui-macros #[view]
 ```
 
 ### State and Logic: `ark-app`
@@ -153,7 +156,7 @@ What an app asks of the device is a module, Expo's way: one package each
 under `modules/`, and a small core under `ui/rust/module`.
 
 ```
-ui/rust/module/       crate ark-module: ModuleCall, ModuleAnswer, Reply, Modules — the plumbing, no module
+ui/rust/module/       crate ark-module: ModuleCall, ModuleAnswer, ModuleReply, Modules — the plumbing, no module
 modules/<name>/
 ├── Cargo.toml        crate ark-<name>: the trait, its calls, its fake; desktop/web impls behind features
 ├── src/
@@ -173,7 +176,7 @@ registered (`Inbox::ask`), the registry finds the module by its trait
 (`register::<dyn Haptics>(…)`), and the `ModuleAnswer` — `Done`, `Text`,
 `Bytes`, `Unavailable` (none registered: haptics on the desktop),
 `Failed` — comes back into the update as a message (`then: fn(
-ModuleAnswer) -> Msg`), at once, or later through a `Reply` the platform
+ModuleAnswer) -> Msg`), at once, or later through a `ModuleReply` the platform
 answers once (the camera). Events a module sends on its own (a player's
 position) go through a listener trait of the module's (`MediaListener`),
 which the shell turns into messages. A test registers each module's fake
@@ -182,7 +185,7 @@ which the shell turns into messages. A test registers each module's fake
 
 Under each crate's `ffi` feature its trait is a UniFFI foreign trait
 (`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern), and
-`ark-module`'s `Reply` and `ModuleAnswer` UniFFI types: the module's Swift
+`ark-module`'s `ModuleReply` and `ModuleAnswer` UniFFI types: the module's Swift
 class implements the protocol UniFFI writes (`Haptics`), its Kotlin class
 the interface (`uniffi.ark_haptics.Haptics`), and the app's ffi crate takes
 them (`AccountsApp.useModules(haptics:clipboard:share:)`) and registers
@@ -246,7 +249,9 @@ its ffi crate's `useModules` and registers the platform's class.
 ## Escape Hatches
 
 - **`Command::Native(name)`** — something only the shell can do yet:
-  Accounts' pull to refresh asks the phone's own model to sync the bank.
+  Accounts' pull to refresh asks the phone's own model to sync the bank
+  (`refresh`), and a row's Reconcile… raises the shell's own reconcile
+  sheet or dialog (`reconcile <id>`) until reconciling moves into Rust.
 - **App-provided pieces of a part** — a part that wears something of the
   app's takes it from the environment, set once at the root: the face at
   a tab's title (`\.tabFace`; Compose's frame, `LocalTabFrame`), the mark
@@ -269,50 +274,103 @@ its ffi crate's `useModules` and registers the platform's class.
 
 ## What Is Verified
 
-- Rust: `cargo test` / `clippy -D warnings` on ark-app, ark-module and each module crate,
-  arkui-macros (expansion and error tests), ark-ui-gen, money-app
-  (Accounts over the demo household with the fakes), money-iced (a test
-  drives the Accounts page in the window), arkui; money-ffi builds;
-  `checks.ui` built with nix.
-- The UniFFI Swift and Kotlin bindings were generated from the built
-  library and every name the glue uses was checked against them.
-- Not compiled here: the SwiftUI and Compose (no Xcode; the Android
-  build was not run); nothing seen on a device; no screenshot compared.
+- Rust: `cargo test` and `clippy --all-targets -D warnings` on ark-app,
+  ark-module and every module crate (ark-clipboard with `desktop`, and
+  with `web` for wasm32), arkui-macros, ark-ui-gen, arkui (the context
+  menu's tests drive it in iced's simulator: every item runs its own
+  message, the keys move and run, a press outside closes it), money-app
+  (Accounts over the demo household with the fakes, Reconcile, the amount
+  in cents, the row's menu in order), money-iced and harken-iced with
+  `demo`, money-ffi (`--no-default-features`: the session's day);
+  `cargo check --target wasm32-unknown-unknown` of money-iced and
+  harken-iced.
+- nix: `checks.theme`, `checks.ui`, `checks.modules`,
+  `checks.money-ios-typecheck` (now with the listed modules' Swift, and
+  the screens' glue: three name clashes it found are fixed — the UniFFI
+  vtable's `open` in the C header (now `openRoute`), ark-ffi's `Reply`
+  against ark-module's (now `ModuleReply`), money's `Shelf` protocol
+  against the page's record (now `AccountsShelf`) — and `assumeIsolated`,
+  which Linux's Swift has not, is a main-actor `Task`),
+  `checks.harken-ios-typecheck`; the UniFFI Kotlin bindings' names
+  (`uniffi.ark_haptics.Haptics`, `AppShell.openRoute`/`today`,
+  `AccountsMsg.Reconcile`/`DraftCents`) read against what the glue calls.
+- Not compiled here: SwiftUI views (`ScreenParts.swift`, the generated
+  view, the modules' UIKit/AppKit branches), Compose (the Android build was
+  not run); nothing seen on a device; no screenshot compared.
+
+## The iced Fork (Assessed, Not Taken)
+
+The owner asked for the whole workspace on COSMIC's iced
+(`github.com/pop-os/iced`) and its context menu. Assessed on 2026-11-09
+against its `master` (d5d638c3):
+
+- **Its context menu is not in the fork.** COSMIC's `context_menu` and
+  menu trees are libcosmic's (`cosmic::widget::menu`, MPL-2.0, adapted
+  from iced_aw), built on libcosmic's own theme and widget set. Taking the
+  fork brings no menu; taking the menu means libcosmic, which brings its
+  design system, which ArkUI keeps its own of.
+- **Its graph is seven git forks**: pop-os/iced, pop-os/winit (a winit 0.31
+  pre-release, rev 9567503), pop-os/window_clipboard, smithay-clipboard,
+  softbuffer, wash2/accesskit and iced-rs/cryoglyph — 40 git packages in a
+  453-package lock. Each needs a pinned fetch in rust/Cargo.nix, and the
+  winit fork is a newer winit API than iced 0.14's, so arkui's window,
+  touchpad (the Wayland hold handling) and renderer selection move with it.
+- **It does not build for the browser.** A probe crate on the fork's
+  `iced` (no default features; `tiny-skia`, `svg`, `image`, `advanced`,
+  `winit`, `webgl`) fails `cargo check --target wasm32-unknown-unknown`
+  in the fork's own `iced_winit`: `winit::platform::web::{
+  WindowAttributesExtWebSys, WindowExtWebSys, EventLoopExtWebSys}` are
+  gone from its winit fork, and its compositor future is not `'static`
+  for `spawn_local`. money's and harken's web builds are iced in wasm, so
+  the switch stops here, as the owner's condition says; nothing of it was
+  committed.
+
+So the menu was built in arkui (option c): `arkui::context_menu`, ArkUI's
+menu panel at the pointer, flipped at the window's edges
+(`Menu::origin_for`), every item, `↑`/`↓`/`j`/`k`, `Enter`, `Esc`, a press
+outside closes it and goes no further, a long press on touch, the menu key
+or `Shift-F10`. The browser draws the same menu when it has a DOM client.
 
 ## What Is Left
 
-In the order the owner asked for it:
+In the order the owner asked for it, with the design rules first
+(ui/docs/design.md: every app designed as a standard macOS SwiftUI app,
+then written in this vocabulary, then its domain underneath;
+ui/docs/apps/money.md for money):
 
-1. **The browser**: `rust/arkui-web` drawing a `View` with Leptos over the
-   real DOM, theme tokens as CSS variables generated beside the others, and
-   a `money/web` crate running the demo household in wasm.
-2. **Primitives**: the hand-written layer shrinks to primitives — layout
-   (`Stack`, `Spacer`, padding/frame), content (`Text`, `Glyph`, `Image`),
-   token-only surface modifiers, interaction (`Button`/press, menus,
-   swipe), the containers that must stay native (`Scroll`, `List`/`Section`,
-   `NavigationStack`, the adaptive tabs, `Sheet`, `Menu`, `Alert`), the
-   native controls (`TextField`, `Toggle`, `Picker`, `Slider`,
-   `DatePicker`, `ProgressView`) and motion (`animate(Springs.x)`) — and
-   ArkUI's components (`ListRow`, `Badge`, `Tile`, `GroupCard`,
-   `HeroFigure`, `SectionHeader`, …) are themselves `#[view]`s in Rust,
-   emitted into a generated directory inside ui/swift and ui/kotlin.
-   Each primitive is one that cannot be composed: a platform list's swipe,
-   separators and laziness; a native text field's input methods; a sheet's
-   system gesture; the system's springs. Today's `ScreenParts` are the
-   component layer written by hand, the step before that.
-3. **Modules' native implementations**: the packages are there
-   (`modules/`); Camera QR on iOS (wrapping `QrScanner`) and Android (needs
-   a decoder dependency and a deps.json regeneration), share on Android,
-   and media-player, notifications and secure-store everywhere.
-4. **Adaptive layout**: the app's tabs declared once in Rust, the size
-   class decided in the core from one breakpoint token, bottom tabs when
-   compact and a sidebar when regular on every target, per-tab back stacks
-   on the Navigator.
-5. **macOS**: the generated SwiftUI and ArkUI compiled for the Mac (one
-   multiplatform target), modules' Mac behaviour, commands and keyboard
-   shortcuts declared beside the messages.
-6. **The rest of money and harken**: each screen moves the way Accounts
-   did — its state and update into the app crate, its record into
-   `screen()`, its layout into a `#[view]`, the hand-written screen
-   deleted. Budget (drag to reorder, the month stepper) needs gesture and
-   motion primitives first; harken's player needs MediaPlayer.
+1. **The shell's vocabulary**: scenes (`WindowGroup`, `Settings`,
+   `Commands`), the sidebar-adaptable tabs, the split view (collapsing to
+   a stack), toolbar placements, the inspector, `searchable`,
+   `confirmationDialog`, swipe actions — each a part that adapts by size
+   class inside itself (design.md's table: SwiftUI, Compose with
+   NavigationSuiteScaffold/ListDetailPaneScaffold and WindowManager's
+   postures, iced, Leptos), and the keyboard model (vim layer, keys panel,
+   command box, pane focus) as ark-app's, every app's.
+2. **money in that shell**: the sidebar sections, Accounts as content +
+   register detail + inspector; then Budget, Transactions, Insights,
+   Settings, sign-in and receipts ported in that order (ui/docs/apps/
+   money.md). harken's design doc and port after it; revelation is not an
+   Ark app (plain Kotlin) and stays as it is.
+3. **The browser**: `ui/rust/web` drawing a `View` with Leptos over the
+   real DOM, the theme as CSS variables generated from ui/theme.toml, the
+   same context menu in the DOM, and `money/web` running the demo
+   household in wasm.
+4. **macOS, iPad, Android tablets and foldables**: the generated SwiftUI
+   compiled for the Mac (money's target with a macOS destination), iPad
+   (`TARGETED_DEVICE_FAMILY` 1,2, every orientation), Android
+   resizeable with the adaptive scaffolds; their shots in the existing Mac
+   and Android jobs (an iPad Pro 13" in both orientations, a Pixel Tablet
+   landscape, a Pixel Fold folded and open).
+5. **The parity check**: the same screens with the same demo data at one
+   size, shot in iced (arkui-shots), the web (Playwright's Chromium) and
+   macOS, side by side in the PR's comment; iced against web gated by a
+   perceptual diff, a row's context menu open among the shots.
+6. **Modules' native implementations**: Camera QR on iOS (wrapping
+   `QrScanner`) and Android (a decoder dependency and deps.json
+   regenerated), Share on Android, and media-player, notifications and
+   secure-store everywhere.
+7. **Primitives**: the hand-written layer shrinks to primitives (layout,
+   content, token-only surfaces, interaction, the native containers and
+   controls, motion), and ArkUI's components become `#[view]`s emitted into
+   ui/swift and ui/kotlin. Today's `ScreenParts` are the component layer
+   written by hand, the step before that.

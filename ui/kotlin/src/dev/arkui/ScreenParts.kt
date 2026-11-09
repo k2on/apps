@@ -8,12 +8,12 @@
 // glyphs by name (`LocalGlyphs`).
 package dev.arkui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +35,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -142,15 +144,21 @@ public fun CardSection(title: String? = null, total: Long? = null, showsTotal: B
 
 // * Rows
 
-/** One thing a row's menu offers. */
-public class MenuAction(public val title: String, public val glyph: String, public val destructive: Boolean = false, public val onTap: () -> Unit)
+/** One thing a row's menu offers; offered only while [shown]. */
+public class MenuAction(
+    public val title: String,
+    public val glyph: String,
+    public val destructive: Boolean = false,
+    public val shown: Boolean = true,
+    public val onTap: () -> Unit,
+)
 
 /**
  * A row of a card: its picture (a tile, the app's mark, or a bare glyph in the accent), its title
- * and the line under it, a count in a badge, an amount; tapped, `onTap`, lit as it is
- * (`Press.Highlight`); held, its menu.
+ * and the line under it, a count in a badge, an amount, and a chevron when it opens a page
+ * (`pushes`); tapped, `onTap`; held, its menu — lit under the finger either way
+ * (`Press.Highlight`).
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 public fun ListRow(
     title: String,
@@ -162,13 +170,16 @@ public fun ListRow(
     amount: Long? = null,
     quiet: Boolean = false,
     accent: Boolean = false,
+    pushes: Boolean = false,
     said: String? = null,
     menu: List<MenuAction> = emptyList(),
     onTap: (() -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
-    val press = if (menu.isEmpty()) Modifier.pressable(onClick = { onTap?.invoke() }, press = Press.Highlight)
-    else Modifier.combinedClickable(interactionSource = null, indication = null, onClick = { onTap?.invoke() }, onLongClick = { open = true })
+    val offered = menu.filter { it.shown }
+    val press =
+        if (offered.isEmpty()) Modifier.pressable(onClick = { onTap?.invoke() }, press = Press.Highlight)
+        else Modifier.pressable(onClick = { onTap?.invoke() }, onLongClick = { open = true }, press = Press.Highlight)
     Row(
         Modifier.fillMaxWidth()
             .then(press)
@@ -208,15 +219,17 @@ public fun ListRow(
                     else -> MaterialTheme.colorScheme.onSurface
                 })
         }
-        if (onTap != null && !accent) {
+        if (pushes) {
             Spacer(Modifier.width(Space.xs))
             Chevron()
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for (m in menu) {
+            for (m in offered) {
                 DropdownMenuItem(
                     text = { Text(m.title, color = if (m.destructive) MaterialTheme.colorScheme.error else Color.Unspecified) },
-                    leadingIcon = { Icon(glyph(m.glyph), contentDescription = null) },
+                    leadingIcon = {
+                        Icon(glyph(m.glyph), contentDescription = null, tint = if (m.destructive) MaterialTheme.colorScheme.error else LocalContentColor.current)
+                    },
                     onClick = {
                         open = false
                         m.onTap()
@@ -228,17 +241,80 @@ public fun ListRow(
 
 // * What rises over a page
 
-/** A sheet, up for as long as it is composed; put away by the person, `onDismiss`. */
+/**
+ * A sheet with a form, up for as long as it is composed; put away by the person, `onDismiss`. With a
+ * `confirm`, the form ends in its button, the sheet's width, enabled while `canConfirm`.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-public fun Sheet(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+public fun FormSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    confirm: String? = null,
+    canConfirm: Boolean = true,
+    onConfirm: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = Space.xl).navigationBarsPadding().imePadding(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             content()
+            if (confirm != null && onConfirm != null) {
+                Button(onClick = onConfirm, enabled = canConfirm, modifier = Modifier.fillMaxWidth()) { Text(confirm) }
+            }
             Spacer(Modifier.height(Space.xl))
         }
     }
+}
+
+/** A group of a form's fields: its heading over them, its note under them. */
+@Composable
+public fun FormSection(header: String? = null, footer: String? = null, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        if (header != null) {
+            Text(header, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
+        }
+        content()
+        if (footer != null) {
+            Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** What the choices of an `OptionPicker` read: the chosen tag, and what choosing one does. */
+private val LocalPicking = compositionLocalOf<Pair<String, (String) -> Unit>> { "" to { } }
+
+/** One of several, chosen as Material does: filter chips in rows that wrap, the chosen one ticked. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+public fun OptionPicker(label: String, selection: String, onChange: (String) -> Unit, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalPicking provides (selection to onChange)) {
+        FlowRow(
+            Modifier.semantics { contentDescription = label },
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) { content() }
+    }
+}
+
+/** One choice of an `OptionPicker`: a filter chip, its glyph before its title while chosen. */
+@Composable
+public fun PickerChoice(title: String, glyph: String, tag: String) {
+    val (selection, onChange) = LocalPicking.current
+    Chip(title, glyph = glyph, selected = selection == tag, onTap = { onChange(tag) })
+}
+
+/** An amount as Android takes it: typed in a text field; the core says what it means. */
+@Composable
+public fun AmountEntry(
+    label: String,
+    prompt: String,
+    text: String,
+    cents: Long,
+    problem: String?,
+    onType: (String) -> Unit,
+    onCents: (Long) -> Unit,
+) {
+    AmountField(label, text = text, problem = problem, onChange = onType)
 }
 
 /** An alert with one text field, up for as long as it is composed. */
@@ -293,10 +369,10 @@ public fun Chip(label: String, glyph: String, selected: Boolean, onTap: () -> Un
 
 /** A switch with its title and a note under it. */
 @Composable
-public fun SwitchRow(title: String, note: String, isOn: Boolean, onChange: (Boolean) -> Unit) {
+public fun SwitchRow(title: String, note: String? = null, isOn: Boolean, onChange: (Boolean) -> Unit) {
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = { Text(note) },
+        supportingContent = note?.let { n -> { Text(n) } },
         trailingContent = { Switch(checked = isOn, onCheckedChange = onChange) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )

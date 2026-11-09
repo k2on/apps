@@ -100,6 +100,7 @@ fn given<M: Debug>(g: &Given<'_, M>, ty: &str) -> String {
         Given::Act(m) => format!("{{ screen.send({}) }}", msg(&Msg::of(m), ty)),
         Given::Typed(i) => format!("{{ screen.send({}) }}", msg(&Msg::typed(i), ty)),
         Given::Switched(i) => format!("{{ screen.send({}) }}", msg(&Msg::switched(i), ty)),
+        Given::Counted(i) => format!("{{ screen.send({}) }}", msg(&Msg::counted(i), ty)),
         Given::Items(cs) => {
             let items: Vec<String> = cs
                 .iter()

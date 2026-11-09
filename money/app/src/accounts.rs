@@ -50,8 +50,11 @@ pub struct Draft {
     pub name: String,
     pub kind: AccountKind,
     pub on_budget: bool,
-    /// The balance as typed.
+    /// The balance as typed (a text field: Android, the desktop).
     pub typed: String,
+    /// The balance as entered in cents, when it was (the iPhone's amount
+    /// entry); what was typed counts otherwise.
+    pub entered: Option<i64>,
 }
 
 impl Default for Draft {
@@ -61,6 +64,7 @@ impl Default for Draft {
             kind: AccountKind::Checking,
             on_budget: AccountKind::Checking.on_budget_by_default(),
             typed: String::new(),
+            entered: None,
         }
     }
 }
@@ -69,9 +73,10 @@ impl Draft {
     /// The balance typed, in cents — what is owed on a card or a loan is
     /// below nothing however it was typed; none when it is not an amount.
     pub fn balance(&self, style: &NumberStyle) -> Option<i64> {
-        let cents = match self.typed.trim() {
-            "" => Some(0),
-            t => ark_format::parse_amount(t, style),
+        let cents = match (self.entered, self.typed.trim()) {
+            (Some(c), _) => Some(c),
+            (None, "") => Some(0),
+            (None, t) => ark_format::parse_amount(t, style),
         }?;
         Some(if self.kind.owes() { -cents.abs() } else { cents })
     }
@@ -117,6 +122,10 @@ pub enum AccountsMsg {
     DraftBalance {
         typed: String,
     },
+    /// The balance entered in cents (the iPhone's amount entry).
+    DraftCents {
+        cents: i64,
+    },
     /// A kind chosen by its key, as the form's chips send it.
     DraftKindKey {
         key: String,
@@ -145,6 +154,11 @@ pub enum AccountsMsg {
     },
     /// An account's balance put on the clipboard.
     CopyBalance {
+        id: String,
+    },
+    /// An account agreed with its bank: the shell's own sheet for it
+    /// (`Command::Native("reconcile <id>")`) until reconciling moves here.
+    Reconcile {
         id: String,
     },
     /// What became of the last change sent: none when it was taken.
@@ -177,12 +191,14 @@ pub struct AccountItem {
     pub said: String,
     /// What its close action is called: "Close Account" or "Reopen".
     pub close_title: String,
+    /// Its close action's glyph: closing's bin, reopening's arrow back.
+    pub close_glyph: String,
 }
 
 /// A shelf of accounts under its heading.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct Shelf {
+pub struct AccountsShelf {
     pub title: String,
     pub total: i64,
     /// Whether the heading shows the total: the closed shelf's adds up to nothing that matters.
@@ -212,8 +228,17 @@ pub struct AddForm {
     pub kinds: Vec<KindChoice>,
     pub on_budget: bool,
     pub on_budget_note: String,
+    /// The chosen kind's key: the picker's selection.
+    pub kind_key: String,
     pub typed: String,
+    /// The balance in cents, as the amount entry shows it (none typed is nothing).
+    pub cents: i64,
+    /// What a text field for the balance is labelled.
     pub balance_label: String,
+    /// The heading over the balance in a form: "Balance", or "Balance Owed".
+    pub balance_header: String,
+    /// What the amount entry says under its figure.
+    pub balance_prompt: String,
     pub balance_problem: Option<String>,
     pub can_save: bool,
 }
@@ -235,7 +260,7 @@ pub struct AccountsPage {
     pub net_worth: i64,
     /// The open accounts on the budget: All Accounts' figure.
     pub all_total: i64,
-    pub shelves: Vec<Shelf>,
+    pub shelves: Vec<AccountsShelf>,
     /// "Bank Connections", or "Connect a Bank" while none is.
     pub banks_title: String,
     /// When the bank was last asked, said: "Last synced with Chase 5 min ago."
@@ -258,6 +283,11 @@ pub fn kind_glyph(kind: &str) -> &'static str {
 
 fn find<'a>(accounts: &'a [AccountLine], id: &str) -> Option<&'a AccountLine> {
     accounts.iter().find(|a| a.id.hex() == id)
+}
+
+/// An account's id from its hex, as a message carries it.
+pub fn account_id(hex: &str) -> Option<Id<Account>> {
+    id_of(hex)
 }
 
 fn id_of(hex: &str) -> Option<Id<Account>> {
@@ -313,7 +343,11 @@ impl App for Accounts {
                 None => vec![],
             },
             M::DraftOnBudget { on_budget } => edit(s, |d| d.on_budget = on_budget),
-            M::DraftBalance { typed } => edit(s, |d| d.typed = typed),
+            M::DraftBalance { typed } => edit(s, |d| {
+                d.typed = typed;
+                d.entered = None;
+            }),
+            M::DraftCents { cents } => edit(s, |d| d.entered = Some(cents.abs())),
             M::SaveDraft => {
                 let Some(d) = &s.adding else { return vec![] };
                 let change = d.change(&s.style.0, &day_of_ms(data.now_ms));
@@ -371,6 +405,10 @@ impl App for Accounts {
                 Some(a) => vec![Command::Then(M::SetClosed { closed: !a.closed, id })],
                 None => vec![],
             },
+            M::Reconcile { id } => match find(accounts, &id) {
+                Some(a) if !a.closed => vec![Command::Native(format!("reconcile {id}"))],
+                _ => vec![],
+            },
             M::CopyBalance { id } => match find(accounts, &id) {
                 Some(a) => vec![Command::ask(ark_clipboard::copy(ark_format::amount(a.balance, &s.style.0)))],
                 None => vec![],
@@ -399,7 +437,7 @@ impl App for Accounts {
         let style = &s.style.0;
         let shelves = shelves(accounts)
             .into_iter()
-            .map(|sh| Shelf {
+            .map(|sh| AccountsShelf {
                 title: sh.title,
                 total: sh.total,
                 shows_total: sh.shelving != Shelving::Closed,
@@ -466,6 +504,7 @@ fn item(a: &AccountLine, style: &NumberStyle) -> AccountItem {
         is_open: !a.closed,
         said,
         close_title: if a.closed { "Reopen" } else { "Close Account" }.into(),
+        close_glyph: if a.closed { "undo-2" } else { "archive" }.into(),
     }
 }
 
@@ -490,12 +529,16 @@ fn form(d: &Draft, style: &NumberStyle) -> AddForm {
             .collect(),
         on_budget: d.on_budget,
         on_budget_note: match d.on_budget {
-            true => "What's spent from it comes out of categories",
-            false => "Tracked only: its balance counts toward net worth",
+            true => "What's spent from it comes out of the budget, and its balance is ready to assign.",
+            false => "Tracking only: its balance counts toward net worth, and none of it is budgeted.",
         }
         .into(),
+        kind_key: d.kind.key().into(),
         typed: d.typed.clone(),
+        cents: balance.map_or(0, i64::abs),
         balance_label: if d.kind.owes() { "What You Owe on It" } else { "What's in It Today" }.into(),
+        balance_header: if d.kind.owes() { "Balance Owed" } else { "Balance" }.into(),
+        balance_prompt: if d.kind.owes() { "Owed on it today" } else { "In it today" }.into(),
         balance_problem: balance.is_none().then(|| "That isn't an amount".into()),
         can_save: !d.name.trim().is_empty() && name_problem.is_none() && balance.is_some(),
         name_problem,

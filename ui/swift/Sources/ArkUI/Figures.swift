@@ -177,13 +177,16 @@ public struct AmountEntry: View {
     @Binding var cents: Int64
     let prompt: String
     let tint: Color
+    /// Room above and below the figure: a form's row gives it `Space.m`.
+    let inset: CGFloat
     @FocusState private var focused: Bool
     @State private var typed = ""
 
-    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .ink) {
+    public init(cents: Binding<Int64>, prompt: String = "", tint: Color = .ink, inset: CGFloat = 0) {
         _cents = cents
         self.prompt = prompt
         self.tint = tint
+        self.inset = inset
     }
 
     public var body: some View {
@@ -200,6 +203,7 @@ public struct AmountEntry: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, inset)
         .contentShape(Rectangle())
         .onTapGesture { focused = true }
         // The field the keypad types into: unseen, its digits read as cents.
