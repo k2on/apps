@@ -108,12 +108,13 @@ step() {
   fi
 }
 
-# The window that has the focus now, as the window manager's list of
-# windows says it ("Window{… <package>/<activity>}"), or nothing. Of that
-# section alone: the whole `dumpsys window` begins with the last ANR's
-# state, the focus as it was then (a launcher slow to boot), which read as
-# now says the launcher has it while the app is drawn and resumed.
-focus() { adb shell dumpsys window windows 2>/dev/null | tr -d '\r' | grep -oE 'mCurrentFocus=Window\{[^}]*\}' | tail -1 || true; }
+# The window that has the focus now, as each display's contents say it
+# ("Window{… <package>/<activity>}", a line a display), or nothing. Of that
+# section alone (`dumpsys window displays`): the whole `dumpsys window`
+# begins with the state at the last ANR, the focus as it was then (a
+# launcher slow on a booting emulator), which read as now said the
+# launcher had it while the app was drawn and resumed.
+focus() { adb shell dumpsys window displays 2>/dev/null | tr -d '\r' | grep -oE 'mCurrentFocus=Window\{[^}]*\}' || true; }
 
 # Until the window with the focus is package `$1`'s own activity (not its
 # splash, not a dialog over it), up to `$2` seconds.
