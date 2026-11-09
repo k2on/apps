@@ -126,19 +126,19 @@ name = "ark-format"
 version = "0.1.0"
 
 [[package]]
-name = "ark-macros"
+name = "ark-router"
+version = "0.1.0"
+dependencies = [
+ "ark-router-macros",
+]
+
+[[package]]
+name = "ark-router-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "ark-router"
-version = "0.1.0"
-dependencies = [
- "ark-macros",
 ]
 
 [[package]]

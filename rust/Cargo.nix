@@ -127,6 +127,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-router-macros" = rec {
+      packageId = "ark-router-macros";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-router-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-ui-gen" = rec {
       packageId = "ark-ui-gen";
       build = internal.buildRustCrateWithFeatures {
@@ -1183,8 +1193,33 @@ rec {
         libName = "ark_router";
         dependencies = [
           {
-            name = "ark-macros";
-            packageId = "ark-macros";
+            name = "ark-router-macros";
+            packageId = "ark-router-macros";
+          }
+        ];
+
+      };
+      "ark-router-macros" = rec {
+        crateName = "ark-router-macros";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-router-macros; };
+        procMacro = true;
+        libName = "ark_router_macros";
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn 2.0.119";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
           }
         ];
 

@@ -11,4 +11,4 @@ description = "How an app's routes are spelled as one string: the path every she
 
 [dependencies]
 # `#[derive(Routes)]`, which writes a route enum's paths.
-ark-macros = { path = "../ark-macros" }
+ark-router-macros = { path = "../ark-router-macros" }
