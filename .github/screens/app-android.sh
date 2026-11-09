@@ -115,7 +115,14 @@ fi
 # The phone's name, as a Pixel 7 (or the device it is) out of the box has
 # it (Settings, About phone, Device name): the emulator's own is its build's
 # ("sdk_gphone64…"), which the app's device chip and picker would say.
-adb shell settings put global device_name "$name"
+if [ -n "${DEVICE_NAME:-}" ]; then
+  # Quoted for the emulator's shell, which `adb shell` hands its words to
+  # joined: the whole name, parentheses and all.
+  adb shell settings put global device_name "'$name'"
+else
+  # The phone's as it has always been set (its shots compared with main's).
+  adb shell settings put global device_name "$name"
+fi
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1

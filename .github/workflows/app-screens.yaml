@@ -480,7 +480,7 @@ jobs:
             echo "profile=pixel_fold" >> "$GITHUB_OUTPUT"; echo "name=Pixel Fold" >> "$GITHUB_OUTPUT"
           else
             profile=$(grep -x '7.6in Foldable' <<< "$ids" || grep -i -m1 'foldable' <<< "$ids" || true)
-            echo "profile=$profile" >> "$GITHUB_OUTPUT"; echo "name=Foldable ($profile)" >> "$GITHUB_OUTPUT"
+            echo "profile=$profile" >> "$GITHUB_OUTPUT"; echo "name=$profile" >> "$GITHUB_OUTPUT"
           fi
           cat "$GITHUB_OUTPUT"
       - name: Capture (Fold)
