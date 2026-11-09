@@ -12,7 +12,9 @@
 //!
 //! Nothing below writes a colour down, which is the whole of what makes a dark
 //! theme restate all of it.
-use iced::widget::{button, container, progress_bar, rule, scrollable, slider, text, text_input};
+use crate::text;
+use crate::text_input;
+use iced::widget::{button, container, progress_bar, rule, scrollable, slider};
 use iced::{Background, Border, Color, Theme};
 
 use crate::parts::Tint;
@@ -29,6 +31,7 @@ const DIM: f32 = 0.65;
 pub fn dim(theme: &Theme) -> text::Style {
     text::Style {
         color: Some(of(theme).background.base.text.scale_alpha(DIM)),
+        ..Default::default()
     }
 }
 
@@ -37,6 +40,7 @@ pub fn dim(theme: &Theme) -> text::Style {
 pub fn faint(alpha: f32) -> impl Fn(&Theme) -> text::Style {
     move |theme| text::Style {
         color: Some(of(theme).background.base.text.scale_alpha(alpha)),
+        ..Default::default()
     }
 }
 
@@ -46,6 +50,7 @@ pub fn faint(alpha: f32) -> impl Fn(&Theme) -> text::Style {
 pub fn accent(theme: &Theme) -> text::Style {
     text::Style {
         color: Some(of(theme).primary.base.color),
+        ..Default::default()
     }
 }
 
@@ -78,6 +83,8 @@ pub fn seek(theme: &Theme, status: slider::Status) -> slider::Style {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
         },
+        // A seek bar has no breakpoints to mark.
+        breakpoint: slider::Breakpoint { color: Color::TRANSPARENT },
     }
 }
 

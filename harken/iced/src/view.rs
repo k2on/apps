@@ -9,8 +9,10 @@
 use arkui::fit::{drawable, Cut};
 use arkui::format::{clock, clock_secs, count, length, names, plural, span};
 use arkui::line::Line;
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
 use arkui::{account, art, cards, fit, glyphs, hero, icon, layer, menu, panel, picker, style, table, SCROLLBAR};
-use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, stack, text, text_input, Row, Space};
+use iced::widget::{button, column, container, mouse_area, row, rule, scrollable, stack, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::listening::{self, Clock, Output};
@@ -648,6 +650,7 @@ impl App {
             let tone = move |dim: bool| {
                 move |t: &iced::Theme| text::Style {
                     color: Some(style::on_row(t, on, false, dim)),
+                    ..Default::default()
                 }
             };
             let words = column![
@@ -936,6 +939,7 @@ impl App {
                         true => arkui::theme::of(t).primary.base.color,
                         false => style::entry_text(t, false),
                     }),
+                    ..Default::default()
                 }),
         ]
         .spacing(3);
@@ -1010,9 +1014,11 @@ impl App {
                 let tone: fn(&iced::Theme) -> text::Style = match on_cursor {
                     true => |t| text::Style {
                         color: Some(style::on_row(t, true, false, true).scale_alpha(0.8)),
+                        ..Default::default()
                     },
                     false => |t| text::Style {
                         color: Some(style::on_row(t, false, false, true).scale_alpha(0.8)),
+                        ..Default::default()
                     },
                 };
                 body = body.push(self.names(l, &under, |k| Mark::Performer(at, k), 11.0, tone));
@@ -1048,6 +1054,7 @@ impl App {
                                 true => arkui::theme::of(t).primary.base.color,
                                 false => arkui::theme::of(t).background.base.text,
                             }),
+                            ..Default::default()
                         }
                     })),
                 );
@@ -1129,6 +1136,7 @@ impl App {
                     .wrapping(text::Wrapping::Word)
                     .style(move |t| text::Style {
                         color: Some(style::entry_text(t, on)),
+                        ..Default::default()
                     }),
                 text(role)
                     .size(11)
@@ -1257,6 +1265,7 @@ impl App {
             let tone = move |dim: bool| {
                 move |t: &iced::Theme| text::Style {
                     color: Some(style::on_row(t, on, false, dim)),
+                    ..Default::default()
                 }
             };
             let mut words = column![].spacing(4).width(Length::Fill);
@@ -1276,6 +1285,7 @@ impl App {
                     .wrapping(text::Wrapping::Word)
                     .style(move |t| text::Style {
                         color: Some(style::on_row(t, on, here, false)),
+                        ..Default::default()
                     }),
             );
             if let Some(d) = detail.filter(|d| !d.description.is_empty()) {
@@ -1360,9 +1370,11 @@ impl App {
         let tone: fn(&iced::Theme) -> text::Style = match on {
             true => |t| text::Style {
                 color: Some(style::on_row(t, true, false, true)),
+                ..Default::default()
             },
             false => |t| text::Style {
                 color: Some(style::on_row(t, false, false, true)),
+                ..Default::default()
             },
         };
         let faces = guests
@@ -1509,7 +1521,10 @@ impl App {
                 .size(15)
                 .line_height(1.4)
                 .wrapping(text::Wrapping::Word)
-                .style(move |t| text::Style { color: Some(ink(t)) });
+                .style(move |t| text::Style {
+                    color: Some(ink(t)),
+                    ..Default::default()
+                });
             if now {
                 words = words.font(hero::BOLD);
             }
@@ -1518,6 +1533,7 @@ impl App {
                 .width(Length::Fixed(CLOCK_WIDTH))
                 .style(move |t| text::Style {
                     color: Some(ink(t).scale_alpha(0.7)),
+                    ..Default::default()
                 });
             let line = row![at, words.width(Length::Fill)].spacing(12).align_y(Alignment::Center);
             let line = container(line)
@@ -1886,6 +1902,7 @@ impl App {
                 let words = column![
                     text(a.name.clone()).size(14).wrapping(text::Wrapping::Word).style(move |t| text::Style {
                         color: Some(style::entry_text(t, lit)),
+                        ..Default::default()
                     }),
                     text(a.creator.clone()).size(11).style(style::faint(0.55)),
                 ]
@@ -2377,6 +2394,7 @@ impl App {
                                 true => p.primary.base.color,
                                 false => p.background.base.text.scale_alpha(0.75),
                             }),
+                            ..Default::default()
                         }
                     }),
                 ]
@@ -2520,7 +2538,7 @@ impl App {
         let Some(bar) = self.now() else {
             let idle = text(match Player::AUDIBLE {
                 true => "nothing playing \u{2014} pick a track",
-                false => "nothing playing \u{2014} pick a track (the desktop build has no audio device; the browser one streams)",
+                false => "nothing playing \u{2014} pick a track (the desktop build has no audio device yet)",
             })
             .size(12)
             .style(style::dim);
@@ -2682,6 +2700,7 @@ impl App {
                         (false, false) => arkui::theme::of(theme).background.base.text.scale_alpha(0.4),
                         (lit, _) => style::entry_text(theme, lit),
                     }),
+                    ..Default::default()
                 });
             // The name is what hands the sound over; the controls beside it
             // are their own targets.

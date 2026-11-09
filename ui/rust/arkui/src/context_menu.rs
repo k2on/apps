@@ -22,11 +22,12 @@
 //! It opens with no motion: a context menu is seen tens of times a day
 //! (ui/docs/motion.md, the frequency rule; iced has no group opacity to
 //! fade it with in any case).
+use crate::text::{self, text};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, tree, Tree, Widget};
 use iced::advanced::{mouse, overlay, renderer, Clipboard, Shell};
 use iced::keyboard::{key::Named, Key};
-use iced::widget::{column, svg, text, Column};
+use iced::widget::{column, svg, Column};
 use iced::{Background, Border, Element, Event, Length, Point, Rectangle, Size, Vector};
 
 use crate::menu::{Anchor, Menu, MAX_WIDTH, MIN_WIDTH};
@@ -80,6 +81,7 @@ fn panel_of<'a, M: 'a>(title: &str, items: &[Item<M>]) -> Element<'a, M> {
                     true => crate::theme::of(theme).danger.base.color,
                     false => style::entry_text(theme, false),
                 }),
+                ..Default::default()
             });
         let glyph = i.glyph.map(|g| {
             let g: Element<'a, M> = match destructive {
@@ -133,8 +135,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for ContextMenu<'_, M> {
         vec![Tree::new(&self.content), Tree::new(&self.menu)]
     }
 
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.content, &self.menu]);
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(&mut [&mut self.content, &mut self.menu]);
     }
 
     fn size(&self) -> Size<Length> {
@@ -215,6 +217,12 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for ContextMenu<'_, M> {
         self.content
             .as_widget_mut()
             .update(&mut tree.children[0], event, layout, cursor, renderer, clipboard, shell, viewport);
+    }
+
+    /// Its content's accessibility tree, as is: this wrapper adds nothing a
+    /// screen reader reads (COSMIC's accesskit, the fork's `a11y`).
+    fn a11y_nodes(&self, layout: Layout<'_>, tree: &Tree, cursor: mouse::Cursor) -> iced_accessibility::A11yTree {
+        self.content.as_widget().a11y_nodes(layout, &tree.children[0], cursor)
     }
 
     fn draw(
@@ -399,7 +407,7 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for Up<'_, '_, M
                     Key::Named(Named::Escape) => self.close(shell),
                     Key::Named(Named::ArrowDown) | Key::Character("j") => self.state.at = Some(step(self.state.at, true)),
                     Key::Named(Named::ArrowUp) | Key::Character("k") => self.state.at = Some(step(self.state.at, false)),
-                    Key::Named(Named::Enter | Named::Space) => {
+                    Key::Named(Named::Enter) | Key::Character(" ") => {
                         if let Some(i) = self.state.at {
                             let m = self.items[i].message.clone();
                             self.close(shell);

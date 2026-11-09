@@ -21,9 +21,10 @@ license = "MIT OR Apache-2.0"
 arkui = { path = "../../ui/rust/arkui" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+# The apps' iced (rust/Cargo.toml says which and why), at the same revision.
+iced = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad", default-features = false, features = ["winit", "wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "x11", "wayland", "a11y", "smol", "svg", "image", "advanced", "fira-sans"] }
 # A UserInterface built, drawn and read back off screen: iced_test's
 # Simulator, less the part that keeps the pixels to itself.
-iced_runtime = "0.14"
+iced_runtime = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
 # The pictures, as lossless WebP: a third smaller than a PNG of flat colour.
 image = { version = "0.25", default-features = false, features = ["webp"] }

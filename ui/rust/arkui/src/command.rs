@@ -19,9 +19,11 @@
 //! A text box takes `<Esc>` for itself, and the arrows are no text box's;
 //! [`keys`] hears all three, and Ctrl+K, whatever has the keyboard, so the
 //! app can answer them while the box has it.
+use crate::text::{self, text};
+use crate::text_input::{self, text_input};
 use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::time::Instant;
-use iced::widget::{column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Space};
+use iced::widget::{column, container, mouse_area, row, rule, scrollable, Column, Space};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Task};
 
 use crate::motion::Shown;
@@ -320,6 +322,7 @@ fn found<'a, M: Clone + 'a>(
         for g in groups.into_iter().filter(|g| !g.items.is_empty()) {
             let mut group = column![container(text(g.heading).size(11).style(|t| text::Style {
                 color: Some(of(t).background.strong.text),
+                ..Default::default()
             }))
             .padding([0.0, 8.0])
             .center_y(Length::Fixed(HEADING))]
@@ -332,6 +335,7 @@ fn found<'a, M: Clone + 'a>(
                 if let Some(d) = item.detail {
                     line = line.push(Space::new().width(Length::Fill)).push(text(d).size(12).style(|t| text::Style {
                         color: Some(of(t).background.strong.text),
+                        ..Default::default()
                     }));
                 }
                 let drawn = container(line)

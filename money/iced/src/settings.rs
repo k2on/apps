@@ -4,8 +4,9 @@
 //! banks (`crate::banks`), and Amazon and Costco (`crate::stores`).
 
 use arkui::account::{Account, Who};
+use arkui::text::text;
 use arkui::{hero, style};
-use iced::widget::{column, container, scrollable, text};
+use iced::widget::{column, container, scrollable};
 use iced::{Element, Length, Padding, Task};
 
 use crate::view::{dim, quiet, PAD};

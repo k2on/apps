@@ -10,8 +10,10 @@
 //! (`money_domain::filters`): this file only edits a `Filter` and opens
 //! the register for it.
 
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, menu, style};
-use iced::widget::{button, column, row, text, text_input};
+use iced::widget::{button, column, row};
 use iced::{Alignment, Element, Length, Task};
 use money_domain::dates::{add_months, first_day, last_day, month_of};
 use money_domain::*;
@@ -384,6 +386,7 @@ impl App {
                     true => arkui::theme::of(theme).danger.base.color,
                     false => arkui::theme::of(theme).background.base.text,
                 }),
+                ..Default::default()
             }),
             dim(format!("{n} transaction{}", if n == 1 { "" } else { "s" }), 11),
         ]

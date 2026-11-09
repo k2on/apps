@@ -27,7 +27,10 @@ ark-app = { path = "../app", optional = true }
 # derived square, `image` a fetched picture, `advanced` the scroll operation
 # that keeps a keyboard cursor on screen. `fira-sans` is the typeface iced
 # embeds, so a system with no fonts still draws text.
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { workspace = true }
+# A screen reader's tree (accesskit): arkui's own widgets pass their
+# content's on, and a cut line says its whole text.
+iced_accessibility = { workspace = true }
 # Decoding a picture on the thread that fetched it, so the renderer is handed
 # pixels at the size they are drawn rather than a megapixel JPEG to decode
 # inside a frame. iced's own `image` feature already puts this crate in the
@@ -56,7 +59,7 @@ wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 [dev-dependencies]
 # A window driven by hand in a test: a click at a point, and the messages
 # it gave.
-iced_test = "0.14"
+iced_test = { workspace = true }
 
 [features]
 # `view`: a screen laid out once in Rust (ark-app's `#[view]`), drawn by iced.

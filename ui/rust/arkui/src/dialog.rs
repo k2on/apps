@@ -16,8 +16,9 @@
 //! [`crate::layer::dimmed`] does for a picker. A click on the dialog itself,
 //! anywhere on it, is the dialog's: it is opaque to the pointer, so a click
 //! between its controls does not fall through to the page under it.
+use crate::text::text;
 use iced::time::Instant;
-use iced::widget::{column, container, mouse_area, opaque, row, text, Space};
+use iced::widget::{column, container, mouse_area, opaque, row, Space};
 use iced::{Alignment, Background, Border, Element, Length, Vector};
 
 use crate::motion::{self, Shown, Spring};

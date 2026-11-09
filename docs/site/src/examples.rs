@@ -8,9 +8,10 @@ use arkui::fit::Cut;
 use arkui::line::Line;
 use arkui::menu::{self, Anchor, Entry, Menu};
 use arkui::picker::{self, Choice, Picker};
+use arkui::text::{self, text};
 use arkui::{art, format, glyphs, hero, icon, layer, panel, sidebar, style, table, theme, url, vim};
 use iced::keyboard::{key::Named, Key, Modifiers};
-use iced::widget::{button, column, container, row, slider, stack, text, Space};
+use iced::widget::{button, column, container, row, slider, stack, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Point, Size, Theme};
 
 use crate::render::{Painter, Picture};
@@ -358,13 +359,14 @@ fn presses(run: &str) -> Vec<(Key, Modifiers)> {
     while let Some(c) = rest.chars().next() {
         if let Some(named) = rest.strip_prefix('<').and_then(|r| r.split_once('>')) {
             let key = match named.0 {
-                "Enter" => Named::Enter,
-                "Space" => Named::Space,
-                "Tab" => Named::Tab,
-                "Esc" => Named::Escape,
+                "Enter" => Key::Named(Named::Enter),
+                // The space bar is a character in winit 0.31 (the fork's).
+                "Space" => Key::Character(" ".into()),
+                "Tab" => Key::Named(Named::Tab),
+                "Esc" => Key::Named(Named::Escape),
                 other => panic!("no such key <{other}>"),
             };
-            out.push((Key::Named(key), Modifiers::empty()));
+            out.push((key, Modifiers::empty()));
             rest = named.1;
         } else if let Some(ctrl) = rest.strip_prefix('^').and_then(|r| r.chars().next()) {
             out.push((Key::Character(ctrl.to_string().into()), Modifiers::CTRL));
@@ -467,6 +469,7 @@ fn style_(c: Canvas) -> Picture {
                     .size(13)
                     .style(move |t| text::Style {
                         color: Some(style::on_row(t, on, false, false)),
+                        ..Default::default()
                     }),
                 on,
                 true,

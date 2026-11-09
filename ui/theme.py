@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # The theme's generator and its contrast check: ui/theme.toml, the one
-# place a colour or a motion is written down, said in each platform's language.
+# place a colour, a motion or a measure of a window is written down, said in each platform's language.
 #
 #   theme.py write [ROOT]   # the generated files, under ROOT (the repository's root by default)
 #   theme.py contrast       # every text colour on every ground it is drawn on, at WCAG's ratio
@@ -25,6 +25,20 @@ RUST = "ui/rust/arkui/src/tokens.rs"
 KOTLIN_MOTION = "ui/kotlin/src/dev/arkui/MotionTokens.kt"
 SWIFT_MOTION = "ui/swift/Sources/ArkUICore/MotionTokens.swift"
 RUST_MOTION = "ui/rust/arkui/src/motion_tokens.rs"
+KOTLIN_LAYOUT = "ui/kotlin/src/dev/arkui/LayoutTokens.kt"
+SWIFT_LAYOUT = "ui/swift/Sources/ArkUICore/LayoutTokens.swift"
+RUST_LAYOUT = "ui/rust/arkui/src/layout_tokens.rs"
+
+# The layout tokens, in the order they are written, and each one's sentence.
+LAYOUT = {
+    "compact-width": "Narrower than this (dp, pt or logical px) a window is compact: the sidebar is a tab bar, the split view a stack, the inspector a sheet.",
+    "expanded-width": "At least this wide a window is expanded: the split view shows its sidebar, its content and its detail at once.",
+    "sidebar-width": "A split view's sidebar, at rest.",
+    "content-width": "A split view's content column beside a detail, at rest.",
+    "inspector-width": "An inspector at the trailing edge, at rest.",
+    "toolbar-height": "A window's toolbar row.",
+    "line-height": "A line of text as tall as this many times its size (the desktop's: iced's).",
+}
 
 # The motion tokens, in the order they are written, and each one's sentence.
 MOTION = {
@@ -666,6 +680,43 @@ def rust_motion(t):
     return "\n".join(out) + "\n"
 
 
+def layout_values(t):
+    m = t["layout"]
+    missing = [k for k in LAYOUT if k not in m]
+    if missing:
+        sys.exit(f"theme.toml [layout] lacks {', '.join(missing)}")
+    return m
+
+
+def kotlin_layout(t):
+    m = layout_values(t)
+    out = [f"// {HEADER}", "package dev.arkui", "", "/** How a window is laid out (ui/theme.toml `[layout]`, ui/docs/design.md). */", "public object LayoutTokens {"]
+    for k, doc in LAYOUT.items():
+        out.append(f"    /** {doc} */")
+        out.append(f"    public const val {screaming(k)}: Float = {float(m[k])!r}f")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
+def swift_layout(t):
+    m = layout_values(t)
+    out = [f"// {HEADER}", "import Foundation", "", "/// How a window is laid out (ui/theme.toml `[layout]`, ui/docs/design.md).", "public enum LayoutTokens {"]
+    for k, doc in LAYOUT.items():
+        out.append(f"    /// {doc}")
+        out.append(f"    public static let {camel(k)}: Double = {float(m[k])!r}")
+    out.append("}")
+    return "\n".join(out) + "\n"
+
+
+def rust_layout(t):
+    m = layout_values(t)
+    out = [f"//! {HEADER}", "//!", "//! How a window is laid out (ui/theme.toml `[layout]`, ui/docs/design.md).", ""]
+    for k, doc in LAYOUT.items():
+        out.append(f"/// {doc}")
+        out.append(f"pub const {screaming(k)}: f32 = {float(m[k])!r};")
+    return "\n".join(out) + "\n"
+
+
 def colorset(accent):
     def color(hex_):
         r, g, b = rgb(hex_)
@@ -684,6 +735,7 @@ def colorset(accent):
 def files(t):
     out = {KOTLIN: kotlin(t), SWIFT_CORE: swift_core(t), SWIFT_UI: swift_ui(t), RUST: rust(t)}
     out |= {KOTLIN_MOTION: kotlin_motion(t), SWIFT_MOTION: swift_motion(t), RUST_MOTION: rust_motion(t)}
+    out |= {KOTLIN_LAYOUT: kotlin_layout(t), SWIFT_LAYOUT: swift_layout(t), RUST_LAYOUT: rust_layout(t)}
     for accent in t["accent"].values():
         for path in accent["colorsets"]:
             out[os.path.join(path, "Contents.json")] = colorset(accent)

@@ -13,7 +13,8 @@
 //! money's balance. It is drawn on the row's ground, so it asks
 //! [`style::entry_text`] with the same `lit` the row was drawn with
 //! ([`lit`]).
-use iced::widget::{column, container, mouse_area, row, scrollable, text};
+use crate::text::{self, text};
+use iced::widget::{column, container, mouse_area, row, scrollable};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::fit::Cut;
@@ -50,6 +51,7 @@ pub fn count<'a, M: 'a>(n: i64, _lit: bool) -> Element<'a, M> {
             let p = theme::of(t);
             text::Style {
                 color: Some(p.background.base.text.scale_alpha(0.5)),
+                ..Default::default()
             }
         })
         .into()

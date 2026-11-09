@@ -18,7 +18,9 @@
 //! about itself. Two ways to one question should not be two panels to keep in
 //! step. Which one it is is `origin`, and [`crate::context::Context`] is what
 //! sets it.
-use iced::widget::{column, container, mouse_area, rule, scrollable, text, text_input};
+use crate::text::text;
+use crate::text_input::text_input;
+use iced::widget::{column, container, mouse_area, rule, scrollable};
 use iced::{Element, Length, Padding, Point};
 
 use crate::fit::middle;

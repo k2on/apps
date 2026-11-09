@@ -15,7 +15,8 @@
 //! here is a constant given to the container, and the arithmetic is true by
 //! construction rather than a guess about what 13pt text inside some padding
 //! comes to.
-use iced::widget::{container, text, Row};
+use crate::text::{self, text};
+use iced::widget::{container, Row};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 use crate::icon;
@@ -151,6 +152,7 @@ pub fn label<'a, M: 'a>(body: String, lit: bool) -> Element<'a, M> {
         .wrapping(text::Wrapping::None)
         .style(move |theme| text::Style {
             color: Some(crate::style::entry_text(theme, lit)),
+            ..Default::default()
         })
         .into()
 }

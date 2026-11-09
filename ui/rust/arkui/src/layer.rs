@@ -22,7 +22,8 @@
 //! published by the row itself and falls through every layer. So an app
 //! refuses its rows' hover while [`crate::context::Context::focus`] is `Some`,
 //! or the cursor the menu is about creeps away under it.
-use iced::widget::{container, mouse_area, pin, text};
+use crate::text::text;
+use iced::widget::{container, mouse_area, pin};
 use iced::{Background, Element, Length, Point};
 
 use crate::theme::of;

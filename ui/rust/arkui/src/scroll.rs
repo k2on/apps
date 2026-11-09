@@ -899,8 +899,8 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         vec![Tree::new(&self.content)]
     }
 
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_mut(&mut self.content));
     }
 
     fn size(&self) -> Size<Length> {
@@ -960,6 +960,14 @@ impl<M> Widget<M, Theme, iced::Renderer> for Elastic<'_, M> {
         self.content
             .as_widget_mut()
             .update(&mut tree.children[0], event, inner, cursor, renderer, clipboard, shell, &viewport);
+    }
+
+    /// Its content's accessibility tree, as is: this wrapper adds nothing a
+    /// screen reader reads (COSMIC's accesskit, the fork's `a11y`).
+    fn a11y_nodes(&self, layout: Layout<'_>, tree: &Tree, cursor: mouse::Cursor) -> iced_accessibility::A11yTree {
+        self.content
+            .as_widget()
+            .a11y_nodes(layout.children().next().unwrap_or(layout), &tree.children[0], cursor)
     }
 
     fn draw(
@@ -1276,7 +1284,8 @@ mod tests {
     /// Where a list in an [`elastic`] is scrolled to after each of `wheel`'s
     /// events, as its `on_scroll` says, leaving out where it already was.
     fn scrolled_by(wheel: &[ScrollDelta]) -> Vec<i32> {
-        use iced::widget::{column, scrollable, text};
+        use crate::text::text;
+        use iced::widget::{column, scrollable};
         let rows = column((0..50).map(|n| text(format!("row {n}")).height(40).into()));
         let list = scrollable(rows).height(Length::Fill).on_scroll(|v| v.absolute_offset().y.round() as i32);
         let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (400.0, 300.0), elastic(list));
@@ -1318,7 +1327,8 @@ mod tests {
     /// one that coasted for ever (no stop).
     #[test]
     fn a_flick_coasts_on_in_a_window() {
-        use iced::widget::{column, scrollable, text};
+        use crate::text::text;
+        use iced::widget::{column, scrollable};
         let rows = column((0..400).map(|n| text(format!("row {n}")).height(40).into()));
         let list = scrollable(rows).height(Length::Fill).on_scroll(|v| v.absolute_offset().y);
         let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (400.0, 300.0), elastic(list));
@@ -1353,7 +1363,8 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn fingers_landing_stop_a_coast_in_a_window() {
-        use iced::widget::{column, scrollable, text};
+        use crate::text::text;
+        use iced::widget::{column, scrollable};
         let rows = column((0..400).map(|n| text(format!("row {n}")).height(40).into()));
         let list = scrollable(rows).height(Length::Fill).on_scroll(|v| v.absolute_offset().y);
         let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), (400.0, 300.0), elastic(list));
@@ -2152,7 +2163,8 @@ mod tests {
     #[test]
     #[ignore = "writes pictures: ARK_KINETIC_FRAMES=<dir> cargo test -p arkui --lib frames -- --ignored"]
     fn frames() {
-        use iced::widget::{column, container, scrollable, text};
+        use crate::text::text;
+        use iced::widget::{column, container, scrollable};
         let Ok(dir) = std::env::var("ARK_KINETIC_FRAMES") else {
             return;
         };

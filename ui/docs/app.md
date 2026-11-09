@@ -302,38 +302,45 @@ its ffi crate's `useModules` and registers the platform's class.
   view, the modules' UIKit/AppKit branches), Compose (the Android build was
   not run); nothing seen on a device; no screenshot compared.
 
-## The iced Fork (Assessed, Not Taken)
+## The iced Fork: COSMIC's
 
-The owner asked for the whole workspace on COSMIC's iced
-(`github.com/pop-os/iced`) and its context menu. Assessed on 2026-11-09
-against its `master` (d5d638c3):
+The desktop draws with COSMIC's iced (`github.com/pop-os/iced`), the
+whole workspace and the docs site, at the revision libcosmic pins as its
+`iced` submodule: `d5d638c3a3022396fcf5b9b588b3446820dc11ad` (2026-11-05).
+It is iced 0.14 with COSMIC's desktop stack under it; libcosmic itself
+(its widgets, its theme, its menus) is not taken, and ArkUI keeps its
+look.
 
-- **Its context menu is not in the fork.** COSMIC's `context_menu` and
-  menu trees are libcosmic's (`cosmic::widget::menu`, MPL-2.0, adapted
-  from iced_aw), built on libcosmic's own theme and widget set. Taking the
-  fork brings no menu; taking the menu means libcosmic, which brings its
-  design system, which ArkUI keeps its own of.
-- **Its graph is seven git forks**: pop-os/iced, pop-os/winit (a winit 0.31
-  pre-release, rev 9567503), pop-os/window_clipboard, smithay-clipboard,
-  softbuffer, wash2/accesskit and iced-rs/cryoglyph — 40 git packages in a
-  453-package lock. Each needs a pinned fetch in rust/Cargo.nix, and the
-  winit fork is a newer winit API than iced 0.14's, so arkui's window,
-  touchpad (the Wayland hold handling) and renderer selection move with it.
-- **It does not build for the browser.** A probe crate on the fork's
-  `iced` (no default features; `tiny-skia`, `svg`, `image`, `advanced`,
-  `winit`, `webgl`) fails `cargo check --target wasm32-unknown-unknown`
-  in the fork's own `iced_winit`: `winit::platform::web::{
-  WindowAttributesExtWebSys, WindowExtWebSys, EventLoopExtWebSys}` are
-  gone from its winit fork, and its compositor future is not `'static`
-  for `spawn_local`. money's and harken's web builds are iced in wasm, so
-  the switch stops here, as the owner's condition says; nothing of it was
-  committed.
-
-So the menu was built in arkui (option c): `arkui::context_menu`, ArkUI's
-menu panel at the pointer, flipped at the window's edges
-(`Menu::origin_for`), every item, `↑`/`↓`/`j`/`k`, `Enter`, `Esc`, a press
-outside closes it and goes no further, a long press on touch, the menu key
-or `Shift-F10`. The browser draws the same menu when it has a DOM client.
+- **Its git dependencies**, pinned by `rust/Cargo.lock` and fetched by
+  `rust/Cargo.nix` with their hashes (`crate-hashes.json`): pop-os/iced,
+  pop-os/winit (a winit 0.31 pre-release, `9567503d`), pop-os/
+  window_clipboard (`sctk-0.20`, `f68595ee`), pop-os/softbuffer
+  (`cosmic-4.0`, `c2b2c19d`), pop-os/cosmic-protocols (`c0cff4d`),
+  wash2/accesskit (`6c20249d`) and iced-rs/cryoglyph (`e429a025`).
+- **Its features**: none of its defaults (COSMIC's: tokio, no wgpu, no
+  winit shell); upstream iced 0.14's defaults instead, the winit shell,
+  `a11y` (accesskit: arkui's wrappers pass their content's tree on, and a
+  cut line, `arkui::line`, says its whole text) and what every window
+  asks for (`rust/Cargo.toml` says each).
+- **What moved**: `Widget::diff` takes `&mut self`; the space bar is a
+  character (`" "`), not a named key; a drop is every file at once; wgpu 28
+  lists its adapters asynchronously (`renderer.rs` still pins
+  `WGPU_BACKEND`, and `ICED_BACKEND` still picks tiny-skia: both are read
+  by the fork's compositor as before); a text's style carries its
+  selection's colours, a slider's its breakpoints'. The Wayland hold
+  gesture (`touchpad.rs`) binds on the same wayland-client 0.31 as the
+  fork's winit. smithay-client-toolkit links libxkbcommon (pkg-config at
+  build time: `desktopOverrides` in flake.nix).
+- **What it would have changed, and does not**: its text is 1.4 times
+  its size where upstream's is 1.3, so every line of every window was a
+  tenth taller. `arkui::text` and `arkui::text_input` set ArkUI's
+  (`ui/theme.toml`'s `[layout] line-height`), and every window's text
+  goes through them. money's desktop shots are pixel for pixel what they
+  were on upstream iced; harken's table (`arkui::line` cells under
+  `arkui::table` headings) sits about one logical pixel higher.
+- **Not taken from it**: its browser build (iced is the desktop's alone
+  now), its tokio executor, libcosmic's context menu (ArkUI's own is
+  `arkui::context_menu`).
 
 ## What Is Left
 

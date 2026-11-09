@@ -223,7 +223,7 @@ impl Frame {
         let mut el = app.view();
         let viewed = t.elapsed();
         let t = Instant::now();
-        self.tree.diff(el.as_widget());
+        self.tree.diff(el.as_widget_mut());
         let node = el
             .as_widget_mut()
             .layout(&mut self.tree, &self.renderer, &layout::Limits::new(iced::Size::ZERO, self.size));

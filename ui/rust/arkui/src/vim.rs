@@ -276,10 +276,6 @@ impl Keys {
                     query.pop();
                     None
                 }
-                Key::Named(Named::Space) => {
-                    query.push(' ');
-                    None
-                }
                 Key::Character(c) => {
                     query.push_str(c);
                     None
@@ -316,7 +312,8 @@ impl Keys {
                 self.pending = None;
                 Some(Action::Activate)
             }
-            Key::Named(Named::Space) => {
+            // The space bar is a character (winit 0.31, the fork's): " ".
+            Key::Character(c) if c.as_str() == " " => {
                 self.count = None;
                 self.pending = None;
                 Some(Action::Toggle)
@@ -720,7 +717,7 @@ mod tests {
         let key = match s {
             "<Enter>" => Key::Named(Named::Enter),
             "<Esc>" => Key::Named(Named::Escape),
-            "<Space>" => Key::Named(Named::Space),
+            "<Space>" => Key::Character(" ".into()),
             "<Tab>" => Key::Named(Named::Tab),
             c => Key::Character(c.into()),
         };

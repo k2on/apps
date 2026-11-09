@@ -33,7 +33,7 @@ ark-clipboard = { path = "../../modules/clipboard", features = ["desktop"] }
 # receipt's photo, `advanced` the focus operation a form's first field is given
 # the keys by.
 # `fira-sans` is the typeface, as harken's.
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { workspace = true }
 # The window photographed for the apps' screenshots, when `ARK_SHOTS` asks
 # (.github/screens/apps.md): this same application, run headless.
 arkui-shots = { path = "../../ui/rust/shots" }
@@ -45,4 +45,4 @@ money-server = { path = "../server" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 tempfile = "3"
 # The budget drawn to a picture, to look at (`tests::the_budget_drawn`).
-iced_test = "0.14"
+iced_test = { workspace = true }

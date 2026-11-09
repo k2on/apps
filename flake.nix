@@ -106,7 +106,17 @@
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
           # its library under its `lib` output.
-          crate = args: rustCrates.build ({ inherit pkgs rust; } // args);
+          crate = args: rustCrates.build ({ inherit pkgs rust; overrides = desktopOverrides; } // args);
+          # COSMIC's iced (rust/Cargo.toml) links libxkbcommon rather than
+          # opening it at run time: smithay-client-toolkit's build script
+          # asks pkg-config for it, and every crate that links a window
+          # (the xkbcommon bindings, the apps, their tests, the docs) is
+          # given it to link against. The window still takes the host's
+          # first on NixOS (nix/gpu-env.sh).
+          desktopOverrides = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+            let xkb = _: { nativeBuildInputs = [ pkgs.pkg-config ]; buildInputs = [ pkgs.libxkbcommon ]; }; in
+            lib.genAttrs [ "smithay-client-toolkit" "xkbcommon" "arkui" "arkui-shots" "money-iced" "harken-iced" "money-app" "docs" ] (_: xkb)
+          );
           crossPkgs = crossSystem: importPkgs {
             localSystem = pkgs.stdenv.buildPlatform.system;
             inherit crossSystem;
@@ -201,7 +211,7 @@
             inherit lib;
             cargoNix = import ./docs/site/Cargo.nix { inherit pkgs; };
           };
-          docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; } // args);
+          docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; overrides = desktopOverrides; } // args);
           # The site: plain HTML, CSS and a few lines of script, and each
           # desktop component's pictures drawn by iced's own renderer on the
           # CPU (tiny-skia: no window, no GPU), which the sandbox allows.

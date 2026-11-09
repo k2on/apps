@@ -11,7 +11,8 @@
 //! **The cursor on a card is its title going accent**, not a filled rectangle.
 //! A card is mostly picture, and a fill behind one is a border around an image
 //! — it reads as a selected file, not as where the next `l` goes.
-use iced::widget::{column, container, image, mouse_area, row, scrollable, text};
+use crate::text::{self, text};
+use iced::widget::{column, container, image, mouse_area, row, scrollable};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::fit::Cut;
@@ -172,6 +173,7 @@ pub fn view_card<'a, M: Clone + 'a>(side: f32, card: &Card<M>, on_cursor: bool, 
                     .width(Length::Fixed(inner))
                     .style(|theme| text::Style {
                         color: Some(crate::theme::of(theme).background.base.text),
+                        ..Default::default()
                     }),
                 text(crate::fit::drawable(&card.under).into_owned())
                     .size(12)

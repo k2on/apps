@@ -13,8 +13,9 @@
 //! a [`Shown`] for it as for a dialog ([`crate::dialog`]). As a dialog is,
 //! it is opaque to the pointer: a click anywhere on it is its own, and only
 //! one on the dimmed page beside it closes it.
+use crate::text::{self, text};
 use iced::time::Instant;
-use iced::widget::{column, container, opaque, row, text, Space};
+use iced::widget::{column, container, opaque, row, Space};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Vector};
 
 use crate::motion::{self, Shown, Spring};
@@ -81,6 +82,7 @@ pub fn view<'a, M: 'a>(
     if let Some(d) = description {
         words = words.push(text(d).size(13).height(Length::Fixed(18.0)).style(|theme| text::Style {
             color: Some(of(theme).background.strong.text),
+            ..Default::default()
         }));
     }
     let head = row![words, Space::new().width(Length::Fill), close].align_y(Alignment::Start);

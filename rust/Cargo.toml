@@ -13,6 +13,26 @@ serde_json = { version = "1", features = ["raw_value"] }
 memcomparable = "0.2"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 
+# iced is COSMIC's fork (github.com/pop-os/iced), at the revision libcosmic
+# pins as its `iced` submodule: winit 0.31's pre-release and the rest of
+# COSMIC's desktop stack (accesskit, the Wayland clipboard, IME). The
+# desktop's alone (ui/docs/app.md). Its own default features are COSMIC's
+# (tokio, no wgpu, no winit), so none are taken: these are upstream iced
+# 0.14's defaults (wgpu, tiny-skia, crisp, web-colors, thread-pool,
+# linux-theme-detection, x11, wayland), the winit shell, accessibility
+# (`a11y`), and what every window here asks for: `smol` an executor, `svg`
+# every glyph, `image` a picture, `advanced` the operations a keyboard
+# cursor and a form's focus are given by, `fira-sans` the typeface. The git
+# dependencies it brings (pop-os/winit, window_clipboard, softbuffer,
+# cosmic-protocols, iced-rs/cryoglyph) are pinned by Cargo.lock.
+iced = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad", default-features = false, features = ["winit", "wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "x11", "wayland", "a11y", "smol", "svg", "image", "advanced", "fira-sans"] }
+iced_test = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
+iced_tiny_skia = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
+iced_runtime = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
+# What a screen reader is told (accesskit, through the fork's `a11y`): what
+# arkui's own widgets say of themselves.
+iced_accessibility = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
+
 # Test binaries with full debug info are over 100 MB each, and the disk a
 # session builds on is a fixed allowance. Line tables keep file and line in
 # a panic's backtrace, which is what a test failure is read by.

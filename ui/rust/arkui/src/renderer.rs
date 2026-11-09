@@ -30,7 +30,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use iced::widget::text;
+use crate::text::{self, text};
 use iced::Element;
 
 /// What [`choose`] found.
@@ -191,7 +191,9 @@ pub mod native {
             backends,
             ..Default::default()
         });
-        let mut adapters = instance.enumerate_adapters(backends);
+        // wgpu 28 (the fork's) answers asynchronously; natively it is ready
+        // on the first poll.
+        let mut adapters = block_on(instance.enumerate_adapters(backends));
         adapters.sort_by_key(|a| rank(&a.get_info()));
         let mut refused = Vec::new();
         for adapter in adapters {
@@ -248,8 +250,8 @@ pub mod native {
         }
     }
 
-    /// The device iced's compositor asks for (iced_wgpu 0.14's
-    /// `window::compositor::new`): wgpu's default limits, else the
+    /// The device iced's compositor asks for (the fork's iced_wgpu,
+    /// `window::compositor::Compositor::request`): wgpu's default limits, else the
     /// downlevel ones, either with two bind groups and 2048 bindings.
     fn opens(adapter: &wgpu::Adapter) -> Result<(), String> {
         let mut last = String::new();

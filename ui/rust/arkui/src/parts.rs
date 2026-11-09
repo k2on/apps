@@ -12,7 +12,9 @@
 //! looks in [`crate::style`]. The desktop's measures are the desktop's — a
 //! pointer is precise and a window wide — so a card is rounded by 8 here and
 //! by 20 on a phone; what is the same is the piece and what it is handed.
-use iced::widget::{button, column, container, row, rule, slider, svg, text, text_input, Space};
+use crate::text::{self, text};
+use crate::text_input::{self, text_input};
+use iced::widget::{button, column, container, row, rule, slider, svg, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
 
 use crate::theme::of;
@@ -51,6 +53,7 @@ impl Tint {
                 Tint::Neutral => of(theme).background.base.text.scale_alpha(0.6),
                 t => t.color(theme),
             }),
+            ..Default::default()
         }
     }
 }
@@ -155,6 +158,7 @@ pub fn chip<'a, M: Clone + 'a>(label: &str, chosen: bool, press: M) -> Element<'
 pub fn badge<'a, M: 'a>(count: usize) -> Element<'a, M> {
     container(text(count.to_string()).size(10).style(move |theme| text::Style {
         color: Some(of(theme).primary.base.text),
+        ..Default::default()
     }))
     .padding([1, 6])
     .style(move |theme| container::Style {

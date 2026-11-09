@@ -8,7 +8,8 @@
 //! money's, a glyph from [`crate::glyphs`] in the text colour at
 //! [`crate::icon::SIZE`] with a little room around it, so the same action is
 //! the same shape in both apps.
-use iced::widget::{button, container, rule, text, Button};
+use crate::text::{self, text};
+use iced::widget::{button, container, rule, Button};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::{icon, style, theme};
@@ -63,7 +64,10 @@ pub fn underlined<'a, M: 'a>(body: impl Into<Element<'a, M>>, color: impl Fn(&Th
 /// Words in the accent that do something: underlined when pointed at.
 pub fn link<'a, M: Clone + 'a>(label: impl Into<String>, size: f32, press: M) -> Element<'a, M> {
     let accent = |t: &Theme| theme::of(t).primary.base.color;
-    let words = text(label.into()).size(size).style(move |t| text::Style { color: Some(accent(t)) });
+    let words = text(label.into()).size(size).style(move |t| text::Style {
+        color: Some(accent(t)),
+        ..Default::default()
+    });
     plain(underlined(words, accent)).on_press(press).into()
 }
 
@@ -71,6 +75,9 @@ pub fn link<'a, M: Clone + 'a>(label: impl Into<String>, size: f32, press: M) ->
 /// pointed at: a button that is a word.
 pub fn word<'a, M: Clone + 'a>(label: impl Into<String>, size: f32, press: M) -> Element<'a, M> {
     let ink = |t: &Theme| theme::of(t).background.base.text;
-    let words = text(label.into()).size(size).style(move |t| text::Style { color: Some(ink(t)) });
+    let words = text(label.into()).size(size).style(move |t| text::Style {
+        color: Some(ink(t)),
+        ..Default::default()
+    });
     plain(underlined(words, ink)).on_press(press).into()
 }

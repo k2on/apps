@@ -17,7 +17,9 @@
 //! The sections ask the server how the stores are each time Settings opens.
 
 use ark::format::Encode;
-use iced::widget::{column, container, row, text, text_input};
+use arkui::text::text;
+use arkui::text_input::text_input;
+use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
 use money_domain::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
 

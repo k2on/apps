@@ -54,7 +54,8 @@ pub fn boot<M: Send + 'static>() -> Task<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iced::widget::{container, mouse_area, stack, text};
+    use crate::text::text;
+    use iced::widget::{container, mouse_area, stack};
     use iced::Length;
 
     #[derive(Debug, Clone, PartialEq)]

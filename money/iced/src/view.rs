@@ -2,8 +2,10 @@
 //! the month's budget and its inspector, an account's register, or where
 //! the month's money went — with a panel over it when one is open.
 
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, layer, menu, outline, panel, style, table};
-use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, text, text_input, Column, Space};
+use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::budget::ready_to_assign;
 use money_domain::dates::month_of;
@@ -175,6 +177,7 @@ fn balance<'a>(cents: i64, lit: bool) -> Element<'a, Message> {
                 true => arkui::theme::of(theme).danger.base.color,
                 false => style::entry_text(theme, lit).scale_alpha(0.75),
             }),
+            ..Default::default()
         })
         .into()
 }
@@ -602,6 +605,7 @@ impl App {
         let hidden = l.hidden;
         let label = text(l.name.clone()).size(14).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, hidden)),
+            ..Default::default()
         });
         let name = row![tile(l), self.name_or_box(Naming::Category(l.category_id), label.into())]
             .spacing(12)
@@ -623,6 +627,7 @@ impl App {
                     icon::faint(glyphs::REPEAT, lit).width(12.0).height(12.0),
                     text(money(l.assigned)).size(14).style(move |theme| text::Style {
                         color: Some(style::on_row(theme, lit, false, false)),
+                        ..Default::default()
                     })
                 ]
                 .spacing(6)
@@ -634,6 +639,7 @@ impl App {
             .into(),
             _ => button(text(money(l.assigned)).size(14).style(move |theme| text::Style {
                 color: Some(style::on_row(theme, lit, false, false)),
+                ..Default::default()
             }))
             .on_press(Message::EditAssigned(l.category_id))
             .padding([3, 0])
@@ -644,13 +650,16 @@ impl App {
         let activity = match l.activity {
             0 => text("\u{2014}").size(14).style(move |theme| text::Style {
                 color: Some(style::on_row(theme, lit, false, true)),
+                ..Default::default()
             }),
             a => text(money(a)).size(14).style(move |theme| text::Style {
                 color: Some(style::on_row(theme, lit, false, false)),
+                ..Default::default()
             }),
         };
         let goal = text(l.progress(crate::amount::style())).size(13).style(move |theme| text::Style {
             color: Some(style::on_row(theme, lit, false, true)),
+            ..Default::default()
         });
         let available = container(text(money(l.available)).size(14).font(arkui::hero::BOLD))
             .padding([4, 12])
@@ -1106,6 +1115,7 @@ impl App {
                     true => arkui::theme::of(theme).danger.base.color,
                     false => arkui::theme::of(theme).background.base.text,
                 }),
+                ..Default::default()
             }),
             dim(label.to_string(), 11),
         ]
@@ -1134,6 +1144,7 @@ impl App {
                     (true, false) => arkui::theme::of(theme).warning.base.color,
                     _ => style::on_row(theme, lit, false, t.category_id == Some(ready_to_assign())),
                 }),
+                ..Default::default()
             });
         // While its category is being chosen, the cell is the box it is typed
         // into, the list hanging under it.
@@ -1380,6 +1391,7 @@ impl App {
                     true => arkui::theme::of(theme).background.base.text,
                     false => arkui::theme::of(theme).warning.base.color,
                 }),
+                ..Default::default()
             }))
             .on_press(Message::ChoosePayer(PaidFor {
                 receipt_id: c.receipt_id.clone(),

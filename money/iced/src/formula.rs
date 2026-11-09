@@ -6,8 +6,10 @@
 //! as a register limited to the month. Saved, it holds from the month on
 //! screen on (`money_domain::formulas`).
 
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, menu};
-use iced::widget::{button, column, container, row, text, text_input};
+use iced::widget::{button, column, container, row};
 use iced::{Alignment, Element, Length, Task};
 use money_domain::formulas::{parse_share, percent};
 use money_domain::*;

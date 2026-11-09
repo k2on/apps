@@ -33,7 +33,7 @@ serde_json = { workspace = true }
 # glyph, `image` a cover, `advanced` the scroll operation that keeps the cursor
 # on screen and the recipes `tests/wake.rs` runs.
 # `fira-sans` is the typeface (the port leaves the vendored Inter behind).
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { workspace = true }
 # The sync socket natively: the token first, then frames, and the server's
 # close code read (4401 is a login turned away).
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
@@ -47,4 +47,4 @@ arkui-shots = { path = "../../ui/rust/shots" }
 [dev-dependencies]
 # The software renderer iced falls back to, built with no window: what
 # `tests/bench.rs` lays a page out and draws it with.
-iced_tiny_skia = "0.14"
+iced_tiny_skia = { workspace = true }

@@ -8,8 +8,10 @@
 //! right click, a long press, or the menu key), a sheet or a prompt is a
 //! dialog over the page, a picker is a row of chips, and an amount is typed.
 
+use crate::text::{self, text};
+use crate::text_input::text_input;
 use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Section, Val, View};
-use iced::widget::{button, checkbox, column, container, row, scrollable, stack, text, text_input, Column, Space};
+use iced::widget::{button, checkbox, column, container, row, scrollable, stack, Column, Space};
 use iced::{Alignment, Length};
 
 use crate::{context_menu, glyphs, icon, layer, parts, style};
@@ -250,6 +252,7 @@ fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>
     if let Some(p) = problem {
         c = c.push(text(p).size(12).style(|t| text::Style {
             color: Some(crate::theme::of(t).danger.base.color),
+            ..Default::default()
         }));
     }
     c.into()
@@ -265,6 +268,7 @@ fn amount<M: 'static>(cents: i64, size: u32, quiet: bool) -> Element<'static, M>
                 (false, true) => style::dim(t).color.unwrap_or_default(),
                 (false, false) => crate::theme::of(t).background.base.text,
             }),
+            ..Default::default()
         })
         .into()
 }

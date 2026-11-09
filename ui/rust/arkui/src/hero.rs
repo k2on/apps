@@ -12,8 +12,9 @@
 //! **One face, two weights.** Names and section headings are the interface's
 //! own sans at [`BOLD`] and a size up; a second family beside it was one more
 //! voice on a page that only needs the one.
+use crate::text::{self, text};
 use iced::font::Weight;
-use iced::widget::{column, container, image, mouse_area, row, rule, stack, text, Space};
+use iced::widget::{column, container, image, mouse_area, row, rule, stack, Space};
 use iced::{Alignment, Background, Color, ContentFit, Element, Font, Length, Padding};
 
 use crate::{style, theme};
@@ -74,6 +75,7 @@ pub fn banner<'a, M: 'a>(picture: Option<&image::Handle>, kind: &str, name: &str
     let white = |a: f32| {
         move |_: &iced::Theme| text::Style {
             color: Some(Color::from_rgba(1.0, 1.0, 1.0, a)),
+            ..Default::default()
         }
     };
     let words = container(
@@ -182,6 +184,7 @@ pub fn grid<'a, M: 'a>(entries: Vec<Element<'a, M>>, columns: usize) -> Element<
 pub fn entry<'a, M: Clone + 'a>(picture: Option<Element<'a, M>>, e: &Entry<M>, on_cursor: bool, hover: M) -> Element<'a, M> {
     let title = text(e.title.clone()).size(14).style(|t| text::Style {
         color: Some(theme::of(t).background.base.text),
+        ..Default::default()
     });
     let mut words = column![].spacing(2).width(Length::Fill);
     if !e.over.is_empty() {

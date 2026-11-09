@@ -17,8 +17,9 @@
 //! account), every account here, and nothing — the account another login
 //! to the same bank feeds with the same last digits already on the cursor.
 
+use arkui::text::{self, text};
 use arkui::{glyphs, icon, menu, style};
-use iced::widget::{button, column, container, row, text, Column};
+use iced::widget::{button, column, container, row, Column};
 use iced::{Alignment, Element, Length, Padding};
 use money_domain::*;
 
@@ -285,6 +286,7 @@ impl App {
                 .size(12)
                 .style(|theme| text::Style {
                     color: Some(arkui::theme::of(theme).danger.base.color),
+                    ..Default::default()
                 })
                 .into(),
             false => dim(s.words, 12).into(),

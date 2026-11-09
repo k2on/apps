@@ -1,6 +1,6 @@
 # arkui
 
-The ui every app in this repository shares: iced 0.14 components, the vim
+The ui every app in this repository shares: iced components (COSMIC's fork of iced 0.14, ui/docs/app.md), the vim
 keyboard, theming, the glyph table, a picture cache and the address bar. It
 knows nothing about any domain. An app hands over its palette, its places, its
 messages and its screens; arkui supplies the parts of a window that are the

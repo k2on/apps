@@ -12,7 +12,8 @@
 //! [`view`] while [`Which::showing`] says so.
 use std::time::Duration;
 
-use iced::widget::{column, container, row, text};
+use crate::text::text;
+use iced::widget::{column, container, row};
 use iced::{Alignment, Background, Border, Element, Length, Padding};
 
 use crate::vim::{Binding, Group};

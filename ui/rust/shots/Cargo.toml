@@ -11,10 +11,10 @@ license.workspace = true
 # for the desktop alone.
 
 [dependencies]
-iced = { version = "0.14", features = ["smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { workspace = true }
 # The headless runtime: the app's boot, updates, tasks and subscriptions as
 # iced's shell runs them, with no window (`Emulator`).
-iced_test = "0.14"
+iced_test = { workspace = true }
 # Each shot written as a PNG.
 image = { version = "0.25", default-features = false, features = ["png"] }
 # The app's shots.json.

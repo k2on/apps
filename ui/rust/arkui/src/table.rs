@@ -20,7 +20,8 @@
 //!   window's width would suggest. So a cell is cut where it is laid out, to
 //!   the width it was actually given less [`SPACING`], and clipped to its
 //!   column besides.
-use iced::widget::{container, text};
+use crate::text::{self, text};
+use iced::widget::container;
 use iced::{Element, Length, Padding};
 
 use crate::line::Line;

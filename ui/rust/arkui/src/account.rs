@@ -21,7 +21,8 @@
 //!
 //! The app says what each entry does: the messages are its own, and nothing
 //! here knows what a server, a session or a login is.
-use iced::widget::{container, image, mouse_area, text};
+use crate::text::text;
+use iced::widget::{container, image, mouse_area};
 use iced::{mouse, Border, Color, ContentFit, Element, Length, Point, Size, Theme};
 
 use crate::menu::{self, Anchor, Entry, Menu};

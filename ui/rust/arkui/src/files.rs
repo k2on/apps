@@ -44,23 +44,22 @@ pub fn media_of(name: &str) -> Option<&'static str> {
     })
 }
 
-/// Every file dropped on the window, read; one that does not read is
-/// passed over.
+/// A file dropped on the window, read: the first of a drop that reads (a
+/// drop is every file let go at once, as the fork's winit says it); one
+/// that does not read is passed over.
 pub fn dropped() -> Subscription<Picked> {
-    {
-        iced::event::listen_with(|e, _, _| match e {
-            iced::Event::Window(iced::window::Event::FileDropped(path)) => {
-                let bytes = std::fs::read(&path).ok()?;
-                let name = path.file_name()?.to_string_lossy().into_owned();
-                Some(Picked {
-                    name,
-                    media: String::new(),
-                    bytes,
-                })
-            }
-            _ => None,
-        })
-    }
+    iced::event::listen_with(|e, _, _| match e {
+        iced::Event::Window(iced::window::Event::FileDropped(paths)) => paths.iter().find_map(|path| {
+            let bytes = std::fs::read(path).ok()?;
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            Some(Picked {
+                name,
+                media: String::new(),
+                bytes,
+            })
+        }),
+        _ => None,
+    })
 }
 
 /// A file chosen, of these media types (`image/*`), or none when the

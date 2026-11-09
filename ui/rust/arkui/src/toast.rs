@@ -36,7 +36,8 @@
 //! ground over a row, it is simply there and then not.
 use std::time::Duration;
 
-use iced::widget::{container, row, text};
+use crate::text::text;
+use iced::widget::{container, row};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Subscription, Vector};
 
 use crate::{glyphs, icon, style, theme};

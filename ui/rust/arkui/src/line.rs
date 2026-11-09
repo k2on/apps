@@ -83,6 +83,8 @@ struct Shaped<P: Paragraph> {
     shown: String,
     paragraph: core_text::paragraph::Plain<P>,
     letters: Vec<(f32, P)>,
+    /// Who it is to a screen reader, for as long as it is on screen.
+    a11y: Option<iced_accessibility::Id>,
 }
 
 /// How far apart, in `em` of the size, the characters of text `size` pixels
@@ -190,10 +192,30 @@ where
         // row gives what fills its whole share as the minimum, and a line
         // that [gives way](Line::gives_way) must still answer with its own
         // width, or what follows it is pushed to the far end.
+        let _ = cut.a11y.get_or_insert_with(iced_accessibility::Id::unique);
         let text = cut.paragraph.min_bounds();
         let gaps = cut.letters.len().saturating_sub(1) as f32;
         let width = (text.width + step * gaps).max(0.0);
         layout::Node::new(Size::new(width.min(max.width), text.height.min(max.height)))
+    }
+
+    /// A label: the whole of what it says, even where it is cut to fit, for
+    /// a screen reader (the fork's accesskit).
+    fn a11y_nodes(&self, layout: Layout<'_>, tree: &Tree, _cursor: mouse::Cursor) -> iced_accessibility::A11yTree {
+        use iced_accessibility::accesskit::{Node, Rect, Role};
+        let Some(id) = tree.state.downcast_ref::<Shaped<R::Paragraph>>().a11y.clone() else {
+            return iced_accessibility::A11yTree::default();
+        };
+        let b = layout.bounds();
+        let mut node = Node::new(Role::Label);
+        node.set_label(self.body.clone().into_boxed_str());
+        node.set_bounds(Rect::new(
+            f64::from(b.x),
+            f64::from(b.y),
+            f64::from(b.x + b.width),
+            f64::from(b.y + b.height),
+        ));
+        iced_accessibility::A11yTree::leaf(node, id)
     }
 
     fn draw(
@@ -209,6 +231,7 @@ where
         let cut = tree.state.downcast_ref::<Shaped<R::Paragraph>>();
         let style = widget::text::Style {
             color: Some((self.color)(theme)),
+            ..Default::default()
         };
         let bounds = layout.bounds();
         if cut.letters.is_empty() {
@@ -232,12 +255,14 @@ fn one_line<F>(content: &str, size: f32, font: F, height: f32) -> core_text::Tex
         content,
         bounds: Size::new(f32::INFINITY, height),
         size: Pixels(size),
-        line_height: core_text::LineHeight::default(),
+        line_height: crate::text::LINE_HEIGHT,
         font,
         align_x: core_text::Alignment::Default,
         align_y: alignment::Vertical::Top,
         shaping: core_text::Shaping::default(),
         wrapping: core_text::Wrapping::None,
+        // Cut here, by `fit::Cut`, never by the renderer's own ellipsis.
+        ellipsize: core_text::Ellipsize::None,
     }
 }
 

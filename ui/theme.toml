@@ -316,3 +316,24 @@ band-lift-ms = 800
 # own coast arriving as more of the wheel, or fingers that slowed to a
 # stop. It coasts no further, so a coast already made is never doubled.
 coast-spent = 0.25
+
+# How a window is laid out, for every platform: the one place the size
+# classes are decided (ui/docs/design.md). The parts that adapt — the
+# sidebar-adaptable tabs, the split view, the inspector — read these and
+# nothing else; an app never asks how wide it is. Widths are dp on Android,
+# pt on Apple's and logical px on the desktop.
+[layout]
+# Narrower is compact: a phone upright, an iPad's slide-over, a folded
+# Fold. Material's compact window class; where SwiftUI's horizontal size
+# class turns regular on an iPad.
+compact-width = 600.0
+# This wide or wider is expanded: a split view shows all three columns.
+# Material's expanded window class.
+expanded-width = 840.0
+sidebar-width = 220.0
+content-width = 360.0
+inspector-width = 280.0
+toolbar-height = 44.0
+# The desktop's text (iced): upstream iced 0.14's 1.3, which ArkUI's rows
+# were measured at; COSMIC's fork defaults to 1.4.
+line-height = 1.3

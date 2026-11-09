@@ -246,7 +246,7 @@ fn press(spelled: &str) -> Option<Vec<Event>> {
         "Escape" => (keyboard::Key::Named(Named::Escape), None),
         "Tab" => (keyboard::Key::Named(Named::Tab), None),
         "Backspace" => (keyboard::Key::Named(Named::Backspace), None),
-        "Space" => (keyboard::Key::Named(Named::Space), Some(SmolStr::new(" "))),
+        "Space" => (keyboard::Key::Character(SmolStr::new(" ")), Some(SmolStr::new(" "))),
         "Up" => (keyboard::Key::Named(Named::ArrowUp), None),
         "Down" => (keyboard::Key::Named(Named::ArrowDown), None),
         "Left" => (keyboard::Key::Named(Named::ArrowLeft), None),
@@ -453,10 +453,17 @@ where
                 self.redraw = Some(Instant::now());
             }
             Action::Window(action) => self.window(action),
-            // No clipboard, no system to ask, no image to read back, and the
-            // window stays open: what each was asked with is let go, so a
-            // task waiting on it ends.
-            Action::Clipboard(_) | Action::System(_) | Action::Image(_) | Action::Reload | Action::Exit => {}
+            // No clipboard, no system to ask, no image to read back, nothing
+            // dragged, no Wayland surface of the fork's own, and the window
+            // stays open: what each was asked with is let go, so a task
+            // waiting on it ends.
+            Action::Clipboard(_)
+            | Action::System(_)
+            | Action::Image(_)
+            | Action::Dnd(_)
+            | Action::PlatformSpecific(_)
+            | Action::Reload
+            | Action::Exit => {}
         }
     }
 
@@ -663,7 +670,10 @@ where
                 renderer,
                 theme,
                 &renderer::Style {
+                    // What the fork's iced_test draws a symbolic icon in.
+                    icon_color: style.text_color,
                     text_color: style.text_color,
+                    scale_factor: f64::from(scale),
                 },
                 cursor,
             );

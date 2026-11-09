@@ -13,7 +13,9 @@
 //! detached.
 
 use arkui::style;
-use iced::widget::{button, column, container, image, mouse_area, row, scrollable, text, text_input, Column, Space};
+use arkui::text::{self, text};
+use arkui::text_input::text_input;
+use iced::widget::{button, column, container, image, mouse_area, row, scrollable, Column, Space};
 use iced::{Alignment, Color, Element, Length, Task};
 use money_domain::*;
 
@@ -309,7 +311,12 @@ impl App {
         // which white paper would hide.
         let ink = arkui::tokens::light::INK;
         let faded = arkui::tokens::light::QUIET;
-        let mono = |s: String, size: u32, c: Color| text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style { color: Some(c) });
+        let mono = |s: String, size: u32, c: Color| {
+            text(s).font(arkui::fonts::MONO).size(size).style(move |_| text::Style {
+                color: Some(c),
+                ..Default::default()
+            })
+        };
         let rule = || mono("-".repeat(30), 12, faded);
         let mut paper: Column<'a, Message> = column![
             container(mono(place_of(r), 15, ink)).center_x(Length::Fill),

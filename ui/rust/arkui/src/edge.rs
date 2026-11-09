@@ -65,8 +65,8 @@ impl<M> Widget<M, Theme, iced::Renderer> for Faded<'_, M> {
         self.content.as_widget().children()
     }
 
-    fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+    fn diff(&mut self, tree: &mut Tree) {
+        self.content.as_widget_mut().diff(tree);
     }
 
     fn size(&self) -> Size<Length> {
@@ -95,6 +95,12 @@ impl<M> Widget<M, Theme, iced::Renderer> for Faded<'_, M> {
         self.content
             .as_widget_mut()
             .update(tree, event, layout, cursor, renderer, clipboard, shell, viewport);
+    }
+
+    /// Its content's accessibility tree, as is: this wrapper adds nothing a
+    /// screen reader reads (COSMIC's accesskit, the fork's `a11y`).
+    fn a11y_nodes(&self, layout: Layout<'_>, tree: &Tree, cursor: mouse::Cursor) -> iced_accessibility::A11yTree {
+        self.content.as_widget().a11y_nodes(layout, tree, cursor)
     }
 
     fn draw(
