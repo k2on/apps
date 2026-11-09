@@ -1,0 +1,161 @@
+Attributes: Application, 0x105854430, pid: 82226, label: 'Harken'
+Element subtree:
+ →Application, 0x105854430, pid: 82226, label: 'Harken'
+    Window (Main), 0x103e39f50, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x103e2c260, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x103e2e800, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x103e39c00, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x103e2f580, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x103e38040, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103e383a0, {{0.0, 0.0}, {402.0, 874.0}}
+                  Other, 0x103e386f0, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x103e39200, {{0.0, 0.0}, {402.0, 874.0}}
+                      Other, 0x103e36090, {{0.0, 0.0}, {402.0, 874.0}}
+                        Other, 0x103e306d0, {{0.0, 0.0}, {402.0, 874.0}}
+                          Other, 0x103e375b0, {{0.0, 0.0}, {402.0, 874.0}}
+                            NavigationBar, 0x103e37920, {{0.0, 62.0}, {402.0, 54.0}}, identifier: 'Home'
+                              StaticText, 0x103e30380, {{177.3, 73.7}, {47.3, 20.7}}, label: 'Home'
+                                Other, 0x103e3a630, {{177.3, 73.7}, {47.3, 20.7}}
+                                  StaticText, 0x103e3b040, {{177.3, 82.0}, {47.3, 20.3}}, label: 'Home'
+                            Other, 0x103e3b3a0, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103e3a2c0, {{0.0, 0.0}, {402.0, 874.0}}
+                                Other, 0x103e3ace0, {{0.0, 0.0}, {402.0, 874.0}}
+                                  Other, 0x103e2f200, {{0.0, 0.0}, {402.0, 874.0}}
+                                    ScrollView, 0x103e2fff0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x103e2f900, {{0.0, 0.0}, {402.0, 874.0}}
+                                        Other, 0x103e2eea0, {{0.0, 0.0}, {402.0, 170.8}}
+                                        Other, 0x103e314e0, {{0.0, 670.2}, {402.0, 203.8}}
+                                      Other, 0x103e367b0, {{0.0, 0.0}, {402.0, 874.0}}
+                                        Other, 0x103e33760, {{0.0, 670.2}, {402.0, 203.8}}
+                                          Image, 0x105943f80, {{-120.0, 675.0}, {642.0, 398.0}}, identifier: 'AdditionalDimmingOverlay'
+                                          Other, 0x10594acf0, {{0.0, 670.2}, {402.0, 203.8}}
+                                            Other, 0x105949e00, {{0.0, 670.2}, {402.0, 203.8}}
+                                          Other, 0x10594a220, {{0.0, 670.2}, {402.0, 203.8}}
+                                            Other, 0x1059454d0, {{0.0, 670.2}, {402.0, 203.8}}
+                                            Other, 0x10594d0d0, {{0.0, 670.2}, {402.0, 203.8}}
+                                      Other, 0x10594d1f0, {{0.0, 116.0}, {402.0, 823.0}}
+                                        Other, 0x10594d310, {{0.0, 117.7}, {402.0, 796.3}}
+                                          StaticText, 0x10594d430, {{16.0, 117.7}, {94.3, 40.7}}, label: 'Home'
+                                          Button, 0x10594d550, {{354.0, 122.0}, {32.0, 32.0}}, label: 'Signed in as alex'
+                                            StaticText, 0x10594d670, {{354.0, 122.0}, {32.0, 32.0}}, label: 'A'
+                                            Image, 0x10594d790, {{354.0, 122.0}, {32.0, 32.0}}
+                                          StaticText, 0x10594d8b0, {{16.0, 192.0}, {162.7, 26.3}}, label: 'Recently Added'
+                                          Button, 0x10594d9d0, {{314.7, 195.0}, {71.3, 20.3}}, label: 'All Songs'
+                                          ScrollView, 0x10594daf0, {{0.0, 226.3}, {402.0, 190.3}}
+                                            Other, 0x10594dc10, {{0.0, 226.3}, {1984.0, 190.3}}
+                                              Other, 0x10594dd30, {{16.0, 226.3}, {804.0, 190.3}}
+                                                Button, 0x10594de50, {{16.0, 226.3}, {148.0, 190.3}}, label: 'Für Elise, Ludwig van Beethoven'
+                                                  Other, 0x10594df70, {{16.0, 226.3}, {148.0, 148.0}}
+                                                  Image, 0x10594e090, {{16.0, 226.3}, {148.0, 148.0}}
+                                                  StaticText, 0x10594e1b0, {{16.0, 382.3}, {61.0, 18.0}}, label: 'Für Elise'
+                                                  StaticText, 0x10594e2d0, {{16.0, 402.3}, {127.7, 14.3}}, label: 'Ludwig van Beethoven'
+                                                Button, 0x10594e3f0, {{180.0, 226.3}, {148.0, 190.3}}, label: 'Gigue, George Frideric Handel'
+                                                  Other, 0x10594e510, {{180.0, 226.3}, {148.0, 148.0}}
+                                                  Image, 0x10594e630, {{180.0, 226.3}, {148.0, 148.0}}
+                                                  StaticText, 0x10594e750, {{180.0, 382.3}, {42.0, 18.0}}, label: 'Gigue'
+                                                  StaticText, 0x10594e870, {{180.0, 402.3}, {131.0, 14.3}}, label: 'George Frideric Handel'
+                                                Button, 0x10594e990, {{344.0, 226.3}, {148.0, 190.3}}, label: 'Menuet, George Frideric Handel'
+                                                  Other, 0x10594eab0, {{344.0, 226.3}, {148.0, 148.0}}
+                                                  Image, 0x10594ebd0, {{344.0, 226.3}, {148.0, 148.0}}
+                                                  StaticText, 0x10594ecf0, {{344.0, 382.3}, {54.0, 18.0}}, label: 'Menuet'
+                                                  StaticText, 0x10594ee10, {{344.0, 402.3}, {131.0, 14.3}}, label: 'George Frideric Handel'
+                                                Button, 0x10594ef30, {{508.0, 226.3}, {148.0, 190.3}}, label: 'Rigaudon, George Frideric Handel'
+                                                  Other, 0x10594f050, {{508.0, 226.3}, {148.0, 148.0}}
+                                                  Image, 0x10594f170, {{508.0, 226.3}, {148.0, 148.0}}
+                                                  StaticText, 0x10594f290, {{508.0, 382.3}, {67.7, 18.0}}, label: 'Rigaudon'
+                                                  StaticText, 0x10594f3b0, {{508.0, 402.3}, {131.0, 14.3}}, label: 'George Frideric Handel'
+                                                Button, 0x103e31f50, {{672.0, 226.3}, {148.0, 190.3}}, label: 'Sarabande, George Frideric Handel'
+                                                  Other, 0x103e33060, {{672.0, 226.3}, {148.0, 148.0}}
+                                                  Image, 0x103e2e490, {{672.0, 226.3}, {148.0, 148.0}}
+                                                  StaticText, 0x103e2d6c0, {{672.0, 382.3}, {77.0, 18.0}}, label: 'Sarabande'
+                                                  StaticText, 0x103e35280, {{672.0, 402.3}, {131.0, 14.3}}, label: 'George Frideric Handel'
+                                          StaticText, 0x10594f4d0, {{16.0, 440.7}, {138.0, 26.3}}, label: 'Your Playlists'
+                                          Button, 0x10594f5f0, {{351.7, 443.7}, {34.3, 20.3}}, label: 'New'
+                                          ScrollView, 0x10594f710, {{0.0, 475.0}, {402.0, 190.3}}
+                                            Other, 0x10594f830, {{0.0, 475.0}, {180.0, 190.3}}
+                                              Other, 0x103e36430, {{16.0, 475.0}, {148.0, 190.3}}
+                                                Button, 0x103e33ab0, {{16.0, 475.0}, {148.0, 190.3}}, label: 'Favorites, Playlist'
+                                                  Other, 0x10585a770, {{16.0, 475.0}, {148.0, 148.0}}
+                                                  StaticText, 0x105852ef0, {{16.0, 631.0}, {65.3, 18.0}}, label: 'Favorites'
+                                                  StaticText, 0x10584e6f0, {{16.0, 651.0}, {40.3, 14.3}}, label: 'Playlist'
+                                          StaticText, 0x10584efb0, {{16.0, 689.3}, {78.7, 26.3}}, label: 'Albums'
+                                          Button, 0x105850a90, {{333.7, 692.3}, {52.3, 20.3}}, label: 'See All'
+                                          ScrollView, 0x10583b020, {{0.0, 723.7}, {402.0, 190.3}}
+                                            Other, 0x10584e2d0, {{0.0, 723.7}, {4116.0, 190.3}}
+                                              Other, 0x1058565f0, {{16.0, 723.7}, {804.0, 190.3}}
+                                                Button, 0x105856b50, {{16.0, 723.7}, {148.0, 190.3}}, label: 'String Concertos, Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein'
+                                                  Other, 0x1058581b0, {{16.0, 723.7}, {148.0, 148.0}}
+                                                  Image, 0x10585a3d0, {{16.0, 723.7}, {148.0, 148.0}}
+                                                  StaticText, 0x10585a4f0, {{16.0, 879.7}, {121.7, 18.0}}, label: 'String Concertos'
+                                                  StaticText, 0x10585a610, {{16.0, 899.7}, {142.0, 14.3}}, label: 'Advent Chamber Orchestra, Jacques Israelievitch, Roxana Pavel Goldstein'
+                                                Button, 0x105855850, {{180.0, 723.7}, {148.0, 190.3}}, label: 'Stabat Mater, Andreas Scholl, Ensemble 415, Chiara Banchini'
+                                                  Other, 0x105855970, {{180.0, 723.7}, {148.0, 148.0}}
+                                                  Image, 0x103e322c0, {{180.0, 723.7}, {148.0, 148.0}}
+                                                  StaticText, 0x103e32640, {{180.0, 879.7}, {93.0, 18.0}}, label: 'Stabat Mater'
+                                                  StaticText, 0x103e31bc0, {{180.0, 899.7}, {146.3, 14.3}}, label: 'Andreas Scholl, Ensemble 415, Chiara Banchini'
+                                                Button, 0x103e31180, {{344.0, 723.7}, {148.0, 190.3}}, label: 'Impromptus, Andriy Bondarenko'
+                                                  Other, 0x103e34190, {{344.0, 723.7}, {148.0, 148.0}}
+                                                  Image, 0x103e34850, {{344.0, 723.7}, {148.0, 148.0}}
+                                                  StaticText, 0x103e30a70, {{344.0, 879.7}, {87.0, 18.0}}, label: 'Impromptus'
+                                                  StaticText, 0x103e329b0, {{344.0, 899.7}, {107.7, 14.3}}, label: 'Andriy Bondarenko'
+                                                Button, 0x103e2cff0, {{508.0, 723.7}, {148.0, 190.3}}, label: 'Vivaldi: Concertos, Angel Romero, Academy of St Martin in the Fields'
+                                                  Other, 0x103e37230, {{508.0, 723.7}, {148.0, 148.0}}
+                                                  Image, 0x103e36eb0, {{508.0, 723.7}, {148.0, 148.0}}
+                                                  StaticText, 0x103e3ba60, {{508.0, 879.7}, {130.7, 18.0}}, label: 'Vivaldi: Concertos'
+                                                  StaticText, 0x103e3a980, {{508.0, 899.7}, {148.0, 14.3}}, label: 'Angel Romero, Academy of St Martin in the Fields'
+                                                Button, 0x103e2da60, {{672.0, 723.7}, {148.0, 190.3}}, label: 'Hungarian Dances, Arthur Nikisch'
+                                                  Other, 0x103e3c8a0, {{672.0, 723.7}, {148.0, 148.0}}
+                                                  Image, 0x103e36b50, {{672.0, 723.7}, {148.0, 148.0}}
+                                                  StaticText, 0x103e30df0, {{672.0, 879.7}, {131.0, 18.0}}, label: 'Hungarian Dances'
+                                                  StaticText, 0x103e35980, {{672.0, 899.7}, {80.7, 14.3}}, label: 'Arthur Nikisch'
+                                      Other, 0x103e35620, {{369.0, 116.0}, {30.0, 619.0}}, label: 'Vertical scroll bar, 2 pages', value: 0%
+                                        Other, 0x103e31850, {{396.0, 662.0}, {3.0, 70.0}}
+                                      Other, 0x103e2fc70, {{369.0, 116.0}, {30.0, 619.0}}, label: 'Vertical scroll bar, 2 pages', value: 0%
+                                        Other, 0x103e2ddd0, {{396.0, 662.0}, {3.0, 70.0}}
+                            Other, 0x103e2d340, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x103e2bf00, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x103e398c0, {{0.0, 735.0}, {402.0, 139.0}}
+                  Other, 0x10594f950, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x10594fa70, {{21.0, 735.0}, {360.0, 48.0}}
+                      Other, 0x10594fb90, {{21.0, 735.0}, {360.0, 48.0}}
+                        Other, 0x10594fcb0, {{21.0, 735.0}, {360.0, 48.0}}
+                          Other, 0x10594fdd0, {{21.0, 735.0}, {360.0, 48.0}}
+                            Image, 0x10594fef0, {{46.0, 750.7}, {10.3, 17.0}}, identifier: 'music.note', label: 'Song'
+                            StaticText, 0x105950010, {{81.0, 750.0}, {78.3, 18.0}}, label: 'Not Playing'
+                    TabBar, 0x105950130, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar'
+                      Other, 0x103e39550, {{21.0, 791.0}, {290.0, 62.0}}
+                        Other, 0x103e35d00, {{21.0, 791.0}, {141.0, 54.0}}
+                        Other, 0x103e2c900, {{21.0, 791.0}, {290.0, 62.0}}
+                          Button, 0x103e2c5b0, {{25.0, 795.0}, {141.0, 54.0}}, label: 'Home', Selected
+                            Image, 0x103e3cfb0, {{79.0, 801.0}, {33.3, 28.0}}, identifier: 'house.fill', label: 'home'
+                          Button, 0x103e3b700, {{166.0, 795.0}, {141.0, 54.0}}, label: 'Library'
+                            Image, 0x103e3c520, {{224.0, 799.7}, {26.0, 32.3}}, identifier: 'square.stack.fill', label: 'square.stack.fill'
+                        Other, 0x103e3c1a0, {{25.0, 795.0}, {141.0, 54.0}}
+                          Other, 0x103e3be00, {{25.0, 795.0}, {141.0, 54.0}}
+                            Other, 0x103e37cc0, {{25.0, 795.0}, {141.0, 54.0}}
+                            Other, 0x103e32d10, {{25.0, 795.0}, {141.0, 54.0}}
+                              Other, 0x103e33e20, {{25.0, 795.0}, {141.0, 54.0}}
+                                Other, 0x105855a90, {{25.0, 795.0}, {141.0, 54.0}}
+                                  Other, 0x105855bb0, {{25.0, 795.0}, {141.0, 54.0}}
+                                Other, 0x10585b870, {{25.0, 795.0}, {141.0, 54.0}}
+                              Other, 0x10585b990, {{25.0, 795.0}, {141.0, 54.0}}
+                      Other, 0x10585bab0, {{319.0, 791.0}, {62.0, 62.0}}
+                        Other, 0x10585bbd0, {{319.0, 791.0}, {62.0, 62.0}}
+                          Other, 0x10585bcf0, {{319.0, 791.0}, {62.0, 62.0}}
+                            Button, 0x10585be10, {{319.0, 791.0}, {62.0, 62.0}}, label: 'Search'
+                              Image, 0x10585bf30, {{336.0, 808.7}, {28.0, 26.7}}, identifier: 'magnifyingglass', label: 'Search'
+                  Other, 0x10585c050, {{0.0, 735.0}, {402.0, 139.0}}
+                    Other, 0x10585c170, {{0.0, 735.0}, {402.0, 139.0}}
+                      Other, 0x10585c290, {{0.0, 735.0}, {402.0, 139.0}}
+                        Other, 0x105950250, {{0.0, 735.0}, {402.0, 139.0}}
+                          Other, 0x105950370, {{0.0, 735.0}, {402.0, 139.0}}
+                            Other, 0x10585c3b0, {{0.0, 735.0}, {402.0, 139.0}}
+                        Other, 0x10585c4d0, {{0.0, 735.0}, {402.0, 139.0}}
+                          Other, 0x10585c5f0, {{0.0, 735.0}, {402.0, 139.0}}
+Path to element:
+ →Application, 0x105854430, pid: 82226, label: 'Harken'
+Query chain:
+ →Find: Application 'us.koon.harken'
+  Output: {
+    Application, 0x103e34f10, pid: 82226, label: 'Harken'
+  }
