@@ -752,7 +752,11 @@
             let tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
             in {
               inherit tc;
-              cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; };
+              # COSMIC's iced and its dependencies from GitHub are in the
+              # lockfile (rust/Cargo.toml); the phones link none of them, but
+              # the lockfile is vendored whole, each one fetched at the
+              # revision it pins.
+              cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; allowBuiltinFetchGit = true; };
               nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
               # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
               # Xcode, outside the store. Pinned, only its directory is read,
