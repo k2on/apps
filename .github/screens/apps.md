@@ -277,11 +277,18 @@ build, the same driver, the same shots.json, light and dark.
   natural way up), and takes every shot; then the Fold (the Pixel Fold's
   profile where the runner's avdmanager lists it; GitHub's has had only
   the emulator's `7.6in Foldable`, and device.json says which), opened
-  (`adb emu unfold`), signed in and every shot taken, then folded
-  (`adb emu fold`) and every shot taken again, the login kept. A Fold that
-  does not change its screen's size when told to fold is said, and its
-  folded shots are not taken. device.json is from what was drawn: a
-  tablet's is wider than tall.
+  (`adb emu unfold`), signed in and every shot taken, then folded and
+  every shot taken again, the login kept. Folded is told three ways, until
+  the screen changes size: the emulator's hinge (`adb emu fold`), Android's
+  device state (`cmd device_state`, CLOSED, which apps read the posture
+  from), and, as GitHub's headless `7.6in Foldable` takes both and still
+  draws its one inner screen whole, the Pixel Fold's outer screen's size
+  and density given to Android (`wm size 1080x2092`, `wm density 420`).
+  So the folded shots are the app laid out for the outer screen, in the
+  folded posture; the launcher's taskbar, there since the inner screen,
+  can stay at the foot. A Fold whose screen does not change at all is
+  said, and its folded shots are not taken. device.json is from what was
+  drawn: a tablet's is wider than tall.
 - **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
   built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
   takes the iPad (main's apps today are the iPhone's alone), nothing is
