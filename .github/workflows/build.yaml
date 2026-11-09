@@ -31,6 +31,13 @@
 # store in GitHub's actions cache (10 GB per repository). The Android SDK is
 # Google's and its licence does not allow redistributing it, so it is never
 # pushed to Cachix; the APK jobs keep it in the actions cache either way.
+#
+# **Only this repository's code is ever pushed.** A pull request from a fork
+# runs here under `pull_request`, which GitHub gives no secrets: its
+# CACHIX_AUTH_TOKEN is empty, and cachix-action then only reads the cache.
+# Never move this workflow to `pull_request_target`, and never hand the token
+# to a step some other way: nix trusts what the cache signed, not what is in
+# it, so one push of a fork's build would be every later build's.
 name: build
 
 on:
@@ -170,6 +177,9 @@ jobs:
   # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
   # job has built downloads them rather than compiling them on the host.
+  # With the seeds the screenshots' servers start on (<app>/screens/server.sh):
+  # each of app-screens' Linux jobs, a dozen at once, then fetches them
+  # rather than every one compiling the same seed and its crates.
   # After the pages: the web directory it serves is the browser peer's
   # crates compiled to wasm, the page's own, which it then substitutes
   # rather than compiling beside it. On a tag no page is built, and it runs
@@ -187,7 +197,7 @@ jobs:
           name: ${{ vars.CACHIX_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build what the server runs
-        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#money-server .#money-web-server .#arkdb
+        run: nix build --print-build-logs --no-link .#harken-server .#harken-web-server .#money-server .#money-web-server .#arkdb .#harken-seed .#money-seed
 
   apk:
     needs: plan
