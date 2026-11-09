@@ -224,14 +224,25 @@ final class Drive: XCTestCase {
         let each = label.split(separator: "|").map(String.init)
         let until = Date().addingTimeInterval(timeout)
         var c = app.descendants(matching: .any)[each[0]].firstMatch
+        // One that is there but cannot yet be touched (still being laid
+        // out, sliding in, its frame not yet on the screen) is waited on
+        // until it can: tapped at once, XCUITest fails it ("Failed to
+        // determine hittability … Activation point invalid", harken's
+        // Für Elise in app-screens 42660995429). Only at the end is one
+        // that is there and never hittable handed back, for XCUITest's tap
+        // to scroll to as it would.
+        var there: XCUIElement?
         repeat {
             for one in each {
                 c = step.where == "bottom" ? lowest(app, one, timeout: 0) : control(app, one, role: step.role)
-                if c.exists { return c }
+                if c.exists {
+                    if c.isHittable { return c }
+                    there = there ?? c
+                }
             }
             sleep(1)
         } while Date() < until
-        return c
+        return there ?? c
     }
 
     /// Of every element that says `label`, the lowest on the screen, once

@@ -41,6 +41,13 @@ name=${DEVICE_NAME:-Pixel 7}
 signed_in=${SIGNED_IN:-}
 mkdir -p "$out"
 
+# The activity of the category `$1` (of package `$2`, when given) that MAIN
+# opens, `<package>/<activity>`: the app's launcher activity, the launcher's
+# HOME.
+resolve() {
+  adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c "$1" ${2:+"$2"} 2>/dev/null | tr -d '\r' | grep / | tail -1
+}
+
 # The screen as uiautomator reads it.
 dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 
@@ -101,17 +108,76 @@ step() {
   fi
 }
 
+# The window that has the focus, as the window manager says it
+# ("Window{… <package>/<activity>}"), or nothing.
+focus() { adb shell dumpsys window 2>/dev/null | tr -d '\r' | grep -m1 -oE 'mCurrentFocus=Window\{[^}]*\}' || true; }
+
+# Until the window with the focus is package `$1`'s own activity (not its
+# splash, not a dialog over it), up to `$2` seconds.
+front() {
+  for _ in $(seq 1 "${2:-30}"); do
+    focus | grep -qF " $1/" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Why the app is not what is on the screen: what has the focus, what the
+# activity manager has resumed, and what crashed (hide_error_dialogs keeps
+# a "keeps stopping" off the screen, so only the crash log says so).
+why() {
+  echo "focus: $(focus)"
+  adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E 'ResumedActivity|mFocusedApp' || true
+  echo "== crashes"
+  adb logcat -d -b crash 2>/dev/null | tail -n 80 || true
+  echo "== the activity manager"
+  adb logcat -d -s ActivityTaskManager:I ActivityManager:I AndroidRuntime:E 2>/dev/null | tail -n 80 || true
+}
+
+# The app opened afresh as the launcher opens it (its MAIN/LAUNCHER
+# activity in a task of its own: `am start -W`, which returns once it has
+# drawn), then waited for until its own window has the focus; not a fixed
+# four seconds after `monkey`, which says nothing when a launch is lost.
 open_app() {
+  local said
   adb shell am force-stop "$pkg"
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
-  adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-  sleep 4
+  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" 2>&1 | tr -d '\r')
+  if ! front "$pkg" 30; then
+    echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
+    why > "$out/stuck.why.txt" 2>&1 || true
+    return 1
+  fi
+  # What it shows first (a list, a cover) a moment to draw.
+  sleep 2
+}
+
+# The system in theme `$1` (light, dark) with the app stopped, and settled
+# before the app is opened: the night mode as `cmd uimode` says it back,
+# and the launcher, which the change re-creates (the tablet's and the
+# Fold's with their taskbar, slowly), in front again. Told while the app
+# was in front, its sign-in only just done, and the app opened two seconds
+# on, the launch could be lost under the re-creation: money's dark tablet
+# and Fold showed the launcher a minute later (app-screens 42695364285).
+theme_set() {
+  local want=no
+  [ "$1" = dark ] && want=yes
+  adb shell am force-stop "$pkg"
+  adb shell cmd uimode night "$want" >/dev/null
+  for _ in $(seq 1 30); do
+    adb shell cmd uimode night 2>/dev/null | tr -d '\r' | grep -qix "night mode: $want" && break
+    sleep 1
+  done
+  front "${home%%/*}" 30 || echo "$app: the launcher not in front after the night mode ($want): $(focus)"
 }
 
 if [ -z "$signed_in" ]; then
   adb install -r "$apk" >/dev/null
   adb shell pm clear "$pkg" >/dev/null
 fi
+activity=$(resolve android.intent.category.LAUNCHER "$pkg")
+home=$(resolve android.intent.category.HOME)
+[ -n "$activity" ] || { echo "::error::$app: $pkg has no launcher activity"; exit 1; }
 # The phone's name, as a Pixel 7 (or the device it is) out of the box has
 # it (Settings, About phone, Device name): the emulator's own is its build's
 # ("sdk_gphone64…"), which the app's device chip and picker would say.
@@ -179,17 +245,16 @@ fi
 # Both themes, or the one THEMES names: CI takes each on an emulator of
 # its own, at once (app-screens.yaml).
 for theme in ${THEMES:-light dark}; do
-  if [ "$theme" = dark ]; then adb shell cmd uimode night yes >/dev/null; else adb shell cmd uimode night no >/dev/null; fi
-  sleep 2
+  theme_set "$theme"
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
     echo "$app $(basename "$out") $theme $id"
-    open_app
     # What the screen was after each step, for the run's results (not the
     # shots): where a shot went other than it was written to.
     steps="${RESULTS:-$out/../steps}/$app/$(basename "$out")/$theme/$id"
     mkdir -p "$steps"
+    open_app || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of
@@ -199,7 +264,7 @@ for theme in ${THEMES:-light dark}; do
       n=$((n + 1))
       # A step that fails fails the capture (as the iPhone's test does):
       # under `set -e`, a failure inside `a && b` would be passed over.
-      step "$s" || { echo "::error::$app $(basename "$out") $theme $id: step $s failed"; dump | python3 -I "$here/ui.py" --tree > "$steps/$n-failed.txt" || true; exit 1; }
+      step "$s" || { echo "::error::$app $(basename "$out") $theme $id: step $s failed"; { dump | python3 -I "$here/ui.py" --tree; why; } > "$steps/$n-failed.txt" 2>&1 || true; exit 1; }
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3

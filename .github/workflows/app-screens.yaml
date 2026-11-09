@@ -402,6 +402,8 @@ jobs:
         run: bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
         env:
           GH_TOKEN: ${{ github.token }}
+          # A dry run: the APKs build made at the branch's commit, where it made any.
+          COMMIT: ${{ inputs.dry == true && github.sha || '' }}
 
       # The app's server, as nix builds it (its server.sh): the cache's,
       # which build.yaml's own build of the servers fills, or else built,

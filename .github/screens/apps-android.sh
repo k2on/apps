@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Each app's Android screenshots in turn (app-android.sh), on the emulator
-# that is booted: one that fails is said, and the others are still taken.
+# that is booted: one that fails is said, and the others are still taken;
+# then, if any failed, it fails (as apps-ios.sh), so that the job says so
+# and not only its log.
 #
 #   apps-android.sh <out> <apks> <app>...
 #
@@ -22,6 +24,7 @@ apks=$2
 shift 2
 here=$(dirname "$0")
 device=${DEVICE:-phone}
+failed=0
 
 # The screen's size as it is drawn now, "<width> <height>".
 size() {
@@ -94,12 +97,12 @@ for a in "$@"; do
   case $device in
     phone)
       bash "$here/app-android.sh" "$out/$a/android" "$apk" "$a" "$server" ||
-        echo "::error::$a's Android screenshots failed"
+        { echo "::error::$a's Android screenshots failed"; failed=1; }
       ;;
     tablet)
       DEVICE_NAME="Pixel Tablet" CORNER=60 CUTOUT=none \
         bash "$here/app-android.sh" "$out/$a/android-tablet" "$apk" "$a" "$server" ||
-        echo "::error::$a's Android tablet screenshots failed"
+        { echo "::error::$a's Android tablet screenshots failed"; failed=1; }
       ;;
     fold)
       # Open first, signed in there; then folded, as it is, the login kept.
@@ -109,14 +112,15 @@ for a in "$@"; do
         if posture fold; then
           DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=110 CUTOUT=hole SIGNED_IN=1 \
             bash "$here/app-android.sh" "$out/$a/fold-folded" "$apk" "$a" "$server" ||
-            echo "::error::$a's Fold (folded) screenshots failed"
+            { echo "::error::$a's Fold (folded) screenshots failed"; failed=1; }
         else
-          echo "::warning::$a: the emulator did not fold (its screen kept its size); the folded shots not taken"
+          echo "::error::$a: the emulator did not fold (its screen kept its size); the folded shots not taken"; failed=1
         fi
       else
-        echo "::error::$a's Fold (open) screenshots failed"
+        echo "::error::$a's Fold (open) screenshots failed"; failed=1
       fi
       ;;
     *) echo "::error::no such Android device: $device"; exit 1 ;;
   esac
 done
+exit $failed

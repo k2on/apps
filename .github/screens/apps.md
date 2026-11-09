@@ -134,7 +134,14 @@ which nix builds at the commit (see below).
 - **`app-android.sh`** (with `ui.py`, which finds a label's place in
   uiautomator's dump): installs the APK, signs in through Chrome, and does
   each shot's steps with `adb input`. The emulator reaches the server on
-  the host's loopback as `10.0.2.2`.
+  the host's loopback as `10.0.2.2`. Each shot opens the app as the
+  launcher does (`am start -W` of its launcher activity) and waits until
+  its own window has the focus (`dumpsys window`); one that never comes is
+  a failure with its why beside it (`stuck.why.txt`, the step's
+  `*-failed.txt`: the focus, the resumed activity, the crash log). The
+  theme is set with the app stopped, and the app opened only once the
+  night mode says it back and the launcher, which the change re-creates,
+  is in front again.
 - **`app-ios.sh`** and the UI test in **`drive-ios/`**: an XCUITest bundle
   of its own, which drives the installed app by its bundle id (the apps'
   projects are untouched). It signs in through `ASWebAuthenticationSession`
@@ -145,7 +152,8 @@ which nix builds at the commit (see below).
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
 - **`apps-android.sh`**, **`apps-ios.sh`**, **`apps-desktop.sh`**,
   **`apps-mac.sh`**: each app in turn, so one that fails does not stop the
-  others; `apps-android.sh` on the emulator profile `DEVICE` says,
+  others, and the step fails at the end if any did (Android's too: a job
+  whose shots failed is red, not only its log); `apps-android.sh` on the emulator profile `DEVICE` says,
   `apps-ios.sh` on the iPhone or (`FAMILY=ipad`) the iPad.
 - **`ios-family.sh`**: of the apps built, those whose build takes the iPad
   (the built `.app`'s `UIDeviceFamily`, which `TARGETED_DEVICE_FAMILY`
@@ -252,7 +260,8 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   moved, and updates its comment: after a Mac's run failed, or to try the
   workflow as a branch has it. Run by hand on a branch with `dry`, it
   takes every app as by hand, with that branch's workflow and scripts and
-  its commit's iPhone apps, and publishes nothing (no `screens` branch, no
+  its commit's iPhone apps (and its commit's APKs, those its PR's `build`
+  made, awaited if it is making them; the rest F-Droid's), and publishes nothing (no `screens` branch, no
   cache): its artifacts are what it took. A `workflow_run` always runs
   main's file, so a change to it is tried this way before it is merged.
 
