@@ -40,10 +40,13 @@ moved() {
 }
 
 # The Fold in a posture, `fold` or `unfold`: told by the emulator's console
-# (its hinge), else by Android's own device state (CLOSED, OPENED: `cmd
-# device_state`, as the system's posture is set from the hinge). Fails when
-# the screen it draws did not change size, as an emulator that cannot fold
-# leaves it. What each said is printed, to see why.
+# (its hinge), then by Android's own device state (CLOSED, OPENED: `cmd
+# device_state`, which apps read the posture from). On GitHub's runner the
+# emulator's generic foldable takes both and still draws its one screen
+# whole, the inner one; then, folded, Android is given the Pixel Fold's
+# outer screen's size and density (`wm size`, `wm density`: 1080x2092 at
+# 420), and opened, its own again. Fails when the screen it draws did not
+# change size. What each said is printed.
 posture() {
   local before states name id
   before=$(size)
@@ -51,15 +54,21 @@ posture() {
   moved "$before" && return 0
   name=$([ "$1" = fold ] && echo CLOSED || echo OPENED)
   states=$(adb shell cmd device_state print-states 2>&1 | tr -d '\r')
-  echo "$1: device states: $(tr '\n' ' ' <<< "$states")"
   id=$(grep -o "identifier=[0-9]*, name='$name'" <<< "$states" | grep -o '[0-9]\+' | head -1)
-  [ -n "$id" ] || return 1
-  echo "$1: device_state $id ($name): $(adb shell cmd device_state state "$id" 2>&1 | tr -d '\r' | tr '\n' ' ')"
-  sleep 5
-  echo "DEBUG wm size: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')"
-  adb shell dumpsys display | tr -d '\r' | grep -E "DisplayDeviceInfo|mBaseDisplayInfo|mOverrideDisplayInfo|mViewports" | cut -c1-400
-  adb shell dumpsys device_state | tr -d '\r' | head -30
+  if [ -n "$id" ]; then
+    echo "$1: device state $id ($name) $(adb shell cmd device_state state "$id" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+    moved "$before" && return 0
+  fi
+  if [ "$1" = fold ]; then
+    adb shell wm size 1080x2092
+    adb shell wm density 420
+  else
+    adb shell wm size reset
+    adb shell wm density reset
+  fi
+  sleep 3
   mkdir -p "$out/debug"; adb exec-out screencap -p > "$out/debug/$1.png"
+  echo "$1: wm $(adb shell wm size | tr -d '\r' | tr '\n' ' ')"
   moved "$before"
 }
 
