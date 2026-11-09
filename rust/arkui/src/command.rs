@@ -19,6 +19,14 @@
 //! A text box takes `<Esc>` for itself, and the arrows are no text box's;
 //! [`keys`] hears all three, and Ctrl+K, whatever has the keyboard, so the
 //! app can answer them while the box has it.
+//!
+//! **What is typed is the box's from the key that opens it.** The keyboard
+//! comes to its text box by a task (`focus`), done after the update that
+//! opened it, so a key typed straight after Ctrl+K can come before it. No
+//! text box takes such a key, and [`keys`] hears it as what it types
+//! ([`Press::Type`], [`Press::Erase`], [`Press::Choose`]), which the app
+//! puts in the box ([`Command::missed`]) as the box would have: typing as
+//! fast as the hands go, on however slow a machine, finds the same thing.
 use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::time::Instant;
 use iced::widget::{column, container, mouse_area, row, rule, scrollable, text, text_input, Column, Space};
@@ -74,7 +82,7 @@ pub struct Command {
 }
 
 /// A key the box answers, heard whatever has the keyboard: [`keys`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Press {
     /// Ctrl+K or ⌘K: open it, or close it.
     Toggle,
@@ -83,6 +91,13 @@ pub enum Press {
     /// ↑ or Ctrl+P, ↓ or Ctrl+N.
     Up,
     Down,
+    /// What a key typed that no text box took, while it was up: typed
+    /// before its box had the keyboard.
+    Type(String),
+    /// `<Backspace>` no text box took.
+    Erase,
+    /// `<Enter>` no text box took: the row with the keys chosen.
+    Choose,
 }
 
 /// Whether `key` with `mods` is Ctrl+K (⌘K on a Mac).
@@ -110,22 +125,46 @@ pub fn press(key: &Key, mods: Modifiers, open: bool) -> Option<Press> {
     }
 }
 
-/// Every key pressed, captured by a widget or not, as [`press`] reads it
+/// What a key no text box took types into the box, while it is up: its
+/// text, unless Ctrl, Alt or Super is held (a shortcut, not typing);
+/// `<Backspace>`; `<Enter>`.
+pub fn missed(key: &Key, mods: Modifiers, text: Option<&str>) -> Option<Press> {
+    if mods.control() || mods.alt() || mods.logo() {
+        return None;
+    }
+    match key.as_ref() {
+        Key::Named(Named::Backspace) => Some(Press::Erase),
+        Key::Named(Named::Enter) => Some(Press::Choose),
+        _ => text
+            .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
+            .map(|t| Press::Type(t.to_string())),
+    }
+}
+
+/// An event as [`keys`] hears it, for a box `open` or not: a key pressed,
+/// as [`press`] reads it whether or not a widget took it; and while the
+/// box is up, one no widget took as what it types ([`missed`]). A key its
+/// text box took is the box's already, and is not heard twice.
+pub fn heard(event: &iced::Event, status: iced::event::Status, open: bool) -> Option<Press> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, text, .. }) = event else {
+        return None;
+    };
+    press(key, *modifiers, open).or_else(|| match (open, status) {
+        (true, iced::event::Status::Ignored) => missed(key, *modifiers, text.as_deref()),
+        _ => None,
+    })
+}
+
+/// Every key pressed, captured by a widget or not, as [`heard`] reads it
 /// for a box `open` or not: `open` is a plain function of nothing, so a
 /// subscription can be made of it, and the app passes the one for its
 /// state (one when it is up, the other when it is not).
 pub fn keys(open: bool) -> iced::Subscription<Press> {
-    fn up(event: iced::Event, _: iced::event::Status, _: iced::window::Id) -> Option<Press> {
-        match event {
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => press(&key, modifiers, true),
-            _ => None,
-        }
+    fn up(event: iced::Event, status: iced::event::Status, _: iced::window::Id) -> Option<Press> {
+        heard(&event, status, true)
     }
-    fn down(event: iced::Event, _: iced::event::Status, _: iced::window::Id) -> Option<Press> {
-        match event {
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => press(&key, modifiers, false),
-            _ => None,
-        }
+    fn down(event: iced::Event, status: iced::event::Status, _: iced::window::Id) -> Option<Press> {
+        heard(&event, status, false)
     }
     iced::event::listen_with(if open { up } else { down })
 }
@@ -190,6 +229,21 @@ impl Command {
         self.at = 0;
         self.scrolled = 0.0;
         iced::widget::operation::scroll_to(list, scrollable::AbsoluteOffset { x: 0.0, y: 0.0 })
+    }
+
+    /// A key no text box took ([`missed`]), put in the box as its text box
+    /// would have: what it types after what is typed, or the last
+    /// character taken off. Anything else leaves it as it is.
+    pub fn missed<M>(&mut self, press: &Press, list: &'static str) -> Task<M> {
+        let mut query = self.query.clone();
+        match press {
+            Press::Type(t) => query.push_str(t),
+            Press::Erase => {
+                query.pop();
+            }
+            _ => return Task::none(),
+        }
+        self.typed(query, list)
     }
 
     /// The list scrolled to `y`, by the wheel or by [`Command::step`].
@@ -403,6 +457,48 @@ mod tests {
         assert_eq!(press(&esc, Modifiers::empty(), false), None);
         assert_eq!(press(&Key::Character("n".into()), Modifiers::CTRL, true), Some(Press::Down));
         assert_eq!(press(&Key::Named(Named::ArrowUp), Modifiers::empty(), true), Some(Press::Up));
+    }
+
+    fn pressed(key: Key, mods: Modifiers, text: Option<&str>) -> iced::Event {
+        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: iced::keyboard::Location::Standard,
+            modifiers: mods,
+            text: text.map(Into::into),
+            repeat: false,
+        })
+    }
+
+    /// A key typed while the box is up that no text box took — typed
+    /// before the focus its opening asked for had landed — is heard as what
+    /// it types, and goes in the box; one its text box took is not heard
+    /// again, and with the box down nothing is. Falsified by `keys` reading
+    /// only `press`, as it did: "Elise" typed straight after Ctrl+K went
+    /// nowhere until the focus came, and harken's search shot found nothing
+    /// on a slow machine.
+    #[test]
+    fn a_key_typed_before_the_box_has_the_keyboard_goes_in_it() {
+        use iced::event::Status;
+        let e = pressed(Key::Character("e".into()), Modifiers::SHIFT, Some("E"));
+        assert_eq!(heard(&e, Status::Ignored, true), Some(Press::Type("E".into())));
+        assert_eq!(heard(&e, Status::Captured, true), None, "its box took it");
+        assert_eq!(heard(&e, Status::Ignored, false), None, "the box is down");
+        let ctrl_l = pressed(Key::Character("l".into()), Modifiers::CTRL, Some("\u{c}"));
+        assert_eq!(heard(&ctrl_l, Status::Ignored, true), None, "a shortcut types nothing");
+        let back = pressed(Key::Named(Named::Backspace), Modifiers::empty(), None);
+        let enter = pressed(Key::Named(Named::Enter), Modifiers::empty(), None);
+        assert_eq!(heard(&back, Status::Ignored, true), Some(Press::Erase));
+        assert_eq!(heard(&enter, Status::Ignored, true), Some(Press::Choose));
+        let ctrl_k = pressed(Key::Character("k".into()), Modifiers::CTRL, None);
+        assert_eq!(heard(&ctrl_k, Status::Captured, false), Some(Press::Toggle));
+
+        let mut c = Command::new(Instant::now());
+        for p in [Press::Type("E".into()), Press::Type("lx".into()), Press::Erase, Press::Up] {
+            let _: Task<usize> = c.missed(&p, "list");
+        }
+        assert_eq!(c.query, "El");
     }
 
     /// The keys walk the rows across groups and stop at either end; the
