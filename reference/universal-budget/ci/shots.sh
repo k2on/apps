@@ -93,6 +93,14 @@ still() {
   rm -rf "$tmp"
 }
 
+# The app's saved state wiped, so each launch is a first launch: iPadOS
+# restores a scene's sidebar and inspector from the launch before.
+fresh() {
+  local data
+  data=$(xcrun simctl get_app_container "$1" "$bundle" data 2> /dev/null) || return 0
+  rm -rf "$data/Library/Saved Application State" "$data/Library/Preferences" "$data/Library/SplitViewState"
+}
+
 # Portrait shots on a booted simulator: launched with each shot's arguments.
 portrait() {
   local udid=$1 device=$2
@@ -105,6 +113,7 @@ portrait() {
       read -ra args <<< "${shot#*|}"
       echo "$device $theme $name"
       xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
+      fresh "$udid"
       if ! xcrun simctl launch "$udid" "$bundle" "${args[@]}" -appearance "$theme" > /dev/null; then
         echo "::error::$device $theme $name: did not launch"; failed=1; continue
       fi
@@ -136,13 +145,16 @@ ios)
     -destination "id=$udid" -derivedDataPath "$derived" CODE_SIGNING_ALLOWED=NO -quiet || exit 1
   for theme in light dark; do
     appearance "$udid" "$theme"
-    list=""
-    for shot in "${ipad_landscape[@]}"; do list+="$shot -appearance $theme"$'\n'; done
-    echo "ipad-landscape $theme"
-    TEST_RUNNER_SHOTS_BUNDLE="$bundle" TEST_RUNNER_SHOTS_LIST="$list" TEST_RUNNER_SHOTS_OUT="$out/ipad-landscape/$theme" \
-      xcodebuild test-without-building -project "$here/landscape/Landscape.xcodeproj" -scheme Shots \
-        -destination "id=$udid" -derivedDataPath "$derived" > "$out/ipad-landscape-$theme.log" 2>&1 ||
-      { echo "::error::iPad landscape ($theme) failed"; tail -n 40 "$out/ipad-landscape-$theme.log"; failed=1; }
+    # One test run a shot, the app's state wiped between.
+    for shot in "${ipad_landscape[@]}"; do
+      echo "ipad-landscape $theme ${shot%%|*}"
+      xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
+      fresh "$udid"
+      TEST_RUNNER_SHOTS_BUNDLE="$bundle" TEST_RUNNER_SHOTS_LIST="$shot -appearance $theme" TEST_RUNNER_SHOTS_OUT="$out/ipad-landscape/$theme" \
+        xcodebuild test-without-building -project "$here/landscape/Landscape.xcodeproj" -scheme Shots \
+          -destination "id=$udid" -derivedDataPath "$derived" > "$out/ipad-landscape-$theme.log" 2>&1 ||
+        { echo "::error::iPad landscape ($theme) ${shot%%|*} failed"; tail -n 40 "$out/ipad-landscape-$theme.log"; failed=1; }
+    done
   done
   rm -f "$out"/ipad-landscape-*.log
   # XCUITest's screenshot is in the screen's own (portrait) frame: turned
@@ -164,6 +176,8 @@ mac)
   tmp=$(mktemp -d)
   # A process's window id (.github/screens/window.swift).
   xcrun swiftc -O "$repo/.github/screens/window.swift" -o "$tmp/window"
+  # A screen that holds a 1440x900 window (display.swift).
+  xcrun swiftc -O "$here/display.swift" -o "$tmp/display" && "$tmp/display" | grep -v '^mode' || true
   dark_mode() {
     osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $1" &
     local asked=$!
@@ -185,9 +199,15 @@ mac)
       echo "mac $theme $name"
       style=()
       [ "$theme" = dark ] && style=(-AppleInterfaceStyle Dark)
-      "$exe" "${args[@]}" -window 1440x900 -ApplePersistenceIgnoreState YES -appearance "$theme" ${style[@]+"${style[@]}"} \
-        > "$tmp/$theme-$name.log" 2>&1 &
-      pid=$!
+      # Through LaunchServices, so the app comes to the front and its
+      # window is key (one run from the shell stays inactive and grey).
+      open -n -a "$app" --stdout "$tmp/$theme-$name.log" --stderr "$tmp/$theme-$name.log" --args \
+        "${args[@]}" -window 1440x900 -ApplePersistenceIgnoreState YES -appearance "$theme" ${style[@]+"${style[@]}"}
+      pid=""
+      for _ in $(seq 1 30); do
+        pid=$(pgrep -n -f "$exe") && break
+        sleep 0.5
+      done
       wid=""
       for _ in $(seq 1 60); do
         wid=$("$tmp/window" "$pid" 2> /dev/null) && break
@@ -214,7 +234,7 @@ mac)
       # The whole screen too, for a shot with a second window (Settings) or a sheet.
       case $name in *settings*|*add-transaction*) screencapture -x "$out/mac/$theme/$name-screen.png" ;; esac
       kill "$pid" 2> /dev/null || true
-      wait "$pid" 2> /dev/null || true
+      for _ in $(seq 1 50); do kill -0 "$pid" 2> /dev/null || break; sleep 0.2; done
       sleep 1
     done
   done

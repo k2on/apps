@@ -35,6 +35,7 @@ struct AddAccountView: View {
                 Section {
                     LabeledContent(kind.isLiability ? "Amount Owed" : "Current Balance") {
                         TextField("Balance", value: $balance, format: .currency(code: currencyCode))
+                            .labelsHidden()
                             .multilineTextAlignment(.trailing)
                             .monospacedDigit()
                             .decimalKeyboard()
@@ -122,6 +123,7 @@ struct ReconcileView: View {
                     Section {
                         LabeledContent("Statement Balance") {
                             TextField("Statement Balance", value: $statementBalance, format: .currency(code: currencyCode))
+                                .labelsHidden()
                                 .multilineTextAlignment(.trailing)
                                 .monospacedDigit()
                                 .decimalKeyboard()

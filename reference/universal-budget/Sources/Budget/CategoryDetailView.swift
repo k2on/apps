@@ -133,6 +133,7 @@ private struct GoalSection: View {
             if let goal = category.goal {
                 LabeledContent("Target") {
                     TextField("Target", value: amount(goal), format: .currency(code: currencyCode))
+                        .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .monospacedDigit()
                         .decimalKeyboard()

@@ -125,7 +125,7 @@ struct BankStatusLine: View {
                     .foregroundStyle(.orange)
             }
             if reviewCount > 0 {
-                Button("^[\(reviewCount) to review](inflect: true)") {
+                Button("\(reviewCount) to review") {
                     model.showTransactions(matching: [.needsReview])
                 }
                 .buttonStyle(.borderless)

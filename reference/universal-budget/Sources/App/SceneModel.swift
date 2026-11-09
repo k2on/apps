@@ -157,11 +157,23 @@ final class SceneModel {
             tab = .accounts
         case .account(let name):
             tab = .accounts
-            if let account = store.account(named: name) { paths[.accounts] = [.account(account.id)] }
+            if let account = store.account(named: name) {
+                #if os(macOS)
+                // The Mac's sidebar lists each account: select it (a path set
+                // at launch was not pushed on the Mac; BUILD-NOTES.md).
+                tab = .account(account.id)
+                #else
+                paths[.accounts] = [.account(account.id)]
+                #endif
+            }
         case .reconcile(let name):
             tab = .accounts
             if let account = store.account(named: name) {
+                #if os(macOS)
+                tab = .account(account.id)
+                #else
                 paths[.accounts] = [.account(account.id)]
+                #endif
                 sheet = .reconcile(account.id)
             }
         case .addAccount:

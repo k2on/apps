@@ -357,6 +357,7 @@ struct AssignedField: View {
         .multilineTextAlignment(.trailing)
         .monospacedDigit()
         .textFieldStyle(.plain)
+        .labelsHidden()
         .decimalKeyboard()
         .accessibilityLabel("Assigned")
     }
