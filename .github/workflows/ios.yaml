@@ -14,7 +14,8 @@
 # is built under nix's strict sandbox, with only the Xcode directory let in;
 # the app's own xcodebuild is the one step that cannot be (flake.nix says
 # why), so the runner's nix is relaxed, where every other build is still
-# sandboxed. Main's builds go to Cachix.
+# sandboxed. This repository's builds go to Cachix (main's, by hand, and a
+# pull request's from a branch here); a fork's never.
 #
 # **The archive is unsigned on purpose**, and given its build number after it
 # is built (../ios-archive.sh): the commit's time, always rising and never
@@ -40,10 +41,10 @@
 #   ASC_ISSUER_ID       the Issuer ID shown above the keys list
 #   ASC_KEY_P8          the .p8 file's whole contents, BEGIN/END lines included
 #   APPLE_TEAM_ID       the ten-character Team ID
-#   CACHIX_AUTH_TOKEN   to push main's builds to the cache (CACHIX_NAME, a
-#                       variable, names it)
+#   CACHIX_AUTH_TOKEN   to push this repository's builds to the cache
+#                       (CACHIX_NAME, a variable, names it); never a fork's
 # Repository variables (the Variables tab):
-#   CACHIX_NAME            the cache main's builds are pushed to
+#   CACHIX_NAME            the cache this repository's builds are pushed to
 # (An app's bundle id is its project.yml's; whether it goes to TestFlight is
 # the flake's list.)
 name: ios
@@ -174,9 +175,13 @@ jobs:
             ${{ env.NIX_CONFIG }}
             ${{ env.XCODE_NIX_CONF }}
 
-      # Main's builds, and a pull request's of this repository's (a fork's
-      # has no token), go to the cache: app-screens' Mac takes them from it.
-      - if: (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.CACHIX_NAME != ''
+      # Every build of this repository's own code goes to the cache — main's,
+      # a run by hand, a pull request's from a branch here — and app-screens'
+      # Mac takes it from there. A fork's pull request never: it is the
+      # fork's code, and the token is not even asked for (GitHub gives a
+      # fork's `pull_request` no secrets anyway). Nix trusts what the cache
+      # signed, not what is in it.
+      - if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
