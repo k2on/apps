@@ -355,12 +355,17 @@ ui/docs/apps/money.md for money):
    real DOM, the theme as CSS variables generated from ui/theme.toml, the
    same context menu in the DOM, and `money/web` running the demo
    household in wasm.
-4. **macOS, iPad, Android tablets and foldables**: the generated SwiftUI
-   compiled for the Mac (money's target with a macOS destination), iPad
-   (`TARGETED_DEVICE_FAMILY` 1,2, every orientation), Android
-   resizeable with the adaptive scaffolds; their shots in the existing Mac
-   and Android jobs (an iPad Pro 13" in both orientations, a Pixel Tablet
-   landscape, a Pixel Fold folded and open).
+4. **macOS, iPad, Android tablets and foldables**: money's and harken's
+   iPhone targets take the iPad (`TARGETED_DEVICE_FAMILY` 1,2, every
+   orientation on an iPad, no `UIRequiresFullScreen`), not yet built on a
+   Mac; Android's activities have no fixed orientation and are resizeable
+   already. Left: the generated SwiftUI compiled for the Mac (a macOS
+   destination on money's target: today its hand-written screens use
+   UIKit, so the destination waits for the shell of item 1), the adaptive
+   scaffolds, and the shots in the existing Mac and Android jobs (an iPad
+   Pro 13" in both orientations, a Pixel Tablet landscape, a Pixel Fold
+   folded and open). The rumoured iPhone Fold needs no code (size
+   classes) and has no simulator to try.
 5. **The parity check**: the same screens with the same demo data at one
    size, shot in iced (arkui-shots), the web (Playwright's Chromium) and
    macOS, side by side in the PR's comment; iced against web gated by a

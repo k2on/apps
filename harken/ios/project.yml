@@ -55,6 +55,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # The iPad: every orientation, and Split View and Slide Over (no
+        # UIRequiresFullScreen); the parts adapt by size class (ui/docs/design.md).
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # The player plays on with the screen locked and the app in the background.
         UIBackgroundModes: [audio]
         # Where the server's sign-in sends its code back to: harken://auth?code=…
@@ -76,7 +79,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: us.koon.harken
-        TARGETED_DEVICE_FAMILY: "1"
+        # The iPhone and the iPad.
+        TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: false
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
