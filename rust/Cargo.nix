@@ -67,6 +67,26 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-camera" = rec {
+      packageId = "ark-camera";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-camera";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-clipboard" = rec {
+      packageId = "ark-clipboard";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-clipboard";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-ffi" = rec {
       packageId = "ark-ffi";
       build = internal.buildRustCrateWithFeatures {
@@ -87,6 +107,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-haptics" = rec {
+      packageId = "ark-haptics";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-haptics";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-macros" = rec {
       packageId = "ark-macros";
       build = internal.buildRustCrateWithFeatures {
@@ -97,10 +127,30 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "ark-modules" = rec {
-      packageId = "ark-modules";
+    "ark-media-player" = rec {
+      packageId = "ark-media-player";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "ark-modules";
+        packageId = "ark-media-player";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-module" = rec {
+      packageId = "ark-module";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-module";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-notifications" = rec {
+      packageId = "ark-notifications";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-notifications";
       };
 
       # Debug support which might change between releases.
@@ -131,6 +181,26 @@ rec {
       packageId = "ark-router-macros";
       build = internal.buildRustCrateWithFeatures {
         packageId = "ark-router-macros";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-secure-store" = rec {
+      packageId = "ark-secure-store";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-secure-store";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "ark-share" = rec {
+      packageId = "ark-share";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-share";
       };
 
       # Debug support which might change between releases.
@@ -783,8 +853,8 @@ rec {
         libName = "ark_app";
         dependencies = [
           {
-            name = "ark-modules";
-            packageId = "ark-modules";
+            name = "ark-module";
+            packageId = "ark-module";
           }
           {
             name = "ark-peer";
@@ -794,6 +864,16 @@ rec {
           {
             name = "arkui-macros";
             packageId = "arkui-macros";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
           }
         ];
 
@@ -944,6 +1024,60 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "ffi" "server" ];
       };
+      "ark-camera" = rec {
+        crateName = "ark-camera";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/camera; };
+        libName = "ark_camera";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-clipboard" = rec {
+        crateName = "ark-clipboard";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/clipboard; };
+        libName = "ark_clipboard";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Navigator" "Clipboard" ];
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+          "web" = [ "dep:web-sys" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "ffi" "web" ];
+      };
       "ark-ffi" = rec {
         crateName = "ark-ffi";
         version = "0.1.0";
@@ -1029,6 +1163,29 @@ rec {
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
+      "ark-haptics" = rec {
+        crateName = "ark-haptics";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/haptics; };
+        libName = "ark_haptics";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
       "ark-macros" = rec {
         crateName = "ark-macros";
         version = "0.1.0";
@@ -1054,12 +1211,35 @@ rec {
         ];
 
       };
-      "ark-modules" = rec {
-        crateName = "ark-modules";
+      "ark-media-player" = rec {
+        crateName = "ark-media-player";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-modules; };
-        libName = "ark_modules";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/media-player; };
+        libName = "ark_media_player";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-module" = rec {
+        crateName = "ark-module";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/module; };
+        libName = "ark_module";
         dependencies = [
           {
             name = "uniffi";
@@ -1070,6 +1250,29 @@ rec {
         ];
         features = {
           "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-notifications" = rec {
+        crateName = "ark-notifications";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/notifications; };
+        libName = "ark_notifications";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
         };
         resolvedDefaultFeatures = [ "ffi" ];
       };
@@ -1223,6 +1426,52 @@ rec {
           }
         ];
 
+      };
+      "ark-secure-store" = rec {
+        crateName = "ark-secure-store";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/secure-store; };
+        libName = "ark_secure_store";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
+      "ark-share" = rec {
+        crateName = "ark-share";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/share; };
+        libName = "ark_share";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" "ark-module/ffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
       };
       "ark-ui-gen" = rec {
         crateName = "ark-ui-gen";
@@ -11317,12 +11566,16 @@ rec {
             packageId = "ark-app";
           }
           {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+          }
+          {
             name = "ark-format";
             packageId = "ark-format";
           }
           {
-            name = "ark-modules";
-            packageId = "ark-modules";
+            name = "ark-haptics";
+            packageId = "ark-haptics";
           }
           {
             name = "ark-peer";
@@ -11363,7 +11616,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-modules/ffi" ];
+          "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" ];
           "gen" = [ "dep:ark-ui-gen" ];
           "iced" = [ "dep:arkui" "arkui/app" ];
         };
@@ -11441,6 +11694,11 @@ rec {
             packageId = "ark-app";
           }
           {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-ffi";
             packageId = "ark-ffi";
           }
@@ -11450,14 +11708,24 @@ rec {
             features = [ "ffi" ];
           }
           {
-            name = "ark-modules";
-            packageId = "ark-modules";
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
             features = [ "ffi" ];
           }
           {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
+            features = [ "ffi" ];
           }
           {
             name = "money-app";
@@ -11538,6 +11806,11 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            features = [ "desktop" ];
           }
           {
             name = "ark-peer";

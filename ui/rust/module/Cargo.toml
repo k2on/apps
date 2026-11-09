@@ -1,0 +1,17 @@
+[package]
+name = "ark-module"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "What every Ark device module shares, Expo's modules core: a call as data, its answer, a reply for later, and the registry a shell fills at startup. The modules themselves are packages of their own (modules/<name>)."
+
+# No module and no platform: each module crate (modules/haptics, …) brings
+# its trait, its calls and its fake, and an app registers what it uses.
+
+[dependencies]
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+# The answer and the reply as UniFFI types, for the modules' foreign traits.
+ffi = ["dep:uniffi"]

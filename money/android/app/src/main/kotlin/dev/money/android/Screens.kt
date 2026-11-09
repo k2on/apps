@@ -5,28 +5,21 @@
 // message and whenever the book moved. Nothing here decides anything.
 package dev.money.android
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import dev.arkui.Feedback
 import dev.arkui.LocalGlyphs
 import dev.arkui.LocalRowMark
 import dev.arkui.LocalTabFrame
-import dev.arkui.perform
 import dev.money.ffi.AccountsApp
 import dev.money.ffi.AppShell
 import dev.money.ffi.Session
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import uniffi.ark_modules.Clipboard
-import uniffi.ark_modules.Haptic
-import uniffi.ark_modules.Haptics
+import uniffi.ark_clipboard.Clipboard
+import uniffi.ark_haptics.Haptics
 import uniffi.money_app.AccountsMsg
 import uniffi.money_app.AccountsPage
 import uniffi.money_domain.Route
@@ -51,7 +44,8 @@ class AccountsHolder(session: Session, refresh: () -> Unit, haptics: Haptics?, c
     val page: StateFlow<AccountsPage> = _page
 
     init {
-        app.useModules(haptics, clipboard, null, null)
+        // money's modules (money/modules.toml): no share sheet on Android yet.
+        app.useModules(haptics, clipboard, null)
     }
 
     /** `msg` taken by the app; the page read again. */
@@ -63,22 +57,6 @@ class AccountsHolder(session: Session, refresh: () -> Unit, haptics: Haptics?, c
     /** The page read again: the book moved. */
     fun reload() {
         _page.value = app.page()
-    }
-}
-
-/** `ui/docs/motion.md`'s haptics, on the view the app is drawn in. */
-class PhoneHaptics(private val view: View) : Haptics {
-    override fun perform(haptic: Haptic) {
-        // A warning is a success's weight here: ArkUI's two are what Android has an answer for.
-        view.post { view.perform(if (haptic == Haptic.SELECTION) Feedback.Selection else Feedback.Success) }
-    }
-}
-
-/** The system clipboard. */
-class PhoneClipboard(private val context: Context) : Clipboard {
-    override fun copyText(text: String) {
-        val m = context.getSystemService(ClipboardManager::class.java)
-        m?.setPrimaryClip(ClipData.newPlainText("Amount", text))
     }
 }
 

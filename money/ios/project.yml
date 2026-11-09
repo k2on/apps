@@ -14,6 +14,11 @@
 # `Sendable`, and the kernel calls back on its own threads (`Listener`),
 # which the app meets with a queue rather than actors.
 name: Money
+# The device modules money opts into (../modules.toml): their Swift and the
+# Info.plist keys they need, as the template `ArkModules` the app's target
+# uses. Written by `nix run .#update-modules`; never edited.
+include:
+  - modules.yml
 options:
   bundleIdPrefix: us.koon
   deploymentTarget:
@@ -35,6 +40,7 @@ targets:
   Money:
     type: application
     platform: iOS
+    templates: [ArkModules]
     sources:
       - path: Money
       - path: ../ffi/ios/swift

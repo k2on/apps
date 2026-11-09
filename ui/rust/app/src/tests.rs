@@ -1,5 +1,4 @@
 use super::*;
-use ark_modules::fake::Fakes;
 use ark_peer::store::Opening;
 
 /// A counter: the smallest app with every kind of command.
@@ -46,9 +45,7 @@ impl App for Counter {
         match msg {
             Msg::Add => {
                 s.n += 1;
-                vec![Command::ask(ModuleCall::Haptic {
-                    haptic: modules::Haptic::Selection,
-                })]
+                vec![Command::ask(ark_haptics::perform(ark_haptics::Haptic::Selection))]
             }
             Msg::Save => vec![Command::Send {
                 change: s.n,
@@ -59,7 +56,7 @@ impl App for Counter {
                 vec![]
             }
             Msg::Scan => vec![Command::Ask {
-                call: ModuleCall::ScanQr,
+                call: ark_camera::scan_qr(),
                 then: Some(Msg::Scanned),
             }],
             Msg::Scanned(a) => {
@@ -78,7 +75,9 @@ impl App for Counter {
 /// A host over an empty store, the fakes for modules.
 struct Here {
     store: Store<NoView>,
-    fakes: Fakes,
+    haptics: ark_haptics::fake::Fake,
+    camera: ark_camera::Fake,
+    modules: Modules,
     inbox: Inbox,
     sent: Vec<i64>,
     opened: Vec<String>,
@@ -86,9 +85,16 @@ struct Here {
 
 impl Here {
     fn new() -> Here {
+        let haptics = ark_haptics::fake::Fake::new();
+        let camera = ark_camera::Fake::new();
+        let mut modules = Modules::new();
+        haptics.register(&mut modules);
+        camera.register(&mut modules);
         Here {
             store: Store::new(),
-            fakes: Fakes::new(),
+            haptics,
+            camera,
+            modules,
             inbox: Inbox::default(),
             sent: vec![],
             opened: vec![],
@@ -118,7 +124,7 @@ impl Host<Counter> for Here {
         self.opened.push("back".into())
     }
     fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.fakes.modules(), ticket, call)
+        self.inbox.ask(&self.modules, ticket, call)
     }
 }
 
@@ -130,7 +136,7 @@ fn a_message_updates_and_grows_the_version() {
     rt.dispatch(Msg::Add, &mut h);
     assert_eq!(rt.state().n, 1);
     assert!(rt.version() > 0);
-    assert_eq!(h.fakes.haptics(), vec![modules::Haptic::Selection]);
+    assert_eq!(h.haptics.performed(), vec![ark_haptics::Haptic::Selection]);
     assert_eq!(rt.screen(&h), "1 ");
 }
 
@@ -160,13 +166,13 @@ fn a_later_answer_runs_its_message_then_what_it_asks() {
     let mut h = Here::new();
     rt.dispatch(Msg::Scan, &mut h);
     assert!(rt.awaits(1));
-    h.fakes.scanned(Some("code".into()));
+    h.camera.scanned(Some("code".into()));
     for (t, a) in h.inbox.take() {
         rt.answer(t, a, &mut h);
     }
     assert!(!rt.awaits(1));
     assert_eq!(rt.state().n, 1);
-    assert_eq!(rt.state().said, vec!["Scanned { code: Some(\"code\") }"]);
+    assert_eq!(rt.state().said, vec!["Text { value: Some(\"code\") }"]);
 }
 
 #[test]

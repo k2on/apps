@@ -1,0 +1,15 @@
+[package]
+name = "ark-haptics"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The phone's answer in the hand, as an Ark module: a success, a selection step, a warning (ui/docs/motion.md, Haptics). The trait, its call and its fake; the iPhone's, the Mac's and Android's implementations beside it (swift/, kotlin/)."
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+# The trait as a UniFFI foreign trait, for the phones.
+ffi = ["dep:uniffi", "ark-module/ffi"]

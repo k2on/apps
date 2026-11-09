@@ -1,0 +1,9 @@
+# What an app takes on when its modules.toml lists media-player (ui/docs/app.md,
+# The Device; README.md says why each is asked). ui/modules.py reads it.
+crate = "ark-media-player"
+
+[ios.info]
+UIBackgroundModes = ["audio"]
+
+[android]
+permissions = ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"]

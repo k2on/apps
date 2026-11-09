@@ -1,6 +1,6 @@
 use super::*;
-use ark_app::{Host, Inbox, Runtime, Ticket};
-use ark_modules::fake::Fakes;
+use ark_app::Modules;
+use ark_app::{Host, Inbox, ModuleCall, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer;
 
@@ -8,7 +8,9 @@ use ark_peer::Peer;
 pub(crate) struct Demo {
     pub peer: Peer,
     pub store: Store<MoneyView>,
-    pub fakes: Fakes,
+    pub haptics: ark_haptics::fake::Fake,
+    pub clipboard: ark_clipboard::fake::Fake,
+    pub modules: Modules,
     pub inbox: Inbox,
     pub opened: Vec<Route>,
     pub native: Vec<String>,
@@ -25,10 +27,17 @@ impl Demo {
             store.hold(&mut peer, k);
         }
         store.settle(&mut peer);
+        let haptics = ark_haptics::fake::Fake::new();
+        let clipboard = ark_clipboard::fake::Fake::new();
+        let mut modules = Modules::new();
+        haptics.register(&mut modules);
+        clipboard.register(&mut modules);
         Demo {
             peer,
             store,
-            fakes: Fakes::new(),
+            haptics,
+            clipboard,
+            modules,
             inbox: Inbox::default(),
             opened: vec![],
             native: vec![],
@@ -56,7 +65,7 @@ impl Host<Accounts> for Demo {
         self.opened.push(route)
     }
     fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.fakes.modules(), ticket, call)
+        self.inbox.ask(&self.modules, ticket, call)
     }
     fn native(&mut self, name: &str) {
         self.native.push(name.into())
@@ -140,7 +149,7 @@ fn adding_an_account_checks_it_as_the_domain_does() {
     assert_eq!(visa.balance, -25_000);
     assert_eq!(visa.kind, "credit");
     assert!(rt.state().adding.is_none(), "the sheet goes once it is kept");
-    assert_eq!(d.fakes.haptics(), vec![Haptic::Selection, Haptic::Success]);
+    assert_eq!(d.haptics.performed(), vec![Haptic::Selection, Haptic::Success]);
 }
 
 #[test]
@@ -171,7 +180,7 @@ fn renaming_and_closing_go_through_the_domain() {
         }],
     );
     assert_eq!(d.store.refusal(), Some("an account is closed with nothing in it"));
-    assert!(d.fakes.haptics().is_empty(), "a refusal is not felt as a success");
+    assert!(d.haptics.performed().is_empty(), "a refusal is not felt as a success");
 
     run(
         &mut rt,
@@ -205,7 +214,7 @@ fn renaming_and_closing_go_through_the_domain() {
     for (t, a) in d.inbox.take() {
         rt.answer(t, a, &mut d);
     }
-    assert_eq!(d.fakes.haptics(), vec![Haptic::Success, Haptic::Warning, Haptic::Success]);
+    assert_eq!(d.haptics.performed(), vec![Haptic::Success, Haptic::Warning, Haptic::Success]);
 }
 
 #[test]
@@ -214,7 +223,7 @@ fn copy_balance_and_refresh_reach_the_device_and_the_shell() {
     let mut rt = Runtime::<Accounts>::new();
     let a = d.accounts()[0].clone();
     run(&mut rt, &mut d, [AccountsMsg::CopyBalance { id: a.id.hex() }, AccountsMsg::Refresh]);
-    assert_eq!(d.fakes.copied(), vec![ark_format::amount(a.balance, &NumberStyle::us())]);
+    assert_eq!(d.clipboard.copied(), vec![ark_format::amount(a.balance, &NumberStyle::us())]);
     assert_eq!(d.native, vec!["refresh"]);
 }
 

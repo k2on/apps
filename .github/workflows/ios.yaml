@@ -73,6 +73,13 @@ on:
       - "rust/ark-format/**"
       - "ui/rust/router/**"
       - "ui/rust/router-macros/**"
+      # money's screens run in Rust, and the device modules it lists.
+      - "money/app/**"
+      - "money/modules.toml"
+      - "ui/rust/app/**"
+      - "ui/rust/arkui-macros/**"
+      - "ui/rust/module/**"
+      - "modules/**"
       - "rust/Cargo.lock"
       - "rust/Cargo.toml"
       - "ui/swift/**"

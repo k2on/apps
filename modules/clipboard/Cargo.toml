@@ -1,0 +1,24 @@
+[package]
+name = "ark-clipboard"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Text put where the person can paste it, as an Ark module: the trait, its call and its fake; the desktop's and the browser's implementations here (features), the iPhone's, the Mac's and Android's beside it (swift/, kotlin/)."
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", optional = true, features = ["Window", "Navigator", "Clipboard"] }
+
+[features]
+# The trait as a UniFFI foreign trait, for the phones.
+ffi = ["dep:uniffi", "ark-module/ffi"]
+# `Queued`: what an iced window (desktop or wasm) writes with its own
+# clipboard task after a message.
+desktop = []
+# `Browser`: the page's own clipboard (navigator.clipboard), for a DOM
+# client; wasm32 only.
+web = ["dep:web-sys"]

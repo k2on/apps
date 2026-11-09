@@ -24,7 +24,7 @@ final class AccountsScreen: ObservableObject {
         let shell = ScreenShell(refresh: refresh, nowMs: nowMs)
         self.shell = shell
         app = AccountsApp(session: session, shell: shell)
-        app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share, camera: modules.camera)
+        app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
     }
@@ -64,10 +64,11 @@ final class ScreenShell: AppShell, @unchecked Sendable {
     func nowMs() -> Int64 { now() }
 }
 
-/// The device modules the phone registers with every screen.
+/// The device modules the phone registers with every screen: the ones
+/// money lists in money/modules.toml, whose Swift (modules/<name>/swift)
+/// the project compiles in (modules.yml).
 struct PhoneModules {
     var haptics: Haptics? = nil
     var clipboard: Clipboard? = nil
     var share: Share? = nil
-    var camera: Camera? = nil
 }

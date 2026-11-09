@@ -1,0 +1,15 @@
+[package]
+name = "ark-media-player"
+workspace = "../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "One sound at a time, as an Ark module (harken's PhoneSound generalised): the trait, its calls, its events and its fake; no native implementation yet."
+
+[dependencies]
+ark-module = { path = "../../ui/rust/module" }
+uniffi = { version = "0.32.2", default-features = false, optional = true }
+
+[features]
+# The trait as a UniFFI foreign trait, for the phones.
+ffi = ["dep:uniffi", "ark-module/ffi"]

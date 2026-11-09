@@ -1,10 +1,14 @@
 //! The Accounts page, run in Rust once for every platform (money_app,
 //! ui/docs/app.md): the window is its host — the store it reads is the
 //! window's, a change goes through the window's own [`App::change`], a
-//! route becomes a page, and the clipboard is iced's. The page is the view
+//! route becomes a page, and the modules are the desktop's (money/modules.toml):
+//! the clipboard is ark-clipboard's `Queued`, written with iced's own task. The page is the view
 //! `money_app::accounts::view::accounts` drawn by `arkui::view`.
 
-use ark_app::{Host, ModuleAnswer, ModuleCall, Ticket};
+use std::sync::Arc;
+
+use ark_app::{Host, Inbox, ModuleCall, Modules, Ticket};
+use ark_clipboard::{Clipboard, Queued};
 use ark_peer::store::Store;
 use iced::{Element, Task};
 use money_app::accounts::{Accounts, AccountsMsg};
@@ -16,9 +20,25 @@ use crate::{App, Message, Route};
 /// The window, as the runtime's host for one message.
 struct Desk<'a> {
     app: &'a mut App,
-    /// What the window does after: the clipboard written.
-    tasks: Vec<Task<Message>>,
-    answers: Vec<(Ticket, ModuleAnswer)>,
+    /// The desktop's modules: the clipboard; no haptics, no share sheet
+    /// (a call to either is answered Unavailable).
+    modules: Modules,
+    clipboard: Queued,
+    inbox: Inbox,
+}
+
+impl Desk<'_> {
+    fn new(app: &mut App) -> Desk<'_> {
+        let clipboard = Queued::new();
+        let mut modules = Modules::new();
+        modules.register::<dyn Clipboard>(Arc::new(clipboard.clone()));
+        Desk {
+            app,
+            modules,
+            clipboard,
+            inbox: Inbox::default(),
+        }
+    }
 }
 
 /// Noon on the window's day, in milliseconds: the time the page is worked out at.
@@ -48,16 +68,7 @@ impl Host<Accounts> for Desk<'_> {
         }
     }
     fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        // The desktop's modules: the clipboard is iced's; there are no
-        // haptics, and the rest is not the desktop's yet.
-        let answer = match call {
-            ModuleCall::Copy { text } => {
-                self.tasks.push(iced::clipboard::write(text));
-                ModuleAnswer::Done
-            }
-            _ => ModuleAnswer::Unavailable,
-        };
-        self.answers.push((ticket, answer));
+        self.inbox.ask(&self.modules, ticket, call)
     }
 }
 
@@ -65,18 +76,19 @@ impl App {
     /// A message of the Accounts page taken.
     pub(crate) fn accounts_step(&mut self, msg: AccountsMsg) -> Task<Message> {
         let mut rt = std::mem::take(&mut self.accounts);
-        let mut desk = Desk {
-            app: self,
-            tasks: vec![],
-            answers: vec![],
-        };
+        let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
-        while !desk.answers.is_empty() {
-            for (t, a) in std::mem::take(&mut desk.answers) {
+        loop {
+            let answers = desk.inbox.take();
+            if answers.is_empty() {
+                break;
+            }
+            for (t, a) in answers {
                 rt.answer(t, a, &mut desk);
             }
         }
-        let tasks = std::mem::take(&mut desk.tasks);
+        // What the window does after: the clipboard written.
+        let tasks: Vec<Task<Message>> = desk.clipboard.take().into_iter().map(iced::clipboard::write).collect();
         self.accounts = rt;
         Task::batch(tasks)
     }

@@ -173,7 +173,9 @@ dependencies = [
 name = "ark-app"
 version = "0.1.0"
 dependencies = [
- "ark-modules",
+ "ark-camera",
+ "ark-haptics",
+ "ark-module",
  "ark-peer",
  "arkui-macros",
 ]
@@ -204,6 +206,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-camera"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
+name = "ark-clipboard"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+ "web-sys",
+]
+
+[[package]]
 name = "ark-ffi"
 version = "0.1.0"
 dependencies = [
@@ -226,6 +245,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-haptics"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
 name = "ark-macros"
 version = "0.1.0"
 dependencies = [
@@ -235,9 +262,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-modules"
+name = "ark-media-player"
 version = "0.1.0"
 dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
+name = "ark-module"
+version = "0.1.0"
+dependencies = [
+ "uniffi",
+]
+
+[[package]]
+name = "ark-notifications"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
  "uniffi",
 ]
 
@@ -278,6 +321,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "ark-secure-store"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
+name = "ark-share"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
 ]
 
 [[package]]
@@ -3593,8 +3652,9 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-app",
+ "ark-clipboard",
  "ark-format",
- "ark-modules",
+ "ark-haptics",
  "ark-peer",
  "ark-ui-gen",
  "arkui",
@@ -3624,10 +3684,13 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-app",
+ "ark-clipboard",
  "ark-ffi",
  "ark-format",
- "ark-modules",
+ "ark-haptics",
+ "ark-module",
  "ark-peer",
+ "ark-share",
  "image",
  "money-app",
  "money-domain",
@@ -3645,6 +3708,7 @@ dependencies = [
  "ark",
  "ark-app",
  "ark-auth",
+ "ark-clipboard",
  "ark-peer",
  "arkui",
  "arkui-shots",

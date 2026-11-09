@@ -18,6 +18,17 @@ val moneyLib: String = providers.gradleProperty("moneyLib").getOrElse(rootProjec
 /** arkui, the look every Ark app on Android shares, compiled from its sources as harken does. */
 val arkUi = rootProject.file("../../ui/kotlin/src")
 
+/**
+ * The device modules money opts into (`../modules.toml`, ui/docs/app.md): each listed module's
+ * Kotlin (`modules/<name>/kotlin`) is compiled in. The permissions they need are in the manifest,
+ * which `checks.modules` holds to what each module declares.
+ */
+val arkModules: List<String> =
+    Regex("""(?s)modules\s*=\s*\[(.*?)]""").find(rootProject.file("../modules.toml").readText())
+        ?.groupValues?.get(1)
+        ?.let { list -> Regex("\"([a-z-]+)\"").findAll(list).map { it.groupValues[1] }.toList() }
+        ?: emptyList()
+
 android {
     namespace = "dev.money.android"
     compileSdk = 35
@@ -93,6 +104,7 @@ android {
             jniLibs.srcDir("$moneyLib/jniLibs")
             kotlin.srcDir("$moneyLib/kotlin")
             kotlin.srcDir(arkUi)
+            arkModules.forEach { kotlin.srcDir(rootProject.file("../../modules/$it/kotlin")) }
         }
     }
 }

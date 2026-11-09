@@ -15,7 +15,8 @@ was. The last section says what is left and in what order.
 ```
  money/app            the app: State, Msg, update, screen records, #[view] layouts
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary
-   └ ark-modules      the device: Haptics, Clipboard, Share, Camera, MediaPlayer, …
+   └ ark-module       the device's plumbing (ui/rust/module)
+   └ ark-<name>       a device module each: modules/haptics, clipboard, share, camera, …
  ui/rust/arkui           iced: draws a View (feature `app`) — the desktop
  ui/swift          SwiftUI: the parts a generated view calls, by hand
  ui/kotlin         Compose: the same parts, by hand
@@ -146,50 +147,101 @@ runtime (`AccountsScreen` in `money/ios/Money/Screens.swift`,
 `ObservableObject` / `StateFlow` of the record, read again after every
 message and whenever the store moved.
 
-### The Device: `ark-modules`
+### The Device: `modules/`
 
-A module is one Rust trait, implemented natively per platform and
-registered at startup (`Modules`). An update never calls one: it returns a
-`ModuleCall` (`Haptic`, `Copy`, `Share`, `ScanQr`, `TakePhoto`, `Notify`,
-`SecretGet`, …), the runtime hands it to the module, and the
-`ModuleAnswer` comes back as a message — at once, or later for the camera
-(a `Reply` object the platform answers once). So an update is testable
-with `ark_modules::fake::Fakes`, which records what was asked and lets a
-test answer a scan.
+What an app asks of the device is a module, Expo's way: one package each
+under `modules/`, and a small core under `ui/rust/module`.
 
-Under the `ffi` feature each trait is a UniFFI foreign trait
-(`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern): Swift
-and Kotlin classes implement the protocol / interface UniFFI writes.
+```
+ui/rust/module/       crate ark-module: ModuleCall, ModuleAnswer, Reply, Modules — the plumbing, no module
+modules/<name>/
+├── Cargo.toml        crate ark-<name>: the trait, its calls, its fake; desktop/web impls behind features
+├── src/
+├── swift/            the iPhone's and the Mac's implementation (compiled into the app, not a package)
+├── kotlin/           Android's implementation (compiled into the app)
+├── module.toml       its crate, and what it asks of each platform (Info.plist keys, permissions)
+└── README.md         its API, what it does on each platform, the permissions it needs
+```
 
-| Module | Trait | iPhone | Android | Desktop (iced) | Browser |
+An update never calls a module. It returns `Command::ask(call)`, where
+`call` is a `ModuleCall` the module's crate makes (`ark_haptics::perform(
+Haptic::Success)`, `ark_clipboard::copy(text)`, `ark_camera::scan_qr()`):
+the module's own enum (`HapticsCall`, …) implementing `ark_module::Call`,
+which names the trait that carries it out, erased into one type the
+runtime holds, compares and prints. The host hands it to the `Modules` it
+registered (`Inbox::ask`), the registry finds the module by its trait
+(`register::<dyn Haptics>(…)`), and the `ModuleAnswer` — `Done`, `Text`,
+`Bytes`, `Unavailable` (none registered: haptics on the desktop),
+`Failed` — comes back into the update as a message (`then: fn(
+ModuleAnswer) -> Msg`), at once, or later through a `Reply` the platform
+answers once (the camera). Events a module sends on its own (a player's
+position) go through a listener trait of the module's (`MediaListener`),
+which the shell turns into messages. A test registers each module's fake
+(`ark_haptics::fake::Fake`, `ark_clipboard::fake::Fake`, `ark_camera::Fake`
+…) and looks at what was asked.
+
+Under each crate's `ffi` feature its trait is a UniFFI foreign trait
+(`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern), and
+`ark-module`'s `Reply` and `ModuleAnswer` UniFFI types: the module's Swift
+class implements the protocol UniFFI writes (`Haptics`), its Kotlin class
+the interface (`uniffi.ark_haptics.Haptics`), and the app's ffi crate takes
+them (`AccountsApp.useModules(haptics:clipboard:share:)`) and registers
+them. Each module crate is its own UniFFI namespace in the app's one
+library, so its Kotlin package is `uniffi.ark_<name>`.
+
+| Module | Crate | iPhone, iPad, Mac | Android | Desktop and wasm (iced) | Browser (DOM) |
 |---|---|---|---|---|---|
-| Haptics | `perform(haptic)` | `PhoneHaptics` (UIFeedbackGenerator) | `PhoneHaptics` (`View.perform`) | none (Unavailable) | none |
-| Clipboard | `copy_text(text)` | `PhoneClipboard` (UIPasteboard) | `PhoneClipboard` (ClipboardManager) | `iced::clipboard::write` | — |
-| Share | `share(text, url)` | `PhoneShare` (UIActivityViewController) | — | — | — |
-| Camera | `scan_qr`, `take_photo` (answer later) | API only: `QrScanner` stays hand-written | API only | — | — |
-| MediaPlayer | `load`, `play`, `pause`, `seek`, `set_rate`, `set_volume`, `set_now_playing`, events (`MediaListener`) | API only | API only | API only | — |
-| Notifications | `schedule`, `cancel` | API only | API only | — | — |
-| SecureStore | `get`, `put`, `remove` | API only | API only | — | — |
+| haptics | `ark-haptics` | `PhoneHaptics` (UIFeedbackGenerator; NSHapticFeedbackManager) | `PhoneHaptics` (ArkUI's `View.perform`) | Unavailable | Unavailable |
+| clipboard | `ark-clipboard` | `PhoneClipboard` (UIPasteboard; NSPasteboard) | `PhoneClipboard` (ClipboardManager) | `Queued` (feature `desktop`), written by `iced::clipboard::write` | `Browser` (feature `web`) |
+| share | `ark-share` | `PhoneShare` (UIActivityViewController; NSSharingServicePicker) | not yet | Unavailable | Unavailable |
+| camera | `ark-camera` | not yet (`QrScanner` stays hand-written) | not yet | Unavailable | Unavailable |
+| media-player | `ark-media-player` | not yet | not yet | not yet (`harken_player`) | — |
+| notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
+| secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
 
 **MediaPlayer** generalises harken's `PhoneSound` and
-`harken_player::Sound`: one sound at a time, loaded from a URL at a
-position, played and paused, sought, at a rate and a volume, with the lock
-screen's now-playing record; what it did (`Loaded`, `Position`, `Playing`,
-`Paused`, `Ended`, `Remote` from the lock screen or a headset, `Failed`)
-arrives through the `MediaListener` the app registers and becomes the
-app's messages. Moving harken onto it is: implement the trait over
-AVPlayer (iPhone), Media3 (Android) and `harken_player` (desktop), register
-it, and move the player's state machine from the shells into harken's
-`update`.
+`harken_player::Sound` (modules/media-player/README.md says how harken
+moves onto it).
 
-**To add a module:** add its trait and its calls/answers to `ark-modules`
-(exported under `ffi`), a fake in `fake.rs`, a case in `Modules::call`;
-implement it per platform; register it where the app registers the others
-(`MoneyApp.swift`, `MoneyApp.kt` / `Screens.kt`, the iced host's `ask`).
-The owner's direction is one package per module, Expo's way
-(`modules/<name>/` with its crate, its `swift/`, its `kotlin/`, its README
-and the permissions it declares, and a small shared `ark-module` crate for
-the plumbing); that split is not done yet (below).
+#### How an App Opts In
+
+An app lists its modules once, in `<app>/modules.toml`:
+
+```toml
+modules = ["haptics", "clipboard", "share"]
+```
+
+and every build reads that list, or is held to it:
+
+- **Cargo**: the app's crates depend on the listed modules' crates (money:
+  `money/app` on the ones its update asks, `money/ffi` on each, with `ffi`;
+  `money/iced` on `ark-clipboard` with `desktop`).
+- **Xcode**: `nix run .#update-modules` (`ui/modules.py`) writes
+  `<app>/ios/modules.yml`, an XcodeGen file `project.yml` includes; its
+  template `ArkModules`, which the app's target uses, adds each listed
+  module's `swift/` to the sources and the Info.plist keys its
+  `module.toml` declares (the app's own keys win).
+- **Gradle**: `android/app/build.gradle.kts` reads `modules.toml` and adds
+  each listed module's `kotlin/` to the sources. Android cannot merge a
+  manifest from a source directory, so a module's permissions are checked,
+  not written: `checks.modules` fails when the app's manifest lacks one.
+- **The shell** registers what it built: `PhoneModules(haptics:
+  PhoneHaptics(), …)` in `MoneyApp.swift`, `AccountsHolder(…,
+  PhoneHaptics(view), PhoneClipboard(context))` in `MoneyApp.kt`, the
+  `Queued` clipboard in `money/iced/src/overview.rs`.
+
+`checks.modules` holds it together: every listed module exists, the app's
+ffi crate depends on exactly the listed modules' crates, the manifest asks
+for their Android permissions, and `modules.yml` is what the script
+writes. The iPhone typecheck (`checks.money-ios-typecheck`) compiles the
+listed modules' Swift on Linux against the generated bindings, so every
+name they use is checked.
+
+**To add a module:** `modules/<name>/` with its crate (trait, a `Call`
+enum, the functions that make calls, a fake, tests), `module.toml`,
+`README.md`, `swift/` and `kotlin/`; add the crate to `rust/Cargo.toml`'s
+members; an app that wants it lists it, depends on its crate, takes it in
+its ffi crate's `useModules` and registers the platform's class.
 
 ## Escape Hatches
 
@@ -217,7 +269,7 @@ the plumbing); that split is not done yet (below).
 
 ## What Is Verified
 
-- Rust: `cargo test` / `clippy -D warnings` on ark-app, ark-modules,
+- Rust: `cargo test` / `clippy -D warnings` on ark-app, ark-module and each module crate,
   arkui-macros (expansion and error tests), ark-ui-gen, money-app
   (Accounts over the demo household with the fakes), money-iced (a test
   drives the Accounts page in the window), arkui; money-ffi builds;
@@ -248,10 +300,10 @@ In the order the owner asked for it:
    separators and laziness; a native text field's input methods; a sheet's
    system gesture; the system's springs. Today's `ScreenParts` are the
    component layer written by hand, the step before that.
-3. **Modules as packages**, one directory each (crate, `swift/`,
-   `kotlin/`, README with permissions), an app opting in per module;
-   Camera QR on iOS (wrapping `QrScanner`) and Android (needs a decoder
-   dependency and a deps.json regeneration).
+3. **Modules' native implementations**: the packages are there
+   (`modules/`); Camera QR on iOS (wrapping `QrScanner`) and Android (needs
+   a decoder dependency and a deps.json regeneration), share on Android,
+   and media-player, notifications and secure-store everywhere.
 4. **Adaptive layout**: the app's tabs declared once in Rust, the size
    class decided in the core from one breakpoint token, bottom tabs when
    compact and a sidebar when regular on every target, per-tab back stacks

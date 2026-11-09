@@ -1,0 +1,6 @@
+# The device modules money uses (ui/docs/app.md, The Device). Each is a
+# package under modules/: listing one here compiles its Swift into the
+# iPhone app (ios/modules.yml, `nix run .#update-modules`) and its Kotlin
+# into the Android app (android/app/build.gradle.kts reads this file), and
+# money/ffi depends on its crate. `checks.modules` holds them together.
+modules = ["haptics", "clipboard", "share"]

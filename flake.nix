@@ -73,7 +73,7 @@
       # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "ui/rust" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
@@ -677,7 +677,9 @@
             name = "money";
             appid = "dev.money.android";
             flags = [ "-PmoneyLib=${money-android-lib}" ];
-            shared = [ "ui/kotlin" ];
+            # arkui, and the device modules money lists (money/modules.toml),
+            # whose kotlin/ its build.gradle.kts compiles in.
+            shared = [ "ui/kotlin" "modules" "money/modules.toml" ];
             title = "money";
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
@@ -1056,7 +1058,9 @@
             pkgs.stdenv.mkDerivation {
               pname = "${name}-ios-${kind}";
               version = "0.1.0";
-              src = only [ "${name}/ios" "ui/swift" ];
+              # The app, ArkUI, and the device modules its modules.yml
+              # compiles in (modules/<name>/swift, ui/docs/app.md).
+              src = only [ "${name}/ios" "ui/swift" "modules" ];
               nativeBuildInputs = [ xcodegen ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
@@ -1226,6 +1230,13 @@
               done
             '';
           };
+          # `nix run .#update-modules`, from the repository's root: each
+          # app's Xcode list of its device modules (<app>/ios/modules.yml),
+          # written from <app>/modules.toml and each module's module.toml
+          # (ui/docs/app.md, The Device). `checks.modules` holds it current.
+          update-modules = pkgs.writeShellScriptBin "update-modules" ''
+            ${pkgs.python3}/bin/python3 ui/modules.py write
+          '';
           # `nix run .#update-theme`, from the repository's root: the colours
           # every app is drawn in, written from ui/theme.toml into the
           # Kotlin, Swift and Rust each platform's arkui reads (ui/README.md).
@@ -1262,6 +1273,9 @@
             # `nix run .#update-theme`: the theme's generated files, from
             # ui/theme.toml.
             inherit update-theme;
+            # `nix run .#update-modules`: each app's list of its device
+            # modules for Xcode, from <app>/modules.toml.
+            inherit update-modules;
             # `nix run .#update-ui`: the phones' screens written from the
             # views laid out in Rust.
             inherit update-ui money-ui;
@@ -1350,6 +1364,16 @@
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
+            # What an app opts into is what it builds with (ui/docs/app.md,
+            # The Device): each module it lists exists; its ffi crate depends
+            # on those modules' crates and on no other; its Android manifest
+            # asks for every permission they declare; and its modules.yml is
+            # what ui/modules.py writes.
+            modules = pkgs.runCommand "modules-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              cd ${only [ "ui/modules.py" "modules" "money/modules.toml" "money/ios/modules.yml" "money/ffi/Cargo.toml" "money/android/app/src/main/AndroidManifest.xml" ]}
+              python3 ui/modules.py check
+              touch $out
+            '';
             theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
               python3 ${./ui}/theme.py contrast
               touch $out
@@ -1491,7 +1515,7 @@
             # types, UniFFI's Swift for money's library and ArkUICore.
             money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "money-ios-typecheck";
-              src = only [ "money/ios" "rust/ark-ffi/swift" "ui/swift" ];
+              src = only [ "money/ios" "money/modules.toml" "modules" "rust/ark-ffi/swift" "ui/swift" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               buildPhase = ''

@@ -29,6 +29,15 @@ trap 'rm -rf "$OUT"' EXIT
 
 # The app's files Linux can read: none of Apple's frameworks but Foundation and Combine.
 SOURCES=()
+# And the device modules money lists (../../modules.toml): their Swift is
+# behind `canImport(UIKit)` / `canImport(AppKit)`, so on Linux it is the
+# classes over the protocols UniFFI wrote, and each name is checked.
+MODULES="${MODULES:-$HERE/../../../modules}"
+for m in $(sed -n 's/^modules *= *\[\(.*\)\]/\1/p' "$HERE/../../modules.toml" | tr -d '"' | tr ',' ' '); do
+  for f in "$MODULES/$m"/swift/*.swift; do
+    [ -e "$f" ] && SOURCES+=("$f")
+  done
+done
 for f in "$APP"/*.swift; do
   if ! grep -qE '^import (SwiftUI|UIKit|AVFoundation|AVKit|MediaPlayer|AuthenticationServices|ImageIO|CoreGraphics|UniformTypeIdentifiers|Charts)' "$f"; then
     SOURCES+=("$f")

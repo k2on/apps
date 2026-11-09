@@ -13,7 +13,9 @@ path = "src/lib.rs"
 [dependencies]
 ark = { path = "../../rust/ark" }
 ark-app = { path = "../../ui/rust/app" }
-ark-modules = { path = "../../rust/ark-modules" }
+# The device modules money's update asks of (money/modules.toml).
+ark-haptics = { path = "../../modules/haptics" }
+ark-clipboard = { path = "../../modules/clipboard" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
 money-domain = { path = "../domain" }
@@ -23,7 +25,7 @@ arkui = { path = "../../ui/rust/arkui", optional = true }
 
 [features]
 # The state's records and messages as UniFFI's, for the phones (money/ffi).
-ffi = ["dep:uniffi", "money-domain/ffi", "ark-modules/ffi"]
+ffi = ["dep:uniffi", "money-domain/ffi", "ark-haptics/ffi", "ark-clipboard/ffi"]
 # The writer of the phones' screens.
 gen = ["dep:ark-ui-gen"]
 # `accounts::iced(&page)`: the views as iced draws them.

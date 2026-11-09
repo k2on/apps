@@ -22,7 +22,12 @@ money-domain = { path = "../domain", features = ["ffi"] }
 # records and messages, and the device modules they ask.
 money-app = { path = "../app", features = ["ffi"] }
 ark-app = { path = "../../ui/rust/app" }
-ark-modules = { path = "../../rust/ark-modules", features = ["ffi"] }
+# The device modules money opts into (money/modules.toml), as the phone's
+# foreign traits; their Swift and Kotlin are each module's swift/, kotlin/.
+ark-module = { path = "../../ui/rust/module", features = ["ffi"] }
+ark-haptics = { path = "../../modules/haptics", features = ["ffi"] }
+ark-clipboard = { path = "../../modules/clipboard", features = ["ffi"] }
+ark-share = { path = "../../modules/share", features = ["ffi"] }
 # The demo's household (`money/seed`), which `money_demo` opens on.
 money-seed = { path = "../seed", default-features = false }
 serde_json = { workspace = true }

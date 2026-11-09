@@ -10,9 +10,9 @@
 //! ArkUI's parts, once, for every toolkit.
 
 use ark::row::Id;
-use ark_app::{App, Command, Data, ModuleCall};
+use ark_app::{App, Command, Data};
 use ark_format::NumberStyle;
-use ark_modules::Haptic;
+use ark_haptics::{perform, Haptic};
 use money_domain::accounts::{net_worth, shelves, AccountKind, Shelving};
 use money_domain::dates::day_of_ms;
 use money_domain::routes::Route;
@@ -304,7 +304,7 @@ impl App for Accounts {
                     d.on_budget = kind.on_budget_by_default();
                 });
                 if stepped {
-                    out.push(Command::ask(ModuleCall::Haptic { haptic: Haptic::Selection }));
+                    out.push(Command::ask(perform(Haptic::Selection)));
                 }
                 out
             }
@@ -372,9 +372,7 @@ impl App for Accounts {
                 None => vec![],
             },
             M::CopyBalance { id } => match find(accounts, &id) {
-                Some(a) => vec![Command::ask(ModuleCall::Copy {
-                    text: ark_format::amount(a.balance, &s.style.0),
-                })],
+                Some(a) => vec![Command::ask(ark_clipboard::copy(ark_format::amount(a.balance, &s.style.0)))],
                 None => vec![],
             },
             M::Sent { closed, refused } => match refused {
@@ -389,7 +387,7 @@ impl App for Accounts {
                             Haptic::Success
                         }
                     };
-                    vec![Command::ask(ModuleCall::Haptic { haptic })]
+                    vec![Command::ask(perform(haptic))]
                 }
             },
         }

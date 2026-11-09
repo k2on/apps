@@ -19,7 +19,7 @@
 //!   message when the update asked ([`Command::Send`]'s `then`).
 //! - **navigation** is the domain's `Route` ([`Command::Open`]): the host
 //!   hands it to its Navigator, its back stack, its address bar.
-//! - **the device** is [`ark_modules`]: a [`ModuleCall`] the host carries
+//! - **the device** is [`ark_module`]: a [`ModuleCall`] the host carries
 //!   out through what it registered, its answer a message again, now or
 //!   (the camera) later ([`Runtime::answer`]).
 //!
@@ -34,7 +34,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 
-pub use ark_modules::{self as modules, ModuleAnswer, ModuleCall, Modules};
+pub use ark_module::{self as modules, ModuleAnswer, ModuleCall, Modules};
 use ark_peer::store::{Store, ViewKey};
 
 /// An app: its state, its messages, how one changes the other, and what

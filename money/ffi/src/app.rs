@@ -4,15 +4,19 @@
 //! ([`AccountsApp::page`]) and sends it messages ([`AccountsApp::send`]);
 //! the app's update runs here, its changes go to the peer, its routes and
 //! the shell's own work to the [`AppShell`] the phone gave, its module
-//! calls to the modules the phone registered (`ark_modules`, UniFFI
-//! foreign traits the ArkUI libraries implement).
+//! calls to the modules the phone registered (money/modules.toml: each a
+//! crate under modules/, a UniFFI foreign trait its swift/ and kotlin/
+//! implement).
 
 use std::sync::{Arc, Mutex};
 
 use ark_app::{Host, Inbox, Runtime, Ticket};
+use ark_app::{ModuleCall, Modules};
+use ark_clipboard::Clipboard;
 use ark_ffi::Refusal;
-use ark_modules::{Camera, Clipboard, Haptics, ModuleCall, Modules, Share};
+use ark_haptics::Haptics;
 use ark_peer::store::Store;
+use ark_share::Share;
 use money_app::accounts::{Accounts, AccountsMsg, AccountsPage};
 use money_domain::{self as domain, routes::Route, MoneyChange};
 
@@ -121,18 +125,10 @@ impl AccountsApp {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 
-    /// The phone's modules, registered once at startup; any may be none.
-    pub fn use_modules(
-        &self,
-        haptics: Option<Arc<dyn Haptics>>,
-        clipboard: Option<Arc<dyn Clipboard>>,
-        share: Option<Arc<dyn Share>>,
-        camera: Option<Arc<dyn Camera>>,
-    ) {
+    /// The phone's modules, the ones money opts into (money/modules.toml),
+    /// registered once at startup; any may be none.
+    pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
-        m.haptics = haptics;
-        m.clipboard = clipboard;
-        m.share = share;
-        m.camera = camera;
+        m.set(haptics).set(clipboard).set(share);
     }
 }

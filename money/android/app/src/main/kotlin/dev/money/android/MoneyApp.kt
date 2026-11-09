@@ -88,6 +88,8 @@ import dev.arkui.RouteArg
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
+import dev.arkui.modules.PhoneClipboard
+import dev.arkui.modules.PhoneHaptics
 import uniffi.money_domain.Route
 import uniffi.money_domain.TxnLine
 import uniffi.money_domain.newDraft
