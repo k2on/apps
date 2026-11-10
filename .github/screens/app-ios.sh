@@ -65,15 +65,18 @@ appearance() {
 # Which device's, as its directory says (ios, ipad-portrait, …): the
 # results of each its own.
 kind=$(basename "$out")
-for theme in light dark; do
+# Both themes, or those THEMES names (a dry run's), signed in in the first.
+themes=${THEMES:-light dark}
+first=${themes%% *}
+for theme in $themes; do
   echo "$app $kind $theme"
   appearance "$theme"
   # The test's own lines, and why it failed if it did; its whole log beside its results.
   status=0
-  # Signed in once, in light: dark opens signed in already, and with no
+  # Signed in once, in the first (light): the next opens signed in already, and with no
   # server given does not wait for the server's page to be there.
   signin=$server
-  if [ "$theme" != light ] || [ -n "${SIGNED_IN:-}" ]; then signin=; fi
+  if [ "$theme" != "$first" ] || [ -n "${SIGNED_IN:-}" ]; then signin=; fi
   TEST_RUNNER_APP_BUNDLE="$bundle" TEST_RUNNER_APP_SERVER="$signin" TEST_RUNNER_APP_USER="$user" \
   TEST_RUNNER_APP_SHOTS="$shots" TEST_RUNNER_APP_OUT="$out/$theme" TEST_RUNNER_APP_ORIENTATION="$orientation" \
     xcodebuild test-without-building -xctestrun "$xctestrun" \

@@ -265,6 +265,17 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   cache): its artifacts are what it took. A `workflow_run` always runs
   main's file, so a change to it is tried this way before it is merged.
 
+- **The design loop**: a dry run by hand can take only what an iteration
+  looks at. `apps` (`money`), `devices` (any of `android`,
+  `android-tablet`, `fold`, `iphone`, `ipad`, `mac`, `desktop`), `shots`
+  (ids, `budget insights`: of the phones' and the desktop's shots.json,
+  only those, `only-shots.sh`) and `themes` (`light` or `dark`); each
+  left empty takes all, as before. Only with `dry`: a published or
+  compared phone is always taken whole. Every device asked for is a job
+  of its own, at once: Android's phone, tablet and Fold each per app and
+  theme, and on the Macs each app's iPhone, iPad and Mac window (the
+  driver and the apps fetched from the cache, nix's builds of them).
+
 ## The larger screens
 
 Each is a "phone", a directory beside `android/`, `ios/` and `desktop/`

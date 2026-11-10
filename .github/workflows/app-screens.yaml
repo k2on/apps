@@ -121,6 +121,24 @@ on:
         type: boolean
         required: false
         default: false
+      # The design loop's: with `dry`, only what an iteration looks at.
+      # Each empty takes everything, as before.
+      apps:
+        description: "With dry: only these apps (space-separated; empty, all)"
+        required: false
+        default: ""
+      devices:
+        description: "With dry: only these devices: android android-tablet fold iphone ipad mac desktop (empty, all)"
+        required: false
+        default: ""
+      shots:
+        description: "With dry: only these shots, by id (space-separated; empty, all)"
+        required: false
+        default: ""
+      themes:
+        description: "With dry: light or dark alone (empty, both)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -171,6 +189,10 @@ jobs:
       desktop: ${{ steps.which.outputs.desktop }}
       # The same, as JSON lists: each app a job of its own.
       android-json: ${{ steps.which.outputs.android-json }}
+      # Android's devices and every phone's themes, as JSON lists: all of
+      # them unless a dry run by hand asked for fewer.
+      android-devices: ${{ steps.which.outputs.android-devices }}
+      themes: ${{ steps.which.outputs.themes }}
       ios-json: ${{ steps.which.outputs.ios-json }}
       desktop-json: ${{ steps.which.outputs.desktop-json }}
       # Each iPhone app taken, and the hash of what it is taken from
@@ -200,6 +222,11 @@ jobs:
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
           BY_HAND: ${{ github.event_name == 'workflow_dispatch' }}
           INPUT_PR: ${{ inputs.pr }}
+          DRY: ${{ inputs.dry }}
+          ONLY_APPS: ${{ inputs.apps }}
+          ONLY_DEVICES: ${{ inputs.devices }}
+          ONLY_SHOTS: ${{ inputs.shots }}
+          ONLY_THEMES: ${{ inputs.themes }}
         run: |
           repo=${{ github.repository }}
           pr="" mode="" sha=$SHA branch=${BRANCH:-$GITHUB_REF_NAME}
@@ -231,22 +258,52 @@ jobs:
             fetched
             names=$(nix eval --json "$src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null) || names=[]
             for a in $ios; do
-              rows+=("$a iphone")
-              if grep -qE 'TARGETED_DEVICE_FAMILY: *"?[0-9,]*2' "$src/$a/ios/project.yml" 2> /dev/null; then rows+=("$a ipad"); fi
-              if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then rows+=("$a mac"); fi
+              if wanted iphone; then rows+=("$a iphone"); fi
+              if wanted ipad && grep -qE 'TARGETED_DEVICE_FAMILY: *"?[0-9,]*2' "$src/$a/ios/project.yml" 2> /dev/null; then rows+=("$a ipad"); fi
+              if wanted mac && jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then rows+=("$a mac"); fi
             done
             printf '%s\n' "${rows[@]}" | jq -Rsc 'split("\n") | map(select(. != "") | split(" ") | {app: .[0], device: .[1]})'
           }
+          # The loop's filters (a dry run by hand): whether a device, an
+          # app, is asked for; each empty asks for all.
+          wanted() { [ -z "${ONLY_DEVICES// /}" ] || grep -qw -- "$1" <<< "$ONLY_DEVICES"; }
+          asked() { [ -z "${ONLY_APPS// /}" ] || grep -qw -- "$1" <<< "$ONLY_APPS"; }
+          if [ -n "${ONLY_APPS// /}${ONLY_DEVICES// /}${ONLY_SHOTS// /}${ONLY_THEMES// /}" ] && [ "$DRY" != true ]; then
+            echo "::error::apps, devices, shots and themes are for a dry run (dry): a published or compared phone is taken whole"
+            exit 1
+          fi
+          for d in $ONLY_DEVICES; do
+            case $d in android | android-tablet | fold | iphone | ipad | mac | desktop) ;; *) echo "::error::no such device: $d"; exit 1 ;; esac
+          done
+          for t in $ONLY_THEMES; do
+            case $t in light | dark) ;; *) echo "::error::no such theme: $t"; exit 1 ;; esac
+          done
           # What was decided, as the jobs read it. Nothing for this event
           # (ios's start, a PR's build ending, a PR closed, nothing moved):
           # nothing to do, publish included.
           said() {
+            local a k keep devices=() themes
+            # A dry run by hand that asked for fewer: the rest left out.
+            for k in android ios desktop; do
+              keep=""
+              for a in ${!k}; do if asked "$a"; then keep="$keep $a"; fi; done
+              printf -v "$k" '%s' "$keep"
+            done
+            wanted android || wanted android-tablet || wanted fold || android=""
+            wanted iphone || wanted ipad || wanted mac || ios=""
+            wanted desktop || desktop=""
+            if wanted android; then devices+=(phone); fi
+            if wanted android-tablet; then devices+=(tablet); fi
+            if wanted fold; then devices+=(fold); fi
+            themes=${ONLY_THEMES:-light dark}
             android=${android# } ios=${ios# } desktop=${desktop# }
             [ -n "$android$ios$desktop" ] || mode=
             {
               echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
               echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
               echo "ios-matrix=$(macs)"
+              echo "android-devices=$(printf '%s\n' "${devices[@]}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
+              echo "themes=$(tr ' ' '\n' <<< "$themes" | jq -Rsc 'split("\n") | map(select(. != ""))')"
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
@@ -401,7 +458,7 @@ jobs:
         # at once rather than one after the other (harken's was eight
         # minutes of its ten). Their captures meet in the same
         # <app>/android/ (merge-multiple), whole when both are there.
-        theme: [light, dark]
+        theme: ${{ fromJSON(needs.which.outputs.themes) }}
         # The phone (a Pixel 7), a Pixel Tablet in landscape, and a Pixel
         # Fold open and then folded (apps-android.sh): the same APK, driver
         # and shots on each, each its own job. The tablet and the Fold were
@@ -409,7 +466,7 @@ jobs:
         # and one wait for the APK; that job was the longest of a run
         # (harken's 16.7 minutes in app-screens 42728322097, the Fold's 10.3
         # after the tablet's 5.1), and those are a minute or two each.
-        device: [phone, tablet, fold]
+        device: ${{ fromJSON(needs.which.outputs.android-devices) }}
     name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
@@ -427,6 +484,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+
+      # A dry run's `shots`: only those (only-shots.sh); else all.
+      - if: inputs.shots != ''
+        name: The shots asked for
+        env:
+          ONLY: ${{ inputs.shots }}
+        run: bash .github/screens/only-shots.sh "$ONLY" "$APPS"
 
       - name: Enable KVM
         run: |
@@ -618,6 +682,8 @@ jobs:
     env:
       APPS: ${{ matrix.app }}
       DEVICE: ${{ matrix.device }}
+      # Both, unless a dry run asked for one (app-ios.sh).
+      THEMES: ${{ join(fromJSON(needs.which.outputs.themes), ' ') }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
     steps:
@@ -660,6 +726,13 @@ jobs:
           ref: ${{ env.SOURCE }}
           path: src
           persist-credentials: false
+
+      # A dry run's `shots`: only those (only-shots.sh); else all.
+      - if: steps.open.outputs.open == 'true' && inputs.shots != ''
+        name: The shots asked for
+        env:
+          ONLY: ${{ inputs.shots }}
+        run: bash .github/screens/only-shots.sh "$ONLY" "$APPS"
 
       # The Xcode the flake pins (flake.nix, `xcode`): its simulators boot
       # here, and if an app must be built, it is put in the store as it is.
@@ -946,6 +1019,13 @@ jobs:
           ref: ${{ env.SOURCE }}
           path: src
           persist-credentials: false
+
+      # A dry run's `shots`: only those (only-shots.sh); else all.
+      - if: inputs.shots != ''
+        name: The shots asked for
+        env:
+          ONLY: ${{ inputs.shots }}
+        run: bash .github/screens/only-shots.sh "$ONLY" "$APPS"
 
       - uses: DeterminateSystems/nix-installer-action@main
         with:
