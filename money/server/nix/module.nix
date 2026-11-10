@@ -57,9 +57,10 @@ in
       type = lib.types.nullOr lib.types.package;
       default = null;
       description = ''
-        The browser client to serve at `/`, a static directory. Null serves
-        the socket alone; there is no browser client yet (the Leptos one,
-        ui/docs/app.md, is not written).
+        The browser client to serve at `/`, a static directory, in the same
+        process as the socket and sign-in. Null serves the build the
+        package carries (money-web, the SPA: ui/docs/app.md, "The
+        Browser's Modes").
       '';
     };
 

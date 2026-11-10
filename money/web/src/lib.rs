@@ -606,7 +606,11 @@ impl WebApp for MoneyWeb {
         // (`?screen=budget&inspector=1`).
         let mut args = vec![];
         for key in ["screen", "inspector", "appearance", "pane", "settingsTab"] {
-            if let Some(v) = route.get(key).map(str::to_string).or_else(|| arkui_web::page::args().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)) {
+            if let Some(v) = route
+                .get(key)
+                .map(str::to_string)
+                .or_else(|| arkui_web::page::args().into_iter().find(|(k, _)| k == key).map(|(_, v)| v))
+            {
                 args.push(format!("-{key}"));
                 args.push(v);
             }

@@ -497,7 +497,14 @@ impl Route {
     pub fn query_url(&self) -> String {
         match self.query.is_empty() {
             true => String::new(),
-            false => format!("?{}", self.query.iter().map(|(k, v)| format!("{}={}", encode(k), encode(v))).collect::<Vec<_>>().join("&")),
+            false => format!(
+                "?{}",
+                self.query
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
+                    .collect::<Vec<_>>()
+                    .join("&")
+            ),
         }
     }
 
@@ -607,7 +614,10 @@ mod tests {
     fn a_link_to_a_page_not_written_is_found() {
         let pages = vec![
             ("/".to_string(), r#"<a href="/budget/">B</a><link href="/favicon.svg">"#.to_string()),
-            ("/budget/".to_string(), r#"<button formaction="/budget/?inspector=1"></button><a href="https://x.org/">x</a>"#.to_string()),
+            (
+                "/budget/".to_string(),
+                r#"<button formaction="/budget/?inspector=1"></button><a href="https://x.org/">x</a>"#.to_string(),
+            ),
         ];
         assert!(dangling(&pages, "/").is_empty());
         let mut more = pages.clone();

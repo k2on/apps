@@ -685,7 +685,14 @@ pub fn prerender<A: WebApp>(
             let pressed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| page::press(i))).unwrap_or(false);
             let to = s.app().route();
             let leads_to = pressed && s.app().changes() == before && to.query.is_empty() && to != *r && declared.contains(&to);
-            leads.insert(i, if leads_to { Lead::To(format!("{base}{}", to.path_url())) } else { Lead::Stays });
+            leads.insert(
+                i,
+                if leads_to {
+                    Lead::To(format!("{base}{}", to.path_url()))
+                } else {
+                    Lead::Stays
+                },
+            );
             if pressed {
                 kept = Some(s);
             }

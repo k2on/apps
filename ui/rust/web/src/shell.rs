@@ -68,7 +68,11 @@ pub fn widths() -> (f64, f64, f64) {
                 })
                 .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
         };
-        let found = if cfg!(target_arch = "wasm32") { computed().or_else(|| written(name)) } else { written(name) };
+        let found = if cfg!(target_arch = "wasm32") {
+            computed().or_else(|| written(name))
+        } else {
+            written(name)
+        };
         found.unwrap_or_else(|| panic!("theme.css has no {name}"))
     };
     let t = (read("--ark-compact-width"), read("--ark-expanded-width"), read("--ark-sidebar-min-width"));

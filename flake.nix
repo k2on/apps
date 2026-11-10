@@ -256,7 +256,15 @@
           arkdb = crate { packageId = "arkdb"; };
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
-          money-server = crate { packageId = "money-server"; };
+          # money's server is one process for everything the household
+          # reaches: the sync socket, sign-in, the importer and the browser
+          # client, whose build it carries (MONEY_WEB, unless the
+          # environment names another).
+          money-server-bin = crate { packageId = "money-server"; };
+          money-server = pkgs.runCommand "money-server-${money-server-bin.version or "0"}" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+            mkdir -p $out/bin
+            makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${money-web}
+          '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
           # that app's server boots seeded from; money's is its core's `cli`.
           money-seed = crate { packageId = "money-core"; features = [ "cli" ]; };
