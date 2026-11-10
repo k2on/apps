@@ -34,6 +34,11 @@ size() {
   adb exec-out screencap ${d:+-d "$d"} -p | python3 -I -c 'import struct, sys; d = sys.stdin.buffer.read(24); print(*struct.unpack(">II", d[16:24]))'
 }
 
+# The first display's id, as SurfaceFlinger lists them.
+first_display() {
+  adb shell dumpsys SurfaceFlinger --display-id 2>/dev/null | tr -d '\r' | sed -n 's/^Display \([0-9]*\).*/\1/p' | head -1
+}
+
 # A Pixel Fold's emulator has two displays, the inner and the outer, and
 # folded it turns the outer on while screencap still draws the first
 # (app-screens 42869626745: device state CLOSED, `wm size` the outer's
@@ -73,8 +78,10 @@ moved() {
 # change size. What each said is printed.
 posture() {
   local before states name id
-  # Opened, the first display again.
-  [ "$1" = fold ] || unset SCREENCAP_DISPLAY
+  # Opened, the first display again: named, as a device of two displays
+  # wants (screencap with none writes "[Warning] Multiple displays were
+  # found…" into the picture, screens-pr-100's corrupt Fold PNGs).
+  if [ "$1" != fold ]; then SCREENCAP_DISPLAY=$(first_display); export SCREENCAP_DISPLAY; fi
   before=$(size)
   echo "$1: the emulator says $(adb emu "$1" 2>&1 | tr -d '\r' | tr '\n' ' ')"
   moved "$before" && return 0
@@ -118,6 +125,10 @@ case $device in
   fold)
     adb shell settings put system accelerometer_rotation 0
     adb shell settings put system user_rotation 0
+    # Every picture of the Fold names its display (posture() says why).
+    SCREENCAP_DISPLAY=$(first_display)
+    export SCREENCAP_DISPLAY
+    echo "fold: the first display is ${SCREENCAP_DISPLAY:-unknown}"
     ;;
 esac
 

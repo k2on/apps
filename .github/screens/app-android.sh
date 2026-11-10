@@ -327,8 +327,17 @@ for theme in ${THEMES:-light dark}; do
       tree
       adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/$theme/$id.png"
     fi
+    # A picture, or the capture fails: a warning written in front of one
+    # (screencap on two displays, none named) is no PNG.
+    if [ "$(head -c 8 "$out/$theme/$id.png" | od -An -tx1 | tr -d ' \n')" != 89504e470d0a1a0a ]; then
+      echo "::error::$app $(basename "$out") $theme $id: the screenshot is not a PNG ($(head -c 60 "$out/$theme/$id.png" | tr -cd '[:print:]'))"
+      exit 1
+    fi
   done 3< <(jq -c '.shots[]' "$shots")
 done
+
+# Each shot its own screen: none the same picture as another.
+bash "$here/distinct.sh" "$out" || exit 1
 
 # The device, from what it drew: the screen as it was taken (a tablet's
 # landscape, a Fold's open or folded), not the panel's own size.
