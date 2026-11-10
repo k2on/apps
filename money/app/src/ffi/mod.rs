@@ -1,10 +1,14 @@
-//! money's library for its phones (`docs/plan-v5.md` §1.16, N3): the
-//! bridge (`ark-ffi`) with money's domain linked in. The apps load this one
-//! shared library, open their replica with [`money_open`] — or the demo's
-//! household with [`money_demo`] — and send every change of the domain's
-//! through it as a `MoneyChange` ([`Session::send`]). Every view hands over
-//! UniFFI's records, and the records carry the domain's rules as methods
-//! (`money_domain`'s `ffi` feature): nothing crosses as JSON.
+//! money for its phones (`docs/plan-v5.md` §1.16, N3), under the crate's
+//! `ffi` feature: the bridge (`ark-ffi`) with money's domain and its
+//! screens' runtime, exported through UniFFI. The phones' library is no
+//! crate of money's: nix generates it (nix/ark-app.nix, `money-ffi`), a
+//! shim that links this crate as a static library for the iPhone and the
+//! Mac and a shared one for Android. The apps open their replica with
+//! [`money_open`] — or the demo's household with [`money_demo`] — and
+//! send every change of the domain's through it as a `MoneyChange`
+//! ([`Session::send`]). Every view hands over UniFFI's records, and the
+//! records carry the domain's rules as methods (`money_domain`'s `ffi`
+//! feature): nothing crosses as JSON.
 //!
 //! Signing in is `ark_auth::onboarding`'s machine, through the bridge: the server's page
 //! (`Effect::Browse`, redirecting to `money://auth`), the code exchanged
@@ -14,13 +18,15 @@
 //! [`money_send`] is a mutation whose own refusal is one too. A [`Hall`] is
 //! a money server in the same process, over memory, that devices dial
 //! without a socket: what the apps' tests sync through.
+//!
+//! The session's views ([`MoneyView`], [`Budget`], [`Holding`]) are what
+//! the screens still hand-written in money/native read; they go as those
+//! screens move into this crate's views.
 
 use std::sync::Arc;
 
 use ark_ffi::{Login, Peer, Refusal};
 use ark_peer::Config;
-
-uniffi::setup_scaffolding!();
 
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)

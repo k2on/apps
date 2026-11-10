@@ -18,10 +18,10 @@ import dev.arkui.LocalGlyphs
 import dev.arkui.LocalRowMark
 import dev.arkdb.ffi.Id
 import dev.arkui.LocalTabFrame
-import dev.money.ffi.AccountsApp
-import dev.money.ffi.AppShell
-import dev.money.ffi.Session
-import dev.money.ffi.ShellApp
+import uniffi.money_app.AccountsApp
+import uniffi.money_app.AppShell
+import uniffi.money_app.Session
+import uniffi.money_app.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import uniffi.ark_clipboard.Clipboard

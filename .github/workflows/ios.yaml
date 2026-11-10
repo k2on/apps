@@ -64,7 +64,6 @@ on:
       - "money/icon.svg"
       - "ui/prebuild.py"
       - "nix/ark-app.nix"
-      - "money/ffi/**"
       - "money/domain/**"
       # The demo's household, which money's library links for its demo.
       - "money/seed/**"

@@ -1,9 +1,10 @@
+#![cfg(feature = "ffi")]
 //! The demo through the bridge: the seeded household read typed, as the
 //! apps' previews and screenshots draw it, and its bank's syncs.
 
 use ark_ffi::{Peer, Taken};
+use money_app::ffi::{money_add_months, money_demo, DemoBank};
 use money_domain::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
-use money_ffi::{money_add_months, money_demo, DemoBank};
 use money_seed as seed;
 use std::sync::Arc;
 

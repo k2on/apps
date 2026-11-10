@@ -78,9 +78,9 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/app" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" "money/web" ];
-      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
-      # money/ffi's tests hold to their domains (`tests/gen.rs`).
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/app" "money/iced" "money/server" "harken/seed" "money/seed" "money/web" ];
+      # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
+      # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
         "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
       ];
@@ -449,12 +449,11 @@
           # UniFFI's defaults.
           ffiBindings = { lib, language, out ? "$TMPDIR/bindings" }:
             let
-              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" "money/ffi/uniffi.toml" "harken/ffi/uniffi.toml" ];
+              roots = only [ "rust/ark-ffi/uniffi.toml" "rust/ark-auth/uniffi.toml" "harken/ffi/uniffi.toml" ];
               config = pkgs.writeText "uniffi-roots.toml" ''
                 [crate-roots]
                 ark_ffi = "${roots}/rust/ark-ffi"
                 ark_auth = "${roots}/rust/ark-auth"
-                money_ffi = "${roots}/money/ffi"
                 harken_ffi = "${roots}/harken/ffi"
               '';
             in
@@ -481,7 +480,9 @@
           ffiHostLib = { crate, so, features ? [ "default" ], ... }:
             "${(rustCrates.build { inherit pkgs rust features; packageId = crate; }).lib}/lib/lib${so}${pkgs.stdenv.hostPlatform.extensions.sharedLibrary}";
           harkenFfi = { name = "harken"; crate = "harken-ffi"; so = "harken_ffi"; };
-          moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; };
+          # An Ark app's library is the shim nix/ark-app.nix generates over
+          # its crate (`ark`: its app.toml), no crate of the app's own.
+          moneyFfi = { name = "money"; crate = "money-ffi"; so = "money_ffi"; ark = arkApp.read "money"; };
           # The ABIs the APK carries — a phone, an old phone, an emulator —
           # each nixpkgs for that Android against API 26 (the app's minSdk),
           # with the NDK's prebuilt clang, which links each and compiles
@@ -499,10 +500,11 @@
               };
             };
           };
-          # An app's library for its phones (`harken/ffi`, `money/ffi`) as the
+          # An app's library for its phones (`harken/ffi`; money's the
+          # generated shim over money/app) as the
           # APK carries it: `name` the app, `crate` its ffi crate, `so` the
           # library's name (`harken_ffi`).
-          androidPhone = { name, crate, so }:
+          androidPhone = { name, crate, so, ark ? null }:
             let
               hostLib = ffiHostLib { inherit crate so; };
               # `so` for one Android ABI, stripped, as `jniLibs/<abi>/lib<so>.so`.
@@ -541,7 +543,8 @@
               chmod 755 $out/host/lib${so}.so
             '';
           harken-android-lib = androidPhone harkenFfi;
-          # money's (`money/ffi`): what its APK builds over.
+          # money's (the generated `money-ffi` over money/app): what its APK
+          # builds over.
           money-android-lib = androidPhone moneyFfi;
 
           # The Android SDK the APK is built with. Google ships one for
@@ -831,8 +834,10 @@
               echo ${if f == "src/lib.rs" then "" else "'fn main() {}'"} > ${dir}/${f}
             '') (lib.filter has [ "src/lib.rs" "src/main.rs" "build.rs" ] ++ bins)) dirs;
           # A source of the workspace's manifests and lockfile, the crates in
-          # `real` as they are, every other one a stand-in.
-          rustSource = real: {
+          # `real` as they are, every other one a stand-in; and an Ark app's
+          # phones' library (`ark`, its app.toml), the shim nix/ark-app.nix
+          # writes, made a member at `<app>/.ffi`.
+          rustSource = { real, ark ? null }: {
             src = only ([ "rust/Cargo.toml" "rust/Cargo.lock" ] ++ real ++ map (d: "${d}/Cargo.toml") rustMembers);
             sourceRoot = "source/rust";
             # Unpacked read-only but for the source root: the stand-ins are
@@ -840,11 +845,22 @@
             postUnpack = ''
               chmod -R u+w source
               (cd source && ${stubs (lib.subtractLists real rustMembers)})
+            '' + lib.optionalString (ark != null) ''
+              mkdir -p source/${ark.dir}/.ffi
+              cp ${pkgs.writeText "Cargo.toml" (arkApp.ffiCargo ark)} source/${ark.dir}/.ffi/Cargo.toml
+              cp ${pkgs.writeText "lib.rs" (arkApp.ffiSource ark)} source/${ark.dir}/.ffi/lib.rs
+              sed -i 's|^members = \[|members = ["../${ark.dir}/.ffi", |' source/rust/Cargo.toml
             '';
           };
+          # The crates a phone's library is built from: an Ark app's crate's,
+          # or the library crate's own.
+          phoneSource = { crate, ark ? null }:
+            rustSource { real = phoneCrates (if ark == null then crate else ark.crate); inherit ark; };
           # The environment each iOS cargo build is in, and its cargo build of
           # `crate` for each of `targets`.
-          iosCargo = { crate, targets, xcode }:
+          # An Ark app's shim is no member of the lockfile, which cargo then
+          # adds it to (`locked` false): offline, over the vendored crates.
+          iosCargo = { crate, targets, xcode, locked ? true }:
             let tc = if xcode == null then "/usr/bin" else "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin";
             in {
               inherit tc;
@@ -885,14 +901,14 @@
                 ${lib.concatMapStrings (t: let u = lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] t); l = lib.replaceStrings [ "-" ] [ "_" ] t; in ''
                   export CC_${l}=${tc}/clang CXX_${l}=${tc}/clang++ AR_${l}=${tc}/ar
                   export CARGO_TARGET_${u}_LINKER=${tc}/clang
-                  cargo build --release --offline --locked -p ${crate} --lib --no-default-features --target ${t}
+                  cargo build --release --offline ${lib.optionalString locked "--locked"} -p ${crate} --lib --no-default-features --target ${t}
                 '') targets}
               '';
             };
           # The lockfile's crates, compiled for `targets` as `crate` links
           # them: its `target/`, which a kernel starts from.
-          iosDeps = { name, crate, targets, xcode ? null }:
-            let c = iosCargo { inherit crate targets xcode; };
+          iosDeps = { name, crate, targets, xcode ? null, ark ? null }:
+            let c = iosCargo { inherit crate targets xcode; locked = ark == null; };
             in pkgs.stdenv.mkDerivation ({
               pname = "${name}-ios-deps";
               version = "0.1.0";
@@ -905,7 +921,7 @@
               installPhase = "mkdir -p $out && cp -r target $out/";
               dontFixup = true;
               meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-            } // rustSource [ ]);
+            } // rustSource { real = [ ]; inherit ark; });
           # One app's: `name`, `crate` and `so` as `androidPhone`'s, the
           # framework's name, and its `targets`. With `xcode`, the pinned
           # Xcode (`xcode` below), it is built from the runner's installed
@@ -913,10 +929,10 @@
           # in; without, from whatever Xcode the builder has selected,
           # unsandboxed. The Swift is UniFFI's from the library built for
           # this Mac.
-          iosPhone = { name, crate, so, framework, xcode ? null, targets ? iosTargets }:
+          iosPhone = { name, crate, so, framework, xcode ? null, targets ? iosTargets, ark ? null }:
             let
-              c = iosCargo { inherit crate targets xcode; };
-              deps = iosDeps { inherit name crate targets xcode; };
+              c = iosCargo { inherit crate targets xcode; locked = ark == null; };
+              deps = iosDeps { inherit name crate targets xcode ark; };
             in
             pkgs.stdenv.mkDerivation ({
               pname = "${name}-ios-xcframework${lib.optionalString (targets != iosTargets) "-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}"}";
@@ -981,7 +997,7 @@
                 cp $TMPDIR/bindings/swift/*.swift ark-ffi/swift/Typed.swift $out/swift/
               '';
               meta.platforms = [ "aarch64-darwin" "x86_64-darwin" ];
-            } // rustSource (phoneCrates crate));
+            } // phoneSource { inherit crate ark; });
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
 
@@ -1334,7 +1350,8 @@
             inherit harken-iced docs screens-ffmpeg screens-python xcodegen;
             inherit money-iced money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
-            # money's library for its phones (money/ffi), as harken's.
+            # money's library for its phones (the generated shim over
+            # money/app), as harken's.
             inherit money-android-lib money-ios-xcframework;
             default = ark;
             inherit harken-apk harken-android-tests harken-android-screens;
@@ -1484,7 +1501,7 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/ffi build
+            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/app (`ffi`) build
             # natively, their tests drive the whole surface in the process (a
             # server in it, a mutate and its refusal, a view's patches, the
             # live space, alone and joining, a hall of devices, money's demo)
@@ -1503,7 +1520,7 @@
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
                   { packageId = "harken-ffi"; member = "harken/ffi"; }
-                  { packageId = "money-ffi"; member = "money/ffi"; }
+                  { packageId = "money-app"; member = "money/app"; features = [ "default" "page" ]; }
                 ];
                 dirs = rustDirs ++ genDirs;
                 postCheck = ''
@@ -1512,9 +1529,9 @@
                   grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
-                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/dev/money/ffi/money_ffi.kt"
+                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/uniffi/money_app/money_app.kt"
                   grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
-                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_ffi.swift"
+                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_app.swift"
                   # Every client's formatting, linked into each library.
                   grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
                   grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"

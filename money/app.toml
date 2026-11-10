@@ -63,3 +63,10 @@ dependencies = [
 
 [fdroid]
 metadata = "fdroid/metadata/us.koon.money.yml"
+
+[ffi]
+# The features of money's crate each phone's library links: Android finds
+# a receipt's page in a frame with the corner model in Rust (`page`); the
+# iPhone and the Mac with VisionKit, so with none.
+android = ["page"]
+apple = []

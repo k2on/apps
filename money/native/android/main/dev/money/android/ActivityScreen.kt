@@ -9,7 +9,7 @@
 // sentence, and nothing else.
 package dev.money.android
 
-import dev.money.ffi.MoneyView
+import uniffi.money_app.MoneyView
 import dev.arkui.watch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

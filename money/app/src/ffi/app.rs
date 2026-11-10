@@ -10,6 +10,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::accounts::{Accounts, AccountsMsg, AccountsPage};
+use crate::shell::{MoneyShell, ShellMsg, ShellPage};
 use ark_app::{Host, Inbox, Runtime, Ticket};
 use ark_app::{ModuleCall, Modules};
 use ark_clipboard::Clipboard;
@@ -17,11 +19,9 @@ use ark_ffi::Refusal;
 use ark_haptics::Haptics;
 use ark_peer::store::Store;
 use ark_share::Share;
-use money_app::accounts::{Accounts, AccountsMsg, AccountsPage};
-use money_app::shell::{MoneyShell, ShellMsg, ShellPage};
 use money_domain::{self as domain, routes::Route, MoneyChange};
 
-use crate::Session;
+use crate::ffi::Session;
 
 /// What only the phone's shell can do for a screen: open a route on its
 /// navigator, carry out a native request ("refresh", "reconcile <id>"),

@@ -4312,15 +4312,21 @@ dependencies = [
  "ark",
  "ark-app",
  "ark-clipboard",
+ "ark-ffi",
  "ark-format",
  "ark-haptics",
+ "ark-module",
  "ark-peer",
  "ark-share",
  "ark-ui-gen",
  "arkui",
  "arkui-web",
+ "image",
  "money-domain",
  "money-seed",
+ "serde_json",
+ "tempfile",
+ "tract-onnx",
  "uniffi",
 ]
 
@@ -4336,29 +4342,6 @@ dependencies = [
  "ark-router",
  "serde",
  "serde_json",
- "uniffi",
-]
-
-[[package]]
-name = "money-ffi"
-version = "0.1.0"
-dependencies = [
- "ark",
- "ark-app",
- "ark-clipboard",
- "ark-ffi",
- "ark-format",
- "ark-haptics",
- "ark-module",
- "ark-peer",
- "ark-share",
- "image",
- "money-app",
- "money-domain",
- "money-seed",
- "serde_json",
- "tempfile",
- "tract-onnx",
  "uniffi",
 ]
 

@@ -13,6 +13,8 @@
 uniffi::setup_scaffolding!();
 
 pub mod accounts;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod look;
 pub mod shell;
 

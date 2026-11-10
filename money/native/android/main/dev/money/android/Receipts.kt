@@ -7,7 +7,7 @@
 // (a reading put right), shown as its photo, or taken off.
 package dev.money.android
 
-import dev.money.ffi.MoneyView
+import uniffi.money_app.MoneyView
 import dev.arkui.watch
 import android.content.Context
 import android.graphics.Bitmap

@@ -8,7 +8,7 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import dev.money.ffi.moneyDemo
+import uniffi.money_app.moneyDemo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

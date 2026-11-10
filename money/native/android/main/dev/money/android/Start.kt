@@ -34,10 +34,10 @@ import dev.arkdb.ffi.redeem
 import dev.arkdb.ffi.socketUrl
 import dev.arkui.DeviceLinkShown
 import dev.arkui.server.Probe
-import dev.money.ffi.moneyDemo
-import dev.money.ffi.moneyDomain
-import dev.money.ffi.moneyOpen
-import dev.money.ffi.moneyToday
+import uniffi.money_app.moneyDemo
+import uniffi.money_app.moneyDomain
+import uniffi.money_app.moneyOpen
+import uniffi.money_app.moneyToday
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow

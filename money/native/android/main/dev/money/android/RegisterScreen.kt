@@ -7,7 +7,7 @@
 // cleared balance? Yes locks it; no asks what the bank says and adjusts.
 package dev.money.android
 
-import dev.money.ffi.MoneyView
+import uniffi.money_app.MoneyView
 import dev.arkui.watch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background

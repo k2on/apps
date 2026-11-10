@@ -17,7 +17,7 @@ use money_domain::{
     ReceiptLine, SpendingLine, Summary, TxnLine,
 };
 
-use crate::Sent;
+use crate::ffi::Sent;
 
 type Tag = domain::UniFfiTag;
 type Ffi<T> = <T as Twin<Tag>>::Ffi;
