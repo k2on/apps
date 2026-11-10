@@ -1,0 +1,120 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"5" at 217,81 6x13
+"Settings" at 41,107 53x17
+"On Budget" at 20,138 53x13
+"Checking" at 41,165 60x17
+"$14,166.90" at 160,165 69x16
+"Savings" at 41,192 51x17
+"$6,900.00" at 168,193 61x16
+"Cash" at 41,220 32x17
+"$50.18" at 187,221 42x16
+"Chase Sapphire ••4417" at 41,248 122x17
+"-$583.56" at 175,249 54x16
+"Tracking" at 20,279 43x13
+"Mortgage" at 41,306 62x17
+"-$312,450.00" at 148,307 81x16
+"Retirement" at 41,334 73x17
+"$64,300.00" at 160,335 69x16
+"November 2026" at 297,26 192x29
+"5 transactions need a look →" at 268,61 173x16
+"3 underfunded" at 455,61 89x16
+"$1,284.50" at 970,28 124x29
+"Ready to Assign" at 970,59 97x16
+"+ Category Group" at 268,96 109x16
+"Show hidden categories" at 395,96 144x16
+"Category" at 284,130 322x14
+"Assigned" at 676,130 50x14
+"Activity" at 805,130 41x14
+"Available" at 1046,130 50x14
+"Credit Card Payments" at 307,169 172x18
+"$0.00" at 686,169 44x18
+"-$1,304.38" at 765,169 85x18
+"Chase Sapphire" at 324,222 110x18
+"$0.00" at 686,222 40x18
+"-$1,304.38" at 770,222 76x18
+"Covered" at 902,223 54x17
+"$583.56" at 1020,222 64x18
+"Bills" at 307,277 33x18
+"$2,330.00" at 651,277 79x18
+"-$2,080.00" at 765,277 85x18
+"Rent" at 324,330 33x18
+"$1,850.00" at 655,330 71x18
+"-$1,850.00" at 770,330 76x18
+"100% goal" at 887,331 69x17
+"$0.00" at 1040,330 44x18
+"Electric" at 324,384 52x18
+"$120.00" at 668,384 58x18
+"—" at 832,384 14x18
+"100% goal" at 887,385 69x17
+"$143.73" at 1020,384 64x18
+"Water" at 324,438 42x18
+"$45.00" at 677,438 49x18
+"—" at 832,438 14x18
+"100% goal" at 887,439 69x17
+"$54.62" at 1030,438 54x18
+"Internet" at 324,492 56x18
+"$70.00" at 677,492 49x18
+"-$70.00" at 792,492 54x18
+"100% goal" at 887,493 69x17
+"$0.00" at 1040,492 44x18
+"Phone" at 324,546 43x18
+"$85.00" at 677,546 49x18
+"—" at 832,546 14x18
+"100% goal" at 887,547 69x17
+"$85.00" at 1030,546 54x18
+"Insurance" at 324,600 69x18
+"$160.00" at 668,600 58x18
+"-$160.00" at 783,600 63x18
+"100% goal" at 887,601 69x17
+"$0.00" at 1040,600 44x18
+"Everyday" at 307,655 73x18
+"$1,030.00" at 651,655 79x18
+"-$575.54" at 780,655 70x18
+"Groceries" at 324,708 67x18
+"$650.00" at 668,708 58x18
+"-$456.83" at 783,708 63x18
+"100% goal" at 887,709 69x17
+"$193.17" at 1020,708 64x18
+"Dining Out" at 324,762 75x18
+"$120.00" at 668,762 58x18
+"-$30.17" at 792,762 54x18
+"60% goal" at 895,763 61x17
+"$89.83" at 1030,762 54x18
+"Gas & Transit" at 324,816 95x18
+"$180.00" at 668,816 58x18
+"-$31.11" at 792,816 54x18
+"100% goal" at 887,817 69x17
+"$206.93" at 1020,816 64x18
+"Household" at 324,870 74x18
+"$80.00" at 677,870 49x18
+"-$57.43" at 792,870 54x18
+"100% goal" at 887,871 69x17
+"$22.57" at 1030,870 54x18
+"Chase Sapphire" at 1162,66 141x21
+"Credit Card Payments" at 1162,89 121x14
+"Available Balance" at 1162,115 168x16
+"$583.56" at 1340,114 58x18
+"Cash left over from last month" at 1162,152 185x16
+"$1,887.94" at 1347,152 61x16
+"Assigned this month" at 1162,176 212x16
+"$0.00" at 1374,176 34x16
+"Spending covered, less payments" at 1162,200 181x31
+"-$1,304.38" at 1343,207 65x16
+"Move money" at 1172,244 84x17
+"Card balance" at 1162,306 103x18
+"Owed at the end of the month" at 1162,332 196x16
+"$583.56" at 1358,332 50x16
+"Not covered" at 1162,355 212x16
+"$0.00" at 1374,355 34x16
+"Enough set aside to pay it" at 1162,379 157x16
+"Spending on the card moves what its category had here; what a category could not cover is debt to assign money to." at 1162,403 231x43
+"Hide" at 1148,471 27x16
+"z" at 1136,795 6x14
+"zz" at 1136,817 56x16
+"scroll: the cursor in the middle" at 1200,817 184x16
+"zt" at 1136,837 56x16
+"scroll: the cursor at the top" at 1200,837 164x16
+"zb" at 1136,856 56x16
+"scroll: the cursor at the foot" at 1200,856 168x16
