@@ -584,8 +584,8 @@ jobs:
   # One Mac did them all in turn, the iPad's after every iPhone's, so the
   # loop waited for the sum (an iPhone app's shots some five minutes, an
   # iPad's some ten); each job now pays its own nix, servers and boot (a
-  # few minutes, under which the app comes from the cache and the driver
-  # from the actions cache) and the loop waits for the longest. Each job's
+  # few minutes, under which the app and the driver come from the cache)
+  # and the loop waits for the longest. Each job's
   # shots are its <app>/<device dir>/ in an artifact of its own; whether
   # they were taken whole is its `ios-status-*` artifact, which
   # `ios-inputs` reads to keep an app's hash only when every job of it was.
@@ -644,8 +644,7 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver (app-ios.sh), from the actions cache or built under
-          # the boot; and each app any of whose shots failed (apps-ios.sh,
+          # The driver (app-ios.sh), nix's, under the boot; and each app any of whose shots failed (apps-ios.sh,
           # apps-mac.sh), for which no hash is kept.
           { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
           # What `ios-inputs` reads: closed, or (below) whole or partial.
@@ -712,18 +711,6 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
 
-      # The UI test that drives the apps (drive-ios/), as it was last built
-      # for this Xcode: from the actions cache (this repository's alone, so
-      # nothing built with Xcode goes anywhere public), keyed by its sources,
-      # or built under the boot. Not for the Mac's window, which it does not
-      # drive.
-      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
-        id: driver
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/driver
-          key: drive-ios-${{ env.XCODE }}-${{ hashFiles('.github/screens/drive-ios/**', '.github/screens/app-ios.sh') }}
-
       # The servers' packages (each server.sh's `.#<name>`) and the app
       # (ios-build.sh's), evaluated once, with nothing beside them: under the
       # servers' build, each evaluating a flake at once, it took one to five
@@ -763,23 +750,22 @@ jobs:
               if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
-      # XcodeGen from the flake (the cache's), as every other tool here: no
-      # Homebrew. Then the driver, when the cache had none, built for any
-      # simulator under the boot and the app's build.
+      # The UI test that drives the apps (drive-ios/), as nix builds it with
+      # the pinned Xcode (flake.nix, `screens-drive-ios`), from the scripts'
+      # checkout: the cache's, built once per change to its sources, or
+      # built here under the boot. XcodeGen from the flake, as every other
+      # tool here (no Homebrew), for app-ios.sh should the driver not build.
+      # Not for the Mac's window, which it does not drive.
       - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
-        name: The driver's tools, and the driver
+        name: The driver, and its tools
         run: |
-          bash .github/screens/tools.sh get xcodegen
-          xcodegen=$(nix build --no-link --print-out-paths .#xcodegen)
-          (cd .github/screens/drive-ios && PATH="$xcodegen/bin:$PATH" && xcodegen generate > /dev/null)
-          if [ -f "$DRIVER/built" ]; then echo "the driver, from the cache"; exit 0; fi
-          touch "$RUNNER_TEMP/driver-building"
           bash .github/screens/meanwhile.sh start driver bash -c '
-            start=$(date +%s)
-            xcodebuild build-for-testing -project .github/screens/drive-ios/Drive.xcodeproj -scheme Drive \
-              -destination "generic/platform=iOS Simulator" -derivedDataPath "$DRIVER" \
-              CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO -quiet && touch "$DRIVER/built"
-            echo "built in $(( $(date +%s) - start ))s"'
+            line=$(bash .github/nix-xcode.sh . "$XCODE" screens-drive-ios) || exit 1
+            mkdir -p "$DRIVER"
+            cp -R "${line#* }"/. "$DRIVER/"
+            chmod -R u+w "$DRIVER"
+            ls "$DRIVER"'
+          bash .github/screens/tools.sh get xcodegen
 
       # The app as nix has it at the commit (ios-build.sh): the cache's
       # (what ios built and pushed, as this run starts once it has ended),
@@ -796,9 +782,8 @@ jobs:
       - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
         name: The driver, and the simulator, booted
         run: |
-          if [ -f "$RUNNER_TEMP/driver-building" ]; then
-            bash .github/screens/meanwhile.sh wait driver
-          fi
+          # Built here if nix could not: app-ios.sh builds it then.
+          bash .github/screens/meanwhile.sh wait driver || echo "::warning::the driver from nix failed; app-ios.sh builds it"
           bash .github/screens/meanwhile.sh wait boot
 
       # The iPhone's: the app on the one simulator (apps-ios.sh).

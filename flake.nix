@@ -1089,6 +1089,47 @@
               passthru = { inherit bundle; };
               meta.platforms = [ "aarch64-darwin" ];
             };
+          # The apps' screenshots' UI test (.github/screens/drive-ios, its
+          # XcodeGen project): built for testing for any simulator with the
+          # pinned Xcode, as the apps are (`__noChroot`, for xcodebuild), so
+          # every Mac job of a run fetches it from the cache, built once per
+          # change to its sources (it is no app's: an app's change moves
+          # none of it). $out is the build's products, the .xctestrun beside
+          # Host.app and Drive-Runner.app, which app-ios.sh runs with
+          # `test-without-building -xctestrun`.
+          screens-drive-ios = pkgs.stdenv.mkDerivation {
+            pname = "screens-drive-ios";
+            version = "0.1.0";
+            src = only [ ".github/screens/drive-ios" ];
+            nativeBuildInputs = [ xcodegen ];
+            __noChroot = true;
+            buildPhase = ''
+              runHook preBuild
+              export DEVELOPER_DIR=${xcode.developer}
+              ${xcode.check}
+              export PATH=${xcode.developer}/usr/bin:$PATH
+              export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home USER=nixbld LOGNAME=nixbld
+              mkdir -p "$HOME/Library/Developer/CoreSimulator/Devices"
+              unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+              for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+              done
+              cd .github/screens/drive-ios
+              xcodegen generate
+              xcodebuild build-for-testing -project Drive.xcodeproj -scheme Drive \
+                -destination 'generic/platform=iOS Simulator' -derivedDataPath $TMPDIR/derived \
+                ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+                CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+              runHook postBuild
+            '';
+            installPhase = ''
+              mkdir -p $out
+              cp -R $TMPDIR/derived/Build/Products/. $out/
+            '';
+            dontStrip = true;
+            dontFixup = true;
+            meta.platforms = [ "aarch64-darwin" ];
+          };
           moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
           harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
           # Both slices; and the simulator's alone, which the tests link
@@ -1243,6 +1284,8 @@
             # The iPhone apps from the pinned Xcode: for the simulator (the
             # screenshots), as the archive TestFlight is sent, and the kernel.
             inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive;
+            # The screenshots' UI test, built once per change to it (app-ios.sh).
+            inherit screens-drive-ios;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the

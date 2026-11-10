@@ -38,15 +38,18 @@ mkdir -p "$out"
 xcrun simctl install "$udid" "$bundle_app"
 xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
 
-# The driver, built once: in $DRIVER when set, where the app taken before
-# this one on the same simulator left it built (apps-ios.sh), so it is not
-# built again; nothing in it is any one app's.
+# The driver, built once: in $DRIVER when set, its build's products (the
+# .xctestrun beside the runner): nix's (flake.nix, `screens-drive-ios`,
+# which the workflow puts there), or what the app taken before this one on
+# the same simulator built (apps-ios.sh). Else built here, once; nothing
+# in it is any one app's.
 derived=${DRIVER:-$(mktemp -d)}
-if ! [ -f "$derived/built" ]; then
+xctestrun=$(find "$derived" -maxdepth 3 -name '*.xctestrun' 2>/dev/null | head -1)
+if [ -z "$xctestrun" ]; then
   (cd "$here/drive-ios" && xcodegen generate >/dev/null)
   xcodebuild build-for-testing -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
     -destination "id=$udid" -derivedDataPath "$derived" CODE_SIGNING_ALLOWED=NO -quiet
-  touch "$derived/built"
+  xctestrun=$(find "$derived" -maxdepth 3 -name '*.xctestrun' | head -1)
 fi
 
 # The simulator in `theme`, as it says back (ios.sh says why).
@@ -73,8 +76,8 @@ for theme in light dark; do
   if [ "$theme" != light ] || [ -n "${SIGNED_IN:-}" ]; then signin=; fi
   TEST_RUNNER_APP_BUNDLE="$bundle" TEST_RUNNER_APP_SERVER="$signin" TEST_RUNNER_APP_USER="$user" \
   TEST_RUNNER_APP_SHOTS="$shots" TEST_RUNNER_APP_OUT="$out/$theme" TEST_RUNNER_APP_ORIENTATION="$orientation" \
-    xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
-      -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$app-$kind-$theme.xcresult" \
+    xcodebuild test-without-building -xctestrun "$xctestrun" \
+      -destination "id=$udid" -resultBundlePath "$results/$app-$kind-$theme.xcresult" \
       > "$results/$app-$kind-$theme.log" 2>&1 || status=$?
   grep -E "error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$app-$kind-$theme.log" || true
   [ "$status" -eq 0 ] || exit 1
