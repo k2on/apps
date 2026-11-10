@@ -556,7 +556,9 @@ dependencies {{
 }}
 
 tasks.withType<Test>().configureEach {{
-{'''    // The JVM tests drive the real kernel: the library built for the
+{f'''    // Where the app's assets are, for a JVM test that reads one.
+    systemProperty("ark.assets", rootProject.file("{TO_APP}/native/android/assets").path)
+''' if os.path.isdir(native_dir(root, a, "assets")) else ""}{'''    // The JVM tests drive the real kernel: the library built for the
     // machine they run on (`host/`), through JNA's jar.
     systemProperty("dev.arkdb.ui.strict", "true")
     systemProperty("jna.library.path", "$arkLib/host")''' if ark else ""}{f'''

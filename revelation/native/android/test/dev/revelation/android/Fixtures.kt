@@ -6,7 +6,7 @@ import java.io.File
 
 object Fixtures {
     /** The asset the app ships, read from the source tree (the tests run in the module's directory). */
-    val bible: Bible by lazy { File("src/main/assets/${Bible.ASSET}").inputStream().use(Bible::load) }
+    val bible: Bible by lazy { File(System.getProperty("ark.assets") ?: "src/main/assets", Bible.ASSET).inputStream().use(Bible::load) }
 
     /**
      * A stand-in for `Paint.measureText` at 18 dp: a width per character, narrower for the narrow
