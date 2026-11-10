@@ -195,9 +195,11 @@ which nix builds at the commit (see below).
 
 On Android and the desktop each app is a job of its own, so the apps are
 taken at once. The iPhone's are one job, on one Mac, the scarce runner:
-one Xcode selected, one nix installed, one simulator booted, every app
-built and every server started under the boot, then each app taken on it
-in turn, the driver built once (`apps-ios.sh`). One that fails is said,
+one Xcode selected, one nix installed, every app built, the driver
+fetched (flake.nix's `screens-drive-ios`, built once per change to it)
+and every server started under the boots, then each app's iPhone and the
+iPad of each that takes it taken at once, each on a simulator of its own,
+two at a time (`apps-ios-lanes.sh`, `LANES`). One that fails is said,
 the others still taken and kept, and the job fails at its end. Each job
 starts its apps' servers first, in the background (each `server.sh`,
 nix's build of the server: the cache's, or built while the rest goes on),
@@ -302,10 +304,9 @@ build, the same driver, the same shots.json, light and dark.
 - **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
   built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
   takes the iPad (main's apps today are the iPhone's alone), nothing is
-  booted and nothing more is done. Else, once the iPhone's shots are
-  taken, the iPhone is shut down and an iPad booted (not under the
-  iPhone's shots: a second simulator booted beside them could make them
-  flaky), and each app that takes it is taken upright and then on its side
+  booted and nothing more is done. Else an iPad is a lane of its own for
+  each app that takes it, beside the iPhones' (`apps-ios-lanes.sh`), and
+  the app is taken on it upright and then on its side
   (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
   XCUITest gives in the screen's portrait frame is turned a quarter
   counter-clockwise), signed in once. An app whose iPad shots fail keeps

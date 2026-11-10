@@ -550,15 +550,17 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
-  # Every iPhone app on one Mac, in turn: the scarce runner, which a job per
-  # app had waiting in the queue twice, each paying its own Xcode, nix's
-  # install, the servers' builds and a simulator's boot. Here they are paid
-  # once: one simulator booted, every app built (ios-build.sh) and its
-  # server started under the boot, then each app taken in turn on it
-  # (apps-ios.sh), the driver built once for all. One that fails to build
-  # or to be taken is said, the others still taken and kept, and the job
-  # fails at its end. Each app's shots are its own <app>/ios/ in the
-  # artifact, as a job each had them.
+  # Every iPhone app on one Mac: the scarce runner (five an account at
+  # once, and a long queue), which a job per app or device had waiting in
+  # the queue again and again, each paying its own Xcode, nix's install,
+  # the servers' builds and a simulator's boot. Here they are paid once:
+  # every app built (ios-build.sh) and the driver fetched (nix's, from the
+  # cache) under the boots, every server started, then every app's iPhone
+  # and iPad taken at once, each on a simulator of its own, LANES at a
+  # time (apps-ios-lanes.sh), and the Mac's windows after. One that fails
+  # to build or to be taken is said, the others still taken and kept, and
+  # the job fails at its end. Each app's shots are its own <app>/ios/ in
+  # the artifact, as a job each had them.
   ios:
     needs: which
     # Built from the run's own commit, so only a run of this repository's.
@@ -588,6 +590,9 @@ jobs:
       INPUTS: ${{ needs.which.outputs.ios-inputs }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
+      # Simulators taking an app at once (apps-ios-lanes.sh): every app's
+      # iPhone, and the iPad of each that takes it, each a lane of its own.
+      LANES: 2
     steps:
       # The queue for a Mac can be an hour: a PR merged or closed meanwhile
       # is taken nothing of. Every step after says `open`, so the job ends
@@ -686,18 +691,29 @@ jobs:
           done
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
-      # for every app: each is installed on it in turn.
+      # A simulator per app (apps-ios-lanes.sh): the newest iPhone Pro, the
+      # first app's the image's own, every other one created beside it,
+      # booting under the rest while fewer than LANES are (the rest as
+      # their turn comes). Only after nix and the evaluation: under a
+      # booting simulator (CoreSimulator coming up) cachix's setup took
+      # minutes, not seconds (app-screens 42820636768).
       - if: steps.open.outputs.open == 'true'
-        name: Start booting a simulator
+        name: Start booting the iPhones
+        run: bash .github/screens/apps-ios-lanes.sh boot iphone $APPS
+
+      # The UI test that drives the apps (drive-ios/), as nix builds it with
+      # the pinned Xcode (flake.nix, `screens-drive-ios`) from the scripts'
+      # checkout: the cache's, built once per change to its sources, or
+      # built here under the boot.
+      - if: steps.open.outputs.open == 'true'
+        name: Start fetching the driver
         run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            device=$(xcrun simctl list devices available -j | jq -r "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
-            echo "Booting $device"
-            echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
+          bash .github/screens/meanwhile.sh start driver bash -c '
+            line=$(bash .github/nix-xcode.sh . "$XCODE" screens-drive-ios) || exit 1
+            mkdir -p "$DRIVER"
+            cp -R "${line#* }"/. "$DRIVER/"
+            chmod -R u+w "$DRIVER"
+            ls "$DRIVER"'
 
       # Each app's server, as nix builds it (its server.sh), all at once, each
       # on its own port: the cache's once main's run has pushed it, or else
@@ -729,7 +745,13 @@ jobs:
         run: |
           ipad=$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" $APPS | tr '\n' ' ')
           echo "IPAD_APPS=${ipad% }" >> "$GITHUB_ENV"
-          if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
+          if [ -z "${ipad// /}" ]; then
+            echo "no app's build takes the iPad: none will be booted"
+          else
+            echo "the iPad's: $ipad"
+            # shellcheck disable=SC2086
+            bash .github/screens/apps-ios-lanes.sh boot ipad $ipad
+          fi
 
       - if: steps.open.outputs.open == 'true'
         name: The servers, and the driver's tools
@@ -738,43 +760,28 @@ jobs:
           bash .github/screens/tools.sh get xcodegen
           bash .github/screens/meanwhile.sh wait servers
 
+      # The driver, once: nix's, or else built here for any simulator,
+      # before the lanes, which would each build it at once.
       - if: steps.open.outputs.open == 'true'
-        name: The simulator, booted
-        run: bash .github/screens/meanwhile.sh wait boot
-
-      # Each app in turn on the one simulator (apps-ios.sh); one that fails
-      # is said, and the others still taken.
-      - if: steps.open.outputs.open == 'true'
-        name: Capture
-        env:
-          RESULTS: ${{ runner.temp }}/results
-        run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
-
-      # The iPad's, after the iPhone's: the iPhone shut down and only then
-      # the iPad booted (not under the iPhone's shots, which a second
-      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
-      # 13-inch, else the newest iPad); each app whose build takes it, in
-      # portrait and then on its side, light and dark, on the same driver
-      # (apps-ios.sh, FAMILY=ipad).
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
-        name: Capture (iPad)
-        env:
-          RESULTS: ${{ runner.temp }}/results
-          FAMILY: ipad
+        name: The driver
         run: |
-          xcrun simctl shutdown all || true
-          # Of the newest iOS's simulators, the first kind there is.
-          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
-            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
-            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
-            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
-            | "\(.udid) \(.name)"')
-          echo "Booting $name ($udid)"
-          start=$(date +%s)
-          xcrun simctl boot "$udid"
-          xcrun simctl bootstatus "$udid" -b > /dev/null
-          echo "booted in $(( $(date +%s) - start ))s"
-          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
+          bash .github/screens/meanwhile.sh wait driver || echo "::warning::the driver from nix failed; built here"
+          if [ -z "$(find "$DRIVER" -maxdepth 3 -name '*.xctestrun' 2> /dev/null)" ]; then
+            (cd .github/screens/drive-ios && xcodegen generate > /dev/null)
+            xcodebuild build-for-testing -project .github/screens/drive-ios/Drive.xcodeproj -scheme Drive \
+              -destination 'generic/platform=iOS Simulator' -derivedDataPath "$DRIVER" CODE_SIGNING_ALLOWED=NO -quiet
+          fi
+
+      # Every app's iPhone, and the iPad of each that takes it (portrait,
+      # then on its side), LANES at a time, each on its simulator
+      # (apps-ios-lanes.sh, apps-ios.sh); one that fails is said, and the
+      # others still taken. Until this, the iPad's were taken after every
+      # iPhone's, its simulator booted only then.
+      - if: steps.open.outputs.open == 'true'
+        name: Capture (iPhone, iPad)
+        env:
+          RESULTS: ${{ runner.temp }}/results
+        run: bash .github/screens/apps-ios-lanes.sh take "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" $APPS
 
       # The Mac's own window, of each app whose commit has a Mac build
       # (`<app>-macos`, apps-mac.sh): on this Mac, signed in to the same

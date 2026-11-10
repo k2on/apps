@@ -43,7 +43,7 @@ out() {
 }
 
 shared=""
-for p in .github/screens/app-ios.sh .github/screens/apps-ios.sh .github/screens/ios-build.sh \
+for p in .github/screens/app-ios.sh .github/screens/apps-ios.sh .github/screens/apps-ios-lanes.sh .github/screens/ios-build.sh \
   .github/screens/ios-family.sh .github/screens/app-mac.sh .github/screens/apps-mac.sh \
   .github/screens/window.swift .github/screens/app-server.sh .github/screens/drive-ios .github/nix-xcode.sh; do
   shared="$shared$p $(object "$p")"$'\n'
