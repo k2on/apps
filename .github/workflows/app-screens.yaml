@@ -176,7 +176,8 @@ jobs:
       # Each iPhone app taken, and the hash of what it is taken from
       # (ios-inputs.sh), as a JSON object: kept beside its shots.
       ios-inputs: ${{ steps.which.outputs.ios-inputs }}
-      # The Macs' jobs: [{app, device}], device iphone, ipad or mac.
+      # The Macs' jobs: [{device, apps}], device iphone, ipad or mac, apps
+      # the space-separated apps it takes in turn.
       ios-matrix: ${{ steps.which.outputs.ios-matrix }}
     steps:
       - uses: actions/checkout@v4
@@ -219,23 +220,27 @@ jobs:
             git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$sha"
             git -C "$src" checkout -q FETCH_HEAD
           }
-          # The Macs' jobs, one per app and device, at once (the `ios`
-          # matrix): each iPhone app's iPhone; its iPad when its project
-          # may take it (a TARGETED_DEVICE_FAMILY with 2: the built app's
-          # UIDeviceFamily, ios-family.sh, still decides, so a job for one
-          # that does not passes over it in seconds); its Mac window when
-          # the commit has <app>-macos (by name, nothing evaluated).
+          # The Macs' jobs, one per device, at once (the `ios` matrix), each
+          # taking its apps in turn: every iPhone app's iPhone; the iPad of
+          # each whose project may take it (a TARGETED_DEVICE_FAMILY with 2:
+          # the built app's UIDeviceFamily, ios-family.sh, still decides);
+          # the Mac window of each whose commit has <app>-macos (by name,
+          # nothing evaluated). A job per device and not per app: Macs are
+          # five an account at once and their queue is long, and two
+          # simulators on one Mac ran at half speed and failed (app-screens
+          # 42832522218).
           macs() {
-            local a names=[] rows=()
+            local a names=[] iphone="" ipad="" mac=""
             [ -n "${ios// /}" ] || { echo '[]'; return; }
             fetched
             names=$(nix eval --json "$src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null) || names=[]
             for a in $ios; do
-              rows+=("$a iphone")
-              if grep -qE 'TARGETED_DEVICE_FAMILY: *"?[0-9,]*2' "$src/$a/ios/project.yml" 2> /dev/null; then rows+=("$a ipad"); fi
-              if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then rows+=("$a mac"); fi
+              iphone="$iphone $a"
+              if grep -qE 'TARGETED_DEVICE_FAMILY: *"?[0-9,]*2' "$src/$a/ios/project.yml" 2> /dev/null; then ipad="$ipad $a"; fi
+              if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then mac="$mac $a"; fi
             done
-            printf '%s\n' "${rows[@]}" | jq -Rsc 'split("\n") | map(select(. != "") | split(" ") | {app: .[0], device: .[1]})'
+            jq -nc --arg iphone "${iphone# }" --arg ipad "${ipad# }" --arg mac "${mac# }" '
+              [{device: "iphone", apps: $iphone}, {device: "ipad", apps: $ipad}, {device: "mac", apps: $mac}] | map(select(.apps != ""))'
           }
           # What was decided, as the jobs read it. Nothing for this event
           # (ios's start, a PR's build ending, a PR closed, nothing moved):
@@ -578,17 +583,19 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
-  # The Macs: a job per app and device, at once (`which`'s ios-matrix):
-  # each app's iPhone, its iPad (upright and on its side, signed in once)
-  # when its build takes it, and its Mac window when the commit has one.
-  # One Mac did them all in turn, the iPad's after every iPhone's, so the
-  # loop waited for the sum (an iPhone app's shots some five minutes, an
-  # iPad's some ten); each job now pays its own nix, servers and boot (a
-  # few minutes, under which the app and the driver come from the cache)
-  # and the loop waits for the longest. Each job's
-  # shots are its <app>/<device dir>/ in an artifact of its own; whether
-  # they were taken whole is its `ios-status-*` artifact, which
-  # `ios-inputs` reads to keep an app's hash only when every job of it was.
+  # The Macs: a job per device, at once (`which`'s ios-matrix), each
+  # taking its apps in turn: every app's iPhone, the iPad's (upright and
+  # on its side, signed in once) of each whose build takes it, and the Mac
+  # window of each whose commit has one. One Mac did them all in turn, the
+  # iPad's after every iPhone's, so the loop waited for the sum; a job per
+  # app and device (#94's first form) cost a queue slot and a setup each,
+  # of five Macs an account has; several simulators on one Mac ran at half
+  # speed and failed (app-screens 42832522218). Each job pays its own nix,
+  # servers and boot (a few minutes, under which the apps and the driver
+  # come from the cache). Each job's shots are its apps' <app>/<device
+  # dir>/ in an artifact of its own; whether each was taken whole is its
+  # `ios-status-*` artifact, which `ios-inputs` reads to keep an app's
+  # hash only when every job took it whole.
   ios:
     needs: which
     # Built from the run's own commit, so only a run of this repository's.
@@ -599,14 +606,14 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.which.outputs.ios-matrix) }}
-    name: ios (${{ matrix.app }}, ${{ matrix.device }})
+    name: ios (${{ matrix.device }})
     runs-on: macos-15
     # One of each at a time on a branch: a newer commit's (or the same
     # commit's again, from another event: on main a push that moves the
     # scripts and starts ios) takes over from the one going, rather than a
     # second Mac.
     concurrency:
-      group: app-screens-ios-${{ needs.which.outputs.branch }}-${{ matrix.app }}-${{ matrix.device }}
+      group: app-screens-ios-${{ needs.which.outputs.branch }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 150
     # It builds the commit's code, one step of it outside nix's sandbox
@@ -616,7 +623,7 @@ jobs:
       contents: read
       pull-requests: read
     env:
-      APPS: ${{ matrix.app }}
+      APPS: ${{ matrix.apps }}
       DEVICE: ${{ matrix.device }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
@@ -647,9 +654,11 @@ jobs:
           # The driver (app-ios.sh), nix's, under the boot; and each app any of whose shots failed (apps-ios.sh,
           # apps-mac.sh), for which no hash is kept.
           { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
-          # What `ios-inputs` reads: closed, or (below) whole or partial.
-          mkdir -p "$RUNNER_TEMP/status/$APPS"
-          [ "$open" = true ] || echo closed > "$RUNNER_TEMP/status/$APPS/$DEVICE"
+          # What `ios-inputs` reads, each app's: closed, or (below) whole or partial.
+          for a in $APPS; do
+            mkdir -p "$RUNNER_TEMP/status/$a"
+            [ "$open" = true ] || echo closed > "$RUNNER_TEMP/status/$a/$DEVICE"
+          done
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -776,6 +785,9 @@ jobs:
       - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
         id: build
         name: The apps, built by nix
+        # One that fails is said; the others are still taken, and the job
+        # fails at its end.
+        continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
       - if: steps.open.outputs.open == 'true'
@@ -805,8 +817,8 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
         run: |
-          if [ -z "$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" "$APPS")" ]; then
-            echo "$APPS: its build does not take the iPad; nothing taken"
+          if [ -z "$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" $APPS)" ]; then
+            echo "no app's build takes the iPad; nothing taken"
             exit 0
           fi
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
@@ -817,25 +829,28 @@ jobs:
         name: Capture (Mac)
         run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
 
-      # Whether this job's shots were taken whole, for `ios-inputs`: a
-      # failed build or shot, or the iPhone's not there in both themes, is
-      # partial, and no hash is kept for the app (it is taken again).
+      # Whether this job took each app's shots whole, for `ios-inputs`: a
+      # failed shot, an app with no build where one was to be built, or an
+      # iPhone's not there in both themes, is partial, and no hash is kept
+      # for the app (it is taken again).
       - if: always() && steps.open.outputs.open == 'true'
         name: Taken whole?
         run: |
-          state=whole
-          if [ -f "$PARTIAL" ] && grep -qx "$APPS" "$PARTIAL"; then state=partial; fi
-          if [ "${{ steps.build.outcome }}" = failure ]; then state=partial; fi
-          case "${{ job.status }}" in success) ;; *) state=partial ;; esac
-          at=$RUNNER_TEMP/out/$APPS/ios
-          if [ "$DEVICE" = iphone ] && ! { [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; }; then state=partial; fi
-          echo "$state" > "$RUNNER_TEMP/status/$APPS/$DEVICE"
-          echo "$APPS $DEVICE: $state"
+          for a in $APPS; do
+            state=whole
+            if [ -f "$PARTIAL" ] && grep -qx "$a" "$PARTIAL"; then state=partial; fi
+            if [ "$DEVICE" != mac ] && [ -z "$(find "$RUNNER_TEMP/apps/simulator-$a" -maxdepth 1 -name '*.app' 2> /dev/null)" ]; then state=partial; fi
+            case "${{ job.status }}" in success) ;; *) state=partial ;; esac
+            at=$RUNNER_TEMP/out/$a/ios
+            if [ "$DEVICE" = iphone ] && ! { [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; }; then state=partial; fi
+            echo "$state" > "$RUNNER_TEMP/status/$a/$DEVICE"
+            echo "$a $DEVICE: $state"
+          done
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-status-${{ matrix.app }}-${{ matrix.device }}
+          name: ios-status-${{ matrix.device }}
           path: ${{ runner.temp }}/status
 
       # The driver's results (its log, and the test's recording of the
@@ -843,7 +858,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure() && steps.open.outputs.open == 'true'
         with:
-          name: ios-driver-results-${{ matrix.app }}-${{ matrix.device }}
+          name: ios-driver-results-${{ matrix.device }}
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore
 
@@ -851,15 +866,23 @@ jobs:
         name: The servers' logs
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
 
-      # Its shots, <app>/ios/ (or ipad-portrait/ and ipad-landscape/, or
-      # mac/): compare and publish lay the app-screens-* artifacts over each
-      # other as one tree.
+      # Its shots, each app's <app>/ios/ (or ipad-portrait/ and
+      # ipad-landscape/, or mac/): compare and publish lay the
+      # app-screens-* artifacts over each other as one tree.
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
-          name: app-screens-ios-${{ matrix.app }}-${{ matrix.device }}
+          name: app-screens-ios-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
+
+      # The build of one app failed, and the others were taken: the job fails
+      # now that they are kept.
+      - if: always() && steps.build.outcome == 'failure'
+        name: Every app built
+        run: |
+          echo "::error::an iPhone app did not build (The apps, built by nix, says which)"
+          exit 1
 
   # Beside each iPhone app's shots, when every Mac job of it took them
   # whole, the hash of what they were taken from (`which`, ios-inputs.sh):
@@ -893,7 +916,7 @@ jobs:
           for a in $APPS; do
             hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
             whole=true
-            for d in $(jq -r --arg a "$a" '.[] | select(.app == $a) | .device' <<< "$MATRIX"); do
+            for d in $(jq -r --arg a "$a" '.[] | select(.apps | split(" ") | index($a)) | .device' <<< "$MATRIX"); do
               s=$(cat "$RUNNER_TEMP/status/$a/$d" 2> /dev/null || echo missing)
               [ "$s" != closed ] || open=false
               [ "$s" = whole ] || { echo "$a $d: $s"; whole=false; }
