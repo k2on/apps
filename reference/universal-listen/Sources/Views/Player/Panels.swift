@@ -151,6 +151,7 @@ struct OutputButton: View {
     let style: Style
     @Environment(Player.self) private var player
     @Environment(Navigator.self) private var nav
+    @Environment(Library.self) private var library
     @State private var shown = false
 
     var body: some View {
@@ -167,6 +168,7 @@ struct OutputButton: View {
         .popover(isPresented: presented, arrowEdge: style == .player ? .bottom : .top) {
             OutputPicker()
                 .frame(minWidth: 320, idealWidth: 340)
+                .modifier(ListenModel(library: library, player: player, nav: nav))
                 .presentationDetents([.medium, .large])
         }
         .onChange(of: nav.outputPopover, initial: true) { _, open in

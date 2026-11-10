@@ -24,7 +24,7 @@ struct PlaybackToolbar: ViewModifier {
                 NowPlayingDisplay()
             }
             ToolbarItem(placement: .primaryAction) {
-                VolumeSlider(compact: true).frame(width: 110)
+                VolumeSlider(compact: true).frame(width: 96)
             }
             #endif
             if !isCompact {
@@ -70,7 +70,7 @@ struct NowPlayingDisplay: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(width: 400, height: 38)
+        .frame(width: 360, height: 38)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Now Playing")
@@ -181,6 +181,8 @@ struct LyricsToggle: View {
 /// Up Next, as a popover off the toolbar.
 struct UpNextButton: View {
     @Environment(Navigator.self) private var nav
+    @Environment(Library.self) private var library
+    @Environment(Player.self) private var player
 
     var body: some View {
         @Bindable var nav = nav
@@ -190,6 +192,7 @@ struct UpNextButton: View {
             .popover(isPresented: $nav.upNextPopover, arrowEdge: .bottom) {
                 UpNextList(style: .popover)
                     .frame(minWidth: 340, idealWidth: 360, minHeight: 420, idealHeight: 520)
+                    .modifier(ListenModel(library: library, player: player, nav: nav))
                     .presentationCompactAdaptation(.popover)
             }
     }
@@ -280,11 +283,15 @@ struct MiniPlayer: View {
 /// over the window's content on the Mac (the toolbar stays).
 struct FullPlayerPresentation: ViewModifier {
     @Environment(Navigator.self) private var nav
+    @Environment(Library.self) private var library
+    @Environment(Player.self) private var player
 
     @ViewBuilder func body(content: Content) -> some View {
         @Bindable var nav = nav
         #if os(iOS)
-        content.fullScreenCover(isPresented: $nav.playerExpanded) { FullPlayer() }
+        content.fullScreenCover(isPresented: $nav.playerExpanded) {
+            FullPlayer().modifier(ListenModel(library: library, player: player, nav: nav))
+        }
         #else
         content.overlay {
             if nav.playerExpanded {

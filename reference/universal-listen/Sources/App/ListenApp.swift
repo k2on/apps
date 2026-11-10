@@ -8,6 +8,12 @@ struct ListenApp: App {
     @AppStorage("appearance") private var appearance = "system"
 
     init() {
+        if Launch.screen != nil {
+            let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            for dir in ["Saved Application State", "SplitViewState"] {
+                try? FileManager.default.removeItem(at: lib.appendingPathComponent(dir))
+            }
+        }
         let library = Library()
         _library = State(initialValue: library)
         _player = State(initialValue: Player(library: library))

@@ -72,6 +72,7 @@ final class Navigator {
     var settingsPath: [SettingsPane] = []
     /// The track the new-playlist sheet was opened for, if any.
     var pendingTracks: [String] = []
+    private var launchPath: [Route] = []
 
     func path(_ tab: TabID) -> Binding<[Route]> {
         Binding(get: { self.paths[tab] ?? [] }, set: { self.paths[tab] = $0 })
@@ -92,7 +93,7 @@ final class Navigator {
         let arg = parts.count > 1 ? parts[1] : ""
         func show(_ wide: TabID, compactTab: TabID, _ routes: [Route]) {
             tab = compact ? compactTab : wide
-            paths[tab] = routes
+            launchPath = routes
         }
         switch key {
         case "songs": show(.songs, compactTab: .library, compact ? [.songs] : [])
@@ -139,6 +140,13 @@ final class Navigator {
         if let panel = Launch.panel.flatMap(PlayerPanel.init(rawValue:)) { playerPanel = panel }
         searchPresented = Launch.searchActive
         if Launch.sheet == "new-playlist" { sheet = .newPlaylist }
+    }
+
+    /// The launch's route, pushed on the selected tab once its stack is on screen.
+    func applyLaunchPaths() {
+        guard !launchPath.isEmpty else { return }
+        paths[tab] = launchPath
+        launchPath = []
     }
 
     /// Transient UI that needs its anchor on screen first.

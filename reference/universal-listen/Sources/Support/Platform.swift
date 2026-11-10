@@ -115,3 +115,55 @@ private struct ListenAnimation<V: Equatable>: ViewModifier {
         content.animation(reduceMotion ? .easeInOut(duration: 0.15) : .listen, value: value)
     }
 }
+
+// MARK: Carrying the model into detached content
+
+/// The app's model objects, handed on explicitly. Content SwiftUI hosts
+/// apart from the view tree — Mac table cells, popovers, menus — does not
+/// always inherit the environment's Observable objects.
+struct ListenModel: ViewModifier {
+    let library: Library
+    let player: Player
+    let nav: Navigator
+
+    func body(content: Content) -> some View {
+        content.environment(library).environment(player).environment(nav)
+    }
+}
+
+/// A context menu whose items see the model.
+private struct ListenContextMenu<Items: View>: ViewModifier {
+    @Environment(Library.self) private var library
+    @Environment(Player.self) private var player
+    @Environment(Navigator.self) private var nav
+    let items: () -> Items
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            items().modifier(ListenModel(library: library, player: player, nav: nav))
+        }
+    }
+}
+
+extension View {
+    func listenContextMenu<M: View>(@ViewBuilder _ items: @escaping () -> M) -> some View {
+        modifier(ListenContextMenu(items: items))
+    }
+}
+
+/// A pull-down menu whose items see the model.
+struct ListenMenu<Items: View, MenuLabel: View>: View {
+    @ViewBuilder let items: () -> Items
+    @ViewBuilder let label: () -> MenuLabel
+    @Environment(Library.self) private var library
+    @Environment(Player.self) private var player
+    @Environment(Navigator.self) private var nav
+
+    var body: some View {
+        Menu {
+            items().modifier(ListenModel(library: library, player: player, nav: nav))
+        } label: {
+            label()
+        }
+    }
+}

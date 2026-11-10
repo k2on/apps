@@ -40,6 +40,7 @@ struct SongTable: View {
     @State private var selection: Set<Track.ID> = []
     @Environment(Player.self) private var player
     @Environment(Library.self) private var library
+    @Environment(Navigator.self) private var nav
     @Environment(\.isCompact) private var isCompact
 
     private var rows: [Track] { sortOrder.isEmpty ? tracks : tracks.sorted(using: sortOrder) }
@@ -47,7 +48,8 @@ struct SongTable: View {
     var body: some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Title", value: \.title) { t in
-                TitleCell(track: t, isCompact: isCompact, isCurrent: player.currentTrackID == t.id, isPlaying: player.isPlaying)
+                TitleCell(track: t, art: library.album(t.albumID)?.art, isCompact: isCompact,
+                          isCurrent: player.currentTrackID == t.id, isPlaying: player.isPlaying)
             }
             .width(min: 200, ideal: 280)
             TableColumn("Artist", value: \.artistName) { Text($0.artistName).lineLimit(1) }
@@ -69,6 +71,7 @@ struct SongTable: View {
         }
         .contextMenu(forSelectionType: Track.ID.self) { ids in
             TrackMenuItems(tracks: ids.compactMap(library.track))
+                .modifier(ListenModel(library: library, player: player, nav: nav))
         } primaryAction: { ids in
             let start = ids.first.flatMap(library.track)
             player.play(tracks: rows, from: start)
@@ -105,18 +108,19 @@ struct SortMenu: View {
     }
 }
 
+/// A table cell: plain values only (Mac table cells don't see the environment's objects).
 private struct TitleCell: View {
     let track: Track
+    let art: Art?
     let isCompact: Bool
     let isCurrent: Bool
     let isPlaying: Bool
-    @Environment(Library.self) private var library
 
     var body: some View {
         HStack(spacing: 10) {
             ZStack {
-                if let album = library.album(track.albumID) {
-                    Artwork(art: album.art)
+                if let art {
+                    Artwork(art: art)
                 }
                 if isCurrent {
                     RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.35))

@@ -236,7 +236,7 @@ private struct ItemMoreMenu: View {
     @Environment(Navigator.self) private var nav
 
     var body: some View {
-        Menu {
+        ListenMenu {
             if let id = player.currentTrackID, let t = library.track(id) {
                 TrackMenuItems(tracks: [t])
             } else if let id = player.currentEpisodeID, let e = library.episode(id) {

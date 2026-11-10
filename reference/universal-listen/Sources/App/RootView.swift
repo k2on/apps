@@ -36,6 +36,7 @@ struct RootView: View {
                 stack(.search) { SearchView() }
             }
 
+            if !isCompact {
             TabSection("Library") {
                 Tab("Artists", systemImage: "music.mic", value: TabID.artists) { stack(.artists) { ArtistsView() } }
                 Tab("Albums", systemImage: "square.stack", value: TabID.albums) { stack(.albums) { AlbumsView() } }
@@ -58,15 +59,19 @@ struct RootView: View {
                 }
             }
             .defaultVisibility(.hidden, for: .tabBar)
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
         .modifier(MiniPlayerAccessory())
         .modifier(FullPlayerPresentation())
         .sheet(item: $nav.sheet) { sheet in
-            switch sheet {
-            case .newPlaylist: NewPlaylistSheet()
-            case .settings: SettingsSheet()
+            Group {
+                switch sheet {
+                case .newPlaylist: NewPlaylistSheet()
+                case .settings: SettingsSheet()
+                }
             }
+            .modifier(ListenModel(library: library, player: player, nav: nav))
         }
         .onKeyPress(.space) {
             player.togglePlay()
@@ -78,7 +83,9 @@ struct RootView: View {
             #if os(macOS)
             if Launch.screen == "settings" { openSettings() }
             #endif
-            try? await Task.sleep(for: .milliseconds(700))
+            try? await Task.sleep(for: .milliseconds(400))
+            nav.applyLaunchPaths()
+            try? await Task.sleep(for: .milliseconds(500))
             nav.applyLaunchTransients()
         }
     }

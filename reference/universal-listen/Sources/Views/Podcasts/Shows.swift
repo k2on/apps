@@ -110,7 +110,7 @@ struct EpisodeRow: View {
                     .accessibilityLabel(current && player.isPlaying ? "Pause" : "Play, \(Format.remaining(episode))")
                     DownloadBadge(state: episode.download)
                     Spacer()
-                    Menu {
+                    ListenMenu {
                         EpisodeMenuItems(episode: episode)
                     } label: {
                         Image(systemName: "ellipsis").frame(width: 30, height: 30).contentShape(Rectangle())
@@ -127,7 +127,7 @@ struct EpisodeRow: View {
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture { nav.go(.episode(episode.id)) }
-        .contextMenu { EpisodeMenuItems(episode: episode) }
+        .listenContextMenu { EpisodeMenuItems(episode: episode) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("episode.\(episode.id)")
     }
@@ -246,7 +246,7 @@ struct EpisodeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        Menu {
+                        ListenMenu {
                             EpisodeMenuItems(episode: e)
                         } label: {
                             Label("More", systemImage: "ellipsis")

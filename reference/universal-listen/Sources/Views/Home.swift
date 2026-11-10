@@ -21,7 +21,7 @@ struct HomeView: View {
                             ContinueCard(info: info, progress: e.progress, caption: Format.remaining(e)) {
                                 player.play(.episode(e.id))
                             }
-                            .contextMenu { EpisodeMenuItems(episode: e) }
+                            .listenContextMenu { EpisodeMenuItems(episode: e) }
                         }
                     }
                 }
@@ -44,7 +44,7 @@ struct HomeView: View {
                     ForEach(library.recentlyAddedAlbums.prefix(10)) { album in
                         NavigationLink(value: Route.album(album.id)) { AlbumTile(album: album, width: 160) }
                             .buttonStyle(.plain)
-                            .contextMenu { AlbumMenuItems(album: album) }
+                            .listenContextMenu { AlbumMenuItems(album: album) }
                     }
                 }
 

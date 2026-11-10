@@ -106,7 +106,7 @@ private struct SearchResults: View {
                                 ForEach(albums) { a in
                                     NavigationLink(value: Route.album(a.id)) { AlbumTile(album: a, width: 140) }
                                         .buttonStyle(.plain)
-                                        .contextMenu { AlbumMenuItems(album: a) }
+                                        .listenContextMenu { AlbumMenuItems(album: a) }
                                 }
                             }
                             .padding(.vertical, 4)

@@ -172,9 +172,6 @@ direct_ios() {
       echo "::error::$device $theme $name: did not launch"; failed=1; continue
     fi
     still "$udid" "$out/$device/$theme/$name.png"
-    if ! xcrun simctl spawn "$udid" launchctl list 2> /dev/null | grep -q "UIKitApplication:$bundle"; then
-      echo "::warning::$device $theme $name: the app was not running at the shot (crashed?)"
-    fi
   done
   xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
 }
@@ -193,14 +190,28 @@ drive() {
     list+="$name|$args -appearance $theme|$steps"$'\n'
   done
   [ -n "$list" ] || return 0
-  echo "$device $theme: driving $(($(wc -l <<< "$list") - 1)) shots"
   mkdir -p "$out/$device/$theme"
-  TEST_RUNNER_SHOTS_BUNDLE="$bundle" TEST_RUNNER_SHOTS_LIST="$list" TEST_RUNNER_SHOTS_OUT="$out/$device/$theme" \
-    TEST_RUNNER_SHOTS_ORIENTATION="$orientation" \
-    xcodebuild test-without-building -project "$here/drive/Drive.xcodeproj" -scheme "$scheme" \
-      -destination "$dest" -derivedDataPath "$derived" > "$out/drive-$device-$theme.log" 2>&1 ||
-    { echo "::error::$device ($theme) driven shots failed"; tail -n 60 "$out/drive-$device-$theme.log"; failed=1; }
-  grep -h "^SHOT " "$out/drive-$device-$theme.log" | sed 's/^/::warning::/' || true
+  local attempt missing line
+  for attempt in 1 2; do
+    echo "$device $theme: driving $(($(wc -l <<< "$list") - 1)) shots (attempt $attempt)"
+    TEST_RUNNER_SHOTS_BUNDLE="$bundle" TEST_RUNNER_SHOTS_LIST="$list" TEST_RUNNER_SHOTS_OUT="$out/$device/$theme" \
+      TEST_RUNNER_SHOTS_ORIENTATION="$orientation" \
+      xcodebuild test-without-building -project "$here/drive/Drive.xcodeproj" -scheme "$scheme" \
+        -destination "$dest" -derivedDataPath "$derived" > "$out/drive-$device-$theme-$attempt.log" 2>&1 && break
+    grep -E "error:|Failed" "$out/drive-$device-$theme-$attempt.log" | head -n 5 || true
+    missing=""
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      [ -f "$out/$device/$theme/${line%%|*}.png" ] || missing+="$line"$'\n'
+    done <<< "$list"
+    [ -n "$missing" ] || break
+    if [ $attempt = 2 ]; then
+      echo "::error::$device ($theme) driven shots failed: $(cut -d'|' -f1 <<< "$missing" | tr '\n' ' ')"
+      tail -n 40 "$out/drive-$device-$theme-$attempt.log"; failed=1
+    fi
+    list=$missing
+  done
+  grep -h "^SHOT " "$out/drive-$device-$theme"-*.log | sed 's/^/::warning::/' || true
   mkdir -p "$out/trees"
   for t in "$out/$device/$theme"/*.tree.txt; do
     [ -f "$t" ] || continue
@@ -261,8 +272,13 @@ mac)
     kill "$asked" 2> /dev/null || true
     echo "::warning::System Events did not answer: the system appearance is unchanged"
   }
-  # The UI test drives the app by its bundle id: LaunchServices must know it.
-  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" || true
+  # The UI test drives the app by its bundle id: LaunchServices must know it,
+  # at a path the test runner can read (not the job's temporary directory).
+  lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  rm -rf /Applications/Listen.app && ditto "$app" /Applications/Listen.app && app=/Applications/Listen.app
+  "$lsregister" -u "$3" > /dev/null 2>&1 || true
+  "$lsregister" -f "$app" || true
+  exe="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
   sudo automationmodetool enable-automationmode-without-authentication > /dev/null 2>&1 || true
   mac_built=0
   xcodebuild build-for-testing -project "$here/drive/Drive.xcodeproj" -scheme ShotsMac \
@@ -303,6 +319,7 @@ mac)
       # Still: the window's picture the same twice a second apart.
       sleep 2
       prev=""
+      rm -f "$tmp/shot.png"
       for i in $(seq 1 10); do
         wid=$("$tmp/window" "$pid" 2> /dev/null) || break
         screencapture -x -o -l "$wid" "$tmp/shot.png"
@@ -311,7 +328,11 @@ mac)
         prev=$now
         sleep 1
       done
-      cp "$tmp/shot.png" "$out/mac/$theme/$name.png"
+      if [ -f "$tmp/shot.png" ]; then
+        cp "$tmp/shot.png" "$out/mac/$theme/$name.png"
+      else
+        echo "::error::mac $theme $name: the window went away (crashed?)"; tail -n 20 "$tmp/$theme-$name.log"; failed=1
+      fi
       # The whole screen too, for a second window (Settings), a popover or a sheet.
       case $name in *settings*|*popover*|*sheet*|*dialog*|*suggestions*) screencapture -x "$out/mac/$theme/$name-screen.png" ;; esac
       kill "$pid" 2> /dev/null || true

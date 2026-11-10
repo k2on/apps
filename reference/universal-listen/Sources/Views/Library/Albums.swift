@@ -81,7 +81,7 @@ struct AlbumGrid: View {
                     AlbumTile(album: album)
                 }
                 .buttonStyle(.plain)
-                .contextMenu { AlbumMenuItems(album: album) }
+                .listenContextMenu { AlbumMenuItems(album: album) }
                 .accessibilityIdentifier("album.\(album.id)")
             }
         }
@@ -187,7 +187,7 @@ private struct AlbumHeader: View {
                 Label("Shuffle", systemImage: "shuffle").frame(minWidth: 110)
             }
             .buttonStyle(.bordered)
-            Menu {
+            ListenMenu {
                 AlbumMenuItems(album: album)
             } label: {
                 Label("More", systemImage: "ellipsis")
@@ -245,7 +245,7 @@ struct TrackRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contextMenu { TrackMenuItems(tracks: [track]) }
+        .listenContextMenu { TrackMenuItems(tracks: [track]) }
         .swipeActions(edge: .leading) {
             Button("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") { player.playNext([.track(track.id)]) }
                 .tint(.indigo)
