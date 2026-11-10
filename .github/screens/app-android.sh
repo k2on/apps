@@ -118,7 +118,7 @@ tap() {
   done
   [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; return 0; }
   echo "::error::$app: nothing on the screen says '$text'"
-  adb exec-out screencap -p > "$out/stuck.png" || true
+  adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
   return 1
 }
@@ -217,7 +217,7 @@ open_app() {
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
-    adb exec-out screencap -p > "$out/stuck.png" || true
+    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
     return 1
   fi
   # What it shows first (a list, a cover), drawn: its ready signal.
@@ -387,7 +387,7 @@ for theme in ${THEMES:-light dark}; do
       { echo "before the picture"; cat "$out/$theme/$id.tree.txt"; } > "$steps/shot.txt"
     }
     tree
-    adb exec-out screencap -p > "$out/$theme/$id.png"
+    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/$theme/$id.png"
   done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
 done
 
