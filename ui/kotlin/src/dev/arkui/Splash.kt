@@ -37,7 +37,10 @@ public fun ComponentActivity.holdSplashUntil(
     val splash = installSplashScreen()
     val since = SystemClock.uptimeMillis()
     splash.setKeepOnScreenCondition {
-        keepsSplash(ready(), SystemClock.uptimeMillis() - since, ceilingMs)
+        val keep = keepsSplash(ready(), SystemClock.uptimeMillis() - since, ceilingMs)
+        // A screenshot is not ready while the splash still hides the app (Shots.kt).
+        Ready.still("splash", keep)
+        keep
     }
 }
 

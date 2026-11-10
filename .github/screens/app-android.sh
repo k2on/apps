@@ -290,6 +290,10 @@ demo clock -e hhmm 1200
 demo battery -e level 100 -e plugged false
 demo network -e wifi show -e level 4
 demo notifications -e visible false
+# Every icon of the status bar said, so none changes under a shot (two runs'
+# shots differed in the Wi-Fi and the clock's corner, rows 51-83).
+demo network -e mobile hide -e wifi show -e level 4 -e fully true
+demo status -e volume hide -e bluetooth hide -e location hide -e alarm hide -e sync hide -e tty hide -e eri hide -e mute hide -e speakerphone hide -e zen hide
 
 # The app's ready signal, read from here on.
 listen
