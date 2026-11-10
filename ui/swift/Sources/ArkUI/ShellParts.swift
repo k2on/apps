@@ -242,7 +242,9 @@ public struct WithToolbar<Content: View, Items: ToolbarContent>: View {
         content
             .navigationTitle(title)
             #if os(iOS)
-            .toolbarTitleDisplayMode(.automatic)
+            // Large on the iPad as on the iPhone (the reference's month over
+            // its budget); `.automatic` was inline beside the top tab bar.
+            .toolbarTitleDisplayMode(.large)
             #endif
             .toolbar {
                 items
@@ -328,9 +330,13 @@ public struct WithInspector<Content: View, Inspector: View>: View {
     public var body: some View {
         content
             .inspector(isPresented: Binding(get: { isShown }, set: onToggle)) {
-                inspector
-                    .navigationTitle(title)
-                    .inspectorColumnWidth(min: LayoutTokens.inspectorWidth, ideal: LayoutTokens.inspectorWidth + 40)
+                // Its title in a stack of its own: a title set here never
+                // reaches the section's bar (an account's register read
+                // "Transaction Details" on the iPhone).
+                NavigationStack {
+                    inspector.navigationTitle(title)
+                }
+                .inspectorColumnWidth(min: LayoutTokens.inspectorWidth, ideal: LayoutTokens.inspectorWidth + 40)
             }
             // Its toggle at the toolbar's trailing end, as Apple's apps put it.
             .toolbar {
