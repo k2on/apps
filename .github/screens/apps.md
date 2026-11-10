@@ -194,11 +194,15 @@ which nix builds at the commit (see below).
 ## When it runs
 
 On Android and the desktop each app is a job of its own, so the apps are
-taken at once. The iPhone's are one job, on one Mac, the scarce runner:
-one Xcode selected, one nix installed, one simulator booted, every app
-built and every server started under the boot, then each app taken on it
-in turn, the driver built once (`apps-ios.sh`). One that fails is said,
-the others still taken and kept, and the job fails at its end. Each job
+taken at once. On the Macs each app and device is a job of its own too,
+at once (`which`'s `ios-matrix`): an app's iPhone; its iPad when its
+project's `TARGETED_DEVICE_FAMILY` has 2; its Mac window when the commit
+has `<app>-macos`. Each selects the Xcode, installs nix, evaluates, then
+boots its simulator under the server's start and the app's and the
+driver's fetch (both nix's builds, from the cache; the driver is
+`screens-drive-ios`, built once per change to drive-ios/). One that
+fails is red, the others still taken; `ios-inputs` keeps an app's hash
+only when every job of it took its shots whole. Each job
 starts its apps' servers first, in the background (each `server.sh`,
 nix's build of the server: the cache's, or built while the rest goes on),
 under whatever is slow anyway: the apps' build on the iPhone and the
@@ -299,19 +303,17 @@ build, the same driver, the same shots.json, light and dark.
   can stay at the foot. A Fold whose screen does not change at all is
   said, and its folded shots are not taken. device.json is from what was
   drawn: a tablet's is wider than tall.
-- **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
-  built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
-  takes the iPad (main's apps today are the iPhone's alone), nothing is
-  booted and nothing more is done. Else, once the iPhone's shots are
-  taken, the iPhone is shut down and an iPad booted (not under the
-  iPhone's shots: a second simulator booted beside them could make them
-  flaky), and each app that takes it is taken upright and then on its side
+- **The iPad**: a Mac job of its own, for an app whose project says it
+  may take the iPad. Once the app is built, `ios-family.sh` reads its
+  `UIDeviceFamily`; when it does not take the iPad, nothing is taken.
+  Else the iPad booted under the build is taken upright and then on its side
   (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
   XCUITest gives in the screen's portrait frame is turned a quarter
   counter-clockwise), signed in once. An app whose iPad shots fail keeps
   no hash (`<app>/ios/inputs`), so it is taken whole again.
-- **The Mac**: in the same job, after the iPad. The commit's Mac packages
-  are listed by name (nothing evaluated); an app with `<app>-macos` is
+- **The Mac**: a Mac job of its own, for an app whose commit has
+  `<app>-macos` (`which` lists the Mac packages by name, nothing
+  evaluated); it is
   built by `nix-xcode.sh` as the iPhone's are, opened with `--server
   <URL> --user <name>` (what the desktop window is given; an app that takes
   them opens signed in to the same sample-data server), and its window
@@ -326,10 +328,11 @@ build, the same driver, the same shots.json, light and dark.
   once with the phone's. Together, one job after the other, they were 5
   (revelation), 12 (money) and 17 to 18 (harken) minutes; apart, the
   longest is the Fold's (two postures). The
-  Mac: for apps that take neither the iPad nor the Mac, about five
-  seconds (the iPad's check, the listing of the Mac packages); for one
-  that takes the iPad, the iPad's boot (about a minute) and its shots
-  twice over (money's were eight minutes, both ways up, light and dark).
+  Macs: a job per app and device, each a few minutes of its own setup
+  (nix, the evaluation, the boot) before its shots, at once rather than
+  one after the other; an iPad's shots are twice an iPhone's (money's
+  were eight minutes, both ways up, light and dark). GitHub runs at most
+  five Macs of an account at once.
 
 ## The desktop
 
