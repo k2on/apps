@@ -66,7 +66,6 @@ struct Shell: View {
     @EnvironmentObject private var model: Model
     @EnvironmentObject private var watched: Watched<MoneyView>
     @State private var sheet: Sheet? = nil
-    @State private var autoAssigning = false
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
     /// What the inspector shows: a category or a transaction, by its id.
@@ -121,11 +120,6 @@ struct Shell: View {
             }
             // The budget's title is its month: the shell is told as it moves.
             .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
-            .confirmationDialog("Auto-Assign", isPresented: $autoAssigning, titleVisibility: .visible) {
-                Button("Underfunded") { model.autoAssign(.underfunded) }
-                Button("Assigned Last Month") { model.autoAssign(.lastMonth) }
-                Button("Reset Assigned Amounts", role: .destructive) { model.autoAssign(.reset) }
-            }
             .sheet(item: $sheet) { s in
                 sheetView(s)
                     .environmentObject(model)
@@ -155,7 +149,23 @@ struct Shell: View {
         let section = String(name.split(separator: ".").first ?? "")
         SwiftUI.Group {
             switch name {
-            case "budget": BudgetView()
+            case "budget":
+                if let b = model.budget {
+                    // Written from Rust (Generated/BudgetView.swift), over its runtime.
+                    BudgetView()
+                        .environmentObject(b)
+                        .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind, side: 20)) }
+                        .onAppear {
+                            // A category's month: in the inspector while it shows, else pushed.
+                            b.open = { r in
+                                if case let .category(id, _) = r, model.shell.page.inspector {
+                                    model.shell.send(.inspectCategory(id: id))
+                                } else {
+                                    push("budget", r)
+                                }
+                            }
+                        }
+                }
             case "accounts":
                 if let a = model.accounts {
                     // Written from Rust (Generated/AccountsView.swift), over its runtime.
@@ -228,7 +238,10 @@ struct Shell: View {
         case "previous-month": model.stepMonth(-1)
         case "next-month": model.stepMonth(1)
         case "this-month": model.showThisMonth()
-        case "auto-assign": autoAssigning = true
+        case "auto-assign": model.budget?.send(.autoAssign)
+        case "new-category": model.budget?.send(.newCategory(group: ""))
+        case "new-group": model.budget?.send(.newGroup)
+        case "toggle-hidden": model.budget?.send(.toggleHidden)
         case "refresh": Task { await model.refresh() }
         default: break
         }

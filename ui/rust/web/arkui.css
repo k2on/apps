@@ -442,3 +442,19 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
   background: var(--ark-error-container);
   color: var(--ark-on-error-container);
 }
+/* A section's figures in columns, a collapsible heading, a row toward a goal (MeterRow). */
+.ark-section-header.ark-toggles { cursor: default; }
+.ark-section-header .ark-chevron { margin-right: 4px; }
+.ark-columns { display: inline-flex; gap: var(--ark-space-m, 12px); }
+.ark-column { display: inline-flex; flex-direction: column; align-items: flex-end; width: var(--ark-amount-column-width, 96px); flex: none; }
+.ark-column-title { font-size: 10px; font-weight: 400; opacity: .7; }
+.ark-caution-words { color: var(--ark-caution); }
+.ark-meter-row { align-items: center; gap: var(--ark-space-m, 12px); }
+.ark-meter-row .ark-row-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ark-meter-row .ark-row-title { display: flex; align-items: center; gap: 8px; }
+.ark-meter-notes { display: flex; justify-content: space-between; font-size: 11px; }
+.ark-meter-note.ark-tint-positive { color: var(--ark-positive); }
+.ark-meter-note.ark-tint-negative { color: var(--ark-error); }
+.ark-meter-note.ark-tint-caution { color: var(--ark-caution); }
+.ark-meter-note.ark-tint-neutral { color: var(--ark-quiet); }
+.ark-tile-small { width: 20px; height: 20px; }

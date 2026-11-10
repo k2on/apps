@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Section, View};
+use ark_app::view::{Confirm, Input, ListRow, MeterRow, Part, Picture, Section, View};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -100,6 +100,18 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
             .into_any(),
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
+        Part::MeterRow(r) => meter_row(*r),
+        Part::Headline(h) => {
+            let ark_app::view::Headline {
+                label,
+                figure,
+                tint,
+                caption,
+                action,
+            } = *h;
+            let act = action.map(|(title, glyph, tap)| crate::figures::capsule_button(Some(glyph), title, true, tap));
+            crate::figures::headline(&label.get(), figure.get(), crate::figures::Tint::named(&tint.get()), &caption.get(), act)
+        }
         Part::NameField {
             label,
             value,
@@ -259,14 +271,73 @@ pub fn chip<M: Clone + 'static>(label: String, selected: bool, tap: M) -> AnyVie
 
 fn section<M: Clone + 'static>(s: Section<M>) -> AnyView {
     let shows = s.shows.as_ref().is_none_or(|b| b.get());
-    let trailing = s.amount.filter(|_| shows).map(|a| {
-        let c = a.get();
-        amount(c, c >= 0)
+    let total = match s.note.as_ref().and_then(|n| n.get()) {
+        Some(words) => Some(html::span().class("ark-caution-words").child(words).into_any()),
+        None => s.amount.filter(|_| shows).map(|a| {
+            let c = a.get();
+            amount(c, c >= 0)
+        }),
+    };
+    // The figures in their columns, each under its title (hidden when compact).
+    let trailing = match &s.columns {
+        Some(k) => {
+            let cell = |title: &'static str, figure: Option<AnyView>, class: &'static str| {
+                html::span()
+                    .class(class)
+                    .child((html::span().class("ark-column-title").child(title), figure))
+                    .into_any()
+            };
+            Some(
+                html::span()
+                    .class("ark-columns")
+                    .child((
+                        cell(k.titles[0], Some(amount(k.first.get(), true)), "ark-column ark-unless-compact"),
+                        cell(k.titles[1], Some(amount(k.second.get(), true)), "ark-column ark-unless-compact"),
+                        cell(k.titles[2], total, "ark-column"),
+                    ))
+                    .into_any(),
+            )
+        }
+        None => total,
+    };
+    let open = s.open.as_ref().is_none_or(|(o, _)| o.get());
+    let toggle = s.open.as_ref().map(|(_, t)| t.clone());
+    let entries = menu::of_row(&s.menu);
+    let head = s.title.map(|t| {
+        let title = t.get();
+        let chevron = toggle.is_some().then(|| {
+            html::span()
+                .class("ark-chevron")
+                .child(glyph(if open { "chevron-down" } else { "chevron-right" }, 12))
+        });
+        let (t2, e2) = (title.clone(), entries.clone());
+        html::div()
+            .class(if toggle.is_some() {
+                "ark-section-header ark-toggles"
+            } else {
+                "ark-section-header"
+            })
+            .attr("aria-expanded", toggle.is_some().then(|| open.to_string()))
+            .on(leptos::ev::click, move |_| {
+                if let Some(t) = &toggle {
+                    send(t.clone())
+                }
+            })
+            .on(leptos::ev::contextmenu, move |e: web_sys::MouseEvent| {
+                if !e2.is_empty() {
+                    e.prevent_default();
+                    menu::open(
+                        t2.clone(),
+                        e2.clone(),
+                        (e.client_x() as f64, e.client_y() as f64),
+                        menu::Anchor::Pointer,
+                        false,
+                    );
+                }
+            })
+            .child((html::span().child((chevron, title)), trailing))
     });
-    let head = s
-        .title
-        .map(|t| html::div().class("ark-section-header").child((html::span().child(t.get()), trailing)));
-    let rows = nodes(*s.rows);
+    let rows = if open { nodes(*s.rows) } else { vec![] };
     let n = rows.len();
     let rows: Vec<AnyView> = rows
         .into_iter()
@@ -354,6 +425,91 @@ pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
             }
         })
         .child((picture, words, badge, figure, value, chevron))
+        .into_any()
+}
+
+/// ArkUI's `MeterRow`: its mark and title over the slim bar and its words,
+/// two figures in columns (when not compact), the status badge at its end.
+pub fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> AnyView {
+    let title = r.title.get();
+    let entries = menu::of_row(&r.menu);
+    let open: Option<crate::Action> = r.tap.clone().map(|t| Rc::new(move || send(t.clone())) as crate::Action);
+    let opener: Option<crate::Opener> = (!entries.is_empty()).then(|| {
+        let title = title.clone();
+        let entries = entries.clone();
+        Rc::new(move |x: f64, y: f64| menu::open(title.clone(), entries.clone(), (x, y), menu::Anchor::Pointer, false)) as crate::Opener
+    });
+    if let Some(o) = &opener {
+        let (t, o) = (title.clone(), o.clone());
+        crate::drawn(|d| d.contexts.push((t, o)));
+    }
+    let (_, lit) = row_drawn(Row {
+        title: title.clone(),
+        open: open.clone(),
+        menu: opener.clone(),
+    });
+    let faded = r.faded.as_ref().is_some_and(|f| f.get());
+    let mark = r
+        .mark
+        .as_ref()
+        .and_then(|m| m.get())
+        .map(|k| tile(if k == "credit" { "credit-card" } else { &k }, "ark-tile ark-tile-small ark-tile-accent"));
+    let bar = match (r.fraction.as_ref().and_then(|f| f.get()), &r.meter_tint) {
+        (Some(f), Some(t)) => Some(crate::figures::goal_bar(f as f32, crate::figures::Tint::named(&t.get()))),
+        _ => None,
+    };
+    let note = r.note.as_ref().and_then(|n| n.get());
+    let end = r.note_end.as_ref().and_then(|n| n.get());
+    let tint = crate::figures::Tint::named(&r.note_tint.as_ref().map(|t| t.get()).unwrap_or_default());
+    let notes = (note.is_some() || end.is_some()).then(|| {
+        html::div().class("ark-meter-notes").child((
+            note.map(|n| html::span().class(format!("ark-meter-note {}", tint.class())).child(n)),
+            end.map(|e| html::span().class("ark-quiet").child(e)),
+        ))
+    });
+    let words = html::div().class("ark-row-words").child((
+        html::div()
+            .class(if faded { "ark-row-title ark-quiet" } else { "ark-row-title" })
+            .child((mark, title.clone())),
+        bar,
+        notes,
+    ));
+    let columns = r.columns.map(|(a, b)| {
+        (
+            html::span().class("ark-column ark-unless-compact").child(amount(a.get(), false)),
+            html::span().class("ark-column ark-unless-compact").child(amount(b.get(), true)),
+        )
+    });
+    let badge = html::span().class("ark-column").child(crate::figures::status_badge(
+        r.status.get(),
+        crate::figures::Tint::named(&r.status_tint.get()),
+    ));
+    let menu_at = opener.clone();
+    let wired = match &open {
+        Some(o) => crate::page::tap(&title, o.clone()),
+        None => crate::page::Wired::default(),
+    };
+    crate::wired!(html::button(), wired)
+        .class(if lit {
+            "ark-row ark-meter-row ark-cursor"
+        } else {
+            "ark-row ark-meter-row"
+        })
+        .attr("data-cursor", lit.then_some("true"))
+        .attr("data-title", title.clone())
+        .attr("aria-label", r.said.map(|s| s.get()).unwrap_or(title))
+        .on(leptos::ev::click, move |_| {
+            if let Some(o) = &open {
+                o()
+            }
+        })
+        .on(leptos::ev::contextmenu, move |e: web_sys::MouseEvent| {
+            if let Some(o) = &menu_at {
+                e.prevent_default();
+                o(e.client_x() as f64, e.client_y() as f64);
+            }
+        })
+        .child((words, columns, badge))
         .into_any()
 }
 

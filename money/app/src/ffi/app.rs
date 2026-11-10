@@ -11,6 +11,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::accounts::{Accounts, AccountsMsg, AccountsPage};
+use crate::budget::{Budget, BudgetMsg, BudgetPage};
 use crate::shell::{MoneyShell, ShellMsg, ShellPage};
 use ark_app::{Host, Inbox, Runtime, Ticket};
 use ark_app::{ModuleCall, Modules};
@@ -147,6 +148,107 @@ impl AccountsApp {
 
     /// The phone's modules, the ones money opts into (money/app.toml),
     /// registered once at startup; any may be none.
+    pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
+        let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
+        m.set(haptics).set(clipboard).set(share);
+    }
+}
+
+/// The Budget tab, running: its month's views held as the month moves
+/// (`Budget::holds` reads the state, so they are held again after every
+/// message).
+#[derive(uniffi::Object)]
+pub struct BudgetApp {
+    session: Arc<ark_ffi::Session<domain::MoneyView>>,
+    shell: Arc<dyn AppShell>,
+    runtime: Mutex<Runtime<Budget>>,
+    modules: Mutex<Modules>,
+    inbox: Inbox,
+    holds: Mutex<(Vec<domain::MoneyView>, Vec<ark_ffi::Hold<domain::MoneyView>>)>,
+}
+
+struct Tab<'a> {
+    app: &'a BudgetApp,
+}
+
+impl Host<Budget> for Tab<'_> {
+    fn read<R>(&self, f: impl FnOnce(&Store<domain::MoneyView>) -> R) -> R {
+        self.app.session.read(|st, _| f(st))
+    }
+    fn now_ms(&self) -> i64 {
+        session_now(self.app.shell.now_ms(), &self.app.shell.today())
+    }
+    fn send(&mut self, change: MoneyChange) -> Result<(), String> {
+        match self.app.session.send(|p| p.mutate_encoded(change.name(), change.input())) {
+            Ok(_) => Ok(()),
+            Err(Refusal::Refused { why }) => Err(why),
+        }
+    }
+    fn open(&mut self, route: Route) {
+        self.app.shell.open_route(route)
+    }
+    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
+        let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        self.app.inbox.ask(&modules, ticket, call)
+    }
+    fn native(&mut self, name: &str) {
+        self.app.shell.native(name.into())
+    }
+}
+
+impl BudgetApp {
+    /// The views the state names held, and those it no longer names let go.
+    fn hold(&self, rt: &Runtime<Budget>) {
+        let want = rt.holds();
+        let mut h = self.holds.lock().unwrap_or_else(|e| e.into_inner());
+        if h.0 != want {
+            let held = want.iter().map(|k| self.session.hold(k.clone())).collect();
+            *h = (want, held);
+        }
+    }
+}
+
+#[uniffi::export]
+impl BudgetApp {
+    #[uniffi::constructor]
+    pub fn new(session: Arc<Session>, shell: Arc<dyn AppShell>) -> Arc<BudgetApp> {
+        let app = Arc::new(BudgetApp {
+            session: session.inner.clone(),
+            shell,
+            runtime: Mutex::new(Runtime::<Budget>::new()),
+            modules: Mutex::new(Modules::default()),
+            inbox: Inbox::default(),
+            holds: Mutex::new((vec![], vec![])),
+        });
+        app.hold(&app.runtime.lock().unwrap_or_else(|e| e.into_inner()));
+        app
+    }
+
+    /// `msg` taken; the views its state names held.
+    pub fn send(&self, msg: BudgetMsg) {
+        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        rt.dispatch(msg, &mut Tab { app: self });
+        loop {
+            let answers = self.inbox.take();
+            if answers.is_empty() {
+                break;
+            }
+            for (t, a) in answers {
+                rt.answer(t, a, &mut Tab { app: self });
+            }
+        }
+        self.hold(&rt);
+    }
+
+    pub fn page(&self) -> BudgetPage {
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        rt.screen(&Tab { app: self })
+    }
+
+    pub fn version(&self) -> u64 {
+        self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
+    }
+
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
         m.set(haptics).set(clipboard).set(share);

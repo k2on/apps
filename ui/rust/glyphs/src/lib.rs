@@ -285,6 +285,27 @@ pub const ARROWS: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="
 /// `users`
 pub const USERS: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M13 7a4 4 0 1 1-8 0a4 4 0 1 1 8 0z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>"##;
 
+/// `eye`
+pub const EYE: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><path d="M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z"/></svg>"##;
+
+/// `eye-off`
+pub const EYE_OFF: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>"##;
+
+/// `arrow-up`
+pub const ARROW_UP: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>"##;
+
+/// `arrow-down`
+pub const ARROW_DOWN: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>"##;
+
+/// `trash`
+pub const TRASH: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>"##;
+
+/// `crosshair`
+pub const CROSSHAIR: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z"/><path d="M22 12h-4"/><path d="M6 12H2"/><path d="M12 6V2"/><path d="M12 22v-4"/></svg>"##;
+
+/// `folder`
+pub const FOLDER: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"##;
+
 /// The glyph Lucide calls `name`, of the ones every toolkit has under the
 /// same name (ui/docs/parts.md, "Glyphs"): Compose's `ArkGlyphs.named`
 /// and SwiftUI's `ArkGlyphs.symbol` (an SF Symbol) answer the same names.
@@ -354,6 +375,13 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "laptop" => LAPTOP,
         "tag" => TAG,
         "music" => NOTE,
+        "eye" => EYE,
+        "eye-off" => EYE_OFF,
+        "arrow-up" => ARROW_UP,
+        "arrow-down" => ARROW_DOWN,
+        "trash" => TRASH,
+        "crosshair" => CROSSHAIR,
+        "folder" => FOLDER,
         _ => return None,
     })
 }
@@ -382,6 +410,13 @@ mod named_tests {
             "volume-2",
             "volume-x",
             "log-out",
+            "eye",
+            "eye-off",
+            "arrow-up",
+            "arrow-down",
+            "trash",
+            "crosshair",
+            "folder",
         ] {
             assert!(named(n).is_some(), "{n}");
         }

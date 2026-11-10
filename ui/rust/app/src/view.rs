@@ -281,7 +281,7 @@ pub enum Part<M> {
     /// A tab's page: its large title (the account's face at its end), then
     /// its content; pulled down, `refresh`.
     Page {
-        title: &'static str,
+        title: Val<String>,
         refresh: Option<M>,
         top: Box<View<M>>,
         content: Box<View<M>>,
@@ -323,6 +323,15 @@ pub enum Part<M> {
     /// A group of rows in a card, under its heading, a note under it.
     Section(Section<M>),
     Row(Box<ListRow<M>>),
+    /// A row of a thing toward a goal: its title (the app's mark before
+    /// it, faded while `faded`), a slim bar of how far (in its tint), words
+    /// under it in a tint and quiet ones at their end; on a regular width
+    /// two figures in columns; its figure in a status badge at its end.
+    MeterRow(Box<MeterRow<M>>),
+    /// A page's headline: what it is, its figure large in its tint, a
+    /// caption under it, and its one action at its end (a prominent
+    /// capsule).
+    Headline(Box<Headline<M>>),
     /// A sheet: its title, its content; put away, `dismiss`; kept with
     /// its confirming action, while there is one (the iPhone's checkmark in
     /// the sheet's bar, a full-width button under the form elsewhere).
@@ -607,9 +616,9 @@ tuples!(A B C D E F G H);
 // * The parts, as builders
 
 /// A tab's page.
-pub fn tab_page<M>(title: &'static str, content: impl Into<View<M>>) -> PageBuilder<M> {
+pub fn tab_page<M>(title: impl Into<Val<String>>, content: impl Into<View<M>>) -> PageBuilder<M> {
     PageBuilder {
-        title,
+        title: title.into(),
         refresh: None,
         top: View::Empty,
         content: content.into(),
@@ -617,7 +626,7 @@ pub fn tab_page<M>(title: &'static str, content: impl Into<View<M>>) -> PageBuil
 }
 
 pub struct PageBuilder<M> {
-    title: &'static str,
+    title: Val<String>,
     refresh: Option<M>,
     top: View<M>,
     content: View<M>,
@@ -690,7 +699,25 @@ pub struct Section<M> {
     /// While the amount shows; always when none.
     pub shows: Option<Val<bool>>,
     pub footer: Option<Val<Option<String>>>,
+    /// Words in the caution's tint where the total would be, while there
+    /// are any ("$40.00 not covered").
+    pub note: Option<Val<Option<String>>>,
+    /// On a regular width, two more figures before the total, each under
+    /// its column's title (and the total under the third).
+    pub columns: Option<Box<Columns>>,
+    /// Its rows shown while this holds; its heading, tapped, sends the message.
+    pub open: Option<(Val<bool>, M)>,
+    /// What holding its heading offers.
+    pub menu: Vec<MenuItem<M>>,
     pub rows: Box<View<M>>,
+}
+
+/// A section's figures in columns ([`Section::columns`]).
+#[derive(Clone, Debug)]
+pub struct Columns {
+    pub titles: [&'static str; 3],
+    pub first: Val<i64>,
+    pub second: Val<i64>,
 }
 
 /// ArkUI's `HeaderCard` ([`Part::HeaderCard`]).
@@ -780,6 +807,10 @@ pub fn card_section<M>(rows: impl Into<View<M>>) -> Section<M> {
         amount: None,
         shows: None,
         footer: None,
+        note: None,
+        columns: None,
+        open: None,
+        menu: vec![],
         rows: Box::new(rows.into()),
     }
 }
@@ -806,6 +837,200 @@ impl<M> Section<M> {
     pub fn footer(mut self, text: impl Into<Val<Option<String>>>) -> Self {
         self.footer = Some(text.into());
         self
+    }
+
+    /// Words in the caution's tint in the total's place, while there are any.
+    pub fn total_note(mut self, text: impl Into<Val<Option<String>>>) -> Self {
+        self.note = Some(text.into());
+        self
+    }
+
+    /// Two figures before the total on a regular width, under `titles`'
+    /// first two (the total under the third).
+    pub fn columns(mut self, titles: [&'static str; 3], first: impl Into<Val<i64>>, second: impl Into<Val<i64>>) -> Self {
+        self.columns = Some(Box::new(Columns {
+            titles,
+            first: first.into(),
+            second: second.into(),
+        }));
+        self
+    }
+
+    /// Its rows only while `open`; its heading, tapped, `toggle`.
+    pub fn collapsible(mut self, open: impl Into<Val<bool>>, toggle: M) -> Self {
+        self.open = Some((open.into(), toggle));
+        self
+    }
+
+    /// `title` in what holding the heading offers, while `shown` holds.
+    pub fn menu_if(
+        mut self,
+        title: impl Into<Val<String>>,
+        glyph: impl Into<Val<String>>,
+        tap: M,
+        destructive: bool,
+        shown: impl Into<Val<bool>>,
+    ) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(destructive),
+            shown: Some(shown.into()),
+        });
+        self
+    }
+}
+
+/// ArkUI's `MeterRow` ([`Part::MeterRow`]).
+#[derive(Clone, Debug)]
+pub struct MeterRow<M> {
+    pub title: Val<String>,
+    /// The app's mark of this kind before the title, while there is one.
+    pub mark: Option<Val<Option<String>>>,
+    pub faded: Option<Val<bool>>,
+    /// How far, 0 to 1, while there is a goal; and the bar's tint.
+    pub fraction: Option<Val<Option<f64>>>,
+    pub meter_tint: Option<Val<String>>,
+    /// Words under the bar, in `note_tint`, while there are any.
+    pub note: Option<Val<Option<String>>>,
+    pub note_tint: Option<Val<String>>,
+    /// Quiet words at the end of the note's line.
+    pub note_end: Option<Val<Option<String>>>,
+    pub columns: Option<(Val<i64>, Val<i64>)>,
+    pub status: Val<String>,
+    pub status_tint: Val<String>,
+    pub said: Option<Val<String>>,
+    pub tap: Option<M>,
+    pub menu: Vec<MenuItem<M>>,
+}
+
+/// A row toward a goal: `title`, and `status` in a badge of `tint` at its end.
+pub fn meter_row<M>(title: impl Into<Val<String>>, status: impl Into<Val<String>>, tint: impl Into<Val<String>>) -> MeterRow<M> {
+    MeterRow {
+        title: title.into(),
+        mark: None,
+        faded: None,
+        fraction: None,
+        meter_tint: None,
+        note: None,
+        note_tint: None,
+        note_end: None,
+        columns: None,
+        status: status.into(),
+        status_tint: tint.into(),
+        said: None,
+        tap: None,
+        menu: vec![],
+    }
+}
+
+impl<M> MeterRow<M> {
+    /// The app's mark of `kind` before the title, while there is one.
+    pub fn mark(mut self, kind: impl Into<Val<Option<String>>>) -> Self {
+        self.mark = Some(kind.into());
+        self
+    }
+    /// Its title quiet while `b` holds (hidden, not gone).
+    pub fn faded(mut self, b: impl Into<Val<bool>>) -> Self {
+        self.faded = Some(b.into());
+        self
+    }
+    pub fn meter(mut self, fraction: impl Into<Val<Option<f64>>>, tint: impl Into<Val<String>>) -> Self {
+        self.fraction = Some(fraction.into());
+        self.meter_tint = Some(tint.into());
+        self
+    }
+    pub fn note(mut self, text: impl Into<Val<Option<String>>>, tint: impl Into<Val<String>>) -> Self {
+        self.note = Some(text.into());
+        self.note_tint = Some(tint.into());
+        self
+    }
+    pub fn note_end(mut self, text: impl Into<Val<Option<String>>>) -> Self {
+        self.note_end = Some(text.into());
+        self
+    }
+    /// Two figures in columns before the badge, on a regular width.
+    pub fn columns(mut self, first: impl Into<Val<i64>>, second: impl Into<Val<i64>>) -> Self {
+        self.columns = Some((first.into(), second.into()));
+        self
+    }
+    pub fn said(mut self, s: impl Into<Val<String>>) -> Self {
+        self.said = Some(s.into());
+        self
+    }
+    pub fn on_tap(mut self, m: M) -> Self {
+        self.tap = Some(m);
+        self
+    }
+    /// `title` in what holding the row offers, while `shown` holds;
+    /// destructive when `destructive`.
+    pub fn menu_if(
+        mut self,
+        title: impl Into<Val<String>>,
+        glyph: impl Into<Val<String>>,
+        tap: M,
+        destructive: bool,
+        shown: impl Into<Val<bool>>,
+    ) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(destructive),
+            shown: Some(shown.into()),
+        });
+        self
+    }
+}
+
+impl<M> From<MeterRow<M>> for View<M> {
+    fn from(r: MeterRow<M>) -> View<M> {
+        Part::MeterRow(Box::new(r)).into()
+    }
+}
+
+/// A page's headline ([`Part::Headline`]).
+#[derive(Clone, Debug)]
+pub struct Headline<M> {
+    pub label: Val<String>,
+    pub figure: Val<String>,
+    pub tint: Val<String>,
+    pub caption: Val<String>,
+    /// Its one action: its title, its glyph, its message.
+    pub action: Option<(&'static str, &'static str, M)>,
+}
+
+/// What [`headline`] builds.
+pub type HeadlineBuilder<M> = Headline<M>;
+
+/// A page's headline: `label`, `figure` large in `tint`, `caption` under it.
+pub fn headline<M>(
+    label: impl Into<Val<String>>,
+    figure: impl Into<Val<String>>,
+    tint: impl Into<Val<String>>,
+    caption: impl Into<Val<String>>,
+) -> HeadlineBuilder<M> {
+    Headline {
+        label: label.into(),
+        figure: figure.into(),
+        tint: tint.into(),
+        caption: caption.into(),
+        action: None,
+    }
+}
+
+impl<M> HeadlineBuilder<M> {
+    /// Its one action at its end: `title` with `glyph`, tapped `tap`.
+    pub fn action(mut self, title: &'static str, glyph: &'static str, tap: M) -> Self {
+        self.action = Some((title, glyph, tap));
+        self
+    }
+}
+
+impl<M> From<Headline<M>> for View<M> {
+    fn from(h: Headline<M>) -> View<M> {
+        Part::Headline(Box::new(h)).into()
     }
 }
 
@@ -1279,6 +1504,27 @@ fn lit<T: Debug>(v: &Val<T>) -> String {
     }
 }
 
+/// A menu's items as the phones' `MenuAction`s.
+fn menu_items<M>(menu: &[MenuItem<M>]) -> Given<'_, M> {
+    Given::Items(
+        menu.iter()
+            .map(|m| {
+                let mut args = vec![("glyph", Given::Val(lit(&m.glyph))), ("destructive", Given::Val(lit(&m.destructive)))];
+                if let Some(s) = &m.shown {
+                    args.push(("shown", Given::Val(lit(s))));
+                }
+                args.push(("onTap", Given::Act(&m.tap)));
+                Call {
+                    name: "MenuAction",
+                    first: Some(Given::Val(lit(&m.title))),
+                    args,
+                    slots: vec![],
+                }
+            })
+            .collect(),
+    )
+}
+
 impl<M> Part<M> {
     /// The part as a call (see [`Call`]).
     pub fn call(&self) -> Call<'_, M> {
@@ -1295,7 +1541,7 @@ impl<M> Part<M> {
                 if let Some(r) = refresh {
                     args.push(("onRefresh", G::Act(r)));
                 }
-                c("TabPage", Some(G::Text(title)), args, vec![("", &**content), ("top", &**top)])
+                c("TabPage", Some(G::Val(lit(title))), args, vec![("", &**content), ("top", &**top)])
             }
             Part::Summary {
                 label,
@@ -1361,7 +1607,71 @@ impl<M> Part<M> {
                 if let Some(f) = &s.footer {
                     args.push(("footer", G::Val(lit(f))));
                 }
+                if let Some(n) = &s.note {
+                    args.push(("totalNote", G::Val(lit(n))));
+                }
+                if let Some(k) = &s.columns {
+                    args.push(("firstTitle", G::Text(k.titles[0])));
+                    args.push(("secondTitle", G::Text(k.titles[1])));
+                    args.push(("totalTitle", G::Text(k.titles[2])));
+                    args.push(("first", G::Val(lit(&k.first))));
+                    args.push(("second", G::Val(lit(&k.second))));
+                }
+                if let Some((open, toggle)) = &s.open {
+                    args.push(("open", G::Val(lit(open))));
+                    args.push(("onToggle", G::Act(toggle)));
+                }
+                if !s.menu.is_empty() {
+                    args.push(("menu", menu_items(&s.menu)));
+                }
                 c("CardSection", None, args, vec![("", &*s.rows)])
+            }
+            Part::MeterRow(r) => {
+                let mut args = vec![("status", G::Val(lit(&r.status))), ("statusTint", G::Val(lit(&r.status_tint)))];
+                if let Some(m) = &r.mark {
+                    args.push(("mark", G::Val(lit(m))));
+                }
+                if let Some(f) = &r.faded {
+                    args.push(("faded", G::Val(lit(f))));
+                }
+                if let (Some(f), Some(t)) = (&r.fraction, &r.meter_tint) {
+                    args.push(("fraction", G::Val(lit(f))));
+                    args.push(("meterTint", G::Val(lit(t))));
+                }
+                if let (Some(n), Some(t)) = (&r.note, &r.note_tint) {
+                    args.push(("note", G::Val(lit(n))));
+                    args.push(("noteTint", G::Val(lit(t))));
+                }
+                if let Some(e) = &r.note_end {
+                    args.push(("noteEnd", G::Val(lit(e))));
+                }
+                if let Some((a, b)) = &r.columns {
+                    args.push(("first", G::Val(lit(a))));
+                    args.push(("second", G::Val(lit(b))));
+                }
+                if let Some(s) = &r.said {
+                    args.push(("said", G::Val(lit(s))));
+                }
+                if !r.menu.is_empty() {
+                    args.push(("menu", menu_items(&r.menu)));
+                }
+                if let Some(t) = &r.tap {
+                    args.push(("onTap", G::Act(t)));
+                }
+                c("MeterRow", Some(G::Val(lit(&r.title))), args, vec![])
+            }
+            Part::Headline(h) => {
+                let mut args = vec![
+                    ("figure", G::Val(lit(&h.figure))),
+                    ("tint", G::Val(lit(&h.tint))),
+                    ("caption", G::Val(lit(&h.caption))),
+                ];
+                if let Some((title, glyph, tap)) = &h.action {
+                    args.push(("actionTitle", G::Text(title)));
+                    args.push(("actionGlyph", G::Text(glyph)));
+                    args.push(("onAction", G::Act(tap)));
+                }
+                c("Headline", Some(G::Val(lit(&h.label))), args, vec![])
             }
             Part::Row(r) => {
                 let mut args = vec![];
@@ -1396,19 +1706,7 @@ impl<M> Part<M> {
                     args.push(("said", G::Val(lit(s))));
                 }
                 if !r.menu.is_empty() {
-                    let items = r
-                        .menu
-                        .iter()
-                        .map(|m| {
-                            let mut args = vec![("glyph", G::Val(lit(&m.glyph))), ("destructive", G::Val(lit(&m.destructive)))];
-                            if let Some(s) = &m.shown {
-                                args.push(("shown", G::Val(lit(s))));
-                            }
-                            args.push(("onTap", G::Act(&m.tap)));
-                            c("MenuAction", Some(G::Val(lit(&m.title))), args, vec![])
-                        })
-                        .collect();
-                    args.push(("menu", G::Items(items)));
+                    args.push(("menu", menu_items(&r.menu)));
                 }
                 if let Some(t) = &r.tap {
                     args.push(("onTap", G::Act(t)));
@@ -1785,8 +2083,41 @@ impl<M: 'static> Part<M> {
                 amount: s.amount,
                 shows: s.shows,
                 footer: s.footer,
+                note: s.note,
+                columns: s.columns,
+                open: s.open.map(|(o, t)| (o, f(t))),
+                menu: map_menu(s.menu, f),
                 rows: b(s.rows),
             }),
+            Part::MeterRow(r) => {
+                let r = *r;
+                Part::MeterRow(Box::new(MeterRow {
+                    title: r.title,
+                    mark: r.mark,
+                    faded: r.faded,
+                    fraction: r.fraction,
+                    meter_tint: r.meter_tint,
+                    note: r.note,
+                    note_tint: r.note_tint,
+                    note_end: r.note_end,
+                    columns: r.columns,
+                    status: r.status,
+                    status_tint: r.status_tint,
+                    said: r.said,
+                    tap: r.tap.map(|m| f(m)),
+                    menu: map_menu(r.menu, f),
+                }))
+            }
+            Part::Headline(h) => {
+                let h = *h;
+                Part::Headline(Box::new(Headline {
+                    label: h.label,
+                    figure: h.figure,
+                    tint: h.tint,
+                    caption: h.caption,
+                    action: h.action.map(|(t, g, m)| (t, g, f(m))),
+                }))
+            }
             Part::Row(r) => {
                 let r = *r;
                 Part::Row(Box::new(ListRow {
@@ -2035,4 +2366,17 @@ impl<M: 'static> Part<M> {
             },
         }
     }
+}
+
+/// A menu's items sending `f` of their messages.
+fn map_menu<M, N>(menu: Vec<MenuItem<M>>, f: &Rc<dyn Fn(M) -> N>) -> Vec<MenuItem<N>> {
+    menu.into_iter()
+        .map(|m| MenuItem {
+            title: m.title,
+            glyph: m.glyph,
+            tap: f(m.tap),
+            destructive: m.destructive,
+            shown: m.shown,
+        })
+        .collect()
 }

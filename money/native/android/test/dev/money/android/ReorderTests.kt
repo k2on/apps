@@ -1,38 +1,21 @@
-// Putting the budget in order by hand: arkui's Reorder in sections (where a
-// row lands as it is dragged, and what it landed in front of), then the
-// budget's own reading of a drop as the domain's change, then that change
-// made on the demo's household and read back — the cards' payment
-// categories kept among themselves. Upper-case keys are headers.
+// arkui's Reorder in sections: where a row lands as it is dragged, and what
+// it landed in front of. Upper-case keys are headers. (The budget's own
+// moves are Rust's now: money/app/src/budget/tests.rs.)
 package dev.money.android
 
-import dev.arkdb.ffi.Id
-import uniffi.money_core.AccountKind
-import uniffi.money_core.cardGroupId
 import dev.arkui.Landing
 import dev.arkui.landing
 import dev.arkui.reordered
 import dev.arkui.sections
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 
 class ReorderTests {
     private val head: (String) -> Boolean = { it[0].isUpperCase() }
     private val order = listOf("A", "a1", "a2", "B", "b1", "C")
-
-    private lateinit var book: Book
-    private val l: Ledger
-        get() = book.state.value
-
-    @Before fun open() {
-        book = demoBook()
-    }
-
-    @After fun close() = book.close()
 
     // * arkui: where a drag puts a row
 
@@ -98,127 +81,5 @@ class ReorderTests {
         // Within its section, and the headers, as before.
         assertEquals(listOf("A", "a2", "a1", "B", "b1", "C"), reordered(order, "a1", "a2", head, fits))
         assertEquals(listOf("B", "b1", "A", "a1", "a2", "C"), reordered(order, "A", "B", head, fits))
-    }
-
-    // * The budget: a drop as the domain's change
-
-    // The demo starts with the cards' group (its Chase card's payment category), then the people's.
-    private val budget
-        get() = l.byGroup()
-    private val people
-        get() = budget.filter { it.first.id != cardGroupId() }
-    private val fits
-        get() = fitsOf(budget)
-
-    private fun dragged(keys: List<String>, key: String, over: String) = reordered(keys, key, over, ::isGroupKey, fits)
-
-    @Test fun theCardsGroupComesFirst() {
-        val (cards, rest) = budget.first()
-        assertEquals(cardGroupId(), cards.id)
-        assertEquals("Credit Card Payments", cards.name)
-        assertTrue(rest.isNotEmpty())
-        assertTrue(rest.all { it.isPayment() && it.card != null })
-        assertTrue(people.flatMap { it.second }.none { it.isPayment() })
-    }
-
-    @Test fun aCategoryDropIsAMoveIntoTheGroupItLandedUnder() {
-        val keys = keysOf(budget)
-        val (g1, g2) = people
-        val moved = g1.second.first()
-        val key = categoryKey(moved.categoryId)
-        // Dragged down past the second group's header: in front of that group's first category.
-        val after = dragged(keys, key, groupKey(g2.first.id))!!
-        val drop = dropOf(key, landing(after, key, ::isGroupKey)!!)
-        assertEquals(Drop.Category(moved.categoryId, g2.first.id, g2.second.firstOrNull()?.categoryId), drop)
-    }
-
-    @Test fun aCategoryAtAGroupsEndIsMovedBeforeNothing() {
-        val (g1, _) = people
-        val key = categoryKey(g1.second.first().categoryId)
-        val last = categoryKey(g1.second.last().categoryId)
-        val after = dragged(keysOf(budget), key, last)!!
-        assertEquals(Drop.Category(g1.second.first().categoryId, g1.first.id, null), dropOf(key, landing(after, key, ::isGroupKey)!!))
-    }
-
-    @Test fun aGroupDropIsAMoveInFrontOfTheNextGroup() {
-        val groups = budget.map { it.first }
-        val key = groupKey(groups[0].id)
-        val after = dragged(keysOf(budget), key, groupKey(groups[1].id))!!
-        assertEquals(Drop.Group(groups[0].id, groups.getOrNull(2)?.id), dropOf(key, landing(after, key, ::isGroupKey)!!))
-    }
-
-    @Test fun aPaymentCategoryStaysWithTheCards() {
-        val keys = keysOf(budget)
-        val pay = categoryKey(budget.first().second.last().categoryId)
-        val (g1, _) = people
-        // Down past the next group's header, or past its categories: it stops at the cards' edge.
-        assertNull(dragged(keys, pay, groupKey(g1.first.id)))
-        assertNull(dragged(keys, pay, categoryKey(g1.second.first().categoryId)))
-        // Nor does a category of the people's go up among the cards.
-        assertNull(dragged(keys, categoryKey(g1.second.first().categoryId), groupKey(g1.first.id)))
-        // And were it let go there all the same, the domain says no in its own words.
-        book.moveCategory(Id(pay.substringAfter('/')), g1.first.id, null)
-        assertTrue(book.said.last(), book.said.last().contains("stays with the cards"))
-        assertEquals(cardGroupId(), l.line(Id(pay.substringAfter('/')))!!.groupId)
-    }
-
-    // * The demo's household: the drop made, and read back in the order it was dragged into
-
-    private fun drop(key: String, over: String): List<String> {
-        val after = dragged(keysOf(budget), key, over)!!
-        when (val d = dropOf(key, landing(after, key, ::isGroupKey)!!)) {
-            is Drop.Category -> book.moveCategory(d.id, d.group, d.before)
-            is Drop.Group -> book.moveGroup(d.id, d.before)
-            null -> error("no drop")
-        }
-        return after
-    }
-
-    @Test fun aCategoryDraggedIntoAnotherGroupIsThere() {
-        val (g1, g2) = people
-        val moved = g1.second.first()
-        val after = drop(categoryKey(moved.categoryId), groupKey(g2.first.id))
-        assertEquals(after, keysOf(budget))
-        assertEquals(g2.first.id, l.line(moved.categoryId)!!.groupId)
-        assertEquals(emptyList<String>(), book.said)
-    }
-
-    @Test fun aCategoryDraggedWithinItsGroupIsThere() {
-        val g = people.first { it.second.size >= 3 }.second
-        val after = drop(categoryKey(g[0].categoryId), categoryKey(g[2].categoryId))
-        assertEquals(after, keysOf(budget))
-        assertEquals(emptyList<String>(), book.said)
-    }
-
-    @Test fun aCategoryDraggedUpIntoTheGroupAboveIsItsLast() {
-        val (g1, g2) = people
-        val moved = g2.second.first()
-        val after = drop(categoryKey(moved.categoryId), groupKey(g2.first.id))
-        assertEquals(after, keysOf(budget))
-        assertEquals(moved.categoryId, budget.first { it.first.id == g1.first.id }.second.last().categoryId)
-    }
-
-    @Test fun theCardsPaymentsAreDraggedAmongThemselves() {
-        // A second card, so the cards' group has two to put in order.
-        book.openAccount("Visa", AccountKind.CREDIT, onBudget = true, balance = 0)
-        val pays = budget.first().second
-        assertEquals(2, pays.size)
-        val after = drop(categoryKey(pays[0].categoryId), categoryKey(pays[1].categoryId))
-        assertEquals(after, keysOf(budget))
-        assertEquals(listOf(pays[1].categoryId, pays[0].categoryId), budget.first().second.map { it.categoryId })
-        assertEquals(emptyList<String>(), book.said)
-    }
-
-    @Test fun aGroupDraggedDownAndBackIsThere() {
-        val before = keysOf(budget)
-        val groups = budget.map { it.first }
-        val down = drop(groupKey(groups[0].id), groupKey(groups.last().id))
-        assertEquals(down, keysOf(budget))
-        assertNotEquals(before, down)
-        assertEquals(groups[0].id, budget.last().first.id)
-        val back = drop(groupKey(groups[0].id), groupKey(groups[1].id))
-        assertEquals(before, back)
-        assertEquals(before, keysOf(budget))
-        assertEquals(emptyList<String>(), book.said)
     }
 }

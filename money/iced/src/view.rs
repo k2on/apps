@@ -4,7 +4,7 @@
 
 use arkui::text::{self, text};
 use arkui::text_input::text_input;
-use arkui::{format, glyphs, icon, layer, menu, outline, panel, style, table};
+use arkui::{format, glyphs, icon, layer, menu, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_core::budget::ready_to_assign;
@@ -14,7 +14,7 @@ use money_core::*;
 use crate::amount::money;
 use crate::look::{self, Looks, Tone};
 use crate::peer::Ledger;
-use crate::{App, Choice, Choosing, Field, Message, Modal, Naming, Page, Pane, SplitRow, TxnForm};
+use crate::{App, Choice, Choosing, Field, Message, Modal, Page, Pane, SplitRow, TxnForm};
 
 /// How tall a line of the budget is, a group's heading or a category:
 /// one height, so a drag is arithmetic (`arkui::outline`).
@@ -74,9 +74,6 @@ impl App {
         )
     }
 }
-
-/// A column of figures: Assigned, Activity, Available (the theme's).
-const COLUMN: f32 = arkui::layout_tokens::AMOUNT_COLUMN_WIDTH;
 
 pub(crate) fn bold<'a>(s: impl Into<String>, size: u32) -> iced::widget::Text<'a> {
     text(s.into()).size(size).font(arkui::hero::BOLD)
@@ -209,293 +206,6 @@ impl App {
     // * The sidebar
 
     // * The budget
-
-    pub(crate) fn view_budget(&self) -> Element<'_, Message> {
-        let s = self.peer.summary();
-        let compact = arkui::shell::SizeClass::of(self.window.width) == arkui::shell::SizeClass::Compact;
-        // What is left to give a job: the page's headline figure, green
-        // while there is some, red when more was given than there is; what
-        // wants a look under it; Auto-Assign at its end.
-        let mut said = vec![];
-        if s.overspent > 0 {
-            said.push(format!("{} overspent", s.overspent));
-        }
-        if s.underfunded > 0 {
-            said.push(format!("{} underfunded", s.underfunded));
-        }
-        let caption = match (said.is_empty(), s.ready_to_assign) {
-            (false, _) => said.join(" \u{b7} "),
-            (true, 0) => "Every dollar has a job.".into(),
-            (true, _) => "Give these dollars a job.".into(),
-        };
-        let (label, tint) = match s.ready_to_assign {
-            r if r < 0 => ("Assigned Too Much", arkui::parts::Tint::Negative),
-            0 => ("Ready to Assign", arkui::parts::Tint::Neutral),
-            _ => ("Ready to Assign", arkui::parts::Tint::Positive),
-        };
-        let auto = arkui::figures::capsule_button(Some(glyphs::WAND), "Auto-Assign", compact, Message::AutoMenu);
-        let ready = arkui::figures::headline(label, money(s.ready_to_assign), tint, &caption, Some(auto));
-
-        let mut new_group: Column<'_, Message> = Column::new();
-        if let Some(name) = &self.new_group {
-            new_group = new_group.push(
-                container(
-                    text_input("New category group", name)
-                        .id(look::NEW_GROUP)
-                        .on_input(Message::NewGroupTyped)
-                        .on_submit(Message::NewGroupDone)
-                        .size(13)
-                        .padding([5, 8])
-                        .style(arkui::style::field),
-                )
-                .padding([4, 0]),
-            );
-        }
-        // The categories under their groups, the cursor on the categories
-        // alone (`arkui::outline`): `j` and `k` walk past the headings, `J`
-        // and `K` carry what is selected, `{` and `}` its group.
-        let groups = self
-            .shown()
-            .into_iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let foot = match &self.new_category {
-                    Some((ng, name)) if *ng == s.group.id => Some(
-                        container(
-                            text_input("New category", name)
-                                .id(look::NEW_CATEGORY)
-                                .on_input(Message::NewCategoryTyped)
-                                .on_submit(Message::NewCategoryDone)
-                                .size(13)
-                                .padding([5, 8])
-                                .style(arkui::style::field),
-                        )
-                        .padding(Padding {
-                            top: 2.0,
-                            right: 8.0,
-                            bottom: 2.0,
-                            left: 26.0,
-                        })
-                        .into(),
-                    ),
-                    _ => None,
-                };
-                outline::Group {
-                    head: self.group_row(s.group, &s.lines, i == 0, compact),
-                    rows: s.rows,
-                    foot,
-                }
-            })
-            .collect();
-        let body = outline::view(
-            groups,
-            self.lit(),
-            self.budget_keys(),
-            outline::Look {
-                line: LINE,
-                zebra: false,
-                rules: true,
-            },
-            self.drag.as_ref(),
-            self.settle.as_ref(),
-            iced::time::Instant::now(),
-            Message::Grab,
-            Message::Menu,
-            |l, lit| self.category_row(l, lit, compact),
-        );
-        // What the budget's own structure is changed by, quiet at its foot:
-        // a group added, the hidden shown.
-        let tools = row![
-            link("New Category Group", Message::NewGroup),
-            link(
-                if self.show_hidden {
-                    "Hide Hidden Categories"
-                } else {
-                    "Show Hidden Categories"
-                },
-                Message::ShowHidden(!self.show_hidden)
-            ),
-        ]
-        .spacing(18);
-
-        let list = column![
-            container(ready).padding([4, 0]),
-            rule::horizontal(1).style(style::hairline),
-            new_group,
-            body,
-            container(tools).padding([14, 0]),
-        ]
-        .spacing(6);
-        arkui::scroll::elastic(
-            scrollable(container(list).padding(Padding {
-                top: 14.0,
-                right: PAD,
-                bottom: PAD,
-                left: PAD,
-            }))
-            .id(look::BUDGET)
-            .on_scroll(|v| Message::PageScrolled(v.absolute_offset().y))
-            .height(Length::Fill)
-            .style(style::bars),
-        )
-    }
-
-    /// A name, or the box it is being renamed in.
-    fn name_or_box<'a>(&self, named: Naming, name: Element<'a, Message>) -> Element<'a, Message> {
-        match &self.renaming {
-            Some((n, typed)) if *n == named => text_input("Name", typed)
-                .id(look::RENAME)
-                .on_input(Message::RenameTyped)
-                .on_submit(Message::RenameDone)
-                .size(13)
-                .padding([3, 6])
-                .width(Length::Fixed(240.0))
-                .style(arkui::style::field)
-                .into(),
-            _ => name,
-        }
-    }
-
-    /// A group's heading, the rows hang under it: its name, quiet, and
-    /// what its categories were given, spent and have — each column's title
-    /// over it, small, on the first group (one total, what they have, when
-    /// compact). The cards' group is the cards' — its categories come and
-    /// go with them, so it offers no new one.
-    fn group_row<'a>(&self, g: &GroupLine, lines: &[&BudgetLine], first: bool, compact: bool) -> Element<'a, Message> {
-        let sum = |f: fn(&BudgetLine) -> i64| lines.iter().map(|l| f(l)).sum::<i64>();
-        let collapsed = self.collapsed.contains(&g.id);
-        let cards = g.id == money_core::cards::card_group();
-        let heading = text(g.name.clone()).size(12).font(arkui::hero::BOLD).style(style::faint(0.55));
-        let mut name = row![button(
-            icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false)
-                .width(12.0)
-                .height(12.0)
-        )
-        .on_press(Message::Collapse(g.id))
-        .padding(2)
-        .style(style::quiet),]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        if cards {
-            name = name.push(heading);
-        } else {
-            name = name.push(self.name_or_box(Naming::Group(g.id), heading.into())).push(
-                button(icon::faint(glyphs::PLUS, false).width(12.0).height(12.0))
-                    .on_press(Message::NewCategory(g.id))
-                    .padding(2)
-                    .style(style::quiet),
-            );
-        }
-        let total = |title: &'static str, c: i64| -> Element<'a, Message> {
-            let mut col = column![].align_x(Alignment::End).spacing(1);
-            if first {
-                col = col.push(text(title).size(10).style(style::faint(0.4)));
-            }
-            col = col.push(text(money(c)).size(12).style(style::faint(0.55)));
-            container(col).width(Length::Fixed(COLUMN)).align_x(Alignment::End).into()
-        };
-        let mut line = row![container(name).width(Length::Fill)].align_y(Alignment::End);
-        if compact {
-            line = line.push(total("Available", sum(|l| l.available)));
-        } else {
-            line = line
-                .push(total("Assigned", sum(|l| l.assigned)))
-                .push(total("Activity", sum(|l| l.activity)))
-                .push(total("Available", sum(|l| l.available)));
-        }
-        container(line)
-            .padding(Padding {
-                top: 0.0,
-                right: 4.0,
-                bottom: 6.0,
-                left: 0.0,
-            })
-            .height(Length::Fill)
-            .align_y(Alignment::End)
-            .into()
-    }
-
-    /// A category's line: its glyph and name, the bar toward its goal under
-    /// the name and what needs attention under that, in words; then what it
-    /// was given (typed into in place), what was spent, and what it has in
-    /// a capsule of its state — the capsule alone when compact. `lit` is
-    /// the accent under it, so every colour on it asks `style::on_row`.
-    fn category_row<'a>(&'a self, l: &'a BudgetLine, lit: bool, compact: bool) -> Element<'a, Message> {
-        let tone = l.tone();
-        let hidden = l.hidden;
-        let label = text(l.name.clone()).size(13).style(move |theme| text::Style {
-            color: Some(style::on_row(theme, lit, false, hidden)),
-            ..Default::default()
-        });
-        let mut words = column![row![small_tile(l), self.name_or_box(Naming::Category(l.category_id), label.into())]
-            .spacing(6)
-            .align_y(Alignment::Center)]
-        .spacing(3);
-        if let Some(m) = l.meter() {
-            let bar = arkui::figures::goal_bar(m.fraction() as f32, m.tone.bar());
-            words = words.push(match compact {
-                true => container(bar).width(Length::Fill).into(),
-                false => bar,
-            });
-        }
-        if matches!(tone, Tone::Overspent | Tone::Short | Tone::OnCard) {
-            let story = l.story(crate::amount::style());
-            if !story.is_empty() {
-                words = words.push(text(story).size(11).style(tone.text()));
-            }
-        }
-        let available = arkui::figures::status_badge(money(l.available), tone.tint());
-        let mut line = row![container(words).width(Length::Fill)].align_y(Alignment::Center);
-        if !compact {
-            let assigned: Element<'a, Message> = match &self.assigning {
-                Some((c, typed)) if *c == l.category_id => text_input("0.00", typed)
-                    .id(look::ASSIGNED)
-                    .on_input(Message::AssignedTyped)
-                    .on_submit(Message::AssignedDone)
-                    .size(13)
-                    .padding([3, 6])
-                    .width(Length::Fixed(COLUMN - 14.0))
-                    .style(arkui::style::field)
-                    .into(),
-                // Worked out by its formula: the amount, with the formula's
-                // mark, and pressing it says why it does not open.
-                _ if l.ruled => button(
-                    row![
-                        icon::faint(glyphs::REPEAT, lit).width(12.0).height(12.0),
-                        text(money(l.assigned)).size(13).style(move |theme| text::Style {
-                            color: Some(style::on_row(theme, lit, false, false)),
-                            ..Default::default()
-                        })
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center),
-                )
-                .on_press(Message::EditAssigned(l.category_id))
-                .padding([3, 0])
-                .style(style::quiet)
-                .into(),
-                _ => button(text(money(l.assigned)).size(13).style(move |theme| text::Style {
-                    color: Some(style::on_row(theme, lit, false, false)),
-                    ..Default::default()
-                }))
-                .on_press(Message::EditAssigned(l.category_id))
-                .padding([3, 0])
-                .style(style::quiet)
-                .into(),
-            };
-            let activity = text(money(l.activity)).size(13).style(move |theme| text::Style {
-                color: Some(style::on_row(theme, lit, false, true)),
-                ..Default::default()
-            });
-            line = line.push(right(assigned, COLUMN)).push(right(activity.into(), COLUMN));
-            line = line.push(right(available, COLUMN));
-        } else {
-            line = line.push(available);
-        }
-        container(line).padding([0.0, 0.0]).height(Length::Fill).align_y(Alignment::Center).into()
-    }
-
-    // * The inspector
 
     pub(crate) fn view_inspector(&self) -> Element<'_, Message> {
         let body = match self.selected.and_then(|c| self.peer.line(c)) {
@@ -1633,36 +1343,6 @@ fn right<'a>(content: Element<'a, Message>, width: f32) -> Element<'a, Message> 
         .width(Length::Fixed(width))
         .align_x(iced::alignment::Horizontal::Right)
         .into()
-}
-
-/// A category's glyph, small, before its name in a budget's row.
-fn small_tile<'a>(l: &BudgetLine) -> Element<'a, Message> {
-    let (glyph, colour) = tile_look(l);
-    container(icon::tinted(glyph, 11.0, |_| crate::palette::TILE_GLYPH))
-        .width(Length::Fixed(18.0))
-        .height(Length::Fixed(18.0))
-        .center_x(Length::Fixed(18.0))
-        .center_y(Length::Fixed(18.0))
-        .style(move |_| container::Style {
-            background: Some(iced::Background::Color(colour)),
-            border: iced::Border {
-                radius: 5.0.into(),
-                ..iced::Border::default()
-            },
-            ..container::Style::default()
-        })
-        .into()
-}
-
-/// A category's glyph and the colour of its tile.
-fn tile_look(l: &BudgetLine) -> (&'static [u8], iced::Color) {
-    match l.card {
-        Some(_) => (glyphs::CARD, crate::palette::CARD_TILE),
-        None => (
-            category_glyph(&l.name),
-            crate::palette::TILES[arkui::art::hash(&l.name) as usize % crate::palette::TILES.len()],
-        ),
-    }
 }
 
 /// What a category is for, by the words in its name; a tag when none says.

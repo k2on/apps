@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -122,24 +123,192 @@ public fun HeroFigure(caption: String, cents: Long, note: String) {
     }
 }
 
-/** A section's card under its heading (a total at its end, the error's red below nothing), a note under it. */
+/**
+ * A section's card under its heading: a total at its end (the error's red below nothing) or words in
+ * the caution's tint in its place, and, short of compact, two more figures before it under their
+ * columns' titles; a note under it. A collapsible one's heading toggles it, its rows shown while
+ * [open]; held, its [menu].
+ */
 @Composable
-public fun CardSection(title: String? = null, total: Long? = null, showsTotal: Boolean = true, footer: String? = null, content: @Composable () -> Unit) {
+public fun CardSection(
+    title: String? = null,
+    total: Long? = null,
+    showsTotal: Boolean = true,
+    footer: String? = null,
+    totalNote: String? = null,
+    firstTitle: String? = null,
+    secondTitle: String? = null,
+    totalTitle: String? = null,
+    first: Long? = null,
+    second: Long? = null,
+    open: Boolean = true,
+    onToggle: (() -> Unit)? = null,
+    menu: List<MenuAction> = emptyList(),
+    content: @Composable () -> Unit,
+) {
     if (title != null) {
-        SectionHeader(title) {
-            if (total != null && showsTotal) {
-                AmountText(
-                    total,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (total < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        var held by remember { mutableStateOf(false) }
+        val offered = menu.filter { it.shown }
+        val press = when {
+            onToggle == null && offered.isEmpty() -> Modifier
+            offered.isEmpty() -> Modifier.pressable(onClick = { onToggle?.invoke() }, press = Press.Highlight)
+            else -> Modifier.pressable(onClick = { onToggle?.invoke() }, onLongClick = { held = true }, press = Press.Highlight)
+        }
+        val columns = LocalSizeClass.current != SizeClass.Compact && first != null && second != null
+        Box(press) {
+            SectionHeader(if (onToggle != null) (if (open) "▾ " else "▸ ") + title else title) {
+                if (columns) {
+                    FigureColumn(title = firstTitle) { AmountText(first!!, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    FigureColumn(title = secondTitle) { AmountText(second!!, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    FigureColumn(title = totalTitle) { SectionFigure(total, showsTotal, totalNote) }
+                } else {
+                    SectionFigure(total, showsTotal, totalNote)
+                }
             }
+            MenuOf(offered, held) { held = false }
         }
     } else {
         Spacer(Modifier.height(Space.xl))
     }
-    GroupCard { content() }
+    if (open) GroupCard { content() }
     if (footer != null) {
         Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s))
+    }
+}
+
+@Composable
+private fun SectionFigure(total: Long?, showsTotal: Boolean, totalNote: String?) {
+    when {
+        totalNote != null -> Text(totalNote, style = MaterialTheme.typography.titleSmall, color = tintInk(Tint.Caution))
+        total != null && showsTotal -> AmountText(
+            total,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (total < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** A figure under its column's title, as wide as the theme's amount column. */
+@Composable
+private fun FigureColumn(title: String?, figure: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Column(Modifier.width(LayoutTokens.AMOUNT_COLUMN_WIDTH.dp), horizontalAlignment = Alignment.End) {
+        if (title != null) Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        figure()
+    }
+}
+
+/** A menu's offered actions, while [open]. */
+@Composable
+private fun MenuOf(offered: List<MenuAction>, open: Boolean, onDismiss: () -> Unit) {
+    DropdownMenu(expanded = open, onDismissRequest = onDismiss) {
+        for (m in offered) {
+            DropdownMenuItem(
+                text = { Text(m.title, color = if (m.destructive) MaterialTheme.colorScheme.error else Color.Unspecified) },
+                leadingIcon = {
+                    Icon(glyph(m.glyph), contentDescription = null, tint = if (m.destructive) MaterialTheme.colorScheme.error else LocalContentColor.current)
+                },
+                onClick = {
+                    onDismiss()
+                    m.onTap()
+                })
+        }
+    }
+}
+
+/**
+ * A row of a thing toward a goal: the app's mark before its title (faded while hidden), a slim bar
+ * of how far in its tint, words under it in a tint with quiet ones at their end; short of compact,
+ * two figures in columns; its figure in a status badge at its end. Tapped, [onTap]; held, its menu
+ * — lit under the finger either way (`Press.Highlight`).
+ */
+@Composable
+public fun MeterRow(
+    title: String,
+    status: String,
+    statusTint: String,
+    mark: String? = null,
+    faded: Boolean = false,
+    fraction: Double? = null,
+    meterTint: String = "positive",
+    note: String? = null,
+    noteTint: String = "neutral",
+    noteEnd: String? = null,
+    first: Long? = null,
+    second: Long? = null,
+    said: String? = null,
+    menu: List<MenuAction> = emptyList(),
+    onTap: (() -> Unit)? = null,
+) {
+    var open by remember { mutableStateOf(false) }
+    val offered = menu.filter { it.shown }
+    val press =
+        if (offered.isEmpty()) Modifier.pressable(onClick = { onTap?.invoke() }, press = Press.Highlight)
+        else Modifier.pressable(onClick = { onTap?.invoke() }, onLongClick = { open = true }, press = Press.Highlight)
+    val columns = LocalSizeClass.current != SizeClass.Compact && first != null && second != null
+    Row(
+        Modifier.fillMaxWidth()
+            .then(press)
+            .padding(horizontal = Space.l, vertical = Space.m)
+            .semantics(mergeDescendants = true) { contentDescription = said ?: title },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.foundation.layout.Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (mark != null) {
+                    LocalRowMark.current(mark)
+                    Spacer(Modifier.width(Space.s))
+                }
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (faded) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
+            }
+            if (fraction != null) GoalBar(fraction.toFloat(), tintNamed(meterTint))
+            if (note != null || noteEnd != null) {
+                Row(Modifier.fillMaxWidth()) {
+                    if (note != null) {
+                        val t = tintNamed(noteTint)
+                        Text(note, style = MaterialTheme.typography.bodySmall, color = if (t == Tint.Neutral) MaterialTheme.colorScheme.onSurfaceVariant else tintInk(t))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (noteEnd != null) Text(noteEnd, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Spacer(Modifier.width(Space.s))
+        if (columns) {
+            Box(Modifier.width(LayoutTokens.AMOUNT_COLUMN_WIDTH.dp), contentAlignment = Alignment.CenterEnd) {
+                AmountText(first!!, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            }
+            Box(Modifier.width(LayoutTokens.AMOUNT_COLUMN_WIDTH.dp), contentAlignment = Alignment.CenterEnd) {
+                AmountText(second!!, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Box(Modifier.width(LayoutTokens.AMOUNT_COLUMN_WIDTH.dp), contentAlignment = Alignment.CenterEnd) { StatusBadge(status, tintNamed(statusTint)) }
+        } else {
+            StatusBadge(status, tintNamed(statusTint))
+        }
+        MenuOf(offered, open) { open = false }
+    }
+}
+
+/** A view's headline (`ark_app::view::headline`): its tint by name, its one action a prominent capsule at its end. */
+@Composable
+public fun Headline(label: String, figure: String, tint: String, caption: String, actionTitle: String? = null, actionGlyph: String? = null, onAction: (() -> Unit)? = null) {
+    GroupCard(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {
+        Box(Modifier.padding(horizontal = Space.l)) {
+            Headline(label, figure, tintNamed(tint), caption) {
+                if (onAction != null) {
+                    Button(onClick = onAction) {
+                        if (actionGlyph != null) {
+                            Icon(glyph(actionGlyph), contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(Space.s))
+                        }
+                        Text(actionTitle ?: "")
+                    }
+                }
+            }
+        }
     }
 }
 

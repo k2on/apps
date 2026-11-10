@@ -134,38 +134,209 @@ public struct SummaryCard: View {
 }
 
 /// A list's section in its card: a heading with a total at its end (the
-/// error's red below nothing), a note under it.
+/// error's red below nothing) or words in the caution's tint in its place,
+/// a note under it. On a regular width two more figures stand before the
+/// total, each under its column's title. A collapsible one's heading is a
+/// button with its chevron, its rows shown while `open`; held, its menu.
 public struct CardSection<Content: View>: View {
     let title: String?
     let total: Int64?
     let showsTotal: Bool
     let footer: String?
+    let totalNote: String?
+    let titles: [String]?
+    let first: Int64?
+    let second: Int64?
+    let open: Bool
+    let onToggle: (() -> Void)?
+    let menu: [MenuAction]
     let content: Content
+    @Environment(\.reducesMotion) private var still
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var size
+    private var columns: Bool { size != .compact }
+    #else
+    private let columns = true
+    #endif
 
-    public init(title: String? = nil, total: Int64? = nil, showsTotal: Bool = true, footer: String? = nil, @ViewBuilder content: () -> Content) {
+    public init(title: String? = nil, total: Int64? = nil, showsTotal: Bool = true, footer: String? = nil,
+                totalNote: String? = nil, firstTitle: String? = nil, secondTitle: String? = nil, totalTitle: String? = nil,
+                first: Int64? = nil, second: Int64? = nil, open: Bool = true, onToggle: (() -> Void)? = nil,
+                menu: [MenuAction] = [], @ViewBuilder content: () -> Content) {
         self.title = title
         self.total = total
         self.showsTotal = showsTotal
         self.footer = footer
+        self.totalNote = totalNote
+        if let firstTitle, let secondTitle, let totalTitle { titles = [firstTitle, secondTitle, totalTitle] } else { titles = nil }
+        self.first = first
+        self.second = second
+        self.open = open
+        self.onToggle = onToggle
+        self.menu = menu
         self.content = content()
     }
 
     public var body: some View {
         Section {
-            content
+            if open { content }
         } header: {
             if let title {
-                HStack {
-                    Text(title)
-                    Spacer()
-                    if let total, showsTotal {
-                        CentsText(total).foregroundStyle(total < 0 ? Color.error : Color.quiet)
-                    }
+                if let onToggle {
+                    Button { withAnimation(Springs.move.reduced(still)) { onToggle() } } label: { heading(title) }
+                        .buttonStyle(.plain)
+                        .accessibilityHint(open ? "Collapses the group" : "Expands the group")
+                        .contextMenu { MenuActions(menu: menu) }
+                } else {
+                    heading(title).contextMenu { MenuActions(menu: menu) }
                 }
             }
         } footer: {
             if let footer { Text(footer) }
         }
+    }
+
+    private func heading(_ title: String) -> some View {
+        HStack(alignment: .lastTextBaseline) {
+            if onToggle != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+            }
+            Text(title)
+            Spacer()
+            if let titles, columns, let first, let second {
+                column(titles[0]) { CentsText(first) }
+                column(titles[1]) { CentsText(second) }
+                column(titles[2]) { figure }
+            } else {
+                figure
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private var figure: some View {
+        if let totalNote {
+            Text(totalNote).font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(Color.caution)
+        } else if let total, showsTotal {
+            CentsText(total).foregroundStyle(total < 0 ? Color.error : Color.quiet)
+        }
+    }
+
+    private func column<V: View>(_ title: String, @ViewBuilder _ v: () -> V) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(title).font(.caption2).foregroundStyle(.tertiary)
+            v()
+        }
+        .frame(width: LayoutTokens.amountColumnWidth, alignment: .trailing)
+    }
+}
+
+/// A menu's actions, those offered, as a context menu lists them.
+struct MenuActions: View {
+    let menu: [MenuAction]
+
+    var body: some View {
+        ForEach(menu.indices, id: \.self) { i in
+            let m = menu[i]
+            if m.shown {
+                Button(role: m.destructive ? .destructive : nil, action: m.onTap) {
+                    Label(m.title, systemImage: ArkGlyphs.sf(m.glyph))
+                }
+            }
+        }
+    }
+}
+
+/// A row of a thing toward a goal: the app's mark before its title (faded
+/// while hidden), a slim bar of how far in its tint, words under it in a
+/// tint with quiet ones at their end; on a regular width two figures in
+/// columns; its figure in a status badge at its end, rolling as it
+/// changes. Tapped, `onTap`; held, its menu.
+public struct MeterRow: View {
+    let title: String
+    let status: String
+    let statusTint: Tint
+    var mark: String? = nil
+    var faded = false
+    var fraction: Double? = nil
+    var meterTint: Tint = .positive
+    var note: String? = nil
+    var noteTint: Tint = .neutral
+    var noteEnd: String? = nil
+    var first: Int64? = nil
+    var second: Int64? = nil
+    var said: String? = nil
+    var menu: [MenuAction] = []
+    var onTap: (() -> Void)? = nil
+    @Environment(\.rowMark) private var rowMark
+    @Environment(\.dynamicTypeSize) private var type
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var size
+    private var regular: Bool { size != .compact }
+    #else
+    private let regular = true
+    #endif
+
+    public init(_ title: String, status: String, statusTint: String, mark: String? = nil, faded: Bool = false,
+                fraction: Double? = nil, meterTint: String = "positive", note: String? = nil, noteTint: String = "neutral",
+                noteEnd: String? = nil, first: Int64? = nil, second: Int64? = nil, said: String? = nil,
+                menu: [MenuAction] = [], onTap: (() -> Void)? = nil) {
+        self.title = title
+        self.status = status
+        self.statusTint = Tint(named: statusTint)
+        self.mark = mark
+        self.faded = faded
+        self.fraction = fraction
+        self.meterTint = Tint(named: meterTint)
+        self.note = note
+        self.noteTint = Tint(named: noteTint)
+        self.noteEnd = noteEnd
+        self.first = first
+        self.second = second
+        self.said = said
+        self.menu = menu
+        self.onTap = onTap
+    }
+
+    public var body: some View {
+        Button { onTap?() } label: { line }
+            .foregroundStyle(Color.ink)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(said ?? title)
+            .contextMenu { MenuActions(menu: menu) }
+    }
+
+    private var line: some View {
+        HStack(spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(spacing: Space.s) {
+                    if let mark { rowMark(mark) }
+                    Text(title).foregroundStyle(faded ? Color.quiet : Color.ink).lineLimit(2)
+                }
+                if let fraction { GoalBar(fraction, tint: meterTint) }
+                if note != nil || noteEnd != nil {
+                    HStack {
+                        if let note { Text(note).foregroundStyle(noteTint == .neutral ? Color.quiet : noteTint.color) }
+                        Spacer(minLength: Space.s)
+                        if let noteEnd { Text(noteEnd).foregroundStyle(.quiet) }
+                    }
+                    .font(.caption)
+                    .monospacedDigit()
+                }
+            }
+            Spacer(minLength: Space.s)
+            if regular && !type.isAccessibilitySize, let first, let second {
+                CentsText(first).frame(width: LayoutTokens.amountColumnWidth, alignment: .trailing)
+                CentsText(second).foregroundStyle(.quiet).frame(width: LayoutTokens.amountColumnWidth, alignment: .trailing)
+                StatusBadge(status, tint: statusTint).rolls(on: status)
+                    .frame(width: LayoutTokens.amountColumnWidth, alignment: .trailing)
+            } else {
+                StatusBadge(status, tint: statusTint).rolls(on: status)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 

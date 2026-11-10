@@ -231,13 +231,34 @@ public object ArkGlyphs {
     /** `trending-up`, Lucide's: an investment. */
     public val Trending: ImageVector = glyph("trending-up", "M16 7h6v6", "m22 7-8.5 8.5-5-5L2 17")
 
+    /** `eye`, Lucide's. */
+    public val Eye: ImageVector = glyph("eye", "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0", "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z")
+
+    /** `eye-off`, Lucide's. */
+    public val EyeOff: ImageVector = glyph("eye-off", "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49", "M14.084 14.158a3 3 0 0 1-4.242-4.242", "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143", "m2 2 20 20")
+
+    /** `arrow-up`, Lucide's. */
+    public val ArrowUp: ImageVector = glyph("arrow-up", "m5 12 7-7 7 7", "M12 19V5")
+
+    /** `arrow-down`, Lucide's. */
+    public val ArrowDown: ImageVector = glyph("arrow-down", "M12 5v14", "m19 12-7 7-7-7")
+
+    /** `trash`, Lucide's. */
+    public val Trash: ImageVector = glyph("trash", "M3 6h18", "M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6", "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2")
+
+    /** `crosshair`, Lucide's. */
+    public val Crosshair: ImageVector = glyph("crosshair", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M22 12h-4", "M6 12H2", "M12 6V2", "M12 22v-4")
+
+    /** `folder`, Lucide's. */
+    public val Folder: ImageVector = glyph("folder", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
             More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked,
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
-            Landmark, Card, Trending,
+            Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Crosshair, Folder,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

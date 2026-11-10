@@ -100,7 +100,7 @@ public fun sizeClassOf(width: Dp): SizeClass = when {
     else -> SizeClass.Expanded
 }
 
-private val LocalSizeClass = compositionLocalOf { SizeClass.Compact }
+internal val LocalSizeClass = compositionLocalOf { SizeClass.Compact }
 
 // * The sections
 

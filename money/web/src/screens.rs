@@ -7,25 +7,19 @@
 
 use std::rc::Rc;
 
-use arkui_web::figures::{self, Bar, Series, Tint};
+use arkui_web::figures::{self, Bar, Series};
 use arkui_web::menu::Entry;
 use arkui_web::table::{self, column, Align, Slot, TableRow};
 use arkui_web::{amount, fields, glyph, money, parts, quiet, send, AnyView};
 use leptos::html;
 use leptos::prelude::*;
-use money_app::look;
 use money_app::shell::view::money_settings;
-use money_app::shell::{tagged_account, ShellMsg, ShellPage};
+use money_app::shell::{tagged_account, ShellPage};
 use money_core::budget::ready_to_assign;
 use money_core::dates::add_months;
-use money_core::words::Tone;
 use money_core::*;
 
 use crate::{Asking, DraftMsg, MoneyWeb, Msg};
-
-fn style() -> ark_format::NumberStyle {
-    ark_format::NumberStyle::us()
-}
 
 pub fn lines(app: &MoneyWeb) -> &[BudgetLine] {
     app.store.rows(&MoneyView::Lines { month: app.month.clone() })
@@ -46,27 +40,24 @@ pub fn open_accounts(app: &MoneyWeb) -> Vec<&AccountLine> {
     app.store.rows::<AccountLine>(&MoneyView::Accounts).iter().filter(|a| !a.closed).collect()
 }
 
-fn tint(t: Tone) -> Tint {
-    match t {
-        Tone::Neutral => Tint::Neutral,
-        Tone::Positive => Tint::Positive,
-        Tone::Short | Tone::OnCard => Tint::Caution,
-        Tone::Overspent => Tint::Negative,
-    }
-}
-
-fn bar_tint(t: Tone) -> Tint {
-    match t {
-        Tone::Neutral | Tone::Positive => Tint::Positive,
-        t => tint(t),
-    }
-}
-
 /// A screen the shell hosts, by name.
 pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
     let section = app.shell.state().section.clone();
     match name {
-        "budget" => budget(app),
+        "budget" => {
+            // The window's month, whatever the page was last told.
+            let state = money_app::budget::State {
+                month: app.month.clone(),
+                ..app.budget.state().clone()
+            };
+            let data = ark_app::Data {
+                store: &app.store,
+                now_ms: app.now_ms(),
+            };
+            arkui_web::render(
+                money_app::budget::view::budget::view(&<money_app::budget::Budget as ark_app::App>::screen(&state, &data)).map(crate::Msg::Budget),
+            )
+        }
         "budget.inspector" => budget_inspector(app),
         "accounts" => money_app::accounts::view::accounts::web(&app.accounts.screen_of(&app.store, app.now_ms())),
         "accounts.register" => match tagged_account(&section) {
@@ -85,196 +76,6 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
 }
 
 // * The budget
-
-fn tile(l: &BudgetLine) -> AnyView {
-    let (g, colour) = match l.card {
-        Some(_) => ("credit-card", look::CARD_TILE),
-        None => (look::category_glyph(&l.name), look::tile_of(&l.name)),
-    };
-    html::span()
-        .class("ark-swatch")
-        .attr("style", format!("background:{colour}"))
-        .child(glyph(g, 11))
-        .into_any()
-}
-
-/// The Auto-Assign menu: what each way would do to the month.
-fn auto_entries() -> Vec<Entry> {
-    vec![
-        Entry::run(Some("target"), "Underfunded", Msg::Auto(Auto::Underfunded)),
-        Entry::run(Some("repeat"), "Assigned Last Month", Msg::Auto(Auto::LastMonth)),
-        Entry::run(Some("undo-2"), "Reset Assigned Amounts", Msg::Auto(Auto::Reset)),
-    ]
-}
-
-/// The budget: what is ready to assign over every category under its
-/// group, each its name and its bar toward its goal, what it was given,
-/// what was spent and what it has.
-fn budget(app: &MoneyWeb) -> AnyView {
-    let s = summary(app);
-    let mut said = vec![];
-    if s.overspent > 0 {
-        said.push(format!("{} overspent", s.overspent));
-    }
-    if s.underfunded > 0 {
-        said.push(format!("{} underfunded", s.underfunded));
-    }
-    let caption = match (said.is_empty(), s.ready_to_assign) {
-        (false, _) => said.join(" \u{b7} "),
-        (true, 0) => "Every dollar has a job.".into(),
-        (true, _) => "Give these dollars a job.".into(),
-    };
-    let (label, t) = match s.ready_to_assign {
-        r if r < 0 => ("Assigned Too Much", Tint::Negative),
-        0 => ("Ready to Assign", Tint::Neutral),
-        _ => ("Ready to Assign", Tint::Positive),
-    };
-    let auto = arkui_web::menu::button(
-        "auto-assign",
-        "Auto-Assign",
-        html::span()
-            .class("ark-capsule")
-            .child((glyph("wand-sparkles", 13), html::span().child("Auto-Assign")))
-            .into_any(),
-        "money-auto",
-        Rc::new(auto_entries),
-    );
-    let head = figures::headline(label, money(s.ready_to_assign), t, &caption, Some(auto));
-    let columns = [
-        column("", "minmax(0,1fr)", Align::Start).slot(Slot::Title),
-        column("Assigned", "var(--ark-amount-column-width)", Align::End).wide_only(),
-        column("Activity", "var(--ark-amount-column-width)", Align::End).wide_only(),
-        column("Available", "var(--ark-amount-column-width)", Align::End).slot(Slot::Trailing),
-    ];
-    let all = lines(app);
-    let mut rows = vec![];
-    let mut groups: Vec<(&str, Vec<&BudgetLine>)> = vec![];
-    let mut sorted: Vec<&BudgetLine> = all.iter().filter(|l| !l.hidden && !l.is_ready_to_assign()).collect();
-    sorted.sort_by_key(|l| (l.group_pos, l.pos));
-    for l in sorted {
-        match groups.last_mut() {
-            Some((g, ls)) if *g == l.group => ls.push(l),
-            _ => groups.push((&l.group, vec![l])),
-        }
-    }
-    let categories: Vec<(Id<Category>, String)> = groups
-        .iter()
-        .flat_map(|(_, ls)| ls.iter().map(|l| (l.category_id, l.name.clone())))
-        .collect();
-    for (g, ls) in groups {
-        let sum = |f: fn(&BudgetLine) -> i64| ls.iter().map(|l| f(l)).sum::<i64>();
-        let mut head = TableRow::new(
-            g,
-            vec![
-                html::span()
-                    .class("money-group")
-                    .child((glyph("chevron-down", 12), html::span().child(g.to_string())))
-                    .into_any(),
-                html::span().class("ark-quiet").child(money(sum(|l| l.assigned))).into_any(),
-                html::span().class("ark-quiet").child(money(sum(|l| l.activity))).into_any(),
-                html::span().class("ark-quiet").child(money(sum(|l| l.available))).into_any(),
-            ],
-        );
-        head.heading = true;
-        rows.push(head);
-        for l in ls {
-            rows.push(category_row(app, l, &categories));
-        }
-    }
-    let body = table::table_with(&columns, rows, false, Some(head));
-    html::div().class("money-budget").child(body).into_any()
-}
-
-fn category_row(app: &MoneyWeb, l: &BudgetLine, categories: &[(Id<Category>, String)]) -> TableRow {
-    let tone = l.tone();
-    let words = {
-        let bar = l.meter().map(|m| figures::goal_bar(m.fraction() as f32, bar_tint(m.tone)));
-        let story = matches!(tone, Tone::Overspent | Tone::Short | Tone::OnCard)
-            .then(|| l.story(&style()))
-            .filter(|s| !s.is_empty())
-            .map(|s| html::div().class(format!("money-story ark-text-{}", tint_word(tint(tone)))).child(s));
-        html::div()
-            .class("money-category")
-            .child((
-                html::div().class("money-name").child((tile(l), html::span().child(l.name.clone()))),
-                bar,
-                story,
-            ))
-            .into_any()
-    };
-    let id = l.category_id;
-    let move_to: Vec<Entry> = categories
-        .iter()
-        .filter(|(c, _)| *c != id)
-        .map(|(c, n)| {
-            Entry::run(
-                None,
-                n.clone(),
-                Msg::Assign(*c, {
-                    // A row's own number, with what this one holds over moved to it.
-                    let to = lines(app).iter().find(|x| x.category_id == *c).map_or(0, |x| x.assigned);
-                    to + l.available.max(0)
-                }),
-            )
-        })
-        .collect();
-    let menu = vec![
-        Entry::run(Some("panel-right"), "Show Details", Msg::Category(Some(id))),
-        Entry::sub(
-            Some("target"),
-            "Assign",
-            vec![
-                Entry::run(
-                    None,
-                    format!("Underfunded ({})", money(l.underfunded)),
-                    Msg::Assign(id, l.assigned + l.underfunded),
-                ),
-                Entry::run(
-                    None,
-                    format!("Assigned Last Month ({})", money(l.assigned_last_month)),
-                    Msg::Assign(id, l.assigned_last_month),
-                ),
-                Entry::run(
-                    None,
-                    format!("Spent Last Month ({})", money(l.spent_last_month)),
-                    Msg::Assign(id, l.spent_last_month.abs()),
-                ),
-                Entry::run(
-                    None,
-                    format!("Average Spent ({})", money(l.average_spent)),
-                    Msg::Assign(id, l.average_spent.abs()),
-                ),
-                Entry::Separator,
-                Entry::run(None, "Reset", Msg::Assign(id, 0)),
-            ],
-        ),
-        Entry::sub(Some("arrow-left-right"), "Move Available To", move_to),
-        Entry::Separator,
-        Entry::run(Some("list"), "Show Transactions", Msg::Shell(ShellMsg::Search { text: l.name.clone() })),
-    ];
-    let mut r = TableRow::new(
-        l.name.clone(),
-        vec![
-            words,
-            amount(l.assigned, false),
-            amount(l.activity, false),
-            figures::status_badge(money(l.available), tint(tone)),
-        ],
-    );
-    r.open = Some(Rc::new(move || send(Msg::Category(Some(id)))));
-    r.menu = menu;
-    r.selected = app.category == Some(id);
-    r
-}
-
-fn tint_word(t: Tint) -> &'static str {
-    match t {
-        Tint::Negative => "negative",
-        Tint::Caution => "caution",
-        Tint::Positive => "positive",
-        _ => "quiet",
-    }
-}
 
 fn figure_row(label: &str, cents: i64) -> AnyView {
     html::div()

@@ -12,6 +12,7 @@ use ark_clipboard::{Clipboard, Queued};
 use ark_peer::store::Store;
 use iced::{Element, Task};
 use money_app::accounts::{Accounts, AccountsMsg};
+use money_app::budget::{Budget, BudgetMsg};
 use money_core::dates::{days_from_civil, parse_day};
 use money_core::{MoneyChange, MoneyView};
 
@@ -81,7 +82,70 @@ impl Host<Accounts> for Desk<'_> {
     }
 }
 
+impl Host<Budget> for Desk<'_> {
+    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+        f(&self.app.peer.store)
+    }
+    fn now_ms(&self) -> i64 {
+        now_ms(&self.app.today)
+    }
+    fn send(&mut self, change: MoneyChange) -> Result<(), String> {
+        <Self as Host<Accounts>>::send(self, change)
+    }
+    fn open(&mut self, route: Route) {
+        // A category's month: Category Details, the inspector's, beside the budget.
+        if let Route::Category { id, .. } = &route {
+            if let Some(c) = money_app::accounts::account_id(id).map(|a| ark::row::Id::new(a.0)) {
+                self.natives.push(Message::Select(Some(c)));
+            }
+        }
+    }
+    fn native(&mut self, name: &str) {
+        if name == "refresh" {
+            self.natives.push(Message::Sync);
+        }
+    }
+    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
+        self.inbox.ask(&self.modules, ticket, call)
+    }
+}
+
 impl App {
+    /// A message of the Budget page taken.
+    pub(crate) fn budget_step(&mut self, msg: BudgetMsg) -> Task<Message> {
+        let mut rt = std::mem::take(&mut self.budget);
+        let mut desk = Desk::new(self);
+        rt.dispatch(msg, &mut desk);
+        loop {
+            let answers = desk.inbox.take();
+            if answers.is_empty() {
+                break;
+            }
+            for (t, a) in answers {
+                rt.answer(t, a, &mut desk);
+            }
+        }
+        let tasks: Vec<Task<Message>> = std::mem::take(&mut desk.natives).into_iter().map(Task::done).collect();
+        self.budget = rt;
+        Task::batch(tasks)
+    }
+
+    /// The Budget page told the window's month, when it moved.
+    pub(crate) fn budget_month(&mut self) -> Task<Message> {
+        match self.budget.state().month == self.peer.month {
+            true => Task::none(),
+            false => self.budget_step(BudgetMsg::Month {
+                month: self.peer.month.clone(),
+            }),
+        }
+    }
+
+    /// The Budget page.
+    pub(crate) fn view_budget(&self) -> Element<'_, Message> {
+        let page = self.budget.screen_of(&self.peer.store, now_ms(&self.today));
+        money_app::budget::view::budget::iced(&page).map(Message::Budget)
+    }
+
     /// A message of the Accounts page taken.
     pub(crate) fn accounts_step(&mut self, msg: AccountsMsg) -> Task<Message> {
         let mut rt = std::mem::take(&mut self.accounts);

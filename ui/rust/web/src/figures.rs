@@ -32,7 +32,7 @@ impl Tint {
         }
     }
 
-    pub(crate) fn class(self) -> &'static str {
+    pub fn class(self) -> &'static str {
         match self {
             Tint::Neutral => "ark-tint-neutral",
             Tint::Positive => "ark-tint-positive",

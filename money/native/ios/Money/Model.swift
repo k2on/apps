@@ -41,6 +41,8 @@ final class Model: ObservableObject {
     private(set) var session: Session? = nil
     /// The Accounts tab's runtime (Screens.swift), while a session is open.
     @Published private(set) var accounts: AccountsScreen? = nil
+    /// The Budget tab, running in Rust (money/app/src/budget) once a session is open.
+    @Published private(set) var budget: BudgetScreen? = nil
     /// The shell's runtime (Screens.swift): the app's for its life, running
     /// while a session is open.
     let shell = MoneyShellScreen()
@@ -169,6 +171,7 @@ final class Model: ObservableObject {
                         moved: { [weak self] views in
                             self?.moves += 1
                             self?.accounts?.reload()
+                            self?.budget?.reload()
                             self?.shell.reload()
                             self?.onMoved(views)
                         })
@@ -179,6 +182,9 @@ final class Model: ObservableObject {
         accounts = AccountsScreen(session: s, modules: modules,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
                                   today: { [weak self] in self?.today ?? moneyToday() })
+        budget = BudgetScreen(session: s, modules: modules, month: month,
+                              refresh: { [weak self] in Task { await self?.refresh() } },
+                              today: { [weak self] in self?.today ?? moneyToday() })
         shell.connect(session: s,
                       refresh: { [weak self] in Task { await self?.refresh() } },
                       today: { [weak self] in self?.today ?? moneyToday() })
@@ -188,6 +194,7 @@ final class Model: ObservableObject {
         bridge?.close()
         bridge = nil
         accounts = nil
+        budget = nil
         shell.disconnect()
         session = nil
         snapshot = Snapshot()
@@ -242,6 +249,7 @@ final class Model: ObservableObject {
         guard m != month else { return }
         month = m
         bridge?.show(month: m)
+        budget?.send(.month(month: m))
     }
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }
@@ -316,15 +324,6 @@ final class Model: ObservableObject {
     func hide(group id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", .hideGroup(value: HideGroup(id: id, hidden: hidden))) }
     func delete(category id: Id, moveTo: Id?) { write("delete it", .deleteCategory(value: DeleteCategory(id: id, moveTo: moveTo))) }
     func delete(group id: Id, moveTo: Id?) { write("delete it", .deleteGroup(value: DeleteGroup(id: id, moveTo: moveTo))) }
-
-    /// A row of Edit let go somewhere new, as [Arranging] reads it: a
-    /// category into a group in front of another, or a group past others.
-    func rearrange(_ r: Rearrange) {
-        switch r {
-        case let .category(m): write("move it", .moveCategory(value: m))
-        case let .group(m): write("move it", .moveGroup(value: m))
-        }
-    }
 
     // MARK: transactions
 

@@ -26,6 +26,7 @@ use ark_peer::store::Store;
 use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
 use money_app::accounts::{Accounts, AccountsMsg};
+use money_app::budget::{Budget, BudgetMsg};
 use money_app::shell::view::{commands, money_shell};
 use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::dates::{add_months, days_from_civil, parse_day};
@@ -39,6 +40,8 @@ pub mod screens;
 pub enum Msg {
     Shell(ShellMsg),
     Accounts(AccountsMsg),
+    /// The Budget page's (`money_app::budget`).
+    Budget(BudgetMsg),
     /// A category chosen in the budget (its inspector shows it), or none.
     Category(Option<Id<Category>>),
     /// A transaction chosen in a register, or none.
@@ -109,6 +112,7 @@ pub struct MoneyWeb {
     pub month: String,
     pub shell: Runtime<MoneyShell>,
     pub accounts: Runtime<Accounts>,
+    pub budget: Runtime<Budget>,
     pub category: Option<Id<Category>>,
     pub txn: Option<Id<Txn>>,
     pub search: String,
@@ -178,6 +182,7 @@ impl MoneyWeb {
             month: month.clone(),
             shell: Runtime::new(),
             accounts: Runtime::new(),
+            budget: Runtime::new(),
             category: None,
             txn: None,
             search: String::new(),
@@ -257,6 +262,21 @@ impl MoneyWeb {
         }
     }
 
+    fn budget_step(&mut self, msg: BudgetMsg) {
+        let mut rt = std::mem::take(&mut self.budget);
+        let mut desk = Desk { app: self, natives: vec![] };
+        if rt.state().month != desk.app.month {
+            let month = desk.app.month.clone();
+            rt.dispatch(BudgetMsg::Month { month }, &mut desk);
+        }
+        rt.dispatch(msg, &mut desk);
+        let natives = std::mem::take(&mut desk.natives);
+        self.budget = rt;
+        for n in natives {
+            self.native(&n);
+        }
+    }
+
     fn accounts_step(&mut self, msg: AccountsMsg) {
         let mut rt = std::mem::take(&mut self.accounts);
         let mut desk = Desk { app: self, natives: vec![] };
@@ -277,7 +297,14 @@ impl MoneyWeb {
             "previous-month" => self.update(Msg::Month(-1)),
             "next-month" => self.update(Msg::Month(1)),
             "this-month" => self.update(Msg::ThisMonth),
-            "auto-assign" => arkui_web::keys::open_menu("auto-assign"),
+            "auto-assign" => self.budget_step(BudgetMsg::AutoAssign),
+            "new-category" => self.budget_step(BudgetMsg::NewCategory { group: String::new() }),
+            "new-group" => self.budget_step(BudgetMsg::NewGroup),
+            "toggle-hidden" => self.budget_step(BudgetMsg::ToggleHidden),
+            "inspect" => {
+                let found = screens::lines(self).iter().find(|l| l.category_id.hex() == rest).map(|l| l.category_id);
+                self.update(Msg::Category(found));
+            }
             "refresh" => {
                 let _ = self.change(MoneyChange::Sync);
             }
@@ -475,6 +502,11 @@ impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::R
             R::Reflect => Some("insights".into()),
             R::Accounts | R::Inbox | R::Filtered | R::Filter { .. } => Some("transactions".into()),
             R::Account { id, .. } => Some(money_app::shell::account_tag(&id)),
+            // A category's month: Category Details, beside the budget.
+            R::Category { id, .. } => {
+                self.natives.push(format!("inspect {id}"));
+                None
+            }
             R::Settings | R::Banks | R::Bank { .. } => {
                 self.natives.push("settings Connected Banks".into());
                 None
@@ -513,6 +545,7 @@ impl WebApp for MoneyWeb {
             }
             Msg::Shell(m) => self.shell_step(m),
             Msg::Accounts(m) => self.accounts_step(m),
+            Msg::Budget(m) => self.budget_step(m),
             Msg::Category(c) => {
                 self.category = c;
                 // The shell's Category Details shows it (`follow_shell`).
@@ -713,6 +746,7 @@ impl WebApp for MoneyWeb {
         (self.category, self.txn, self.draft, self.asking) = (None, None, None, None);
         (self.search, self.review, self.settings) = (String::new(), false, false);
         self.accounts = Runtime::new();
+        self.budget = Runtime::new();
         let month = self.month.clone();
         self.shell_step(ShellMsg::Month { month });
         true

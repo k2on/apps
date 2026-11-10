@@ -19,6 +19,9 @@ import dev.arkui.LocalRowMark
 import dev.arkdb.ffi.Id
 import dev.arkui.LocalTabFrame
 import uniffi.money_app.AccountsApp
+import uniffi.money_app.BudgetApp
+import uniffi.money_app.BudgetMsg
+import uniffi.money_app.BudgetPage
 import uniffi.money_app.AppShell
 import uniffi.money_app.Session
 import uniffi.money_app.ShellApp
@@ -65,6 +68,43 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
 
     /** `msg` taken by the app; the page read again. */
     fun send(msg: AccountsMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
+    /** The page read again: the book moved. */
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/** The Budget tab, running in Rust (money/app/src/budget): its month the book's, told as it pages. */
+class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?) {
+    /** Opens a route: a category's month. */
+    var opened: (Route) -> Unit = {}
+
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) = opened(route)
+
+            override fun native(name: String) {
+                if (name == "refresh") refresh()
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = BudgetApp(session, shell)
+    private val _page = MutableStateFlow(app.page())
+    val page: StateFlow<BudgetPage> = _page
+
+    init {
+        app.useModules(haptics, null, null)
+    }
+
+    /** `msg` taken by the app; the page read again. */
+    fun send(msg: BudgetMsg) {
         app.send(msg)
         _page.value = app.page()
     }

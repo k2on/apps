@@ -1,6 +1,5 @@
 // The pieces money's pages are laid out of that are money's, the way the
-// iPhone app lays them (an inset grouped list): the one figure a page is
-// about in a card washed in its tint ([HeroCard]), a section's total at the
+// iPhone app lays them (an inset grouped list): a section's total at the
 // end of its heading ([HeadingTotal]), an account's kind as its symbol in a
 // chart colour over a wash of it ([KindTile]), and the month paged under
 // the page's title ([MonthPager]). The heading, the card and its hairlines,
@@ -51,52 +50,6 @@ import dev.arkui.Tint
 import dev.arkui.chartPalette
 import dev.arkui.pressable
 import uniffi.ark_format.formatMonth
-
-/** The hero's corners: a little rounder, as the larger thing. */
-private val HeroCorner: Dp = 28.dp
-
-/**
- * The one figure a page is about: its caption, quiet; the amount, large and bold, in its tone (ink
- * when neutral); a line under it; and what follows (`footer`), on a card washed from the tone's
- * colour at its top corner to almost nothing. Tapping it is `onClick`, when there is one.
- */
-@Composable
-fun HeroCard(
-    caption: String,
-    cents: Long,
-    tone: Tint,
-    note: String,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    footer: @Composable ColumnScope.() -> Unit = {},
-) {
-    val a = LocalAmounts.current
-    val ink = tintInk(tone)
-    val shape = RoundedCornerShape(HeroCorner)
-    Column(
-        modifier
-            .fillMaxWidth()
-            // Before the clip and the fills, so the whole card gives under the finger.
-            .then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .background(Brush.linearGradient(listOf(ink.copy(alpha = 0.22f), ink.copy(alpha = 0.04f))))
-            .padding(Space.xl)
-            .semantics(mergeDescendants = true) { contentDescription = "$caption, ${a.format(cents)}" + if (note.isNotEmpty()) ", $note" else "" },
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        Text(caption, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AmountText(
-            cents,
-            style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold, fontSize = 40.sp, lineHeight = 48.sp),
-            color = if (tone == Tint.Neutral) MaterialTheme.colorScheme.onSurface else ink,
-        )
-        if (note.isNotEmpty()) {
-            Text(note, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        footer()
-    }
-}
 
 /** A section's total at the end of its heading, quiet, or the error's red below nothing. */
 @Composable

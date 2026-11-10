@@ -46,6 +46,39 @@ final class AccountsScreen: ObservableObject {
     }
 }
 
+/// The Budget tab, running in Rust (money/app/src/budget): its month the
+/// model's, told as it pages.
+@MainActor
+final class BudgetScreen: ObservableObject {
+    @Published private(set) var page: BudgetPage
+    /// Opens a route (a category's month) on the tab's back stack, or in the inspector.
+    var open: (Route) -> Void = { _ in }
+
+    private let app: BudgetApp
+    private let shell: ScreenShell
+
+    init(session: Session, modules: PhoneModules, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = BudgetApp(session: session, shell: shell)
+        app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
+        app.send(msg: .month(month: month))
+        page = app.page()
+        shell.opened = { [weak self] r in self?.open(r) }
+    }
+
+    /// `msg` taken by the app; the page read again.
+    func send(_ msg: BudgetMsg) {
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    /// The page read again: a view it holds moved.
+    func reload() {
+        page = app.page()
+    }
+}
+
 /// money's shell running in Rust (money/app/src/shell): its sections,
 /// toolbar, inspector, search and commands, which the generated
 /// `MoneyShellView`, `MoneySettingsView` and `MoneyCommands` read and send

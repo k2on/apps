@@ -235,8 +235,7 @@ hundredths).
   pickers; connecting a bank followed to Plaid's page, and what Settings
   says of an ask and of a bank.
 - `ReorderTests` — arkui's Reorder in sections (a section of its own kept
-  so), and the budget's drops made on the demo, payment categories staying
-  with the cards.
+  so); the budget's moves are Rust's (money/app/src/budget/tests.rs).
 - `StartTests` — the way in: the welcome, the demo remembered and left, an
   address that is not a money server, the sign-in's tab and its code, a
   code that does not exchange, signing out; and days written in the

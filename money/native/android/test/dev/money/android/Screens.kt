@@ -61,7 +61,11 @@ class Screens {
     @Test fun signIn() =
         shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", Phase.BROWSER, null), said, null, {}, none) }
 
-    @Test fun budget() = shot("budget") { BudgetScreen(book.state.value) }
+    @Test fun budget() {
+        val holder = BudgetHolder(book.session, {}, { book.state.value.today }, null)
+        holder.send(uniffi.money_app.BudgetMsg.Month(month = book.state.value.month))
+        shot("budget") { ScreenFrame { BudgetScreen(holder) } }
+    }
 
     @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today }, null, null)) } }
 

@@ -189,13 +189,22 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     // Budget, Accounts, Transactions and Insights — a navigation bar, a rail or a drawer by the
     // window's width — each its top bar, search and inspector, hosting money's own screens.
     LaunchedEffect(ledger) { sections.reload() }
+    // Budget, written from Rust (generated/BudgetScreen.kt), over its runtime: its month the book's.
+    val hapticView = androidx.compose.ui.platform.LocalView.current
+    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(hapticView)) }
+    LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_app.BudgetMsg.Month(month = ledger.month)) }
+    LaunchedEffect(ledger) { budget.reload() }
     sections.native = { name ->
         when (name) {
             "new-transaction" -> form = newForm(book.state.value, null)
             "new-account" -> shell.onAccountSheet()
             "previous-month" -> book.stepMonth(-1)
             "next-month" -> book.stepMonth(1)
-            "auto-assign" -> book.autoAssign(Auto.UNDERFUNDED)
+            "auto-assign" -> budget.send(uniffi.money_app.BudgetMsg.AutoAssign)
+            "new-category" -> budget.send(uniffi.money_app.BudgetMsg.NewCategory(group = ""))
+            "new-group" -> budget.send(uniffi.money_app.BudgetMsg.NewGroup)
+            "toggle-hidden" -> budget.send(uniffi.money_app.BudgetMsg.ToggleHidden)
+            "this-month" -> book.stepMonth(0)
             "refresh" -> book.sync()
             "review" -> {}
             else -> if (name.startsWith("settings")) nav.navigate("settings") { launchSingleTop = true }
@@ -209,7 +218,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     }
     // The month is the budget's title in the shell's top bar.
     LaunchedEffect(ledger.month) { sections.send(uniffi.money_app.ShellMsg.Month(month = ledger.month)) }
-    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections) }
+    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
         NavHost(
@@ -436,9 +445,15 @@ fun rememberFlag(initial: Boolean = false): androidx.compose.runtime.MutableStat
  * Accounts' list is the generated Accounts slice, over its runtime.
  */
 @Composable
-private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController, sections: MoneyShellHolder) {
+private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController, sections: MoneyShellHolder, budget: BudgetHolder) {
     when (name) {
-        "budget" -> BudgetScreen(ledger)
+        "budget" -> {
+            // A category's month: its sheet, money's own until Category Details moves into Rust.
+            var open by rememberSaveable { mutableStateOf<String?>(null) }
+            budget.opened = { r -> if (r is Route.Category) open = r.id }
+            ScreenFrame { BudgetScreen(budget) }
+            open?.let { hex -> CategorySheet(ledger, Id(hex), onDismiss = { open = null }) }
+        }
         "accounts" -> {
             // Written from Rust (generated/AccountsScreen.kt), over its runtime.
             val view = androidx.compose.ui.platform.LocalView.current

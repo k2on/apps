@@ -11,7 +11,7 @@
 use crate::text::{self, text};
 use crate::text_input::text_input;
 use ark_app::shell::compact_tag;
-use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Placement, Section, Val, View};
+use ark_app::view::{Confirm, Input, ListRow, MeterRow, Part, Picture, Placement, Section, Val, View};
 use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, tooltip, Column, Space};
 use iced::{Alignment, Length, Padding};
 
@@ -41,12 +41,12 @@ pub fn element<M: Clone + 'static>(view: View<M>) -> Element<'static, M> {
     }
 }
 
-fn page<M: Clone + 'static>(title: &'static str, content: View<M>) -> Element<'static, M> {
+fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'static, M> {
     let mut body = vec![];
     let mut over = vec![];
     for v in flatten(content) {
         match v {
-            View::Part(Part::Sheet { .. } | Part::Prompt { .. }) => over.push(v),
+            View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => over.push(v),
             v => body.extend(nodes(v)),
         }
     }
@@ -55,7 +55,11 @@ fn page<M: Clone + 'static>(title: &'static str, content: View<M>) -> Element<'s
     let list = column(body).spacing(10).padding(PAD).max_width(720);
     let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
     for v in over {
-        if let Some((dismiss, dialog)) = dialog(v) {
+        let asked = match v {
+            View::Part(p) => notice(p),
+            v => dialog(v),
+        };
+        if let Some((dismiss, dialog)) = asked {
             layers = layers.push(layer::dimmed(dismiss.clone(), dismiss)).push(layer::centred(dialog));
         }
     }
@@ -133,6 +137,18 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         .into(),
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
+        Part::MeterRow(r) => meter_row(*r),
+        Part::Headline(h) => {
+            let ark_app::view::Headline {
+                label,
+                figure,
+                tint,
+                caption,
+                action,
+            } = *h;
+            let act = action.map(|(title, glyph, tap)| crate::figures::capsule_button(glyphs::named(glyph), title, true, tap));
+            crate::figures::headline(&label.get(), figure.get(), parts::Tint::named(&tint.get()), &caption.get(), act)
+        }
         Part::NameField {
             label,
             value,
@@ -885,19 +901,139 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
 
 fn section<M: Clone + 'static>(s: Section<M>) -> Element<'static, M> {
     let shows = s.shows.as_ref().is_none_or(|b| b.get());
-    let trailing = s.amount.filter(|_| shows).map(|a| {
-        let cents = a.get();
-        amount(cents, 13, cents >= 0)
-    });
+    let note = s.note.as_ref().and_then(|n| n.get());
+    let total: Option<Element<'static, M>> = match note {
+        Some(words) => Some(
+            text(words)
+                .size(13)
+                .font(crate::hero::BOLD)
+                .style(|t| text::Style {
+                    color: Some(parts::Tint::Caution.color(t)),
+                    ..Default::default()
+                })
+                .into(),
+        ),
+        None => s.amount.filter(|_| shows).map(|a| {
+            let cents = a.get();
+            amount(cents, 13, cents >= 0)
+        }),
+    };
+    // The figures in their columns, each under its title, the total last.
+    let trailing: Option<Element<'static, M>> = match (s.columns, total) {
+        (Some(k), total) => {
+            let cell = |title: &'static str, figure: Element<'static, M>| -> Element<'static, M> {
+                column![text(title).size(10).style(style::faint(0.45)), figure]
+                    .align_x(Alignment::End)
+                    .width(METER_COLUMN)
+                    .into()
+            };
+            let mut line = row![
+                cell(k.titles[0], amount(k.first.get(), 13, true)),
+                cell(k.titles[1], amount(k.second.get(), 13, true)),
+            ]
+            .spacing(COLUMN_GAP)
+            .align_y(Alignment::End);
+            if let Some(t) = total {
+                line = line.push(cell(k.titles[2], t));
+            }
+            Some(line.into())
+        }
+        (None, total) => total,
+    };
+    let open = s.open.as_ref().is_none_or(|(o, _)| o.get());
     let mut out = column![].spacing(0);
     if let Some(t) = s.title {
-        out = out.push(parts::section_header(&t.get(), trailing));
+        let title = t.get();
+        let mut head = parts::section_header(&title, trailing);
+        if let Some((_, toggle)) = s.open.clone() {
+            let chevron = icon::plain(if open { glyphs::DOWN } else { glyphs::CHEVRON }, true);
+            head = button(row![chevron, head].spacing(4).align_y(Alignment::End))
+                .padding(0)
+                .width(Length::Fill)
+                .style(style::bare)
+                .on_press(toggle)
+                .into();
+        }
+        let items = menu_of(s.menu);
+        out = out.push(match items.is_empty() {
+            true => head,
+            false => context_menu::context_menu(head, title, items),
+        });
     }
-    out = out.push(parts::group_card(nodes(*s.rows)));
+    if open {
+        out = out.push(parts::group_card(nodes(*s.rows)));
+    }
     if let Some(note) = s.footer.and_then(|f| f.get()) {
         out = out.push(container(text(note).size(12).style(style::dim)).padding([6, 4]));
     }
     out.into()
+}
+
+/// A column's width beside a row's name, and the gap between two.
+const METER_COLUMN: f32 = 96.0;
+const COLUMN_GAP: f32 = 12.0;
+
+/// A menu's items as ArkUI's context menu offers them: those offered.
+fn menu_of<M: Clone + 'static>(menu: Vec<ark_app::view::MenuItem<M>>) -> Vec<context_menu::Item<M>> {
+    menu.into_iter()
+        .filter(|m| m.offered())
+        .map(|m| context_menu::Item {
+            glyph: glyphs::named(&m.glyph.get()),
+            label: m.title.get(),
+            destructive: m.destructive.get(),
+            message: m.tap,
+        })
+        .collect()
+}
+
+/// ArkUI's `MeterRow`: the mark and the title over the slim bar and its
+/// words; the columns; the status badge at its end.
+fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> Element<'static, M> {
+    let faded = r.faded.as_ref().is_some_and(|f| f.get());
+    let mut name = row![].spacing(8).align_y(Alignment::Center);
+    if let Some(kind) = r.mark.as_ref().and_then(|m| m.get()) {
+        let glyph = shape(if kind == "credit" { "credit-card" } else { &kind });
+        name = name.push(parts::tile(glyph, |t| crate::theme::of(t).primary.base.color, 20.0));
+    }
+    name = name.push(text(r.title.get()).size(14).style(move |t| text::Style {
+        color: faded.then(|| style::dim(t).color.unwrap_or_default()),
+        ..Default::default()
+    }));
+    let mut words = column![name].spacing(4).width(Length::Fill);
+    if let (Some(f), Some(t)) = (r.fraction.as_ref().and_then(|f| f.get()), r.meter_tint.as_ref()) {
+        words = words.push(crate::figures::goal_bar(f as f32, parts::Tint::named(&t.get())));
+    }
+    let note = r.note.as_ref().and_then(|n| n.get());
+    let end = r.note_end.as_ref().and_then(|n| n.get());
+    if note.is_some() || end.is_some() {
+        let tint = parts::Tint::named(&r.note_tint.as_ref().map(|t| t.get()).unwrap_or_default());
+        let mut line = row![].spacing(8);
+        if let Some(n) = note {
+            line = line.push(text(n).size(11).style(move |t| text::Style {
+                color: Some(tint.color(t)),
+                ..Default::default()
+            }));
+        }
+        line = line.push(Space::new().width(Length::Fill));
+        if let Some(e) = end {
+            line = line.push(text(e).size(11).style(style::dim));
+        }
+        words = words.push(line);
+    }
+    let mut line = row![words].spacing(COLUMN_GAP).align_y(Alignment::Center);
+    if let Some((a, b)) = &r.columns {
+        line = line
+            .push(container(amount(a.get(), 14, false)).width(METER_COLUMN).align_right(METER_COLUMN))
+            .push(container(amount(b.get(), 14, true)).width(METER_COLUMN).align_right(METER_COLUMN));
+    }
+    let badge = crate::figures::status_badge(r.status.get(), parts::Tint::named(&r.status_tint.get()));
+    line = line.push(container(badge).width(METER_COLUMN).align_right(METER_COLUMN));
+    let b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare).on_press_maybe(r.tap);
+    let items = menu_of(r.menu);
+    match items.is_empty() {
+        true => b.into(),
+        false => context_menu::context_menu(b, r.title.get(), items),
+    }
 }
 
 fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {

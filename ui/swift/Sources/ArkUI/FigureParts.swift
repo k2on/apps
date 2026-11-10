@@ -474,3 +474,27 @@ public struct Sparkline: View {
     }
 }
 #endif
+
+/// A headline's one action: a prominent capsule of its glyph and title.
+public struct HeadlineAction: View {
+    let title: String
+    let glyph: String
+    let onTap: () -> Void
+
+    public var body: some View {
+        Button(action: onTap) { Label(title, systemImage: ArkGlyphs.sf(glyph)) }
+            // Its glyph and its title, whatever the row's label style.
+            .labelStyle(.titleAndIcon)
+            .buttonStyle(.borderedProminent)
+    }
+}
+
+extension Headline where Trailing == HeadlineAction? {
+    /// A view's headline (`ark_app::view::headline`): its tint by name, its
+    /// action at its end while it has one.
+    public init(_ label: String, figure: String, tint: String, caption: String,
+                actionTitle: String? = nil, actionGlyph: String? = nil, onAction: (() -> Void)? = nil) {
+        let action = onAction.map { HeadlineAction(title: actionTitle ?? "", glyph: actionGlyph ?? "", onTap: $0) }
+        self.init(label, figure: figure, tint: Tint(named: tint), caption: caption) { action }
+    }
+}

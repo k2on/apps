@@ -19,6 +19,9 @@
 // chips would be, and offers neither moving money nor covering.
 package dev.money.android
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -435,3 +438,28 @@ private fun Cover(ledger: Ledger, l: BudgetLine, onDone: () -> Unit) {
 /** A row of chips that scrolls sideways when it is wider than the sheet. */
 @Composable
 private fun Modifier.horizontalScrollSafe(): Modifier = this.fillMaxWidth().horizontalScroll(rememberScrollState())
+
+/** A card's payment category's mark: the card's own, as its account wears it. */
+@Composable
+fun CardTile(modifier: Modifier = Modifier) {
+    Box(modifier) { KindTile("credit", side = 28.dp) }
+}
+
+/** A name, typed into a dialog: a new group, a new category, a rename. */
+@Composable
+fun NameDialog(title: String, typed: String, onType: (String) -> Unit, onDone: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = typed,
+                onValueChange = onType,
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth())
+        },
+        confirmButton = { TextButton(onClick = onDone, enabled = typed.isNotBlank()) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

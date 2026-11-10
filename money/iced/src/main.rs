@@ -199,6 +199,8 @@ pub enum Message {
     Go(Page),
     /// The Accounts page's own messages (`money_app::accounts`).
     Accounts(money_app::accounts::AccountsMsg),
+    /// The Budget page's own messages (`money_app::budget`).
+    Budget(money_app::budget::BudgetMsg),
     /// A message of the shell's: a section, the inspector, the search, a command.
     Shell(ShellMsg),
     /// A month earlier or later; zero is this one.
@@ -357,6 +359,8 @@ pub struct App {
     pub page: Page,
     /// The Accounts page, running.
     pub accounts: ark_app::Runtime<money_app::accounts::Accounts>,
+    /// The Budget page, run in Rust (`money_app::budget`), on the window's month.
+    pub budget: ark_app::Runtime<money_app::budget::Budget>,
     pub today: String,
     /// The category the inspector is about; none is the month's summary.
     pub selected: Option<Id<Category>>,
@@ -453,6 +457,7 @@ impl App {
             peer: Peer::open(client, &month_of(today)),
             page: Page::Budget,
             accounts: ark_app::Runtime::new(),
+            budget: ark_app::Runtime::new(),
             today: today.into(),
             selected: None,
             assigning: None,
@@ -737,6 +742,8 @@ impl App {
     /// is written to it.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        // The Budget page's month is the window's.
+        let task = Task::batch([task, self.budget_month()]);
         // The shell's section is the page's.
         self.sync_shell();
         // The account's picture is asked for once somebody is signed in,
@@ -854,6 +861,7 @@ impl App {
     fn step(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Accounts(m) => return self.accounts_step(m),
+            Message::Budget(m) => return self.budget_step(m),
             Message::Shell(m) => return self.shell_step(m),
             Message::Go(page) => {
                 self.page = page;
