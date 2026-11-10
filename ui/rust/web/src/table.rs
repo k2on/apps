@@ -154,6 +154,7 @@ pub fn table_with(columns: &[Column], rows: Vec<TableRow>, zebra: bool, top: Opt
                     .collect(),
             };
             let open = r.open.clone();
+            let hit = r.open.clone().and_then(|o| crate::hit(&r.title, o));
             html::div()
                 .class(class)
                 .role("row")
@@ -170,7 +171,7 @@ pub fn table_with(columns: &[Column], rows: Vec<TableRow>, zebra: bool, top: Opt
                         o(e.client_x() as f64, e.client_y() as f64);
                     }
                 })
-                .child(cells)
+                .child((cells, hit))
                 .into_any()
         })
         .collect();

@@ -52,6 +52,9 @@ fn widths() -> (f64, f64, f64) {
         return t;
     }
     let read = |name: &str, or: f64| -> f64 {
+        if !cfg!(target_arch = "wasm32") {
+            return or;
+        }
         web_sys::window()
             .and_then(|w| {
                 let root = w.document()?.document_element()?;
@@ -72,6 +75,12 @@ fn widths() -> (f64, f64, f64) {
 
 /// The window's width, in CSS pixels.
 pub fn width() -> f64 {
+    if let Some(w) = crate::page::width() {
+        return w;
+    }
+    if !cfg!(target_arch = "wasm32") {
+        return 1440.0;
+    }
     web_sys::window()
         .and_then(|w| w.inner_width().ok())
         .and_then(|v| v.as_f64())
@@ -354,7 +363,7 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
                     }
                     let tap = select.call(title.to_string());
                     heads.push(
-                        html::button()
+                        crate::wired!(html::button(), crate::tapped(title, &tap))
                             .class(if on { "ark-pane-tab ark-on" } else { "ark-pane-tab" })
                             .role("tab")
                             .attr("aria-selected", if on { "true" } else { "false" })
@@ -422,7 +431,7 @@ fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, 
     let mut lead: Vec<AnyView> = vec![];
     if let Some(back) = ctx.back.take() {
         lead.push(
-            html::button()
+            crate::wired!(html::button(), crate::page::tap("Back", back.clone()))
                 .class("ark-bar-button")
                 .attr("title", "Back")
                 .attr("aria-label", "Back")
@@ -452,7 +461,7 @@ fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, 
     }
     if let Some((t, shown, tap)) = toggle {
         trailing.push(
-            html::button()
+            crate::wired!(html::button(), crate::tapped(t, &tap))
                 .class(if shown { "ark-bar-button ark-on" } else { "ark-bar-button" })
                 .attr("title", t)
                 .attr("aria-label", t)
@@ -540,7 +549,7 @@ fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static s
 /// A toolbar's button: its glyph alone, as a Mac toolbar draws one, its
 /// title said when the pointer rests on it.
 pub fn bar_button<M: Clone + 'static>(title: &'static str, g: &'static str, enabled: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &tap))
         .class("ark-bar-button")
         .attr("title", title)
         .attr("aria-label", title)
@@ -564,7 +573,7 @@ fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, se
     if lit {
         class.push_str(" ark-cursor");
     }
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &tap))
         .class(class)
         .attr("data-cursor", lit.then_some("true"))
         .attr("aria-current", selected.then_some("page"))
@@ -578,7 +587,7 @@ fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, se
 }
 
 fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-top-tab ark-on" } else { "ark-top-tab" })
         .role("tab")
         .attr("aria-selected", if on { "true" } else { "false" })
@@ -588,7 +597,7 @@ fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap:
 }
 
 fn bottom_tab<M: Clone + 'static>(title: String, g: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-bottom-tab ark-on" } else { "ark-bottom-tab" })
         .role("tab")
         .attr("aria-selected", if on { "true" } else { "false" })

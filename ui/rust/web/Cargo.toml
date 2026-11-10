@@ -13,7 +13,17 @@ description = "ArkUI in the browser: an ark-app View drawn by Leptos over the re
 ark-app = { path = "../app" }
 ark-format = { path = "../../../rust/ark-format" }
 arkui-glyphs = { path = "../glyphs" }
-# The DOM, client-side rendered: no server functions, no hydration.
-leptos = { version = "0.8", default-features = false, features = ["csr"] }
+# The DOM. How the page is made is the build's (ui/docs/app.md, "The
+# Browser's Modes"): `csr` draws it in the browser alone (the SPA, the
+# default); `ssr` writes a page's HTML natively (the prerenderer, the
+# server); `hydrate` takes over HTML written so, in the browser. No server
+# functions: the app's own server answers the forms.
+leptos = { version = "0.8", default-features = false }
 wasm-bindgen = "0.2.129"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "MouseEvent", "Event", "EventTarget", "DomRect", "Location", "UrlSearchParams", "MediaQueryList", "CssStyleDeclaration", "Node", "History", "FocusEvent", "PointerEvent", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Navigator", "NodeList", "HtmlDocument"] }
+
+[features]
+default = ["csr"]
+csr = ["leptos/csr"]
+hydrate = ["leptos/hydrate"]
+ssr = ["leptos/ssr"]

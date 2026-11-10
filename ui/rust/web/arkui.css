@@ -361,3 +361,19 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 [data-motion="rise"] { animation: ark-rise var(--ark-move-ms) var(--ark-move); }
 [data-motion="none"] { animation: none; }
 :root[data-motion="reduced"] [data-motion="rise"] { animation-name: ark-fade; }
+
+/* * A page written as HTML (src/page.rs, ui/docs/app.md "The Browser's
+   Modes"). A part that is no button is pressed through a button over all
+   of it; what only works with script (`.ark-js`) is put away until script
+   runs, and what stands in for it without (`.ark-nojs`) once it does. A
+   control's menu is the browser's own popover, in the menu's panel. */
+:has(> .ark-hit) { position: relative; }
+.ark-hit { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: none; opacity: 0; cursor: default; }
+.ark-hit:focus-visible { opacity: 1; outline: 2px solid var(--ark-accent); outline-offset: -2px; }
+:root[data-ark-mode]:not([data-ark-js]) .ark-js { display: none; }
+:root[data-ark-js] .ark-nojs { display: none; }
+.ark-menu-popover:popover-open { position: fixed; inset: 0; margin: auto; width: max-content; height: max-content; min-width: 198px; display: flex; flex-direction: column; }
+.ark-menu-popover .ark-menu-entry { text-align: start; }
+:root[data-ark-mode] button[disabled]:not(.ark-hit) { cursor: default; }
+/* The page a written control is already on is disabled, not dimmed. */
+:root[data-ark-mode] :is(.ark-selected, .ark-on, [aria-current])[disabled] { color: inherit; opacity: 1; }

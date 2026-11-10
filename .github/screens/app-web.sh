@@ -9,6 +9,9 @@
 #
 #   app-web.sh <out> <site> <app>     (ARK_WEB_SHOTS: another shots.json, to take a few)
 #
+# ARK_WEB_MODE=ssg takes a static site (`nix build .#<app>-web-static`)
+# by its routes' paths, and ARK_WEB_JS=0 with script off (web-shots.js).
+#
 # Writes <out>/device.json and <out>/<size>/<theme>/<id>.png, each with
 # its <id>.tree.txt (the page's text, what a step can name). Run from the
 # repository's root, where `node` can `require('playwright')` with its

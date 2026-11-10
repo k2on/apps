@@ -10,6 +10,15 @@
 //   node web-shots.js <shots.json> <base URL> <out>
 //
 // Writes <out>/<size>/<theme>/<id>.png and <out>/device.json.
+//
+// The page's mode (ui/docs/app.md, "The Browser's Modes") is ARK_WEB_MODE:
+// `spa` (the default) as above; `ssg`, a static site, where each of
+// `screens` is opened by its route's path (`/budget/inspector=1/`) and the
+// browser's own `web.shots` (which open the page's transient parts by its
+// query) are left out. ARK_WEB_JS=0 takes them with script off. With
+// script on, a page written as HTML fails its shot on any error or any
+// word of hydration in the console: the browser's first draw must be the
+// one the page was written with.
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
@@ -28,20 +37,37 @@ async function main() {
     for (let i = 0; i + 1 < args.length; i += 2) q.push(`${args[i].replace(/^-+/, '')}=${encodeURIComponent(args[i + 1])}`);
     return q.join('&');
   };
-  const shots = (all.screens || []).map(s => ({ id: s.id, query: query(s.args), sizes: s.on })).concat(web.shots || []);
+  const mode = process.env.ARK_WEB_MODE || 'spa';
+  const js = process.env.ARK_WEB_JS !== '0';
+  // A route's path, as arkui-web's `page::Route::path` writes it.
+  const routePath = args => {
+    const segs = [];
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      const k = args[i].replace(/^-+/, ''), v = encodeURIComponent(args[i + 1]).replace(/%3A/g, ':');
+      if (k === 'screen') segs.unshift(v); else segs.push(`${k}=${v}`);
+    }
+    return segs.length ? `/${segs.join('/')}/` : '/';
+  };
+  const screens = (all.screens || []).map(s => ({ id: s.id, query: query(s.args), path: routePath(s.args), sizes: s.on }));
+  const shots = mode === 'spa' ? screens.concat(web.shots || []) : screens;
   const browser = await chromium.launch({ args: ['--font-render-hinting=none', '--disable-lcd-text', '--force-color-profile=srgb'] });
   let failed = 0;
   for (const [size, [width, height]] of Object.entries(sizes)) {
     for (const theme of ['light', 'dark']) {
-      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: web.scale || 1, colorScheme: theme, reducedMotion: 'reduce' });
+      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: web.scale || 1, colorScheme: theme, reducedMotion: 'reduce', javaScriptEnabled: js });
       for (const shot of shots) {
         if (shot.sizes && !shot.sizes.includes(size)) continue;
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', e => errors.push(e.message));
+        page.on('console', m => {
+          if (mode !== 'spa' && (m.type() === 'error' || /hydrat/i.test(m.text()))) errors.push(`console ${m.type()}: ${m.text()}`);
+        });
         const q = [`today=${web.today}`, `theme=${theme}`, 'reduce-motion=1', shot.query || ''].filter(Boolean).join('&');
         try {
-          await page.goto(`${base}/?${q}`);
+          await page.goto(mode === 'spa' ? `${base}/?${q}` : `${base}${shot.path}`);
+          // The written page is the browser's once its module has run.
+          if (mode !== 'spa' && js) await page.waitForSelector('html[data-ark-js]', { timeout: 20000 });
           await page.waitForSelector('.ark-window', { timeout: 20000 });
           await page.waitForTimeout(300);
           for (const step of shot.steps || []) {
@@ -61,6 +87,10 @@ async function main() {
           // The texts on the page, as the desktop's tree.txt has them: what a step can name.
           fs.writeFileSync(path.join(dir, `${shot.id}.tree.txt`), await page.evaluate(() => document.body.innerText));
           console.log(`${size} ${theme} ${shot.id}${errors.length ? ' (errors: ' + errors.join('; ') + ')' : ''}`);
+          if (mode !== 'spa' && errors.length) {
+            failed++;
+            console.log(`::error::${size} ${theme} ${shot.id}: ${errors.join('; ')}`);
+          }
         } catch (e) {
           failed++;
           console.log(`::error::${size} ${theme} ${shot.id}: ${e.message}`);
@@ -70,7 +100,7 @@ async function main() {
       await context.close();
     }
   }
-  fs.writeFileSync(path.join(out, 'device.json'), JSON.stringify({ browser: 'chromium', version: browser.version(), sizes }, null, 2) + '\n');
+  fs.writeFileSync(path.join(out, 'device.json'), JSON.stringify({ browser: 'chromium', version: browser.version(), sizes, mode, js }, null, 2) + '\n');
   await browser.close();
   if (failed) process.exit(1);
 }

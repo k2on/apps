@@ -385,7 +385,7 @@ fn budget_inspector(app: &MoneyWeb) -> AnyView {
 }
 
 fn auto_line(label: &str, cents: i64, m: Msg) -> AnyView {
-    html::button()
+    arkui_web::wired!(html::button(), arkui_web::tapped(label, &m))
         .class("ark-figure-row ark-link-row")
         .on(leptos::ev::click, move |_| send(m.clone()))
         .child((html::span().child(label.to_string()), amount(cents, false)))
@@ -393,7 +393,7 @@ fn auto_line(label: &str, cents: i64, m: Msg) -> AnyView {
 }
 
 fn quiet_button(label: &str, m: Msg) -> AnyView {
-    html::button()
+    arkui_web::wired!(html::button(), arkui_web::tapped(label, &m))
         .class("ark-link")
         .on(leptos::ev::click, move |_| send(m.clone()))
         .child(label.to_string())
@@ -482,8 +482,9 @@ fn register(app: &MoneyWeb, account: Option<String>) -> AnyView {
             }
             cells.push(html::span().class("ark-quiet").child(t.memo.clone()).into_any());
             cells.push(arkui_web::signed(t.amount));
+            let said = if cleared { "Cleared" } else { "Uncleared" };
             cells.push(
-                html::button()
+                arkui_web::wired!(html::button(), arkui_web::tapped(said, &Msg::Cleared(id, !cleared)))
                     .class(if cleared { "ark-check-button ark-on" } else { "ark-check-button" })
                     .attr("aria-label", if cleared { "Cleared" } else { "Uncleared" })
                     .on(leptos::ev::click, move |e: web_sys::MouseEvent| {
@@ -690,7 +691,7 @@ fn household() -> AnyView {
                 html::span().class("money-face").child(glyph("users", 13)),
                 html::span().child("Demo Household"),
             )),
-            html::button()
+            arkui_web::wired!(html::button(), arkui_web::tapped("Settings", &Msg::Settings(true)))
                 .class("ark-bar-button")
                 .attr("title", "Settings")
                 .attr("aria-label", "Settings")
@@ -701,11 +702,15 @@ fn household() -> AnyView {
 }
 
 fn settings_general() -> AnyView {
-    let theme = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.document_element())
-        .and_then(|e| e.get_attribute("data-theme"))
-        .unwrap_or_default();
+    // What the page says (`data-theme`); written as HTML, the address's.
+    let theme = match arkui_web::page::writing() {
+        true => arkui_web::query("theme"),
+        false => web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.document_element())
+            .and_then(|e| e.get_attribute("data-theme")),
+    }
+    .unwrap_or_default();
     let chosen = match theme.as_str() {
         "light" => "Light",
         "dark" => "Dark",

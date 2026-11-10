@@ -61,6 +61,13 @@ dependencies = [
   "androidx.media3:media3-session:1.5.1",
 ]
 
+[web]
+# How the browser's page is made (ui/docs/app.md, "The Browser's Modes"):
+# `spa` drawn by the page alone (`<id>-web`), `ssg` every page prerendered
+# and taken over by script when it runs (`<id>-web-static`), `ssr` written
+# by the app's server for each request (not built yet).
+modes = ["spa", "ssg"]
+
 [fdroid]
 metadata = "fdroid/metadata/us.koon.money.yml"
 

@@ -36,6 +36,7 @@ pub mod fields;
 pub mod figures;
 pub mod keys;
 pub mod menu;
+pub mod page;
 pub mod parts;
 pub mod shell;
 pub mod table;
@@ -155,6 +156,35 @@ pub fn send<M: 'static>(m: M) {
     redraw();
 }
 
+/// A control that sends `m`, wired for the page without script
+/// ([`page::tap`]): `label` is what it says.
+pub fn tapped<M: Clone + 'static>(label: &str, m: &M) -> page::Wired {
+    let m = m.clone();
+    page::tap(label, Rc::new(move || send(m.clone())))
+}
+
+/// Where a part that is no button is pressed (a table's row, a toggle's
+/// box) without script: a button over all of it, wired as [`page::tap`],
+/// drawn in every mode but the SPA's (so the page the browser takes over
+/// is the one the server wrote). With script it runs `run` itself.
+pub fn hit(label: &str, run: Action) -> Option<AnyView> {
+    if page::mode() == page::Mode::Spa {
+        return None;
+    }
+    let w = page::tap(label, run.clone());
+    Some(
+        wired!(html::button(), w)
+            .class("ark-hit")
+            .attr("aria-label", label.to_string())
+            .on(leptos::ev::click, move |e| {
+                e.prevent_default();
+                e.stop_propagation();
+                run()
+            })
+            .into_any(),
+    )
+}
+
 /// The page drawn again.
 pub fn redraw() {
     if let Some(v) = VERSION.with(|v| v.get()) {
@@ -220,18 +250,66 @@ pub trait WebApp: 'static {
     fn suggest(&self, _field: &str, _typed: &str) -> Vec<String> {
         vec![]
     }
+    /// Where the app is, as the address that brings it back there
+    /// (`arrive` reads it): its screen, its selection, its sheet. A page
+    /// written as HTML is at its route, and a press that moves the app
+    /// leads to its new one (`page`).
+    fn route(&self) -> page::Route {
+        page::Route::default()
+    }
+    /// How many changes the app has made to its data: a press that makes
+    /// one is an action, not a way to another page.
+    fn changes(&self) -> u64 {
+        0
+    }
+    /// The app put back where it opens, its data as it is: what the
+    /// prerenderer presses each control from, rather than opening the app
+    /// again. False (the default) when it cannot.
+    fn rewind(&mut self) -> bool {
+        false
+    }
+    /// While `on`, a change the app would send its data is counted
+    /// (`changes`) and not sent: the prerenderer presses every control,
+    /// and one that would change the data is an action, not a way.
+    fn dry_run(&mut self, _on: bool) {}
 }
 
 /// The page's address's `name` parameter.
+///
+/// Then the route in the path (`/budget/inspector=1/`, [`page::Route`]),
+/// then what the page was written with (`page::args`): a page written as
+/// HTML reads the same arguments in the browser as it was written with.
 pub fn query(name: &str) -> Option<String> {
-    let search = web_sys::window()?.location().search().ok()?;
-    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name)
+    let written = || page::args().into_iter().find(|(k, _)| k == name).map(|(_, v)| v);
+    if !cfg!(target_arch = "wasm32") {
+        return written();
+    }
+    let location = web_sys::window()?.location();
+    let search = location.search().ok()?;
+    if let Some(v) = web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name) {
+        return Some(v);
+    }
+    let base = page_base();
+    let path = location.pathname().ok()?;
+    page::Route::of_path(&path, &base)
+        .and_then(|r| r.get(name).map(str::to_string))
+        .or_else(written)
+}
+
+/// Where the site is served from (`<html data-ark-base>`), `/` unless said.
+pub fn page_base() -> String {
+    root_element()
+        .and_then(|r| r.get_attribute("data-ark-base"))
+        .unwrap_or_else(|| "/".into())
 }
 
 /// Whether motion takes its gentle path (ui/docs/motion.md): the address
 /// says (`?reduce-motion=1` or `0`), else the system, only when
 /// [`ALWAYS_ANIMATE`] is off.
 pub fn reduced() -> bool {
+    if !cfg!(target_arch = "wasm32") {
+        return query("reduce-motion").as_deref() == Some("1");
+    }
     match query("reduce-motion").as_deref() {
         Some("1") => true,
         Some("0") => false,
@@ -243,6 +321,9 @@ pub fn reduced() -> bool {
 }
 
 fn root_element() -> Option<web_sys::Element> {
+    if !cfg!(target_arch = "wasm32") {
+        return None;
+    }
     web_sys::window()?.document()?.document_element()
 }
 
@@ -263,26 +344,10 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         style.set_text_content(Some(&format!("{THEME_CSS}\n{ARKUI_CSS}\n{css}")));
         let _ = head.append_child(&style);
     }
-    let app = Rc::new(RefCell::new(app));
-    SINK.with(|s| {
-        let app = app.clone();
-        *s.borrow_mut() = Some(Rc::new(move |m: Box<dyn Any>| {
-            if let Ok(m) = m.downcast::<A::Msg>() {
-                app.borrow_mut().update(*m);
-            }
-        }));
-    });
+    let app = install(app);
     keys::listen::<A>(app.clone());
-    {
-        let app = app.clone();
-        fields::suggest_with(move |f, q| app.borrow().suggest(f, q));
-    }
     let version = RwSignal::new(0u64);
     VERSION.with(|v| v.set(Some(version)));
-    APP_VIEW.with(|v| {
-        let app = app.clone();
-        *v.borrow_mut() = Some(Rc::new(move || app.borrow().view()));
-    });
     leptos::mount::mount_to_body(move || {
         move || {
             version.get();
@@ -308,6 +373,326 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
     }
 }
 
+/// `app` as the page's one app: the sink its messages go to, the view
+/// drawn, what its fields suggest.
+fn install<A: WebApp>(app: A) -> Rc<RefCell<A>> {
+    let app = Rc::new(RefCell::new(app));
+    SINK.with(|s| {
+        let app = app.clone();
+        *s.borrow_mut() = Some(Rc::new(move |m: Box<dyn Any>| {
+            if let Ok(m) = m.downcast::<A::Msg>() {
+                app.borrow_mut().update(*m);
+            }
+        }));
+    });
+    {
+        let app = app.clone();
+        fields::suggest_with(move |f, q| app.borrow().suggest(f, q));
+    }
+    APP_VIEW.with(|v| {
+        let app = app.clone();
+        *v.borrow_mut() = Some(Rc::new(move || app.borrow().view()));
+    });
+    UI.with(|u| *u.borrow_mut() = Ui::default());
+    QUEUE.with(|q| q.borrow_mut().clear());
+    BUSY.with(|b| b.set(false));
+    app
+}
+
+/// `app` taking over a page written as HTML (`page::Mode::Static` or
+/// `Server`): it arrives where the page's route says, as the writer's did,
+/// and its first draw is the written one at the width it was written at;
+/// then it is the SPA's, at the window's own width. The forms the page
+/// was written with are the browser's no more: a press is the click's.
+#[cfg(feature = "hydrate")]
+pub fn hydrate<A: WebApp>(app: A) {
+    use wasm_bindgen::closure::Closure;
+    let doc = web_sys::window().and_then(|w| w.document()).expect("a document");
+    let root = root_element().expect("a root");
+    let attr = |n: &str| root.get_attribute(n);
+    page::set_mode(attr("data-ark-mode").and_then(|m| page::Mode::of_word(&m)).unwrap_or(page::Mode::Static));
+    page::set_width(attr("data-ark-width").and_then(|w| w.parse().ok()));
+    page::set_args(page::Route::of_query(&attr("data-ark-args").unwrap_or_default()).0);
+    let _ = root.set_attribute("data-ark-js", "");
+    let app = install(app);
+    keys::listen::<A>(app.clone());
+    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&|n| query(n));
+    for m in arrive {
+        app.borrow_mut().update(m);
+    }
+    // A form sent or a popover toggled by a control is the click's now.
+    let stop = Closure::<dyn FnMut(web_sys::Event)>::new(|e: web_sys::Event| e.prevent_default());
+    let _ = doc.add_event_listener_with_callback_and_bool("submit", stop.as_ref().unchecked_ref(), true);
+    stop.forget();
+    let popovers = Closure::<dyn FnMut(web_sys::Event)>::new(|e: web_sys::Event| {
+        let on = e.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+        if on.and_then(|el| el.closest("[popovertarget]").ok().flatten()).is_some() {
+            e.prevent_default();
+        }
+    });
+    let _ = doc.add_event_listener_with_callback_and_bool("click", popovers.as_ref().unchecked_ref(), true);
+    popovers.forget();
+    // What the writer wired for the page without script taken away before
+    // the browser takes the page over: its own properties are set then.
+    if let Ok(list) = doc.query_selector_all("#ark-root [form], #ark-root [data-ark-off], #ark-root [popovertarget]") {
+        for i in 0..list.length() {
+            if let Some(el) = list.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
+                for a in ["form", "formaction", "formmethod", "popovertarget"] {
+                    let _ = el.remove_attribute(a);
+                }
+                if el.has_attribute("data-ark-off") {
+                    let _ = el.remove_attribute("disabled");
+                    let _ = el.remove_attribute("data-ark-off");
+                }
+            }
+        }
+    }
+    let version = RwSignal::new(0u64);
+    VERSION.with(|v| v.set(Some(version)));
+    let mount = doc
+        .get_element_by_id("ark-root")
+        .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+        .expect("#ark-root");
+    let handle = leptos::mount::hydrate_from(mount, move || {
+        move || {
+            version.get();
+            draw_window()
+        }
+    });
+    std::mem::forget(handle);
+    // At the window's own width from the next frame.
+    request_frame(|| {
+        page::set_width(None);
+        redraw();
+    });
+}
+
+/// What a page written as HTML says besides its view.
+#[derive(Clone, Debug, Default)]
+pub struct Written {
+    pub mode: page::Mode,
+    pub route: page::Route,
+    /// Where the site is served from: `/`, or `/money/`.
+    pub base: String,
+    /// The page's own arguments, read back as the route is (`today=…`).
+    pub args: Vec<(String, String)>,
+    /// The width it is drawn at: the browser's first draw is at it too.
+    pub width: f64,
+    pub accent: String,
+    pub css: String,
+    /// The app's own `<head>`: its title, its icon, its script.
+    pub head: String,
+    /// Where `#ark-act` is sent (a server's), and its hidden fields (the
+    /// CSRF token, the form's own idempotency token).
+    pub action: String,
+    pub hidden: Vec<(String, String)>,
+}
+
+/// A whole page: `view` (a [`Served::draw`]) inside the document
+/// [`Written`] says, the theme's and the app's styles in its head, and the
+/// two forms its controls are wired to (`page`).
+pub fn document(w: &Written, view: &str) -> String {
+    use page::escape as e;
+    let theme = w
+        .args
+        .iter()
+        .chain(w.route.0.iter())
+        .find(|(k, v)| k == "theme" && (v == "light" || v == "dark"))
+        .map(|(_, v)| format!(" data-theme=\"{v}\""))
+        .unwrap_or_default();
+    let reduced = w.args.iter().chain(w.route.0.iter()).any(|(k, v)| k == "reduce-motion" && v == "1");
+    let args = w.args.iter().map(|(k, v)| format!("{}={}", e(k), e(v))).collect::<Vec<_>>().join("&amp;");
+    let hidden: String = w
+        .hidden
+        .iter()
+        .map(|(k, v)| format!("<input type=\"hidden\" name=\"{}\" value=\"{}\">", e(k), e(v)))
+        .collect();
+    format!(
+        "<!doctype html>\n<html lang=\"en\" data-accent=\"{accent}\"{theme} data-motion=\"{motion}\" data-ark-mode=\"{mode}\" \
+         data-ark-base=\"{base}\" data-ark-width=\"{width}\" data-ark-args=\"{args}\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta name=\"color-scheme\" content=\"light dark\">\n\
+         <style id=\"ark-style\">{THEME_CSS}\n{ARKUI_CSS}\n{css}</style>\n{head}\n</head>\n<body>\n\
+         <form id=\"ark-go\" method=\"get\"></form>\n\
+         <form id=\"ark-act\" method=\"post\" action=\"{action}\"><button name=\"ark\" value=\"\" hidden></button>\
+         <input type=\"hidden\" name=\"route\" value=\"{route}\">{hidden}</form>\n\
+         <div id=\"ark-root\">{view}</div>\n</body>\n</html>\n",
+        accent = e(&w.accent),
+        motion = if reduced { "reduced" } else { "full" },
+        mode = w.mode.word(),
+        base = e(&w.base),
+        width = w.width,
+        css = w.css,
+        head = w.head,
+        action = e(&w.action),
+        route = e(&w.route.path()),
+    )
+}
+
+/// An app drawn as HTML by native code: the prerenderer's, a server's. Its
+/// draw records its controls (`page`), and a form sent to it is taken
+/// against the draw it makes again ([`Served::take`]). One at a time on a
+/// thread: the page's state is the thread's.
+#[cfg(feature = "ssr")]
+pub struct Served<A: WebApp> {
+    app: Rc<RefCell<A>>,
+}
+
+#[cfg(feature = "ssr")]
+impl<A: WebApp> Served<A> {
+    /// `app` at `route`, in `mode`, drawn at `width`, with `args`.
+    pub fn new(app: A, mode: page::Mode, route: &page::Route, args: &[(String, String)], width: f64) -> Served<A> {
+        page::set_mode(mode);
+        page::set_width(Some(width));
+        page::set_args(args.to_vec());
+        let app = install(app);
+        let arrive = {
+            let ask = |n: &str| {
+                route
+                    .get(n)
+                    .map(str::to_string)
+                    .or_else(|| args.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()))
+            };
+            app.borrow_mut().arrive(&ask)
+        };
+        for m in arrive {
+            app.borrow_mut().update(m);
+        }
+        Served { app }
+    }
+
+    /// Put back at `route` as it opened, if the app can be (`WebApp::rewind`).
+    pub fn rewind(&self, route: &page::Route, args: &[(String, String)]) -> bool {
+        if !self.app.borrow_mut().rewind() {
+            return false;
+        }
+        UI.with(|u| *u.borrow_mut() = Ui::default());
+        let ask = |n: &str| {
+            route
+                .get(n)
+                .map(str::to_string)
+                .or_else(|| args.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()))
+        };
+        let arrive = self.app.borrow_mut().arrive(&ask);
+        for m in arrive {
+            self.app.borrow_mut().update(m);
+        }
+        true
+    }
+
+    pub fn app(&self) -> std::cell::Ref<'_, A> {
+        self.app.borrow()
+    }
+
+    pub fn app_mut(&self) -> std::cell::RefMut<'_, A> {
+        self.app.borrow_mut()
+    }
+
+    /// The window's view as HTML: what `#ark-root` holds.
+    pub fn draw(&self) -> String {
+        use leptos::prelude::RenderHtml;
+        (move || draw_window()).to_html()
+    }
+
+    /// A form sent: drawn again, then the fields that changed and the press
+    /// taken against that draw (`page::take`).
+    pub fn take(&self, press: &str, fields: &[(String, String)]) -> Result<(), page::Refused> {
+        let _ = self.draw();
+        page::take(press, fields)
+    }
+}
+
+/// Every page of a static site (`page::Mode::Static`), from `starts` and
+/// every page a control leads to, up to `cap` pages; each control's lead
+/// found by pressing it on an app opened afresh (`open`). Returns the
+/// pages, each its route and its HTML (written by `write` from its view).
+#[cfg(feature = "ssr")]
+pub fn prerender<A: WebApp>(
+    open: &dyn Fn() -> A,
+    starts: Vec<page::Route>,
+    cap: usize,
+    width: f64,
+    args: &[(String, String)],
+    write: &dyn Fn(&page::Route, &str) -> String,
+) -> Vec<(page::Route, String)> {
+    use page::{Lead, Mode, Route};
+    use std::collections::{HashMap, VecDeque};
+    let quiet = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let mut seen: Vec<Route> = vec![];
+    let mut leads: HashMap<Route, HashMap<usize, Option<Route>>> = HashMap::new();
+    let mut queue: VecDeque<Route> = starts.into_iter().collect();
+    while let Some(r) = queue.pop_front() {
+        if seen.contains(&r) || seen.len() >= cap {
+            continue;
+        }
+        seen.push(r.clone());
+        if std::env::var_os("ARK_PRERENDER_SAY").is_some() {
+            eprintln!("{} ({} waiting)", r.path(), queue.len());
+        }
+        let n = {
+            let s = Served::new(open(), Mode::Static, &r, args, width);
+            s.draw();
+            page::controls()
+        };
+        let mut found = HashMap::new();
+        let mut kept: Option<Served<A>> = None;
+        for i in 0..n {
+            // An app that only moved is put back and pressed again; one
+            // whose data changed, or that cannot be put back, opened afresh.
+            // The controls of the draw before stay recorded: an app put
+            // back is where that draw was made.
+            let s = match kept.take() {
+                Some(s) if s.rewind(&r, args) => s,
+                _ => {
+                    let s = Served::new(open(), Mode::Static, &r, args, width);
+                    s.draw();
+                    s.app_mut().dry_run(true);
+                    s
+                }
+            };
+            let before = s.app().changes();
+            let pressed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| page::press(i))).unwrap_or(false);
+            let to = s.app().route();
+            let lead = (pressed && s.app().changes() == before && to != r).then_some(to);
+            if pressed {
+                kept = Some(s);
+            }
+            if let Some(to) = &lead {
+                if !seen.contains(to) {
+                    queue.push_back(to.clone());
+                }
+            }
+            found.insert(i, lead);
+        }
+        leads.insert(r, found);
+    }
+    std::panic::set_hook(quiet);
+    let base = args
+        .iter()
+        .find(|(k, _)| k == "base")
+        .map(|(_, v)| v.trim_end_matches('/').to_string())
+        .unwrap_or_default();
+    seen.iter()
+        .map(|r| {
+            let l = leads[r]
+                .iter()
+                .map(|(i, to)| {
+                    let lead = match to {
+                        Some(to) if seen.contains(to) => Lead::To(format!("{base}{}", to.path())),
+                        _ => Lead::Stays,
+                    };
+                    (*i, lead)
+                })
+                .collect();
+            page::set_leads(Some(l));
+            let s = Served::new(open(), Mode::Static, r, args, width);
+            let html = write(r, &s.draw());
+            page::set_leads(None);
+            (r.clone(), html)
+        })
+        .collect()
+}
+
 thread_local! {
     static APP_VIEW: RefCell<Option<Rc<dyn Fn() -> AnyView>>> = const { RefCell::new(None) };
     static AFTER: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
@@ -321,6 +706,7 @@ pub fn after_draw(f: impl FnOnce() + 'static) {
 
 fn draw_window() -> AnyView {
     drawn(|d| *d = Drawn::default());
+    page::begin_draw();
     let view = APP_VIEW.with(|v| v.borrow().clone()).map(|f| f());
     let over = (menu::overlay(), keys::overlay());
     // Kept to the rows drawn: a cursor past a list that shrank is on its last.
@@ -352,6 +738,9 @@ fn draw_window() -> AnyView {
 
 /// `f` on the next animation frame: after the DOM the draw made is there.
 pub fn request_frame(f: impl FnOnce() + 'static) {
+    if !cfg!(target_arch = "wasm32") {
+        return;
+    }
     let cb = wasm_bindgen::closure::Closure::once_into_js(f);
     if let Some(w) = web_sys::window() {
         let _ = w.request_animation_frame(cb.unchecked_ref());

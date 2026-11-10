@@ -570,8 +570,13 @@ pub fn button(id: &'static str, title: &'static str, face: AnyView, class: &'sta
         })
     };
     crate::drawn(|d| d.menus.push((id.to_string(), opener)));
-    html::button()
+    // Without script, the menu is the browser's own popover under the
+    // button, its entries the page's controls (`page`).
+    let nojs = (crate::page::mode() != crate::page::Mode::Spa).then(|| popover(id, title, &entries()));
+    let target = (crate::page::writing()).then(|| format!("ark-menu-{id}"));
+    let button = html::button()
         .class(class)
+        .attr("popovertarget", target)
         .attr("data-menu", id)
         .attr("title", title)
         .attr("aria-haspopup", "menu")
@@ -582,7 +587,51 @@ pub fn button(id: &'static str, title: &'static str, face: AnyView, class: &'sta
                 open_below(title, entries(), &el, e.detail() == 0);
             }
         })
-        .child(face)
+        .child(face);
+    (button, nojs).into_any()
+}
+
+/// A menu as an HTML `popover`, for the page without script: its title and
+/// its entries, a submenu's under its label.
+fn popover(id: &str, title: &str, entries: &[Entry]) -> AnyView {
+    fn items(entries: &[Entry], out: &mut Vec<AnyView>) {
+        for e in entries {
+            match e {
+                Entry::Run {
+                    label,
+                    action,
+                    destructive,
+                    checked,
+                    ..
+                } => out.push(
+                    crate::wired!(html::button(), crate::page::tap(label, action.clone()))
+                        .class(if *destructive {
+                            "ark-menu-entry ark-destructive"
+                        } else {
+                            "ark-menu-entry"
+                        })
+                        .attr("role", "menuitem")
+                        .attr("aria-checked", checked.then_some("true"))
+                        .child(label.clone())
+                        .into_any(),
+                ),
+                Entry::Sub { label, entries, .. } => {
+                    out.push(html::div().class("ark-menu-title").child(label.clone()).into_any());
+                    items(entries, out);
+                }
+                Entry::Separator => out.push(html::div().class("ark-menu-separator").into_any()),
+            }
+        }
+    }
+    let mut out = vec![];
+    items(entries, &mut out);
+    html::div()
+        .id(format!("ark-menu-{id}"))
+        .class("ark-menu ark-menu-popover")
+        .attr("popover", "")
+        .attr("role", "menu")
+        .attr("aria-label", title.to_string())
+        .child((html::div().class("ark-menu-title").child(title.to_string()), out))
         .into_any()
 }
 

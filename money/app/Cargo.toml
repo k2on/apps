@@ -31,7 +31,7 @@ serde_json = { workspace = true, optional = true }
 tract-onnx = { version = "0.22", optional = true }
 ark-ui-gen = { path = "../../ui/rust/gen", optional = true }
 arkui = { path = "../../ui/rust/arkui", optional = true }
-arkui-web = { path = "../../ui/rust/web", optional = true }
+arkui-web = { path = "../../ui/rust/web", optional = true, default-features = false }
 
 [features]
 # The state's records and messages as UniFFI's, for the phones (money/ffi).

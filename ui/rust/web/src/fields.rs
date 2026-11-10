@@ -97,7 +97,7 @@ fn suggesting(id: &'static str, prompt: &'static str, value: String, typed: Type
     };
     let input = {
         let typed = typed.clone();
-        html::input()
+        crate::wired!(html::input(), crate::page::text(prompt, &value, typed.clone()))
             .class(if is_search { "ark-search-input" } else { "ark-input" })
             .attr("type", if is_search { "search" } else { "text" })
             .attr("placeholder", prompt)
@@ -172,7 +172,7 @@ pub fn text_field(label: &str, value: String, typed: Typed) -> AnyView {
         .class("ark-field")
         .child((
             html::span().class("ark-caption").child(label.to_string()),
-            html::input()
+            crate::wired!(html::input(), crate::page::text(label, &value, typed.clone()))
                 .class("ark-input")
                 .attr("placeholder", label.to_string())
                 .prop("value", value)
@@ -237,8 +237,18 @@ const MONTHS: [&str; 12] = [
 pub fn date_field(id: &'static str, label: &str, day: String, pick: Typed) -> AnyView {
     let today = parse(&day).unwrap_or(0);
     let open = ui(|u| u.popover.as_ref().filter(|(p, _)| p == id).map(|(_, d)| *d));
+    // Without script, the browser's own day field in its place (`.ark-nojs`).
+    let nojs = (crate::page::mode() != crate::page::Mode::Spa).then(|| {
+        crate::wired!(html::input(), crate::page::text(label, &day, pick.clone()))
+            .class("ark-input ark-nojs")
+            .attr("type", "date")
+            .attr("aria-label", label.to_string())
+    });
     let face = html::button()
-        .class("ark-date-button")
+        .class(match crate::page::mode() {
+            crate::page::Mode::Spa => "ark-date-button",
+            _ => "ark-date-button ark-js",
+        })
         .attr("data-popover", id)
         .attr("aria-haspopup", "dialog")
         .on(leptos::ev::click, move |_| {
@@ -255,7 +265,7 @@ pub fn date_field(id: &'static str, label: &str, day: String, pick: Typed) -> An
         .class("ark-field")
         .child((
             html::span().class("ark-caption").child(label.to_string()),
-            html::div().class("ark-popover-anchor").child((face, calendar)),
+            html::div().class("ark-popover-anchor").child((face, calendar, nojs)),
         ))
         .into_any()
 }

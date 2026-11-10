@@ -6,17 +6,37 @@ edition.workspace = true
 license.workspace = true
 description = "money in the browser: the same money-app shell and screens as every platform, drawn by arkui-web (Leptos over the DOM), over the demo household in wasm with no server."
 
+[lib]
+name = "money_web"
+path = "src/lib.rs"
+
+# The page's module: the SPA (`csr`, the default) or the one that takes
+# over written HTML (`hydrate`).
 [[bin]]
 name = "money-web"
 path = "src/main.rs"
+
+# Every page of the static site (`ssr`): ui/docs/app.md, "The Browser's Modes".
+[[bin]]
+name = "money-web-static"
+path = "src/bin/static.rs"
+required-features = ["ssr"]
 
 [dependencies]
 ark-app = { path = "../../ui/rust/app" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
-arkui-web = { path = "../../ui/rust/web" }
-leptos = { version = "0.8", default-features = false, features = ["csr"] }
+arkui-web = { path = "../../ui/rust/web", default-features = false }
+leptos = { version = "0.8", default-features = false }
 money-app = { path = "../app", features = ["web"] }
 # The domain, and (`demo`) its household: three months of a family's budget up to today.
 money-core = { path = "../core", features = ["demo"] }
+# The static site's starts, from a shots.json (src/bin/static.rs).
+serde_json = { workspace = true, optional = true }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element"] }
+
+[features]
+default = ["csr"]
+csr = ["arkui-web/csr", "leptos/csr"]
+hydrate = ["arkui-web/hydrate", "leptos/hydrate"]
+ssr = ["arkui-web/ssr", "leptos/ssr", "dep:serde_json"]

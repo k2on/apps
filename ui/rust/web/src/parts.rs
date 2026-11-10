@@ -143,10 +143,22 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
             html::label()
                 .class("ark-toggle")
                 .child((
-                    html::input()
-                        .attr("type", "checkbox")
-                        .prop("checked", on)
-                        .on(leptos::ev::change, move |_| send(change.call(!on))),
+                    crate::wired!(
+                        html::input()
+                            .attr("type", "checkbox")
+                            .prop("checked", on)
+                            .attr("checked", (crate::page::writing() && on).then_some("")),
+                        crate::page::Wired {
+                            disabled: crate::page::writing().then_some(""),
+                            off: crate::page::writing().then_some(""),
+                            ..Default::default()
+                        }
+                    )
+                    .on(leptos::ev::change, {
+                        let change = change.clone();
+                        move |_| send(change.call(!on))
+                    }),
+                    crate::hit(title, Rc::new(move || send(change.call(!on)))),
                     html::span().child((
                         html::span().class("ark-toggle-title").child(title),
                         note.map(|n| html::span().class("ark-caption").child(n.get())),
@@ -156,7 +168,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
         }
         Part::Button { title, enabled, tap } => {
             let enabled = enabled.get();
-            html::button()
+            crate::wired!(html::button(), crate::tapped(title, &tap))
                 .class("ark-button")
                 .prop("disabled", !enabled)
                 .on(leptos::ev::click, move |_| send(tap.clone()))
@@ -185,7 +197,7 @@ fn fact(label: &'static str, cents: i64) -> AnyView {
 
 /// A choice in a wrapping row, lit when chosen.
 pub fn chip<M: Clone + 'static>(label: String, selected: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(&label, &tap))
         .class(if selected { "ark-chip ark-on" } else { "ark-chip" })
         .attr("aria-pressed", if selected { "true" } else { "false" })
         .on(leptos::ev::click, move |_| send(tap.clone()))
@@ -267,7 +279,11 @@ pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
         class.push_str(" ark-cursor");
     }
     let menu_at = opener.clone();
-    html::button()
+    let wired = match &open {
+        Some(o) => crate::page::tap(&title, o.clone()),
+        None => crate::page::Wired::default(),
+    };
+    crate::wired!(html::button(), wired)
         .class(class)
         .attr("data-cursor", lit.then_some("true"))
         .attr("data-title", title.clone())
@@ -298,11 +314,14 @@ pub fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<Str
         .class("ark-field")
         .child((
             html::span().class("ark-caption").child(label.to_string()),
-            html::input()
-                .class("ark-input")
-                .attr("placeholder", label.to_string())
-                .prop("value", value)
-                .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e)))),
+            crate::wired!(html::input(), {
+                let typed = typed.clone();
+                crate::page::text(label, &value, Rc::new(move |s| send(typed.call(s))))
+            })
+            .class("ark-input")
+            .attr("placeholder", label.to_string())
+            .prop("value", value)
+            .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e)))),
             problem.map(|p| html::span().class("ark-problem").child(p)),
         ))
         .into_any()
@@ -334,7 +353,12 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
             cancel,
         } => {
             let submit = ok.clone();
-            let input = html::input()
+            let now = text.get();
+            let wired = {
+                let typed = typed.clone();
+                crate::page::text(title, &now, Rc::new(move |s| send(typed.call(s))))
+            };
+            let input = crate::wired!(html::input(), wired)
                 .class("ark-input")
                 .attr("autofocus", "")
                 .prop("value", text.get())
@@ -366,8 +390,9 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
                     "ark-push ark-default"
                 };
                 let tap = a.tap;
+                let words = a.title.get();
                 b.push(
-                    html::button()
+                    crate::wired!(html::button(), crate::tapped(&words, &tap))
                         .class(class)
                         .on(leptos::ev::click, move |_| send(tap.clone()))
                         .child(a.title.get())
@@ -427,7 +452,7 @@ pub fn modal(title: String, body: Vec<AnyView>, buttons: Vec<AnyView>, dismiss: 
 
 /// A dialog's button: the default one filled in the accent.
 pub fn push_button<M: Clone + 'static>(title: &'static str, enabled: bool, default: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &tap))
         .class(if default { "ark-push ark-default" } else { "ark-push" })
         .prop("disabled", !enabled)
         .on(leptos::ev::click, move |_| send(tap.clone()))

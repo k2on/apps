@@ -74,7 +74,7 @@ pub fn headline(label: &str, figure: impl Into<String>, tint: Tint, caption: &st
 
 /// A capsule button: bordered, or filled in the accent when prominent.
 pub fn capsule_button<M: Clone + 'static>(g: Option<&str>, title: &str, prominent: bool, press: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &press))
         .class(if prominent { "ark-capsule ark-prominent" } else { "ark-capsule" })
         .on(leptos::ev::click, move |_| send(press.clone()))
         .child((g.map(|g| glyph(g, 13)), html::span().child(title.to_string())))

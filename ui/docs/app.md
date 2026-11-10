@@ -411,8 +411,9 @@ the debug key. Nothing there is a project file.
 
 ## The Browser: `arkui-web`
 
-`ui/rust/web` draws an `ark_app` `View` in the DOM, client-side, with
-Leptos 0.8 (`csr`; no server functions, no hydration), the way
+`ui/rust/web` draws an `ark_app` `View` in the DOM with Leptos 0.8 — in
+the browser alone by default (`csr`), or written as HTML first and taken
+over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 `arkui::view` draws it in iced:
 
 - **`render(view)`** a page's view (`#[view]`'s `web(&record)`);
@@ -469,6 +470,98 @@ Leptos 0.8 (`csr`; no server functions, no hydration), the way
   every shell reads (`?screen=account:checking&inspector=1&pane=banks`,
   `ark_app::shell::Launch`), and arkui-web's `?context=<row>`,
   `?menu=<id>`, `?popover=<id>`, `?command=`, `?keys=1`, `?theme=dark`.
+
+## The Browser's Modes
+
+How the page is made is chosen per build, by app.toml's `[web] modes`
+(money's: `["spa", "ssg"]`); the app's crate is the same in each.
+
+| Mode | Built by | What the browser is sent | Without script |
+|---|---|---|---|
+| `spa` (the default) | `nix build .#<app>-web` (feature `csr`) | index.html and the module; the page draws itself | nothing |
+| `ssg` | `nix build .#<app>-web-static` (the app's prerenderer, feature `ssr`, and the module built with `hydrate`) | a page of HTML per route, then the module, which takes it over | every page, every way between pages; nothing that changes the data |
+| `ssr` | not built yet (see below) | each request's page, written by the app's server, then the module | everything: a press is a form the server answers |
+
+The SPA is what it always was: none of what follows is drawn in it, and
+its markup is the same.
+
+**Routes.** A page's address is its route (`arkui_web::page::Route`): the
+launch arguments every shell reads (`screen`, `inspector`, `pane`, …) and
+whatever else the app's `WebApp::route` says it is at — for money the
+month, the selection, the review, the search, Settings and its pane, the
+question asked, the sheet and what is written in it — as segments of the
+path: `/budget/`, `/budget/inspector=1/category=<id>/`,
+`/transactions/sheet=add-transaction/payee=Target/`. `screen` is bare and
+first, the rest `key=value`, each percent-encoded (`page::Route::path`,
+read back by `of_path`; its test holds every one to round trip). The
+app's `arrive` reads them back, from the path as from `?screen=…` (which
+the SPA still takes), so the state a page is written at is the state the
+module arrives at, from the route and the data alone.
+
+**Browser-only calls** (the window, its width, `DomRect`, history, focus,
+the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`); written
+natively, a page is at the width it is written at (1440, the expanded
+size class), and the module's first draw is at that width too
+(`data-ark-width`), so it takes over exactly what was written; from its
+next frame it is at the window's own.
+
+**The no-JS contract** (`page`). Written as HTML, every control a draw
+makes is recorded in the order it is drawn, by what it says and what it
+does (`page::tap`, `page::text`), and wired so that it works with no
+script:
+
+- a button is a submit button of the page's one form, `#ark-act`, its
+  value `<index>.<check>` (the check a hash of its label); a field is that
+  form's `t<index>`. A part that is no button (a table's row, a toggle) is
+  pressed through an invisible button over all of it (`.ark-hit`).
+- a control's menu (`menu::button`) is the browser's own `popover`; a date
+  field is the browser's `<input type="date">` in its place (`.ark-nojs`,
+  put away once script runs; `.ark-js` is what is put away until then).
+- a form is taken against the same draw made again (`page::take`): every
+  field whose text changed sent first, then the press. A press the draw
+  cannot make — another page's, a stale one, a label that is not the one
+  at that index — is refused (`Refused::Stale`) and nothing runs; a value
+  past `page::MAX_TEXT` or not of the form is refused (`Malformed`). So no
+  message is taken that the page as it is could not send.
+- what needs script — the keyboard's shortcuts and vim layer, a row's
+  right-click menu, a hold, a drag, a spring — is not there without it:
+  the same commands are buttons, menus and links on the page. With script
+  it all behaves as in the SPA, and motion is the shared tokens' as ever
+  (ui/docs/motion.md): the written page draws no motion of its own.
+- once the module runs it takes the wiring away (the forms' attributes,
+  what the writer disabled) before taking the page over, and catches any
+  form sent from then on: a press is the click's, as in the SPA.
+
+**The static site** (`ssg`) has no server to run `update`, so the
+prerenderer (`arkui_web::prerender`, money's `money-web-static`) presses
+every control of every page on the app as it was opened (`WebApp::rewind`
+puts it back; `dry_run` counts a change to the data and sends none): a
+press that only moves the app to another route is a link to that page
+(`formaction` on the form `#ark-go`, a plain GET), and it is written too;
+a press that would change the data, or leaves the page where it is, is
+drawn **disabled**. The pages are found breadth first from `/`, each of
+the app's shots.json `screens` and any `--start`, up to `--cap` (250): the
+routes are the product of every selection, month and sheet, so not every
+one is written, and a way to one that is not is disabled too. Without
+script a static page is a reader's: every screen, every selection the
+cap reaches, nothing that writes. With script it is the SPA over the demo
+household, from the page it was opened on.
+
+**Server-rendered** (`ssr`) is the static page with a server behind the
+form: the app's own server (money-server, one process with the sync socket
+and sign-in) opening the app at the request's route as the session's
+`Who`, drawing it (`arkui_web::Served`), taking a form against that draw
+(`Served::take`) so that a press runs `update` and its changes go through
+the in-process peer as that `Who`, then 303 to the app's new route. The
+pieces are built and tested here (`Served`, `page::take`, `Written`'s
+`action` and `hidden` for the CSRF and idempotency tokens); the server's
+routes, the session cookie, and their tests are what is left (the last
+section).
+
+**Checked**: `.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` opens
+each screen by its route's path, with script and with `ARK_WEB_JS=0`
+without; with script, a written page fails its shot on any error or any
+word of hydration in the console (build.yaml's `web-modes`).
 
 ## The iced Fork: COSMIC's
 
@@ -594,3 +687,20 @@ ui/docs/apps/money.md for money):
    controls, motion), and ArkUI's components become `#[view]`s emitted into
    ui/swift and ui/kotlin. Today's `ScreenParts` are the component layer
    written by hand, the step before that.
+8. **Server-rendered pages, in the app's server** ("The Browser's
+   Modes"): an `ark-web-serve` layer (or ark-peer's `web` feature) that
+   mounts arkui-web's routes on the peer's axum router in one call —
+   `GET` a route drawn by `Served` as the ark-auth session's `Who`, its
+   views asked once through a replica the hub serves in-process (the
+   importer's way), so row scopes are the socket's; `POST` taken by
+   `Served::take`, its changes authored through the same mutators (role
+   checks and `Refusal`s the socket's, shown in the same words), then 303
+   to the new route, or 422 with the form kept; a same-site session
+   cookie, a CSRF token and an idempotency token on every form — and its
+   tests with script off (assign, add, edit and delete a transaction seen
+   by a socket client, a refused change, a user without a role, a bank's
+   connect round trip against the fake Plaid with a waiting page that
+   refreshes itself). Then `ssr` in `[web] modes`, the server's NixOS
+   module serving the static site and the module from the one process.
+   Narrow windows without script: a written page is at 1440 until script
+   runs (a server could read `Sec-CH-Viewport-Width`).
