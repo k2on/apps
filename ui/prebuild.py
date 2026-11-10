@@ -789,8 +789,8 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
         write_file(os.path.join(andr, "app", "build.gradle.kts"), android_gradle(REPO, a, ffi_lib_name(a)))
         write_file(os.path.join(andr, "app", "src", "main", "AndroidManifest.xml"), android_manifest(REPO, a))
         android_resources(REPO, a, os.path.join(andr, "app", "src", "main", "res"))
-        copy_views(views, "kt", os.path.join(andr, "app", "generated"))
-        os.makedirs(os.path.join(andr, "app", "generated"), exist_ok=True)
+        copy_views(views, "kt", os.path.join(andr, "generated"))
+        os.makedirs(os.path.join(andr, "generated"), exist_ok=True)
         written.append(andr)
     return written
 
