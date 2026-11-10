@@ -52,7 +52,26 @@ All of it is in `<app>/screens/`:
   `"where": "bottom"` on a tap takes the lowest on the screen of all that
   match, and `"unless": "<label>"` skips a step when that label is on the
   screen already; `{"await": "<label>"}` waits (up to 20 s) until it is (`a|b`: either).
-  `{"relaunch": true}` stops and opens the app again. harken's `player`
+  `{"relaunch": true}` stops and opens the app again.
+  `"hold": true` on a tap presses it long, as a finger opens a context
+  menu (iOS `press(forDuration:)`, Android a still swipe of a second);
+  the menu's items are then tapped by what they say, as any other.
+
+  **A screen opened by its launch arguments** rather than by steps: a
+  shot's `"args"` (`["-screen", "category:dining", "-menu", "sort"]`)
+  are given to the app every time it is opened for that shot (signing
+  in opens it with none). On the iPhone and the iPad they are the
+  process's launch arguments, which an app reads from UserDefaults'
+  argument domain (`UserDefaults.standard.string(forKey: "screen")`); on
+  Android each `-<key> <value>` pair is a string extra of the launch
+  intent (`intent.getStringExtra("screen")`). An app that reads none
+  opens as it always does, so a shot can say both its args and the steps
+  that reach the same screen. What a shot opens that animates in (a
+  dropdown, a submenu, a popover, a sheet) is taken once it has settled:
+  the iPhone's every shot, once the screen is the same three times half a
+  second apart; Android's, for a shot with a `hold` step or
+  `"settle": true`, once it is the same twice running (else, as ever,
+  three seconds after its last step). harken's `player`
   shot: the lowest "Für Elise" (the mini player, if one is there; else
   Recently added's, which plays it), until something plays ("Pause") or
   the player is open ("Close the player"); then the app opened again, so
@@ -100,7 +119,8 @@ All of it is in `<app>/screens/`:
   the text the window lays out (iced's own selector, as iced_test finds
   text): `{"click": "<text>"}` clicks the middle of the text that says
   exactly that (`a|b`, `"where": "bottom"`, `"optional"` and `"unless"` as
-  the phones' taps have them); `{"hover": "<text>"}` moves the pointer over
+  the phones' taps have them; `"button": "right"` for its context menu);
+  `{"hover": "<text>"}` moves the pointer over
   it and leaves it there, so the shot is drawn pointed at it (a shot is
   otherwise drawn with no pointer); `{"scroll": "<text>", "by": <pixels>}`
   turns the wheel over it, `by` down (negative: up), for a page no key
