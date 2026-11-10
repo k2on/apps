@@ -6,7 +6,7 @@
 // one (`AmountEntry`), and a step back and forth through something ordered —
 // a month, a week — with its name between (`Pager`). Nothing of any app:
 // the amounts are cents (ArkUICore's `Cents`).
-#if os(iOS)
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// Cents as the locale writes money, `$1,234.56`, by the app's library
@@ -209,7 +209,7 @@ public struct AmountEntry: View {
         // The field the keypad types into: unseen, its digits read as cents.
         .background {
             TextField("", text: $typed)
-                .keyboardType(.numberPad)
+                .keypad(.number)
                 .focused($focused)
                 .opacity(0.011)
                 .frame(width: 1, height: 1)

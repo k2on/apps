@@ -31,7 +31,7 @@
 // the same words.
 import SwiftUI
 
-#if os(iOS)
+#if canImport(SwiftUI)
 /// The account's sizes and words, written once.
 public enum AccountSizes {
     /// The face at the top of the account sheet.
@@ -267,7 +267,7 @@ private struct LargeTitleBar: ViewModifier {
         content
             .contentMargins(.top, fold == nil ? nil : CGFloat(0), for: .scrollContent)
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .onScrollGeometryChange(for: Bool.self) { g in
                 guard let fold, fold > 0 else { return false }
                 return g.contentOffset.y + g.contentInsets.top >= fold
@@ -375,7 +375,7 @@ public struct AccountSheet<Rows: View>: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Account")
-            .navigationBarTitleDisplayMode(.inline)
+            .inlineTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

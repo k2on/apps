@@ -2,7 +2,7 @@
 // a sentence, and what to do — the server's address, signing in, the
 // replica on its way. The app gives the symbol and the colour; harken's
 // onboarding draws the same page with its own copy.
-#if os(iOS)
+#if canImport(SwiftUI)
 import SwiftUI
 
 @available(iOS 26.0, *)

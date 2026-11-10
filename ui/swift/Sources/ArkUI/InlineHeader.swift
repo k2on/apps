@@ -30,7 +30,7 @@ public enum InlineArt {
     public static let corner: CGFloat = 4
 }
 
-#if os(iOS)
+#if canImport(SwiftUI)
 @available(iOS 26.0, *)
 public struct InlineHeader<Art: View>: View {
     let title: String
