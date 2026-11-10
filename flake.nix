@@ -757,6 +757,13 @@
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
 
+          # An Ark app's F-Droid metadata, written from its app.toml's
+          # [store] by ui/prebuild.py (nothing of F-Droid's is committed).
+          storeYml = dir: pkgs.runCommand "${dir}-fdroid.yml" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+            cd ${only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "${dir}/app.toml" ]}
+            python3 ui/prebuild.py fdroid ${dir} --root . --out $out
+          '';
+
           # Every app as one F-Droid repository (nix/fdroid.nix): each app is
           # its id, its APK, its metadata and its icon.
           fdroid = import ./nix/fdroid.nix {
@@ -774,14 +781,14 @@
                 appid = "${bundlePrefix}.revelation";
                 apk = revelation.apk;
                 apkName = "revelation.apk";
-                metadata = ./revelation/fdroid/metadata/us.koon.revelation.yml;
+                metadata = storeYml "revelation";
                 icon = ./revelation/icon.svg;
               }
               {
                 appid = "${bundlePrefix}.money";
                 apk = money-apk;
                 apkName = "money.apk";
-                metadata = ./money/fdroid/metadata/us.koon.money.yml;
+                metadata = storeYml "money";
                 icon = ./money/icon.svg;
               }
             ];

@@ -69,7 +69,7 @@ last, for the reasons harken's README gives; its certificate's SHA-256 is
 `125e43a7…646a6afa`. It is a PKCS#12 file made with openssl (there was no
 JDK to run keytool), which `storeType = "pkcs12"` says. Anyone can sign an
 APK as this app with it. F-Droid offers money from the same repository as
-harken and Revelation (`nix/fdroid.nix`; `money/fdroid/` is its metadata,
+harken and Revelation (`nix/fdroid.nix`; its metadata is money/app.toml's `[store]`, written out by `ui/prebuild.py fdroid`,
 and its icon money/icon.svg).
 
 ## What it does

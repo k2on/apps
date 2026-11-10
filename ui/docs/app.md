@@ -265,8 +265,7 @@ app is committed. An app is
 ├── app/          ark-app: its state, messages, update, #[view]s, `screens()` and `commands()`
 ├── server/       when it has one
 ├── screens/      shots.json, server.sh
-├── native/       what is not written in Rust yet (shrinking: see below)
-└── fdroid/       F-Droid's metadata
+└── native/       what is not written in Rust yet (shrinking: see below)
 ```
 
 and nix generates the rest, from app.toml, each listed module's
@@ -279,6 +278,7 @@ and nix generates the rest, from app.toml, each listed module's
 | The SwiftUI and Compose of every `#[view]` | the app's `screens()` | inside both |
 | The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <app crate>::*` as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `crate` and `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
 | The generator's main | the app's crate | `<app>-ui` |
+| F-Droid's metadata (`<bundle id>.yml`) | app.toml's `[store]` (`ui/prebuild.py fdroid`) | `apps-fdroid`, `fdroid-repo` |
 
 `nix build .#<app>-native` is the projects as a build lays them out
 (`<app>/.native/ios`, `<app>/.native/android`), and **`nix run
@@ -326,8 +326,14 @@ dependencies = []              # Maven coordinates its own Kotlin needs
 android = ["page"]             # the app crate's features each phone's library links
 apple = []
 
-[fdroid]
-metadata = "fdroid/metadata/us.koon.money.yml"
+[store]                        # what a store lists: F-Droid's .yml is written from it
+summary = "A household's budget, shared, every dollar given a job"
+categories = ["Money"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """…"""
 ```
 
 A module's `module.toml`:

@@ -11,7 +11,6 @@ version = "0.1"
 accent = "blue"
 platforms = ["android"]
 modules = []
-summary = "The Bible as one scroll, zoomed like a map"
 
 [icon]
 # The whole Bible zoomed all the way out: one thin white line on the dark
@@ -43,5 +42,19 @@ test-dependencies = ["junit:junit:4.13.2"]
 # Its tests parse the whole Bible (BibleTests).
 test-heap = "2g"
 
-[fdroid]
-metadata = "fdroid/metadata/us.koon.revelation.yml"
+# What a store lists of it: F-Droid's metadata (nix/fdroid.nix writes its
+# .yml from this through `ui/prebuild.py fdroid`), the docs' listing.
+[store]
+summary = "The Bible as one scroll, zoomed like a map"
+categories = ["Reading"]
+license = "MIT OR Apache-2.0"
+website = "https://k2on.github.io/apps/"
+source = "https://github.com/k2on/apps"
+issues = "https://github.com/k2on/apps/issues"
+description = """
+Revelation is the whole Bible as one continuous column of text, Genesis 1:1 at the top and Revelation 22:21 at the bottom. It scrolls the way the phone scrolls and zooms the way a map does: pinch out and the words become lines, the lines a column, and the column, at the far end, one white line the height of the screen. Pinch in and it comes back. Going anywhere, from the book picker, a search or a label beside the column, is a map's camera move: out, across, and in.
+
+The text is the Berean Standard Bible, which its translators have dedicated to the public domain; it is in the app, so nothing is fetched and nothing is synced. The app's own code is MIT OR Apache-2.0.
+
+This is a release build signed with a key committed to the source repository, so anyone could sign an APK as this app.
+"""

@@ -799,6 +799,35 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
     return written
 
 
+# ------------------------------------------------------------- Stores
+
+
+def fdroid_yml(a):
+    """F-Droid's metadata for an app, from its app.toml's `[store]`: what
+    nix/fdroid.nix lays beside its APK in the repository."""
+    st = a["store"]
+    out = ["Categories:"] + [f"  - {c}" for c in st["categories"]]
+    out += [
+        f"License: {st['license']}",
+        f"WebSite: {st['website']}",
+        f"SourceCode: {st['source']}",
+        f"IssueTracker: {st['issues']}",
+        "",
+        f"Name: {a['name']}",
+        f"Summary: {st['summary']}",
+        "Description: |-",
+    ]
+    for i, para in enumerate(st["description"].strip().split("\n\n")):
+        if i:
+            out.append("")
+        out += ["    " + line for line in para.strip().splitlines()]
+    out += ["", "AutoUpdateMode: None", "UpdateCheckMode: None", ""]
+    return "\n".join(out)
+
+
+STORE_KEYS = ("summary", "description", "categories", "license", "website", "source", "issues")
+
+
 def check(root):
     """Every app's app.toml says what it must, every module it lists is
     one, every Rust crate of the app depends on each listed module's crate
@@ -820,6 +849,11 @@ def check(root):
             problems.append(f"{app}/app.toml has Apple platforms and no [apple]")
         if has(a, "android") and "android" not in a:
             problems.append(f"{app}/app.toml has android and no [android]")
+        # An app on Android is in the F-Droid repository: its listing is [store]'s.
+        if has(a, "android"):
+            for k in STORE_KEYS:
+                if k not in a.get("store", {}):
+                    problems.append(f"{app}/app.toml's [store] says no `{k}`")
         crate_dir = os.path.join(root, app, "app")
         if a.get("crate") and os.path.exists(os.path.join(crate_dir, "Cargo.toml")):
             deps = load(os.path.join(crate_dir, "Cargo.toml")).get("dependencies", {})
@@ -852,6 +886,10 @@ def main(argv):
     f.add_argument("app")
     sub.add_parser("check")
     sub.add_parser("apps")
+    fd = sub.add_parser("fdroid")
+    fd.add_argument("app")
+    fd.add_argument("--root", default=REPO)
+    fd.add_argument("--out")
     args = p.parse_args(argv)
     if args.cmd == "write":
         for d in write(args.root, args.app, args.views, args.icon_png, args.bundle_prefix, args.out):
@@ -863,6 +901,12 @@ def main(argv):
         sys.exit(0 if check(REPO) else 1)
     elif args.cmd == "apps":
         print("\n".join(apps(REPO)))
+    elif args.cmd == "fdroid":
+        text = fdroid_yml(app_of(args.root, args.app))
+        if args.out:
+            write_file(args.out, text)
+        else:
+            sys.stdout.write(text)
 
 
 if __name__ == "__main__":
