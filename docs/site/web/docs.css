@@ -2,9 +2,9 @@
    live parts' frame, the desktop pictures in the page's theme, and the
    phones' captures in a frame of their device. No motion of its own. */
 .docs-live, .docs-desktop, .docs-mobile { margin-top: 8px; }
-.docs-specimen { margin: 0 0 16px; padding: 16px; border: 1px solid var(--ark-hairline); border-radius: 10px; background: var(--ark-container-lowest); max-width: 682px; display: flex; flex-direction: column; gap: 10px; }
-.docs-specimen .ark-writing { font-size: 13px; color: var(--ark-quiet); }
-.docs-picture { margin: 0 0 16px; padding: 20px; border: 1px solid var(--ark-hairline); border-radius: 10px; max-width: 682px; }
+.docs-specimen { margin: 0 0 16px; padding: 16px; border: 1px solid var(--ark-hairline); border-radius: 10px; background: var(--ark-container-lowest); display: flex; flex-direction: column; gap: 10px; }
+.docs-note { margin: 0; font-size: 13px; color: var(--ark-quiet); }
+.docs-picture { margin: 0 0 16px; padding: 20px; border: 1px solid var(--ark-hairline); border-radius: 10px; }
 .docs-picture img { display: block; max-width: 100%; height: auto; }
 .docs-picture figcaption, .capture figcaption { font-size: 13px; color: var(--ark-quiet); margin-top: 12px; }
 .docs-picture .dark { display: none; }

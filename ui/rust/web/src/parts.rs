@@ -422,20 +422,30 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
 pub fn modal(title: String, body: Vec<AnyView>, buttons: Vec<AnyView>, dismiss: crate::Action) -> AnyView {
     let away = dismiss.clone();
     let esc = dismiss.clone();
-    crate::drawn(|d| d.modal = Some(dismiss.clone()));
+    // In a specimen it is drawn in its frame: the window's keys stay the
+    // window's, and it is there as written, so nothing moves in.
+    let here = crate::in_specimen();
+    if !here {
+        crate::drawn(|d| d.modal = Some(dismiss.clone()));
+    }
     // Compact, a sheet from the foot (the iPhone's); else centred, as a
     // modal belongs to the window (motion.md).
     let compact = crate::shell::size_class() == crate::shell::SizeClass::Compact;
+    let motion = match (here, compact) {
+        (true, _) => "none",
+        (false, true) => "rise",
+        (false, false) => "grow",
+    };
     html::div()
-        .class("ark-modal-layer")
+        .class(if here { "ark-modal-layer ark-in-place" } else { "ark-modal-layer" })
         .child((
             html::div().class("ark-scrim").on(leptos::ev::mousedown, move |_| away()),
             html::div()
                 .class(if compact { "ark-dialog ark-dialog-sheet" } else { "ark-dialog" })
                 .role("dialog")
-                .attr("aria-modal", "true")
+                .attr("aria-modal", (!here).then_some("true"))
                 .attr("aria-label", title.clone())
-                .attr("data-motion", if compact { "rise" } else { "grow" })
+                .attr("data-motion", motion)
                 .on(leptos::ev::keydown, move |e: web_sys::KeyboardEvent| {
                     if e.key() == "Escape" {
                         e.stop_propagation();

@@ -164,3 +164,33 @@ mod tests {
         }
     }
 }
+
+/// The way to the page before and the page after, at a page's foot, each
+/// its title and where it is (`href`): links, so they work without script
+/// and an app that takes its links over walks them.
+pub fn pager(previous: Option<(&str, &str)>, next: Option<(&str, &str)>) -> AnyView {
+    let one = |(title, href): (&str, &str), class: &'static str, said: &'static str, g: &'static str| {
+        let mark = glyph(g, 12);
+        let words = html::span().child(said);
+        html::a()
+            .class(class)
+            .attr("href", href.to_string())
+            .attr("rel", if class == "ark-pager-next" { "next" } else { "prev" })
+            .child((
+                match class {
+                    "ark-pager-next" => html::span().class("ark-pager-said").child((words, mark)).into_any(),
+                    _ => html::span().class("ark-pager-said").child((mark, words)).into_any(),
+                },
+                html::span().class("ark-pager-title").child(title.to_string()),
+            ))
+            .into_any()
+    };
+    html::nav()
+        .class("ark-pager")
+        .attr("aria-label", "Pages")
+        .child((
+            previous.map(|p| one(p, "ark-pager-previous", "Previous", "chevron-left")),
+            next.map(|n| one(n, "ark-pager-next", "Next", "chevron-right")),
+        ))
+        .into_any()
+}

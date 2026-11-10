@@ -35,8 +35,29 @@ canonical link, and a line in `sitemap.xml`. The search (`?q=`), the phone
 chosen and the appearance are the reader's: never a page, taken up by the
 module once it has taken the page over. Without script the search field is
 disabled and **All Pages** in the toolbar is the index of every page; the
-live parts are drawn as they open. The old addresses (`menu.html`) are sent
-on to the new.
+live parts are drawn as they open.
+
+## Sections, and Walking the Pages
+
+The pages are in five sections, Foundations to Behaviour, each with a page
+of its own (`/overlays/`) listing its pages. Wide, the sidebar has every
+page under its section's heading, the heading the way to the section's
+page. Short of a sidebar (`tab_section`), each section is a tab, its page
+the list of its pages and each page pushed over it with the way back
+named for the section, as Settings' are on an iPhone.
+
+Every page ends with the pages before and after it in reading order (the
+overview, then each section's page and its pages), as links. With
+script, the keyboard is arkui-web's, every app's: `j` and `k` on the
+sidebar walk the pages, as the desktop's sidebar cursor is the section
+shown (on a page with live rows, the keys start in the rows: `h` is the
+sidebar); `:` or ⌘K finds Next Page, Previous Page and the rest.
+
+What goes over a page — a row's menu and its submenu, a sheet, a
+question, a picker's menu, the command box, the keys panel — is drawn
+open in its frame on its page (`arkui_web::specimen`, `menu::written`),
+so it reads without script and takes no keys from the page; with script,
+it answers.
 
 ## The Pictures Are the Components
 

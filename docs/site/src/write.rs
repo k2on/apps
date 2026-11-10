@@ -1,7 +1,6 @@
 //! The site, written out: every page of the app as static HTML
 //! (`arkui_web::prerender`, every band of width at once), the desktop
-//! pictures drawn by arkui itself, sitemap.xml, catalogue.json, and the
-//! old addresses (`menu.html`) sent on to the new (`menu/`).
+//! pictures drawn by arkui itself, sitemap.xml and catalogue.json.
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -166,19 +165,6 @@ pub fn write(out: &Path, o: &Options) -> io::Result<Vec<String>> {
     let dangling = arkui_web::page::dangling(&urls, &base);
     if !dangling.is_empty() {
         return Err(io::Error::other(format!("links to no page: {dangling:?}")));
-    }
-    // The old addresses, `menu.html`, and their fragments, `#menu`.
-    for c in COMPONENTS {
-        let to = format!("{base}{}/", c.id);
-        fs::write(
-            out.join(format!("{}.html", c.id)),
-            format!(
-                "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>{name} · ArkUI</title>\
-                 <link rel=\"canonical\" href=\"{to}\"><meta http-equiv=\"refresh\" content=\"0; url={to}\"></head>\
-                 <body><p>This page is now at <a href=\"{to}\">{to}</a>.</p></body></html>\n",
-                name = esc(c.name),
-            ),
-        )?;
     }
     fs::write(
         out.join("sitemap.xml"),

@@ -435,10 +435,14 @@ pub enum Part<M> {
         content: Box<View<M>>,
     },
     /// A group of sections under a heading (`TabSection`): in the sidebar
-    /// only, never on a compact tab bar — Mail's mailboxes.
+    /// only, never on a compact tab bar — Mail's mailboxes. Unless it is a
+    /// place of its own (`place`: its glyph, its tag and what it shows, an
+    /// index of its sections): then, short of a sidebar, the group is one
+    /// tab, its sections pushed over that index, as Settings' are.
     TabGroup {
         title: &'static str,
         tabs: Box<View<M>>,
+        place: Option<(&'static str, &'static str, Box<View<M>>)>,
     },
     /// What a list opens, pushed onto the section's stack at every width
     /// while `showing` (`navigationDestination(isPresented:)`), `back` to
@@ -1563,7 +1567,7 @@ impl<M> Part<M> {
                 }
                 c("SectionTab", Some(G::Val(lit(title))), args, vec![("", &**content)])
             }
-            Part::TabGroup { title, tabs } => c("SectionGroup", Some(G::Text(title)), vec![], vec![("", &**tabs)]),
+            Part::TabGroup { title, tabs, .. } => c("SectionGroup", Some(G::Text(title)), vec![], vec![("", &**tabs)]),
             Part::Push {
                 content,
                 detail,
@@ -1916,7 +1920,11 @@ impl<M: 'static> Part<M> {
                 tabs: b(tabs),
                 footer: b(footer),
             },
-            Part::TabGroup { title, tabs } => Part::TabGroup { title, tabs: b(tabs) },
+            Part::TabGroup { title, tabs, place } => Part::TabGroup {
+                title,
+                tabs: b(tabs),
+                place: place.map(|(g, t, v)| (g, t, b(v))),
+            },
             Part::Push {
                 content,
                 detail,

@@ -102,6 +102,9 @@ pub struct Ui {
     /// The popover open, by its part's id (a date field's calendar, a
     /// search field's suggestions) and where it is (a day, a lit row).
     pub popover: Option<(String, i64)>,
+    /// Where the pointer has been in each menu written open
+    /// ([`menu::written`]), by its id: the entry lit at each level.
+    pub written: Vec<(String, Vec<usize>)>,
     /// The cursor moved by the keys: kept in view after the next draw.
     reveal: bool,
     /// The keys have walked the rows: the cursor is shown from then on, as
@@ -117,6 +120,9 @@ pub(crate) struct Drawn {
     pub contexts: Vec<(String, Opener)>,
     pub menus: Vec<(String, Rc<dyn Fn()>)>,
     pub pane: Pane,
+    /// The sidebar's row of the section shown: where its cursor is, as the
+    /// desktop's sidebar cursor is the section (`arkui::shell::Routed::Section`).
+    pub sidebar_at: Option<usize>,
     /// The dismissal of the modal on top, while one is up: `Esc`'s.
     pub modal: Option<Action>,
 }
@@ -135,6 +141,9 @@ thread_local! {
     static VERSION: Cell<Option<RwSignal<u64>>> = const { Cell::new(None) };
     static QUEUE: RefCell<Vec<Box<dyn Any>>> = const { RefCell::new(Vec::new()) };
     static BUSY: Cell<bool> = const { Cell::new(false) };
+    /// Drawing a specimen ([`specimen`]): what goes over the page is
+    /// drawn in its place.
+    static SPECIMEN: Cell<bool> = const { Cell::new(false) };
 }
 
 /// `m` sent to the app: taken, and the page drawn again. A message sent
@@ -184,6 +193,30 @@ pub fn hit(label: &str, run: Action) -> Option<AnyView> {
             })
             .into_any(),
     )
+}
+
+/// `view` drawn as a specimen, for a page that shows what a part is (the
+/// docs): what goes over the page (a sheet, a question, a control's menu)
+/// is drawn in the specimen's frame rather than over the window, so it can
+/// be written open and read without script, and it neither takes the keys
+/// nor dims the page. With script it answers as it does over a window:
+/// its buttons close it, and what opens it opens it here.
+pub fn specimen<M: Clone + 'static>(view: ark_app::view::View<M>) -> AnyView {
+    specimen_of(|| render(view))
+}
+
+/// What `draw` draws, as a [`specimen`]: for arkui-web's own parts
+/// called directly (`fields::picker`, `menu::button`).
+pub fn specimen_of(draw: impl FnOnce() -> AnyView) -> AnyView {
+    let was = SPECIMEN.with(|s| s.replace(true));
+    let drawn = draw();
+    SPECIMEN.with(|s| s.set(was));
+    html::div().class("ark-specimen").child(drawn).into_any()
+}
+
+/// Whether a specimen is being drawn ([`specimen`]).
+pub fn in_specimen() -> bool {
+    SPECIMEN.with(|s| s.get())
 }
 
 /// The page drawn again.

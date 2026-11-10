@@ -124,6 +124,22 @@ pub fn tab_group<M>(title: &'static str, tabs: impl Into<View<M>>) -> View<M> {
     Part::TabGroup {
         title,
         tabs: Box::new(tabs.into()),
+        place: None,
+    }
+    .into()
+}
+
+/// Sections under a heading that is a place of its own, tagged `tag`:
+/// `index` is what it shows (its sections, a row each). In the sidebar,
+/// the heading over its sections, as [`tab_group`]'s; short of one, a tab
+/// of the tab bar with `glyph`, showing `index`, and a section of it
+/// pushed over the index with the way back to it — Settings' panes on an
+/// iPhone, the docs' sections on a phone.
+pub fn tab_section<M>(title: &'static str, glyph: &'static str, tag: &'static str, index: impl Into<View<M>>, tabs: impl Into<View<M>>) -> View<M> {
+    Part::TabGroup {
+        title,
+        tabs: Box::new(tabs.into()),
+        place: Some((glyph, tag, Box::new(index.into()))),
     }
     .into()
 }

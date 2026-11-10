@@ -38,6 +38,39 @@ impl Section {
         Section::Behaviour,
     ];
 
+    /// Its page's tag and path: `/foundations/`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Section::Foundations => "foundations",
+            Section::Components => "components",
+            Section::Overlays => "overlays",
+            Section::Motion => "motion",
+            Section::Behaviour => "behaviour",
+        }
+    }
+
+    /// Its glyph, in the sidebar's heading's place on a phone's tab bar.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Section::Foundations => "layers",
+            Section::Components => "list",
+            Section::Overlays => "copy",
+            Section::Motion => "zap",
+            Section::Behaviour => "wrench",
+        }
+    }
+
+    /// What its pages are, for its own page.
+    pub fn about(self) -> &'static str {
+        match self {
+            Section::Foundations => "The colours, the styles, the glyphs and the words every part is made of.",
+            Section::Components => "What a page is built of: its navigation, its lists and cards, its headers and fields.",
+            Section::Overlays => "What goes over a page: a menu, the command box, a picker, a dialog or a sheet.",
+            Section::Motion => "What moves, and how: the shared springs and the parts built on them.",
+            Section::Behaviour => "The rules with no drawing of their own: the keyboard, the address bar, waking.",
+        }
+    }
+
     pub fn heading(self) -> &'static str {
         match self {
             Section::Foundations => "Foundations",

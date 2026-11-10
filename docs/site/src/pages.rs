@@ -62,6 +62,9 @@ pub struct Page {
     pub title: String,
     pub glyph: String,
     pub section: Option<Section>,
+    /// The section this page is the index of: its own page, a row for
+    /// each of its pages.
+    pub index: Option<Section>,
     /// A sentence for `<meta name="description">` and a search's result.
     pub description: String,
     /// The writing above the examples.
@@ -124,10 +127,39 @@ pub fn pages(base: &str) -> Vec<Page> {
     for section in Section::ALL {
         out.extend(COMPONENTS.iter().filter(|c| c.section == section).map(component));
     }
+    out.extend(Section::ALL.into_iter().map(index));
     for p in &mut out {
         p.words = format!("{} {} {} {}", p.title, p.description, p.intro, p.reference).to_lowercase();
     }
     out
+}
+
+/// The pages in reading order, for each page's way to the one before and
+/// the one after: the overview, then each section's own page and its
+/// pages. The index of every page is the search's, not a page to read.
+pub fn reading(pages: &[Page]) -> Vec<&Page> {
+    let mut out: Vec<&Page> = pages.iter().filter(|p| p.tag == OVERVIEW).collect();
+    for s in Section::ALL {
+        out.extend(pages.iter().filter(|p| p.index == Some(s)));
+        out.extend(pages.iter().filter(|p| p.section == Some(s)));
+    }
+    out
+}
+
+/// A section's own page: what it is, and a row for each of its pages
+/// (`DocsWeb`'s `index`, hosted under the words).
+fn index(s: Section) -> Page {
+    Page {
+        tag: s.tag().into(),
+        title: s.heading().into(),
+        glyph: s.glyph().into(),
+        section: None,
+        index: Some(s),
+        description: s.about().into(),
+        intro: format!("{}\n", s.about()),
+        reference: String::new(),
+        words: String::new(),
+    }
 }
 
 fn overview(base: &str) -> Page {
@@ -162,6 +194,7 @@ fn overview(base: &str) -> Page {
         title: "ArkUI".into(),
         glyph: "house".into(),
         section: None,
+        index: None,
         description:
             "The components every Ark app shares, a page each: arkui on the desktop, arkui-web in the browser, Compose and SwiftUI on the phones."
                 .into(),
@@ -176,7 +209,7 @@ fn all(base: &str) -> Page {
     let mut md = String::from("Every page of the docs, by section. With script, the search field finds words on any of them.\n\n");
     md.push_str(&format!("- [Overview]({base})\n"));
     for section in Section::ALL {
-        md.push_str(&format!("\n## {}\n\n", section.heading()));
+        md.push_str(&format!("\n## [{}]({})\n\n", section.heading(), href(base, section.tag())));
         for c in COMPONENTS.iter().filter(|c| c.section == section) {
             md.push_str(&format!("- [{}]({}): {}\n", c.name, href(base, c.id), c.summary));
         }
@@ -186,6 +219,7 @@ fn all(base: &str) -> Page {
         title: "All Pages".into(),
         glyph: "list".into(),
         section: None,
+        index: None,
         description: "Every page of the ArkUI docs, by section.".into(),
         intro: md,
         reference: String::new(),
@@ -226,6 +260,7 @@ fn component(c: &Component) -> Page {
         title: c.name.into(),
         glyph: glyph(c.id).into(),
         section: Some(c.section),
+        index: None,
         description: bare(c.summary),
         intro,
         reference,

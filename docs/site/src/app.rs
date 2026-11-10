@@ -45,6 +45,8 @@ pub enum Msg {
     },
     /// System, light, dark, in turn: the reader's, kept by the browser.
     Appearance,
+    /// The page after the one shown in reading order (`1`), or before.
+    Step(isize),
     Live(LiveMsg),
 }
 
@@ -116,17 +118,33 @@ impl DocsWeb {
 
     pub fn record(&self) -> ShellPage {
         let of = |s: Section| self.pages.iter().filter(|p| p.section == Some(s)).map(Self::card).collect();
+        let own = |s: Section| self.pages.iter().filter(|p| p.index == Some(s)).map(Self::card).collect();
         ShellPage {
             page: self.page.clone(),
             search: self.search.clone(),
             searching: !self.search.trim().is_empty(),
             results: self.found(),
-            top: self.pages.iter().filter(|p| p.section.is_none()).map(Self::card).collect(),
+            top: self.pages.iter().filter(|p| p.tag == OVERVIEW).map(Self::card).collect(),
+            more: self.pages.iter().filter(|p| p.tag == ALL).map(Self::card).collect(),
+            foundations_page: own(Section::Foundations),
             foundations: of(Section::Foundations),
+            components_page: own(Section::Components),
             components: of(Section::Components),
+            overlays_page: own(Section::Overlays),
             overlays: of(Section::Overlays),
+            motion_page: own(Section::Motion),
             motion: of(Section::Motion),
+            behaviour_page: own(Section::Behaviour),
             behaviour: of(Section::Behaviour),
+        }
+    }
+
+    /// The page shown's neighbours in reading order: before, after.
+    pub fn neighbours(&self) -> (Option<&Page>, Option<&Page>) {
+        let order = pages::reading(&self.pages);
+        match order.iter().position(|p| p.tag == self.page) {
+            Some(i) => (i.checked_sub(1).map(|j| order[j]), order.get(i + 1).copied()),
+            None => (None, None),
         }
     }
 
@@ -155,21 +173,50 @@ impl DocsWeb {
         if name == "page" {
             return self.page_view();
         }
+        if name == "pager" {
+            let (before, after) = self.neighbours();
+            let link = |p: &Page| (p.title.clone(), pages::href(&self.base, &p.tag));
+            let (before, after) = (before.map(link), after.map(link));
+            return arkui_web::writing::pager(
+                before.as_ref().map(|(t, h)| (t.as_str(), h.as_str())),
+                after.as_ref().map(|(t, h)| (t.as_str(), h.as_str())),
+            );
+        }
+        if name == "index" {
+            let Some(s) = self.shown().index else { return ().into_any() };
+            let rows: Vec<View<Msg>> = self
+                .pages
+                .iter()
+                .filter(|p| p.section == Some(s))
+                .map(|p| {
+                    ark_app::view::list_row(p.title.clone())
+                        .subtitle(p.description.clone())
+                        .glyph(pages::glyph(&p.tag))
+                        .pushes()
+                        .on_tap(Msg::Go { tag: p.tag.clone() })
+                        .into()
+                })
+                .collect();
+            return arkui_web::render(ark_app::view::card_section(rows).into());
+        }
         let Some(c) = COMPONENTS.iter().find(|c| c.id == self.page) else {
             return ().into_any();
         };
         match name {
-            "live" => match live::view(c.id, &self.live) {
-                Some(v) => html::section()
+            "live" => {
+                let frames = live::frames(c.id, &self.live);
+                if frames.is_empty() {
+                    return ().into_any();
+                }
+                html::section()
                     .class("docs-live")
                     .child((
-                        arkui_web::writing::markdown("## In the Browser\n\narkui-web's own parts, live: the same `ark_app::view` parts an app's screen is made of. Without script they are drawn as they open; with it, they answer."),
-                        html::div().class("docs-specimen").child(arkui_web::render(v)),
+                        arkui_web::writing::markdown("## In the Browser\n\narkui-web's own parts, live: the same `ark_app::view` parts an app's screen is made of. What opens over a page is drawn open in its frame, so it reads without script; with script, each part answers."),
+                        frames.into_iter().map(|f| html::div().class("docs-specimen").child(f)).collect::<Vec<_>>(),
                         (c.id == "writing").then(|| arkui_web::writing::code("md", live::WRITING_SAMPLE)),
                     ))
-                    .into_any(),
-                None => ().into_any(),
-            },
+                    .into_any()
+            }
             "desktop" => self.desktop(c.id),
             "mobile" => self.mobile(c),
             _ => ().into_any(),
@@ -361,8 +408,30 @@ impl WebApp for DocsWeb {
                 browser::keep("phone", &self.phone);
             }
             Msg::Appearance => browser::next_appearance(),
+            Msg::Step(by) => {
+                let (before, after) = self.neighbours();
+                if let Some(p) = if by < 0 { before } else { after } {
+                    let tag = p.tag.clone();
+                    self.update(Msg::Go { tag });
+                }
+            }
             Msg::Live(m) => self.live.update(m),
         }
+    }
+
+    /// The command box's (`:`, ⌘K): the pages before and after, every
+    /// page, the appearance.
+    fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Msg>> {
+        use ark_app::shell::{command_menu, command_unbound, MenuPlace};
+        vec![command_menu(
+            MenuPlace::View,
+            vec![
+                command_unbound("Next Page", Msg::Step(1)),
+                command_unbound("Previous Page", Msg::Step(-1)),
+                command_unbound("All Pages", Msg::Go { tag: ALL.into() }),
+                command_unbound("Appearance", Msg::Appearance),
+            ],
+        )]
     }
 
     /// The page is the path; the search is the query's `q`, the reader's.
@@ -485,6 +554,7 @@ pub fn title_of(href: &str) -> String {
         .iter()
         .find(|c| c.id == tag)
         .map(|c| c.name)
+        .or(Section::ALL.into_iter().find(|s| s.tag() == tag).map(Section::heading))
         .or((tag == ALL).then_some("All Pages"));
     match name {
         Some(n) => format!("{n} · ArkUI"),

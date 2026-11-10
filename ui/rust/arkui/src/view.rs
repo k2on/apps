@@ -240,7 +240,7 @@ fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>) {
                 group,
                 content: *content,
             }),
-            View::Part(Part::TabGroup { title, tabs }) => tabs_of(*tabs, Some(title), out),
+            View::Part(Part::TabGroup { title, tabs, .. }) => tabs_of(*tabs, Some(title), out),
             _ => {}
         }
     }

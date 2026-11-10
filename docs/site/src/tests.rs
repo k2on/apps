@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::catalogue;
-use crate::components::COMPONENTS;
+use crate::components::{Section, COMPONENTS};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -78,7 +78,7 @@ fn every_link_lands() {
         version: "dev".into(),
     };
     let paths = crate::write::write(&out, &o).unwrap();
-    assert_eq!(paths.len(), COMPONENTS.len() + 2, "{paths:?}");
+    assert_eq!(paths.len(), COMPONENTS.len() + 2 + Section::ALL.len(), "{paths:?}");
     let sitemap = read(&out.join("sitemap.xml"));
     for p in &paths {
         assert!(
@@ -119,7 +119,63 @@ fn every_link_lands() {
             }
         }
     }
+    // What opens over a page is written open in its frame, and takes no
+    // keys from the page: the menu with its submenu, the sheet and the
+    // question, the picker's menu, the command box. Falsified by drawing
+    // the live parts with `render` rather than as a specimen: the sheet is
+    // modal and the menu's submenu is not written.
+    let page = |p: &str| read(&out.join(p).join("index.html"));
+    let menu = page("menu");
+    assert!(menu.matches("ark-menu ark-menu-written").count() >= 2, "the menu and its submenu");
+    assert!(menu.contains("Add to Collection") && menu.contains("New Collection…"));
+    let dialog = page("dialog");
+    assert!(dialog.matches("ark-modal-layer ark-in-place").count() >= 2, "the sheet and the question");
+    assert!(!dialog.contains("aria-modal"), "a specimen is not modal");
+    assert!(page("picker").contains("ark-menu-written"));
+    assert!(page("command").contains("ark-command-written"));
+    // Short of a sidebar, each section is a tab, and a page of one is
+    // pushed over the section's own page, the way back named for it.
+    // Falsified by `tab_group` in `docs_shell`: no tab, no way back.
+    assert!(menu.contains("ark-bar-button ark-bar-back") && menu.contains("aria-label=\"Overlays\""));
+    for s in Section::ALL {
+        assert!(
+            menu.contains(&format!("<span class=\"ark-bottom-title\">{}</span>", s.heading())),
+            "no {} tab",
+            s.heading()
+        );
+    }
+    // A section's own page lists its pages.
+    let overlays = page("overlays");
+    for c in COMPONENTS.iter().filter(|c| c.section == Section::Overlays) {
+        assert!(overlays.contains(c.name), "{} is not on Overlays' page", c.name);
+    }
     let _ = std::fs::remove_dir_all(&out);
+}
+
+/// Every page but the first has the one before it, every page but the
+/// last the one after, and a section's own page comes before its pages.
+/// Falsified by leaving the sections' pages out of the reading order.
+#[test]
+fn every_page_leads_to_the_next() {
+    use arkui_web::WebApp;
+    let mut app = crate::app::DocsWeb::open("/", crate::pages::Built::default());
+    let order: Vec<String> = crate::pages::reading(app.pages()).iter().map(|p| p.tag.clone()).collect();
+    assert_eq!(order.len(), app.pages().len() - 1, "every page but the index of every page");
+    assert_eq!(order[0], "overview");
+    assert_eq!(order[1], "foundations");
+    let at = |t: &str| order.iter().position(|o| o == t).unwrap();
+    assert_eq!(at("overlays") + 1, at("menu"));
+    app.update(crate::app::Msg::Go { tag: "menu".into() });
+    app.update(crate::app::Msg::Step(-1));
+    assert_eq!(app.route().path_url(), "/overlays/");
+    app.update(crate::app::Msg::Step(1));
+    app.update(crate::app::Msg::Step(1));
+    assert_eq!(app.route().path_url(), "/command/");
+    app.update(crate::app::Msg::Go {
+        tag: order.last().unwrap().clone(),
+    });
+    app.update(crate::app::Msg::Step(1));
+    assert_eq!(app.route().path_url(), format!("/{}/", order.last().unwrap()), "past the last, it stays");
 }
 
 /// A page's every way to another page is a link without script, and the
@@ -134,7 +190,7 @@ fn every_page_is_a_path_and_the_search_is_not() {
     app.update(crate::app::Msg::Search { text: "spring".into() });
     assert_eq!(app.route().path_url(), "/menu/");
     assert_eq!(app.route().get("q"), Some("spring"));
-    assert_eq!(app.static_paths().len(), COMPONENTS.len() + 2);
+    assert_eq!(app.static_paths().len(), COMPONENTS.len() + 2 + Section::ALL.len());
     assert!(app.static_paths().iter().all(|r| r.query.is_empty()));
     assert!(app.found().iter().any(|h| h.tag == "springs"), "{:?}", app.found());
     assert!(app.found().iter().all(|h| h.tag != "overview" || h.title == "ArkUI"));

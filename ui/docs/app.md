@@ -681,7 +681,11 @@ ui/docs/apps/money.md for money):
    child of `parent`, its own place in the sidebar and the parent's pushed
    page when compact) and its `footer` (`.tabViewSidebarBottomBar`; the
    toolbar's end where there is no sidebar), `tab_group` (`TabSection`,
-   sidebar only, Mail's mailboxes), `pushes` (`navigationDestination`),
+   sidebar only, Mail's mailboxes), `tab_section` (a group that is a
+   place of its own: in the sidebar its heading, short of one a tab whose
+   page is an index of its sections, each pushed over it with the way
+   back named for the group — so far arkui-web's alone, for the docs),
+   `pushes` (`navigationDestination`),
    `split_view`, `toolbar`
    with `bar_item`s by `Placement`, `searchable`, `inspector`, `hosted`,
    `confirmation_dialog`, `alert`, `settings_panes` (one shown, by title),
