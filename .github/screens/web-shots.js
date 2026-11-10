@@ -1,5 +1,6 @@
 // An app's browser screenshots (app-web.sh): its <app>/screens/shots.json
-// `web`, each shot opened by its address (`query`: the launch arguments
+// `screens` (each by its launch arguments, the address's parameters here)
+// and `web`, each shot opened by its address (`query`: the launch arguments
 // every shell reads, `?screen=…`, and arkui-web's `?context=`, `?menu=`,
 // `?popover=`, `?command=`, `?keys=`) and then its steps — the desktop's
 // vocabulary: `click` a text on the page, `key` a key, `type` text,
@@ -15,15 +16,25 @@ const { chromium } = require('playwright');
 
 async function main() {
   const [shotsFile, base, out] = process.argv.slice(2);
-  const web = JSON.parse(fs.readFileSync(shotsFile, 'utf8')).web;
+  const all = JSON.parse(fs.readFileSync(shotsFile, 'utf8'));
+  const web = all.web;
   if (!web) throw new Error(`${shotsFile} has no "web"`);
   const sizes = web.sizes;
+  // Every app's screens by their launch arguments (`-screen budget
+  // -inspector 1`), the address's parameters here, on the sizes each is on;
+  // then the browser's own.
+  const query = args => {
+    const q = [];
+    for (let i = 0; i + 1 < args.length; i += 2) q.push(`${args[i].replace(/^-+/, '')}=${encodeURIComponent(args[i + 1])}`);
+    return q.join('&');
+  };
+  const shots = (all.screens || []).map(s => ({ id: s.id, query: query(s.args), sizes: s.on })).concat(web.shots || []);
   const browser = await chromium.launch({ args: ['--font-render-hinting=none', '--disable-lcd-text', '--force-color-profile=srgb'] });
   let failed = 0;
   for (const [size, [width, height]] of Object.entries(sizes)) {
     for (const theme of ['light', 'dark']) {
       const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: web.scale || 1, colorScheme: theme, reducedMotion: 'reduce' });
-      for (const shot of web.shots) {
+      for (const shot of shots) {
         if (shot.sizes && !shot.sizes.includes(size)) continue;
         const page = await context.newPage();
         const errors = [];

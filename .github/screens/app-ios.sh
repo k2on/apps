@@ -29,7 +29,10 @@ results=${RESULTS:-$(mktemp -d)}
 mkdir -p "$results"
 here=$(cd "$(dirname "$0")" && pwd)
 user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
-shots=$(jq -c '.shots' "$app/screens/shots.json")
+kind=$(basename "$out")
+# The shots, then each of the `screens` that is `on` this device (ios,
+# ipad-portrait, ipad-landscape): opened by its launch arguments alone.
+shots=$(jq -c --arg k "$kind" '.shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, args, steps: (.steps // [])}]' "$app/screens/shots.json")
 bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle_app/Info.plist")
 orientation=${ORIENTATION:-}
 udid=$(xcrun simctl list devices booted -j | jq -r --arg d "$device" '[.devices[][] | select(.state == "Booted")] | (map(select(.name == $d)) + .)[0].udid')
@@ -60,8 +63,7 @@ appearance() {
 }
 
 # Which device's, as its directory says (ios, ipad-portrait, …): the
-# results of each its own.
-kind=$(basename "$out")
+# results of each its own (`kind`, above).
 for theme in light dark; do
   echo "$app $kind $theme"
   appearance "$theme"

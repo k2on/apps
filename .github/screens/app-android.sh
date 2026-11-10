@@ -146,11 +146,14 @@ why() {
 # activity in a task of its own: `am start -W`, which returns once it has
 # drawn), then waited for until its own window has the focus; not a fixed
 # four seconds after `monkey`, which says nothing when a launch is lost.
+# Given launch arguments (a shot of shots.json's `screens`), they go with
+# it as the intent's string array `ark.args` (ark_app::shell::Launch).
 open_app() {
-  local said
+  local said extra=()
+  if [ -n "${1:-}" ]; then extra=(--esa ark.args "$1"); fi
   adb shell am force-stop "$pkg"
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
-  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" 2>&1 | tr -d '\r')
+  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} 2>&1 | tr -d '\r')
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
@@ -263,7 +266,7 @@ for theme in ${THEMES:-light dark}; do
     # shots): where a shot went other than it was written to.
     steps="${RESULTS:-$out/../steps}/$app/$(basename "$out")/$theme/$id"
     mkdir -p "$steps"
-    open_app || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+    open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of
@@ -280,7 +283,7 @@ for theme in ${THEMES:-light dark}; do
     { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
     adb exec-out screencap -p > "$out/$theme/$id.png"
     dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
-  done 3< <(jq -c '.shots[]' "$shots")
+  done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
 done
 
 # The device, from what it drew: the screen as it was taken (a tablet's

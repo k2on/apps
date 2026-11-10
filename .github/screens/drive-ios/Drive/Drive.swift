@@ -9,7 +9,7 @@
 //   APP_SERVER  the server's address, typed into the first page; unset, none
 //   APP_USER    the name the server's dev sign-in page is given
 //   APP_SHOTS   the shots, as the app's screens/shots.json has them:
-//               [{"id": …, "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
+//               [{"id": …, "args"?: [launch arguments], "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
 //               A tap's label is what the element says or its accessibility
 //               identifier; `role` ("tab", "button", "field", "text") says
 //               which kind it is when several say it; `a|b` is whichever is
@@ -45,13 +45,17 @@ struct Shot: Decodable {
 
     var id: String
     var steps: [Step] = []
+    /// The app's launch arguments for this shot (shots.json's `screens`:
+    /// `-screen budget`, …), none for the rest.
+    var args: [String] = []
 
-    enum CodingKeys: String, CodingKey { case id, steps }
+    enum CodingKeys: String, CodingKey { case id, steps, args }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         steps = try c.decodeIfPresent([Step].self, forKey: .steps) ?? []
+        args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
     }
 }
 
@@ -111,6 +115,7 @@ final class Drive: XCTestCase {
 
         for shot in shots {
             app.terminate()
+            app.launchArguments = shot.args
             app.launch()
             // Up, not a fixed two seconds: each step waits for what it names.
             _ = app.wait(for: .runningForeground, timeout: 10)

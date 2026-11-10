@@ -431,6 +431,7 @@ public fun PanesScope.SettingsPane(title: String, glyph: String, content: @Compo
  * Settings: its panes' tabs across the top, the one titled `selection`
  * under them (choosing another sends `onSelect`).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: PanesScope.() -> Unit) {
     val all = PanesScope().apply(panes).panes

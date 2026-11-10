@@ -3,5 +3,8 @@ targetTemplates:
   ArkModules:
     sources:
       - path: ../../modules/haptics/swift
+        group: Modules/haptics
       - path: ../../modules/clipboard/swift
+        group: Modules/clipboard
       - path: ../../modules/share/swift
+        group: Modules/share

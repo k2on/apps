@@ -1467,7 +1467,7 @@
               })
             ] ++ memberClippy docsCrate { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
-            fmt = rustfmtCheck "arkdb" (only rustDirs);
+            fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;

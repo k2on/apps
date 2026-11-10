@@ -65,7 +65,12 @@ def xcode(root, app):
     names = listed(root, app)
     for name in names:
         if os.path.isdir(os.path.join(root, "modules", name, "swift")):
+            # A group of its own in the project: a path that climbs out of
+            # the app's directory, laid out in the groups it climbs through,
+            # put the app's other sources from outside (its bindings) under
+            # the checkout's own name, where Xcode then looked for them.
             out.append(f"      - path: ../../modules/{name}/swift")
+            out.append(f"        group: Modules/{name}")
         info.update(module(root, name).get("ios", {}).get("info", {}))
     if not any(l.startswith("      - path") for l in out):
         out[-1] = "    sources: []"

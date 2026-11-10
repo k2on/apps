@@ -39,7 +39,7 @@ extension ShapeStyle where Self == Color {
 }
 #endif
 
-#if os(iOS)
+#if canImport(SwiftUI)
 @available(iOS 26.0, *)
 extension View {
     /// On glass in `shape`, tinted with `tint` and answering the finger when

@@ -83,12 +83,12 @@ struct BudgetView: View {
                 }
             }
         }
-        .environment(\.editMode, .constant(editing ? .active : .inactive))
+        .editing(editing)
         .onChange(of: Arranging.shape(groups)) { _, now in
             if let a = ahead, Arranging.shape(a) == now { ahead = nil }
         }
         .groupedList()
-        .listSectionSpacing(.compact)
+        .compactSections()
         .refreshable { await model.refresh() }
         .toolbar {
             ToolbarItem(placement: .secondaryAction) {
@@ -186,12 +186,18 @@ struct BudgetView: View {
 
     // MARK: Ready to Assign
 
-    @ViewBuilder private func ready(_ summary: Summary?) -> some View {
-        let s = summary ?? Summary(month: model.month, readyToAssign: 0, income: 0, assigned: 0, activity: 0, available: 0, overspentLastMonth: 0, overspent: 0, underfunded: 0)
+    /// What needs attention, in words: so many overspent, so many
+    /// underfunded; or, with nothing, what the money is for.
+    private static func caption(_ s: Summary) -> String {
         var said: [String] = []
         if s.overspent > 0 { said.append("\(s.overspent) overspent") }
         if s.underfunded > 0 { said.append("\(s.underfunded) underfunded") }
-        let caption = said.isEmpty ? (s.readyToAssign == 0 ? "Every dollar has a job." : "Give these dollars a job.") : said.joined(separator: " \u{b7} ")
+        return said.isEmpty ? (s.readyToAssign == 0 ? "Every dollar has a job." : "Give these dollars a job.") : said.joined(separator: " \u{b7} ")
+    }
+
+    @ViewBuilder private func ready(_ summary: Summary?) -> some View {
+        let s = summary ?? Summary(month: model.month, readyToAssign: 0, income: 0, assigned: 0, activity: 0, available: 0, overspentLastMonth: 0, overspent: 0, underfunded: 0)
+        let caption = Self.caption(s)
         Headline(s.readyToAssign < 0 ? "Assigned Too Much" : "Ready to Assign",
                  figure: CentsText.string(s.readyToAssign),
                  tint: s.readyToAssign < 0 ? .negative : s.readyToAssign > 0 ? .positive : .neutral,

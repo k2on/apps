@@ -225,10 +225,15 @@ impl MoneyWeb {
                 self.category = found;
             }
             "open-transaction" => {
+                // `receipt`: the first with a receipt (the reference's word);
+                // else by its payee or its id.
                 let n = rest.to_lowercase();
                 let found = screens::all_txns(self)
                     .iter()
-                    .find(|t| t.payee.to_lowercase().contains(&n) || t.id.hex() == rest)
+                    .find(|t| match n.as_str() {
+                        "receipt" => !t.receipt.is_empty() || t.photos > 0,
+                        _ => t.payee.to_lowercase().contains(&n) || t.id.hex() == rest,
+                    })
                     .map(|t| t.id);
                 self.txn = found;
             }
@@ -443,7 +448,7 @@ impl WebApp for MoneyWeb {
 
     fn arrive(&mut self, query: &dyn Fn(&str) -> Option<String>) -> Vec<Msg> {
         let mut args = vec![];
-        for key in ["screen", "inspector", "appearance", "pane"] {
+        for key in ["screen", "inspector", "appearance", "pane", "settingsTab"] {
             if let Some(v) = query(key) {
                 args.push(format!("-{key}"));
                 args.push(v);

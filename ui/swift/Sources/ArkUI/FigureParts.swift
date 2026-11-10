@@ -300,16 +300,24 @@ public struct ColumnChart: View {
         Chart {
             ForEach(groups) { g in
                 ForEach(Array(g.values.enumerated()), id: \.offset) { i, v in
-                    BarMark(x: .value("Group", g.label), y: .value("Amount", v))
-                        .position(by: .value("Series", series[min(i, series.count - 1)]))
-                        .foregroundStyle(by: .value("Series", series[min(i, series.count - 1)]))
-                        .cornerRadius(3)
+                    column(g.label, name(i), v)
                 }
             }
         }
         .chartForegroundStyleScale(domain: series, range: Array(Color.chart.prefix(series.count)))
         .chartLegend(position: .top, alignment: .leading)
         .frame(height: 200)
+    }
+
+    /// The series of the `i`-th value, the last for any past it.
+    private func name(_ i: Int) -> String { series[min(i, series.count - 1)] }
+
+    /// One column: its group's place, its series' colour.
+    private func column(_ group: String, _ series: String, _ v: Int64) -> some ChartContent {
+        BarMark(x: .value("Group", group), y: .value("Amount", v))
+            .position(by: .value("Series", series))
+            .foregroundStyle(by: .value("Series", series))
+            .cornerRadius(3)
     }
 }
 

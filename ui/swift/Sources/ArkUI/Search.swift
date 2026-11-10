@@ -16,7 +16,7 @@
 // search that is one row of a page, not a page of its own.
 import SwiftUI
 
-#if os(iOS)
+#if canImport(SwiftUI)
 /// The search row's measures, written once.
 public enum SearchSizes {
     /// The capsule's height, at the least: the system's field's, and a touch target's.
@@ -53,7 +53,7 @@ public struct SearchField: View {
                 .submitLabel(.search)
                 .onSubmit(onSearch)
                 .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .capitals(.never)
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.quiet)

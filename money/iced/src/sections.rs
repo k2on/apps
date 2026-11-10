@@ -93,11 +93,14 @@ impl App {
             ShellMsg::Run { command } => command.strip_prefix("go-").and_then(|t| page_for(self, t)),
             _ => None,
         };
+        let launching = matches!(msg, ShellMsg::Launch { .. });
         let mut rt = std::mem::take(&mut self.shell);
         let mut desk = Desk { app: self, natives: vec![] };
         rt.dispatch(msg, &mut desk);
         let natives = std::mem::take(&mut desk.natives);
         self.shell = rt;
+        // Where a launch opened: the place the shell shows now.
+        let go = if launching { page_for(self, &self.shell_page().section) } else { go };
         let mut tasks = vec![];
         if let Some(page) = go.filter(|p| *p != self.page) {
             tasks.push(self.update(Message::Go(page)));
@@ -114,6 +117,10 @@ impl App {
                 "find" => Some(Message::Go(Page::Ledger(Ledger::All))),
                 "reconcile" => self.register_account().map(Message::Reconcile),
                 "auto-assign" => Some(Message::AutoMenu),
+                "review" => Some(Message::Go(Page::Ledger(Ledger::Inbox))),
+                _ if name.starts_with("settings") => Some(Message::Go(Page::Settings)),
+                _ if name.starts_with("open-category ") => self.category_named(&name["open-category ".len()..]).map(|c| Message::Select(Some(c))),
+                _ if name.starts_with("open-transaction ") => self.txn_named(&name["open-transaction ".len()..]).map(Message::EditTxn),
                 _ => name
                     .strip_prefix("search ")
                     .or((name == "search").then_some(""))
@@ -124,6 +131,35 @@ impl App {
             }
         }
         Task::batch(tasks)
+    }
+
+    /// The category a launch names: its name in any case, or a part of it.
+    fn category_named(&self, n: &str) -> Option<money_domain::Id<money_domain::Category>> {
+        let w = n.to_lowercase();
+        let lines = self.peer.lines();
+        lines
+            .iter()
+            .find(|l| l.name.to_lowercase() == w)
+            .or_else(|| lines.iter().find(|l| l.name.to_lowercase().contains(&w)))
+            .map(|l| l.category_id)
+    }
+
+    /// The transaction a launch names (the reference's keys): `receipt`,
+    /// the newest with one; `review`, the newest waiting; `transfer`; a
+    /// number, the n-th oldest; else a payee.
+    fn txn_named(&self, key: &str) -> Option<money_domain::Id<money_domain::Txn>> {
+        let all = self.peer.register();
+        let k = key.to_lowercase();
+        let t = match k.as_str() {
+            "receipt" => all.iter().find(|t| !t.receipt.is_empty() || t.photos > 0),
+            "review" => all.iter().find(|t| !t.approved),
+            "transfer" => all.iter().find(|t| t.transfer),
+            _ => match k.parse::<usize>() {
+                Ok(n) if n >= 1 && n <= all.len() => all.iter().rev().nth(n - 1),
+                _ => all.iter().find(|t| t.payee.to_lowercase().contains(&k)),
+            },
+        };
+        t.map(|t| t.id)
     }
 
     /// The shell's place, the page's: what a key, a link or the back

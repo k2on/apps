@@ -55,4 +55,29 @@ extension View {
         }
     }
 }
+#elseif canImport(SwiftUI)
+import SwiftUI
+
+extension View {
+    /// `url`, whenever there is one, opened in the Mac's browser: a page
+    /// that is somebody else's to finish (a bank's login); `closed` told at
+    /// once, as the browser is the person's to close.
+    public func safari(_ url: URL?, tint: Color? = nil, closed: @escaping () -> Void) -> some View {
+        modifier(OpenedInBrowser(url: url, closed: closed))
+    }
+}
+
+private struct OpenedInBrowser: ViewModifier {
+    let url: URL?
+    let closed: () -> Void
+    @Environment(\.openURL) private var openURL
+
+    func body(content: Content) -> some View {
+        content.onChange(of: url) {
+            guard let url else { return }
+            openURL(url)
+            closed()
+        }
+    }
+}
 #endif
