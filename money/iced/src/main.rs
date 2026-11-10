@@ -59,7 +59,7 @@ use peer::{Ledger, Peer};
 /// Which pane has the keys: ArkUI's panes (`arkui::shell`), every app's.
 pub use arkui::shell::Pane;
 
-use money_app::shell::{ShellMsg, SECTIONS};
+use money_app::shell::ShellMsg;
 /// Where the window is: money's routes (`money_domain::routes`), which the
 /// address bar spells by their paths (`arkui::router`).
 pub use money_domain::routes::Route;
@@ -247,9 +247,13 @@ pub enum Message {
     Sync,
     /// Settings' Banks section: connecting, and what each account feeds.
     Banks(banks::Msg),
-    /// The account button at the top right: its menu, whose entries open
-    /// Settings and sign out.
+    /// Who is signed in, at the sidebar's foot: its menu, whose entries
+    /// open Settings and sign out.
     AccountMenu,
+    /// The toolbar's Filter: the register's bar of conditions shown or put away.
+    ShowFilter(bool),
+    /// The toolbar's Auto-Assign: its menu, under the wand.
+    AutoMenu,
     SignOut,
     /// "Add a Device": a one-time code for another device, asked of the
     /// server as this login; and what it answered.
@@ -364,6 +368,9 @@ pub struct App {
     pub formula: formula::Form,
     pub collapsed: Vec<Id<Group>>,
     pub show_hidden: bool,
+    /// The register's bar of conditions, shown by the toolbar's Filter
+    /// (and always while the register is one no built-in names).
+    pub show_filter: bool,
     pub new_group: Option<String>,
     pub new_category: Option<(Id<Group>, String)>,
     pub form: Option<TxnForm>,
@@ -449,6 +456,7 @@ impl App {
             formula: formula::Form::default(),
             collapsed: Vec::new(),
             show_hidden: false,
+            show_filter: false,
             new_group: None,
             new_category: None,
             form: None,
@@ -1150,10 +1158,15 @@ impl App {
             Message::Banks(m) => return self.banks(m),
             Message::AccountMenu => {
                 if let Some(account) = self.account() {
-                    let right = self.window.width - view::PAD;
-                    self.ctx.open_menu(account.menu(right, view::PAD + arkui::account::HEIGHT, self.window));
+                    // Over the sidebar's foot, where it was pressed.
+                    let rows = account.entries.len() as f32 + 1.0;
+                    let up = self.window.height - 44.0 - rows * 30.0;
+                    let right = arkui::layout_tokens::SIDEBAR_WIDTH.min(self.window.width) - 10.0;
+                    self.ctx.open_menu(account.menu(right, up.max(0.0), self.window));
                 }
             }
+            Message::ShowFilter(on) => self.show_filter = on,
+            Message::AutoMenu => self.auto_menu(),
             Message::SignOut => self.sign_out(),
             Message::AddDevice => return self.add_device(),
             Message::DeviceCode(made) => self.device_coded(made),
@@ -1533,7 +1546,8 @@ impl App {
             Page::Budget => &MONEY_KEYS,
             _ => &[],
         };
-        let routed = self.keyboard.press(&key, mods, &panes, section, SECTIONS.len(), bindings);
+        let places = self.places().len();
+        let routed = self.keyboard.press(&key, mods, &panes, section, places, bindings);
         // Nothing moves between panes while something is over the window.
         if !free {
             self.keyboard.focus = before;
@@ -1551,7 +1565,8 @@ impl App {
             Routed::Section(i) if free => {
                 // A cursor walking is a scrub: one history entry, not one a place.
                 self.history.replace_next();
-                self.update(Message::Shell(ShellMsg::Select { tag: SECTIONS[i].into() }))
+                let tag = self.place_tag(i);
+                self.update(Message::Shell(ShellMsg::Select { tag }))
             }
             Routed::Scroll(place) if free => self.scroll_cursor(place),
             Routed::Pane(_, action) if self.ctx.is_open() => match action {
@@ -1926,7 +1941,7 @@ impl App {
 
     /// How tall the register's list is on screen.
     fn register_view(&self) -> f32 {
-        (self.window.height - view::PAD - self.ledger_top() - view::LEDGER_GAP - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
+        (self.window.height - self.page_origin().y - self.ledger_top() - view::LEDGER_HEAD - 1.0).max(view::TXN_ROW)
     }
 
     /// Scroll the register just far enough that row `i` is in sight.
@@ -1983,12 +1998,18 @@ impl App {
     fn under(&self, y: f32) -> (Point, bool) {
         let all = self.register_account().is_none();
         let origin = self.page_origin();
-        let left = origin.x + 1.0 + view::PAD + arkui::table::ROW_PADDING[1];
-        let fixed = if all { 130.0 } else { 0.0 } + 96.0 + 100.0 + 100.0 + 116.0;
-        let width = self.window.width - origin.x - 1.0 - receipt::SIDE - view::PAD * 2.0 - arkui::table::ROW_PADDING[1] * 2.0;
-        let payee = (width - fixed).max(0.0) * 3.0 / 8.0;
-        let x = left + if all { 130.0 } else { 0.0 } + 96.0 + payee;
-        let top = origin.y + view::PAD + self.ledger_top() + view::LEDGER_GAP + view::LEDGER_HEAD + 1.0;
+        let inset = view::PAD - 6.0 + arkui::table::ROW_PADDING[1];
+        let left = origin.x + 1.0 + inset;
+        let inspector = match self.shell_page().inspector {
+            true => arkui::layout_tokens::INSPECTOR_WIDTH + 1.0,
+            false => 0.0,
+        };
+        let width = self.window.width - origin.x - 1.0 - inspector - inset * 2.0;
+        let fixed = view::DATE_COL + view::AMOUNT_COL + view::CLEARED_COL;
+        let portions = if all { 10.0 } else { 8.0 };
+        let payee = (width - fixed).max(0.0) * 3.0 / portions;
+        let x = left + view::DATE_COL + payee;
+        let top = origin.y + self.ledger_top() + view::LEDGER_HEAD + 1.0 + 4.0;
         let y = top + y - self.register_scroll;
         let above = y + arkui::command::LIST_HEIGHT > self.window.height;
         // Above: its bottom on the cell's top.

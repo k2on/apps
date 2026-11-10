@@ -13,14 +13,11 @@ fun AccountsScreen(screen: AccountsHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
     TabPage("Accounts", onRefresh = { screen.send(AccountsMsg.Refresh) },
         top = {
-            HeroFigure("Net Worth", cents = p.netWorth, note = "Every open account, less what's owed")
         },
     ) {
-        CardSection {
-            ListRow("All Accounts", tile = "layers", amount = p.allTotal, quiet = true, pushes = true, onTap = { screen.send(AccountsMsg.OpenAll) })
-        }
+        SummaryCard("Net Worth", cents = p.netWorth, first = "Assets", firstCents = p.assets, second = "Liabilities", secondCents = p.liabilities, trend = p.trend)
         for (shelf in p.shelves) {
-            CardSection(title = shelf.title, total = shelf.total, showsTotal = shelf.showsTotal) {
+            CardSection(title = shelf.title, total = shelf.total, showsTotal = shelf.showsTotal, footer = shelf.note) {
                 for (a in shelf.accounts) {
                     ListRow(a.name, subtitle = a.subtitle, mark = a.kindKey, badge = a.reviews, amount = a.balance, pushes = true, said = a.said, menu = listOf(MenuAction("Rename", glyph = "pencil", destructive = false, onTap = { screen.send(AccountsMsg.Rename(id = a.id)) }), MenuAction("Reconcile…", glyph = "badge-check", destructive = false, shown = a.isOpen, onTap = { screen.send(AccountsMsg.Reconcile(id = a.id)) }), MenuAction("Copy Balance", glyph = "copy", destructive = false, onTap = { screen.send(AccountsMsg.CopyBalance(id = a.id)) }), MenuAction(a.closeTitle, glyph = a.closeGlyph, destructive = a.isOpen, onTap = { screen.send(AccountsMsg.ToggleClosed(id = a.id)) })), onTap = { screen.send(AccountsMsg.OpenAccount(id = a.id)) })
                 }

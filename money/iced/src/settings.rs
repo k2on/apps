@@ -7,7 +7,7 @@ use arkui::account::{Account, Who};
 use arkui::text::text;
 use arkui::{hero, style};
 use iced::widget::{column, container, scrollable};
-use iced::{Element, Length, Padding, Task};
+use iced::{Element, Length, Task};
 
 use crate::view::{dim, quiet, PAD};
 use crate::{live, App, Message, Page};
@@ -128,12 +128,6 @@ impl App {
             }
         };
         let page = column![
-            container(crate::view::page_title("Settings")).padding(Padding {
-                bottom: 4.0,
-                ..Padding::ZERO
-            }),
-            hero::heading("Banks"),
-            self.banks_section(),
             hero::heading("Amazon"),
             self.amazon_section(),
             hero::heading("Costco"),
@@ -144,15 +138,22 @@ impl App {
             arkui::renderer::about(),
         ]
         .width(Length::Fill);
-        arkui::scroll::elastic(
-            scrollable(crate::view::under_face(
-                container(page).padding(PAD).max_width(980),
-                crate::view::page_ground,
-            ))
+        settings_scroll(page)
+    }
+
+    /// Settings' Connected Banks: each bank, what it feeds, its sync.
+    pub fn view_banks_pane(&self) -> Element<'_, Message> {
+        settings_scroll(column![self.banks_section()].width(Length::Fill))
+    }
+}
+
+/// A pane of Settings, scrolled, at a readable width.
+fn settings_scroll<'a>(page: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
+    arkui::scroll::elastic(
+        scrollable(container(page).padding(PAD).max_width(760))
             .id(crate::look::PAGE_TOP)
             .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
             .height(Length::Fill)
             .style(style::bars),
-        )
-    }
+    )
 }

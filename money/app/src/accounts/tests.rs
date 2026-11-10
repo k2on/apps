@@ -85,11 +85,11 @@ fn the_page_adds_up_the_household() {
     let p = rt.screen(&d);
     assert_eq!(p.net_worth, net_worth(d.accounts()));
     assert!(!p.shelves.is_empty());
-    assert_eq!(p.shelves[0].title, "Budget");
+    assert_eq!(p.shelves[0].title, "Budget Accounts");
     assert_eq!(p.shelves[0].total, p.all_total);
     let every: usize = p.shelves.iter().map(|s| s.accounts.len()).sum();
     assert_eq!(every, d.accounts().len());
-    assert!(p.shelves.iter().all(|s| s.shows_total == (s.title != "Closed")));
+    assert!(p.shelves.iter().all(|s| s.shows_total == (s.title != "Closed Accounts")));
     assert!(p.adding.is_none() && p.renaming.is_none());
 }
 
@@ -200,7 +200,7 @@ fn renaming_and_closing_go_through_the_domain() {
         }],
     );
     let p = rt.screen(&d);
-    let closed = p.shelves.iter().find(|s| s.title == "Closed").unwrap();
+    let closed = p.shelves.iter().find(|s| s.title == "Closed Accounts").unwrap();
     assert!(closed.accounts.iter().any(|a| a.id == jar && a.close_title == "Reopen"));
     run(
         &mut rt,
@@ -279,4 +279,21 @@ fn an_amount_entered_in_cents_is_the_balance() {
     assert_eq!(rt.state().adding.as_ref().unwrap().balance(&NumberStyle::us()), Some(-1_250));
     run(&mut rt, &mut d, [AccountsMsg::DraftBalance { typed: "3".into() }]);
     assert_eq!(rt.screen(&d).adding.unwrap().cents, 300);
+}
+
+/// Net worth's card: what is owned and owed add up to it, and its trend
+/// ends at today's figure and does not take back a starting balance (the
+/// mortgage was always owed). Falsified by counting the mortgage's opening
+/// as a change in what the household is worth.
+#[test]
+fn net_worth_is_owned_less_owed_and_its_trend_ends_today() {
+    let d = Demo::new();
+    let rt = Runtime::<Accounts>::new();
+    let p = rt.screen(&d);
+    assert_eq!(p.assets + p.liabilities, p.net_worth);
+    assert_eq!(p.trend.last(), Some(&p.net_worth));
+    assert_eq!(p.trend.len(), 13);
+    let swing = p.trend.iter().max().unwrap() - p.trend.iter().min().unwrap();
+    assert!(swing < 10_000_000, "a household's twelve weeks, not its mortgage: {:?}", p.trend);
+    assert_eq!(p.shelves[0].title, "Budget Accounts");
 }

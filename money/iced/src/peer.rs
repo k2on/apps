@@ -69,7 +69,7 @@ pub struct Peer {
 }
 
 /// The views the window holds as long as it is open.
-const ALWAYS: [MoneyView; 11] = [
+const ALWAYS: [MoneyView; 12] = [
     MoneyView::Accounts,
     MoneyView::Groups,
     MoneyView::Payees,
@@ -81,6 +81,8 @@ const ALWAYS: [MoneyView; 11] = [
     MoneyView::Linked,
     MoneyView::Asks,
     MoneyView::Saved,
+    // Every transaction: the net worth's trend, and Insights' months.
+    MoneyView::Register { account: None },
 ];
 
 /// What the register for `ledger` asks the domain.

@@ -9,72 +9,105 @@ struct MoneyShellView: View {
     var body: some View {
         let p = screen.page
         AdaptiveTabs(selection: p.section, onSelect: { screen.send(.select(tag: $0)) }) {
-            SectionTab("Budget", glyph: "wallet", tag: "budget") {
-                WithInspector("Category", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
-                    WithToolbar("Budget") {
+            SectionTab("Budget", glyph: "mail", tag: "budget") {
+                WithToolbar(p.monthTitle) {
+                    WithInspector("Category Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                         HostedScreen("budget")
-                    } items: {
-                        BarButton("Previous Month", glyph: "chevron-left", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "previous-month")) })
-                        BarButton("This Month", glyph: "check", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "this-month")) })
-                        BarButton("Next Month", glyph: "chevron-right", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "next-month")) })
-                        BarButton("Assign", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "assign")) })
-                        BarButton("Inspector", glyph: "layers", placement: .primary, enabled: true, onTap: { screen.send(.toggleInspector) })
+                    } inspector: {
+                        HostedScreen("budget.inspector")
                     }
-                } inspector: {
-                    HostedScreen("budget.inspector")
+                } items: {
+                    BarButton("Previous Month", glyph: "chevron-left", placement: .navigation, enabled: true, onTap: { screen.send(.run(command: "previous-month")) })
+                    BarButton("Next Month", glyph: "chevron-right", placement: .navigation, enabled: true, onTap: { screen.send(.run(command: "next-month")) })
+                    BarButton("Auto-Assign", glyph: "wand-sparkles", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "auto-assign")) })
                 }
             }
-            SectionTab("Accounts", glyph: "landmark", tag: "accounts", badge: p.toReview) {
-                WithInspector("Transaction", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
-                    WithToolbar("Accounts") {
-                        WithSearch("Search", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
-                            SplitColumns(showing: p.showing, onBack: { screen.send(.back) }) {
-                                HostedScreen("accounts")
-                            } detail: {
-                                HostedScreen("accounts.register")
+            SectionTab("Accounts", glyph: "landmark", tag: "accounts") {
+                WithToolbar("Accounts") {
+                    PushedDetail(showing: p.showing, onBack: { screen.send(.back) }) {
+                        HostedScreen("accounts")
+                    } detail: {
+                        WithToolbar(p.accountTitle) {
+                            WithSearch("Search", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
+                                WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
+                                    HostedScreen("accounts.register")
+                                } inspector: {
+                                    HostedScreen("transactions.inspector")
+                                }
                             }
+                        } items: {
+                            BarButton("Sync", glyph: "refresh-cw", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "refresh")) })
+                            BarButton("Reconcile", glyph: "badge-check", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "reconcile")) })
+                            BarButton("New Transaction", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-transaction")) })
                         }
-                    } items: {
-                        BarButton("Add Account", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-account")) })
-                        BarButton("Inspector", glyph: "layers", placement: .primary, enabled: true, onTap: { screen.send(.toggleInspector) })
                     }
-                } inspector: {
-                    HostedScreen("accounts.inspector")
+                } items: {
+                    BarButton("Sync", glyph: "refresh-cw", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "refresh")) })
+                    BarButton("Add Account", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-account")) })
                 }
             }
-            SectionTab("Transactions", glyph: "credit-card", tag: "transactions") {
-                WithInspector("Splits and Receipt", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
-                    WithToolbar("Transactions") {
-                        WithSearch("Search Transactions", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
-                            SplitColumns(showing: p.showing, onBack: { screen.send(.back) }) {
-                                HostedScreen("transactions")
-                            } detail: {
-                                HostedScreen("transactions.detail")
+            SectionTab("Transactions", glyph: "list", tag: "transactions", badge: p.toReview) {
+                WithToolbar("Transactions") {
+                    WithSearch("Payee, category, memo or amount", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
+                        WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
+                            HostedScreen("transactions")
+                        } inspector: {
+                            HostedScreen("transactions.inspector")
+                        }
+                    }
+                } items: {
+                    BarButton("Filter", glyph: "list-filter", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "filter")) })
+                    BarButton("New Transaction", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-transaction")) })
+                }
+            }
+            SectionTab("Insights", glyph: "chart-column", tag: "insights") {
+                WithToolbar("Insights") {
+                    HostedScreen("insights")
+                } items: {
+                    BarButton("Previous Month", glyph: "chevron-left", placement: .navigation, enabled: true, onTap: { screen.send(.run(command: "previous-month")) })
+                    BarButton("Next Month", glyph: "chevron-right", placement: .navigation, enabled: true, onTap: { screen.send(.run(command: "next-month")) })
+                }
+            }
+            SectionGroup("Budget Accounts") {
+                ForEach(p.budgetAccounts, id: \.self) { a in
+                    SectionTab(a.title, glyph: a.glyph, tag: a.tag, badge: a.badge) {
+                        WithToolbar(a.title) {
+                            WithSearch("Search", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
+                                WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
+                                    HostedScreen("accounts.register")
+                                } inspector: {
+                                    HostedScreen("transactions.inspector")
+                                }
                             }
+                        } items: {
+                            BarButton("Sync", glyph: "refresh-cw", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "refresh")) })
+                            BarButton("Reconcile", glyph: "badge-check", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "reconcile")) })
+                            BarButton("New Transaction", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-transaction")) })
                         }
-                    } items: {
-                        BarButton("New Transaction", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-transaction")) })
-                        BarButton("Filter", glyph: "search", placement: .secondary, enabled: true, onTap: { screen.send(.run(command: "filter")) })
-                        BarButton("Inspector", glyph: "layers", placement: .primary, enabled: true, onTap: { screen.send(.toggleInspector) })
                     }
-                } inspector: {
-                    HostedScreen("transactions.inspector")
                 }
             }
-            SectionTab("Insights", glyph: "trending-up", tag: "insights") {
-                WithInspector("Trend", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
-                    WithToolbar("Insights") {
-                        HostedScreen("insights")
-                    } items: {
-                        BarButton("Previous Month", glyph: "chevron-left", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "previous-month")) })
-                        BarButton("This Month", glyph: "check", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "this-month")) })
-                        BarButton("Next Month", glyph: "chevron-right", placement: .principal, enabled: true, onTap: { screen.send(.run(command: "next-month")) })
-                        BarButton("Inspector", glyph: "layers", placement: .primary, enabled: true, onTap: { screen.send(.toggleInspector) })
+            SectionGroup("Tracking Accounts") {
+                ForEach(p.trackingAccounts, id: \.self) { a in
+                    SectionTab(a.title, glyph: a.glyph, tag: a.tag, badge: a.badge) {
+                        WithToolbar(a.title) {
+                            WithSearch("Search", text: p.search, onChange: { screen.send(.search(text: $0)) }) {
+                                WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
+                                    HostedScreen("accounts.register")
+                                } inspector: {
+                                    HostedScreen("transactions.inspector")
+                                }
+                            }
+                        } items: {
+                            BarButton("Sync", glyph: "refresh-cw", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "refresh")) })
+                            BarButton("Reconcile", glyph: "badge-check", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "reconcile")) })
+                            BarButton("New Transaction", glyph: "plus", placement: .primary, enabled: true, onTap: { screen.send(.run(command: "new-transaction")) })
+                        }
                     }
-                } inspector: {
-                    HostedScreen("insights.inspector")
                 }
             }
+        } footer: {
+            HostedScreen("household")
         }
     }
 }

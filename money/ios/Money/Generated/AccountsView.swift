@@ -9,11 +9,9 @@ struct AccountsView: View {
     var body: some View {
         let p = screen.page
         TabPage("Accounts", onRefresh: { screen.send(.refresh) }) {
-            CardSection {
-                ListRow("All Accounts", tile: "layers", amount: p.allTotal, quiet: true, pushes: true, onTap: { screen.send(.openAll) })
-            }
+            SummaryCard("Net Worth", cents: p.netWorth, first: "Assets", firstCents: p.assets, second: "Liabilities", secondCents: p.liabilities, trend: p.trend)
             ForEach(p.shelves, id: \.self) { shelf in
-                CardSection(title: shelf.title, total: shelf.total, showsTotal: shelf.showsTotal) {
+                CardSection(title: shelf.title, total: shelf.total, showsTotal: shelf.showsTotal, footer: shelf.note) {
                     ForEach(shelf.accounts, id: \.self) { a in
                         ListRow(a.name, subtitle: a.subtitle, mark: a.kindKey, badge: a.reviews, amount: a.balance, pushes: true, said: a.said, menu: [MenuAction("Rename", glyph: "pencil", destructive: false, onTap: { screen.send(.rename(id: a.id)) }), MenuAction("Reconcile…", glyph: "badge-check", destructive: false, shown: a.isOpen, onTap: { screen.send(.reconcile(id: a.id)) }), MenuAction("Copy Balance", glyph: "copy", destructive: false, onTap: { screen.send(.copyBalance(id: a.id)) }), MenuAction(a.closeTitle, glyph: a.closeGlyph, destructive: a.isOpen, onTap: { screen.send(.toggleClosed(id: a.id)) })], onTap: { screen.send(.openAccount(id: a.id)) })
                     }
@@ -45,7 +43,6 @@ struct AccountsView: View {
                 Prompt("Rename Account", text: r.name, onChange: { screen.send(.renameTyped(name: $0)) }, confirm: "Rename", onConfirm: { screen.send(.saveRename) }, onCancel: { screen.send(.cancelRename) })
             }
         } top: {
-            HeroFigure("Net Worth", cents: p.netWorth, note: "Every open account, less what's owed")
         }
     }
 }

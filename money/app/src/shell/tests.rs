@@ -65,49 +65,72 @@ fn hosted<M>(v: &View<M>, out: &mut Vec<&'static str>) {
     }
 }
 
-/// The sections are money.md's, in its order, Accounts with what waits
-/// for a look; choosing one shows it, and a new section starts at its list
-/// with nothing searched. Falsified by keeping the search across sections.
+/// The sections are money.md's, in its order, Transactions with what
+/// waits for a look; choosing one shows it, and a new place starts with
+/// nothing searched. Each open account is a place of its own under its
+/// shelf's heading, a child of Accounts (shown in it when compact).
+/// Falsified by keeping the search across sections.
 #[test]
-fn the_sections_are_budget_accounts_transactions_insights() {
+fn the_sections_then_every_account() {
     let mut demo = Demo::new();
     let mut rt = Runtime::<MoneyShell>::new();
     let page = rt.screen(&demo);
     assert_eq!(page.section, "budget");
     assert!(page.to_review.is_some_and(|n| n > 0), "the demo's Chase card waits for a look: {page:?}");
-    rt.dispatch(ShellMsg::Select { tag: "accounts".into() }, &mut demo);
+    let budget: Vec<&str> = page.budget_accounts.iter().map(|a| a.title.as_str()).collect();
+    let tracking: Vec<&str> = page.tracking_accounts.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(budget, ["Checking", "Savings", "Cash", "Chase Sapphire"]);
+    assert_eq!(tracking, ["Mortgage", "Retirement"]);
+    let card = page.budget_accounts[3].clone();
+    assert!(card.badge.is_some_and(|n| n > 0), "the card's imports wait: {card:?}");
+    rt.dispatch(ShellMsg::Select { tag: "transactions".into() }, &mut demo);
     rt.dispatch(ShellMsg::Search { text: "Costco".into() }, &mut demo);
-    rt.dispatch(ShellMsg::Opened, &mut demo);
     let page = rt.screen(&demo);
-    assert_eq!((page.section.as_str(), page.search.as_str(), page.showing), ("accounts", "Costco", true));
+    assert_eq!(
+        (page.section.as_str(), page.search.as_str(), page.showing),
+        ("transactions", "Costco", false)
+    );
     assert_eq!(demo.native, vec!["search Costco"], "the hosted list is told what to look for");
+    rt.dispatch(ShellMsg::Select { tag: card.tag.clone() }, &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.section.as_str(), page.search.as_str(), page.showing), (card.tag.as_str(), "", true));
+    assert_eq!(page.account_title, "Chase Sapphire");
+    assert_eq!(
+        ark_app::shell::compact_tag(&page.section),
+        "accounts",
+        "compact, the account is Accounts' pushed page"
+    );
+    rt.dispatch(ShellMsg::Back, &mut demo);
+    assert_eq!(rt.screen(&demo).section, "accounts");
     rt.dispatch(
         ShellMsg::Run {
             command: "go-insights".into(),
         },
         &mut demo,
     );
-    let page = rt.screen(&demo);
-    assert_eq!((page.section.as_str(), page.search.as_str(), page.showing), ("insights", "", false));
+    assert_eq!(rt.screen(&demo).section, "insights");
     rt.dispatch(ShellMsg::Select { tag: "nowhere".into() }, &mut demo);
+    rt.dispatch(ShellMsg::Select { tag: "accounts/00".into() }, &mut demo);
     assert_eq!(rt.screen(&demo).section, "insights", "an unknown tag shows nothing new");
+    rt.dispatch(ShellMsg::Month { month: "2026-10".into() }, &mut demo);
+    assert_eq!(rt.screen(&demo).month_title, "October 2026", "the budget's title is its month");
     let mut names = vec![];
     hosted(&money_shell::view(&rt.screen(&demo)), &mut names);
     assert_eq!(
-        names,
-        vec![
+        &names[..9],
+        [
             "budget",
             "budget.inspector",
             "accounts",
             "accounts.register",
-            "accounts.inspector",
+            "transactions.inspector",
             "transactions",
-            "transactions.detail",
             "transactions.inspector",
             "insights",
-            "insights.inspector"
+            "accounts.register",
         ]
     );
+    assert_eq!(names.last(), Some(&"household"), "who is signed in, at the sidebar's foot");
 }
 
 /// The inspector toggles from the toolbar and ⌥⌘I, and is put away by its
@@ -137,15 +160,22 @@ fn the_inspector_and_the_commands() {
     assert_eq!(places, vec![MenuPlace::File, MenuPlace::View, MenuPlace::Go]);
 }
 
-/// Settings has money.md's four panes. Falsified by leaving one out.
+/// Settings has the reference's three panes, one shown at a time.
+/// Falsified by leaving one out, or showing a pane no title names.
 #[test]
-fn settings_has_four_panes() {
-    let demo = Demo::new();
-    let rt = Runtime::<MoneyShell>::new();
+fn settings_has_three_panes() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
     let mut names = vec![];
     hosted(&money_settings::view(&rt.screen(&demo)), &mut names);
-    assert_eq!(
-        names,
-        vec!["settings.server", "settings.banks", "settings.household", "settings.appearance"]
+    assert_eq!(names, vec!["settings.general", "settings.household", "settings.banks"]);
+    assert_eq!(rt.screen(&demo).pane, "General");
+    rt.dispatch(
+        ShellMsg::Pane {
+            title: "Connected Banks".into(),
+        },
+        &mut demo,
     );
+    rt.dispatch(ShellMsg::Pane { title: "Nowhere".into() }, &mut demo);
+    assert_eq!(rt.screen(&demo).pane, "Connected Banks");
 }

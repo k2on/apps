@@ -1490,7 +1490,7 @@ fn an_accounts_register_is_its_filter() {
     assert_eq!(app.register_account(), None);
     assert!(app.peer.register().iter().all(|t| t.account_id == checking && t.amount < 0));
     let lit = app.sidebar_at();
-    assert_eq!(app.places()[lit].1, "Accounts", "the account's section stays lit");
+    assert_eq!(app.places()[lit].1, "Checking", "the account's own place stays lit");
     let _ = app.update(Message::Filter(filter::Msg::Edit(filter::Edit::Direction(Direction::Either))));
     assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
     assert_eq!(
@@ -1521,7 +1521,7 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
     let n = app.places().len();
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("G".into()), iced::keyboard::Modifiers::SHIFT));
     assert_eq!(app.sidebar_at(), n - 1);
-    assert_eq!(app.page, Page::Reflect, "the last section is Insights");
+    assert_eq!(app.places()[n - 1].1, "Retirement", "the last place is the last tracking account");
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Saved(id))));
     let f = app.peer.saved(id).unwrap().filter.clone();
     assert!(app.peer.register().iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
@@ -1833,22 +1833,26 @@ fn the_accounts_page_runs_in_the_window() {
     assert_eq!(a.page, Page::Ledger(Ledger::Account(jar)));
 }
 
-/// The window is money's shell: its four sections in the sidebar, a
-/// section chosen is its page, a register opened from Accounts is that
-/// section's detail beside the list, and back from it is the list; a
-/// command's shortcut runs it (Ctrl-3 is Transactions, Ctrl-Alt-I the
-/// inspector). Falsified by keeping the old sidebar of every account.
+/// The window is money's shell: its four sections in the sidebar, then
+/// each open account under its shelf's heading; a place chosen is its
+/// page, a register opened from Accounts is the account's own place, and
+/// back from it (compact) is the list; a command's shortcut runs it
+/// (Ctrl-3 is Transactions, Ctrl-Alt-I the inspector). Falsified by
+/// keeping the accounts out of the sidebar.
 #[test]
 fn the_window_is_the_shell() {
     let mut app = app();
-    let names: Vec<String> = app.places().into_iter().map(|p| p.1).collect();
-    assert_eq!(names, ["Budget", "Accounts", "Transactions", "Insights"]);
+    let places: Vec<(String, Option<&str>)> = app.places().into_iter().map(|p| (p.1, p.2)).collect();
+    let names: Vec<&str> = places.iter().map(|p| p.0.as_str()).collect();
+    assert_eq!(&names[..4], ["Budget", "Accounts", "Transactions", "Insights"]);
+    assert_eq!(places[4].1, Some("Budget Accounts"));
+    assert_eq!(places.last().and_then(|p| p.1), Some("Tracking Accounts"));
     let _ = app.update(Message::Shell(money_app::shell::ShellMsg::Select { tag: "accounts".into() }));
     assert_eq!(app.page, Page::Accounts);
     let checking = account(&app, "Checking").id;
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
-    assert_eq!(app.shell.state().section, "accounts");
-    assert!(app.shell_page().showing, "the register is the detail");
+    assert_eq!(app.shell.state().section, format!("accounts/{}", checking.hex()));
+    assert!(app.shell_page().showing, "compact, the register is pushed onto Accounts");
     let _ = app.update(Message::Shell(money_app::shell::ShellMsg::Back));
     assert_eq!(app.page, Page::Accounts);
     let ctrl = iced::keyboard::Modifiers::CTRL;
@@ -1866,6 +1870,9 @@ fn the_window_is_the_shell() {
     // Wide, the inspector is a pane the keys reach; narrow, a sheet they do not.
     app.window = iced::Size::new(1440.0, 900.0);
     assert!(app.panes().contains(&Pane::Inspector));
+    assert!(app.has_sidebar());
+    app.window = iced::Size::new(900.0, 1100.0);
+    assert!(!app.has_sidebar(), "an iPad upright: the sections are a tab bar at the top");
     app.window = iced::Size::new(390.0, 800.0);
     assert_eq!(app.panes(), vec![Pane::Content]);
 }

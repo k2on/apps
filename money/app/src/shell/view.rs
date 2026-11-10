@@ -8,8 +8,12 @@ use ark_app::view::*;
 
 use super::{ShellMsg, ShellPage};
 
-/// The main window: the four sections, each its toolbar over what it
-/// shows, its inspector beside it.
+/// The main window: the four sections, then each account in the sidebar
+/// under Budget Accounts or Tracking Accounts; each its toolbar — what
+/// goes back or between months at its leading end, its title, its
+/// actions, the inspector's toggle and the search field at its trailing
+/// end — over what it shows, its inspector beside it. Who is signed in is
+/// at the sidebar's foot, with Settings.
 #[view]
 pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
     adaptive_tabs(
@@ -18,111 +22,178 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
         (
             section_tab(
                 "Budget",
-                "wallet",
+                "mail",
                 "budget",
-                inspector(
-                    "Category",
-                    p.inspector,
-                    |shown| ShellMsg::Inspector { shown },
-                    toolbar(
-                        "Budget",
+                toolbar(
+                    p.month_title,
+                    inspector(
+                        "Category Details",
+                        p.inspector,
+                        |shown| ShellMsg::Inspector { shown },
                         hosted("budget"),
-                        (
-                            bar_item("Previous Month", "chevron-left", Placement::Principal, run("previous-month")),
-                            bar_item("This Month", "check", Placement::Principal, run("this-month")),
-                            bar_item("Next Month", "chevron-right", Placement::Principal, run("next-month")),
-                            bar_item("Assign", "plus", Placement::Primary, run("assign")),
-                            bar_item("Inspector", "layers", Placement::Primary, ShellMsg::ToggleInspector),
-                        ),
+                        hosted("budget.inspector"),
                     ),
-                    hosted("budget.inspector"),
+                    (
+                        bar_item("Previous Month", "chevron-left", Placement::Navigation, run("previous-month")),
+                        bar_item("Next Month", "chevron-right", Placement::Navigation, run("next-month")),
+                        bar_item("Auto-Assign", "wand-sparkles", Placement::Primary, run("auto-assign")),
+                    ),
                 ),
             ),
             section_tab(
                 "Accounts",
                 "landmark",
                 "accounts",
-                inspector(
-                    "Transaction",
-                    p.inspector,
-                    |shown| ShellMsg::Inspector { shown },
-                    toolbar(
-                        "Accounts",
-                        searchable(
-                            "Search",
-                            p.search,
-                            |text| ShellMsg::Search { text },
-                            split_view(hosted("accounts"), hosted("accounts.register"), p.showing, ShellMsg::Back),
+                toolbar(
+                    "Accounts",
+                    pushes(
+                        hosted("accounts"),
+                        toolbar(
+                            p.account_title,
+                            searchable(
+                                "Search",
+                                p.search,
+                                |text| ShellMsg::Search { text },
+                                inspector(
+                                    "Transaction Details",
+                                    p.inspector,
+                                    |shown| ShellMsg::Inspector { shown },
+                                    hosted("accounts.register"),
+                                    hosted("transactions.inspector"),
+                                ),
+                            ),
+                            register_items(),
                         ),
-                        (
-                            bar_item("Add Account", "plus", Placement::Primary, run("new-account")),
-                            bar_item("Inspector", "layers", Placement::Primary, ShellMsg::ToggleInspector),
+                        p.showing,
+                        ShellMsg::Back,
+                    ),
+                    (
+                        bar_item("Sync", "refresh-cw", Placement::Primary, run("refresh")),
+                        bar_item("Add Account", "plus", Placement::Primary, run("new-account")),
+                    ),
+                ),
+            ),
+            section_tab(
+                "Transactions",
+                "list",
+                "transactions",
+                toolbar(
+                    "Transactions",
+                    searchable(
+                        "Payee, category, memo or amount",
+                        p.search,
+                        |text| ShellMsg::Search { text },
+                        inspector(
+                            "Transaction Details",
+                            p.inspector,
+                            |shown| ShellMsg::Inspector { shown },
+                            hosted("transactions"),
+                            hosted("transactions.inspector"),
                         ),
                     ),
-                    hosted("accounts.inspector"),
+                    (
+                        bar_item("Filter", "list-filter", Placement::Primary, run("filter")),
+                        bar_item("New Transaction", "plus", Placement::Primary, run("new-transaction")),
+                    ),
                 ),
             )
             .badge(p.to_review),
             section_tab(
-                "Transactions",
-                "credit-card",
-                "transactions",
-                inspector(
-                    "Splits and Receipt",
-                    p.inspector,
-                    |shown| ShellMsg::Inspector { shown },
-                    toolbar(
-                        "Transactions",
-                        searchable(
-                            "Search Transactions",
-                            p.search,
-                            |text| ShellMsg::Search { text },
-                            split_view(hosted("transactions"), hosted("transactions.detail"), p.showing, ShellMsg::Back),
-                        ),
-                        (
-                            bar_item("New Transaction", "plus", Placement::Primary, run("new-transaction")),
-                            bar_item("Filter", "search", Placement::Secondary, run("filter")),
-                            bar_item("Inspector", "layers", Placement::Primary, ShellMsg::ToggleInspector),
-                        ),
+                "Insights",
+                "chart-column",
+                "insights",
+                toolbar(
+                    "Insights",
+                    hosted("insights"),
+                    (
+                        bar_item("Previous Month", "chevron-left", Placement::Navigation, run("previous-month")),
+                        bar_item("Next Month", "chevron-right", Placement::Navigation, run("next-month")),
                     ),
-                    hosted("transactions.inspector"),
                 ),
             ),
-            section_tab(
-                "Insights",
-                "trending-up",
-                "insights",
-                inspector(
-                    "Trend",
-                    p.inspector,
-                    |shown| ShellMsg::Inspector { shown },
-                    toolbar(
-                        "Insights",
-                        hosted("insights"),
-                        (
-                            bar_item("Previous Month", "chevron-left", Placement::Principal, run("previous-month")),
-                            bar_item("This Month", "check", Placement::Principal, run("this-month")),
-                            bar_item("Next Month", "chevron-right", Placement::Principal, run("next-month")),
-                            bar_item("Inspector", "layers", Placement::Primary, ShellMsg::ToggleInspector),
+            tab_group(
+                "Budget Accounts",
+                for a in p.budget_accounts {
+                    section_tab(
+                        a.title,
+                        a.glyph,
+                        a.tag,
+                        toolbar(
+                            a.title,
+                            searchable(
+                                "Search",
+                                p.search,
+                                |text| ShellMsg::Search { text },
+                                inspector(
+                                    "Transaction Details",
+                                    p.inspector,
+                                    |shown| ShellMsg::Inspector { shown },
+                                    hosted("accounts.register"),
+                                    hosted("transactions.inspector"),
+                                ),
+                            ),
+                            register_items(),
                         ),
-                    ),
-                    hosted("insights.inspector"),
-                ),
+                    )
+                    .badge(a.badge)
+                },
+            ),
+            tab_group(
+                "Tracking Accounts",
+                for a in p.tracking_accounts {
+                    section_tab(
+                        a.title,
+                        a.glyph,
+                        a.tag,
+                        toolbar(
+                            a.title,
+                            searchable(
+                                "Search",
+                                p.search,
+                                |text| ShellMsg::Search { text },
+                                inspector(
+                                    "Transaction Details",
+                                    p.inspector,
+                                    |shown| ShellMsg::Inspector { shown },
+                                    hosted("accounts.register"),
+                                    hosted("transactions.inspector"),
+                                ),
+                            ),
+                            register_items(),
+                        ),
+                    )
+                    .badge(a.badge)
+                },
             ),
         ),
     )
+    .footer(hosted("household"))
+    .into()
+}
+
+/// An account's register's toolbar: ask the bank, reconcile, add.
+fn register_items() -> View<ShellMsg> {
+    (
+        bar_item("Sync", "refresh-cw", Placement::Primary, run("refresh")),
+        bar_item("Reconcile", "badge-check", Placement::Primary, run("reconcile")),
+        bar_item("New Transaction", "plus", Placement::Primary, run("new-transaction")),
+    )
+        .into()
 }
 
 /// The Settings scene: a window of panes on the Mac and the desktop, a
 /// list of screens elsewhere.
 #[view]
-pub fn money_settings(_p: &ShellPage) -> View<ShellMsg> {
-    settings_panes((
-        settings_pane("Server and Sign-In", "badge-check", hosted("settings.server")),
-        settings_pane("Bank Connections", "landmark", hosted("settings.banks")),
-        settings_pane("Household", "building-2", hosted("settings.household")),
-        settings_pane("Appearance", "circle", hosted("settings.appearance")),
-    ))
+pub fn money_settings(p: &ShellPage) -> View<ShellMsg> {
+    settings_panes(
+        p.pane,
+        |title| ShellMsg::Pane { title },
+        (
+            settings_pane("General", "settings", hosted("settings.general")),
+            settings_pane("Household", "users", hosted("settings.household")),
+            settings_pane("Connected Banks", "landmark", hosted("settings.banks")),
+        ),
+    )
 }
 
 /// A command by name, carried out by the platform's shell.
@@ -149,9 +220,10 @@ pub fn commands() -> Vec<CommandMenu<ShellMsg>> {
             vec![
                 command("Previous Month", "[", run("previous-month")),
                 command("Next Month", "]", run("next-month")),
-                command("This Month", "t", run("this-month")),
+                command("This Month", "t", run("this-month")).shift(),
                 command("Show Inspector", "i", ShellMsg::ToggleInspector).option(),
-                command("Refresh", "r", run("refresh")),
+                command("Find Transactions…", "f", run("find")),
+                command("Sync with Banks", "r", run("refresh")),
             ],
         ),
         command_menu(

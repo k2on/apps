@@ -22,7 +22,6 @@ struct TransactionsView: View {
     @State private var approved = 0
 
     /// How tall the large title's row is: past it, the inline title comes into the bar.
-    @State private var fold: CGFloat = 0
 
     var body: some View {
         // A search is the core's (`MoneyView.search`), held while typed; what needs a look is the
@@ -35,10 +34,7 @@ struct TransactionsView: View {
             // The large title, and at the end of its line what the tab offers and the account's face.
             // With the search field and To Review / All under it, the title's
             // own gap all there is between them (`TitleSection`).
-            TitleSection("Transactions", fold: $fold) {
-                AddTransactionButton()
-                AccountButton()
-            } below: {
+            Section {
                 SearchField(text: $needle, prompt: "Payee, category, memo or amount")
                 Picker("Showing", selection: $showing) {
                     ForEach(Showing.allCases, id: \.self) { s in
@@ -53,7 +49,6 @@ struct TransactionsView: View {
             }
         }
         .groupedList()
-        .largeTitleBar("Transactions", fold: fold)
         .refreshable { await model.refresh() }
         .sensoryFeedback(.success, trigger: approved)
         .holding(MoneyView.register(account: nil))

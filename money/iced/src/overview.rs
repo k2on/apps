@@ -67,7 +67,7 @@ impl Host<Accounts> for Desk<'_> {
     }
     fn open(&mut self, route: Route) {
         if let Some(page) = self.app.page_of(&route) {
-            self.app.page = page;
+            let _ = self.app.step(Message::Go(page));
         }
     }
     fn native(&mut self, name: &str) {

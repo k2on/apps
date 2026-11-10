@@ -93,6 +93,7 @@ import dev.arkui.Transitions
 import dev.arkui.reducedMotion
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
+import uniffi.money_domain.Auto
 import uniffi.money_domain.Route
 import uniffi.money_domain.TxnLine
 import uniffi.money_domain.newDraft
@@ -192,10 +193,16 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         when (name) {
             "new-transaction" -> form = newForm(book.state.value, null)
             "new-account" -> shell.onAccountSheet()
+            "previous-month" -> book.stepMonth(-1)
+            "next-month" -> book.stepMonth(1)
+            "auto-assign" -> book.autoAssign(Auto.UNDERFUNDED)
+            "refresh" -> book.sync()
             else -> {}
         }
     }
-    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav) }
+    // The month is the budget's title in the shell's top bar.
+    LaunchedEffect(ledger.month) { sections.send(uniffi.money_app.ShellMsg.Month(month = ledger.month)) }
+    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
         NavHost(
@@ -418,7 +425,7 @@ fun rememberFlag(initial: Boolean = false): androidx.compose.runtime.MutableStat
  * Accounts' list is the generated Accounts slice, over its runtime.
  */
 @Composable
-private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController) {
+private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController, sections: MoneyShellHolder) {
     when (name) {
         "budget" -> BudgetScreen(ledger)
         "accounts" -> {
@@ -440,7 +447,15 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
         }
         "transactions" -> ActivityScreen(ledger)
         "insights" -> InsightsScreen(ledger)
-        "settings.server" -> SettingsScreen(ledger, onBack = {})
+        "accounts.register" -> {
+            // The account the shell shows: its place's tag, `accounts/<id>`.
+            val page by sections.page.collectAsStateWithLifecycle()
+            val id = ledger.accounts.firstOrNull { "accounts/${it.id.hex}" == page.section }?.id
+            if (id != null) RegisterScreen(ledger, id, onBack = { sections.send(uniffi.money_app.ShellMsg.Back) }) else Text("No Account Selected", modifier = Modifier.padding(16.dp))
+        }
+        // Who is signed in, at the drawer's foot (or the top bar's end): the account sheet.
+        "household" -> androidx.compose.material3.TextButton(onClick = shell.onAccountSheet) { Text(ledger.who) }
+        "settings.general" -> SettingsScreen(ledger, onBack = {})
         else -> Text("Nothing Selected", modifier = Modifier.padding(16.dp))
     }
 }

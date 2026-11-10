@@ -57,34 +57,15 @@ struct BudgetView: View {
         var verb: String { if case .newGroup = self { return "Add" } else { return "Rename" } }
     }
 
-    /// How tall the large title's row is: past it, the inline title comes into the bar.
-    @State private var fold: CGFloat = 0
 
     var body: some View {
         let s = model.snapshot
         let groups = Months.groups(s.groups, s.lines, hidden: showHidden)
         let shown = ahead ?? groups
         List {
-            // The large title, and at the end of its line the ••• menu and the account's face.
-            // With the month's pager and Ready to Assign under it, the title's
-            // own gap all there is between them (`TitleSection`).
-            TitleSection("Budget", fold: $fold, spacing: Space.l) {
-                if editing {
-                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
-                        .fontWeight(.semibold)
-                } else {
-                    options
-                }
-                AccountButton()
-            } below: {
-                // A step changes the month at once; only its figures roll, as its
-                // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
-                Pager(model.monthName,
-                      home: model.month == model.thisMonth ? nil : { model.showThisMonth() },
-                      back: { model.stepMonth(-1) },
-                      forward: { model.stepMonth(1) })
-                ready(s.summary)
-            }
+            // The month is the toolbar's title, its arrows the toolbar's
+            // (the shell's); Ready to Assign is the page's headline.
+            Section { ready(s.summary) }
             if !s.loaded {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }
                     .listRowBackground(Color.clear)
@@ -109,7 +90,16 @@ struct BudgetView: View {
         .groupedList()
         .listSectionSpacing(.compact)
         .refreshable { await model.refresh() }
-        .largeTitleBar("Budget", fold: fold)
+        .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                if editing {
+                    Button("Done") { withAnimation(Springs.move.reduced(still)) { editing = false } }
+                        .fontWeight(.semibold)
+                } else {
+                    options
+                }
+            }
+        }
         .alert(naming?.title ?? "",
                isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
             TextField("Name", text: $typed)
@@ -198,27 +188,26 @@ struct BudgetView: View {
 
     @ViewBuilder private func ready(_ summary: Summary?) -> some View {
         let s = summary ?? Summary(month: model.month, readyToAssign: 0, income: 0, assigned: 0, activity: 0, available: 0, overspentLastMonth: 0, overspent: 0, underfunded: 0)
-        HeroFigure("Ready to Assign", cents: s.readyToAssign, tint: s.tint, note: s.readyWords(),
-                   action: s.readyToAssign > 0 ? { present(.move(nil)) } : nil) {
-            HStack(spacing: Space.s) {
-                if s.overspent > 0 {
-                    Pill(.negative) { Label("\(s.overspent) overspent", systemImage: "exclamationmark.circle.fill") }
-                }
-                if s.underfunded > 0 {
-                    Button { model.autoAssign(.underfunded) } label: {
-                        Pill(.caution) { Label("\(s.underfunded) underfunded", systemImage: "target") }
-                    }
-                    .buttonStyle(.press)
-                    .accessibilityHint("Assigns every underfunded category its target")
-                }
-                if s.overspent == 0 && s.underfunded == 0 && s.assigned > 0 {
-                    Pill(.positive) { Label("On track", systemImage: "checkmark.circle.fill") }
-                }
-                Spacer(minLength: 0)
+        var said: [String] = []
+        if s.overspent > 0 { said.append("\(s.overspent) overspent") }
+        if s.underfunded > 0 { said.append("\(s.underfunded) underfunded") }
+        let caption = said.isEmpty ? (s.readyToAssign == 0 ? "Every dollar has a job." : "Give these dollars a job.") : said.joined(separator: " \u{b7} ")
+        Headline(s.readyToAssign < 0 ? "Assigned Too Much" : "Ready to Assign",
+                 figure: CentsText.string(s.readyToAssign),
+                 tint: s.readyToAssign < 0 ? .negative : s.readyToAssign > 0 ? .positive : .neutral,
+                 caption: caption) {
+            Menu {
+                Button { model.autoAssign(.underfunded) } label: { Label("Underfunded", systemImage: "target") }
+                Button { model.autoAssign(.lastMonth) } label: { Label("Assigned Last Month", systemImage: "arrow.uturn.backward") }
+                Divider()
+                Button(role: .destructive) { model.autoAssign(.reset) } label: { Label("Reset Assigned Amounts", systemImage: "arrow.counterclockwise") }
+            } label: {
+                Label("Auto-Assign", systemImage: "wand.and.stars")
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .fixedSize()
         }
-        .padding(.horizontal, Space.page)
-        .padding(.bottom, Space.s)
     }
 
     // MARK: a group
@@ -335,60 +324,50 @@ struct BudgetView: View {
     }
 }
 
-/// One category in the month: its name, how far it is toward its target,
-/// and what it has, in its tone's pill. A card's payment category wears
-/// the card's mark and says how much of what the card owes is set aside;
-/// a category that spent more on a card than it had says so in amber.
+/// One category in the month: its name, the slim bar toward its goal and
+/// what needs attention in words under it; on a regular width what it was
+/// given and what was spent in their columns; what it has in a capsule of
+/// its state (`StatusBadge`), the capsule alone when compact. A card's
+/// payment category wears the card's mark and says how much of what the
+/// card owes is set aside.
 struct CategoryRow: View {
     let line: BudgetLine
     /// The month its figures are of: they roll when it is stepped.
     let month: String
+    @Environment(\.horizontalSizeClass) private var size
+    @Environment(\.dynamicTypeSize) private var type
+    @ScaledMetric(relativeTo: .body) private var column: CGFloat = LayoutTokens.amountColumnWidth
 
     var body: some View {
         let tone = line.tone()
         let card = line.isPayment()
+        let columns = size != .compact && !type.isAccessibilitySize
         HStack(spacing: Space.m) {
-            if card { AccountMark(kind: "credit", side: 28) }
-            VStack(alignment: .leading, spacing: Space.xs + 2) {
-                HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(spacing: Space.s) {
+                    if card { AccountMark(kind: "credit", side: 20) }
                     Text(line.name)
                         .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
-                        .lineLimit(1)
-                    Spacer(minLength: Space.s)
-                    Pill(cents: line.available, tint: tone.tint).rolls(on: month)
+                        .lineLimit(2)
                 }
                 if card {
                     payment
-                } else if let f = line.meter()?.fraction() {
-                    ProgressView(value: f)
-                        .tint(tone == .overspent ? Color.error : tone == .onCard || f < 1 ? Color.caution : Color.positive)
-                        .scaleEffect(y: 0.8, anchor: .center)
-                    HStack {
-                        if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
-                        Text("\(CentsText.string(line.assigned)) of \(CentsText.string(line.target))")
-                        Spacer()
-                        if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.quiet)
-                    .monospacedDigit()
-                } else if line.activity != 0 || line.assigned != 0 || line.ruled {
-                    HStack {
-                        if line.ruled { Image(systemName: Ruled.symbol).imageScale(.small) }
-                        Text("Assigned \(CentsText.string(line.assigned))")
-                        Spacer()
-                        if line.activity != 0 { Text("Spent \(CentsText.string(-line.activity))") }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.quiet)
-                    .monospacedDigit()
+                } else if let m = line.meter() {
+                    GoalBar(m.fraction(), tint: m.tone.tint)
                 }
-                if !card && line.creditOverspent > 0 {
-                    Label("\(CentsText.string(line.creditOverspent)) on card", systemImage: "creditcard")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.caution)
-                        .monospacedDigit()
+                if !card && (tone == .overspent || tone == .short || tone == .onCard) {
+                    Text(line.story(style: Numbers.style)).font(.caption).foregroundStyle(tone.tint.color)
                 }
+            }
+            Spacer(minLength: Space.s)
+            if columns {
+                CentsText(line.assigned).frame(width: column, alignment: .trailing)
+                CentsText(line.activity).foregroundStyle(.quiet).frame(width: column, alignment: .trailing)
+                StatusBadge(CentsText.string(line.available), tint: tone.tint)
+                    .rolls(on: month)
+                    .frame(width: column, alignment: .trailing)
+            } else {
+                StatusBadge(CentsText.string(line.available), tint: tone.tint).rolls(on: month)
             }
         }
         .padding(.vertical, 2)

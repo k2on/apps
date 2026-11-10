@@ -7,22 +7,17 @@ use ark_app::view::*;
 
 use super::{AccountItem, AccountsMsg, AccountsPage};
 
-/// The tab: what the household is worth, All Accounts, the shelves of
-/// accounts, Bank Connections and Add Account; Add Account's sheet and
-/// the rename alert over it while they are up.
+/// The tab: what the household is worth in its card (what it owns, what it
+/// owes, how it went), the shelves of accounts (Budget Accounts, Tracking
+/// Accounts, Closed) each with its total and a note, Bank Connections and
+/// Add Account; Add Account's sheet and the rename alert over it while
+/// they are up.
 #[view]
 pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
     tab_page(
         "Accounts",
         (
-            card_section(
-                list_row("All Accounts")
-                    .tile("layers")
-                    .amount(p.all_total)
-                    .quiet()
-                    .pushes()
-                    .on_tap(AccountsMsg::OpenAll),
-            ),
+            summary_card("Net Worth", p.net_worth, "Assets", p.assets, "Liabilities", p.liabilities, p.trend),
             for shelf in p.shelves {
                 card_section(for a in shelf.accounts {
                     account_row(a)
@@ -30,6 +25,7 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
                 .header(shelf.title)
                 .amount(shelf.total)
                 .shows_amount(shelf.shows_total)
+                .footer(shelf.note)
             },
             card_section((
                 list_row(p.banks_title).glyph("link").pushes().on_tap(AccountsMsg::OpenBanks),
@@ -82,7 +78,6 @@ pub fn accounts(p: &AccountsPage) -> View<AccountsMsg> {
             },
         ),
     )
-    .top(hero_figure("Net Worth", p.net_worth, "Every open account, less what's owed"))
     .refresh(AccountsMsg::Refresh)
     .into()
 }

@@ -20,9 +20,9 @@ pub fn money(cents: i64) -> String {
     format::amount(cents, &STYLE)
 }
 
-/// [`money`], or nothing for nothing.
-pub fn money_or_blank(cents: i64) -> String {
-    format::amount_or_blank(cents, &STYLE)
+/// [`money`] with its sign always: `+$12.00`, `-$12.00`.
+pub fn signed(cents: i64) -> String {
+    format::amount_signed(cents, &STYLE)
 }
 
 /// What somebody typed as an amount, in cents; nothing typed is nothing.

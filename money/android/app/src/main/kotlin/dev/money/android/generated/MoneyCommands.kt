@@ -14,9 +14,10 @@ fun moneyCommands(screen: MoneyShellHolder): List<ShellMenu> = listOf(
     ShellMenu(MenuPlace.View, listOf(
         ShellCommand("Previous Month", key = "[", shift = false, option = false) { screen.send(ShellMsg.Run(command = "previous-month")) },
         ShellCommand("Next Month", key = "]", shift = false, option = false) { screen.send(ShellMsg.Run(command = "next-month")) },
-        ShellCommand("This Month", key = "t", shift = false, option = false) { screen.send(ShellMsg.Run(command = "this-month")) },
+        ShellCommand("This Month", key = "t", shift = true, option = false) { screen.send(ShellMsg.Run(command = "this-month")) },
         ShellCommand("Show Inspector", key = "i", shift = false, option = true) { screen.send(ShellMsg.ToggleInspector) },
-        ShellCommand("Refresh", key = "r", shift = false, option = false) { screen.send(ShellMsg.Run(command = "refresh")) },
+        ShellCommand("Find Transactions…", key = "f", shift = false, option = false) { screen.send(ShellMsg.Run(command = "find")) },
+        ShellCommand("Sync with Banks", key = "r", shift = false, option = false) { screen.send(ShellMsg.Run(command = "refresh")) },
     )),
     ShellMenu(MenuPlace.Go, listOf(
         ShellCommand("Budget", key = "1", shift = false, option = false) { screen.send(ShellMsg.Run(command = "go-budget")) },

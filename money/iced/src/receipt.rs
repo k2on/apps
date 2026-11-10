@@ -23,9 +23,6 @@ use crate::amount::{self, money};
 use crate::view::{action, bold, dim, fill, link, quiet};
 use crate::{look, App, Message, Modal, Page};
 
-/// The width of the panel beside the register.
-pub const SIDE: f32 = 350.0;
-
 /// What the receipt panel does.
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -201,8 +198,7 @@ impl App {
         }
     }
 
-    /// The panel beside the register, as the inspector is beside the
-    /// budget: the selected transaction's receipt drawn as paper, and what
+    /// The inspector beside a register: the selected transaction's receipt drawn as paper, and what
     /// can be done with it; or how one is added; or, typing one, its form.
     pub fn view_receipt_side(&self) -> Element<'_, Message> {
         let body: Element<'_, Message> = match self.open_txn() {
@@ -219,22 +215,14 @@ impl App {
             ],
             None => column![bold("Receipt", 15)],
         };
-        // Its top clear of the account button, which floats over the corner.
-        let pad = iced::Padding {
-            top: crate::view::PAD + arkui::account::HEIGHT + 6.0,
-            ..iced::Padding::new(crate::view::PAD)
-        };
+        // The shell's inspector holds it (`arkui::view::shell`), under the toolbar.
         container(arkui::scroll::elastic(
-            scrollable(crate::view::under_face(
-                column![head.spacing(2), body].spacing(12).padding(pad),
-                style::surface_color,
-            ))
-            .height(Length::Fill)
-            .style(style::bars),
+            scrollable(column![head.spacing(2), body].spacing(12).padding(crate::view::PAD))
+                .height(Length::Fill)
+                .style(style::bars),
         ))
-        .width(Length::Fixed(SIDE))
+        .width(Length::Fill)
         .height(Length::Fill)
-        .style(style::surface)
         .into()
     }
 

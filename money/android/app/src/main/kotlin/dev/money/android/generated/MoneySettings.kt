@@ -11,18 +11,15 @@ import uniffi.money_app.ShellMsg
 @Composable
 fun MoneySettings(screen: MoneyShellHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
-    SettingsPanes {
-        SettingsPane("Server and Sign-In", glyph = "badge-check") {
-            HostedScreen("settings.server")
+    SettingsPanes(selection = p.pane, onSelect = { screen.send(ShellMsg.Pane(title = it)) }) {
+        SettingsPane("General", glyph = "settings") {
+            HostedScreen("settings.general")
         }
-        SettingsPane("Bank Connections", glyph = "landmark") {
-            HostedScreen("settings.banks")
-        }
-        SettingsPane("Household", glyph = "building-2") {
+        SettingsPane("Household", glyph = "users") {
             HostedScreen("settings.household")
         }
-        SettingsPane("Appearance", glyph = "circle") {
-            HostedScreen("settings.appearance")
+        SettingsPane("Connected Banks", glyph = "landmark") {
+            HostedScreen("settings.banks")
         }
     }
 }

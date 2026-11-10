@@ -66,6 +66,7 @@ struct Shell: View {
     @EnvironmentObject private var model: Model
     @EnvironmentObject private var watched: Watched<MoneyView>
     @State private var sheet: Sheet? = nil
+    @State private var autoAssigning = false
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
 
@@ -85,7 +86,17 @@ struct Shell: View {
             .environment(\.hostedScreens) { name in AnyView(hosted(name)) }
             .environment(\.sectionPath) { tag in path(tag) }
             .environment(\.present) { s in present(s) }
-            .onAppear { model.shell.native = { name in run(name) } }
+            .onAppear {
+                model.shell.native = { name in run(name) }
+                model.shell.send(.month(month: model.month))
+            }
+            // The budget's title is its month: the shell is told as it moves.
+            .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
+            .confirmationDialog("Auto-Assign", isPresented: $autoAssigning, titleVisibility: .visible) {
+                Button("Underfunded") { model.autoAssign(.underfunded) }
+                Button("Assigned Last Month") { model.autoAssign(.lastMonth) }
+                Button("Reset Assigned Amounts", role: .destructive) { model.autoAssign(.reset) }
+            }
             .sheet(item: $sheet) { s in
                 sheetView(s)
                     .environmentObject(model)
@@ -121,7 +132,6 @@ struct Shell: View {
                     // Written from Rust (Generated/AccountsView.swift), over its runtime.
                     AccountsView()
                         .environmentObject(a)
-                        .environment(\.tabFace) { AnyView(AccountButton()) }
                         .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind)) }
                         .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
                         .onAppear {
@@ -131,12 +141,19 @@ struct Shell: View {
                 }
             case "transactions": TransactionsView()
             case "insights": InsightsView()
-            case "accounts.register": ContentUnavailableView("No Account Selected", systemImage: "building.columns")
-            case "transactions.detail": ContentUnavailableView("No Transaction Selected", systemImage: "list.bullet.rectangle.portrait")
-            case "settings.server": SettingsView()
+            case "accounts.register":
+                // The account the shell shows (its place's tag, `accounts/<id>`).
+                if let id = model.snapshot.accounts.first(where: { "accounts/\($0.id.hex)" == model.shell.page.section })?.id {
+                    RegisterView(account: id)
+                } else {
+                    ContentUnavailableView("No Account Selected", systemImage: "building.columns")
+                }
+            case "budget.inspector", "transactions.inspector":
+                ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
+            case "household": AccountButton()
+            case "settings.general": SettingsView()
             case "settings.banks": BanksView()
-            case "settings.household": ContentUnavailableView("Household", systemImage: "house", description: Text("Who shares this budget, and their roles."))
-            case "settings.appearance": ContentUnavailableView("Appearance", systemImage: "circle.lefthalf.filled", description: Text("Follows the system's light and dark."))
+            case "settings.household": ContentUnavailableView("Household", systemImage: "person.2", description: Text("Who shares this budget, and their roles."))
             default: ContentUnavailableView("Nothing Selected", systemImage: "sidebar.right")
             }
         }
@@ -151,6 +168,11 @@ struct Shell: View {
             let a = usualAccount(accounts: model.snapshot.accounts)
             present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
         case "new-account": present(.addAccount)
+        case "previous-month": model.stepMonth(-1)
+        case "next-month": model.stepMonth(1)
+        case "this-month": model.showThisMonth()
+        case "auto-assign": autoAssigning = true
+        case "refresh": Task { await model.refresh() }
         default: break
         }
     }

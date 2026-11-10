@@ -15,7 +15,6 @@ struct InsightsView: View {
     @State private var picked: Int64? = nil
 
     /// How tall the large title's row is: past it, the inline title comes into the bar.
-    @State private var fold: CGFloat = 0
 
     var body: some View {
         let s = model.snapshot
@@ -25,7 +24,7 @@ struct InsightsView: View {
             // The large title, and at the end of its line what the tab offers and the account's face.
             // With the month's pager under it, the title's own gap all there
             // is between them (`TitleSection`).
-            TitleSection("Insights", fold: $fold) { AccountButton() } below: {
+            Section {
                 // A step changes the month at once; only its figures roll, as its
                 // numbers arrive (`rolls(on:)`), and the name slides (`Pager`).
                 Pager(model.monthName,
@@ -86,7 +85,6 @@ struct InsightsView: View {
         }
         .groupedList()
         .refreshable { await model.refresh() }
-        .largeTitleBar("Insights", fold: fold)
     }
 
     /// The groups' colours, in the order the most spent takes them: the

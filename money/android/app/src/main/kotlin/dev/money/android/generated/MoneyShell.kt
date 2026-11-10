@@ -11,90 +11,131 @@ import uniffi.money_app.ShellMsg
 @Composable
 fun MoneyShell(screen: MoneyShellHolder) {
     val p by screen.page.collectAsStateWithLifecycle()
-    AdaptiveTabs(selection = p.section, onSelect = { screen.send(ShellMsg.Select(tag = it)) }) {
-        SectionTab("Budget", glyph = "wallet", tag = "budget") {
-            WithInspector("Category", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
-                inspector = {
-                    HostedScreen("budget.inspector")
+    AdaptiveTabs(selection = p.section, onSelect = { screen.send(ShellMsg.Select(tag = it)) },
+        footer = {
+            HostedScreen("household")
+        },
+    ) {
+        SectionTab("Budget", glyph = "mail", tag = "budget") {
+            WithToolbar(p.monthTitle,
+                items = {
+                    BarButton("Previous Month", glyph = "chevron-left", placement = BarPlacement.Navigation, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "previous-month")) })
+                    BarButton("Next Month", glyph = "chevron-right", placement = BarPlacement.Navigation, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "next-month")) })
+                    BarButton("Auto-Assign", glyph = "wand-sparkles", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "auto-assign")) })
                 },
             ) {
-                WithToolbar("Budget",
-                    items = {
-                        BarButton("Previous Month", glyph = "chevron-left", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "previous-month")) })
-                        BarButton("This Month", glyph = "check", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "this-month")) })
-                        BarButton("Next Month", glyph = "chevron-right", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "next-month")) })
-                        BarButton("Assign", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "assign")) })
-                        BarButton("Inspector", glyph = "layers", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.ToggleInspector) })
+                WithInspector("Category Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
+                    inspector = {
+                        HostedScreen("budget.inspector")
                     },
                 ) {
                     HostedScreen("budget")
                 }
             }
         }
-        SectionTab("Accounts", glyph = "landmark", tag = "accounts", badge = p.toReview) {
-            WithInspector("Transaction", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
-                inspector = {
-                    HostedScreen("accounts.inspector")
+        SectionTab("Accounts", glyph = "landmark", tag = "accounts") {
+            WithToolbar("Accounts",
+                items = {
+                    BarButton("Sync", glyph = "refresh-cw", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "refresh")) })
+                    BarButton("Add Account", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-account")) })
                 },
             ) {
-                WithToolbar("Accounts",
-                    items = {
-                        BarButton("Add Account", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-account")) })
-                        BarButton("Inspector", glyph = "layers", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.ToggleInspector) })
+                PushedDetail(showing = p.showing, onBack = { screen.send(ShellMsg.Back) },
+                    detail = {
+                        WithToolbar(p.accountTitle,
+                            items = {
+                                BarButton("Sync", glyph = "refresh-cw", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "refresh")) })
+                                BarButton("Reconcile", glyph = "badge-check", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "reconcile")) })
+                                BarButton("New Transaction", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-transaction")) })
+                            },
+                        ) {
+                            WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
+                                WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
+                                    inspector = {
+                                        HostedScreen("transactions.inspector")
+                                    },
+                                ) {
+                                    HostedScreen("accounts.register")
+                                }
+                            }
+                        }
                     },
                 ) {
-                    WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
-                        SplitColumns(showing = p.showing, onBack = { screen.send(ShellMsg.Back) },
-                            detail = {
+                    HostedScreen("accounts")
+                }
+            }
+        }
+        SectionTab("Transactions", glyph = "list", tag = "transactions", badge = p.toReview) {
+            WithToolbar("Transactions",
+                items = {
+                    BarButton("Filter", glyph = "list-filter", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "filter")) })
+                    BarButton("New Transaction", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-transaction")) })
+                },
+            ) {
+                WithSearch("Payee, category, memo or amount", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
+                    WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
+                        inspector = {
+                            HostedScreen("transactions.inspector")
+                        },
+                    ) {
+                        HostedScreen("transactions")
+                    }
+                }
+            }
+        }
+        SectionTab("Insights", glyph = "chart-column", tag = "insights") {
+            WithToolbar("Insights",
+                items = {
+                    BarButton("Previous Month", glyph = "chevron-left", placement = BarPlacement.Navigation, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "previous-month")) })
+                    BarButton("Next Month", glyph = "chevron-right", placement = BarPlacement.Navigation, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "next-month")) })
+                },
+            ) {
+                HostedScreen("insights")
+            }
+        }
+        SectionGroup("Budget Accounts") {
+            for (a in p.budgetAccounts) {
+                SectionTab(a.title, glyph = a.glyph, tag = a.tag, badge = a.badge) {
+                    WithToolbar(a.title,
+                        items = {
+                            BarButton("Sync", glyph = "refresh-cw", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "refresh")) })
+                            BarButton("Reconcile", glyph = "badge-check", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "reconcile")) })
+                            BarButton("New Transaction", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-transaction")) })
+                        },
+                    ) {
+                        WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
+                            WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
+                                inspector = {
+                                    HostedScreen("transactions.inspector")
+                                },
+                            ) {
                                 HostedScreen("accounts.register")
-                            },
-                        ) {
-                            HostedScreen("accounts")
+                            }
                         }
                     }
                 }
             }
         }
-        SectionTab("Transactions", glyph = "credit-card", tag = "transactions") {
-            WithInspector("Splits and Receipt", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
-                inspector = {
-                    HostedScreen("transactions.inspector")
-                },
-            ) {
-                WithToolbar("Transactions",
-                    items = {
-                        BarButton("New Transaction", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-transaction")) })
-                        BarButton("Filter", glyph = "search", placement = BarPlacement.Secondary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "filter")) })
-                        BarButton("Inspector", glyph = "layers", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.ToggleInspector) })
-                    },
-                ) {
-                    WithSearch("Search Transactions", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
-                        SplitColumns(showing = p.showing, onBack = { screen.send(ShellMsg.Back) },
-                            detail = {
-                                HostedScreen("transactions.detail")
-                            },
-                        ) {
-                            HostedScreen("transactions")
+        SectionGroup("Tracking Accounts") {
+            for (a in p.trackingAccounts) {
+                SectionTab(a.title, glyph = a.glyph, tag = a.tag, badge = a.badge) {
+                    WithToolbar(a.title,
+                        items = {
+                            BarButton("Sync", glyph = "refresh-cw", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "refresh")) })
+                            BarButton("Reconcile", glyph = "badge-check", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "reconcile")) })
+                            BarButton("New Transaction", glyph = "plus", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "new-transaction")) })
+                        },
+                    ) {
+                        WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
+                            WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
+                                inspector = {
+                                    HostedScreen("transactions.inspector")
+                                },
+                            ) {
+                                HostedScreen("accounts.register")
+                            }
                         }
                     }
-                }
-            }
-        }
-        SectionTab("Insights", glyph = "trending-up", tag = "insights") {
-            WithInspector("Trend", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
-                inspector = {
-                    HostedScreen("insights.inspector")
-                },
-            ) {
-                WithToolbar("Insights",
-                    items = {
-                        BarButton("Previous Month", glyph = "chevron-left", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "previous-month")) })
-                        BarButton("This Month", glyph = "check", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "this-month")) })
-                        BarButton("Next Month", glyph = "chevron-right", placement = BarPlacement.Principal, enabled = true, onTap = { screen.send(ShellMsg.Run(command = "next-month")) })
-                        BarButton("Inspector", glyph = "layers", placement = BarPlacement.Primary, enabled = true, onTap = { screen.send(ShellMsg.ToggleInspector) })
-                    },
-                ) {
-                    HostedScreen("insights")
                 }
             }
         }

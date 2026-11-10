@@ -15,9 +15,10 @@ struct MoneyCommands: Commands {
         ArkCommands(.view) {
             CommandButton("Previous Month", key: "[", shift: false, option: false) { screen.send(.run(command: "previous-month")) }
             CommandButton("Next Month", key: "]", shift: false, option: false) { screen.send(.run(command: "next-month")) }
-            CommandButton("This Month", key: "t", shift: false, option: false) { screen.send(.run(command: "this-month")) }
+            CommandButton("This Month", key: "t", shift: true, option: false) { screen.send(.run(command: "this-month")) }
             CommandButton("Show Inspector", key: "i", shift: false, option: true) { screen.send(.toggleInspector) }
-            CommandButton("Refresh", key: "r", shift: false, option: false) { screen.send(.run(command: "refresh")) }
+            CommandButton("Find Transactions…", key: "f", shift: false, option: false) { screen.send(.run(command: "find")) }
+            CommandButton("Sync with Banks", key: "r", shift: false, option: false) { screen.send(.run(command: "refresh")) }
         }
         ArkCommands(.go) {
             CommandButton("Budget", key: "1", shift: false, option: false) { screen.send(.run(command: "go-budget")) }

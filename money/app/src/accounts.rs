@@ -13,7 +13,7 @@ use ark::row::Id;
 use ark_app::{App, Command, Data};
 use ark_format::NumberStyle;
 use ark_haptics::{perform, Haptic};
-use money_domain::accounts::{net_worth, shelves, AccountKind, Shelving};
+use money_domain::accounts::{net_worth, shelves, AccountKind, Shelving, STARTING_BALANCE};
 use money_domain::dates::day_of_ms;
 use money_domain::routes::Route;
 use money_domain::*;
@@ -203,6 +203,8 @@ pub struct AccountsShelf {
     pub total: i64,
     /// Whether the heading shows the total: the closed shelf's adds up to nothing that matters.
     pub shows_total: bool,
+    /// What the shelf is, said under it.
+    pub note: Option<String>,
     pub accounts: Vec<AccountItem>,
 }
 
@@ -258,6 +260,11 @@ pub struct RenameForm {
 pub struct AccountsPage {
     /// Every open account, less what's owed.
     pub net_worth: i64,
+    /// What the open accounts hold, and what they owe (below nothing).
+    pub assets: i64,
+    pub liabilities: i64,
+    /// Net worth at the end of each of the last weeks, oldest first, now last.
+    pub trend: Vec<i64>,
     /// The open accounts on the budget: All Accounts' figure.
     pub all_total: i64,
     pub shelves: Vec<AccountsShelf>,
@@ -272,13 +279,54 @@ pub struct AccountsPage {
 /// The glyph a kind of account is marked with (ArkUI's names, Lucide's).
 pub fn kind_glyph(kind: &str) -> &'static str {
     match kind {
-        "cash" => "wallet",
+        "cash" => "dollar-sign",
         "credit" => "credit-card",
-        "loan" => "landmark",
+        "loan" => "house",
         "investment" => "trending-up",
-        "savings" => "piggy-bank",
-        _ => "building-2",
+        "savings" => "banknote",
+        _ => "landmark",
     }
+}
+
+/// How many weeks the net worth's trend looks back.
+const TREND_WEEKS: i64 = 12;
+
+/// Net worth at the end of each of the last [`TREND_WEEKS`] weeks, oldest
+/// first, today last: today's, less what every open account's
+/// transactions since each of those days did (a transfer between two of
+/// them did nothing to it). An account's starting balance is not a change
+/// in what the household is worth, only in what this app knows of it, so
+/// it is not taken back.
+fn trend(accounts: &[AccountLine], txns: &[TxnLine], now_ms: i64) -> Vec<i64> {
+    let now = net_worth(accounts);
+    let open: Vec<_> = accounts.iter().filter(|a| !a.closed).map(|a| a.id).collect();
+    let today = now_ms.div_euclid(86_400_000);
+    (0..=TREND_WEEKS)
+        .rev()
+        .map(|weeks| {
+            let day = today - weeks * 7;
+            let since: i64 = txns
+                .iter()
+                .filter(|t| t.payee != STARTING_BALANCE && open.contains(&t.account_id))
+                .filter(|t| day_number(&t.date).is_some_and(|d| d > day && d <= today))
+                .map(|t| t.amount)
+                .sum();
+            now - since
+        })
+        .collect()
+}
+
+/// A day (`2026-11-08`) as days since 1970.
+fn day_number(day: &str) -> Option<i64> {
+    let mut parts = day.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, m, d) = (parts.next()??, parts.next()??, parts.next()??);
+    // Howard Hinnant's days_from_civil.
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
 }
 
 fn find<'a>(accounts: &'a [AccountLine], id: &str) -> Option<&'a AccountLine> {
@@ -307,7 +355,7 @@ impl App for Accounts {
     type Screen = AccountsPage;
 
     fn holds(_: &State) -> Vec<MoneyView> {
-        vec![MoneyView::Accounts, MoneyView::Banks]
+        vec![MoneyView::Accounts, MoneyView::Banks, MoneyView::Register { account: None }]
     }
 
     fn update(s: &mut State, msg: AccountsMsg, data: &Data<'_, MoneyView>) -> Vec<Command<Self>> {
@@ -438,7 +486,12 @@ impl App for Accounts {
         let shelves = shelves(accounts)
             .into_iter()
             .map(|sh| AccountsShelf {
-                title: sh.title,
+                title: format!("{} Accounts", sh.title),
+                note: match sh.shelving {
+                    Shelving::Budget => Some("What these hold is budgeted: ready to assign, then spent from categories.".into()),
+                    Shelving::Tracking => Some("Counted toward net worth; none of it is budgeted.".into()),
+                    Shelving::Closed => None,
+                },
                 total: sh.total,
                 shows_total: sh.shelving != Shelving::Closed,
                 accounts: sh.accounts.iter().map(|a| item(a, style)).collect(),
@@ -448,8 +501,13 @@ impl App for Accounts {
             .first()
             .filter(|b| b.synced_ms > 0)
             .map(|b| format!("Last synced with {} {}.", b.institution, ark_format::ago(b.synced_ms, data.now_ms)));
+        let open = || accounts.iter().filter(|a| !a.closed);
+        let txns: &[TxnLine] = data.rows(&MoneyView::Register { account: None });
         AccountsPage {
             net_worth: net_worth(accounts),
+            assets: open().map(|a| a.balance).filter(|b| *b > 0).sum(),
+            liabilities: open().map(|a| a.balance).filter(|b| *b < 0).sum(),
+            trend: trend(accounts, txns, data.now_ms),
             all_total: accounts.iter().filter(|a| !a.closed && a.on_budget).map(|a| a.balance).sum(),
             shelves,
             banks_title: if banks.is_empty() { "Connect a Bank" } else { "Bank Connections" }.into(),

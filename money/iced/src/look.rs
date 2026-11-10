@@ -1,14 +1,11 @@
 //! money's own looks, beside `arkui::style`'s: the tint the domain's tone
 //! of an amount is drawn in ([`Looks`]: `money_domain::words::Tone` in
-//! arkui's [`Tint`]s, for `arkui::style::pill` and `progress`), and the box
-//! what is ready to assign is drawn in. The
+//! arkui's [`Tint`]s, for `arkui::style::pill` and `progress`). The
 //! fields, cards, chips and pills are arkui's (`arkui::style::field`,
 //! `card`, `chip`, `pill`). Every colour asks [`arkui::theme::of`].
 
 use arkui::parts::Tint;
-use arkui::theme::of;
-use iced::widget::container;
-use iced::{Background, Border, Theme};
+use iced::Theme;
 
 /// The text boxes a task focuses, by id.
 pub const ASSIGNED: &str = "assigned";
@@ -68,28 +65,5 @@ impl Looks for Tone {
 
     fn text(self) -> impl Fn(&Theme) -> iced::widget::text::Style {
         self.tint().text()
-    }
-}
-
-/// The box across the top of the budget: green while there is money to
-/// assign, red when more was assigned than there is, quiet at nothing.
-pub fn ready(cents: i64) -> impl Fn(&Theme) -> container::Style {
-    move |theme| {
-        let p = of(theme);
-        let c = match cents {
-            0 => p.background.base.text.scale_alpha(0.3),
-            c if c < 0 => p.danger.base.color,
-            _ => p.success.base.color,
-        };
-        container::Style {
-            background: Some(Background::Color(c.scale_alpha(0.16))),
-            text_color: Some(p.background.base.text),
-            border: Border {
-                radius: 8.0.into(),
-                width: 1.0,
-                color: c.scale_alpha(0.5),
-            },
-            ..container::Style::default()
-        }
     }
 }
