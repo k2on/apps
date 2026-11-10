@@ -12,7 +12,7 @@ use money_server::stores::{AmazonOrders, Stores};
 /// An export the domain's tests read the stores from (money/core/tests/stores),
 /// read as the test runs: a crate is compiled from its own directory alone.
 fn domain_store(name: &str) -> String {
-    let path = format!("{}/../domain/tests/stores/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../core/tests/stores/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
