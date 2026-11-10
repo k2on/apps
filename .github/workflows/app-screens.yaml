@@ -14,8 +14,8 @@
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
 # the desktop `nix build .#<app>-iced` at the commit (flake.nix, `icedApp`;
 # `publish.desktop` the list), photographed with no window by arkui-shots.
-# The larger screens in the same jobs: Android's tablet and Fold beside each
-# phone's job, from the same APK; the iPad on the iPhone's Mac, only for an
+# The larger screens: Android's tablet and Fold each a job beside each
+# phone's, from the same APK; the iPad on the iPhone's Mac, only for an
 # app whose build takes it (its UIDeviceFamily), and the Mac's own window,
 # only for an app whose commit has `<app>-macos` (apps.md, "The larger
 # screens"). An app with neither boots nothing more.
@@ -374,13 +374,14 @@ jobs:
         # minutes of its ten). Their captures meet in the same
         # <app>/android/ (merge-multiple), whole when both are there.
         theme: [light, dark]
-        # The phone (a Pixel 7); and the large screens, one emulator after
-        # the other in a job of their own: a Pixel Tablet in landscape, then
-        # a Pixel Fold open and folded (apps-android.sh). The same APK,
-        # driver and shots on each; a job of their own so that the phone's
-        # come as soon as before, and one job, not two, so that the large
-        # screens pay one nix, one server and one wait for the APK.
-        device: [phone, large]
+        # The phone (a Pixel 7), a Pixel Tablet in landscape, and a Pixel
+        # Fold open and then folded (apps-android.sh): the same APK, driver
+        # and shots on each, each its own job. The tablet and the Fold were
+        # one job, one emulator after the other, to pay one nix, one server
+        # and one wait for the APK; that job was the longest of a run
+        # (harken's 16.7 minutes in app-screens 42728322097, the Fold's 10.3
+        # after the tablet's 5.1), and those are a minute or two each.
+        device: [phone, tablet, fold]
     name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
@@ -484,11 +485,11 @@ jobs:
           # if the run is still making it (none: apps-android.sh skips it).
           script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
-      # The large screens: the same, on a Pixel Tablet held in landscape
-      # (<app>/android-tablet/), then on a Pixel Fold, open and then folded
-      # (<app>/fold-unfolded/, <app>/fold-folded/), each its own AVD.
+      # The larger screens: the same, on a Pixel Tablet held in landscape
+      # (<app>/android-tablet/), or on a Pixel Fold, open and then folded
+      # (<app>/fold-unfolded/, <app>/fold-folded/), each its own job.
       - name: Capture (tablet)
-        if: matrix.device == 'large'
+        if: matrix.device == 'tablet'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -504,7 +505,7 @@ jobs:
       # foldable, the Pixel Fold's inner screen, which folds the same way
       # (the runner's command-line tools have had only that one).
       - id: fold
-        if: ${{ !cancelled() && matrix.device == 'large' }}
+        if: matrix.device == 'fold'
         name: The Fold's profile
         run: |
           ids=$("$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list device -c)
@@ -516,7 +517,7 @@ jobs:
           fi
           cat "$GITHUB_OUTPUT"
       - name: Capture (Fold)
-        if: ${{ !cancelled() && matrix.device == 'large' && steps.fold.outputs.profile != '' }}
+        if: matrix.device == 'fold' && steps.fold.outputs.profile != ''
         uses: reactivecircus/android-emulator-runner@v2
         env:
           FOLD_NAME: ${{ steps.fold.outputs.name }}
@@ -527,8 +528,7 @@ jobs:
           profile: ${{ steps.fold.outputs.profile }}
           avd-name: fold
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
-          # The APK as the tablet's step left it (awaited there, if the run was still making it).
-          script: bash .github/screens/meanwhile.sh wait servers && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
       - name: The servers' logs
         if: always()
