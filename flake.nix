@@ -594,7 +594,9 @@
               deps = if ark == null then "${name}/android/deps.json" else "${name}/native/android/deps.json";
               src =
                 if ark == null then only ([ dir ] ++ shared)
-                else pkgs.runCommand "${name}-android-source" { } ''
+                # Named `source`, as `only` names its trees: unpacked under
+                # that name, which sourceRoot says.
+                else pkgs.runCommand "source" { } ''
                   cp -r ${only ([ "${name}/native/android" "${name}/app.toml" ] ++ shared)} $out
                   chmod -R u+w $out
                   cp -r ${ark.native}/. $out/
