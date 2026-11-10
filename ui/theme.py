@@ -8,7 +8,8 @@
 # `nix run .#update-theme` is the first, from the repository's root;
 # `checks.theme` runs it into a directory of its own and compares, and
 # `checks.theme-contrast` is the second. Python's standard library only, so
-# the checks need nothing but the interpreter.
+# the checks need nothing but the interpreter. The browser's is CSS
+# (ui/rust/web/theme.css): variables, springs as `linear()`, size classes.
 import json
 import os
 import sys
@@ -28,6 +29,7 @@ RUST_MOTION = "ui/rust/arkui/src/motion_tokens.rs"
 KOTLIN_LAYOUT = "ui/kotlin/src/dev/arkui/LayoutTokens.kt"
 SWIFT_LAYOUT = "ui/swift/Sources/ArkUICore/LayoutTokens.swift"
 RUST_LAYOUT = "ui/rust/arkui/src/layout_tokens.rs"
+CSS = "ui/rust/web/theme.css"
 
 # The layout tokens, in the order they are written, and each one's sentence.
 LAYOUT = {
@@ -720,6 +722,112 @@ def rust_layout(t):
     return "\n".join(out) + "\n"
 
 
+def spring_curve(stiffness, damping, rest):
+    """A spring from rest to rest as CSS has it: how long it takes to come
+    within `rest` of where it goes, in ms, and `linear()` sampled along it.
+    The same spring as every toolkit's (unit mass, critically damped or
+    under): what the browser approximates, since CSS has no spring."""
+    import math
+    w = math.sqrt(stiffness)
+    z = damping
+
+    def x(t):
+        if z >= 1.0:
+            return 1 - (1 + w * t) * math.exp(-w * t)
+        wd = w * math.sqrt(1 - z * z)
+        return 1 - math.exp(-z * w * t) * (math.cos(wd * t) + z * w / wd * math.sin(wd * t))
+
+    t, step, end = 0.0, 0.001, 0.0
+    while t < 5.0:
+        if abs(1 - x(t)) > rest:
+            end = t
+        t += step
+    end += step
+    n = 24
+    points = ", ".join(f"{x(end * i / n):.4f}" for i in range(n)) + ", 1"
+    return round(end * 1000), f"linear({points})"
+
+
+def css_px(v):
+    return f"{float(v):g}px"
+
+
+def css(t):
+    m = motion_values(t)
+    lay = layout_values(t)
+    out = [f"/* {HEADER} */", "", "/* The theme as CSS variables for the browser (arkui-web): every role by",
+           "   name, light by default, dark by the system's choice unless the page says",
+           "   (`data-theme`), an app's accent by `data-accent`; the window's measures,",
+           "   the springs as `linear()` curves sampled from the same stiffness and",
+           "   damping every toolkit rides, and the size classes' breakpoints. */", ""]
+
+    def block(sel, side, accent=None):
+        lines = [f"{sel} {{"]
+        if accent is None:
+            colors = side_colors(t, side)
+            for name in roles():
+                lines.append(f"  --ark-{name}: {colors[name]};")
+            for i, c in enumerate(t["chart"][side]):
+                lines.append(f"  --ark-chart-{i}: {c};")
+            lines.append(f"  --ark-wash: {wash(t, side)};")
+            lines.append(f"  color-scheme: {side};")
+        else:
+            for name in ACCENT:
+                lines.append(f"  --ark-{name}: {accent[side][name]};")
+        lines.append("}")
+        return lines
+
+    out += [":root {"]
+    for k in LAYOUT:
+        v = lay[k]
+        out.append(f"  --ark-{k}: {v if k == 'line-height' else css_px(v)};")
+    move_ms, move_curve = spring_curve(m["stiffness"], m["move"], m["rest"])
+    size_ms, size_curve = spring_curve(m["stiffness"], m["size"], m["rest"])
+    fade_ms, fade_curve = spring_curve(m["fade-stiffness"], m["move"], m["rest"])
+    out += [f"  --ark-move-ms: {move_ms}ms;", f"  --ark-move: {move_curve};",
+            f"  --ark-size-ms: {size_ms}ms;", f"  --ark-size: {size_curve};",
+            f"  --ark-fade-ms: {fade_ms}ms;", f"  --ark-fade: {fade_curve};",
+            f"  --ark-enter-scale: {m['enter-scale']};", f"  --ark-press: {m['press']};",
+            f"  --ark-rise: {css_px(m['rise'])};", f"  --ark-shift: {m['shift']};", "}", ""]
+    out += block(":root", "light")
+    for a, accent in t["accent"].items():
+        out += block(f':root[data-accent="{a}"]', "light", accent)
+    out.append("")
+    out.append("@media (prefers-color-scheme: dark) {")
+    out += ["  " + l for l in block(':root:not([data-theme="light"])', "dark")]
+    for a, accent in t["accent"].items():
+        out += ["  " + l for l in block(f':root:not([data-theme="light"])[data-accent="{a}"]', "dark", accent)]
+    out.append("}")
+    out.append("")
+    out += block(':root[data-theme="dark"]', "dark")
+    for a, accent in t["accent"].items():
+        out += block(f':root[data-theme="dark"][data-accent="{a}"]', "dark", accent)
+    out.append("")
+    out += ["/* Reduced motion: what travels fades in place (ui/docs/motion.md). The",
+            "   page says so (`data-motion`), as `motion::reduced()` does, never the",
+            "   system directly: arkui-web asks it only when the override is off. */",
+            ':root[data-motion="reduced"] {',
+            "  --ark-move-ms: var(--ark-fade-ms);", "  --ark-move: var(--ark-fade);",
+            "  --ark-size-ms: var(--ark-fade-ms);", "  --ark-size: var(--ark-fade);",
+            "  --ark-enter-scale: 1;", "  --ark-press: 1;", "  --ark-rise: 0px;", "  --ark-shift: 0;", "}", ""]
+    below = lambda k: f"{float(lay[k]) - 0.02:g}px"
+    c, s, e = css_px(lay["compact-width"]), css_px(lay["sidebar-min-width"]), css_px(lay["expanded-width"])
+    out += ["/* The size classes (ui/docs/design.md), decided by the window's width as",
+            "   every toolkit decides them: a sidebar from sidebar-min-width, a tab bar at",
+            "   the top short of it, at the foot when compact. A part shows what is its",
+            "   at a width by these classes alone. */",
+            ".ark-window { container: ark-window / inline-size; }",
+            f"@container ark-window (min-width: {s}) {{", "  .ark-unless-sidebar { display: none !important; }", "}",
+            f"@container ark-window (max-width: {below('sidebar-min-width')}) {{", "  .ark-if-sidebar { display: none !important; }", "}",
+            f"@container ark-window (max-width: {below('compact-width')}) {{", "  .ark-unless-compact { display: none !important; }", "}",
+            f"@container ark-window (min-width: {c}) {{", "  .ark-if-compact { display: none !important; }", "}",
+            f"@container ark-window (min-width: {c}) and (max-width: {below('sidebar-min-width')}) {{", "  .ark-unless-topbar { display: none !important; }", "}",
+            f"@container ark-window (max-width: {below('compact-width')}), (min-width: {s}) {{", "  .ark-if-topbar { display: none !important; }", "}",
+            f"@container ark-window (min-width: {e}) {{", "  .ark-unless-expanded { display: none !important; }", "}",
+            f"@container ark-window (max-width: {below('expanded-width')}) {{", "  .ark-if-expanded { display: none !important; }", "}"]
+    return "\n".join(out) + "\n"
+
+
 def colorset(accent):
     def color(hex_):
         r, g, b = rgb(hex_)
@@ -739,6 +847,7 @@ def files(t):
     out = {KOTLIN: kotlin(t), SWIFT_CORE: swift_core(t), SWIFT_UI: swift_ui(t), RUST: rust(t)}
     out |= {KOTLIN_MOTION: kotlin_motion(t), SWIFT_MOTION: swift_motion(t), RUST_MOTION: rust_motion(t)}
     out |= {KOTLIN_LAYOUT: kotlin_layout(t), SWIFT_LAYOUT: swift_layout(t), RUST_LAYOUT: rust_layout(t)}
+    out[CSS] = css(t)
     for accent in t["accent"].values():
         for path in accent["colorsets"]:
             out[os.path.join(path, "Contents.json")] = colorset(accent)
