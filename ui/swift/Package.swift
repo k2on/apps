@@ -10,7 +10,7 @@ import PackageDescription
 
 let package = Package(
     name: "ArkUI",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS("18.0"), .macOS("15.0")],
     products: [
         .library(name: "ArkUICore", targets: ["ArkUICore"]),
         .library(name: "ArkUI", targets: ["ArkUI"]),

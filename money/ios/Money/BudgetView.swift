@@ -83,7 +83,7 @@ struct BudgetView: View {
                 }
             }
         }
-        .environment(\.editMode, .constant(editing ? .active : .inactive))
+        .editing(editing)
         .onChange(of: Arranging.shape(groups)) { _, now in
             if let a = ahead, Arranging.shape(a) == now { ahead = nil }
         }

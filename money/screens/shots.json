@@ -109,5 +109,244 @@
     "line": "A household's budget, shared, on every device and offline",
     "logo": "money/ios/Money/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
     "screen": "budget"
-  }
+  },
+  "_screens": "`screens`: each opened by its launch arguments alone (ark_app::shell::Launch, the reference's names: .github/screens/apps.md), on the Apple devices it is `on` (ios, ipad-portrait, ipad-landscape, mac); its id is the reference app's shot's (reference/universal-budget/ci/shots.sh on the design-ref branch), so the two pair. `launch.mac` is the Mac's own arguments before each: the demo's household (no browser signs the Mac in) at 1440x900.",
+  "launch": {
+    "mac": [
+      "-demo",
+      "YES",
+      "-window",
+      "1440x900",
+      "-ApplePersistenceIgnoreState",
+      "YES"
+    ]
+  },
+  "screens": [
+    {
+      "id": "01-budget",
+      "args": [
+        "-screen",
+        "budget"
+      ],
+      "on": [
+        "ios",
+        "ipad-portrait"
+      ]
+    },
+    {
+      "id": "02-category-dining",
+      "args": [
+        "-screen",
+        "category:dining"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "03-accounts",
+      "args": [
+        "-screen",
+        "accounts"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "04-account-visa",
+      "args": [
+        "-screen",
+        "account:sapphire"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "05-review",
+      "args": [
+        "-screen",
+        "review"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "06-transaction-receipt",
+      "args": [
+        "-screen",
+        "transaction:receipt"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "07-add-transaction",
+      "args": [
+        "-screen",
+        "add-transaction"
+      ],
+      "on": [
+        "ios",
+        "mac"
+      ]
+    },
+    {
+      "id": "08-insights",
+      "args": [
+        "-screen",
+        "insights"
+      ],
+      "on": [
+        "ios"
+      ]
+    },
+    {
+      "id": "02-transactions",
+      "args": [
+        "-screen",
+        "transactions"
+      ],
+      "on": [
+        "ipad-portrait",
+        "mac"
+      ]
+    },
+    {
+      "id": "03-category-dining-inspector",
+      "args": [
+        "-screen",
+        "category:dining",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "ipad-portrait"
+      ]
+    },
+    {
+      "id": "04-review",
+      "args": [
+        "-screen",
+        "review"
+      ],
+      "on": [
+        "ipad-portrait"
+      ]
+    },
+    {
+      "id": "01-category-vacation-inspector",
+      "args": [
+        "-screen",
+        "category:vacation",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "ipad-landscape",
+        "mac"
+      ]
+    },
+    {
+      "id": "02-transaction-receipt-inspector",
+      "args": [
+        "-screen",
+        "transaction:receipt",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "ipad-landscape"
+      ]
+    },
+    {
+      "id": "03-account-checking",
+      "args": [
+        "-screen",
+        "account:checking"
+      ],
+      "on": [
+        "ipad-landscape"
+      ]
+    },
+    {
+      "id": "04-insights",
+      "args": [
+        "-screen",
+        "insights"
+      ],
+      "on": [
+        "ipad-landscape"
+      ]
+    },
+    {
+      "id": "06-settings-household",
+      "args": [
+        "-screen",
+        "settings",
+        "-settingsTab",
+        "household"
+      ],
+      "on": [
+        "ipad-landscape"
+      ]
+    },
+    {
+      "id": "03-transaction-receipt-inspector",
+      "args": [
+        "-screen",
+        "transaction:receipt",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "mac"
+      ]
+    },
+    {
+      "id": "04-account-checking",
+      "args": [
+        "-screen",
+        "account:checking"
+      ],
+      "on": [
+        "mac"
+      ]
+    },
+    {
+      "id": "05-review",
+      "args": [
+        "-screen",
+        "review"
+      ],
+      "on": [
+        "mac"
+      ]
+    },
+    {
+      "id": "06-insights",
+      "args": [
+        "-screen",
+        "insights"
+      ],
+      "on": [
+        "mac"
+      ]
+    },
+    {
+      "id": "08-settings-banks",
+      "args": [
+        "-screen",
+        "settings",
+        "-settingsTab",
+        "banks"
+      ],
+      "on": [
+        "mac"
+      ]
+    }
+  ]
 }

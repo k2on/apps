@@ -26,7 +26,12 @@ struct MoneyApp: App {
         // Money written as every client writes it, in the phone's locale.
         Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let model = Model(shelf: DefaultsShelf(), root: support)
+        // `-demo YES` (or a day, `-demo 2026-11-18`) at launch: the demo's
+        // household, as its first page's Try the Demo opens it (the Mac's
+        // screenshots, which no browser signs in for).
+        let demo = UserDefaults.standard.string(forKey: "demo")
+        let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil })
+        if demo != nil && !model.step.isRunning { model.send(.tryDemo) }
         model.modules = PhoneModules(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare())
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }

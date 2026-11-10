@@ -197,8 +197,15 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
             "next-month" -> book.stepMonth(1)
             "auto-assign" -> book.autoAssign(Auto.UNDERFUNDED)
             "refresh" -> book.sync()
-            else -> {}
+            "review" -> {}
+            else -> if (name.startsWith("settings")) nav.navigate("settings") { launchSingleTop = true }
         }
+    }
+    // Where the window opens (ark_app::shell::Launch): the launch intent's `ark.args`
+    // (`am start --esa ark.args -screen,budget`), once for the activity.
+    val launchArgs = (LocalContext.current as? android.app.Activity)?.intent?.getStringArrayExtra("ark.args")
+    LaunchedEffect(sections) {
+        if (launchArgs != null) sections.send(ShellMsg.Launch(args = launchArgs.toList()))
     }
     // The month is the budget's title in the shell's top bar.
     LaunchedEffect(ledger.month) { sections.send(uniffi.money_app.ShellMsg.Month(month = ledger.month)) }

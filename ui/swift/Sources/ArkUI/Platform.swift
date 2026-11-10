@@ -70,6 +70,17 @@ extension View {
         #endif
     }
 
+    /// A list in its edit mode (the grabbers, the system's reordering) while
+    /// `on`, on the iPhone and the iPad; the Mac's lists reorder by drag
+    /// whatever their mode, and have none.
+    public func editing(_ on: Bool) -> some View {
+        #if os(iOS)
+        environment(\.editMode, .constant(on ? .active : .inactive))
+        #else
+        self
+        #endif
+    }
+
     /// Over everything: a full-screen cover on the iPhone and the iPad, a sheet on the Mac.
     public func cover<Item: Identifiable, Content: View>(item: Binding<Item?>, @ViewBuilder content: @escaping (Item) -> Content) -> some View {
         #if os(iOS)

@@ -71,6 +71,29 @@ All of it is in `<app>/screens/`:
   step that finds nothing leaves `stuck.png` and `stuck.tree.txt`: what
   was on the screen instead.
 
+- **`shots.json`'s `screens`** (optional): screens opened by their launch
+  arguments alone, no steps, on the devices each is `on` (the phones'
+  directories: `ios`, `ipad-portrait`, `ipad-landscape`, `mac`,
+  `android`, `android-tablet`, `fold-unfolded`, `fold-folded`):
+
+  ```json
+  "launch": { "mac": ["-demo", "YES", "-window", "1440x900"] },
+  "screens": [
+    { "id": "01-category-vacation-inspector", "args": ["-screen", "category:vacation", "-inspector", "1"], "on": ["ipad-landscape", "mac"] }
+  ]
+  ```
+
+  Every Ark app's shell reads them (`ark_app::shell::Launch`: `-screen
+  <place>[:item]`, `-inspector 1`, `-appearance`, `-pane`), the iPhone's
+  and the Mac's from the process's arguments (XCUITest's
+  `launchArguments`, a Mac app's command line), Android's from the launch
+  intent's string array `ark.args` (`am start --esa ark.args
+  -screen,budget`), the desktop's from its command line. `launch.mac` goes
+  before each screen's on the Mac, which no browser signs in for: money's
+  opens its demo household. money's ids are the reference app's
+  (`reference/universal-budget` on the design-ref branch), so the two
+  pair.
+
 - **`server.sh`** (only for an app with a server):
   `server.sh <dir> <listen address>`, run from the repository's root,
   starts the app's server with dev auth and something in it, writes its pid
@@ -315,7 +338,8 @@ build, the same driver, the same shots.json, light and dark.
   <URL> --user <name>` (what the desktop window is given; an app that takes
   them opens signed in to the same sample-data server), and its window
   taken with `screencapture -l` in light and dark (System Events' dark
-  mode) as one shot, `window`. No app has a Mac build yet, so every app is
+  mode) as one shot, `window`; then each of shots.json's `screens` that is
+  `on` "mac", the app opened afresh with `launch.mac` and its arguments. No app has a Mac build yet, so every app is
   passed over in the seconds the listing takes; this is plumbing, not yet
   seen running an app. Steps are not driven yet: a Mac window needs a
   macOS UI-test driver of its own (`drive-ios` is the iPhone's), which is

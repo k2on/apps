@@ -398,6 +398,10 @@ pub struct App {
     /// The shell (money/app/src/shell): the sections, their toolbars,
     /// search and inspector, the commands, in Rust as on the phones.
     pub shell: ark_app::Runtime<money_app::shell::MoneyShell>,
+    /// The window's launch arguments (`-screen budget`, …:
+    /// `ark_app::shell::Launch`), given to the shell once the accounts
+    /// have arrived, as a link waits for them.
+    pub launch: Option<Vec<String>>,
     /// Where the window has been: the address bar, and back and forward by
     /// `^O`/`^I` and a swipe (`arkui::history`).
     pub history: arkui::history::History<Route>,
@@ -482,6 +486,7 @@ impl App {
             ctx: arkui::context::Context::new(),
             renaming: None,
             shell: ark_app::Runtime::new(),
+            launch: None,
             history: arkui::history::History::new(),
             txn_at: None,
             txn_anchor: None,
@@ -527,7 +532,9 @@ impl App {
     #[cfg(feature = "demo")]
     fn boot() -> (App, Task<Message>) {
         let today = day_of_ms(ark_peer::now_ms());
-        (App::with_peer(seed::seeded(), &today), Task::none())
+        let mut app = App::with_peer(seed::seeded(), &today);
+        app.launch = Some(std::env::args().collect());
+        (app, Task::none())
     }
 
     /// The window, open on nothing and saying so while its server's replica
@@ -573,6 +580,7 @@ impl App {
             }
         };
         let mut app = App::on_server(client, &today, url, login);
+        app.launch = Some(std::env::args().collect());
         if let Some(s) = &mut app.server {
             (s.logins, s.user) = (Some(logins), user);
         }
@@ -755,6 +763,10 @@ impl App {
             self.landed(&linked);
         }
         self.history.sync(&self.route());
+        let task = match self.launch.take_if(|_| ready) {
+            Some(args) => Task::batch([task, self.update(Message::Shell(ShellMsg::Launch { args }))]),
+            None => task,
+        };
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
         // written.
