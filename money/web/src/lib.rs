@@ -214,6 +214,28 @@ impl MoneyWeb {
         for n in natives {
             self.native(&n);
         }
+        self.follow_shell();
+    }
+
+    /// What the shell chose to inspect, taken as this page's choice: a
+    /// launch's `-screen category:dining -inspector 1` names it to the
+    /// shell alone. A category is the shell's Category Details
+    /// (`category_inspector`, drawn from `ShellPage::category`); a
+    /// transaction is this page's own inspector (`screens::txn_inspector`,
+    /// which approves), so it is taken from the shell and the shell's let go.
+    fn follow_shell(&mut self) {
+        let s = self.shell.state();
+        let (category, transaction) = (s.category.clone(), s.transaction.clone());
+        if let Some(key) = category {
+            self.category = money_app::shell::inspect::category_named(screens::lines(self), &key).map(|l| l.category_id);
+        }
+        if let Some(key) = transaction {
+            self.txn = money_app::shell::inspect::transaction_named(screens::all_txns(self), &key).map(|t| t.id);
+            let mut rt = std::mem::take(&mut self.shell);
+            let mut desk = Desk { app: self, natives: vec![] };
+            rt.dispatch(ShellMsg::InspectTransaction { id: None }, &mut desk);
+            self.shell = rt;
+        }
     }
 
     fn accounts_step(&mut self, msg: AccountsMsg) {
@@ -361,7 +383,11 @@ impl MoneyWeb {
         let category = |app: &MoneyWeb| screens::lines(app).iter().find(|l| l.category_id.hex() == v).map(|l| l.category_id);
         match key {
             "month" if dates_ok(&v) => self.set_month(v),
-            "category" => self.category = category(self),
+            "category" => {
+                let c = category(self);
+                self.category = c;
+                self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
+            }
             "draft-category" => {
                 let c = category(self);
                 if let Some(d) = &mut self.draft {
@@ -468,6 +494,8 @@ impl WebApp for MoneyWeb {
             Msg::Accounts(m) => self.accounts_step(m),
             Msg::Category(c) => {
                 self.category = c;
+                // The shell's Category Details shows it (`follow_shell`).
+                self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
                 if c.is_some() && !self.shell.state().inspector {
                     self.shell_step(ShellMsg::Inspector { shown: true });
                 }

@@ -290,106 +290,39 @@ fn card(title: Option<String>, body: Vec<AnyView>) -> AnyView {
         .into_any()
 }
 
-/// The budget's inspector: the category chosen, or the month.
+/// The budget's inspector with no category chosen: the month. A category
+/// chosen is the shell's Category Details (`category_inspector`), the same
+/// on every platform.
 fn budget_inspector(app: &MoneyWeb) -> AnyView {
-    let found = app.category.and_then(|c| lines(app).iter().find(|l| l.category_id == c));
-    let body = match found {
-        Some(l) => {
-            let tone = l.tone();
-            let target = l.meter().map(|m| {
-                card(
-                    Some("Target".into()),
-                    vec![
-                        html::div()
-                            .class("ark-figure-row")
-                            .child((
-                                html::span().child(format!("{} a month", money(l.target))),
-                                html::span().class("ark-text-positive").child(format!("{}%", m.thousandths / 10)),
-                            ))
-                            .into_any(),
-                        figures::goal_bar(m.fraction() as f32, bar_tint(m.tone)),
-                        html::div().class("ark-caption").child(l.progress(&style())).into_any(),
-                    ],
-                )
-            });
-            let id = l.category_id;
+    let s = summary(app);
+    let carried: i64 = lines(app).iter().map(|l| l.carried).sum();
+    let body = vec![
+        card(
+            Some(format!("{}'s Summary", ark_format::month(&app.month))),
+            vec![
+                figure_row("Left over from last month", carried),
+                figure_row("Assigned this month", s.assigned),
+                figure_row("Activity", s.activity),
+                figure_row("Available", s.available),
+                html::div().class("ark-row-divider").into_any(),
+                figure_row("Income this month", s.income),
+                figure_row("Overspent last month", s.overspent_last_month),
+            ],
+        ),
+        card(
+            Some("Auto-Assign".into()),
             vec![
                 html::div()
-                    .class("ark-inspector-head")
-                    .child((
-                        html::div().child((
-                            html::h2().class("ark-inspector-title").child(l.name.clone()),
-                            html::div().class("ark-caption").child(l.group.clone()),
-                        )),
-                        arkui_web::shell::bar_button("Close", "x", true, Msg::Category(None)),
-                    ))
+                    .class("ark-caption")
+                    .child("Every category at once, for this month.")
                     .into_any(),
-                html::div()
-                    .class("ark-figure-row money-available")
-                    .child((
-                        html::span().child("Available Balance"),
-                        figures::status_badge(money(l.available), tint(tone)),
-                    ))
-                    .into_any(),
-                card(
-                    None,
-                    vec![
-                        figure_row("Cash left over from last month", l.carried),
-                        figure_row("Assigned this month", l.assigned),
-                        figure_row("Cash spending", l.activity),
-                    ],
-                ),
-                target.unwrap_or_else(|| ().into_any()),
-                card(
-                    Some("Auto-Assign".into()),
-                    vec![
-                        auto_line("Assigned last month", l.assigned_last_month, Msg::Assign(id, l.assigned_last_month)),
-                        auto_line("Spent last month", l.spent_last_month, Msg::Assign(id, l.spent_last_month.abs())),
-                        auto_line("Average spent", l.average_spent, Msg::Assign(id, l.average_spent.abs())),
-                    ],
-                ),
-            ]
-        }
-        None => {
-            let s = summary(app);
-            let carried: i64 = lines(app).iter().map(|l| l.carried).sum();
-            vec![
-                card(
-                    Some(format!("{}'s Summary", ark_format::month(&app.month))),
-                    vec![
-                        figure_row("Left over from last month", carried),
-                        figure_row("Assigned this month", s.assigned),
-                        figure_row("Activity", s.activity),
-                        figure_row("Available", s.available),
-                        html::div().class("ark-row-divider").into_any(),
-                        figure_row("Income this month", s.income),
-                        figure_row("Overspent last month", s.overspent_last_month),
-                    ],
-                ),
-                card(
-                    Some("Auto-Assign".into()),
-                    vec![
-                        html::div()
-                            .class("ark-caption")
-                            .child("Every category at once, for this month.")
-                            .into_any(),
-                        quiet_button("Underfunded", Msg::Auto(Auto::Underfunded)),
-                        quiet_button("Assigned last month", Msg::Auto(Auto::LastMonth)),
-                        quiet_button("Reset assigned amounts", Msg::Auto(Auto::Reset)),
-                    ],
-                ),
-            ]
-        }
-    };
+                quiet_button("Underfunded", Msg::Auto(Auto::Underfunded)),
+                quiet_button("Assigned last month", Msg::Auto(Auto::LastMonth)),
+                quiet_button("Reset assigned amounts", Msg::Auto(Auto::Reset)),
+            ],
+        ),
+    ];
     html::div().class("ark-inspector-body").child(body).into_any()
-}
-
-fn auto_line(label: &str, cents: i64, m: Msg) -> AnyView {
-    arkui_web::wired!(html::button(), arkui_web::tapped(label, &m))
-        .class("ark-figure-row ark-link-row")
-        .on(leptos::ev::click, move |_| send(m.clone()))
-        .child((html::span().child(label.to_string()), amount(cents, false)))
-        .into_any()
 }
 
 fn quiet_button(label: &str, m: Msg) -> AnyView {

@@ -19,7 +19,20 @@ pub enum Tint {
 }
 
 impl Tint {
-    fn class(self) -> &'static str {
+    /// A tint by the name a view gives it (`ark_app::view::HeaderCard`'s
+    /// `tint`), as iced's `Tint::named`: neutral unless it is one of the
+    /// others.
+    pub fn named(name: &str) -> Tint {
+        match name {
+            "positive" => Tint::Positive,
+            "caution" => Tint::Caution,
+            "negative" => Tint::Negative,
+            "accent" => Tint::Accent,
+            _ => Tint::Neutral,
+        }
+    }
+
+    pub(crate) fn class(self) -> &'static str {
         match self {
             Tint::Neutral => "ark-tint-neutral",
             Tint::Positive => "ark-tint-positive",
