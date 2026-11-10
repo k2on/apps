@@ -47,7 +47,8 @@ fn catalogue_json_is_what_the_catalogue_prints() {
 /// Falsified by dropping `PULPIT` from `examples::GLYPHS`.
 #[test]
 fn the_glyph_picture_draws_every_glyph() {
-    let table = read(&root().join("ui/rust/arkui/src/glyphs.rs"));
+    // The table is arkui-glyphs', which arkui re-exports as `glyphs`.
+    let table = read(&root().join("ui/rust/glyphs/src/lib.rs"));
     let names: Vec<&str> = table.lines().filter_map(|l| l.strip_prefix("pub const ")?.split(':').next()).collect();
     assert!(names.len() > 30);
     for n in names {

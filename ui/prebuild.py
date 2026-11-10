@@ -734,8 +734,7 @@ include(":app")
 ANDROID_ROOT = '''// {header}
 plugins {{
     id("com.android.application") version "8.7.3" apply false
-    id("com.android.library") version "8.7.3" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+{library}    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
     id("app.cash.paparazzi") version "1.3.5" apply false
 }}
@@ -784,7 +783,10 @@ def write(root, app, views=None, icon_png=None, prefix=BUNDLE_PREFIX, out=None):
         andr = os.path.join(out, "android")
         h = HEADER.format(app=app)
         write_file(os.path.join(andr, "settings.gradle.kts"), ANDROID_SETTINGS.format(header=h, app=app))
-        write_file(os.path.join(andr, "build.gradle.kts"), ANDROID_ROOT.format(header=h))
+        # An Ark app's graph has the library plugin (the modules' builds); an app
+        # of Kotlin alone's has only what it applies.
+        library = '    id("com.android.library") version "8.7.3" apply false\n' if kernel(a) else ""
+        write_file(os.path.join(andr, "build.gradle.kts"), ANDROID_ROOT.format(header=h, library=library))
         write_file(os.path.join(andr, "gradle.properties"), "org.gradle.jvmargs=-Xmx2g\nandroid.useAndroidX=true\nkotlin.code.style=official\n")
         write_file(os.path.join(andr, "app", "build.gradle.kts"), android_gradle(REPO, a, ffi_lib_name(a)))
         write_file(os.path.join(andr, "app", "src", "main", "AndroidManifest.xml"), android_manifest(REPO, a))
