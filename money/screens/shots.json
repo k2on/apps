@@ -403,6 +403,30 @@
         "fold-unfolded",
         "fold-folded"
       ]
+    },
+    {
+      "id": "t-auto-assign-menu",
+      "args": [
+        "-screen",
+        "budget"
+      ],
+      "steps": [
+        {
+          "tap": "Auto-Assign",
+          "role": "button",
+          "where": "bottom",
+          "optional": true
+        },
+        {
+          "wait": 1
+        }
+      ],
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "android",
+        "android-tablet"
+      ]
     }
   ]
 }

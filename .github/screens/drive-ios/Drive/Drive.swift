@@ -12,7 +12,8 @@
 //               [{"id": …, "args"?: [launch arguments], "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
 //               A tap's label is what the element says or its accessibility
 //               identifier; `role` ("tab", "button", "field", "text") says
-//               which kind it is when several say it; `a|b` is whichever is
+//               which kind it is when several say it; `press` holds it
+//               instead (a row's context menu); `a|b` is whichever is
 //               there, and "optional": true passes over a tap with nothing to tap.
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
@@ -26,6 +27,8 @@ import XCTest
 struct Shot: Decodable {
     struct Step: Decodable {
         var tap: String?
+        /// Held (a long press: a row's context menu), as `tap` finds it.
+        var press: String?
         var role: String?
         var `where`: String?
         var unless: String?
@@ -38,7 +41,7 @@ struct Shot: Decodable {
         var optional: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case tap, role, `where`, unless, type, wait, relaunch, optional
+            case tap, press, role, `where`, unless, type, wait, relaunch, optional
             case waitFor = "await"
         }
     }
@@ -130,7 +133,7 @@ final class Drive: XCTestCase {
                     let there = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier IN %@", each, each)).firstMatch
                     XCTAssertTrue(there.waitForExistence(timeout: 20), "\(label) came, for \(shot.id)")
                 }
-                if let label = step.tap {
+                if let label = step.tap ?? step.press {
                     let c = find(app, label, step: step, timeout: step.optional == true ? 3 : 30)
                     if step.optional == true && !c.exists { continue }
                     if !c.exists {
@@ -138,7 +141,7 @@ final class Drive: XCTestCase {
                         XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
                         return
                     }
-                    c.tap()
+                    if step.press != nil { c.press(forDuration: 1.2) } else { c.tap() }
                 }
                 if step.relaunch == true {
                     app.terminate()

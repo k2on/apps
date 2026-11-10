@@ -47,7 +47,8 @@ All of it is in `<app>/screens/`:
   says) or identifier is `<label>` (an iOS `accessibilityIdentifier`, an
   Android resource id or exposed Compose `testTag`), and `"role"`
   (`tab`, `button`, `field`, `text`) says which kind when several share a
-  label (a tab and a heading both saying "Transactions"); `{"type":
+  label (a tab and a heading both saying "Transactions"); `{"press": "<label>"}` holds it instead (a long press: a row's
+  context menu); `{"type":
   "<text>"}` types into what has focus; `{"wait": <seconds>}` waits.
   `"where": "bottom"` on a tap takes the lowest on the screen of all that
   match, and `"unless": "<label>"` skips a step when that label is on the

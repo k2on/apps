@@ -54,6 +54,7 @@ dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 # Tap what says `text` (or, as `--field`, the first text field), waiting
 # up to `seconds` for it to be there; of several, the `role` one.
 # `a|b`: whichever is there. `optional`: nothing there is no failure.
+# HOLD=1: held for a second and a half (a long press: a row's menu).
 tap() {
   local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} optional=${5:-} at one screen
   local -a each
@@ -63,7 +64,12 @@ tap() {
     for one in "${each[@]}"; do
       if at=$(python3 -I "$here/ui.py" "$one" "$role" "$where" <<< "$screen"); then
         # shellcheck disable=SC2086
-        adb shell input tap $at
+        if [ -n "${HOLD:-}" ]; then
+          read -r x y <<< "$at"
+          adb shell input swipe "$x" "$y" "$x" "$y" 1500
+        else
+          adb shell input tap $at
+        fi
         return 0
       fi
     done
@@ -102,6 +108,8 @@ step() {
     else
       tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
     fi
+  elif jq -e 'has("press")' <<< "$s" > /dev/null; then
+    HOLD=1 tap "$(jq -r .press <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
   elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
   elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
   else echo "::error::$app: no such step: $s"; return 1
