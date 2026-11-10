@@ -87,6 +87,17 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
                 )),
             ))
             .into_any(),
+        // An inspector's page of cards, as iced's `Part::Detail` is: its
+        // cards one under another in the pane's own scroll.
+        Part::Detail { content } => html::div().class("ark-inspector-body ark-detail").child(nodes(*content)).into_any(),
+        Part::HeaderCard(h) => header_card(*h),
+        Part::GoalProgress { fraction, tint, note } => html::div()
+            .class("ark-goal-progress")
+            .child((
+                crate::figures::goal_bar(fraction.get() as f32, crate::figures::Tint::named(&tint.get())),
+                html::div().class("ark-caption").child(note.get()),
+            ))
+            .into_any(),
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::NameField {
@@ -189,6 +200,46 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
     })
 }
 
+/// What an inspector is about, in a card (iced's `header_card`): its
+/// glyph, its title, its figure in a status badge or large in its tint,
+/// the line in its tint, the caption quiet, centred; its actions under a
+/// rule.
+fn header_card<M: Clone + 'static>(h: ark_app::view::HeaderCard<M>) -> AnyView {
+    use crate::figures::{status_badge, Tint};
+    let tint = Tint::named(&h.tint.get());
+    let title = h.title.get();
+    let figure = match h.badge {
+        true => status_badge(h.figure.get(), tint),
+        false => html::div()
+            .class(format!("ark-headline {}", tint.class()))
+            .child(h.figure.get())
+            .into_any(),
+    };
+    let said = |v: Option<ark_app::view::Val<String>>| v.map(|v| v.get()).filter(|v| !v.is_empty());
+    let line = said(h.line).map(|l| html::div().class(format!("ark-header-line {}", tint.class())).child(l));
+    let caption = said(h.caption).map(|c| html::div().class("ark-caption").child(c));
+    let actions = nodes(*h.actions);
+    let actions = (!actions.is_empty()).then(|| {
+        (
+            html::div().class("ark-row-divider"),
+            html::div().class("ark-header-actions").child(actions),
+        )
+    });
+    html::div()
+        .class("ark-card ark-header-card")
+        .child((
+            html::div().class("ark-header-face").child((
+                h.glyph.map(|g| tile(&g.get(), "ark-tile ark-tile-large")),
+                (!title.is_empty()).then(|| html::div().class("ark-header-title").child(title)),
+                figure,
+                line,
+                caption,
+            )),
+            actions,
+        ))
+        .into_any()
+}
+
 fn fact(label: &'static str, cents: i64) -> AnyView {
     html::div()
         .class("ark-fact")
@@ -271,6 +322,8 @@ pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
         .and_then(|b| b.get())
         .map(|n| html::span().class("ark-badge").child(n.to_string()));
     let figure = r.amount.map(|a| amount(a.get(), r.quiet));
+    // Words where an amount would be, quiet: a goal, a date, a status.
+    let value = r.value.map(|v| html::span().class("ark-row-value").child(v.get()));
     let chevron = r.pushes.then(|| html::span().class("ark-chevron").child(glyph("chevron-right", 14)));
     let mut class = String::from("ark-row");
     if r.accent {
@@ -300,7 +353,7 @@ pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
                 o(e.client_x() as f64, e.client_y() as f64);
             }
         })
-        .child((picture, words, badge, figure, chevron))
+        .child((picture, words, badge, figure, value, chevron))
         .into_any()
 }
 

@@ -97,3 +97,46 @@ fn a_device_code_signs_another_device_in_once() {
     }
     assert!(auth.device_code(&first.token).unwrap_err().contains("enough codes"));
 }
+
+/// A page's code is traded at `/auth/session` once, as at `/auth/exchange`:
+/// the login comes back without its token, which is the cookie set —
+/// `HttpOnly`, `SameSite=Strict`, the origin's, lasting as the session
+/// does, and `Secure` only over https — and `/auth/logout` sets it empty.
+/// Falsified by answering the login whole: the body held the token.
+#[test]
+fn a_page_s_session_is_a_strict_http_only_cookie() {
+    let (_rt, server, auth, _) = serve();
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let resp = agent
+        .get(&ark_auth::login_url(&server, &format!("{server}/"), Some("ann")))
+        .call()
+        .unwrap();
+    let location = resp.header("Location").unwrap().to_string();
+    let code = ark_auth::query_value(location.split_once('?').unwrap().1, "code").unwrap();
+    let trade = || {
+        agent
+            .post(&format!("{server}/auth/session"))
+            .set("Content-Type", "application/json")
+            .send_string(&serde_json::json!({ "code": code }).to_string())
+            .map_err(Box::new)
+    };
+    let resp = trade().unwrap();
+    let set = resp.header("Set-Cookie").unwrap().to_string();
+    let login: ark_auth::Login = serde_json::from_str(&resp.into_string().unwrap()).unwrap();
+    assert_eq!((login.user.id.as_str(), login.token.as_str()), ("ann", ""));
+    let token = ark_auth::cookie_token(set.split(';').next().unwrap()).unwrap();
+    assert_eq!(auth.verify(token), Some(login.session.as_str()));
+    assert!(set.contains("; Path=/; HttpOnly; SameSite=Strict; Max-Age="), "{set}");
+    let age: i64 = set.split("Max-Age=").nth(1).unwrap().split(';').next().unwrap().parse().unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    assert!((age - (login.expires_ms - now) / 1000).abs() < 5, "{age}");
+    assert!(!set.contains("Secure"), "plain http on loopback");
+    assert!(matches!(trade().map_err(|e| *e), Err(ureq::Error::Status(400, _))), "once");
+    let out = agent.post(&format!("{server}/auth/logout")).call().unwrap();
+    assert!(out
+        .header("Set-Cookie")
+        .unwrap()
+        .starts_with("ark-session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"));
+    let tls = Auth::new::<App>(Mode::Dev, "https://money.example", b"key");
+    assert!(tls.cleared_cookie().ends_with("; Secure"));
+}

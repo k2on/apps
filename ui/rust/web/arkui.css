@@ -317,6 +317,29 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-inspector-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
 .ark-inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ark-inspector-title { font-size: 17px; font-weight: 700; }
+/* The sign-in page (`welcome`): the machine's words centred in the window */
+.ark-welcome { height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.ark-welcome-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.ark-welcome-title { font-size: 28px; font-weight: 700; }
+.ark-welcome-status:empty { display: none; }
+.ark-welcome-error { font-size: 13px; }
+.ark-welcome-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+/* An inspector's page of cards (`detail_page`) and the card at its top (`header_card`), as iced draws them */
+.ark-detail { gap: 14px; }
+.ark-header-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.ark-header-face { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.ark-header-title { font-size: 15px; font-weight: 700; }
+.ark-header-line { font-size: 12px; }
+.ark-header-line.ark-tint-positive { color: var(--ark-positive); }
+.ark-header-line.ark-tint-negative { color: var(--ark-error); }
+.ark-header-line.ark-tint-caution { color: var(--ark-caution); }
+.ark-header-line.ark-tint-accent { color: var(--ark-accent-text); }
+.ark-header-actions { display: flex; flex-direction: column; }
+.ark-tile-large { width: 36px; height: 36px; border-radius: 9px; }
+.ark-goal-progress { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+.ark-goal-progress .ark-goal { width: 100%; }
+.ark-row-value { font-size: 14px; color: var(--ark-quiet); flex: none; }
 .ark-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .ark-panel-title { font-weight: 700; font-size: 14px; }
 .ark-figure-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; width: 100%; }

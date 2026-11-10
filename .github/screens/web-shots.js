@@ -66,7 +66,9 @@ async function main() {
         page.on('console', m => {
           if (mode !== 'spa' && (m.type() === 'error' || /hydrat/i.test(m.text()))) errors.push(`console ${m.type()}: ${m.text()}`);
         });
-        const q = [`today=${web.today}`, `theme=${theme}`, 'reduce-motion=1', shot.query || ''].filter(Boolean).join('&');
+        // `web.query`: what every shot's address says first, the app's own
+        // (money's `demo`: the household in the page, no server).
+        const q = [web.query || '', `today=${web.today}`, `theme=${theme}`, 'reduce-motion=1', shot.query || ''].filter(Boolean).join('&');
         try {
           await page.goto(mode === 'spa' ? `${base}/?${q}` : `${base}${shot.path}`);
           // The written page is the browser's once its module has run.

@@ -10,7 +10,10 @@
 //!                                                                          ─┘    said of it is delivered
 //! ```
 //!
-//! A token proving nobody is closed with code 4401. The server
+//! A page's first message is empty: its session is the cookie
+//! (`ark_auth::COOKIE`) its browser sent with the upgrade, taken only from
+//! a page of this server's own origin. A token proving nobody is closed
+//! with code 4401. The server
 //! pings every `keepalive` and closes a socket that leaves three
 //! unanswered. The app's web ([`web::Site`], [`Server::site`]) is merged
 //! beside them and the app's own middleware ([`Server::layer`]) is over
@@ -24,6 +27,7 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
@@ -206,15 +210,43 @@ impl Running {
     }
 }
 
-async fn sync(ws: WebSocketUpgrade, State(s): State<Shared>) -> Response {
-    ws.on_upgrade(move |socket| connection(socket, s))
+async fn sync(ws: WebSocketUpgrade, headers: HeaderMap, State(s): State<Shared>) -> Response {
+    let cookie = page_session(&headers);
+    ws.on_upgrade(move |socket| connection(socket, s, cookie))
 }
 
-/// One socket: the token, then frames both ways and the pings.
-async fn connection(mut socket: WebSocket, s: Shared) {
+/// The session cookie a page's socket was opened with
+/// (`ark_auth::COOKIE`), when the page is this server's own: the upgrade's
+/// `Origin` is its `Host`. A browser sends a site's cookies with a socket
+/// any page opens to it, so the origin is what keeps another site's page
+/// from opening one as the person (cross-site WebSocket hijacking), beside
+/// the cookie's `SameSite=Strict`.
+fn page_session(headers: &HeaderMap) -> Option<String> {
+    let said = |h: axum::http::HeaderName| headers.get(h).and_then(|v| v.to_str().ok());
+    let host = said(axum::http::header::HOST)?;
+    let origin = said(axum::http::header::ORIGIN)?;
+    let (_, from) = origin.split_once("://")?;
+    if !from.eq_ignore_ascii_case(host) {
+        return None;
+    }
+    let cookies = headers.get_all(axum::http::header::COOKIE);
+    cookies
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(ark_auth::cookie_token)
+        .map(String::from)
+}
+
+/// One socket: the token (or, said as nothing, the page's session cookie),
+/// then frames both ways and the pings.
+async fn connection(mut socket: WebSocket, s: Shared, cookie: Option<String>) {
     let token = match socket.recv().await {
         Some(Ok(Message::Binary(b))) => String::from_utf8(b).unwrap_or_default(),
         _ => return,
+    };
+    let token = match (token.as_str() == ark_auth::COOKIE_HELLO, cookie) {
+        (true, Some(c)) => c,
+        _ => token,
     };
     let authenticate = s.authenticate.clone();
     let judged = tokio::task::spawn_blocking(move || authenticate(&token)).await;

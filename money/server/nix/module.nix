@@ -78,7 +78,11 @@ in
         Address to bind. The default is loopback, for a reverse proxy in front
         that terminates TLS: the login sends a browser here and back, and a
         session token crosses on every connect, neither of which belongs on
-        plain HTTP off the machine.
+        plain HTTP off the machine. The proxy passes `Host` through (nginx's
+        `recommendedProxySettings`) and the WebSocket upgrade: the browser
+        client's socket is its session cookie's only when its `Origin` is
+        the `Host` it reached, and `publicUrl` over https makes the cookie
+        `Secure`.
       '';
     };
 

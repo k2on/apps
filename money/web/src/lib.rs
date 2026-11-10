@@ -3,8 +3,13 @@
 //! (`money_app::accounts`), run by ark-app here as on the phones and the
 //! desktop, drawn by arkui-web (Leptos over the DOM); the screens the
 //! shell hosts that are not in Rust's vocabulary yet are this crate's
-//! (`screens`), as money/iced has its own. The household is the demo's
-//! (`money_core::demo`), in the page's memory, its own authority: no server.
+//! (`screens`), as money/iced has its own.
+//!
+//! The household is the server's that served the page (`live`): the page
+//! signs in through it as the phones do, holds a replica of the budget
+//! and syncs over its socket. With `?demo` it is the demo's
+//! (`money_core::demo`), in the page's memory, its own authority, with no
+//! server: what the screenshots and the public demo run.
 //!
 //! The address opens any screen with no steps, with the launch arguments
 //! every shell reads (`ark_app::shell::Launch`): `?screen=budget`,
@@ -26,6 +31,7 @@ use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::dates::{add_months, days_from_civil, parse_day};
 use money_core::*;
 
+pub mod live;
 pub mod screens;
 
 /// Everything the page can be told.
@@ -59,6 +65,12 @@ pub enum Msg {
     /// Where the address says the page is besides the shell's launch
     /// arguments (`MoneyWeb::route`): a key and its value.
     At(String, String),
+    /// The socket has something to say, or the peer's deadline came
+    /// (`live`): it is pumped.
+    Wake,
+    /// What came of one of the sign-in machine's effects, or a press on
+    /// the sign-in page (`live`).
+    Onboard(ark_auth::onboarding::Event),
 }
 
 /// A change to the new transaction being written.
@@ -108,6 +120,8 @@ pub struct MoneyWeb {
     pub changes: u64,
     /// Changes counted and not sent (`WebApp::dry_run`).
     pub dry: bool,
+    /// The page on its server, signed in there; none for the demo.
+    pub live: Option<live::Live>,
 }
 
 /// The views the page holds as long as it is open.
@@ -145,7 +159,11 @@ impl MoneyWeb {
                 }
             }
         });
-        let mut peer = money_core::demo::open(disk);
+        MoneyWeb::over(money_core::demo::open(disk), today)
+    }
+
+    /// The page over `peer`: its views held, the shell on this month.
+    pub fn over(mut peer: Replica, today: String) -> MoneyWeb {
         let mut store = Store::new();
         for v in ALWAYS {
             store.hold(&mut peer, v);
@@ -169,6 +187,7 @@ impl MoneyWeb {
             settings: false,
             changes: 0,
             dry: false,
+            live: None,
         };
         app.shell_step(ShellMsg::Month { month });
         app
@@ -213,6 +232,28 @@ impl MoneyWeb {
         self.shell = rt;
         for n in natives {
             self.native(&n);
+        }
+        self.follow_shell();
+    }
+
+    /// What the shell chose to inspect, taken as this page's choice: a
+    /// launch's `-screen category:dining -inspector 1` names it to the
+    /// shell alone. A category is the shell's Category Details
+    /// (`category_inspector`, drawn from `ShellPage::category`); a
+    /// transaction is this page's own inspector (`screens::txn_inspector`,
+    /// which approves), so it is taken from the shell and the shell's let go.
+    fn follow_shell(&mut self) {
+        let s = self.shell.state();
+        let (category, transaction) = (s.category.clone(), s.transaction.clone());
+        if let Some(key) = category {
+            self.category = money_app::shell::inspect::category_named(screens::lines(self), &key).map(|l| l.category_id);
+        }
+        if let Some(key) = transaction {
+            self.txn = money_app::shell::inspect::transaction_named(screens::all_txns(self), &key).map(|t| t.id);
+            let mut rt = std::mem::take(&mut self.shell);
+            let mut desk = Desk { app: self, natives: vec![] };
+            rt.dispatch(ShellMsg::InspectTransaction { id: None }, &mut desk);
+            self.shell = rt;
         }
     }
 
@@ -360,7 +401,11 @@ impl MoneyWeb {
         let category = |app: &MoneyWeb| screens::lines(app).iter().find(|l| l.category_id.hex() == v).map(|l| l.category_id);
         match key {
             "month" if dates_ok(&v) => self.set_month(v),
-            "category" => self.category = category(self),
+            "category" => {
+                let c = category(self);
+                self.category = c;
+                self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
+            }
             "draft-category" => {
                 let c = category(self);
                 if let Some(d) = &mut self.draft {
@@ -450,6 +495,9 @@ impl WebApp for MoneyWeb {
     type Msg = Msg;
 
     fn view(&self) -> AnyView {
+        if let Some(live) = self.live.as_ref().filter(|l| !l.running()) {
+            return self.welcome(live);
+        }
         let page = self.shell_page();
         let hosts = |name: &'static str| screens::hosted(self, name);
         let window = arkui_web::shell(money_shell::view(&page).map(Msg::Shell), &hosts);
@@ -467,6 +515,8 @@ impl WebApp for MoneyWeb {
             Msg::Accounts(m) => self.accounts_step(m),
             Msg::Category(c) => {
                 self.category = c;
+                // The shell's Category Details shows it (`follow_shell`).
+                self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
                 if c.is_some() && !self.shell.state().inspector {
                     self.shell_step(ShellMsg::Inspector { shown: true });
                 }
@@ -575,6 +625,8 @@ impl WebApp for MoneyWeb {
             }
             Msg::Settings(on) => self.settings = on,
             Msg::At(k, v) => self.at(&k, v),
+            Msg::Wake => self.wake(),
+            Msg::Onboard(e) => self.onboard(e),
         }
     }
 

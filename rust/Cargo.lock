@@ -4401,6 +4401,7 @@ dependencies = [
  "anyhow",
  "ark",
  "ark-auth",
+ "ark-format",
  "ark-peer",
  "axum",
  "base64 0.22.1",
@@ -4418,13 +4419,17 @@ dependencies = [
 name = "money-web"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-app",
+ "ark-auth",
  "ark-format",
  "ark-peer",
  "arkui-web",
  "leptos",
  "money-app",
  "money-core",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

@@ -16,13 +16,18 @@ use crate::util::with_code;
 
 /// The routes, with state applied, ready to `merge` into an app's router.
 ///
-/// Permissive CORS on all of them: the token is a bearer, never a cookie, so
-/// another origin reading these answers learns only what it already sent.
+/// Permissive CORS on all of them: a native client's token is a bearer,
+/// and a page's cookie (`/auth/session`) is `SameSite=Strict` and set only
+/// on its own origin's answer — CORS that allows any origin allows no
+/// credentials — so another origin reading these answers learns only what
+/// it already sent.
 pub fn router(auth: Arc<Auth>) -> Router {
     Router::new()
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/exchange", post(exchange))
+        .route("/auth/session", post(session))
+        .route("/auth/logout", post(logout))
         .route("/auth/device-code", post(device_code))
         .route("/auth/redeem", post(redeem))
         .route("/auth/picture", get(picture))
@@ -160,6 +165,29 @@ async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> 
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
     }
+}
+
+/// The code, for a browser's session: the token kept in the session
+/// cookie ([`Auth::session_cookie`]), where no script reads it, and the
+/// login answered without it. Once, as `/auth/exchange`.
+async fn session(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> Response {
+    match auth.redeem(&body.code) {
+        Some(login) => {
+            let cookie = auth.session_cookie(&login);
+            let login = Login {
+                token: String::new(),
+                ..login
+            };
+            ([(header::SET_COOKIE, cookie)], Json(login)).into_response()
+        }
+        None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
+    }
+}
+
+/// A browser's session cookie forgotten. Its row is the session's own to
+/// end, over the socket (`session.revoke`), before it is asked this.
+async fn logout(State(auth): State<Arc<Auth>>) -> Response {
+    ([(header::SET_COOKIE, auth.cleared_cookie())], StatusCode::NO_CONTENT).into_response()
 }
 
 /// A one-time code for another device, made by a signed-in one: its

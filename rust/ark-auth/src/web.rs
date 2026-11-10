@@ -76,6 +76,39 @@ pub async fn exchange(server: &str, code: &str) -> Result<Login, String> {
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 
+/// The code, for this page's session: the server keeps its token in the
+/// session cookie (`/auth/session`, [`crate::COOKIE`]), `HttpOnly`, where
+/// no script on the page reads it, and answers the login without it — its
+/// `token` empty, which the socket says as its first message
+/// ([`crate::COOKIE_HELLO`]) so the server takes the cookie. Same origin
+/// only: the page the server serves.
+pub async fn session(server: &str, code: &str) -> Result<Login, String> {
+    let url = format!("{}/auth/session", server.trim_end_matches('/'));
+    let body = serde_json::json!({ "code": code }).to_string();
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    init.set_credentials(web_sys::RequestCredentials::SameOrigin);
+    init.set_body(&wasm_bindgen::JsValue::from_str(&body));
+    let headers = web_sys::Headers::new().map_err(js)?;
+    headers.set("Content-Type", "application/json").map_err(js)?;
+    init.set_headers(&headers);
+    // The server's sentence, without its status: what the page says.
+    let text = fetch_text(&url, &init)
+        .await
+        .map_err(|e| e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string()))?;
+    serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
+}
+
+/// This page's session cookie forgotten (`/auth/logout`). The session
+/// itself is ended over the socket first (`session.revoke`).
+pub async fn forget_session(server: &str) -> Result<(), String> {
+    let url = format!("{}/auth/logout", server.trim_end_matches('/'));
+    let init = web_sys::RequestInit::new();
+    init.set_method("POST");
+    init.set_credentials(web_sys::RequestCredentials::SameOrigin);
+    fetch_text(&url, &init).await.map(|_| ())
+}
+
 /// A device code (a join link's), for a login of this page's own; the
 /// error is the server's sentence.
 pub async fn redeem(server: &str, code: &str) -> Result<Login, String> {
@@ -93,7 +126,8 @@ pub async fn redeem(server: &str, code: &str) -> Result<Login, String> {
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 
-/// The browser's storage, for keeping a login between loads.
+/// The browser's storage, for keeping a login between loads: what of it
+/// is no secret — a page's session token is its cookie's ([`session`]).
 pub fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }
