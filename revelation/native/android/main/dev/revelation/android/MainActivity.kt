@@ -50,6 +50,8 @@ class MainActivity : ComponentActivity() {
     private fun show(b: Bible, saved: BibleView.Anchor?) {
         bible = b
         surface.setBible(b, saved)
+        // The text is in: ready for a screenshot once a frame shows it.
+        Ready.waiting("text", false)
     }
 
     override fun onPause() {
