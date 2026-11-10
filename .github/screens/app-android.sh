@@ -308,17 +308,25 @@ for theme in ${THEMES:-light dark}; do
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
-    { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
+    # The tree the picture is taken from, read once: the run's results'
+    # "before the picture" and the shot's own <id>.tree.txt (each was a
+    # dump of its own, two seconds apiece on the emulator).
+    tree() {
+      dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
+      { echo "before the picture"; cat "$out/$theme/$id.tree.txt"; } > "$steps/shot.txt"
+    }
     # A shot that opens something that animates in (a held tap's context
     # menu, or one that says "settle": true: a dropdown, a sheet) is taken
     # once the screen stands still: the same picture twice running, half a
-    # second apart, up to five seconds more. Every other as before.
+    # second apart, up to five seconds more, and its tree read then. Every
+    # other as before.
     if jq -e '.settle == true or any(.steps[]?; .hold == true)' <<< "$shot" > /dev/null; then
       still "$out/$theme/$id.png"
+      tree
     else
+      tree
       adb exec-out screencap -p > "$out/$theme/$id.png"
     fi
-    dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
   done 3< <(jq -c '.shots[]' "$shots")
 done
 
