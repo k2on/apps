@@ -277,9 +277,12 @@ for theme in ${THEMES:-light dark}; do
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
-    { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
-    adb exec-out screencap -p > "$out/$theme/$id.png"
+    # The tree the picture is taken from, read once: the run's results'
+    # "before the picture" and the shot's own <id>.tree.txt (each was a
+    # dump of its own, two seconds apiece on the emulator).
     dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
+    { echo "before the picture"; cat "$out/$theme/$id.tree.txt"; } > "$steps/shot.txt"
+    adb exec-out screencap -p > "$out/$theme/$id.png"
   done 3< <(jq -c '.shots[]' "$shots")
 done
 
