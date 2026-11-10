@@ -144,7 +144,7 @@ final class Drive: XCTestCase {
     /// route (a link, in the running app), or from where it is; then each
     /// step, each followed by the app's next ready moment.
     private func open(_ shot: Shot, in app: XCUIApplication, entry: Entry, out: URL) throws {
-        if let route = shot.route, let scheme = entry.scheme, !scheme.isEmpty, let url = URL(string: "\(scheme)://\(route)") {
+        if let route = shot.route, let url = link(route, scheme: entry.scheme) {
             // Where the router can take it: in the app as it runs, no relaunch.
             if launched[entry.bundle] != shot.args || app.state != .runningForeground { launch(app, entry, args: shot.args) }
             let g = try ready(app)
@@ -178,6 +178,16 @@ final class Drive: XCTestCase {
                 try ready(app, after: g)
             }
         }
+    }
+
+    /// How a shot's `route` is handed to the app: the one place that says
+    /// it, so a router's own spelling (a whole URL, `ark_router::Address`)
+    /// is a change here alone. A route that is a URL already is taken as it
+    /// is; a path is the app's scheme's.
+    private func link(_ route: String, scheme: String?) -> URL? {
+        if route.contains("://") { return URL(string: route) }
+        guard let scheme, !scheme.isEmpty else { return nil }
+        return URL(string: "\(scheme)://\(route)")
     }
 
     /// `app` launched afresh with `args`, in screenshot mode, and ready.

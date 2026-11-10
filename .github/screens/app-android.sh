@@ -224,6 +224,17 @@ open_app() {
   ready
 }
 
+# How a shot's `route` reaches the app: the one place that says it, so a
+# router's own spelling (a whole URL) is a change here alone. A link to the
+# running app (VIEW, its package), no relaunch, then its ready signal.
+scheme=$(jq -r '.scheme // empty' "$shots")
+open_route() {
+  local url=$1
+  case $url in *://*) ;; *) url="${scheme:-$app}://$url" ;; esac
+  adb shell am start -a android.intent.action.VIEW -d "'$url'" "$pkg" > /dev/null
+  ready
+}
+
 # The system in theme `$1` (light, dark) with the app stopped, and settled
 # before the app is opened: the night mode as `cmd uimode` says it back,
 # and the launcher, which the change re-creates (the tablet's and the
@@ -323,6 +334,8 @@ SHOTS=1
 # its own, at once (app-screens.yaml).
 for theme in ${THEMES:-light dark}; do
   theme_set "$theme"
+  # Stopped by the theme: the next shot launches it.
+  running=
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
@@ -336,7 +349,15 @@ for theme in ${THEMES:-light dark}; do
     while read -r k v; do
       [ -n "$k" ] && extras+=(--es "'${k#-}'" "'$v'")
     done < <(jq -r '(.args // []) as $a | range(0; $a | length; 2) as $i | "\($a[$i]) \($a[$i + 1] // "")"' <<< "$shot")
-    open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+    route=$(jq -r '.route // empty' <<< "$shot")
+    if [ -n "$route" ] && [ -n "${running:-}" ]; then
+      # Where the router can take it: in the app as it runs, no relaunch.
+      open_route "$route" || exit 1
+    else
+      open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+      running=1
+      [ -z "$route" ] || open_route "$route" || exit 1
+    fi
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of

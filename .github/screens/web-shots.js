@@ -44,10 +44,13 @@ async function main() {
         // page's next ready moment after it awaited: no time waited for
         // anywhere; the timeouts are only how long a page may fail to say so.
         const q = [`today=${web.today}`, `theme=${theme}`, 'shots=1', shot.query || ''].filter(Boolean).join('&');
+        // How a shot's `route` is put in the address: the one place that says
+        // it (a router's URL is its fragment, as the address bar shows it).
+        const at = route => (route ? `#${route.replace(/^[a-z]+:\/\//, '')}` : '');
         const generation = () => page.evaluate(() => window.__ark.generation);
         const settled = g => page.evaluate(g => window.__ark.after(g), g);
         try {
-          await page.goto(`${base}/?${q}`);
+          await page.goto(`${base}/?${q}${at(shot.route)}`);
           await page.waitForFunction(() => window.__ark, null, { timeout: 20000 });
           await settled(0);
           for (const step of shot.steps || []) {
