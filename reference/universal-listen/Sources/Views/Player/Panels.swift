@@ -159,7 +159,7 @@ struct OutputButton: View {
             presented.wrappedValue.toggle()
         } label: {
             Label(player.output.map { "Playing on \($0.name)" } ?? "Output",
-                  systemImage: player.outputID == "this" ? "airplayaudio" : (player.output?.symbol ?? "airplayaudio"))
+                  systemImage: "airplayaudio")
         }
         .labelStyle(.iconOnly)
         .frame(minWidth: 44, minHeight: 32)

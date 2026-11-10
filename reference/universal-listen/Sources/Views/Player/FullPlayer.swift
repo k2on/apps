@@ -49,6 +49,9 @@ struct FullPlayer: View {
             .overlay(alignment: .top) { CloseHandle() }
         }
         .environment(\.colorScheme, .dark)
+        #if os(iOS)
+        .preferredColorScheme(.dark)
+        #endif
         .foregroundStyle(.white)
         .tint(.white)
         .listenAnimation(nav.playerPanel)
