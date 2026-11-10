@@ -76,7 +76,7 @@
       # The Ark apps that are generated (nix/ark-app.nix, ui/docs/app.md:
       # "Generated, Not Committed"): each its directory with an app.toml.
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
-      arkApps = [ "money" ];
+      arkApps = [ "money" "revelation" ];
 
       rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/app" "money/iced" "money/server" "harken/seed" "money/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
@@ -723,7 +723,8 @@
           # ArkDB, so it is the SDK and gradle alone.
           revelation = androidApp {
             name = "revelation";
-            appid = "dev.revelation.android";
+            appid = arkOf.revelation.a.android.package;
+            ark = arkOf.revelation;
             title = "Revelation";
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };
@@ -745,8 +746,8 @@
                 appid = "${bundlePrefix}.revelation";
                 apk = revelation.apk;
                 apkName = "revelation.apk";
-                metadata = ./revelation/android/fdroid/metadata/us.koon.revelation.yml;
-                icon = ./revelation/android/fdroid/icon.svg;
+                metadata = ./revelation/fdroid/metadata/us.koon.revelation.yml;
+                icon = ./revelation/icon.svg;
               }
               {
                 appid = "${bundlePrefix}.money";
@@ -1346,6 +1347,9 @@
             money-ui = arkOf.money.ui;
             money-native = arkOf.money.native;
             inherit money-prebuild;
+            # revelation's: Kotlin alone, its Android project generated.
+            revelation-native = arkOf.revelation.native;
+            revelation-prebuild = arkOf.revelation.prebuild { };
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -1423,6 +1427,7 @@
             # projects (nix/ark-app.nix). The emitters' own snapshots are
             # ark-ui-gen's tests (checks.rust).
             money-native = arkOf.money.native;
+            revelation-native = arkOf.revelation.native;
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.

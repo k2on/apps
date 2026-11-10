@@ -411,11 +411,24 @@ ANDROID_DEPENDENCIES = [
 ]
 
 
+def kernel(a):
+    """Whether the app has a Rust crate, so a kernel the phones load (an
+    Ark app on ArkUI), or is Kotlin alone (revelation)."""
+    return "crate" in a
+
+
+def native_dir(root, a, *parts):
+    return os.path.join(root, a["dir"], "native", "android", *parts)
+
+
 def android_gradle(root, a, ffi_lib_name):
     app = a["dir"]
     pkg = a["android"]["package"]
     andr = a["android"]
-    deps = list(ANDROID_DEPENDENCIES)
+    ark = kernel(a)
+    # An Ark app's are ArkUI's and the kernel's; an app of Kotlin alone
+    # says each of its own.
+    deps = list(ANDROID_DEPENDENCIES) if ark else []
     for _, m in modules_of(root, a):
         deps += [d for d in m.get("android", {}).get("dependencies", []) if d not in deps]
     deps += [d for d in andr.get("dependencies", []) if d not in deps]
@@ -425,13 +438,22 @@ def android_gradle(root, a, ffi_lib_name):
             return f'    implementation(platform("{d[len("platform:"):]}"))'
         return f'    implementation("{d}")'
 
-    kotlin_dirs = [f'"{TO_APP}/native/android/main"', '"generated"', f'"{TO_REPO}/ui/kotlin/src"', '"$arkLib/kotlin"']
+    kotlin_dirs = [f'"{TO_APP}/native/android/main"'] + (['"generated"', f'"{TO_REPO}/ui/kotlin/src"', '"$arkLib/kotlin"'] if ark else [])
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "kotlin")):
             kotlin_dirs.append(f'"{TO_REPO}/modules/{name}/kotlin"')
     for d in sorted(glob.glob(os.path.join(root, app, "modules", "*", "kotlin"))):
         kotlin_dirs.append(f'"{TO_APP}/modules/{os.path.basename(os.path.dirname(d))}/kotlin"')
     srcs = "\n".join(f"            kotlin.srcDir(rootProject.file({d}))" if not d.startswith('"$') else f"            kotlin.srcDir({d})" for d in kotlin_dirs)
+    if ark:
+        srcs = '            // The kernel per ABI and the Kotlin over it; the app\'s own\n            // Kotlin and its generated screens; ArkUI; the modules\'.\n            jniLibs.srcDir("$arkLib/jniLibs")\n' + srcs
+    # The app's own resources and assets, beside the generated ones.
+    if os.path.isdir(native_dir(root, a, "res")):
+        srcs += f'\n            res.srcDir(rootProject.file("{TO_APP}/native/android/res"))'
+    if os.path.isdir(native_dir(root, a, "assets")):
+        srcs += f'\n            assets.srcDir(rootProject.file("{TO_APP}/native/android/assets"))'
+    test_deps = andr.get("test-dependencies", ["net.java.dev.jna:jna:5.17.0", "org.json:json:20240303"] if ark else [])
+    store_type = andr.get("keystore-type", "pkcs12")
     keystore = andr.get("keystore")
     signing = f'''
     // The one key every build is signed with ({app}/app.toml's `keystore`),
@@ -441,7 +463,7 @@ def android_gradle(root, a, ffi_lib_name):
     signingConfigs {{
         getByName("debug") {{
             storeFile = rootProject.file("{TO_APP}/{keystore}")
-            storeType = "pkcs12"
+            storeType = "{store_type}"
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
@@ -459,11 +481,11 @@ plugins {{
     id("app.cash.paparazzi")
 }}
 
-// The app's library for the phone (`packages.{app}-android-lib`): `jniLibs/<abi>/lib{ffi_lib_name}.so`
+{f'''// The app's library for the phone (`packages.{app}-android-lib`): `jniLibs/<abi>/lib{ffi_lib_name}.so`
 // and `kotlin/`, the Kotlin UniFFI writes for it; nix passes its store path as `-ParkLib`, and
 // `nix run .#{app}-prebuild` builds it into ../ffi/android.
 val arkLib: String = providers.gradleProperty("arkLib").getOrElse(rootProject.file("../ffi/android").path)
-
+''' if ark else ""}
 android {{
     namespace = "{pkg}"
     compileSdk = {andr.get("target-sdk", 35)}
@@ -479,7 +501,7 @@ android {{
         // every commit.
         versionCode = providers.gradleProperty("versionCode").map {{ it.toInt() }}.getOrElse(1)
         versionName = providers.gradleProperty("versionName").getOrElse("{a.get("version", "0.1")}")
-        ndk {{ abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }}
+{'        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }' if ark else ''}
     }}
 {signing}
     buildTypes {{
@@ -503,9 +525,9 @@ android {{
 
     kotlinOptions {{
         jvmTarget = "21"
-        // The top app bars, pull to refresh, sheets and segmented buttons
+{'''        // The top app bars, pull to refresh, sheets and segmented buttons
         // are still marked experimental in Material 3 1.3.
-        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")''' if ark else ""}
     }}
 
     buildFeatures {{
@@ -514,9 +536,6 @@ android {{
 
     sourceSets {{
         getByName("main") {{
-            // The kernel per ABI and the Kotlin over it; the app's own
-            // Kotlin and its generated screens; ArkUI; the modules'.
-            jniLibs.srcDir("$arkLib/jniLibs")
 {srcs}
         }}
 {f'''        getByName("test") {{
@@ -533,15 +552,15 @@ dependencies {{
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
     }}
 
-    // The JVM tests drive the real kernel: the library built for the machine
-    // they run on (`host/`), through JNA's jar.
-    testImplementation("net.java.dev.jna:jna:5.17.0")
-    testImplementation("org.json:json:20240303")
+{chr(10).join(f'    testImplementation("{d}")' for d in test_deps)}
 }}
 
 tasks.withType<Test>().configureEach {{
+{'''    // The JVM tests drive the real kernel: the library built for the
+    // machine they run on (`host/`), through JNA's jar.
     systemProperty("dev.arkdb.ui.strict", "true")
-    systemProperty("jna.library.path", "$arkLib/host")
+    systemProperty("jna.library.path", "$arkLib/host")''' if ark else ""}{f'''
+    maxHeapSize = "{andr["test-heap"]}"''' if andr.get("test-heap") else ""}
 }}
 
 // The screenshots are `recordPaparazziDebug`'s; the APK's build runs every
@@ -564,6 +583,7 @@ def android_manifest(root, a):
         perms += [p for p in ma.get("permissions", []) if p not in perms]
         services += ma.get("services", [])
         meta += ma.get("meta-data", [])
+    scheme = a.get("scheme")
     lines = ['<?xml version="1.0" encoding="utf-8"?>', f"<!-- {HEADER.format(app=a['dir'])} -->",
              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">']
     lines += [f'    <uses-permission android:name="{p}" />' for p in perms]
@@ -598,6 +618,18 @@ def android_manifest(root, a):
         </service>'''
     for d in meta:
         extra += f'\n        <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />'
+    theme = andr.get("theme")
+    # A server at home often speaks plain http://, and the person typed its
+    # address: only for an app that reaches one.
+    clear = '\n        android:usesCleartextTraffic="true"' if "android.permission.INTERNET" in perms else ""
+    activity = ""
+    if not theme:
+        activity += '\n            android:theme="@style/Theme.Ark.Starting"'
+    if scheme:
+        # The sign-in's return comes back to the same activity.
+        activity += '\n            android:launchMode="singleTask"'
+    if andr.get("config-changes"):
+        activity += f'\n            android:configChanges="{"|".join(andr["config-changes"])}"'
     lines.append(f'''
     <!-- enableOnBackInvokedCallback: the back gesture is predictive (Android 14
          and later). -->
@@ -605,15 +637,12 @@ def android_manifest(root, a):
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:allowBackup="false"
-        android:usesCleartextTraffic="true"
+        android:allowBackup="false"{clear}
         android:enableOnBackInvokedCallback="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:theme="{theme or "@android:style/Theme.DeviceDefault.NoActionBar"}">
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Ark.Starting"
-            android:launchMode="singleTask"
+            android:exported="true"{activity}
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -670,7 +699,14 @@ def android_resources(root, a, out):
 '''
     files["mipmap-anydpi-v26/ic_launcher.xml"] = adaptive
     files["mipmap-anydpi-v26/ic_launcher_round.xml"] = adaptive
+    if a["android"].get("theme"):
+        # The app draws its own first frame (its theme, its colours, in
+        # native/android/res): no splash of ArkUI's.
+        for k in ("values/themes.xml", "values/colors.xml", "values-night/colors.xml", "drawable/splash.xml"):
+            files.pop(k)
     for p, text in files.items():
+        if os.path.exists(native_dir(root, a, "res", p)):
+            raise SystemExit(f"{a['dir']}/native/android/res/{p} is generated (ui/prebuild.py): leave it out")
         write_file(os.path.join(out, p), text)
 
 

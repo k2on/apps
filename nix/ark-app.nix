@@ -72,8 +72,9 @@ rec {
 
   # The app's generated crates, in crate2nix's form (nix/rust.nix's
   # `extraCrates`).
+  # An app of Kotlin alone (no `crate`: revelation) has none.
   crates = pkgs: dir:
-    let a = read dir; in {
+    let a = read dir; in lib.optionalAttrs (a ? crate) {
       "${ffiName a}" = {
         crateName = ffiName a;
         version = "0.1.0";
@@ -107,15 +108,16 @@ rec {
     let
       a = read dir;
       gen = build { packageId = "${a.id}-gen"; };
-      ui = pkgs.runCommand "${a.id}-ui" { } ''
+      # Its screens' SwiftUI and Compose; none for an app with no crate.
+      ui = if a ? crate then pkgs.runCommand "${a.id}-ui" { } ''
         ${gen}/bin/${a.id}-gen write $out --package ${a.android.package or "dev.${a.id}.android"}
-      '';
+      '' else null;
       native = pkgs.runCommand "${a.id}-native" {
         nativeBuildInputs = [ pkgs.python3 pkgs.librsvg ];
         src = only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" dir ];
       } ''
         cd $src
-        python3 ui/prebuild.py write ${dir} --views ${ui} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
+        python3 ui/prebuild.py write ${dir} ${lib.optionalString (ui != null) "--views ${ui}"} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
       '';
     in
     {

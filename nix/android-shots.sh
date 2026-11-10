@@ -13,15 +13,24 @@
 #   nix/android-shots.sh harken                       # every shot
 #   nix/android-shots.sh harken --tests '*d1_player*' # one
 #
-# The PNGs land in <app>/android/app/src/test/snapshots/images (ignored by
-# git), named <appid>_Screens_<test>_<state>-<theme>.png.
+# The PNGs land in the project's app/src/test/snapshots/images (ignored by
+# git), named <appid>_Screens_<test>_<state>-<theme>.png. An Ark app's
+# project is generated (ui/docs/app.md): `nix run .#<app>-prebuild` writes
+# it into <app>/.native/android first, and that is where they land.
 set -euo pipefail
 app=${1:?which app}
 shift
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 home=${XDG_CACHE_HOME:-$HOME/.cache}/ark-shots/$app
 mkdir -p "$home"
-shots="$root/$app/android/app/src/test/snapshots/images"
+project=$app/android
+if [ -f "$root/$app/app.toml" ]; then
+  project=$app/.native/android
+  (cd "$root" && nix run ".#$app-prebuild" \
+    --option extra-substituters https://k2on.cachix.org \
+    --option extra-trusted-public-keys "k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=")
+fi
+shots="$root/$project/app/src/test/snapshots/images"
 # shellcheck disable=SC2016 # the script is for the inner shell to expand
 nix develop "$root#$app-android-screens" \
   --option extra-substituters https://k2on.cachix.org \
@@ -37,11 +46,11 @@ nix develop "$root#$app-android-screens" \
     # The configure hooks of the derivation: the dependency cache served as a
     # proxy, and the flags of gradle pointed at it.
     runHook preConfigure
-    cd "$1/$2/android"
+    cd "$1/$2"
     shift 2
     runHook preBuild
     # Kept warm between runs is the build output, not the daemon: each run
     # has its own proxy, which a daemon could not follow.
     gradle --build-cache :app:recordPaparazziDebug "$@"
-  ' _ "$home/gradle" "$root" "$app" "$@"
+  ' _ "$home/gradle" "$root" "$project" "$@"
 echo "$(find "$shots" -name '*.png' | wc -l) shots in $shots"

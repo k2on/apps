@@ -14,9 +14,14 @@ and the app parses it at launch.
 
 ## What is here
 
-    android/                        the gradle project (one module, :app)
-      app/src/main/assets/bsb.txt   the Berean Standard Bible, as published
-      app/src/main/kotlin/dev/revelation/android/
+    app.toml                        what it is to Android: its id, its theme, its dependencies; its
+                                    gradle project is generated from it (ui/docs/app.md,
+                                    "Generated, Not Committed"): `nix run .#revelation-prebuild`
+    icon.svg                        its icon (the launcher's adaptive and themed icon are made from it)
+    native/android/
+      assets/bsb.txt                the Berean Standard Bible, as published
+      res/values/                   its own theme and colours (the first frame black)
+      main/dev/revelation/android/
         Bible.kt      the text as one String with IntArray indices; Ref <-> verse; search; typed references
         Layout.kt     the reference layout at reading size: tokens measured once, greedy breaks, the line table
         Camera.kt     (y, scale), the screen transform, the clamps, pinch about a focal point, the rubber band
@@ -27,9 +32,10 @@ and the app parses it at launch.
         Shell.kt      the Compose chrome: header, picker, search, About
         Theme.kt      the one palette, white on black, shared by the View and Compose
         MainActivity.kt
-      app/src/test/kotlin/dev/revelation/android/   JUnit 4 tests and the Paparazzi screens
+      test/dev/revelation/android/  JUnit 4 tests and the Paparazzi screens
       debug.keystore                the key every build signs with (see below)
-      fdroid/                       the F-Droid metadata and icon
+      deps.json                     the Maven graph gradle replays offline
+    fdroid/                         the F-Droid metadata
 
 The pieces that decide things (`Bible`, `Layout`, `Camera`, `FlyTo`,
 `Levels`, `Gestures`) are pure Kotlin with no Android types, and are tested
@@ -40,7 +46,8 @@ on the JVM. `BibleView` and the activity are kept thin.
 You need JDK 21, Gradle 8.x (there is no wrapper, as in harken), and an
 Android SDK with **platform 35** and **build-tools 35.0.0**. The toolchain
 is the same as `harken/android`'s: AGP 8.7.3, Kotlin 2.0.21, Compose BOM
-2024.12.01 and Paparazzi 1.3.5. From `revelation/android`:
+2024.12.01 and Paparazzi 1.3.5. `nix run .#revelation-prebuild`, then from
+`revelation/.native/android`:
 
     export ANDROID_HOME=/path/to/sdk ANDROID_SDK_ROOT=/path/to/sdk
     gradle :app:testDebugUnitTest :app:assembleRelease   # the tests, and app/build/outputs/apk/release/app-release.apk
@@ -57,7 +64,7 @@ slow, so the whole Bible is measured with it once, and every later
 surface shot reuses that layout. `BibleView` keeps the last layout for the
 process.
 
-**One key, committed, and public on purpose.** `android/debug.keystore`
+**One key, committed, and public on purpose.** `native/android/debug.keystore`
 signs both the debug and the release builds, so that one APK installs over
 the previous one. The reason is the same as harken's, and is written next
 to `signingConfigs` in `app/build.gradle.kts`. Anyone can read the key, so
