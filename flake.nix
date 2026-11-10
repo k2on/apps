@@ -292,20 +292,37 @@
           # own: screens.yaml's cache of them is keyed on it.
           inherit (import ./nix/screens-tools.nix { inherit pkgs; }) screens-ffmpeg xcodegen;
 
+          # A tool the Macs run (a server, a seed), without the toolchain in
+          # its closure. On macOS the linker leaves in each binary the paths
+          # of the objects it was linked from, the toolchain's standard
+          # library among them (its debug map, for dsymutil), so every Mac
+          # that ran the server fetched the whole toolchain with it: 379 MiB,
+          # 2.3 GiB unpacked, minutes of a Mac job (app-screens 42829780045).
+          # The paths are dropped (remove-references-to) and the binaries
+          # signed again (autoSignDarwinBinariesHook, after postFixup); on
+          # Linux, where strip leaves no such path, nothing changes.
+          macTool = args: crate (args // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+            rootAttrs = old: {
+              nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.removeReferencesTo pkgs.darwin.autoSignDarwinBinariesHook ];
+              postFixup = (old.postFixup or "") + ''
+                find "$out" -type f -perm -0100 -exec remove-references-to -t ${rust} {} +
+              '';
+            };
+          });
           # The server (harken/server: the server and harken-peer): its
           # crate and what it reaches, under the features it asks for, and
           # none of the GUI the workspace's other members link.
-          harken-server = crate { packageId = "harken-server"; };
+          harken-server = macTool { packageId = "harken-server"; };
           # `arkdb` for a server to read its system's events with
           # (docs/plan-observe.md): no GUI stack.
           arkdb = crate { packageId = "arkdb"; };
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
-          money-server = crate { packageId = "money-server"; };
+          money-server = macTool { packageId = "money-server"; };
           # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
           # DATA` writes what that app's server boots seeded from.
-          money-seed = crate { packageId = "money-seed"; };
-          harken-seed = crate { packageId = "harken-seed"; };
+          money-seed = macTool { packageId = "money-seed"; };
+          harken-seed = macTool { packageId = "harken-seed"; };
           # The catalogue's covers, kept in the repository (harken/seed/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
           # them: the first sixteen hex digits of the address's SHA-256), so
