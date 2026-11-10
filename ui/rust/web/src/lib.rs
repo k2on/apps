@@ -306,7 +306,13 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         if let Some(t) = query("theme").filter(|t| t == "light" || t == "dark") {
             let _ = root.set_attribute("data-theme", &t);
         }
-        let motion = if shots() { "shots" } else if reduced() { "reduced" } else { "full" };
+        let motion = if shots() {
+            "shots"
+        } else if reduced() {
+            "reduced"
+        } else {
+            "full"
+        };
         let _ = root.set_attribute("data-motion", motion);
     }
     if shots() {
