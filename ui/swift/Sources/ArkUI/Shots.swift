@@ -67,19 +67,24 @@ private final class Signal: ObservableObject {
     /// end: something a shared spring did not settle (the system's own).
     /// One that repeats for ever (a spinner, the caret's blink) has no end
     /// to wait for, and is not counted.
-    private static func moving() -> Bool {
+    private static func moving() -> String? {
         #if canImport(UIKit)
-        func any(_ l: CALayer) -> Bool {
+        func any(_ l: CALayer) -> String? {
             for key in l.animationKeys() ?? [] {
                 guard let a = l.animation(forKey: key) else { continue }
                 if a.repeatCount.isInfinite || a.repeatCount >= .greatestFiniteMagnitude || a.repeatDuration.isInfinite { continue }
-                return true
+                // Named, for the busy reason: what, on which layer, for how long.
+                return "\(type(of: l)).\(key) \(type(of: a)) \(a.duration)s"
             }
-            return (l.sublayers ?? []).contains(where: any)
+            for s in l.sublayers ?? [] { if let m = any(s) { return m } }
+            return nil
         }
-        return UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).contains { any($0.layer) }
+        for w in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+            if let m = any(w.layer) { return m }
+        }
+        return nil
         #else
-        return false
+        return nil
         #endif
     }
 }

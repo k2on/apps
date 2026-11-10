@@ -41,8 +41,9 @@ public final class Ready {
     public var onChange: (() -> Void)?
     /// Asked to start (true) or stop (false) calling `frame()` once a frame.
     public var ticking: ((Bool) -> Void)?
-    /// Whether anything on the screen is still on its way to an end.
-    public var moving: () -> Bool = { false }
+    /// What on the screen is still on its way to an end, if anything (a
+    /// layer's animation, named): nil when nothing is.
+    public var moving: () -> String? = { nil }
     private var ticks = false
 
     private init() {}
@@ -102,9 +103,9 @@ public final class Ready {
     public func frame() {
         let idle = probes.map { $0() }
         let moves = moving()
-        guard waiting.isEmpty, !idle.contains(false), !moves else {
+        guard waiting.isEmpty, !idle.contains(false), moves == nil else {
             quiet = 0
-            let now = (waiting.keys.sorted() + idle.enumerated().filter { !$0.element }.map { "probe \($0.offset)" } + (moves ? ["moving"] : [])).joined(separator: ", ")
+            let now = (waiting.keys.sorted() + idle.enumerated().filter { !$0.element }.map { "probe \($0.offset)" } + (moves.map { ["moving \($0)"] } ?? [])).joined(separator: ", ")
             if now != why {
                 why = now
                 onChange?()
