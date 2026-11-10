@@ -15,11 +15,13 @@
 #   the Mac (aarch64-darwin), which moves only with what it is built from
 #   (flake.nix's `only`: the app's ios/ and ui/swift; its kernel's Rust;
 #   the pinned Xcode);
+# - its Mac build's, `<app>-macos`, when the commit has one (the iPad's
+#   shots are of the same simulator build);
 # - of the scripts' checkout (main's, which a workflow_run runs), what the
 #   shots are taken by: each package its <app>/screens/server.sh builds
 #   (`.#<name>`, the server and its seed), its screens/ (shots.json and the
-#   server's script), the picture its sign-in wears, and the iPhone's own
-#   scripts here. Not the workflow, nor Android's or the desktop's scripts:
+#   server's script), the picture its sign-in wears, and the iPhone's, the
+#   iPad's and the Mac's own scripts here. Not the workflow, nor Android's or the desktop's scripts:
 #   moving those takes no iPhone shots again.
 set -uo pipefail
 scripts=$(cd "$1" && pwd)
@@ -42,7 +44,8 @@ out() {
 
 shared=""
 for p in .github/screens/app-ios.sh .github/screens/apps-ios.sh .github/screens/ios-build.sh \
-  .github/screens/app-server.sh .github/screens/drive-ios .github/nix-xcode.sh; do
+  .github/screens/ios-family.sh .github/screens/app-mac.sh .github/screens/apps-mac.sh \
+  .github/screens/window.swift .github/screens/app-server.sh .github/screens/drive-ios .github/nix-xcode.sh; do
   shared="$shared$p $(object "$p")"$'\n'
 done
 
@@ -54,6 +57,10 @@ for a in "$@"; do
     continue
   fi
   said="app $app"$'\n'"$shared"
+  # Its Mac build, when the commit has one (apps-mac.sh): the same Mac
+  # takes its window.
+  mac=$(out "$src" "$a-macos" 2> /dev/null)
+  if [ "$mac" != none ]; then said="${said}mac $mac"$'\n'; fi
   said="$said$a/screens $(object "$a/screens")"$'\n'
   picture=$(jq -r '.server.picture // empty' "$scripts/$a/screens/shots.json" 2>/dev/null)
   if [ -n "$picture" ]; then said="$said$picture $(object "$picture")"$'\n'; fi

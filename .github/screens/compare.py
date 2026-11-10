@@ -16,7 +16,13 @@ A row is one screen — an app's shot in a theme — with main's and the PR's
 on each phone side by side, Android's, the iPhone's, then the desktop
 window's (a "phone" here too: apps/<app>/desktop/), so a change on one can
 be held against the others; it is shown when any one's differs or is new.
-A phone with nothing of that screen says so in its cell.
+A phone with nothing of that screen says so in its cell. The larger
+screens are phones too, each its own pair of columns: Android's tablet and
+the Fold open and folded, the iPad upright and on its side, the Mac's
+window. A phone's columns are there only when a screen shown has it, on
+main or on the PR, so a comment with no tablet's has no tablet's columns;
+one main has no shots for says "new". A directory this list does not name
+is still shown, after the rest, by its name.
 """
 import os
 import subprocess
@@ -71,13 +77,24 @@ for app, phone, theme, id in shots(pr):
     screens.setdefault((app, theme, id), {})[phone] = state
 
 # Each phone, what the comment calls it, and how wide its pictures are
-# shown: the desktop's lie on their side, so they are given the room of two.
-PHONES = (("android", "Android", 160), ("ios", "iPhone", 160), ("desktop", "Desktop", 320))
-WIDTH = {p: w for p, _, w in PHONES}
+# shown: the desktop's, a tablet's and the iPad's on its side lie on their
+# side, so they are given the room of two.
+PHONES = (
+    ("android", "Android", 160),
+    ("android-tablet", "Android tablet", 320),
+    ("fold-unfolded", "Fold, open", 200),
+    ("fold-folded", "Fold, folded", 160),
+    ("ios", "iPhone", 160),
+    ("ipad-portrait", "iPad", 200),
+    ("ipad-landscape", "iPad, landscape", 320),
+    ("desktop", "Desktop", 320),
+    ("mac", "Mac", 320),
+)
+KNOWN = {p for p, _, _ in PHONES}
 
 
 def img(url, phone):
-    return f'<img src="{url}" width="{WIDTH[phone]}">'
+    return f'<img src="{url}" width="{WIDTH.get(phone, 160)}">'
 
 
 def cells(app, theme, id, phone, state):
@@ -90,6 +107,17 @@ def cells(app, theme, id, phone, state):
 
 
 shown = {k: v for k, v in screens.items() if any(s != "same" for s in v.values())}
+
+
+# The phones the shown screens have, on main or on the PR, in PHONES' order,
+# then any other by its name.
+there = {p for (app, _, _), v in shown.items() for p in v} | {
+    p for app in {a for a, _, _ in shown} for p in (
+        os.listdir(os.path.join(main, app)) if os.path.isdir(os.path.join(main, app)) else []
+    ) if os.path.isdir(os.path.join(main, app, p))
+}
+PHONES = tuple(x for x in PHONES if x[0] in there) + tuple((p, p, 160) for p in sorted(there - KNOWN))
+WIDTH = {p: w for p, _, w in PHONES}
 same = sum(1 for v in screens.values() for s in v.values() if s == "same") - sum(
     1 for v in shown.values() for s in v.values() if s == "same"
 )

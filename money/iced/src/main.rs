@@ -1146,6 +1146,11 @@ impl App {
                     (arkui::command::Press::Close, _) => self.dropdown = None,
                     (arkui::command::Press::Up, Some(d)) => return d.search.step(false, &groups, look::DROP_LIST),
                     (arkui::command::Press::Down, Some(d)) => return d.search.step(true, &groups, look::DROP_LIST),
+                    // Typed before its box had the keys (the focus is a
+                    // task, landing after the click that opened it): the
+                    // box's all the same.
+                    (arkui::command::Press::Choose, Some(_)) => return self.update(Message::DropChoose),
+                    (press, Some(d)) => return d.search.missed(&press, look::DROP_LIST),
                     _ => {}
                 }
             }
@@ -1280,6 +1285,9 @@ impl App {
                     self.selected = None;
                 }
             }
+            // With the dropdown up the keys are its (`DropKey`), as harken's
+            // command box's are: one its box did not take is not the page's.
+            Message::Key(..) if self.dropdown.is_some() => {}
             Message::Key(key, mods) => return self.key(key, mods),
             Message::Pointer(at) => self.pointer = at,
             Message::Resized(size) => self.window = size,

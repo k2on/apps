@@ -211,9 +211,19 @@ impl State {
         moved
     }
 
-    /// A view's number and name, while it answers.
-    fn kept(&self, id: u64) -> Option<(usize, String)> {
-        let k = self.views.get(&id)?;
+    /// A view's number and name while it answers, its rows about to be read as they stand:
+    /// what it did until now is in them, so it is taken with them, here and
+    /// in the peer, and the next `take` says only what it does after.
+    /// Otherwise a patch the driver's thread settled between the view's
+    /// opening and this read (the server's rows arriving as an app opens)
+    /// came again in the next `take`, and the app's list, its rows with
+    /// that patch spliced in, held a row twice: money's budget a category
+    /// twice, a lazy list's key used twice, the app gone (app-screens
+    /// 42718045335, money's dark phone).
+    fn base(&mut self, id: u64) -> Option<(usize, String)> {
+        let k = self.views.get_mut(&id)?;
+        k.view.settle(&mut self.peer, true);
+        k.update = Update::Unchanged;
         Some((k.view.view()?, k.view.name().to_string()))
     }
 }
@@ -709,10 +719,11 @@ pub struct ViewHandle {
 
 #[uniffi::export]
 impl ViewHandle {
-    /// Its rows as they stand, each its JSON.
+    /// Its rows as they stand, each its JSON; what it did until now is in
+    /// them, and the next `take` says only what it does after.
     pub fn rows(&self) -> Vec<String> {
-        let s = self.shared.lock();
-        let Some((at, name)) = s.kept(self.id) else {
+        let mut s = self.shared.lock();
+        let Some((at, name)) = s.base(self.id) else {
             return vec![];
         };
         s.peer.rows(at).iter().map(|r| text(s.peer.element_json(&name, r))).collect()
@@ -741,10 +752,11 @@ impl ViewHandle {
 }
 
 impl ViewHandle {
-    /// Its rows as they stand, each its bytes.
+    /// Its rows as they stand, each its bytes; what it did until now is in
+    /// them, and the next `take` says only what it does after.
     pub fn rows_bytes(&self) -> Vec<Vec<u8>> {
-        let s = self.shared.lock();
-        s.kept(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
+        let mut s = self.shared.lock();
+        s.base(self.id).map_or(vec![], |(at, _)| s.peer.rows(at))
     }
 
     /// What it did since last taken, and the rows that came with it, each

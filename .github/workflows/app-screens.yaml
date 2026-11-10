@@ -14,6 +14,11 @@
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
 # the desktop `nix build .#<app>-iced` at the commit (flake.nix, `icedApp`;
 # `publish.desktop` the list), photographed with no window by arkui-shots.
+# The larger screens in the same jobs: Android's tablet and Fold beside each
+# phone's job, from the same APK; the iPad on the iPhone's Mac, only for an
+# app whose build takes it (its UIDeviceFamily), and the Mac's own window,
+# only for an app whose commit has `<app>-macos` (apps.md, "The larger
+# screens"). An app with neither boots nothing more.
 #
 # **After the publish.** This runs when build finishes (Android) and when
 # ios has ended (the iPhone, which builds the commit itself, after ios, so as
@@ -55,10 +60,23 @@
 # scripts from main, never the PR's. Of a PR's run Android reads only its
 # artifacts (an APK installed on an emulator); the iPhone and the desktop
 # build the PR's commit, only for a branch of this repository, with a token
-# that can only read, and pushing nothing to the cache (only main's iPhone
-# run does; build.yaml pushes the desktop's). `which` evaluates the PR's
-# flake (ios-inputs.sh) and builds nothing of it, with a token that can only
-# read.
+# that can only read. `which` evaluates the PR's flake (ios-inputs.sh) and
+# builds nothing of it, with a token that can only read.
+#
+# **The cache, and whose code goes in it.** What a job here builds goes to
+# Cachix (CACHIX_NAME, with the secret CACHIX_AUTH_TOKEN) only when every
+# line it builds and runs is this repository's own: main's, a branch's of
+# this repository (its PR's run, or a run by hand), never a fork's. A
+# workflow_run job has this repository's secrets whoever's run started it,
+# and nix trusts what the cache signed, not what is in it: a job holding the
+# token while it ran a fork's code could put anything under any hash every
+# later build fetches. So the token is asked for only by a step whose `if`
+# says the run's head repository is this one (SAME_REPO, below: the
+# triggering run's `head_repository`, not its branch's name, which a fork
+# chooses). A fork's run is read-only on the cache: Android's jobs install
+# its APK and push nothing; the iPhone's and the desktop's do not run.
+# Nothing built with Xcode goes there either (Apple's licence): the Mac's
+# push filters it out, as ios.yaml's does.
 name: app-screens
 
 on:
@@ -94,6 +112,15 @@ on:
         description: "A pull request's number: its iPhone shots, not every app's"
         required: false
         default: ""
+      # Every app taken as by hand, and nothing published (no `screens`
+      # branch): to try this file as a branch has it, run on that branch,
+      # before it is merged. Its builds still go to the cache, as every run
+      # of this repository's code.
+      dry:
+        description: "Without a PR: take every app, publish nothing"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -114,6 +141,12 @@ env:
   BRANCH: ${{ github.event.workflow_run.head_branch }}
   SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
   FDROID: https://k2on.github.io/apps/fdroid/repo
+  # `true` when the code this run builds and runs is this repository's own
+  # (see the top): a push to main or a run by hand (by someone who can
+  # write here; a PR's by hand only of a branch here, `which` says), or a
+  # workflow_run whose run was of this repository's head. Only then does a
+  # job push to the cache.
+  SAME_REPO: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository }}
 
 jobs:
   # What there is to take, and what for: `release` (main, published),
@@ -341,13 +374,20 @@ jobs:
         # minutes of its ten). Their captures meet in the same
         # <app>/android/ (merge-multiple), whole when both are there.
         theme: [light, dark]
-    name: android (${{ matrix.app }}, ${{ matrix.theme }})
+        # The phone (a Pixel 7); and the large screens, one emulator after
+        # the other in a job of their own: a Pixel Tablet in landscape, then
+        # a Pixel Fold open and folded (apps-android.sh). The same APK,
+        # driver and shots on each; a job of their own so that the phone's
+        # come as soon as before, and one job, not two, so that the large
+        # screens pay one nix, one server and one wait for the APK.
+        device: [phone, large]
+    name: android (${{ matrix.app }}, ${{ matrix.theme }}, ${{ matrix.device }})
     runs-on: ubuntu-latest
     # One of each app's at a time on a branch: a newer commit's (or the
     # same commit's again, from another event: on main both a script
     # change and build) takes over from the one going.
     concurrency:
-      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}
+      group: app-screens-android-${{ github.event.workflow_run.head_branch || github.ref_name }}-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 90
     env:
@@ -382,6 +422,8 @@ jobs:
         run: bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
         env:
           GH_TOKEN: ${{ github.token }}
+          # A dry run: the APKs build made at the branch's commit, where it made any.
+          COMMIT: ${{ inputs.dry == true && github.sha || '' }}
 
       # The app's server, as nix builds it (its server.sh): the cache's,
       # which build.yaml's own build of the servers fills, or else built,
@@ -392,6 +434,16 @@ jobs:
           extra-conf: |
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+      # What it builds (the server and its seed, when build.yaml's have not
+      # landed yet) to the cache, for the next job: only of this
+      # repository's run. A fork's APK runs in this job, so a fork's never
+      # holds the token (see the top).
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Start the server
         run: |
@@ -420,6 +472,7 @@ jobs:
       # others still taken. One line: the action runs each line of `script`
       # as its own command.
       - name: Capture
+        if: matrix.device == 'phone'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -431,6 +484,52 @@ jobs:
           # if the run is still making it (none: apps-android.sh skips it).
           script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
+      # The large screens: the same, on a Pixel Tablet held in landscape
+      # (<app>/android-tablet/), then on a Pixel Fold, open and then folded
+      # (<app>/fold-unfolded/, <app>/fold-folded/), each its own AVD.
+      - name: Capture (tablet)
+        if: matrix.device == 'large'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_tablet
+          avd-name: tablet
+          # Not saved at the end: nothing boots it again, and saving took fourteen seconds.
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
+          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=tablet RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+      # The Fold's hardware profile, as this runner's avdmanager has it: the
+      # Pixel Fold's own where it is listed, else the emulator's 7.6-inch
+      # foldable, the Pixel Fold's inner screen, which folds the same way
+      # (the runner's command-line tools have had only that one).
+      - id: fold
+        if: ${{ !cancelled() && matrix.device == 'large' }}
+        name: The Fold's profile
+        run: |
+          ids=$("$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list device -c)
+          if grep -qx pixel_fold <<< "$ids"; then
+            echo "profile=pixel_fold" >> "$GITHUB_OUTPUT"; echo "name=Pixel Fold" >> "$GITHUB_OUTPUT"
+          else
+            profile=$(grep -x '7.6in Foldable' <<< "$ids" || grep -i -m1 'foldable' <<< "$ids" || true)
+            echo "profile=$profile" >> "$GITHUB_OUTPUT"; echo "name=$profile" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+      - name: Capture (Fold)
+        if: ${{ !cancelled() && matrix.device == 'large' && steps.fold.outputs.profile != '' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          FOLD_NAME: ${{ steps.fold.outputs.name }}
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: ${{ steps.fold.outputs.profile }}
+          avd-name: fold
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
+          # The APK as the tablet's step left it (awaited there, if the run was still making it).
+          script: bash .github/screens/meanwhile.sh wait servers && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+
       - name: The servers' logs
         if: always()
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
@@ -440,14 +539,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}
+          name: android-steps-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
           path: ${{ runner.temp }}/steps
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}
+          name: app-screens-android-${{ matrix.app }}-${{ matrix.theme }}-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
@@ -475,8 +574,8 @@ jobs:
       cancel-in-progress: true
     timeout-minutes: 150
     # It builds the commit's code, one step of it outside nix's sandbox
-    # (flake.nix, `iosSimulator`): it can read and nothing more, and only
-    # main's run pushes to the cache.
+    # (flake.nix, `iosSimulator`): it can read and nothing more. What it
+    # builds goes to the cache, as it runs only for this repository's code.
     permissions:
       contents: read
       pull-requests: read
@@ -489,7 +588,6 @@ jobs:
       INPUTS: ${{ needs.which.outputs.ios-inputs }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
-      PUSH: ${{ needs.which.outputs.mode == 'release' }}
     steps:
       # The queue for a Mac can be an hour: a PR merged or closed meanwhile
       # is taken nothing of. Every step after says `open`, so the job ends
@@ -514,6 +612,10 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
+          # The driver, built once for the iPhone and the iPad (app-ios.sh);
+          # and each app any of whose shots failed (apps-ios.sh,
+          # apps-mac.sh), for which no hash is kept.
+          { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -544,8 +646,13 @@ jobs:
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
             ${{ env.XCODE_NIX_CONF }}
 
-      # Main's builds go to the cache; Xcode never (Apple's licence).
-      - if: steps.open.outputs.open == 'true' && env.PUSH == 'true' && vars.CACHIX_NAME != ''
+      # Its builds go to the cache — the servers and seeds for this Mac, the
+      # kernel's and the app's crates — from main's run, a PR's of a branch
+      # here and a run by hand alike (the job's `if` already refuses a fork's;
+      # SAME_REPO says so again where the token is): the next run on any
+      # branch fetches what has not moved rather than spend most of an hour
+      # compiling it. Xcode never (Apple's licence).
+      - if: steps.open.outputs.open == 'true' && env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:
           name: ${{ vars.CACHIX_NAME }}
@@ -614,6 +721,16 @@ jobs:
         continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
+      # The iPad's apps: those whose build takes it (its Info.plist's
+      # UIDeviceFamily has 2: ios-family.sh). With none, no iPad is booted
+      # and nothing more is done on this Mac.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: The iPad, if an app takes it
+        run: |
+          ipad=$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" $APPS | tr '\n' ' ')
+          echo "IPAD_APPS=${ipad% }" >> "$GITHUB_ENV"
+          if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
+
       - if: steps.open.outputs.open == 'true'
         name: The servers, and the driver's tools
         run: |
@@ -633,6 +750,39 @@ jobs:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
 
+      # The iPad's, after the iPhone's: the iPhone shut down and only then
+      # the iPad booted (not under the iPhone's shots, which a second
+      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
+      # 13-inch, else the newest iPad); each app whose build takes it, in
+      # portrait and then on its side, light and dark, on the same driver
+      # (apps-ios.sh, FAMILY=ipad).
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
+        name: Capture (iPad)
+        env:
+          RESULTS: ${{ runner.temp }}/results
+          FAMILY: ipad
+        run: |
+          xcrun simctl shutdown all || true
+          # Of the newest iOS's simulators, the first kind there is.
+          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
+            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
+            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
+            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
+            | "\(.udid) \(.name)"')
+          echo "Booting $name ($udid)"
+          start=$(date +%s)
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b > /dev/null
+          echo "booted in $(( $(date +%s) - start ))s"
+          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
+
+      # The Mac's own window, of each app whose commit has a Mac build
+      # (`<app>-macos`, apps-mac.sh): on this Mac, signed in to the same
+      # server. None has one yet, and each is passed over in seconds.
+      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+        name: Capture (Mac)
+        run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
+
       # Beside each app's shots, taken whole, the hash of what they were
       # taken from (`which`, ios-inputs.sh): the next run that has the same
       # takes none. One taken in part keeps none, and is taken again.
@@ -642,7 +792,10 @@ jobs:
           for a in $APPS; do
             at=$RUNNER_TEMP/out/$a/ios
             hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
-            if [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
+            # A shot of it failed (its iPhone's, iPad's or Mac's): taken again next time, whole.
+            if [ -f "$PARTIAL" ] && grep -qx "$a" "$PARTIAL"; then
+              echo "$a: a shot of it failed; no hash kept"
+            elif [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
               echo "$hash" > "$at/inputs"
               echo "$a: $hash"
             else
@@ -701,7 +854,8 @@ jobs:
       cancel-in-progress: true
     timeout-minutes: 90
     # It builds the commit's code and runs it: it can read and nothing
-    # more, and pushes nothing to the cache (build.yaml's run does).
+    # more. What it builds (the window, and nothing build.yaml builds) goes
+    # to the cache, as it runs only for this repository's code.
     permissions:
       contents: read
     env:
@@ -721,6 +875,14 @@ jobs:
           extra-conf: |
             extra-substituters = https://k2on.cachix.org
             extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+      # The window to the cache: the next commit's, and main's once this
+      # is merged, fetch it rather than compile iced and wgpu again.
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       # The app's server, as nix builds it (its server.sh), under the window's build.
       - name: Start the server
@@ -759,7 +921,7 @@ jobs:
   # run replaced, the rest as it was.
   publish:
     needs: [which, android, ios, desktop]
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' }}
+    if: ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with screens.yaml's publish.
     concurrency:

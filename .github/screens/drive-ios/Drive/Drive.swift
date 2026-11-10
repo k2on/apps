@@ -17,6 +17,9 @@
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
 //               which is what a step can name
+//   APP_ORIENTATION  "landscape": the device on its side (landscape left) for
+//               every shot; "portrait": upright; unset, as it is
+import UIKit
 import XCTest
 
 /// A shot, as shots.json has it.
@@ -63,6 +66,12 @@ final class Drive: XCTestCase {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let shots = try JSONDecoder().decode([Shot].self, from: Data(try value("APP_SHOTS").utf8))
 
+        // Turned before the app opens, and so for every launch after.
+        switch env["APP_ORIENTATION"] {
+        case "landscape"?: XCUIDevice.shared.orientation = .landscapeLeft
+        case "portrait"?: XCUIDevice.shared.orientation = .portrait
+        default: break
+        }
         app.terminate()
         app.launch()
         if let server = env["APP_SERVER"], !server.isEmpty {
@@ -215,14 +224,25 @@ final class Drive: XCTestCase {
         let each = label.split(separator: "|").map(String.init)
         let until = Date().addingTimeInterval(timeout)
         var c = app.descendants(matching: .any)[each[0]].firstMatch
+        // One that is there but cannot yet be touched (still being laid
+        // out, sliding in, its frame not yet on the screen) is waited on
+        // until it can: tapped at once, XCUITest fails it ("Failed to
+        // determine hittability … Activation point invalid", harken's
+        // Für Elise in app-screens 42660995429). Only at the end is one
+        // that is there and never hittable handed back, for XCUITest's tap
+        // to scroll to as it would.
+        var there: XCUIElement?
         repeat {
             for one in each {
                 c = step.where == "bottom" ? lowest(app, one, timeout: 0) : control(app, one, role: step.role)
-                if c.exists { return c }
+                if c.exists {
+                    if c.isHittable { return c }
+                    there = there ?? c
+                }
             }
             sleep(1)
         } while Date() < until
-        return c
+        return there ?? c
     }
 
     /// Of every element that says `label`, the lowest on the screen, once
@@ -237,7 +257,13 @@ final class Drive: XCTestCase {
     /// for when one is; else a tab, else a button, else any element.
     private func control(_ app: XCUIApplication, _ label: String, role: String?) -> XCUIElement {
         switch role {
-        case "tab": return app.tabBars.buttons[label]
+        case "tab":
+            // An iPad's tabs are a bar at the top, or a sidebar, which may not
+            // be a tab bar to XCUITest: then the button that says it. The
+            // iPhone's, a tab bar's alone, as ever.
+            let tab = app.tabBars.buttons[label]
+            guard UIDevice.current.userInterfaceIdiom == .pad, !tab.exists else { return tab }
+            return app.buttons[label].firstMatch
         case "button": return app.buttons[label].firstMatch
         case "field": return app.textFields[label].firstMatch
         case "text": return app.staticTexts[label].firstMatch

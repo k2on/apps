@@ -50,7 +50,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -331,27 +330,32 @@ fun FullFace(
                 )
                 GlassButton(Glyphs.More, "More", controls::more, enabled = now != null)
             }
-            Spacer(Modifier.weight(0.5f))
+            // The cover in the room the rest leaves, square, as wide as the page when the height allows
+            // and else as tall as the room, centred in it: as the iPhone's (`.aspectRatio(1, contentMode:
+            // .fit)`). On a phone upright that is the page's width, as it always was; on a tablet on its
+            // side or an open Fold, the transport, the volume and the chips stay on the screen under it.
             // The card draws the cover in the slot as it travels (PlayerSheet.kt), as this one would:
             // rounded, lifted, and a little smaller while paused.
-            if (now != null && slot != null) Spacer(Modifier.fillMaxWidth().aspectRatio(1f).then(slot))
-            else if (now != null) {
-                val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
-                Cover(
-                    seedOf(now),
-                    now.art,
-                    360.dp,
-                    Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        shape = RoundedCornerShape(COVER_CORNER)
-                        clip = true
-                        shadowElevation = COVER_SHADOW.toPx()
-                    },
-                    corner = COVER_CORNER,
-                )
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val side = minOf(maxWidth, maxHeight)
+                if (now != null && slot != null) Spacer(Modifier.size(side).then(slot))
+                else if (now != null) {
+                    val scale by animateFloatAsState(coverScale(state.playing), unlessReduced(Springs.size()), label = "cover")
+                    Cover(
+                        seedOf(now),
+                        now.art,
+                        360.dp,
+                        Modifier.size(side).graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            shape = RoundedCornerShape(COVER_CORNER)
+                            clip = true
+                            shadowElevation = COVER_SHADOW.toPx()
+                        },
+                        corner = COVER_CORNER,
+                    )
+                }
             }
-            Spacer(Modifier.weight(0.5f))
             // The title opens its album and the name its person's page, as the desktop's bar and the
             // iPhone's player do.
             val album = now?.let(controls::albumOf)
