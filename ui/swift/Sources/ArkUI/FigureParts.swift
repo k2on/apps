@@ -206,6 +206,10 @@ public struct Headline<Trailing: View>: View {
             Text(figure)
                 .font(.system(.largeTitle, design: .rounded, weight: .bold))
                 .monospacedDigit()
+                // One line beside its control, as small as it must be
+                // ($1,284.50 broke after its point on the iPhone).
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(tint == .neutral ? Color.ink : tint.color)
             Text(caption).font(.footnote).foregroundStyle(.quiet)
         }
