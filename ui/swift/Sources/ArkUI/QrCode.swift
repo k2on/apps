@@ -79,6 +79,16 @@ public struct QrScanner: UIViewControllerRepresentable {
         }
     }
 }
+#elseif canImport(SwiftUI)
+/// The Mac has no camera to scan a code with: none is offered
+/// (`available` is false), and the view, never shown, is empty.
+public struct QrScanner: View {
+    public init(found: @escaping (String) -> Void) {}
+
+    @MainActor public static var available: Bool { false }
+
+    public var body: some View { EmptyView() }
+}
 #endif
 
 /// "Add a Device": the join link another device scans or opens — as a QR
