@@ -1,0 +1,45 @@
+    #content
+              'Home' [text]
+              [button] pressable
+                'Signed in as alex'
+                [button]
+              'Recently Added' [text]
+              [button] pressable
+                'All Songs' [text]
+                [button]
+                [button] pressable
+                  'Für Elise' [text]
+                  'Ludwig van Beethoven' [text]
+                [button] pressable
+                  'Gigue' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Menuet' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Rigaudon' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Sarabande' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Bourrée' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Lentement' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Minuet' [text]
+                  'George Frideric Handel' [text]
+              'Your Playlists' [text]
+              [button] pressable
+                'New' [text]
+                [button]
+                [button] pressable
+                  'Favorites' [text]
+                  'Playlist' [text]
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]

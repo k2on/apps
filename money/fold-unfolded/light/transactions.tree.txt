@@ -1,0 +1,51 @@
+    #content
+                  [field] pressable
+                    'Payee, category, memo or amount' [text]
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To Review (5)' [text]
+                      [button]
+                  '5 to Review' [text]
+                  [button] pressable
+                    'Approve All' [text]
+                    [button]
+                    [button] pressable
+                      'Spotify, -$17.00, Subscriptions, waiting for review, uncleared'
+                      'Spotify' [text]
+                      'Subscriptions' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$17.00' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Target, -$45.29, Split (3), waiting for review, has a receipt, uncleared'
+                      'Target' [text]
+                      'Split (3)' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$45.29' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Costco, -$161.15, Split (2), waiting for review, has a receipt, cleared'
+                      'Costco' [text]
+                      'Split (2)' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$161.15' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Shell, -$31.11, Gas & Transit, waiting for review, cleared'
+                      'Shell' [text]
+                      '-$31.11' [text]
+                      [button] pressable
+                'Transactions' [text]
+                [button] pressable
+                  'Signed in as Alex'
+                  [button]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
