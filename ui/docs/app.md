@@ -499,11 +499,19 @@ the SPA still takes), so the state a page is written at is the state the
 module arrives at, from the route and the data alone.
 
 **Browser-only calls** (the window, its width, `DomRect`, history, focus,
-the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`); written
-natively, a page is at the width it is written at (1440, the expanded
-size class), and the module's first draw is at that width too
-(`data-ark-width`), so it takes over exactly what was written; from its
-next frame it is at the window's own.
+the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`).
+
+**Every width without script** (`page::Band`). Natively there is no
+window, so a written page is drawn once per band of `[layout]`'s size
+classes — compact (the tab bar at the foot), medium (the tab bar at the
+top, a split view a column at a time), large (its columns side by side)
+and sidebar — each in a `.ark-at-<band>` that theme.css's media queries
+(written by ui/theme.py from the same tokens) show alone at its widths.
+Each band's controls are the page's, in the order drawn, so a form from
+any band is taken against the same draw made again; an element id is
+suffixed by its band (`page::unique`). The module's first draw is the same
+four bands (`data-ark-width="every"`), so it takes over exactly what was
+written; from its next frame it is the window's own width, one band.
 
 **The no-JS contract** (`page`). Written as HTML, every control a draw
 makes is recorded in the order it is drawn, by what it says and what it
@@ -702,5 +710,4 @@ ui/docs/apps/money.md for money):
    connect round trip against the fake Plaid with a waiting page that
    refreshes itself). Then `ssr` in `[web] modes`, the server's NixOS
    module serving the static site and the module from the one process.
-   Narrow windows without script: a written page is at 1440 until script
-   runs (a server could read `Sec-CH-Viewport-Width`).
+

@@ -573,7 +573,7 @@ pub fn button(id: &'static str, title: &'static str, face: AnyView, class: &'sta
     // Without script, the menu is the browser's own popover under the
     // button, its entries the page's controls (`page`).
     let nojs = (crate::page::mode() != crate::page::Mode::Spa).then(|| popover(id, title, &entries()));
-    let target = (crate::page::writing()).then(|| format!("ark-menu-{id}"));
+    let target = (crate::page::writing()).then(|| crate::page::unique(&format!("ark-menu-{id}")));
     let button = html::button()
         .class(class)
         .attr("popovertarget", target)
@@ -626,7 +626,7 @@ fn popover(id: &str, title: &str, entries: &[Entry]) -> AnyView {
     let mut out = vec![];
     items(entries, &mut out);
     html::div()
-        .id(format!("ark-menu-{id}"))
+        .id(crate::page::unique(&format!("ark-menu-{id}")))
         .class("ark-menu ark-menu-popover")
         .attr("popover", "")
         .attr("role", "menu")

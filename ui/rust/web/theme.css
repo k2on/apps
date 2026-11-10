@@ -246,3 +246,21 @@
 @container ark-window (max-width: 839.98px) {
   .ark-if-expanded { display: none !important; }
 }
+
+/* A page written as HTML for every width at once (arkui-web's
+   `page::Band`): the shell drawn once per band of the size classes, each
+   in its `.ark-at-<band>`, and the viewport's width showing one, so the
+   page is right at every width with no script. */
+.ark-at { display: contents; }
+@media (min-width: 600px) {
+  .ark-at-compact { display: none !important; }
+}
+@media (max-width: 599.98px), (min-width: 840px) {
+  .ark-at-medium { display: none !important; }
+}
+@media (max-width: 839.98px), (min-width: 1200px) {
+  .ark-at-large { display: none !important; }
+}
+@media (max-width: 1199.98px) {
+  .ark-at-sidebar { display: none !important; }
+}

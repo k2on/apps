@@ -88,6 +88,81 @@ thread_local! {
     static WIDTH: Cell<Option<f64>> = const { Cell::new(None) };
     /// What the page was written with besides its route (`today=…`).
     static ARGS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    /// Whether the page is written for every width at once ([`Band`]), and
+    /// the band being drawn.
+    static EVERY: Cell<bool> = const { Cell::new(false) };
+    static BAND: Cell<Option<Band>> = const { Cell::new(None) };
+}
+
+/// A range of the window's width the shell is laid out the same across:
+/// `[layout]`'s size classes, and the sidebar's width within expanded. A
+/// page written as HTML is written once per band, each in a
+/// `.ark-at-<band>` the theme's media queries show at its widths alone
+/// (ui/theme.py), so the page is right at every width with no script.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Band {
+    /// Narrower than `compact-width`: the tab bar at the foot.
+    Compact,
+    /// From `compact-width` to `expanded-width`: the tab bar at the top,
+    /// a split view one column at a time.
+    Medium,
+    /// From `expanded-width` to `sidebar-min-width`: the tab bar at the
+    /// top, a split view's columns side by side.
+    Large,
+    /// From `sidebar-min-width`: the sidebar.
+    Sidebar,
+}
+
+impl Band {
+    pub const ALL: [Band; 4] = [Band::Compact, Band::Medium, Band::Large, Band::Sidebar];
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Band::Compact => "compact",
+            Band::Medium => "medium",
+            Band::Large => "large",
+            Band::Sidebar => "sidebar",
+        }
+    }
+
+    /// A width inside the band: where it starts, by `[layout]`'s tokens.
+    pub fn width(self) -> f64 {
+        let (compact, expanded, sidebar) = crate::shell::widths();
+        match self {
+            Band::Compact => 0.0,
+            Band::Medium => compact,
+            Band::Large => expanded,
+            Band::Sidebar => sidebar,
+        }
+    }
+}
+
+/// Whether the page is drawn for every width at once: written natively
+/// with no width given, and the browser's first draw of such a page.
+pub fn every_width() -> bool {
+    EVERY.with(|e| e.get())
+}
+
+pub fn set_every_width(on: bool) {
+    EVERY.with(|e| e.set(on));
+}
+
+/// The band being drawn, while a page is drawn for every width.
+pub fn band() -> Option<Band> {
+    BAND.with(|b| b.get())
+}
+
+pub(crate) fn set_band(b: Option<Band>) {
+    BAND.with(|c| c.set(b));
+}
+
+/// An element id that is the page's once: suffixed by the band being
+/// drawn, as each band draws the same parts.
+pub fn unique(id: &str) -> String {
+    match band() {
+        Some(b) => format!("{id}-{}", b.word()),
+        None => id.to_string(),
+    }
 }
 
 pub fn mode() -> Mode {

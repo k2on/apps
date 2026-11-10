@@ -46,45 +46,53 @@ thread_local! {
     static TOKENS: Cell<Option<(f64, f64, f64)>> = const { Cell::new(None) };
 }
 
-/// `[layout]`'s compact, expanded and sidebar widths, from the theme's CSS.
-fn widths() -> (f64, f64, f64) {
+/// `[layout]`'s compact, expanded and sidebar widths, from the theme's
+/// CSS: the page's computed variables in a browser, and natively the
+/// same variables as ui/theme.py wrote them into `theme.css`.
+pub fn widths() -> (f64, f64, f64) {
     if let Some(t) = TOKENS.with(|t| t.get()) {
         return t;
     }
-    let read = |name: &str, or: f64| -> f64 {
-        if !cfg!(target_arch = "wasm32") {
-            return or;
-        }
-        web_sys::window()
-            .and_then(|w| {
-                let root = w.document()?.document_element()?;
-                let style = w.get_computed_style(&root).ok()??;
-                style.get_property_value(name).ok()
-            })
-            .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
-            .unwrap_or(or)
+    let written = |name: &str| -> Option<f64> {
+        let at = crate::THEME_CSS.find(&format!("{name}:"))? + name.len() + 1;
+        let rest = &crate::THEME_CSS[at..];
+        rest[..rest.find(';')?].trim().trim_end_matches("px").parse().ok()
     };
-    let t = (
-        read("--ark-compact-width", 600.0),
-        read("--ark-expanded-width", 840.0),
-        read("--ark-sidebar-min-width", 1200.0),
-    );
+    let read = |name: &str| -> f64 {
+        let computed = || {
+            web_sys::window()
+                .and_then(|w| {
+                    let root = w.document()?.document_element()?;
+                    let style = w.get_computed_style(&root).ok()??;
+                    style.get_property_value(name).ok()
+                })
+                .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
+        };
+        let found = if cfg!(target_arch = "wasm32") { computed().or_else(|| written(name)) } else { written(name) };
+        found.unwrap_or_else(|| panic!("theme.css has no {name}"))
+    };
+    let t = (read("--ark-compact-width"), read("--ark-expanded-width"), read("--ark-sidebar-min-width"));
     TOKENS.with(|c| c.set(Some(t)));
     t
 }
 
-/// The window's width, in CSS pixels.
+/// The window's width, in CSS pixels: the band's being drawn when a page
+/// is drawn for every width (`page::Band`).
 pub fn width() -> f64 {
+    if let Some(b) = crate::page::band() {
+        return b.width();
+    }
     if let Some(w) = crate::page::width() {
         return w;
     }
+    let sidebar = || widths().2;
     if !cfg!(target_arch = "wasm32") {
-        return 1440.0;
+        return sidebar();
     }
     web_sys::window()
         .and_then(|w| w.inner_width().ok())
         .and_then(|v| v.as_f64())
-        .unwrap_or(1440.0)
+        .unwrap_or_else(sidebar)
 }
 
 pub fn size_class() -> SizeClass {

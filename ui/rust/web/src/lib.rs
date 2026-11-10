@@ -411,7 +411,9 @@ pub fn hydrate<A: WebApp>(app: A) {
     let root = root_element().expect("a root");
     let attr = |n: &str| root.get_attribute(n);
     page::set_mode(attr("data-ark-mode").and_then(|m| page::Mode::of_word(&m)).unwrap_or(page::Mode::Static));
-    page::set_width(attr("data-ark-width").and_then(|w| w.parse().ok()));
+    let width = attr("data-ark-width");
+    page::set_every_width(width.as_deref() == Some("every"));
+    page::set_width(width.and_then(|w| w.parse().ok()));
     page::set_args(page::Route::of_query(&attr("data-ark-args").unwrap_or_default()).0);
     let _ = root.set_attribute("data-ark-js", "");
     let app = install(app);
@@ -462,6 +464,7 @@ pub fn hydrate<A: WebApp>(app: A) {
     std::mem::forget(handle);
     // At the window's own width from the next frame.
     request_frame(|| {
+        page::set_every_width(false);
         page::set_width(None);
         redraw();
     });
@@ -476,8 +479,9 @@ pub struct Written {
     pub base: String,
     /// The page's own arguments, read back as the route is (`today=…`).
     pub args: Vec<(String, String)>,
-    /// The width it is drawn at: the browser's first draw is at it too.
-    pub width: f64,
+    /// The width it is drawn at, or none for every width at once
+    /// (`page::Band`): the browser's first draw is the same.
+    pub width: Option<f64>,
     pub accent: String,
     pub css: String,
     /// The app's own `<head>`: its title, its icon, its script.
@@ -520,7 +524,7 @@ pub fn document(w: &Written, view: &str) -> String {
         motion = if reduced { "reduced" } else { "full" },
         mode = w.mode.word(),
         base = e(&w.base),
-        width = w.width,
+        width = w.width.map_or("every".to_string(), |w| w.to_string()),
         css = w.css,
         head = w.head,
         action = e(&w.action),
@@ -539,10 +543,12 @@ pub struct Served<A: WebApp> {
 
 #[cfg(feature = "ssr")]
 impl<A: WebApp> Served<A> {
-    /// `app` at `route`, in `mode`, drawn at `width`, with `args`.
-    pub fn new(app: A, mode: page::Mode, route: &page::Route, args: &[(String, String)], width: f64) -> Served<A> {
+    /// `app` at `route`, in `mode`, drawn at `width` (none: for every
+    /// width at once, `page::Band`), with `args`.
+    pub fn new(app: A, mode: page::Mode, route: &page::Route, args: &[(String, String)], width: Option<f64>) -> Served<A> {
         page::set_mode(mode);
-        page::set_width(Some(width));
+        page::set_width(width);
+        page::set_every_width(width.is_none());
         page::set_args(args.to_vec());
         let app = install(app);
         let arrive = {
@@ -610,7 +616,7 @@ pub fn prerender<A: WebApp>(
     open: &dyn Fn() -> A,
     starts: Vec<page::Route>,
     cap: usize,
-    width: f64,
+    width: Option<f64>,
     args: &[(String, String)],
     write: &dyn Fn(&page::Route, &str) -> String,
 ) -> Vec<(page::Route, String)> {
@@ -707,7 +713,7 @@ pub fn after_draw(f: impl FnOnce() + 'static) {
 fn draw_window() -> AnyView {
     drawn(|d| *d = Drawn::default());
     page::begin_draw();
-    let view = APP_VIEW.with(|v| v.borrow().clone()).map(|f| f());
+    let view = app_view();
     let over = (menu::overlay(), keys::overlay());
     // Kept to the rows drawn: a cursor past a list that shrank is on its last.
     UI.with(|u| {
@@ -734,6 +740,29 @@ fn draw_window() -> AnyView {
         .class("ark-window")
         .child(html::div().class("ark-frame").child((view, over)))
         .into_any()
+}
+
+/// The app's view: once at the window's width, or — written for every
+/// width (`page::every_width`) — once per band, each in its
+/// `.ark-at-<band>`, which the theme's media queries show alone at its
+/// widths. Every band's controls are the page's, in the order drawn, so a
+/// form from any of them is taken against the same draw made again.
+fn app_view() -> Option<AnyView> {
+    let f = APP_VIEW.with(|v| v.borrow().clone())?;
+    if !page::every_width() {
+        return Some(f());
+    }
+    let bands: Vec<AnyView> = page::Band::ALL
+        .into_iter()
+        .map(|b| {
+            page::set_band(Some(b));
+            drawn(|d| *d = Drawn::default());
+            let v = f();
+            page::set_band(None);
+            html::div().class(format!("ark-at ark-at-{}", b.word())).child(v).into_any()
+        })
+        .collect();
+    Some(bands.into_any())
 }
 
 /// `f` on the next animation frame: after the DOM the draw made is there.

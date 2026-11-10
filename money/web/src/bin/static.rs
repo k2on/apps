@@ -59,7 +59,7 @@ fn main() -> std::io::Result<()> {
                 route: r.clone(),
                 base: base.clone(),
                 args: page_args.clone(),
-                width: 1440.0,
+                width: None,
                 accent: "green".into(),
                 css: money_web::CSS.into(),
                 head: head.clone(),
@@ -69,7 +69,7 @@ fn main() -> std::io::Result<()> {
         )
     };
     let open = || MoneyWeb::open(today.clone());
-    let pages = prerender(&open, starts, cap, 1440.0, &page_args, &write);
+    let pages = prerender(&open, starts, cap, None, &page_args, &write);
     for (r, html) in &pages {
         // On disk as a server finds it: each segment read back.
         let dir = r
