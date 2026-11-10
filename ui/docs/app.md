@@ -59,7 +59,7 @@ the store's. The runtime has no thread or clock of its own (the host says
 the time: the browser has no clock `std` can read), so the same code runs
 behind the phones' bridge, in the iced window and in wasm.
 
-A `Host` is each shell's: `money/ffi/src/app.rs` (the phones: the bridge's
+A `Host` is each shell's: `money/app/src/ffi/app.rs` (the phones: the bridge's
 `Session`, an `AppShell` foreign trait for routes and the time),
 `money/iced/src/overview.rs` (the window: its own store and changes, iced's
 clipboard), and the tests' (`money/app/src/accounts/tests.rs`, over the
@@ -125,14 +125,23 @@ the phones get generated code.
 
 ### The Phones' Code: `ark-ui-gen`
 
-`nix run .#update-ui` runs `money-ui` (money/app, feature `gen`), which
-records each view and writes:
+An app hands its screens over once, as a registry its crate exports
+under its `gen` feature (`money_app::screens()`: each `#[view]`'s
+recording and its names in Swift and Kotlin, and the menu bar's
+`commands()`). An app has no generator of its own: nix writes a tiny
+main for it (`fn main() { ark_ui_gen::app::main(money_app::screens()) }`,
+nix/ark-app.nix), links it with the app's crate and runs it while it
+builds the app's native projects, which then hold
 
-- `money/ios/Money/Generated/AccountsView.swift`
-- `money/android/app/src/main/kotlin/dev/money/android/generated/AccountsScreen.kt`
+- `<Name>.swift` (`AccountsView`, `MoneyShellView`, `MoneySettingsView`,
+  `MoneyCommands`), and
+- `<Name>.kt` (`AccountsScreen`, `MoneyShell`, `MoneySettings`,
+  `moneyCommands`), in the app's Kotlin package,
 
-`checks.ui` fails when what is committed is not what the views make.
-Never edit those files.
+none of them committed (below). `nix build .#money-ui` is what it writes.
+The emitters' own snapshot tests hold what they write for a fixture view
+of no app's (`ui/rust/gen/tests/snapshots.rs`; after a deliberate change
+to an emitter, `ARK_UPDATE_SNAPSHOTS=1 cargo test -p ark-ui-gen`).
 
 **The emitters write composition and nothing else.** Every part a view
 uses is written by hand in a real `.swift` / `.kt` file
@@ -150,11 +159,12 @@ something non-trivial gets it in its hand-written file, never in the
 emitter. One small file per language: `ui/rust/gen/src/swift.rs`,
 `kotlin.rs`.
 
-The generated view reads its record from a hand-written holder over the
-runtime (`AccountsScreen` in `money/ios/Money/Screens.swift`,
-`AccountsHolder` in `money/android/.../Screens.kt`): an
+The generated view reads its record from a holder over the runtime
+(`AccountsScreen` in `money/native/ios/Money/Screens.swift`,
+`AccountsHolder` in `money/native/android/.../Screens.kt`): an
 `ObservableObject` / `StateFlow` of the record, read again after every
-message and whenever the store moved.
+message and whenever the store moved. The holders are the app's
+hand-written native code until the shell's own become ArkUI's.
 
 ### The Device: `modules/`
 
@@ -214,43 +224,140 @@ moves onto it).
 
 #### How an App Opts In
 
-An app lists its modules once, in `<app>/modules.toml`:
+An app lists its modules in its app.toml (`modules = ["haptics",
+"clipboard", "share"]`), and a module says in its `module.toml` what it
+takes on each platform. ui/prebuild.py writes them into the generated
+projects (below): each listed module's `swift/` and `kotlin/` among the
+sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
+and `background-modes` (`UIBackgroundModes`); its `[android]`
+`permissions`, `services` (a `<service>` with its actions and
+foreground type), `meta-data` and Maven `dependencies`. The app's crate
+depends on each listed module's crate (`checks.prebuild` holds it), and
+the phones' library carries their UniFFI traits; the shell registers what
+it built (`PhoneModules(haptics: PhoneHaptics(), …)` in `MoneyApp.swift`,
+`AccountsHolder(…, PhoneHaptics(view), PhoneClipboard(context))` in
+`MoneyApp.kt`, the `Queued` clipboard in `money/iced/src/overview.rs`).
 
-```toml
-modules = ["haptics", "clipboard", "share"]
-```
-
-and every build reads that list, or is held to it:
-
-- **Cargo**: the app's crates depend on the listed modules' crates (money:
-  `money/app` on the ones its update asks, `money/ffi` on each, with `ffi`;
-  `money/iced` on `ark-clipboard` with `desktop`).
-- **Xcode**: `nix run .#update-modules` (`ui/modules.py`) writes
-  `<app>/ios/modules.yml`, an XcodeGen file `project.yml` includes; its
-  template `ArkModules`, which the app's target uses, adds each listed
-  module's `swift/` to the sources and the Info.plist keys its
-  `module.toml` declares (the app's own keys win).
-- **Gradle**: `android/app/build.gradle.kts` reads `modules.toml` and adds
-  each listed module's `kotlin/` to the sources. Android cannot merge a
-  manifest from a source directory, so a module's permissions are checked,
-  not written: `checks.modules` fails when the app's manifest lacks one.
-- **The shell** registers what it built: `PhoneModules(haptics:
-  PhoneHaptics(), …)` in `MoneyApp.swift`, `AccountsHolder(…,
-  PhoneHaptics(view), PhoneClipboard(context))` in `MoneyApp.kt`, the
-  `Queued` clipboard in `money/iced/src/overview.rs`.
-
-`checks.modules` holds it together: every listed module exists, the app's
-ffi crate depends on exactly the listed modules' crates, the manifest asks
-for their Android permissions, and `modules.yml` is what the script
-writes. The iPhone typecheck (`checks.money-ios-typecheck`) compiles the
-listed modules' Swift on Linux against the generated bindings, so every
-name they use is checked.
+The iPhone typecheck (`checks.money-ios-typecheck`) compiles the listed
+modules' Swift on Linux against the generated bindings, so every name
+they use is checked.
 
 **To add a module:** `modules/<name>/` with its crate (trait, a `Call`
 enum, the functions that make calls, a fake, tests), `module.toml`,
 `README.md`, `swift/` and `kotlin/`; add the crate to `rust/Cargo.toml`'s
-members; an app that wants it lists it, depends on its crate, takes it in
-its ffi crate's `useModules` and registers the platform's class.
+members; an app that wants it lists it in app.toml, depends on its crate
+and registers the platform's class. A module is a device capability any
+app could use, never one app's: what an app makes of it stays in the app.
+One app's own native capability that no other would share is a local
+module, `<app>/modules/<name>/` in the same shape, which ui/prebuild.py
+compiles in as it does the shared ones.
+
+## Generated, Not Committed
+
+Expo's Continuous Native Generation, for Ark apps: nothing native of an
+app is committed. An app is
+
+```
+<app>/
+├── app.toml      what it is: name, id, accent, platforms, modules, what it asks of each platform
+├── icon.svg      its icon, every platform's
+├── core/         its domain (money/domain until it moves)
+├── app/          ark-app: its state, messages, update, #[view]s, `screens()` and `commands()`
+├── server/       when it has one
+├── screens/      shots.json, server.sh
+├── native/       what is not written in Rust yet (shrinking: see below)
+└── fdroid/       F-Droid's metadata
+```
+
+and nix generates the rest, from app.toml, each listed module's
+`module.toml` and the Rust views (nix/ark-app.nix, ui/prebuild.py):
+
+| Generated | From | Where it is built |
+|---|---|---|
+| XcodeGen's `project.yml` (one multiplatform target for the iPhone, the iPad and the Mac), its Info.plist keys, entitlements, the asset catalog (AccentColor from the theme, AppIcon rendered from icon.svg) | app.toml's `[apple]`, the modules' `[ios]` | `<app>-ios-simulator`, `<app>-ios-archive`, `<app>-macos` |
+| Gradle's project (settings, the app's `build.gradle.kts` with ArkUI's dependencies and the modules'), the AndroidManifest (permissions, the scheme's links, services, meta-data), the launcher's adaptive and themed icon and the mark (vectors from icon.svg), the splash | app.toml's `[android]`, the modules' `[android]` | `<app>-apk`, `<app>-android-tests`, `<app>-android-screens` |
+| The SwiftUI and Compose of every `#[view]` | the app's `screens()` | inside both |
+| The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <app crate>::*` as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `crate` and `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
+| The generator's main | the app's crate | `<app>-ui` |
+
+`nix build .#<app>-native` is the projects as a build lays them out
+(`<app>/.native/ios`, `<app>/.native/android`), and **`nix run
+.#<app>-prebuild`** writes them into the working tree's `<app>/.native`
+(ignored by git) with the phones' libraries linked where the projects
+look for them (`.native/ffi/android`, and on a Mac `.native/ffi/ios`), for
+Xcode (`xcodegen generate`, then the `.xcodeproj`) and Android Studio:
+Expo's `npx expo prebuild`. Signing is never generated: the team is CI's
+secret (ios.yaml), and the Android key app.toml names is the one
+committed, public, debug key.
+
+### app.toml
+
+```toml
+name = "Money"                 # what the person sees
+id = "money"                   # us.koon.<id>: the bundle id and the applicationId
+version = "0.1"
+accent = "green"               # ui/theme.toml's [accent.<name>]
+platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
+modules = ["haptics", "clipboard", "share"]
+scheme = "money"               # money://auth (the sign-in's return), money://<route>
+crate = "money-app"            # the app's crate: its screens(), its UniFFI namespace
+
+[icon]
+svg = "icon.svg"               # its full-canvas rectangle the ground, the rest the mark
+
+[apple]
+product = "Money"              # Money.app, the scheme
+category = "public.app-category.finance"
+deployment = "26.0"
+[apple.info]                   # Info.plist keys of the app's own (usage strings)
+[apple.entitlements]           # the app's own entitlements
+
+[android]
+package = "dev.money.android"  # the Kotlin package of its code and its generated screens
+min-sdk = 26
+target-sdk = 35
+keystore = "native/android/debug.keystore"
+permissions = ["android.permission.INTERNET"]
+features = [{ name = "android.hardware.camera", required = false }]
+hosts = ["auth", "join"]       # the scheme's hosts
+dependencies = []              # Maven coordinates its own Kotlin needs
+
+[ffi]
+android = ["page"]             # the app crate's features each phone's library links
+apple = []
+
+[fdroid]
+metadata = "fdroid/metadata/us.koon.money.yml"
+```
+
+A module's `module.toml`:
+
+```toml
+crate = "ark-media-player"
+[ios]
+background-modes = ["audio"]
+entitlements = { "com.apple.developer.carplay-audio" = true }
+[ios.info]
+NSMicrophoneUsageDescription = "…"
+[android]
+permissions = ["android.permission.FOREGROUND_SERVICE"]
+dependencies = ["androidx.media3:media3-session:1.5.1"]
+services = [{ name = "dev.arkui.modules.PlayerService", foreground = "mediaPlayback", actions = ["androidx.media3.session.MediaSessionService"] }]
+meta-data = [{ name = "com.google.android.gms.car.application", resource = "@xml/automotive_app_desc" }]
+```
+
+`checks.prebuild` holds every app.toml to what it must say, every module
+it lists to one that exists, and its crate to the modules' crates; in a
+checkout it also fails when anything is committed where the generated
+projects and library go. `checks.money-native` builds the generator and
+the projects.
+
+**What is still committed native, and why** (`<app>/native/`): the
+screens and the shell not yet written in Rust (their holders over the
+runtime, the first run's screens, the receipt camera, the sheets), each
+going as it moves into the app's crate; the hand-written tests over them;
+the Maven graph Gradle replays offline (`native/android/deps.json`); and
+the debug key. Nothing there is a project file.
 
 ## Escape Hatches
 
@@ -288,7 +395,7 @@ its ffi crate's `useModules` and registers the platform's class.
   (Accounts over the demo household with the fakes, Reconcile, the amount
   in cents, the row's menu in order), money-iced and harken-iced with
   `demo`, money-ffi (`--no-default-features`: the session's day).
-- nix: `checks.theme`, `checks.ui`, `checks.modules`,
+- nix: `checks.theme`, `checks.prebuild`, `checks.money-native`,
   `checks.money-ios-typecheck` (now with the listed modules' Swift, and
   the screens' glue: three name clashes it found are fixed — the UniFFI
   vtable's `open` in the C header (now `openRoute`), ark-ffi's `Reply`

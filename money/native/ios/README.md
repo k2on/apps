@@ -184,29 +184,31 @@ accounts. A card's payment category is never offered as a transaction's.
 
 ## Building
 
+The project is generated, never committed (ui/docs/app.md, "Generated,
+Not Committed"): from money/app.toml, the modules' module.toml and the
+Rust views, which this directory's Swift is compiled beside.
+
 ```
-nix build .#money-ios-xcframework -o result-ios      # on a Mac with Xcode
-rm -rf ../ffi/ios && cp -RL result-ios ../ffi/ios     # MoneyFFI.xcframework, swift/
-brew install xcodegen                                  # once
-cd money/ios
-xcodegen generate
+nix run .#money-prebuild          # on a Mac with Xcode: money/.native/{ios,android}, the kernel linked in
+cd money/.native/ios
+xcodegen generate                 # nix build .#xcodegen, or Homebrew's
 xcodebuild test -scheme Money -destination 'platform=iOS Simulator,name=iPhone 17'
 xcodebuild archive -scheme Money -configuration Release -destination 'generic/platform=iOS'
 ```
 
-`project.yml` is the project: the app (iOS 26.0, Swift 5 language mode for
-harken's reasons, the `money` URL scheme, `ITSAppUsesNonExemptEncryption:
-false`, the icon in `Money/Assets.xcassets`, version `1.0 (1)` which CI
-overrides, automatic signing, bundle id `us.koon.money`) over
-`../ffi/ios/MoneyFFI.xcframework` and `../ffi/ios/swift`, and the
-`MoneyTests` unit tests, in the one scheme `Money`. `Money.xcodeproj` and
-`Money/Info.plist` are outputs; regenerate rather than edit. The icon is
-`tools/icon.svg` (three bars, a month's plan, white on the accent's green),
-made opaque at 1024 by `tools/icon.sh` with Inkscape.
+The generated `project.yml` is the project: one multiplatform target for
+the iPhone, the iPad and the Mac (iOS and macOS 26.0, Swift 5 language
+mode for harken's reasons, the `money` URL scheme, the app.toml's
+Info.plist keys and its modules', the asset catalog with the accent from
+the theme and the icon rendered from money/icon.svg, automatic signing,
+bundle id `us.koon.money`) over `../ffi/ios/MoneyFFI.xcframework` (the
+generated `money-ffi` shim over money/app) and `../ffi/ios/swift`, this
+directory's `Money/` beside the generated views (`Generated/`), and the
+`MoneyTests` unit tests, in the one scheme `Money`.
 
 CI (`.github/workflows/ios.yaml`) does the same on `macos-15` for
-every push touching `money/ios`, `money/ffi`, `money/domain`, `rust/` or
-`ui/swift`, and on demand: the kernel for the phone, the simulator and
+every push touching `money/native/ios`, `money/app.toml`, `money/app`,
+`money/domain`, `rust/`, `ui/prebuild.py` or `ui/swift`, and on demand: the kernel for the phone, the simulator and
 the Mac, the bindings, the xcframework, the project, the archive, then the
 tests on the newest iOS 26 iPhone simulator. The upload to TestFlight runs
 only on `main` and only when the repository variable `MONEY_IOS_UPLOAD` is
@@ -268,7 +270,7 @@ for this machine, run:
 ```
 cargo build -p money-ffi --lib          # rust/
 MONEY_FFI_LIB=$PWD/rust/target/debug/libmoney_ffi.so \
-  bash money/ios/tools/typecheck.sh <uniffi swift bindings>
+  bash money/native/ios/typecheck.sh <uniffi swift bindings>
 ```
 
 The tests (`MoneyTests`) hold the first run's machine, the form's inputs,

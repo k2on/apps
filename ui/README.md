@@ -11,10 +11,11 @@ ui/
 ├── README.md         this file: what is where, and the theme
 ├── theme.toml        every colour, measure and motion value (below)
 ├── theme.py          writes theme.toml out for each toolkit
+├── prebuild.py       every Ark app's native projects, from its app.toml (ui/docs/app.md)
 ├── docs/
 │   ├── design.md     how every Ark app is designed: Mac-first, then Rust, then its domain
 │   ├── apps/         each app's design (money.md)
-│   ├── app.md        the whole app in Rust: the runtime, #[view], ark-ui-gen, modules
+│   ├── app.md        the whole app in Rust: the runtime, #[view], ark-ui-gen, modules, generated native projects
 │   ├── motion.md     how everything moves and answers a touch (a standing rule)
 │   └── parts.md      ArkUI's generic parts, one name in Compose, SwiftUI and iced
 ├── rust/

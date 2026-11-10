@@ -48,8 +48,11 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   (`ui/rust/arkui`), ArkUI for SwiftUI (`ui/swift`) and for Compose
   (`ui/kotlin`), the runtime that runs an app's screens in Rust
   (`ui/rust/app`, `ui/docs/app.md`) and the generator that writes them
-  for the phones (`ui/rust/gen`), and the standing rule for motion
-  (`ui/docs/motion.md`).
+  for the phones (`ui/rust/gen`), the generator of every Ark app's native
+  projects from its `app.toml` (`ui/prebuild.py`, `nix/ark-app.nix`:
+  nothing native of an Ark app is committed, `nix run .#<app>-prebuild`
+  writes it for Xcode and Android Studio), and the standing rule for
+  motion (`ui/docs/motion.md`).
 - `modules/` — what an app asks of the device, one package each, Expo's
   way (`modules/haptics`, `clipboard`, `share`, `camera`, `media-player`,
   `notifications`, `secure-store`): a crate with the trait and its fake,

@@ -57,8 +57,8 @@ On a laptop, with Android Studio or a command-line SDK with platform 35
 and build-tools 35.0.0 plus JDK 21, the kernel built once and gradle
 pointed at it:
 
-    nix build .#money-android-lib -o money/ffi/android   # what -PmoneyLib defaults to
-    cd money/android
+    nix run .#money-prebuild    # money/.native/android, the kernel linked in at .native/ffi/android
+    cd money/.native/android
     gradle assembleDebug
     gradle :app:testDebugUnitTest
     adb install app/build/outputs/apk/debug/app-debug.apk
@@ -69,8 +69,8 @@ last, for the reasons harken's README gives; its certificate's SHA-256 is
 `125e43a7…646a6afa`. It is a PKCS#12 file made with openssl (there was no
 JDK to run keytool), which `storeType = "pkcs12"` says. Anyone can sign an
 APK as this app with it. F-Droid offers money from the same repository as
-harken and Revelation (`nix/fdroid.nix`; `fdroid/` here is its metadata
-and icon).
+harken and Revelation (`nix/fdroid.nix`; `money/fdroid/` is its metadata,
+and its icon money/icon.svg).
 
 ## What it does
 

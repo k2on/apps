@@ -6,22 +6,35 @@ runs on ArkDB at spec v5, as harken does: one domain in plain Rust, every
 figure a view kept up to date by the rows a change touched.
 
 ```
+app.toml   what money is to every platform: its name, id, accent,
+           platforms, modules and what it asks of each (ui/docs/app.md,
+           "Generated, Not Committed"); every native project is generated
+           from it: `nix run .#money-prebuild` writes them into .native/
+icon.svg   its icon, every platform's
 domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            types.rs, dates.rs; accounts.rs, categories.rs, budget.rs,
            transactions.rs; plaid.rs, the bank import; receipts.rs and
            stores.rs, the stores' receipts; migrations.rs. The demo's
            household is beside the app, in seed/
+app/       money as an Ark app: the screens' state, messages, update and
+           #[view]s, drawn by iced and the browser and generated as
+           SwiftUI and Compose (`screens()`); under `ffi`, what the
+           phones' library exports (src/ffi, FFI.md): the bridge with the
+           domain linked in, typed views, the demo, a server in the process
 server/    money-server: the hub, sign-in, a web directory if given one, the
            bank importer (src/importer.rs, Plaid over src/plaid.rs);
            nix/module.nix is services.money
 iced/      the desktop client, on arkui and ark-peer: signed
            in to a server, or (--features demo) a seeded household on a
            peer that is its own authority
-ffi/       the library the phones load (ffi/README.md): ark-ffi with the
-           domain linked in, typed views, the demo, a server in the process
-ios/       the iPhone app (ios/README.md): SwiftUI on ffi/, with the demo
-android/   the Android app (android/README.md): Material You on ffi/,
-           over ui/kotlin, the look it shares with harken
+web/       the browser client, Leptos over arkui-web
+native/    what is not written in Rust yet, each going as it moves into
+           app/: ios/ (SwiftUI, native/ios/README.md) and android/
+           (Compose, native/android/README.md), with their tests
+fdroid/    F-Droid's metadata
+screens/   the screenshots' shots.json and server.sh
+```
+
 ```
 
 The phones sign in the way the browser does (below).
