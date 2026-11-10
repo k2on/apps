@@ -383,10 +383,16 @@ fn keep_on_screen() {
         w.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
         w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
     );
-    let Ok(list) = doc.query_selector_all(".ark-popover-layer") else { return };
+    let Ok(list) = doc.query_selector_all(".ark-popover-layer") else {
+        return;
+    };
     for i in 0..list.length() {
-        let Some(layer) = list.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
-        let Some(panel) = layer.query_selector(".ark-popover").ok().flatten() else { continue };
+        let Some(layer) = list.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else {
+            continue;
+        };
+        let Some(panel) = layer.query_selector(".ark-popover").ok().flatten() else {
+            continue;
+        };
         let r = panel.get_bounding_client_rect();
         let style = layer.style();
         if r.right() > ww - 8.0 {
