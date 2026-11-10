@@ -303,7 +303,10 @@ final class Drive: XCTestCase {
         // then sent with Go; a field the app's own hierarchy shows is tapped
         // first.
         let name = app.webViews.textFields.firstMatch
-        if name.exists && name.isHittable { name.tap() }
+        guard name.waitForExistence(timeout: 10) else {
+            throw NSError(domain: "Drive", code: 5, userInfo: [NSLocalizedDescriptionKey: "the server's page did not go, and no page asking for a name came"])
+        }
+        if name.isHittable { name.tap() }
         app.typeText(user + "\n")
     }
 

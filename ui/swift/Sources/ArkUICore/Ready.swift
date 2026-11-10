@@ -83,18 +83,32 @@ public final class Ready {
         ready = false
         generation += 1
         quiet = 0
-        if !ticks {
+        // Ticked once the root that ticks it is there (ArkUI's `.arkShots()`);
+        // told before that (a model's first news), the root's own first
+        // `changed()` starts it.
+        if !ticks, let tick = ticking {
             ticks = true
-            ticking?(true)
+            tick(true)
         }
         onChange?()
     }
 
+    /// What it still waits for, as the last frame found it: said on the
+    /// screen while not ready (`ark.busy`), what to read when a shot times out.
+    public private(set) var why = ""
+
     /// One frame drawn: ready once everything is done and a frame has been
     /// drawn so (what is done is then on the screen, not only in a view).
     public func frame() {
-        guard waiting.isEmpty, probes.allSatisfy({ $0() }), !moving() else {
+        let idle = probes.map { $0() }
+        let moves = moving()
+        guard waiting.isEmpty, !idle.contains(false), !moves else {
             quiet = 0
+            let now = (waiting.keys.sorted() + idle.enumerated().filter { !$0.element }.map { "probe \($0.offset)" } + (moves ? ["moving"] : [])).joined(separator: ", ")
+            if now != why {
+                why = now
+                onChange?()
+            }
             return
         }
         quiet += 1
@@ -105,6 +119,7 @@ public final class Ready {
         onChange?()
     }
 
-    /// What it says to the driver: `ready <generation> <route>`.
-    public var label: String { "ready \(generation) \(route)" }
+    /// What it says to the driver: `ready <generation> <route>`, or while
+    /// not ready `busy <generation>: <why>`.
+    public var label: String { ready ? "ready \(generation) \(route)" : "busy \(generation): \(why)" }
 }

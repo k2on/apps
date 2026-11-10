@@ -37,13 +37,17 @@ extension View {
 private final class Signal: ObservableObject {
     static let shared = Signal()
     @Published private(set) var label: String? = nil
+    @Published private(set) var ready = false
     #if canImport(UIKit)
     private var link: CADisplayLink?
     #endif
 
     private init() {
         let r = Ready.shared
-        r.onChange = { [weak self] in self?.label = r.ready ? r.label : nil }
+        r.onChange = { [weak self] in
+            self?.label = r.label
+            self?.ready = r.ready
+        }
         r.moving = Signal.moving
         r.ticking = { [weak self] on in self?.tick(on) }
     }
@@ -123,11 +127,15 @@ private struct ShotsRoot: ViewModifier {
                 }
                 .overlay(alignment: .topLeading) {
                     if let label = signal.label {
-                        // Drawn as nothing, there only to be found.
-                        Color.clear
+                        // A point of text no one sees, there only to be found:
+                        // `ark.ready` while ready, `ark.busy` (and why) while not.
+                        Text(label)
+                            .font(.system(size: 1))
+                            .foregroundStyle(.clear)
                             .frame(width: 1, height: 1)
-                            .accessibilityElement()
-                            .accessibilityIdentifier("ark.ready")
+                            .clipped()
+                            .allowsHitTesting(false)
+                            .accessibilityIdentifier(signal.ready ? "ark.ready" : "ark.busy")
                             .accessibilityLabel(label)
                     }
                 }
