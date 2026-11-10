@@ -22,6 +22,7 @@ money-domain = { path = "../domain" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
 ark-ui-gen = { path = "../../ui/rust/gen", optional = true }
 arkui = { path = "../../ui/rust/arkui", optional = true }
+arkui-web = { path = "../../ui/rust/web", optional = true }
 
 [features]
 # The state's records and messages as UniFFI's, for the phones (money/ffi).
@@ -31,7 +32,7 @@ gen = ["dep:ark-ui-gen"]
 # `accounts::iced(&page)`: the views as iced draws them.
 iced = ["dep:arkui", "arkui/app"]
 # `accounts::web(&page)`: the views as the browser draws them.
-web = []
+web = ["dep:arkui-web"]
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer", default-features = false }

@@ -16,9 +16,9 @@ order.
 ## The Layers
 
 iced is the desktop's alone. The browser is drawn by Leptos over the real
-DOM (`ui/rust/web`, not written yet); money's and harken's iced builds for
-wasm32 are gone, and with them their Pages demos until the Leptos client
-exists. What has no UI stays wasm-capable for it: ark-peer, ark-auth's
+DOM (`ui/rust/web`, crate `arkui-web`; money's client is `money/web`);
+money's and harken's iced builds for wasm32 are gone, and harken's Pages
+demo with them until its Leptos client exists. What has no UI stays wasm-capable for it: ark-peer, ark-auth's
 `web`, ark-format, ark-router, ark-app and the modules' `web` impls.
 
 ```
@@ -106,7 +106,7 @@ names and writes its entry points beside it, in a module of the same name:
 |---|---|---|
 | `accounts::view(&page)` | `Real` | the `View` of this record: `for` makes a row per item, `if` takes its branch |
 | `accounts::iced(&page)` | `Real`, drawn by `arkui::view` | an `Element<'static, Msg>` (crate feature `iced`) |
-| `accounts::web(&page)` | `Real`, drawn by `arkui-web` | Leptos over the DOM (feature `web`; the crate is not written yet) |
+| `accounts::web(&page)` | `Real`, drawn by `arkui-web` | Leptos over the DOM (feature `web`) |
 | `accounts::record()` | `Recorder` | the view over paths: `for` walked once with a symbolic item, `if` both ways |
 
 What it rewrites, and only that: a read of the record's fields (`p.f.g`,
@@ -302,6 +302,67 @@ its ffi crate's `useModules` and registers the platform's class.
   view, the modules' UIKit/AppKit branches), Compose (the Android build was
   not run); nothing seen on a device; no screenshot compared.
 
+## The Browser: `arkui-web`
+
+`ui/rust/web` draws an `ark_app` `View` in the DOM, client-side, with
+Leptos 0.8 (`csr`; no server functions, no hydration), the way
+`arkui::view` draws it in iced:
+
+- **`render(view)`** a page's view (`#[view]`'s `web(&record)`);
+  **`shell(view, hosts)`** a shell's: the sections a sidebar from
+  `sidebar-min-width`, a capsule of tabs in the toolbar short of it, tabs
+  at the foot when compact; each section's toolbar (the way back and the
+  navigation items, the title inline or large, the actions, the
+  inspector's toggle and the search field at its trailing end, under the
+  title when compact); its inspector a pane at the trailing edge or a
+  sheet from the foot; a pushed detail; questions and sheets over it.
+  The size class is the window's width against `[layout]`'s tokens read
+  from the theme's CSS variables, so it is written once.
+- **`run(app, accent, css)`** mounts a **`WebApp`** (its `view`, `update`,
+  `commands`, what the address asks for in `arrive`, what a field
+  `suggest`s); a message is **`send(m)`**: the app updates and the page is
+  drawn again, Leptos keeping the elements that are the same (a focused
+  field keeps its keys and its caret).
+- **The transient parts** (`menu`, `fields`): a row's context menu at the
+  pointer (right click, the menu key, Shift-F10) and a control's menu
+  under it (`menu::button`), each with its title, its entries, a check, a
+  shortcut and a submenu hanging off an entry after arkui's dwell (200 ms)
+  or on `→`; `↑`/`↓`/`j`/`k`, `←` out, `Enter`, `Esc` one level, a press
+  outside every level; flipped at the window's edges as AppKit does, in
+  arkui's `panel` measures. A search field's suggestions, a date field's
+  calendar (arrows a day or a week, PageUp/PageDown a month), a picker in
+  a form's row as a menu with its choice checked; a modal centred, a sheet
+  from the foot when compact.
+- **`table`**: a Mac's `Table` (headings, rows a grid of cells, striped,
+  the selected and the cursor's row lit, a row's menu), and when compact a
+  `List` of two-line rows from each column's `Slot`.
+- **`figures`**: arkui's figures, the charts as inline SVG in the `[chart]`
+  palette (`line_svg` is iced's line, point for point).
+- **`keys`**: the shortcuts of the app's `CommandMenu`s
+  (`ark_app::shell::command_for`), the command box (`:`, ⌘K), the keys
+  panel (`?`), and the vim layer over the rows drawn: `j`/`k`, counts,
+  `gg`/`G`/`{n}G`, `^d`/`^u`, `zz`/`zt`/`zb`, `h`/`l`/Tab between the
+  panes, Enter/`o`, `/`, `n`/`N`. A field keeps its keys. iced's grammar
+  (`arkui::vim`) reads iced's `Key`, so this is its twin in the DOM's
+  words, not the same code: moving the grammar into a toolkit-free crate
+  is what is left.
+- **The theme**: `theme.css` is ui/theme.py's (`checks.theme` holds it):
+  every role a variable, dark by the system unless the page says
+  (`data-theme`), an app's accent by `data-accent`, the window's measures,
+  the springs as CSS `linear()` curves sampled from the same stiffness and
+  damping as every toolkit's, the size classes' container queries;
+  `arkui.css` is the parts' own over those variables. The glyphs are
+  `arkui-glyphs`, the table iced draws too.
+- **Motion** (ui/docs/motion.md): a menu or dialog opened by the pointer
+  grows from 0.95 on the move spring, a sheet rises; by a key nothing
+  moves; reduced (`data-motion="reduced"`), only the fade. `ALWAYS_ANIMATE`
+  is true as in the other three, `?reduce-motion=1` forces the gentle path
+  as `ARK_REDUCE_MOTION=1` does.
+- **The address** opens any screen with no steps: the launch arguments
+  every shell reads (`?screen=account:checking&inspector=1&pane=banks`,
+  `ark_app::shell::Launch`), and arkui-web's `?context=<row>`,
+  `?menu=<id>`, `?popover=<id>`, `?command=`, `?keys=1`, `?theme=dark`.
+
 ## The iced Fork: COSMIC's
 
 The desktop draws with COSMIC's iced (`github.com/pop-os/iced`), the
@@ -388,10 +449,14 @@ ui/docs/apps/money.md for money):
    Transactions, Insights, Settings, sign-in and receipts ported in that
    order. harken's design doc and port after it; revelation is not an Ark
    app (plain Kotlin) and stays as it is.
-3. **The browser**: `ui/rust/web` drawing a `View` with Leptos over the
-   real DOM, the theme as CSS variables generated from ui/theme.toml, the
-   same context menu in the DOM, and `money/web` running the demo
-   household in wasm.
+3. **The browser** — written: `ui/rust/web` (crate `arkui-web`) draws a
+   `View` with Leptos over the real DOM ("The Browser", below) and
+   `money/web` runs money's shell and the Accounts slice over the demo
+   household in wasm, its other sections hosted by its own screens as
+   money/iced hosts its; `nix build .#money-web` is the page
+   (`checks.money-web`), `.github/screens/app-web.sh` photographs it.
+   Left: harken's client, an SSR or pre-rendered page for the docs, the
+   vim grammar shared with iced (below), the page's own history.
 4. **macOS, iPad, Android tablets and foldables**: money's target is one
    multiplatform target with a macOS destination (`project.yml`,
    `supportedDestinations`), its kernel's Mac slice and `money-macos`

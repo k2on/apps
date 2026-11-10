@@ -1,0 +1,21 @@
+/* money's own screens in the browser, over ArkUI's parts (arkui-web's
+   arkui.css) and the theme's variables: only what is money's layout. */
+
+.money-budget { height: 100%; }
+.money-group { display: inline-flex; align-items: center; gap: 6px; }
+.money-category { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; }
+.money-name { display: flex; align-items: center; gap: 6px; }
+.money-story { font-size: 11px; }
+.money-needs { color: var(--ark-accent-text); font-weight: 600; }
+.money-payee { display: inline-flex; align-items: center; }
+.money-register { height: 100%; }
+.money-worth { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.money-insights { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.money-household { display: flex; align-items: center; gap: 4px; }
+.money-me { flex: 1; white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.money-me:hover { background: var(--ark-container); }
+.money-face { width: 24px; height: 24px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: var(--ark-container-highest); color: var(--ark-quiet); }
+.money-available { font-size: 13px; font-weight: 600; }
+.money-settings { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.money-settings-window { height: 420px; margin: -8px -20px; border-top: 1px solid var(--ark-hairline); }
+.money-settings-window .ark-shell-root { height: 100%; width: 100%; }

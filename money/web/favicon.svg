@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .ground { fill: #3A4CC6; }
+    .mark { fill: none; stroke: #FFFFFF; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) { .ground { fill: #8B97FF; } .mark { stroke: #161828; } }
+  </style>
+  <rect class="ground" x="4" y="4" width="56" height="56" rx="14"/>
+  <path class="mark" d="M40 22c-2-3-5-4-8-4-5 0-8 3-8 6 0 8 16 5 16 13 0 4-4 7-8 7-4 0-7-1-9-4M32 13v5M32 44v7"/>
+</svg>

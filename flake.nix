@@ -73,13 +73,29 @@
       # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
         "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
         "money/android/app/src/main/kotlin/dev/money/android/gen" "money/ios/Money/Gen"
       ];
+
+      # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
+      # crate the workspace locked, or the glue it writes does not match the
+      # module's imports and the page fails at load with a name nobody
+      # recognises. So the version is read out of the lockfile rather than
+      # written down, and the two hashes beside it are the only thing to move
+      # when the crate moves — a stale hash fails and prints the right one.
+      wasmBindgenVersion =
+        let lock = builtins.fromTOML (builtins.readFile ./rust/Cargo.lock);
+        in (lib.findFirst (p: p.name == "wasm-bindgen") (throw "rust/Cargo.lock has no wasm-bindgen") lock.package).version;
+      wasmBindgenHashes = {
+        "0.2.129" = {
+          hash = "sha256-pcecKQd7E8Opw6bkFoE569epUi7gh5qpQF1e5PJY6V8=";
+          cargoHash = "sha256-/uK14uPcftMFwlBx28Z1qHkm1edIWVVXi6hRRQRmYec=";
+        };
+      };
 
       perSystem = pkgs:
         let
@@ -307,6 +323,61 @@
             else built;
           harken-iced = icedApp "harken-iced";
           money-iced = icedApp "money-iced";
+
+          # The browser (ui/docs/app.md, "The Layers"): an app's Leptos
+          # client (`<app>/web`, on arkui-web) compiled to wasm32 and bound by
+          # wasm-bindgen, beside its page — one static directory, no trunk.
+          # The toolchain is the workspace's with the wasm target added, and
+          # the CLI is built from the crate at the version the lockfile names.
+          wasmRust = rust.override { targets = [ "wasm32-unknown-unknown" ]; };
+          # nixpkgs for wasm32: its compiler is rustc's own linker, and
+          # nixpkgs has no C toolchain for `wasm32-unknown-none`, which no
+          # crate here asks for.
+          wasmPkgs = importPkgs {
+            localSystem = pkgs.stdenv.buildPlatform.system;
+            crossSystem = { config = "wasm32-unknown-none"; rust.rustcTarget = "wasm32-unknown-unknown"; };
+            config = { allowUnfree = true; allowUnsupportedSystem = true; };
+          };
+          wasm-bindgen-cli = pkgs.wasm-bindgen-cli.override ({
+            inherit rustPlatform;
+            version = wasmBindgenVersion;
+          } // (wasmBindgenHashes.${wasmBindgenVersion}
+            or (throw "flake.nix: no hashes for wasm-bindgen ${wasmBindgenVersion}; add them to wasmBindgenHashes")));
+          # Leptos's code splitting (wasm_split_helpers) names its markers
+          # by the crate's manifest's path, which cargo says in
+          # CARGO_MANIFEST_PATH and buildRustCrate does not: any path will
+          # do, as long as it is the same every build.
+          wasmOverrides = {
+            wasm_split_helpers = _: { CARGO_MANIFEST_PATH = "wasm_split_helpers/Cargo.toml"; };
+          };
+          # One wasm page: a binary of the workspace compiled to wasm32 and
+          # bound by wasm-bindgen, beside the static files it is loaded from.
+          wasmPage = { pname, crate, bin ? crate, features ? [ "default" ], files }:
+            let
+              wasm = rustCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = crate; inherit features; overrides = wasmOverrides; };
+            in
+            # `passthru.wasm`: the module before it is bound, to build alone.
+            pkgs.runCommand pname { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm; }; } ''
+              wasm-bindgen --target web --no-typescript --out-dir pkg ${wasm}/bin/${bin}.wasm
+              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                -o pkg/${bin}_bg.wasm pkg/${bin}_bg.wasm
+              # The page names the module and the wasm with `?v=dev`; this
+              # output's own hash replaces it, so a browser holding an older
+              # build is sent URLs its cache has never seen.
+              mkdir -p $out
+              cp -r pkg $out/
+              ${lib.concatMapStrings (f: "cp ${f} $out/${baseNameOf f}\n") files}
+              chmod u+w $out/index.html
+              substituteInPlace $out/index.html --replace-fail "v=dev" "v=$(basename $out | cut -c1-32)"
+            '';
+          # money's web client: the shell and its screens over the demo
+          # household, in the page alone (money/web).
+          money-web = wasmPage {
+            pname = "money-web";
+            crate = "money-web";
+            files = [ ./money/web/index.html ./money/web/favicon.svg ];
+          };
 
           # The specification is `rust/ark` (spec/README.md), and the tools
           # over it are `rust/arkdb`, whose binary is `arkdb` (`gen`, `fuzz`,
@@ -1237,7 +1308,7 @@
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
             inherit harken-iced docs screens-ffmpeg screens-python xcodegen;
-            inherit money-iced money-server;
+            inherit money-iced money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
             # money's library for its phones (money/ffi), as harken's.
             inherit money-android-lib money-ios-xcframework;
@@ -1278,6 +1349,9 @@
           };
 
           checks = {
+            # money's web client builds for wasm32 and is bound
+            # (`.github/screens/app-web.sh` photographs it).
+            inherit money-web;
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
@@ -1389,7 +1463,7 @@
                 name = "docs";
                 build = docsCrate;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
-                dirs = [ "docs/site" "ui/rust/arkui" "rust/Cargo.toml" ];
+                dirs = [ "docs/site" "ui/rust/arkui" "ui/rust/glyphs" "rust/Cargo.toml" ];
               })
             ] ++ memberClippy docsCrate { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.

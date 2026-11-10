@@ -372,6 +372,25 @@ window (`nix build .#harken-iced`), and run `app-desktop.sh <out> result
 harken http://127.0.0.1:8787` from the repository's root; `ARK_SHOTS_ONLY=<id>`
 takes one shot.
 
+## The browser
+
+`app-web.sh <out> <site> <app>` photographs an app's web client (`nix
+build .#money-web`: its index.html beside pkg/) in Playwright's Chromium
+(`web-shots.js`): the page served on the loopback, DejaVu the only font
+fontconfig knows (the desktop's), each shot of shots.json's `web` opened
+by its address — the launch arguments every shell reads (`screen`,
+`inspector`, `pane`) and arkui-web's own (`context`, `menu`, `popover`,
+`command`, `keys`) — then its steps in the desktop's vocabulary (`click`,
+`key`, `type`, `await`, `wait`), at each of `web.sizes` (a Mac's window,
+an iPad upright, a phone) in light and dark, reduced motion so nothing is
+caught moving. It writes `<out>/<size>/<theme>/<id>.png` and each its
+`<id>.tree.txt`. The demo needs no server.
+
+Not yet a job of app-screens.yaml: a job would build `.#money-web`
+(cached), `npx playwright install --with-deps chromium`, and run
+`app-web.sh screens/web money` from the repository's root, then publish
+or compare `screens/web` as the desktop's are.
+
 ## The iPhone builds, in nix
 
 `nix build .#money-ios-simulator` (and `harken-ios-simulator`) is the app

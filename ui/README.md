@@ -18,7 +18,9 @@ ui/
 │   ├── motion.md     how everything moves and answers a touch (a standing rule)
 │   └── parts.md      ArkUI's generic parts, one name in Compose, SwiftUI and iced
 ├── rust/
-│   ├── arkui/        crate `arkui`: the iced components, the desktop and the browser
+│   ├── arkui/        crate `arkui`: the iced components, the desktop
+│   ├── web/          crate `arkui-web`: the same parts in the browser, Leptos over the DOM
+│   ├── glyphs/       crate `arkui-glyphs`: the glyph table, toolkit-free
 │   ├── arkui-macros/ crate `arkui-macros`: `#[view]`
 │   ├── router/       crate `ark-router`: a route as one path string
 │   ├── router-macros/ crate `ark-router-macros`: `#[derive(Routes)]`
@@ -49,7 +51,8 @@ platform's arkui:
 | --- | --- | --- |
 | Android (Compose) | `ui/kotlin/src/dev/arkui/Tokens.kt` | `arkuiScheme(Accent.Gold, dark)`, and `Accent.Gold.art(dark)` for the squares |
 | iPhone (SwiftUI) | `ui/swift/Sources/ArkUICore/Tokens.swift`, `ui/swift/Sources/ArkUI/Colors.swift`, each app's `AccentColor.colorset` | `Accent.use(.gold)` at launch, then `.ink`, `.quiet`, `.accent`… |
-| Desktop and web (iced) | `ui/rust/arkui/src/tokens.rs` | `arkui::theme::install(arkui::tokens::GOLD)` |
+| Desktop (iced) | `ui/rust/arkui/src/tokens.rs` | `arkui::theme::install(arkui::tokens::GOLD)` |
+| Browser (arkui-web) | `ui/rust/web/theme.css` (CSS variables, the springs as `linear()`, the size classes' container queries) | `arkui_web::run(app, "gold", css)` (`data-accent`) |
 
 After editing `theme.toml`, from the repository's root:
 

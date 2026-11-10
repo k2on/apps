@@ -109,5 +109,210 @@
     "line": "A household's budget, shared, on every device and offline",
     "logo": "money/ios/Money/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
     "screen": "budget"
+  },
+  "web": {
+    "_": "The browser's (app-web.sh, web-shots.js): money-web over the demo household seeded to `today`, at each size in light and dark; each shot opened by its address — the launch arguments every shell reads (`screen`, `inspector`, `pane`) and arkui-web's own (`context` a row's menu, `menu` a control's, `popover` a field's, `command` the command box, `keys` the keys panel) — then its steps, the desktop's vocabulary (click, key, type, await, wait). The ids are the reference's.",
+    "today": "2026-11-10",
+    "sizes": {
+      "mac": [
+        1440,
+        900
+      ],
+      "ipad": [
+        900,
+        1100
+      ],
+      "iphone": [
+        400,
+        860
+      ]
+    },
+    "shots": [
+      {
+        "id": "01-budget",
+        "query": "screen=budget"
+      },
+      {
+        "id": "01-category-vacation-inspector",
+        "query": "screen=category:vacation&inspector=1"
+      },
+      {
+        "id": "02-transactions",
+        "query": "screen=transactions"
+      },
+      {
+        "id": "03-category-dining-inspector",
+        "query": "screen=category:dining&inspector=1"
+      },
+      {
+        "id": "03-transaction-receipt-inspector",
+        "query": "screen=transaction:target&inspector=1"
+      },
+      {
+        "id": "03-accounts",
+        "query": "screen=accounts"
+      },
+      {
+        "id": "04-account-checking",
+        "query": "screen=account:checking"
+      },
+      {
+        "id": "04-account-visa",
+        "query": "screen=account:sapphire"
+      },
+      {
+        "id": "05-review",
+        "query": "screen=review"
+      },
+      {
+        "id": "06-insights",
+        "query": "screen=insights"
+      },
+      {
+        "id": "07-add-transaction",
+        "query": "screen=add-transaction"
+      },
+      {
+        "id": "08-settings-banks",
+        "query": "screen=settings&pane=banks"
+      },
+      {
+        "id": "09-settings-household",
+        "query": "screen=settings&pane=household"
+      },
+      {
+        "id": "10-context-menu",
+        "query": "screen=budget&context=Groceries"
+      },
+      {
+        "id": "11-submenu",
+        "query": "screen=budget&context=Groceries",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "12-auto-assign-menu",
+        "query": "screen=budget&menu=auto-assign"
+      },
+      {
+        "id": "13-date-picker",
+        "query": "screen=add-transaction&popover=date"
+      },
+      {
+        "id": "14-search-suggestions",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "key": "/"
+          },
+          {
+            "type": "Tar"
+          }
+        ],
+        "sizes": [
+          "mac",
+          "ipad"
+        ]
+      },
+      {
+        "id": "15-approve-all",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "click": "Approve All"
+          }
+        ]
+      },
+      {
+        "id": "16-command-box",
+        "query": "command=Month"
+      },
+      {
+        "id": "17-keys-panel",
+        "query": "screen=budget&keys=1",
+        "sizes": [
+          "mac",
+          "ipad"
+        ]
+      },
+      {
+        "id": "18-categorize-submenu",
+        "query": "screen=transactions&context=Target",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          }
+        ]
+      },
+      {
+        "id": "19-category-picker",
+        "query": "screen=add-transaction&menu=category",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "20-keys-cursor",
+        "query": "screen=budget",
+        "steps": [
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          }
+        ]
+      }
+    ]
   }
 }

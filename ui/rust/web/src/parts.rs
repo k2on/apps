@@ -1,0 +1,446 @@
+//! A page's parts (ui/docs/parts.md, "A screen laid out in Rust") in the
+//! DOM, as `arkui::view` draws them in iced: the page's figure, its
+//! sections of rows in cards, a row's context menu, a form's fields and
+//! pickers, and the sheets and questions over the page.
+
+use std::rc::Rc;
+
+use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Section, View};
+use leptos::html;
+use leptos::prelude::*;
+use wasm_bindgen::JsCast;
+
+use crate::{amount, glyph, menu, money, row_drawn, send, Row};
+
+/// `view` drawn: what `#[view]`'s `web(&record)` returns.
+pub fn render<M: Clone + 'static>(view: View<M>) -> AnyView {
+    match view {
+        View::Part(Part::Page { top, content, .. }) => page(View::List(vec![*top, *content])),
+        v => html::div().class("ark-column").child(nodes(v)).into_any(),
+    }
+}
+
+/// `v` with its lists opened out: what lies one after another.
+pub(crate) fn flatten<M>(v: View<M>) -> Vec<View<M>> {
+    match v {
+        View::List(vs) => vs.into_iter().flat_map(flatten).collect(),
+        View::Empty => vec![],
+        v => vec![v],
+    }
+}
+
+pub(crate) fn nodes<M: Clone + 'static>(v: View<M>) -> Vec<AnyView> {
+    flatten(v).into_iter().filter_map(part).collect()
+}
+
+/// A tab's page: a scrolling column, its sheets and prompts over it. Its
+/// title is the toolbar's.
+pub(crate) fn page<M: Clone + 'static>(content: View<M>) -> AnyView {
+    let mut body = vec![];
+    let mut over = vec![];
+    for v in flatten(content) {
+        match v {
+            View::Part(p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. })) => over.push(dialog(p)),
+            v => body.extend(nodes(v)),
+        }
+    }
+    html::div()
+        .class("ark-page")
+        .child((html::div().class("ark-page-column").child(body), over))
+        .into_any()
+}
+
+fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
+    let View::Part(p) = v else {
+        // A recording's `for` and `if` are the emitters'; a real view has none.
+        return None;
+    };
+    Some(match p {
+        Part::Hero { label, cents, note } => html::div()
+            .class("ark-hero")
+            .child((
+                html::div().class("ark-hero-label").child(label),
+                html::div().class("ark-hero-figure").child(amount(cents.get(), false)),
+                html::div().class("ark-hero-note").child(note),
+            ))
+            .into_any(),
+        Part::Summary {
+            label,
+            cents,
+            first,
+            first_cents,
+            second,
+            second_cents,
+            trend,
+        } => html::div()
+            .class("ark-card ark-summary")
+            .child((
+                html::div().class("ark-caption").child(label),
+                html::div().class("ark-headline").child(amount(cents.get(), false)),
+                html::div().class("ark-summary-foot").child((
+                    html::div()
+                        .class("ark-facts")
+                        .child((fact(first, first_cents.get()), fact(second, second_cents.get()))),
+                    html::div()
+                        .class("ark-summary-trend")
+                        .child(crate::figures::sparkline(&trend.get(), 160.0, 34.0)),
+                )),
+            ))
+            .into_any(),
+        Part::Section(s) => section(s),
+        Part::Row(r) => list_row(*r),
+        Part::NameField {
+            label,
+            value,
+            problem,
+            typed,
+        } => field(label, value.get(), problem.get(), typed),
+        Part::AmountField { label, typed, problem, on } => field(&label.get(), typed.get(), problem.get(), on),
+        Part::AmountEntry {
+            label,
+            typed,
+            problem,
+            on_typed,
+            ..
+        } => field(&label.get(), typed.get(), problem.get(), on_typed),
+        Part::Chips(c) => html::div().class("ark-chips").child(nodes(*c)).into_any(),
+        Part::Chip { label, selected, tap, .. } => chip(label.get(), selected.get(), tap),
+        Part::FormSection { header, footer, content } => html::div()
+            .class("ark-form-section")
+            .child((
+                header.map(|h| html::div().class("ark-caption").child(h.get())),
+                nodes(*content),
+                footer.map(|f| html::div().class("ark-caption").child(f.get())),
+            ))
+            .into_any(),
+        Part::Picker {
+            selected,
+            pick,
+            choices,
+            label,
+        } => {
+            let chosen = selected.get();
+            let chips: Vec<AnyView> = flatten(*choices)
+                .into_iter()
+                .filter_map(|v| match v {
+                    View::Part(Part::Choice { title, tag, .. }) => {
+                        let tag = tag.get();
+                        Some(chip(title.get(), tag == chosen, pick.call(tag)))
+                    }
+                    _ => None,
+                })
+                .collect();
+            html::div()
+                .class("ark-chips")
+                .role("radiogroup")
+                .attr("aria-label", label)
+                .child(chips)
+                .into_any()
+        }
+        Part::Choice { .. } => return None,
+        Part::Toggle { title, note, on, change } => {
+            let on = on.get();
+            html::label()
+                .class("ark-toggle")
+                .child((
+                    html::input()
+                        .attr("type", "checkbox")
+                        .prop("checked", on)
+                        .on(leptos::ev::change, move |_| send(change.call(!on))),
+                    html::span().child((
+                        html::span().class("ark-toggle-title").child(title),
+                        note.map(|n| html::span().class("ark-caption").child(n.get())),
+                    )),
+                ))
+                .into_any()
+        }
+        Part::Button { title, enabled, tap } => {
+            let enabled = enabled.get();
+            html::button()
+                .class("ark-button")
+                .prop("disabled", !enabled)
+                .on(leptos::ev::click, move |_| send(tap.clone()))
+                .child(title)
+                .into_any()
+        }
+        Part::BarItem {
+            title,
+            glyph: g,
+            enabled,
+            tap,
+            ..
+        } => crate::shell::bar_button(title, g, enabled.get(), tap),
+        p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => dialog(p),
+        // The shell's are `shell`'s.
+        _ => return None,
+    })
+}
+
+fn fact(label: &'static str, cents: i64) -> AnyView {
+    html::div()
+        .class("ark-fact")
+        .child((html::div().class("ark-caption").child(label), amount(cents, false)))
+        .into_any()
+}
+
+/// A choice in a wrapping row, lit when chosen.
+pub fn chip<M: Clone + 'static>(label: String, selected: bool, tap: M) -> AnyView {
+    html::button()
+        .class(if selected { "ark-chip ark-on" } else { "ark-chip" })
+        .attr("aria-pressed", if selected { "true" } else { "false" })
+        .on(leptos::ev::click, move |_| send(tap.clone()))
+        .child(label)
+        .into_any()
+}
+
+fn section<M: Clone + 'static>(s: Section<M>) -> AnyView {
+    let shows = s.shows.as_ref().is_none_or(|b| b.get());
+    let trailing = s.amount.filter(|_| shows).map(|a| {
+        let c = a.get();
+        amount(c, c >= 0)
+    });
+    let head = s
+        .title
+        .map(|t| html::div().class("ark-section-header").child((html::span().child(t.get()), trailing)));
+    let rows = nodes(*s.rows);
+    let n = rows.len();
+    let rows: Vec<AnyView> = rows
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, r)| {
+            let mut v = vec![r];
+            if i + 1 < n {
+                v.push(html::div().class("ark-row-divider").into_any());
+            }
+            v
+        })
+        .collect();
+    let foot = s.footer.and_then(|f| f.get()).map(|n| html::div().class("ark-section-footer").child(n));
+    html::section()
+        .class("ark-section")
+        .child((head, html::div().class("ark-card ark-group").child(rows), foot))
+        .into_any()
+}
+
+/// ArkUI's `ListRow`: its picture, its words, its count, its amount, a
+/// chevron when it pushes; pressed, its message; right-clicked (or the
+/// menu key, Shift-F10 on its cursor), its menu at the pointer.
+pub fn list_row<M: Clone + 'static>(r: ListRow<M>) -> AnyView {
+    let title = r.title.get();
+    let entries = menu::of_row(&r.menu);
+    let open: Option<crate::Action> = r.tap.clone().map(|t| Rc::new(move || send(t.clone())) as crate::Action);
+    let opener: Option<crate::Opener> = (!entries.is_empty()).then(|| {
+        let title = title.clone();
+        let entries = entries.clone();
+        Rc::new(move |x: f64, y: f64| menu::open(title.clone(), entries.clone(), (x, y), menu::Anchor::Pointer, false)) as crate::Opener
+    });
+    if let Some(o) = &opener {
+        let (t, o) = (title.clone(), o.clone());
+        crate::drawn(|d| d.contexts.push((t, o)));
+    }
+    let (_, lit) = row_drawn(Row {
+        title: title.clone(),
+        open: open.clone(),
+        menu: opener.clone(),
+    });
+    let picture = match &r.picture {
+        Picture::None => None,
+        Picture::Tile(g) => Some(tile(g, "ark-tile")),
+        Picture::Mark { glyph: g, .. } => Some(tile(&g.get(), "ark-tile ark-tile-accent")),
+        Picture::Glyph(g) => Some(html::span().class("ark-row-glyph").child(glyph(g, 16)).into_any()),
+    };
+    let words = html::div().class("ark-row-words").child((
+        html::div().class("ark-row-title").child(title.clone()),
+        r.subtitle.map(|s| html::div().class("ark-row-subtitle").child(s.get())),
+    ));
+    let badge = r
+        .badge
+        .and_then(|b| b.get())
+        .map(|n| html::span().class("ark-badge").child(n.to_string()));
+    let figure = r.amount.map(|a| amount(a.get(), r.quiet));
+    let chevron = r.pushes.then(|| html::span().class("ark-chevron").child(glyph("chevron-right", 14)));
+    let mut class = String::from("ark-row");
+    if r.accent {
+        class.push_str(" ark-accent-row");
+    }
+    if lit {
+        class.push_str(" ark-cursor");
+    }
+    let menu_at = opener.clone();
+    html::button()
+        .class(class)
+        .attr("data-cursor", lit.then_some("true"))
+        .attr("data-title", title.clone())
+        .attr("aria-label", r.said.map(|s| s.get()).unwrap_or(title))
+        .on(leptos::ev::click, move |_| {
+            if let Some(o) = &open {
+                o()
+            }
+        })
+        .on(leptos::ev::contextmenu, move |e: web_sys::MouseEvent| {
+            if let Some(o) = &menu_at {
+                e.prevent_default();
+                o(e.client_x() as f64, e.client_y() as f64);
+            }
+        })
+        .child((picture, words, badge, figure, chevron))
+        .into_any()
+}
+
+/// A glyph on a rounded square.
+pub fn tile(g: &str, class: &'static str) -> AnyView {
+    html::span().class(class).child(glyph(g, 16)).into_any()
+}
+
+/// A labelled text field and the problem with what is in it.
+pub fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>, typed: Input<String, M>) -> AnyView {
+    html::label()
+        .class("ark-field")
+        .child((
+            html::span().class("ark-caption").child(label.to_string()),
+            html::input()
+                .class("ark-input")
+                .attr("placeholder", label.to_string())
+                .prop("value", value)
+                .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e)))),
+            problem.map(|p| html::span().class("ark-problem").child(p)),
+        ))
+        .into_any()
+}
+
+/// A sheet, a prompt, a question or a notice over the page, centred (a
+/// modal belongs to the window, motion.md), the page dimmed under it;
+/// pressing outside or Esc is its dismissal.
+pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
+    let (dismiss, title, body, buttons): (M, String, Vec<AnyView>, Vec<AnyView>) = match p {
+        Part::Sheet {
+            title,
+            dismiss,
+            confirm,
+            content,
+        } => {
+            let mut b = vec![push_button("Cancel", true, false, dismiss.clone())];
+            if let Some(Confirm { title, enabled, tap }) = confirm {
+                b.push(push_button(title, enabled.get(), true, tap));
+            }
+            (dismiss, title.to_string(), nodes(*content), b)
+        }
+        Part::Prompt {
+            title,
+            text,
+            typed,
+            confirm,
+            ok,
+            cancel,
+        } => {
+            let submit = ok.clone();
+            let input = html::input()
+                .class("ark-input")
+                .attr("autofocus", "")
+                .prop("value", text.get())
+                .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e))))
+                .on(leptos::ev::keydown, move |e: web_sys::KeyboardEvent| {
+                    if e.key() == "Enter" {
+                        send(submit.clone())
+                    }
+                })
+                .into_any();
+            (
+                cancel.clone(),
+                title.to_string(),
+                vec![input],
+                vec![push_button("Cancel", true, false, cancel), push_button(confirm, true, true, ok)],
+            )
+        }
+        Part::Confirm {
+            title,
+            message,
+            actions,
+            cancel,
+        } => {
+            let mut b = vec![push_button("Cancel", true, false, cancel.clone())];
+            for a in actions {
+                let class = if a.destructive {
+                    "ark-push ark-destructive"
+                } else {
+                    "ark-push ark-default"
+                };
+                let tap = a.tap;
+                b.push(
+                    html::button()
+                        .class(class)
+                        .on(leptos::ev::click, move |_| send(tap.clone()))
+                        .child(a.title.get())
+                        .into_any(),
+                );
+            }
+            (
+                cancel,
+                title.get(),
+                vec![html::p().class("ark-dialog-message").child(message.get()).into_any()],
+                b,
+            )
+        }
+        Part::Alert { title, message, ok } => (
+            ok.clone(),
+            title.get(),
+            vec![html::p().class("ark-dialog-message").child(message.get()).into_any()],
+            vec![push_button("OK", true, true, ok)],
+        ),
+        _ => return ().into_any(),
+    };
+    modal(title, body, buttons, Rc::new(move || send(dismiss.clone())))
+}
+
+/// A modal panel: its title, its body, its buttons at its foot.
+pub fn modal(title: String, body: Vec<AnyView>, buttons: Vec<AnyView>, dismiss: crate::Action) -> AnyView {
+    let away = dismiss.clone();
+    let esc = dismiss.clone();
+    crate::drawn(|d| d.modal = Some(dismiss.clone()));
+    // Compact, a sheet from the foot (the iPhone's); else centred, as a
+    // modal belongs to the window (motion.md).
+    let compact = crate::shell::size_class() == crate::shell::SizeClass::Compact;
+    html::div()
+        .class("ark-modal-layer")
+        .child((
+            html::div().class("ark-scrim").on(leptos::ev::mousedown, move |_| away()),
+            html::div()
+                .class(if compact { "ark-dialog ark-dialog-sheet" } else { "ark-dialog" })
+                .role("dialog")
+                .attr("aria-modal", "true")
+                .attr("aria-label", title.clone())
+                .attr("data-motion", if compact { "rise" } else { "grow" })
+                .on(leptos::ev::keydown, move |e: web_sys::KeyboardEvent| {
+                    if e.key() == "Escape" {
+                        e.stop_propagation();
+                        esc();
+                    }
+                })
+                .child((
+                    html::h2().class("ark-dialog-title").child(title),
+                    html::div().class("ark-dialog-body").child(body),
+                    html::div().class("ark-dialog-buttons").child(buttons),
+                )),
+        ))
+        .into_any()
+}
+
+/// A dialog's button: the default one filled in the accent.
+pub fn push_button<M: Clone + 'static>(title: &'static str, enabled: bool, default: bool, tap: M) -> AnyView {
+    html::button()
+        .class(if default { "ark-push ark-default" } else { "ark-push" })
+        .prop("disabled", !enabled)
+        .on(leptos::ev::click, move |_| send(tap.clone()))
+        .child(title)
+        .into_any()
+}
+
+/// The element an event was on.
+pub fn target_element(e: &web_sys::Event) -> Option<web_sys::Element> {
+    e.current_target().and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+}
+
+/// An amount's words, for a part that writes its own.
+pub fn words(cents: i64) -> String {
+    money(cents)
+}

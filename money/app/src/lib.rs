@@ -13,6 +13,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod accounts;
+pub mod look;
 pub mod shell;
 
 pub use money_domain::routes::Route;

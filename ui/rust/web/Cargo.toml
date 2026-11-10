@@ -1,0 +1,19 @@
+[package]
+name = "arkui-web"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ArkUI in the browser: an ark-app View drawn by Leptos over the real DOM — the shell (sidebar, tab bars, toolbar, search, inspector), sheets, dialogs, menus, tables and figures — in the theme's CSS, with the desktop's keyboard."
+
+# Knows nothing about any domain, as arkui: an app hands it its view, its
+# messages and its hosted screens.
+
+[dependencies]
+ark-app = { path = "../app" }
+ark-format = { path = "../../../rust/ark-format" }
+arkui-glyphs = { path = "../glyphs" }
+# The DOM, client-side rendered: no server functions, no hydration.
+leptos = { version = "0.8", default-features = false, features = ["csr"] }
+wasm-bindgen = "0.2.129"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "MouseEvent", "Event", "EventTarget", "DomRect", "Location", "UrlSearchParams", "MediaQueryList", "CssStyleDeclaration", "Node", "History", "FocusEvent", "PointerEvent", "ScrollIntoViewOptions", "ScrollLogicalPosition", "Navigator", "NodeList", "HtmlDocument"] }

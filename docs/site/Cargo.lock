@@ -217,6 +217,7 @@ version = "0.1.0"
 dependencies = [
  "ark-format",
  "ark-router",
+ "arkui-glyphs",
  "chrono",
  "iced",
  "iced_accessibility",
@@ -227,6 +228,10 @@ dependencies = [
  "wayland-protocols",
  "zbus",
 ]
+
+[[package]]
+name = "arkui-glyphs"
+version = "0.1.0"
 
 [[package]]
 name = "arrayref"
