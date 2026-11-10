@@ -53,7 +53,7 @@ toolbar.
   iPhone's amount entry; a typed field elsewhere), In the Budget with its
   note. A new account is dated with the session's day (the demo's in the
   demo).
-- **Refresh** asks the bank (`Command::Native("refresh")`).
+- **Refresh** asks the bank (`Command::Request(MoneyRequest::Refresh)`).
 
 ## The Shell (Written)
 
@@ -79,7 +79,11 @@ kind, a target a month, so the reference's Goal picker of kinds and its
 date are not there) and the month's transactions with Show All in
 Transactions; Transaction Details its payee and amount, account, date,
 status and memo (no split or receipt items yet). With nothing selected
-the platform's own placeholder is hosted.
+the platform's own placeholder is hosted. Category Details is the only
+one on every client: a category opened from the budget (a row, a link, a
+launch) is the shell's inspector on the phones too — a pane beside the
+budget when regular, a sheet when compact — and the phones' hand-written
+category page and sheet are gone.
 
 What each section shows is still the platform's own screen, hosted by
 name (`hosted("budget")`): Accounts' list is the generated Accounts
@@ -88,7 +92,9 @@ hand-written screens; the registers' detail beside Accounts is the iced
 window's register (a placeholder on the phones), and the inspectors and
 the Household and Appearance panes are placeholders. A command only a
 hosted screen can carry out (New Transaction, the month) comes back to
-the platform by name (`Command::Native`).
+the platform typed (`Command::Request(MoneyRequest::…)`). Adding a
+transaction is the toolbar's New Transaction on Budget and Transactions,
+on every client; the phones have no floating button over the rows.
 
 ## Keyboard
 

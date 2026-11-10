@@ -43,7 +43,6 @@ pub mod formulas;
 pub mod migrations;
 pub mod plaid;
 pub mod receipts;
-pub mod routes;
 pub mod schema;
 pub mod setup;
 pub mod stores;

@@ -1,4 +1,4 @@
-// The Insights tab: the desktop's Reflect, in Swift Charts. The month is
+// The Insights tab, in Swift Charts. The month is
 // paged as the budget's is (one month for both). Where the month's spending
 // went is a donut of its groups, the most first, which a finger on it
 // selects — the middle then says that group and its share — and a legend

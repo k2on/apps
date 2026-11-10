@@ -2,7 +2,7 @@ use super::view::{commands, money_settings, money_shell};
 use super::*;
 use ark_app::shell::{command_for, MenuPlace};
 use ark_app::view::{Part, View};
-use ark_app::{Host, ModuleCall, Runtime, Ticket};
+use ark_app::{Ask, Host, Modules, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer;
 
@@ -13,7 +13,7 @@ const NOW: i64 = 1_792_929_600_000;
 struct Demo {
     _peer: Peer,
     store: Store<MoneyView>,
-    native: Vec<String>,
+    requests: Vec<MoneyRequest>,
 }
 
 impl Demo {
@@ -31,7 +31,7 @@ impl Demo {
         Demo {
             _peer: peer,
             store,
-            native: vec![],
+            requests: vec![],
         }
     }
 }
@@ -47,9 +47,11 @@ impl Host<MoneyShell> for Demo {
         Ok(())
     }
     fn open(&mut self, _: Route) {}
-    fn ask(&mut self, _: Ticket, _: ModuleCall) {}
-    fn native(&mut self, name: &str) {
-        self.native.push(name.into());
+    fn ask(&mut self, _: Ticket, ask: Ask<ShellMsg>) {
+        ask.run(&Modules::new(), |_| {})
+    }
+    fn request(&mut self, r: MoneyRequest) {
+        self.requests.push(r);
     }
 }
 
@@ -94,7 +96,7 @@ fn the_sections_then_every_account() {
         (page.section.as_str(), page.search.as_str(), page.showing),
         ("transactions", "Costco", false)
     );
-    assert_eq!(demo.native, vec!["search Costco"], "the hosted list is told what to look for");
+    assert!(demo.requests.is_empty(), "the hosted list reads what to look for from the page");
     rt.dispatch(ShellMsg::Select { tag: card.tag.clone() }, &mut demo);
     let page = rt.screen(&demo);
     assert_eq!((page.section.as_str(), page.search.as_str(), page.showing), (card.tag.as_str(), "", true));
@@ -106,12 +108,7 @@ fn the_sections_then_every_account() {
     );
     rt.dispatch(ShellMsg::Back, &mut demo);
     assert_eq!(rt.screen(&demo).section, "accounts");
-    rt.dispatch(
-        ShellMsg::Run {
-            command: "go-insights".into(),
-        },
-        &mut demo,
-    );
+    rt.dispatch(view::go("insights"), &mut demo);
     assert_eq!(rt.screen(&demo).section, "insights");
     rt.dispatch(ShellMsg::Select { tag: "nowhere".into() }, &mut demo);
     rt.dispatch(ShellMsg::Select { tag: "accounts/00".into() }, &mut demo);
@@ -156,7 +153,12 @@ fn the_inspector_and_the_commands() {
     assert_eq!(new_account.title, "New Account");
     assert_eq!(command_for(&menus, "n", false, false).map(|c| c.title), Some("New Transaction"));
     rt.dispatch(new_account.run.clone(), &mut demo);
-    assert_eq!(demo.native, vec!["new-account"]);
+    assert_eq!(
+        demo.requests,
+        vec![MoneyRequest::Accounts {
+            msg: crate::accounts::AccountsMsg::Add
+        }]
+    );
     let go = command_for(&menus, "3", false, false).expect("⌘3");
     rt.dispatch(go.run.clone(), &mut demo);
     assert_eq!(rt.screen(&demo).section, "transactions");
@@ -207,10 +209,16 @@ fn launch_arguments_open_a_place() {
         "the receipt's transaction in the inspector: {:?}",
         page.transaction
     );
-    assert_eq!(demo.native, vec!["appearance dark"]);
+    assert_eq!(page.appearance, Some(Appearance::Dark), "the appearance is the shell's own");
+    assert!(demo.requests.is_empty(), "{:?}", demo.requests);
     rt.dispatch(args(&["-screen", "settings", "-settingsTab", "banks"]), &mut demo);
     assert_eq!(rt.screen(&demo).pane, "Connected Banks");
-    assert_eq!(demo.native.last().map(String::as_str), Some("settings Connected Banks"));
+    assert_eq!(
+        demo.requests.last(),
+        Some(&MoneyRequest::Settings {
+            pane: "Connected Banks".into()
+        })
+    );
 
     // Before the accounts have come: wanted, then shown once they have.
     let mut s = ShellState::default();

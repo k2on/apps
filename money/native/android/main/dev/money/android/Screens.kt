@@ -7,10 +7,6 @@ package dev.money.android
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -23,6 +19,7 @@ import uniffi.money_app.BudgetApp
 import uniffi.money_app.BudgetMsg
 import uniffi.money_app.BudgetPage
 import uniffi.money_app.AppShell
+import uniffi.money_app.MoneyRequest
 import uniffi.money_app.Session
 import uniffi.money_app.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +30,7 @@ import uniffi.money_app.AccountsMsg
 import uniffi.money_app.AccountsPage
 import uniffi.money_app.ShellMsg
 import uniffi.money_app.ShellPage
-import uniffi.money_core.Route
+import uniffi.money_app.Route
 
 /** The Accounts tab, running in Rust. */
 class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?, clipboard: Clipboard?) {
@@ -47,9 +44,12 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
         object : AppShell {
             override fun openRoute(route: Route) = opened(route)
 
-            override fun native(name: String) {
-                if (name == "refresh") refresh()
-                if (name.startsWith("reconcile ")) reconciling(Id(name.removePrefix("reconcile ")))
+            override fun request(request: MoneyRequest) {
+                when (request) {
+                    is MoneyRequest.Refresh -> refresh()
+                    is MoneyRequest.Reconcile -> reconciling(Id(request.account))
+                    else -> {}
+                }
             }
 
             override fun nowMs(): Long = System.currentTimeMillis()
@@ -72,6 +72,11 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
         _page.value = app.page()
     }
 
+    /** Nothing left to come (`Runtime::is_idle`), and the number that grows with every message. */
+    fun isIdle(): Boolean = app.isIdle()
+
+    fun version(): ULong = app.version()
+
     /** The page read again: the book moved. */
     fun reload() {
         _page.value = app.page()
@@ -87,8 +92,8 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
         object : AppShell {
             override fun openRoute(route: Route) = opened(route)
 
-            override fun native(name: String) {
-                if (name == "refresh") refresh()
+            override fun request(request: MoneyRequest) {
+                if (request is MoneyRequest.Refresh) refresh()
             }
 
             override fun nowMs(): Long = System.currentTimeMillis()
@@ -109,6 +114,11 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
         _page.value = app.page()
     }
 
+    /** Nothing left to come (`Runtime::is_idle`), and the number that grows with every message. */
+    fun isIdle(): Boolean = app.isIdle()
+
+    fun version(): ULong = app.version()
+
     /** The page read again: the book moved. */
     fun reload() {
         _page.value = app.page()
@@ -118,18 +128,18 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
 /**
  * money's shell, running in Rust (money/app/src/shell): its sections, toolbar, inspector, search
  * and commands, which the generated `MoneyShell`, `MoneySettings` and `moneyCommands` read and send
- * to. A command only a hosted screen can carry out comes back by name (`native`).
+ * to. A command only a hosted screen can carry out comes back typed (`request`).
  */
 class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> String) {
-    /** A command the hosted screens carry out: "new-transaction", "search <text>"… */
-    var native: (String) -> Unit = {}
+    /** What the hosted screens carry out: a new transaction, the month moved, a Budget message… */
+    var request: (MoneyRequest) -> Unit = {}
 
     private val shell =
         object : AppShell {
             override fun openRoute(route: Route) {}
 
-            override fun native(name: String) {
-                if (name == "refresh") refresh() else native.invoke(name)
+            override fun request(request: MoneyRequest) {
+                if (request is MoneyRequest.Refresh) refresh() else this@MoneyShellHolder.request.invoke(request)
             }
 
             override fun nowMs(): Long = System.currentTimeMillis()
@@ -146,6 +156,11 @@ class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> Strin
         _page.value = app.page()
     }
 
+    /** Nothing left to come (`Runtime::is_idle`), and the number that grows with every message. */
+    fun isIdle(): Boolean = app.isIdle()
+
+    fun version(): ULong = app.version()
+
     /** The page read again: the book moved. */
     fun reload() {
         _page.value = app.page()
@@ -153,22 +168,16 @@ class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> Strin
 }
 
 /**
- * What a screen written from Rust needs of this app: its page frame (the top bar, and the tab's
- * button that adds a transaction, as every money tab has), its marks and its glyphs.
+ * What a screen written from Rust needs of this app: its page frame (the top bar; adding a
+ * transaction is the shell toolbar's), its marks and its glyphs.
  */
 @Composable
 fun ScreenFrame(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalTabFrame provides { title, _, inner ->
-            val shell = LocalShell.current
-            Page(
-                title = title,
-                fab = {
-                    FloatingActionButton(onClick = { shell.onAdd(null) }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add a transaction")
-                    }
-                },
-            ) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } }
+            // No floating button over the rows: a new transaction is the
+            // shell's toolbar's (money/app/src/shell/view.rs), as on every client.
+            Page(title = title) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } }
         },
         LocalRowMark provides { kind -> KindTile(kind) },
         LocalGlyphs provides Glyphs::shared,

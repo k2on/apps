@@ -72,6 +72,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import dev.arkui.LocalHostedScreens
 import dev.arkui.shellShortcuts
+import uniffi.money_app.MoneyRequest
 import uniffi.money_app.ShellMsg
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -94,10 +95,10 @@ import dev.arkui.reducedMotion
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
 import uniffi.money_core.Auto
-import uniffi.money_core.Route
+import uniffi.money_app.Route
 import uniffi.money_core.TxnLine
 import uniffi.money_core.newDraft
-import uniffi.money_core.routeFromUrl
+import uniffi.money_app.routeFromUrl
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -172,8 +173,14 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
             when (r) {
                 is Route.Join -> true
-                is Route.Budget, is Route.Category -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
-                is Route.Reflect -> true.also { sections.send(ShellMsg.Select(tag = "insights")) }
+                is Route.Budget -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
+                // Category Details, the shell's inspector, over the budget.
+                is Route.Category -> true.also {
+                    sections.send(ShellMsg.Select(tag = "budget"))
+                    sections.send(ShellMsg.InspectCategory(id = r.id))
+                    sections.send(ShellMsg.Inspector(shown = true))
+                }
+                is Route.Insights -> true.also { sections.send(ShellMsg.Select(tag = "insights")) }
                 is Route.Inbox -> true.also { sections.send(ShellMsg.Select(tag = "transactions")) }
                 else -> false
             }
@@ -194,20 +201,16 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(hapticView)) }
     LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_app.BudgetMsg.Month(month = ledger.month)) }
     LaunchedEffect(ledger) { budget.reload() }
-    sections.native = { name ->
-        when (name) {
-            "new-transaction" -> form = newForm(book.state.value, null)
-            "new-account" -> shell.onAccountSheet()
-            "previous-month" -> book.stepMonth(-1)
-            "next-month" -> book.stepMonth(1)
-            "auto-assign" -> budget.send(uniffi.money_app.BudgetMsg.AutoAssign)
-            "new-category" -> budget.send(uniffi.money_app.BudgetMsg.NewCategory(group = ""))
-            "new-group" -> budget.send(uniffi.money_app.BudgetMsg.NewGroup)
-            "toggle-hidden" -> budget.send(uniffi.money_app.BudgetMsg.ToggleHidden)
-            "this-month" -> book.stepMonth(0)
-            "refresh" -> book.sync()
-            "review" -> {}
-            else -> if (name.startsWith("settings")) nav.navigate("settings") { launchSingleTop = true }
+    sections.request = { r ->
+        when (r) {
+            is MoneyRequest.NewTransaction -> form = newForm(book.state.value, null)
+            is MoneyRequest.Accounts -> if (r.msg is uniffi.money_app.AccountsMsg.Add) shell.onAccountSheet()
+            is MoneyRequest.StepMonth -> book.stepMonth(r.by)
+            is MoneyRequest.ThisMonth -> book.stepMonth(0)
+            is MoneyRequest.Budget -> budget.send(r.msg)
+            is MoneyRequest.Refresh -> book.sync()
+            is MoneyRequest.Settings -> nav.navigate("settings") { launchSingleTop = true }
+            else -> {}
         }
     }
     // Where the window opens (ark_app::shell::Launch): the launch intent's `ark.args`
@@ -448,11 +451,15 @@ fun rememberFlag(initial: Boolean = false): androidx.compose.runtime.MutableStat
 private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: NavHostController, sections: MoneyShellHolder, budget: BudgetHolder) {
     when (name) {
         "budget" -> {
-            // A category's month: its sheet, money's own until Category Details moves into Rust.
-            var open by rememberSaveable { mutableStateOf<String?>(null) }
-            budget.opened = { r -> if (r is Route.Category) open = r.id }
+            // A category's month: Category Details, the shell's inspector (written from Rust) —
+            // a supporting pane when expanded, a bottom sheet otherwise.
+            budget.opened = { r ->
+                if (r is Route.Category) {
+                    sections.send(ShellMsg.InspectCategory(id = r.id))
+                    sections.send(ShellMsg.Inspector(shown = true))
+                }
+            }
             ScreenFrame { BudgetScreen(budget) }
-            open?.let { hex -> CategorySheet(ledger, Id(hex), onDismiss = { open = null }) }
         }
         "accounts" -> {
             // Written from Rust (generated/AccountsScreen.kt), over its runtime.

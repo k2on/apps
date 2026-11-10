@@ -14,8 +14,6 @@ ark = { path = "../../rust/ark" }
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
 # The views an app holds (`views`), as `ark_peer::store` keys them.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-# Its routes, spelled as paths (`src/routes.rs`).
-ark-router = { path = "../../ui/rust/router" }
 # What the rows say, in words: amounts and days as every client writes them.
 ark-format = { path = "../../rust/ark-format" }
 serde = { workspace = true }

@@ -2,6 +2,11 @@
 # The Device; README.md says why each is asked). ui/prebuild.py reads it.
 crate = "ark-media-player"
 
+# Its operations, each with the type of what comes of it (ark_module::Op):
+# ui/prebuild.py checks each is an `impl Op` in the crate with this Output.
+[ops]
+MediaOp = "()"
+
 [ios.info]
 UIBackgroundModes = ["audio"]
 

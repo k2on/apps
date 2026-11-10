@@ -100,7 +100,17 @@ public fun sizeClassOf(width: Dp): SizeClass = when {
     else -> SizeClass.Expanded
 }
 
-internal val LocalSizeClass = compositionLocalOf { SizeClass.Compact }
+/** The size class the shell measured its window at; none outside a shell. */
+internal val LocalSizeClass = compositionLocalOf<SizeClass?> { null }
+
+/**
+ * The size class a part adapts to: the shell's, or, drawn outside one (a
+ * screen on its own, a screenshot's), the window's own width's — so a
+ * tablet's Budget has its columns wherever it is drawn.
+ */
+@Composable
+public fun currentSizeClass(): SizeClass =
+    LocalSizeClass.current ?: sizeClassOf(androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp)
 
 // * The sections
 
@@ -221,7 +231,7 @@ private val LocalShellFooter = compositionLocalOf<(@Composable () -> Unit)?> { n
  */
 @Composable
 public fun SplitColumns(showing: Boolean, onBack: () -> Unit, detail: @Composable () -> Unit, content: @Composable () -> Unit) {
-    if (LocalSizeClass.current == SizeClass.Expanded) {
+    if (currentSizeClass() == SizeClass.Expanded) {
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.width(LayoutTokens.CONTENT_WIDTH.dp).fillMaxHeight()) { content() }
             VerticalDivider()
@@ -360,7 +370,7 @@ public fun WithSearch(prompt: String, text: String, onChange: (String) -> Unit, 
 public fun WithInspector(title: String, isShown: Boolean, onToggle: (Boolean) -> Unit, inspector: @Composable () -> Unit, content: @Composable () -> Unit) {
     // Its toggle goes in the section's top app bar (`WithToolbar`'s actions).
     CompositionLocalProvider(LocalInspectorToggle provides (title to { onToggle(!isShown) })) {
-        if (LocalSizeClass.current == SizeClass.Expanded) {
+        if (currentSizeClass() == SizeClass.Expanded) {
             Row(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) { content() }
                 if (isShown) {

@@ -2,6 +2,9 @@
 //! household's month — assignments, spending, a transfer, an import, a
 //! category gone — a maintained view's rows are a fresh run's, and the
 //! patches it handed out splice the old rows into them.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

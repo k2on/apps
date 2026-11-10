@@ -20,10 +20,9 @@ pub enum Route {
     #[home]
     #[route("/budget")]
     Budget,
-    /// Where the month's money went: the desktop's Reflect, the phones'
-    /// Insights.
-    #[route("/reflect")]
-    Reflect,
+    /// Where the month's money went: Insights, on every client.
+    #[route("/insights")]
+    Insights,
     /// Every account's register: All Accounts.
     #[route("/accounts")]
     Accounts,
@@ -61,7 +60,7 @@ impl Route {
     pub fn title(&self) -> String {
         match self {
             Route::Budget => "Budget".into(),
-            Route::Reflect => "Reflect".into(),
+            Route::Insights => "Insights".into(),
             Route::Accounts => "All Accounts".into(),
             Route::Inbox => "Needs a Look".into(),
             Route::Filtered => "Filtered".into(),
@@ -93,7 +92,7 @@ impl Route {
     /// which every shell reaches without another page — rather than a page
     /// pushed onto a back stack.
     pub fn is_root(&self) -> bool {
-        matches!(self, Route::Budget | Route::Reflect)
+        matches!(self, Route::Budget | Route::Insights)
     }
 
     /// Where the route lands when what it names is gone: an account's or a
@@ -197,7 +196,7 @@ mod tests {
     fn every_route_survives_its_url() {
         assert_round_trips(&[
             Route::Budget,
-            Route::Reflect,
+            Route::Insights,
             Route::Accounts,
             Route::Inbox,
             account(CHECKING, "Checking"),

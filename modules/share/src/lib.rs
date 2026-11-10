@@ -1,9 +1,10 @@
 //! Share: text (and a link) handed to the system's share sheet. An update
-//! asks with [`share`]; the module answers `Done` once the sheet is shown.
+//! asks with [`share`], a [`ShareOp`] whose output is `()`, given once the
+//! sheet is shown.
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
+use ark_module::{Modules, Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -16,24 +17,25 @@ pub trait Share: Send + Sync {
 
 /// What an update asks of the share sheet.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ShareCall {
+pub enum ShareOp {
     Share { text: String, url: Option<String> },
 }
 
-impl Call for ShareCall {
+impl Op for ShareOp {
     type Module = dyn Share;
+    type Output = ();
     const MODULE: &'static str = "share";
-    fn run(&self, m: &dyn Share, reply: Arc<ModuleReply>) {
+    fn run(&self, m: &dyn Share, reply: Reply<()>) {
         match self {
-            ShareCall::Share { text, url } => m.share(text.clone(), url.clone()),
+            ShareOp::Share { text, url } => m.share(text.clone(), url.clone()),
         }
-        reply.answer(ModuleAnswer::Done)
+        reply.done(())
     }
 }
 
 /// `text`, and `url` when there is one, handed to the share sheet.
-pub fn share(text: impl Into<String>, url: Option<String>) -> ModuleCall {
-    ShareCall::Share { text: text.into(), url }.into()
+pub fn share(text: impl Into<String>, url: Option<String>) -> ShareOp {
+    ShareOp::Share { text: text.into(), url }
 }
 
 /// What was shared: the text, and the link when there was one.
@@ -76,7 +78,7 @@ mod tests {
         let fake = Fake::new();
         let mut m = Modules::new();
         fake.register(&mut m);
-        m.call(share("Checking", Some("money://account/1".into())), |a| assert_eq!(a, ModuleAnswer::Done));
+        m.run(&share("Checking", Some("money://account/1".into())), |a| assert_eq!(a, Ok(())));
         assert_eq!(fake.shared(), vec![("Checking".to_string(), Some("money://account/1".to_string()))]);
     }
 }

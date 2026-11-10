@@ -33,15 +33,15 @@ pub const AMOUNT_COL: f32 = arkui::layout_tokens::AMOUNT_COLUMN_WIDTH;
 pub const CLEARED_COL: f32 = 76.0;
 pub const PAD: f32 = 18.0;
 
-/// How far down Reflect or Settings is scrolled once its title, the
+/// How far down Insights or Settings is scrolled once its title, the
 /// page's first line, has gone off the top: the padding over it and its
-/// line (Reflect's is its arrows', 32 tall). Sooner, and the small title
+/// line (Insights's is its arrows', 32 tall). Sooner, and the small title
 /// came while the large one was still there to read under the band.
 pub const TITLED: f32 = PAD + 32.0;
 
 impl App {
     /// What the small header says on this page once its title has scrolled
-    /// away (`arkui::compact`): Reflect's and Settings' titles. The budget
+    /// away (`arkui::compact`): Insights's and Settings' titles. The budget
     /// and the registers keep their headings over their lists, so they
     /// have none.
     pub(crate) fn compact_title(&self) -> Option<String> {
@@ -1010,7 +1010,7 @@ impl App {
 
     // * Settings
 
-    // * Reflect
+    // * Insights
 
     pub(crate) fn view_reflect(&self) -> Element<'_, Message> {
         use arkui::figures::{chart_card, column_chart, grid, labelled_bars, line_chart, stat_tile, Bar, Series};

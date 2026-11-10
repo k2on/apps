@@ -31,7 +31,7 @@ final class AccountsScreen: ObservableObject {
         app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
-        shell.reconciled = { [weak self] id in self?.reconcile(id) }
+        shell.requested = { [weak self] r in if case let .reconcile(account) = r { self?.reconcile(Id(account)) } }
     }
 
     /// `msg` taken by the app; the page read again.
@@ -39,6 +39,11 @@ final class AccountsScreen: ObservableObject {
         app.send(msg: msg)
         page = app.page()
     }
+
+    /// Nothing left to come (`Runtime::is_idle`), and the number that grows
+    /// with every message: the screenshot drivers' ready signal.
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
 
     /// The page read again: a view it holds moved.
     func reload() {
@@ -73,6 +78,11 @@ final class BudgetScreen: ObservableObject {
         page = app.page()
     }
 
+    /// Nothing left to come (`Runtime::is_idle`), and the number that grows
+    /// with every message: the screenshot drivers' ready signal.
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
+
     /// The page read again: a view it holds moved.
     func reload() {
         page = app.page()
@@ -87,12 +97,13 @@ final class BudgetScreen: ObservableObject {
 /// then it shows Budget and keeps what it is sent (the launch's place, the
 /// month), which it takes as soon as it runs: a remembered session opens
 /// after the shell has appeared and sent them. A command only a hosted
-/// screen can carry out comes back by name (`native`).
+/// screen can carry out comes back typed (`request`).
 @MainActor
 final class MoneyShellScreen: ObservableObject {
-    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
-    /// A command the hosted screens carry out: "new-transaction", "refresh", "search <text>"…
-    var native: (String) -> Void = { _ in }
+    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", appearance: nil, category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
+    /// What the hosted screens carry out (`MoneyRequest`): a new
+    /// transaction, the month moved, a message for the Budget's runtime…
+    var request: (MoneyRequest) -> Void = { _ in }
 
     private var app: ShellApp? = nil
     private var shell: ScreenShell? = nil
@@ -102,7 +113,7 @@ final class MoneyShellScreen: ObservableObject {
     /// Running over `session`.
     func connect(session: Session, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
-        shell.other = { [weak self] name in self?.native(name) }
+        shell.requested = { [weak self] r in self?.request(r) }
         self.shell = shell
         let app = ShellApp(session: session, shell: shell)
         self.app = app
@@ -125,6 +136,10 @@ final class MoneyShellScreen: ObservableObject {
         page = app.page()
     }
 
+    /// Nothing left to come, and the number that grows with every message.
+    var isIdle: Bool { app?.isIdle() ?? false }
+    var version: UInt64 { app?.version() ?? 0 }
+
     /// The page read again: a view it holds moved.
     func reload() {
         if let app { page = app.page() }
@@ -135,9 +150,8 @@ final class MoneyShellScreen: ObservableObject {
 /// (the main one: every message comes from a view).
 final class ScreenShell: AppShell, @unchecked Sendable {
     var opened: @MainActor (Route) -> Void = { _ in }
-    var reconciled: @MainActor (Id) -> Void = { _ in }
-    /// Any other native request: the shell's commands, by name.
-    var other: @MainActor (String) -> Void = { _ in }
+    /// Any request but the bank sync: the shell's commands, a reconcile.
+    var requested: @MainActor (MoneyRequest) -> Void = { _ in }
     private let refresh: () -> Void
     private let day: () -> String
 
@@ -151,14 +165,11 @@ final class ScreenShell: AppShell, @unchecked Sendable {
         Task { @MainActor in self.opened(route) }
     }
 
-    func native(name: String) {
-        if name == "refresh" {
+    func request(request: MoneyRequest) {
+        if case .refresh = request {
             refresh()
-        } else if name.hasPrefix("reconcile ") {
-            let id = Id(String(name.dropFirst("reconcile ".count)))
-            Task { @MainActor in self.reconciled(id) }
         } else {
-            Task { @MainActor in self.other(name) }
+            Task { @MainActor in self.requested(request) }
         }
     }
 

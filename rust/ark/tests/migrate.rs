@@ -1,5 +1,8 @@
 //! §1.2's other half: rows of a schema the domain's does not grow from are
 //! read through its migrations ([`ark::migrate`]).
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

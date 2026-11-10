@@ -11,7 +11,7 @@ that might change nothing.
 ## API
 
 ```rust
-ark_haptics::perform(Haptic::Success) // -> ModuleCall, answered Done
+ark_haptics::perform(Haptic::Success) // -> HapticsOp, output ()
 trait Haptics { fn perform(&self, haptic: Haptic); }
 ark_haptics::fake::Fake // .performed()
 ```

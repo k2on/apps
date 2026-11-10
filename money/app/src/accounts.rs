@@ -9,13 +9,13 @@
 //! ([`AccountsPage`]); [`view::accounts`] says how it is laid out in
 //! ArkUI's parts, once, for every toolkit.
 
+use crate::routes::Route;
 use ark::row::Id;
 use ark_app::{App, Command, Data};
 use ark_format::NumberStyle;
 use ark_haptics::{perform, Haptic};
 use money_core::accounts::{net_worth, shelves, AccountKind, Shelving, STARTING_BALANCE};
 use money_core::dates::day_of_ms;
-use money_core::routes::Route;
 use money_core::*;
 
 pub mod view;
@@ -157,7 +157,7 @@ pub enum AccountsMsg {
         id: String,
     },
     /// An account agreed with its bank: the shell's own sheet for it
-    /// (`Command::Native("reconcile <id>")`) until reconciling moves here.
+    /// (`MoneyRequest::Reconcile`) until reconciling moves here.
     Reconcile {
         id: String,
     },
@@ -352,6 +352,7 @@ impl App for Accounts {
     type Msg = AccountsMsg;
     type Change = MoneyChange;
     type Route = Route;
+    type Request = crate::MoneyRequest;
     type Screen = AccountsPage;
 
     fn holds(_: &State) -> Vec<MoneyView> {
@@ -369,7 +370,7 @@ impl App for Accounts {
                 None => vec![Command::Open(Route::Accounts)],
             },
             M::OpenBanks => vec![Command::Open(Route::Banks)],
-            M::Refresh => vec![Command::Native("refresh".into())],
+            M::Refresh => vec![Command::Request(crate::MoneyRequest::Refresh)],
             M::Add => {
                 s.adding = Some(Draft::default());
                 vec![]
@@ -454,7 +455,7 @@ impl App for Accounts {
                 None => vec![],
             },
             M::Reconcile { id } => match find(accounts, &id) {
-                Some(a) if !a.closed => vec![Command::Native(format!("reconcile {id}"))],
+                Some(a) if !a.closed => vec![Command::Request(crate::MoneyRequest::Reconcile { account: id })],
                 _ => vec![],
             },
             M::CopyBalance { id } => match find(accounts, &id) {

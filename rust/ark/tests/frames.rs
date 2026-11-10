@@ -1,4 +1,7 @@
 //! §1.11 held: every frame is its JSON and reads back as the frame.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

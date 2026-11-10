@@ -31,6 +31,7 @@
 
 pub mod browser;
 pub mod costco;
+pub mod feed;
 pub mod importer;
 pub mod paper;
 pub mod photos;

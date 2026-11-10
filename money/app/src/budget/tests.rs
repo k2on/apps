@@ -1,5 +1,5 @@
 use super::*;
-use ark_app::{Host, Inbox, ModuleCall, Modules, Runtime, Ticket};
+use ark_app::{Ask, Host, Inbox, Modules, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer;
 
@@ -13,9 +13,9 @@ struct Demo {
     store: Store<MoneyView>,
     haptics: ark_haptics::fake::Fake,
     modules: Modules,
-    inbox: Inbox,
+    inbox: Inbox<BudgetMsg>,
     opened: Vec<Route>,
-    native: Vec<String>,
+    requests: Vec<crate::MoneyRequest>,
 }
 
 impl Demo {
@@ -40,7 +40,7 @@ impl Demo {
             modules,
             inbox: Inbox::default(),
             opened: vec![],
-            native: vec![],
+            requests: vec![],
         };
         let mut rt = Runtime::<Budget>::new();
         rt.dispatch(BudgetMsg::Month { month: MONTH.into() }, &mut d);
@@ -71,11 +71,11 @@ impl Host<Budget> for Demo {
     fn open(&mut self, route: Route) {
         self.opened.push(route)
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.modules, ticket, call)
+    fn ask(&mut self, ticket: Ticket, ask: Ask<BudgetMsg>) {
+        self.inbox.ask(&self.modules, ticket, ask)
     }
-    fn native(&mut self, name: &str) {
-        self.native.push(name.into())
+    fn request(&mut self, r: crate::MoneyRequest) {
+        self.requests.push(r)
     }
 }
 
@@ -338,5 +338,5 @@ fn a_row_opens_and_a_month_steps() {
     assert_eq!(d.haptics.performed(), vec![Haptic::Selection]);
     assert_eq!(page(&rt, &d).title, "September 2026");
     run(&mut rt, &mut d, [BudgetMsg::Refresh]);
-    assert_eq!(d.native, vec!["refresh".to_string()]);
+    assert_eq!(d.requests, vec![crate::MoneyRequest::Refresh]);
 }

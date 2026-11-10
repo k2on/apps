@@ -1,14 +1,15 @@
 //! The secure store: secrets kept by the system (the keychain, the Android
 //! keystore), such as a login's token. An update asks with [`get`],
-//! [`put`] or [`remove`]; a read answers `Text` (none when nothing is kept
-//! under the key), the others `Done`.
+//! [`put`] or [`remove`], a [`SecureStoreOp`] whose output is what is kept
+//! under the key once it is done: a read's secret (none when nothing is),
+//! a put's value, a removal's none.
 //!
 //! No native implementation yet (README.md).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
+use ark_module::{Modules, Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -23,43 +24,44 @@ pub trait SecureStore: Send + Sync {
 
 /// What an update asks of the secure store.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SecureStoreCall {
+pub enum SecureStoreOp {
     Get(String),
     Put(String, String),
     Remove(String),
 }
 
-impl Call for SecureStoreCall {
+impl Op for SecureStoreOp {
     type Module = dyn SecureStore;
+    type Output = Option<String>;
     const MODULE: &'static str = "secure-store";
-    fn run(&self, m: &dyn SecureStore, reply: Arc<ModuleReply>) {
-        reply.answer(match self {
-            SecureStoreCall::Get(k) => ModuleAnswer::Text { value: m.get(k.clone()) },
-            SecureStoreCall::Put(k, v) => {
+    fn run(&self, m: &dyn SecureStore, reply: Reply<Option<String>>) {
+        reply.done(match self {
+            SecureStoreOp::Get(k) => m.get(k.clone()),
+            SecureStoreOp::Put(k, v) => {
                 m.put(k.clone(), v.clone());
-                ModuleAnswer::Done
+                Some(v.clone())
             }
-            SecureStoreCall::Remove(k) => {
+            SecureStoreOp::Remove(k) => {
                 m.remove(k.clone());
-                ModuleAnswer::Done
+                None
             }
         })
     }
 }
 
 /// The secret kept under `key`.
-pub fn get(key: impl Into<String>) -> ModuleCall {
-    SecureStoreCall::Get(key.into()).into()
+pub fn get(key: impl Into<String>) -> SecureStoreOp {
+    SecureStoreOp::Get(key.into())
 }
 
 /// `value` kept under `key`.
-pub fn put(key: impl Into<String>, value: impl Into<String>) -> ModuleCall {
-    SecureStoreCall::Put(key.into(), value.into()).into()
+pub fn put(key: impl Into<String>, value: impl Into<String>) -> SecureStoreOp {
+    SecureStoreOp::Put(key.into(), value.into())
 }
 
 /// What is kept under `key`, gone.
-pub fn remove(key: impl Into<String>) -> ModuleCall {
-    SecureStoreCall::Remove(key.into()).into()
+pub fn remove(key: impl Into<String>) -> SecureStoreOp {
+    SecureStoreOp::Remove(key.into())
 }
 
 /// The secure store, faked for tests: a map.
@@ -104,14 +106,14 @@ mod tests {
         let read = |m: &Modules| {
             let got = Arc::new(Mutex::new(None));
             let g = got.clone();
-            m.call(get("token"), move |a| *g.lock().unwrap() = Some(a));
+            m.run(&get("token"), move |a| *g.lock().unwrap() = Some(a));
             let a = got.lock().unwrap().clone();
             a
         };
-        assert_eq!(read(&m), Some(ModuleAnswer::Text { value: None }));
-        m.call(put("token", "t"), |_| {});
-        assert_eq!(read(&m), Some(ModuleAnswer::Text { value: Some("t".into()) }));
-        m.call(remove("token"), |_| {});
-        assert_eq!(read(&m), Some(ModuleAnswer::Text { value: None }));
+        assert_eq!(read(&m), Some(Ok(None)));
+        m.run(&put("token", "t"), |a| assert_eq!(a, Ok(Some("t".into()))));
+        assert_eq!(read(&m), Some(Ok(Some("t".into()))));
+        m.run(&remove("token"), |a| assert_eq!(a, Ok(None)));
+        assert_eq!(read(&m), Some(Ok(None)));
     }
 }

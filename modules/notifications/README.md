@@ -10,7 +10,7 @@ one id replaces the first; tapped, it opens its route.
 ## API
 
 ```rust
-ark_notifications::schedule(Notice { id, title, body, at_ms, opens }) // -> ModuleCall, answered Done
+ark_notifications::schedule(Notice { id, title, body, at_ms, opens }) // -> NotificationsOp, output ()
 ark_notifications::cancel(id)
 trait Notifications { fn schedule(&self, notice: Notice); fn cancel(&self, id: String); }
 ark_notifications::Fake // .notices()

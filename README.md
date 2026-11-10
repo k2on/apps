@@ -53,8 +53,8 @@ a crate of plain Rust every peer links — and harken, the first app on it.
   nothing native of an Ark app is committed, `nix run .#<app>-prebuild`
   writes it for Xcode and Android Studio), and the standing rule for
   motion (`ui/docs/motion.md`).
-- `modules/` — what an app asks of the device, one package each, Expo's
-  way (`modules/haptics`, `clipboard`, `share`, `camera`, `media-player`,
+- `modules/` — what an app asks of the device, one package each
+  (`modules/haptics`, `clipboard`, `share`, `camera`, `media-player`,
   `notifications`, `secure-store`): a crate with the trait and its fake,
   its Swift and Kotlin implementations, and a README of its permissions.
 - `showcase/` — the shared components on their own, an app per phone, which

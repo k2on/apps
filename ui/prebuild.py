@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # An Ark app's native projects, generated (ui/docs/app.md, "Generated, Not
-# Committed"): Expo's Continuous Native Generation, for Ark apps. Nothing
-# native of an app is committed; this writes it from
+# Committed"): nothing native of an app is committed; this writes it from
 #
 #   <app>/app.toml            its name, id, accent, platforms, modules, and
 #                             what it asks of each platform itself
@@ -835,6 +834,24 @@ def check(root):
     generated projects go."""
     problems = []
     every = {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(root, "modules", "*", "module.toml"))}
+    # Each module's operations are what its module.toml's [ops] says: an
+    # `impl Op for <name>` in its crate, its Output the type listed.
+    for n in sorted(every):
+        m = module(root, n)
+        ops = m.get("ops", {})
+        if not ops:
+            problems.append(f"modules/{n}/module.toml lists no [ops]")
+        src = os.path.join(root, "modules", n, "src", "lib.rs")
+        text = open(src).read() if os.path.exists(src) else ""
+        for op, output in ops.items():
+            found = re.search(r"impl Op for " + re.escape(op) + r" \{\s*type Module = [^;]+;\s*type Output = ([^;]+);", text)
+            if not found:
+                problems.append(f"modules/{n}/module.toml lists the op {op}, which modules/{n}/src/lib.rs does not implement")
+            elif found.group(1).strip() != output:
+                problems.append(f"modules/{n}: {op}'s Output is {found.group(1).strip()}, module.toml says {output}")
+        for op in re.findall(r"impl Op for (\w+)", text):
+            if op not in ops:
+                problems.append(f"modules/{n}/src/lib.rs implements the op {op}, which its module.toml's [ops] does not list")
     for app in apps(root):
         a = app_of(root, app)
         for k in ("name", "id", "accent", "platforms"):

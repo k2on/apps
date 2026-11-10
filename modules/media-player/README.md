@@ -15,7 +15,7 @@ message.
 ## API
 
 ```rust
-ark_media_player::{load, play, pause, seek, set_rate, set_volume, set_now_playing} // -> ModuleCall
+ark_media_player::{load, play, pause, seek, set_rate, set_volume, set_now_playing} // -> MediaOp, output ()
 trait MediaPlayer { fn load(..); fn play(&self); …; fn set_listener(&self, Option<Arc<dyn MediaListener>>); }
 trait MediaListener { fn heard(&self, event: MediaEvent); }
 ark_media_player::Fake // .asked(), .hear(event)

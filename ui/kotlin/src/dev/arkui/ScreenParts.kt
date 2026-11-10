@@ -154,7 +154,7 @@ public fun CardSection(
             offered.isEmpty() -> Modifier.pressable(onClick = { onToggle?.invoke() }, press = Press.Highlight)
             else -> Modifier.pressable(onClick = { onToggle?.invoke() }, onLongClick = { held = true }, press = Press.Highlight)
         }
-        val columns = LocalSizeClass.current != SizeClass.Compact && first != null && second != null
+        val columns = currentSizeClass() != SizeClass.Compact && first != null && second != null
         Box(press) {
             SectionHeader(if (onToggle != null) (if (open) "▾ " else "▸ ") + title else title) {
                 if (columns) {
@@ -243,7 +243,7 @@ public fun MeterRow(
     val press =
         if (offered.isEmpty()) Modifier.pressable(onClick = { onTap?.invoke() }, press = Press.Highlight)
         else Modifier.pressable(onClick = { onTap?.invoke() }, onLongClick = { open = true }, press = Press.Highlight)
-    val columns = LocalSizeClass.current != SizeClass.Compact && first != null && second != null
+    val columns = currentSizeClass() != SizeClass.Compact && first != null && second != null
     Row(
         Modifier.fillMaxWidth()
             .then(press)

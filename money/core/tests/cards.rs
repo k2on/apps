@@ -4,6 +4,9 @@
 //! for, a payment is spending from the payment category, a card's own debt
 //! is the payment category's to cover, and a payment the banks tell of
 //! from both ends is one transfer.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

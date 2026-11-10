@@ -1,4 +1,4 @@
-// Where the month's money went (the desktop's Reflect), laid out as the
+// Where the month's money went (Insights, on every client), laid out as the
 // iPhone app lays it: the month, paged under the title as the budget's is
 // (the same month); Spending, a ring of the month's spending by group, the
 // most first, with the total in its middle, and a legend under it of each

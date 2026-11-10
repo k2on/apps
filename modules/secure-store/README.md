@@ -10,7 +10,7 @@ when nothing is kept under the key); a write or a removal `Done`.
 ## API
 
 ```rust
-ark_secure_store::{get, put, remove} // -> ModuleCall
+ark_secure_store::{get, put, remove} // -> SecureStoreOp, output Option<String>: what is kept under the key after
 trait SecureStore { fn get(&self, key) -> Option<String>; fn put(&self, key, value); fn remove(&self, key); }
 ark_secure_store::Fake // a map
 ```

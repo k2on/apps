@@ -745,14 +745,14 @@ fn a_prefix_shows_what_can_follow_it() {
 fn back_and_forward() {
     let mut app = app();
     let ctrl = iced::keyboard::Modifiers::CTRL;
-    let _ = app.update(Message::Go(Page::Reflect));
+    let _ = app.update(Message::Go(Page::Insights));
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
-    assert_eq!(app.page, Page::Reflect, "back");
+    assert_eq!(app.page, Page::Insights, "back");
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
     assert_eq!(app.page, Page::Budget, "and back again");
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("i".into()), ctrl));
-    assert_eq!(app.page, Page::Reflect, "forward");
+    assert_eq!(app.page, Page::Insights, "forward");
 }
 
 /// In the register `v` and `j` select two transactions, `c` drops the
@@ -1098,7 +1098,7 @@ fn back_lands_where_the_register_was_scrolled() {
     let _ = app.update(Message::Key(iced::keyboard::Key::Character("o".into()), ctrl));
     assert_eq!(app.page, Page::Ledger(Ledger::All));
     assert_eq!(app.register_scroll, 300.0, "where it was left");
-    let _ = app.update(Message::Go(Page::Reflect));
+    let _ = app.update(Message::Go(Page::Insights));
     let _ = app.update(Message::Go(Page::Ledger(Ledger::All)));
     assert_eq!(app.register_scroll, 0.0, "a visit is the top");
 }
@@ -1850,4 +1850,18 @@ fn the_window_is_the_shell() {
     assert!(!app.has_sidebar(), "an iPad upright: the sections are a tab bar at the top");
     app.window = iced::Size::new(390.0, 800.0);
     assert_eq!(app.panes(), vec![Pane::Content]);
+}
+
+/// The ready signal: the demo window is idle once open, and a message to
+/// one of its runtimes grows the version and leaves it idle (nothing on
+/// the desktop answers later). Falsified by a ticket nobody answers, as a
+/// host that dropped an operation would leave.
+#[test]
+fn the_window_says_when_it_is_idle() {
+    let mut app = app();
+    assert!(app.is_idle());
+    let v = app.version();
+    let _ = app.update(Message::Budget(money_app::budget::BudgetMsg::ToggleHidden));
+    assert!(app.version() > v);
+    assert!(app.is_idle());
 }

@@ -3,6 +3,9 @@
 //! phones held in their own tests before (Android's CardsTests, BanksTests,
 //! BookTests and RulesTests; the iPhone's BudgetTests, CardTests,
 //! FormTests, BankTests, RuleTests and ReceiptTests), held here once.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use ark::row::Id;
 use ark_format::NumberStyle;

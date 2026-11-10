@@ -2,9 +2,8 @@
 
 An Ark app's state, its rules and its screens' layout are written once, in
 Rust; every platform draws them natively — SwiftUI on the iPhone, Compose
-on Android, iced on the desktop, the real DOM in the browser. Think
-multiplatform SwiftUI or Expo, with Rust as the source and nothing
-self-drawn or in a web view on a phone.
+on Android, iced on the desktop, the real DOM in the browser: one source
+in Rust, and nothing self-drawn or in a web view on a phone.
 
 This is a prototype on `claude/sleepy-faraday-lcbow5-app`. One vertical
 slice is moved — money's **Accounts** tab — and everything else is as it
@@ -13,7 +12,7 @@ multiplatform samples and the HIG) is ui/docs/design.md; money's design
 is ui/docs/apps/money.md. The last section says what is left and in what
 order.
 
-## The Layers
+## The Pieces
 
 iced is the desktop's alone. The browser is drawn by Leptos over the real
 DOM (`ui/rust/web`, crate `arkui-web`; money's client is `money/web`);
@@ -35,7 +34,7 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
 
 ### State and Logic: `ark-app`
 
-An app is Elm-shaped (`ark_app::App`):
+An app is a state, its messages and one update over them (`ark_app::App`):
 
 - `State` — what the screen is in the middle of (a form being filled, a
   row being renamed). The domain's rows are **not** copied into it: they
@@ -45,12 +44,13 @@ An app is Elm-shaped (`ark_app::App`):
   routes carry them.
 - `update(&mut State, Msg, &Data) -> Vec<Command>` — decides everything.
   A `Command` is data: `Send` a typed change (`MoneyChange`), `Open` a
-  `Route`, `Ask` a module, `Then` another message, `Native` (an escape
-  hatch, below). What became of a change or a module call comes back as a
-  message when the update asked for one (`then: fn(..) -> Msg`, a plain
-  function pointer, never a closure).
+  `Route`, `Back`, `Ask` a module's typed operation, `Request` something
+  only the host can do (the app's own typed `App::Request`), `Then`
+  another message. What became of a change or an operation comes back as
+  a message when the update asked for one (`then: fn(..) -> Msg`, a plain
+  function pointer, never a closure). Effects and Ports, below, says how.
 - `screen(&State, &Data) -> Screen` — the record the screen draws, every
-  figure and word worked out (Crux's view model): `AccountsPage`.
+  figure and word worked out (the page record): `AccountsPage`.
 
 `Runtime<A>` owns the loop: a message in, the state updated, the commands
 carried out by the shell's `Host`, their messages run in turn, and a
@@ -168,40 +168,36 @@ hand-written native code until the shell's own become ArkUI's.
 
 ### The Device: `modules/`
 
-What an app asks of the device is a module, Expo's way: one package each
-under `modules/`, and a small core under `ui/rust/module`.
+What an app asks of the device is a module: one package each under
+`modules/`, and a small core under `ui/rust/module`.
 
 ```
-ui/rust/module/       crate ark-module: ModuleCall, ModuleAnswer, ModuleReply, Modules — the plumbing, no module
+ui/rust/module/       crate ark-module: Op, ModuleError, Reply, Modules — the plumbing, no module
 modules/<name>/
-├── Cargo.toml        crate ark-<name>: the trait, its calls, its fake; desktop/web impls behind features
+├── Cargo.toml        crate ark-<name>: the trait, its operations, its fake; desktop/web impls behind features
 ├── src/
 ├── swift/            the iPhone's and the Mac's implementation (compiled into the app, not a package)
 ├── kotlin/           Android's implementation (compiled into the app)
-├── module.toml       its crate, and what it asks of each platform (Info.plist keys, permissions)
+├── module.toml       its crate, its [ops] and their outputs, and what it asks of each platform
 └── README.md         its API, what it does on each platform, the permissions it needs
 ```
 
-An update never calls a module. It returns `Command::ask(call)`, where
-`call` is a `ModuleCall` the module's crate makes (`ark_haptics::perform(
-Haptic::Success)`, `ark_clipboard::copy(text)`, `ark_camera::scan_qr()`):
-the module's own enum (`HapticsCall`, …) implementing `ark_module::Call`,
-which names the trait that carries it out, erased into one type the
-runtime holds, compares and prints. The host hands it to the `Modules` it
-registered (`Inbox::ask`), the registry finds the module by its trait
-(`register::<dyn Haptics>(…)`), and the `ModuleAnswer` — `Done`, `Text`,
-`Bytes`, `Unavailable` (none registered: haptics on the desktop),
-`Failed` — comes back into the update as a message (`then: fn(
-ModuleAnswer) -> Msg`), at once, or later through a `ModuleReply` the platform
-answers once (the camera). Events a module sends on its own (a player's
-position) go through a listener trait of the module's (`MediaListener`),
-which the shell turns into messages. A test registers each module's fake
+An update never calls a module. It returns `Command::ask(op)` or
+`Command::ask_then(op, Msg::Scanned)`, where `op` is one of the module's
+operations (`ark_haptics::perform(Haptic::Success)`, a `HapticsOp`;
+`ark_clipboard::copy(text)`; `ark_camera::scan_qr()`, a `ScanQr`), each
+implementing `ark_module::Op` with the trait that carries it out and the
+type of what comes of it (`Output`: `()` for a haptic, `Option<String>`
+for a scan, `Option<Vec<u8>>` for a photo). Effects and Ports, below,
+says how it is carried. A test registers each module's fake
 (`ark_haptics::fake::Fake`, `ark_clipboard::fake::Fake`, `ark_camera::Fake`
 …) and looks at what was asked.
 
 Under each crate's `ffi` feature its trait is a UniFFI foreign trait
-(`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern), and
-`ark-module`'s `ModuleReply` and `ModuleAnswer` UniFFI types: the module's Swift
+(`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern), and a
+module that answers later hands its implementation a typed reply object
+of its own (the camera's `ScanReply.scanned(code)`,
+`PhotoReply.taken(jpeg)`, either's `failed(why)`): the module's Swift
 class implements the protocol UniFFI writes (`Haptics`), its Kotlin class
 the interface (`uniffi.ark_haptics.Haptics`), and the app's ffi crate takes
 them (`AccountsApp.useModules(haptics:clipboard:share:)`) and registers
@@ -242,8 +238,10 @@ The iPhone typecheck (`checks.money-ios-typecheck`) compiles the listed
 modules' Swift on Linux against the generated bindings, so every name
 they use is checked.
 
-**To add a module:** `modules/<name>/` with its crate (trait, a `Call`
-enum, the functions that make calls, a fake, tests), `module.toml`,
+**To add a module:** `modules/<name>/` with its crate (trait, its `Op`s
+and their outputs, the functions that make them, a fake, tests),
+`module.toml` (its `[ops]`: each operation's type and its output's, which
+`checks.prebuild` holds to the crate),
 `README.md`, `swift/` and `kotlin/`; add the crate to `rust/Cargo.toml`'s
 members; an app that wants it lists it in app.toml, depends on its crate
 and registers the platform's class. A module is a device capability any
@@ -252,10 +250,123 @@ One app's own native capability that no other would share is a local
 module, `<app>/modules/<name>/` in the same shape, which ui/prebuild.py
 compiles in as it does the shared ones.
 
+## Effects and Ports
+
+An update decides; it never does. Everything it wants done leaves it as
+a `Command` — a value that prints, compares in a test and crosses a
+bridge — and the shell's `Host` carries it out:
+
+| Command | What it is | Who carries it out |
+|---|---|---|
+| `Send { change, then }` | a domain change (`MoneyChange`) | `Host::send`: the peer, its refusal the domain's sentence |
+| `Open(route)`, `Back` | the app's `Route` | `Host::open`: the Navigator, the back stack, the address bar |
+| `Ask(Ask<Msg>)` | a module's operation and its `then` | `Host::ask`: the `Modules` the shell registered |
+| `Request(App::Request)` | what only the host can do yet, typed | `Host::request` |
+| `Then(msg)` | the next message | the runtime itself |
+
+**A module's operation is typed both ways.** Each module declares its
+operation types and their outputs (`impl Op for ScanQr { type Output =
+Option<String>; … }`, listed in its `module.toml`'s `[ops]`). The update
+asks `Command::ask_then(ark_camera::scan_qr(), Msg::Scanned)`, where
+`Msg::Scanned` takes `Result<Option<String>, ModuleError>`: the compiler
+holds the `then` to the operation's output. `Command::Ask` carries an
+`Ask<Msg>`, the operation and its `then` with the output's type known
+only inside, so it stays data: `Debug` prints the operation
+(`Ask(ScanQr, then)`), `==` compares the operation and the very `then`
+(`std::ptr::fn_addr_eq`), and `Ask::op::<ScanQr>()` reads it back. The
+host runs it over its `Modules` (`Ask::run`, `Inbox::ask`): the registry
+finds the module by its trait, the module answers through a `Reply<T>`
+once — at once (a haptic), or later (the camera, when the person is
+done) — and what came of it is turned into the update's message where
+the type is still known. A module that is not registered answers
+`ModuleError::Unavailable`, so every operation is answered.
+
+**A request is the app's own port.** What only the host can do yet is an
+enum of the app's (`money_app::MoneyRequest`): the bank sync, whose demo
+differs per shell; a sheet still drawn by hand on a platform (`NewTransaction`,
+`OpenTransaction { key }`, `Reconcile { account }`); a message for
+another of the app's runtimes beside it (`Budget { msg: BudgetMsg::AutoAssign }`
+from the shell's toolbar). Each shell matches on it — the phones'
+`AppShell.request(request:)`, iced's `App::requested`, the browser's
+`MoneyWeb::carry` — and a variant goes when what it asks moves into
+Rust. There is no call into a shell by name, and `ShellMsg` has a case
+for each command (`NewTransaction`, `PreviousMonth`, …), not a string.
+What a shell used to be told so it could follow (the search typed, the
+launch's appearance) is the page's (`ShellPage::search`,
+`ShellPage::appearance`), read like any other field.
+
+**The ready signal.** `Runtime::is_idle(&store)` is true when no
+operation's answer is awaited, no answer is queued, no message is running
+and every view `App::holds` names is held; `Runtime::version()` grows
+with every message (and with an answer that runs none). A screenshot
+driver waits until a screen is idle and its version has not moved since
+it last looked. Each shell exposes them:
+
+- **The phones**: `AccountsApp`, `BudgetApp` and `ShellApp` each have
+  `isIdle()` and `version()` over UniFFI (money/app/src/ffi/app.rs).
+  The holders pass them on: Swift's `AccountsScreen`, `BudgetScreen` and
+  `MoneyShellScreen` have `isIdle` and `version`, Kotlin's
+  `AccountsHolder`, `BudgetHolder` and `MoneyShellHolder` `isIdle()` and
+  `version()`; a driver reads them through a debug hook it adds.
+- **The browser**: the page's root carries `data-ark-idle="1"` and
+  `data-ark-version="<n>"` after every draw (`MoneyWeb::say_idle`, over
+  `MoneyWeb::is_idle`/`version`, the sum over its three runtimes); a
+  driver waits for `document.documentElement.dataset.arkIdle === "1"`.
+- **The desktop**: the window owns its runtimes in process; a driver
+  (arkui-shots, iced_test) asks the window's `App::is_idle()` and
+  `App::version()` (money/iced/src/sections.rs), over its three runtimes.
+
+**Ports not yet typed.** The peer's disk (`ark_peer::disk::Disk`) is
+synchronous; an async `Disk` port, so a browser's IndexedDB and a
+phone's file system are adapters of one trait, is left for later.
+
+## Layers
+
+Which crate may depend on which is a table, `layers.toml` at the root,
+and `checks.layers` holds it (run with `checks.clippy`, so build.yaml's
+existing list runs it): `tools/layers.py` reads `cargo metadata
+--no-deps` and fails on a workspace member in no layer, on a dependency
+(normal or build, optional or not; never a dev-dependency) its layer may
+not use, and on an `[allow]` line that is no longer a violation. The
+table says nothing of a stack: it would hold another build tool's graph
+the same way.
+
+| Layer | Crates | May use |
+|---|---|---|
+| kernel | `ark`, `ark-macros` | external pure crates only (serde, sha2, postcard, …) |
+| core | `money-core`, `harken-domain` | the kernel; serde |
+| runtime | `ark-app`, `ark-router`, `ark-format`, `arkui-macros` | the kernel and the core |
+| app | `money-app` | the core, the kernel, the runtime |
+| adapters | `ark-peer`, `ark-auth`, `ark-ffi`, `arkdb`, the toolkits (`arkui*`, `ark-ui-gen`), the modules, the servers, the shells | anything below them |
+
+**Pure code is held inside too.** Beside each crate of the kernel and
+the core is a `clippy.toml` whose `disallowed-methods` and
+`disallowed-types` are `std::fs`, `std::net`, `std::process`,
+`std::env`, `std::thread::spawn`, `SystemTime::now` and `Instant::now`:
+what such a crate needs of the world it is handed (the time is `Data::now_ms`'s,
+a file's bytes are its caller's). Their integration tests read fixtures
+and are allowed to (an `#![allow]` at each test's top); money-core's
+`money-seed` command line is the one piece of library code allowed,
+until it moves out (below).
+
+**The allowlist.** `layers.toml`'s `[allow]` lists today's violations,
+each `"<crate> -> <dependency>"` with what removes it; a change that
+fixes one deletes its line, or the check fails. In order:
+
+1. money-core and harken-domain's `ark-router` (routes move to the app
+   crate), `ark-format` (display text moves to the app crate),
+   `ark-peer`'s view keys (the `ViewKey` trait inverted into the kernel,
+   or the keys moved out), `ark-auth`, and `uniffi`/`ark-ffi` (the
+   records the phones read are generated in the adapter).
+2. money-server's Plaid client behind a `BankFeed` port (a trait), its
+   Plaid adapter and an in-memory fake the importer's tests use.
+3. money-app's adapters — the phones' bridge (`src/ffi`), the iced and
+   browser views and `screens()` behind features — into crates of their
+   own, and the modules' operations treated as the runtime's ports.
+
 ## Generated, Not Committed
 
-Expo's Continuous Native Generation, for Ark apps: nothing native of an
-app is committed. An app is
+Nothing native of an app is committed. An app is
 
 ```
 <app>/
@@ -285,8 +396,8 @@ and nix generates the rest, from app.toml, each listed module's
 .#<app>-prebuild`** writes them into the working tree's `<app>/.native`
 (ignored by git) with the phones' libraries linked where the projects
 look for them (`.native/ffi/android`, and on a Mac `.native/ffi/ios`), for
-Xcode (`xcodegen generate`, then the `.xcodeproj`) and Android Studio:
-Expo's `npx expo prebuild`. Signing is never generated: the team is CI's
+Xcode (`xcodegen generate`, then the `.xcodeproj`) and Android Studio.
+Signing is never generated: the team is CI's
 secret (ios.yaml), and the Android key app.toml names is the one
 committed, public, debug key.
 
@@ -367,10 +478,12 @@ the debug key. Nothing there is a project file.
 
 ## Escape Hatches
 
-- **`Command::Native(name)`** — something only the shell can do yet:
-  Accounts' pull to refresh asks the phone's own model to sync the bank
-  (`refresh`), and a row's Reconcile… raises the shell's own reconcile
-  sheet or dialog (`reconcile <id>`) until reconciling moves into Rust.
+- **`Command::Request(MoneyRequest)`** — something only the host can do
+  yet, typed: the bank sync (`Refresh`, whose demo differs per shell), a
+  row's Reconcile… raising the shell's own reconcile sheet or dialog
+  (`Reconcile { account }`) until reconciling moves into Rust, a message
+  for another of money's runtimes (`Budget { msg }`). There is no call
+  into a shell by name.
 - **App-provided pieces of a part** — a part that wears something of the
   app's takes it from the environment, set once at the root: the face at
   a tab's title (`\.tabFace`; Compose's frame, `LocalTabFrame`), the mark
@@ -487,7 +600,7 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 
 One route model for every app, on every shell (`ark-router`). An app
 declares where it can be once, as a `Route` enum in its domain or app
-crate — `harken_domain::routes`, `money_core::routes`, the docs'
+crate — `harken_domain::routes`, `money_app::routes`, the docs'
 `docs/site/src/routes.rs` — with `#[derive(Routes)]`, a pattern per
 variant (`#[route("/album/:key")]`), and every shell reads that one enum:
 the browser's address bar (arkui-web, `Address::of_url`), the desktop's
@@ -529,7 +642,7 @@ app's routes to them, route → URL → route):
 
 money's browser address still spells its own path from the shell's state
 (`/budget/2026-10/category/<id>/`) and reads the launch arguments
-(`?screen=…`); folding it onto `money_core::Route` and the launch arguments
+(`?screen=…`); folding it onto `money_app::Route` and the launch arguments
 onto routes is what is left.
 
 ## The Browser's Modes

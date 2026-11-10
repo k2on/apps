@@ -5,6 +5,9 @@
 //! across the seam, whether the fold made it or somebody linked a waiting
 //! account to an account another login feeds by hand. And accounts added
 //! to a connected bank through Plaid's account picker.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

@@ -5,6 +5,9 @@
 //! described `Type` (`ark::json::Typed`, what the store and a host
 //! use); keys order as the values do and none is a prefix of another; and
 //! a `Desc` key orders last first.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use ark::format::{put_key, Encode};
 use ark::json::{typed_bytes, typed_key, typed_value};

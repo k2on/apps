@@ -12,7 +12,7 @@
 //! and a page gone to (a key, a link, the back button) is its section's
 //! (`sync_shell`).
 
-use ark_app::{Host, ModuleCall, Ticket};
+use ark_app::{Ask, Host, Modules, Ticket};
 use ark_peer::store::Store;
 use arkui::shell::{Frame, Pane, SizeClass};
 use arkui::text::text;
@@ -21,6 +21,7 @@ use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length, Task};
 use money_app::shell::view::{commands, money_settings, money_shell};
 use money_app::shell::{account_tag, tagged_account, MoneyShell, ShellMsg, ShellPage, SECTIONS};
+use money_app::MoneyRequest;
 use money_core::{Auto, MoneyChange, MoneyView};
 
 use crate::peer::Ledger;
@@ -29,8 +30,8 @@ use crate::{App, Message, Page, Route};
 /// The window, as the shell's host for one message.
 struct Desk<'a> {
     app: &'a mut App,
-    /// What the shell asked of the window's own screens, by name.
-    natives: Vec<String>,
+    /// What the shell asked of the window's own screens.
+    natives: Vec<MoneyRequest>,
 }
 
 impl Host<MoneyShell> for Desk<'_> {
@@ -48,9 +49,12 @@ impl Host<MoneyShell> for Desk<'_> {
             self.app.page = page;
         }
     }
-    fn ask(&mut self, _: Ticket, _: ModuleCall) {}
-    fn native(&mut self, name: &str) {
-        self.natives.push(name.into());
+    fn ask(&mut self, _: Ticket, ask: Ask<ShellMsg>) {
+        // The shell asks no module of the desktop's.
+        ask.run(&Modules::new(), |_| {})
+    }
+    fn request(&mut self, r: MoneyRequest) {
+        self.natives.push(r);
     }
 }
 
@@ -63,7 +67,7 @@ pub fn section_of(page: Page, base: Ledger) -> Option<String> {
         (Page::Accounts, _) => SECTIONS[1].into(),
         (Page::Ledger(Ledger::Account(a)), _) | (Page::Ledger(Ledger::Adhoc), Ledger::Account(a)) => account_tag(&a.hex()),
         (Page::Ledger(_), _) => SECTIONS[2].into(),
-        (Page::Reflect, _) => SECTIONS[3].into(),
+        (Page::Insights, _) => SECTIONS[3].into(),
         (Page::Settings, _) => return None,
     })
 }
@@ -78,7 +82,7 @@ pub fn page_for(app: &App, tag: &str) -> Option<Page> {
         "budget" => Some(Page::Budget),
         "accounts" => Some(Page::Accounts),
         "transactions" => Some(Page::Ledger(Ledger::All)),
-        "insights" => Some(Page::Reflect),
+        "insights" => Some(Page::Insights),
         _ => None,
     }
 }
@@ -90,15 +94,17 @@ impl App {
         let go = match &msg {
             ShellMsg::Select { tag } => page_for(self, tag),
             ShellMsg::Back => Some(Page::Accounts),
-            ShellMsg::Run { command } => command.strip_prefix("go-").and_then(|t| page_for(self, t)),
+            ShellMsg::Find => Some(Page::Ledger(Ledger::All)),
             _ => None,
         };
         let launching = matches!(msg, ShellMsg::Launch { .. });
         let mut rt = std::mem::take(&mut self.shell);
+        let searching = matches!(msg, ShellMsg::Search { .. } | ShellMsg::ShowActivity);
         let mut desk = Desk { app: self, natives: vec![] };
         rt.dispatch(msg, &mut desk);
         let natives = std::mem::take(&mut desk.natives);
         self.shell = rt;
+        let search = searching.then(|| self.shell.state().search.clone());
         // Where a launch opened: the place the shell shows now, and what
         // its inspectors show, this window's selection.
         let go = if launching { page_for(self, &self.shell_page().section) } else { go };
@@ -115,32 +121,40 @@ impl App {
         if let Some(page) = go.filter(|p| *p != self.page) {
             tasks.push(self.update(Message::Go(page)));
         }
-        for name in natives {
-            let m = match name.as_str() {
-                "new-transaction" => Some(Message::AddTxn),
-                "new-account" => Some(Message::Accounts(money_app::accounts::AccountsMsg::Add)),
-                "previous-month" => Some(Message::Month(-1)),
-                "next-month" => Some(Message::Month(1)),
-                "this-month" => Some(Message::ThisMonth),
-                "refresh" => Some(Message::Sync),
-                "filter" => Some(Message::ShowFilter(!self.show_filter)),
-                "find" => Some(Message::Go(Page::Ledger(Ledger::All))),
-                "reconcile" => self.register_account().map(Message::Reconcile),
-                "auto-assign" => Some(Message::AutoMenu),
-                "review" => Some(Message::Go(Page::Ledger(Ledger::Inbox))),
-                _ if name.starts_with("settings") => Some(Message::Go(Page::Settings)),
-                _ if name.starts_with("open-category ") => self.category_named(&name["open-category ".len()..]).map(|c| Message::Select(Some(c))),
-                _ if name.starts_with("open-transaction ") => self.txn_named(&name["open-transaction ".len()..]).map(Message::EditTxn),
-                _ => name
-                    .strip_prefix("search ")
-                    .or((name == "search").then_some(""))
-                    .map(|typed| Message::Filter(crate::filter::Msg::Edit(crate::filter::Edit::Text(typed.into())))),
-            };
-            if let Some(m) = m {
+        // What is typed in the shell's search field is the register's text.
+        if let Some(text) = search {
+            tasks.push(self.update(Message::Filter(crate::filter::Msg::Edit(crate::filter::Edit::Text(text)))));
+        }
+        for r in natives {
+            if let Some(m) = self.requested(r) {
                 tasks.push(self.update(m));
             }
         }
         Task::batch(tasks)
+    }
+
+    /// What money's runtimes asked of the window ([`MoneyRequest`]), as
+    /// the window's own messages: its dialogs, its month, its sync.
+    pub(crate) fn requested(&self, r: MoneyRequest) -> Option<Message> {
+        match r {
+            MoneyRequest::Refresh => Some(Message::Sync),
+            MoneyRequest::Reconcile { account } => money_app::accounts::account_id(&account).map(Message::Reconcile),
+            // The desktop's Auto-Assign is its menu of ways to.
+            MoneyRequest::Budget {
+                msg: money_app::budget::BudgetMsg::AutoAssign,
+            } => Some(Message::AutoMenu),
+            MoneyRequest::Budget { msg } => Some(Message::Budget(msg)),
+            MoneyRequest::Accounts { msg } => Some(Message::Accounts(msg)),
+            MoneyRequest::StepMonth { by } => Some(Message::Month(by.into())),
+            MoneyRequest::ThisMonth => Some(Message::ThisMonth),
+            MoneyRequest::NewTransaction => Some(Message::AddTxn),
+            MoneyRequest::ImportReceipt => None,
+            MoneyRequest::Filter => Some(Message::ShowFilter(!self.show_filter)),
+            MoneyRequest::OpenCategory { key } => self.category_named(&key).map(|c| Message::Select(Some(c))),
+            MoneyRequest::OpenTransaction { key } => self.txn_named(&key).map(Message::EditTxn),
+            MoneyRequest::Review => Some(Message::Go(Page::Ledger(Ledger::Inbox))),
+            MoneyRequest::Settings { .. } => Some(Message::Go(Page::Settings)),
+        }
     }
 
     /// The category a launch names: its name in any case, or a part of it.
@@ -203,6 +217,24 @@ impl App {
     }
 
     /// What the shell shows now.
+    /// Whether nothing is left to come in the window's runtimes (the
+    /// shell's, the Budget's, the Accounts'): no operation's answer awaited
+    /// and every view they need held (`Runtime::is_idle`). With
+    /// [`App::version`] unchanged, what a screenshot driver waits for.
+    /// (Read by the drivers, which the screenshots' run wires; the tests
+    /// hold it meanwhile.)
+    #[allow(dead_code)]
+    pub fn is_idle(&self) -> bool {
+        let store = &self.peer.store;
+        self.shell.is_idle(store) && self.budget.is_idle(store) && self.accounts.is_idle(store)
+    }
+
+    /// The runtimes' versions summed: grows with every message any took.
+    #[allow(dead_code)]
+    pub fn version(&self) -> u64 {
+        self.shell.version() + self.budget.version() + self.accounts.version()
+    }
+
     pub fn shell_page(&self) -> ShellPage {
         self.shell.screen_of(&self.peer.store, crate::overview::now_ms(&self.today))
     }
@@ -238,7 +270,7 @@ impl App {
             (glyphs::MAIL, "Budget".into(), None, Page::Budget),
             (glyphs::BANK, "Accounts".into(), None, Page::Accounts),
             (glyphs::LIST, "Transactions".into(), None, Page::Ledger(Ledger::All)),
-            (glyphs::CHART, "Insights".into(), None, Page::Reflect),
+            (glyphs::CHART, "Insights".into(), None, Page::Insights),
         ];
         let open: Vec<_> = self.peer.accounts().iter().filter(|a| !a.closed).collect();
         for (heading, on) in [("Budget Accounts", true), ("Tracking Accounts", false)] {

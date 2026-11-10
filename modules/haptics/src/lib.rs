@@ -1,12 +1,10 @@
 //! Haptics: the phone's answer in the hand (`ui/docs/motion.md`,
 //! Haptics). Fired on the change itself, never on a tap that might change
-//! nothing. An update asks with [`perform`]; the module answers `Done`
-//! (nothing says whether it was felt) or `Unavailable` where there is none
-//! (the desktop, the browser).
+//! nothing. An update asks with [`perform`], a [`HapticsOp`] whose output
+//! is `()` (nothing says whether it was felt), or `Unavailable` where there
+//! is none (the desktop, the browser).
 
-use std::sync::Arc;
-
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply};
+use ark_module::{Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -33,24 +31,25 @@ pub trait Haptics: Send + Sync {
 
 /// What an update asks of the haptics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HapticsCall {
+pub enum HapticsOp {
     Perform(Haptic),
 }
 
-impl Call for HapticsCall {
+impl Op for HapticsOp {
     type Module = dyn Haptics;
+    type Output = ();
     const MODULE: &'static str = "haptics";
-    fn run(&self, m: &dyn Haptics, reply: Arc<ModuleReply>) {
+    fn run(&self, m: &dyn Haptics, reply: Reply<()>) {
         match *self {
-            HapticsCall::Perform(h) => m.perform(h),
+            HapticsOp::Perform(h) => m.perform(h),
         }
-        reply.answer(ModuleAnswer::Done)
+        reply.done(())
     }
 }
 
 /// `haptic` performed.
-pub fn perform(haptic: Haptic) -> ModuleCall {
-    HapticsCall::Perform(haptic).into()
+pub fn perform(haptic: Haptic) -> HapticsOp {
+    HapticsOp::Perform(haptic)
 }
 
 #[cfg(test)]
@@ -65,8 +64,8 @@ mod tests {
         fake.register(&mut m);
         let got = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let g = got.clone();
-        m.call(perform(Haptic::Warning), move |a| g.lock().unwrap().push(a));
+        m.run(&perform(Haptic::Warning), move |a| g.lock().unwrap().push(a));
         assert_eq!(fake.performed(), vec![Haptic::Warning]);
-        assert_eq!(*got.lock().unwrap(), vec![ModuleAnswer::Done]);
+        assert_eq!(*got.lock().unwrap(), vec![Ok(())]);
     }
 }

@@ -14084,6 +14084,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "ark-share";
             packageId = "ark-share";
           }
@@ -14197,10 +14201,6 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
-          }
-          {
-            name = "ark-router";
-            packageId = "ark-router";
           }
           {
             name = "serde";

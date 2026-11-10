@@ -68,24 +68,34 @@ struct Shell: View {
     @State private var sheet: Sheet? = nil
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
-    /// What the inspector shows: a category or a transaction, by its id.
+    /// What the inspector shows of a transaction, by its id (a category's
+    /// is the shell's own Category Details, written from Rust).
     @State private var inspecting: Inspecting? = nil
     /// What the launch asked for that the household had not yet synced:
     /// tried again as the snapshot moves.
-    @State private var pending: [String] = []
-    /// The launch's `-appearance`, over the system's.
-    @State private var appearance: ColorScheme? = nil
+    @State private var pending: [MoneyRequest] = []
     /// Settings asked for by the launch: the Mac's window, a sheet elsewhere.
     @State private var settings = false
 
-    enum Inspecting: Equatable { case category(Id), transaction(Id) }
+    enum Inspecting: Equatable { case transaction(Id) }
 
     private func path(_ tag: String) -> Binding<NavigationPath> {
         Binding(get: { paths[tag] ?? NavigationPath() }, set: { paths[tag] = $0 })
     }
 
     private func push(_ tag: String, _ r: Route) {
+        // A category's month is Category Details, the shell's inspector
+        // (written from Rust): beside the budget when regular, a sheet when
+        // compact. Never a page of this app's own.
+        if case let .category(id, _) = r { return inspect(category: id) }
         paths[tag, default: NavigationPath()].append(r)
+    }
+
+    /// Category Details shown for the category of this hex id.
+    private func inspect(category id: String) {
+        model.shell.send(.select(tag: "budget"))
+        model.shell.send(.inspectCategory(id: id))
+        model.shell.send(.inspector(shown: true))
     }
 
     var body: some View {
@@ -97,7 +107,7 @@ struct Shell: View {
             .environment(\.sectionPath) { tag in path(tag) }
             .environment(\.present) { s in present(s) }
             .onAppear {
-                model.shell.native = { name in run(name) }
+                model.shell.request = { r in run(r) }
                 model.shell.send(.month(month: model.month))
                 // Where the window opens (ark_app::shell::Launch): once, for the process.
                 if !Launched.done {
@@ -108,9 +118,10 @@ struct Shell: View {
             .onChange(of: model.snapshot.moved) {
                 let waiting = pending
                 pending = []
-                for name in waiting { run(name) }
+                for r in waiting { run(r) }
             }
-            .preferredColorScheme(appearance)
+            // The launch's `-appearance`, over the system's: the shell's.
+            .preferredColorScheme(model.shell.page.appearance.map { $0 == .dark ? .dark : .light })
             .settingsShown($settings) {
                 MoneySettingsView()
                     .environmentObject(model.shell)
@@ -156,14 +167,8 @@ struct Shell: View {
                         .environmentObject(b)
                         .environment(\.rowMark) { kind in AnyView(AccountMark(kind: kind, side: 20)) }
                         .onAppear {
-                            // A category's month: in the inspector while it shows, else pushed.
-                            b.open = { r in
-                                if case let .category(id, _) = r, model.shell.page.inspector {
-                                    model.shell.send(.inspectCategory(id: id))
-                                } else {
-                                    push("budget", r)
-                                }
-                            }
+                            // A category's month: Category Details, the shell's inspector.
+                            b.open = { r in push("budget", r) }
                         }
                 }
             case "accounts":
@@ -188,7 +193,7 @@ struct Shell: View {
                     ContentUnavailableView("No Account Selected", systemImage: "building.columns")
                 }
             case "budget.inspector":
-                if case let .category(id)? = inspecting { CategoryView(id: id) } else { nothingSelected }
+                nothingSelected
             case "transactions.inspector":
                 if case let .transaction(id)? = inspecting, let t = model.register(nil)?.first(where: { $0.id == id }) {
                     TransactionDetail(txn: t)
@@ -210,40 +215,28 @@ struct Shell: View {
         ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
     }
 
-    /// A command the shell hands back by name: what only money's own screens do yet.
-    private func run(_ name: String) {
-        let (verb, rest) = name.firstIndex(of: " ").map { (String(name[..<$0]), String(name[name.index(after: $0)...])) } ?? (name, "")
-        switch verb {
-        case "appearance":
-            appearance = rest == "dark" ? .dark : rest == "light" ? .light : nil
-            return
-        case "open-category":
-            guard let l = categoryNamed(rest) else { pending.append(name); return }
-            if model.shell.page.inspector { inspecting = .category(l.categoryId) } else { push("budget", .category(id: l.categoryId.hex, name: l.name)) }
-            return
-        case "open-transaction":
-            guard let t = transactionNamed(rest) else { pending.append(name); return }
+    /// What the shell's runtime asks of this app (`MoneyRequest`): what
+    /// only money's own screens do yet, or a message for another runtime.
+    private func run(_ r: MoneyRequest) {
+        switch r {
+        case let .openCategory(key):
+            guard let l = categoryNamed(key) else { pending.append(r); return }
+            inspect(category: l.categoryId.hex)
+        case let .openTransaction(key):
+            guard let t = transactionNamed(key) else { pending.append(r); return }
             if model.shell.page.inspector { inspecting = .transaction(t.id) } else { present(.transaction(TxnForm(t))) }
-            return
-        case "settings":
-            settings = true
-            return
-        default: break
-        }
-        switch name {
-        case "new-transaction":
+        case .settings: settings = true
+        case .newTransaction:
             let a = usualAccount(accounts: model.snapshot.accounts)
             present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
-        case "new-account": present(.addAccount)
-        case "previous-month": model.stepMonth(-1)
-        case "next-month": model.stepMonth(1)
-        case "this-month": model.showThisMonth()
-        case "auto-assign": model.budget?.send(.autoAssign)
-        case "new-category": model.budget?.send(.newCategory(group: ""))
-        case "new-group": model.budget?.send(.newGroup)
-        case "toggle-hidden": model.budget?.send(.toggleHidden)
-        case "refresh": Task { await model.refresh() }
-        default: break
+        case let .accounts(msg):
+            if case .add = msg { present(.addAccount) } else { model.accounts?.send(msg) }
+        case let .stepMonth(by): model.stepMonth(Int64(by))
+        case .thisMonth: model.showThisMonth()
+        case let .budget(msg): model.budget?.send(msg)
+        case .refresh: Task { await model.refresh() }
+        case let .reconcile(account): present(.reconcile(Id(account)))
+        case .review, .filter, .importReceipt: break
         }
     }
 
@@ -285,8 +278,6 @@ struct Shell: View {
     /// that is gone is the route's fallback, All Accounts.
     @ViewBuilder private func destination(_ r: Route) -> some View {
         switch r {
-        case .category:
-            if let l = model.snapshot.lines.first(where: { r.names(id: $0.categoryId.hex, name: $0.name) }) { CategoryView(id: l.categoryId) } else { ContentUnavailableView("This Category Is Gone", systemImage: "tray") }
         case .accounts: RegisterView(account: nil)
         case .account: RegisterView(account: model.snapshot.accounts.first { r.names(id: $0.id.hex, name: $0.name) }?.id)
         case .banks: BanksView()

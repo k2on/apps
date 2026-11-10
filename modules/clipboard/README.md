@@ -9,7 +9,7 @@ Text put where the person can paste it.
 ## API
 
 ```rust
-ark_clipboard::copy("$12.00") // -> ModuleCall, answered Done
+ark_clipboard::copy("$12.00") // -> ClipboardOp, output ()
 trait Clipboard { fn copy_text(&self, text: String); }
 ark_clipboard::fake::Fake // .copied()
 ```

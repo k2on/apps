@@ -5,16 +5,17 @@ its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
 listing `camera` in its `modules.toml` and depending on `ark-camera`.
 
 A QR code scanned, a photo taken: each shows the platform's own camera
-page and answers when it closes, through a `ModuleReply` the platform answers
+page and answers when it closes, through a typed reply (`ScanReply`, `PhotoReply`) the platform answers
 once — a scan as `Text` (none when the person backed out), a photo as its
 JPEG's `Bytes`.
 
 ## API
 
 ```rust
-ark_camera::scan_qr()    // -> ModuleCall, answered Text later
-ark_camera::take_photo() // -> ModuleCall, answered Bytes later
-trait Camera { fn scan_qr(&self, reply: Arc<ModuleReply>); fn take_photo(&self, reply: Arc<ModuleReply>); }
+ark_camera::scan_qr()    // -> ScanQr, output Option<String>, later
+ark_camera::take_photo() // -> TakePhoto, output Option<Vec<u8>>, later
+trait Camera { fn scan_qr(&self, reply: Arc<ScanReply>); fn take_photo(&self, reply: Arc<PhotoReply>); }
+// ScanReply.scanned(code) / PhotoReply.taken(jpeg), or .failed(why)
 ark_camera::Fake // .scanned(code), .photographed(jpeg)
 ```
 

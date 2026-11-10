@@ -10,7 +10,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
+use ark_module::{Modules, Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -88,7 +88,7 @@ pub trait MediaPlayer: Send + Sync {
 
 /// What an update asks of the player.
 #[derive(Clone, Debug, PartialEq)]
-pub enum MediaCall {
+pub enum MediaOp {
     Load { url: String, at_ms: i64 },
     Play,
     Pause,
@@ -98,43 +98,44 @@ pub enum MediaCall {
     NowPlaying(Option<NowPlayingInfo>),
 }
 
-impl Call for MediaCall {
+impl Op for MediaOp {
     type Module = dyn MediaPlayer;
+    type Output = ();
     const MODULE: &'static str = "media-player";
-    fn run(&self, m: &dyn MediaPlayer, reply: Arc<ModuleReply>) {
+    fn run(&self, m: &dyn MediaPlayer, reply: Reply<()>) {
         match self {
-            MediaCall::Load { url, at_ms } => m.load(url.clone(), *at_ms),
-            MediaCall::Play => m.play(),
-            MediaCall::Pause => m.pause(),
-            MediaCall::Seek { at_ms } => m.seek(*at_ms),
-            MediaCall::Rate(r) => m.set_rate(*r),
-            MediaCall::Volume(v) => m.set_volume(*v),
-            MediaCall::NowPlaying(i) => m.set_now_playing(i.clone()),
+            MediaOp::Load { url, at_ms } => m.load(url.clone(), *at_ms),
+            MediaOp::Play => m.play(),
+            MediaOp::Pause => m.pause(),
+            MediaOp::Seek { at_ms } => m.seek(*at_ms),
+            MediaOp::Rate(r) => m.set_rate(*r),
+            MediaOp::Volume(v) => m.set_volume(*v),
+            MediaOp::NowPlaying(i) => m.set_now_playing(i.clone()),
         }
-        reply.answer(ModuleAnswer::Done)
+        reply.done(())
     }
 }
 
-pub fn load(url: impl Into<String>, at_ms: i64) -> ModuleCall {
-    MediaCall::Load { url: url.into(), at_ms }.into()
+pub fn load(url: impl Into<String>, at_ms: i64) -> MediaOp {
+    MediaOp::Load { url: url.into(), at_ms }
 }
-pub fn play() -> ModuleCall {
-    MediaCall::Play.into()
+pub fn play() -> MediaOp {
+    MediaOp::Play
 }
-pub fn pause() -> ModuleCall {
-    MediaCall::Pause.into()
+pub fn pause() -> MediaOp {
+    MediaOp::Pause
 }
-pub fn seek(at_ms: i64) -> ModuleCall {
-    MediaCall::Seek { at_ms }.into()
+pub fn seek(at_ms: i64) -> MediaOp {
+    MediaOp::Seek { at_ms }
 }
-pub fn set_rate(rate: f32) -> ModuleCall {
-    MediaCall::Rate(rate).into()
+pub fn set_rate(rate: f32) -> MediaOp {
+    MediaOp::Rate(rate)
 }
-pub fn set_volume(volume: f32) -> ModuleCall {
-    MediaCall::Volume(volume).into()
+pub fn set_volume(volume: f32) -> MediaOp {
+    MediaOp::Volume(volume)
 }
-pub fn set_now_playing(info: Option<NowPlayingInfo>) -> ModuleCall {
-    MediaCall::NowPlaying(info).into()
+pub fn set_now_playing(info: Option<NowPlayingInfo>) -> MediaOp {
+    MediaOp::NowPlaying(info)
 }
 
 #[derive(Default)]
@@ -225,8 +226,8 @@ mod tests {
         let fake = Fake::new();
         let mut m = Modules::new();
         fake.register(&mut m);
-        m.call(load("file:///a.mp3", 5), |_| {});
-        m.call(play(), |_| {});
+        m.run(&load("file:///a.mp3", 5), |_| {});
+        m.run(&play(), |_| {});
         assert_eq!(fake.asked(), vec!["load file:///a.mp3 5", "play"]);
         let log = Arc::new(Log(Mutex::new(vec![])));
         fake.set_listener(Some(log.clone()));

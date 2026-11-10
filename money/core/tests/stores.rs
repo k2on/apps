@@ -2,6 +2,9 @@
 //! what `amazon-orders` (5.x) prints, made by its own serializer; Costco's
 //! and Target's are their pages' JSON as community scripts have recorded
 //! it, and as near as is known — the adapters read the spellings seen.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use money_core::stores::{amazon, amazon_charges, costco, read, target};
 

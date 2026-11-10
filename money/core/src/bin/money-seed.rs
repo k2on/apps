@@ -8,6 +8,9 @@
 //! ```text
 //! money-seed /tmp/money && MONEY_DEV_AUTH=1 MONEY_DATA=/tmp/money money-server 0.0.0.0:8788
 //! ```
+// The seed's command line is an adapter's, kept in the core behind `cli`
+// until it moves to a crate of its own (layers.toml's "money-core -> anyhow").
+#![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
 

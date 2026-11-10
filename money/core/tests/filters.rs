@@ -1,6 +1,9 @@
 //! Filters on a household: the register for any filter and its total, the
 //! built-in ones the same as the registers and the inbox were, and saved
 //! filters kept, renamed, changed, put in order and deleted.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

@@ -3,8 +3,8 @@
 //! store. A screen's generated SwiftUI or Compose reads its record
 //! ([`AccountsApp::page`]) and sends it messages ([`AccountsApp::send`]);
 //! the app's update runs here, its changes go to the peer, its routes and
-//! the shell's own work to the [`AppShell`] the phone gave, its module
-//! calls to the modules the phone registered (money/app.toml: each a
+//! its typed requests ([`MoneyRequest`]) to the [`AppShell`] the phone
+//! gave, its modules' operations to the modules the phone registered (money/app.toml: each a
 //! crate under modules/, a UniFFI foreign trait its swift/ and kotlin/
 //! implement).
 
@@ -12,27 +12,29 @@ use std::sync::{Arc, Mutex};
 
 use crate::accounts::{Accounts, AccountsMsg, AccountsPage};
 use crate::budget::{Budget, BudgetMsg, BudgetPage};
+use crate::routes::Route;
 use crate::shell::{MoneyShell, ShellMsg, ShellPage};
-use ark_app::{Host, Inbox, Runtime, Ticket};
-use ark_app::{ModuleCall, Modules};
+use ark_app::{Ask, Host, Inbox, Modules, Runtime, Ticket};
 use ark_clipboard::Clipboard;
 use ark_ffi::Refusal;
 use ark_haptics::Haptics;
 use ark_peer::store::Store;
 use ark_share::Share;
-use money_core::{self as domain, routes::Route, MoneyChange};
+use money_core::{self as domain, MoneyChange};
 
 use crate::ffi::Session;
+use crate::MoneyRequest;
 
 /// What only the phone's shell can do for a screen: open a route on its
-/// navigator, carry out a native request ("refresh", "reconcile <id>"),
-/// and say the time and the session's day.
+/// navigator, carry out a typed request (the bank sync, a sheet still drawn
+/// by hand, a message for another screen's runtime), and say the time and
+/// the session's day.
 #[uniffi::export(with_foreign)]
 pub trait AppShell: Send + Sync {
     /// Not `open`: UniFFI writes a vtable field of that name quoted into its C
     /// header for Swift, which clang cannot read.
     fn open_route(&self, route: Route);
-    fn native(&self, name: String);
+    fn request(&self, request: MoneyRequest);
     /// Milliseconds since the epoch, by the device's clock.
     fn now_ms(&self) -> i64;
     /// The session's day (`2026-10-26`): the demo's day in the demo, today
@@ -60,7 +62,7 @@ pub struct AccountsApp {
     shell: Arc<dyn AppShell>,
     runtime: Mutex<Runtime<Accounts>>,
     modules: Mutex<Modules>,
-    inbox: Inbox,
+    inbox: Inbox<AccountsMsg>,
     _holds: Vec<ark_ffi::Hold<domain::MoneyView>>,
 }
 
@@ -85,27 +87,12 @@ impl Host<Accounts> for Phone<'_> {
     fn open(&mut self, route: Route) {
         self.app.shell.open_route(route)
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
+    fn ask(&mut self, ticket: Ticket, ask: Ask<AccountsMsg>) {
         let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        self.app.inbox.ask(&modules, ticket, call)
+        self.app.inbox.ask(&modules, ticket, ask)
     }
-    fn native(&mut self, name: &str) {
-        self.app.shell.native(name.into())
-    }
-}
-
-impl AccountsApp {
-    /// What modules answered since, taken in.
-    fn answers(&self, rt: &mut Runtime<Accounts>) {
-        loop {
-            let answers = self.inbox.take();
-            if answers.is_empty() {
-                return;
-            }
-            for (t, a) in answers {
-                rt.answer(t, a, &mut Phone { app: self });
-            }
-        }
+    fn request(&mut self, r: MoneyRequest) {
+        self.app.shell.request(r)
     }
 }
 
@@ -131,7 +118,7 @@ impl AccountsApp {
     pub fn send(&self, msg: AccountsMsg) {
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Phone { app: self });
-        self.answers(&mut rt);
+        self.inbox.drain(&mut rt, &mut Phone { app: self });
     }
 
     /// What the screen shows now.
@@ -144,6 +131,13 @@ impl AccountsApp {
     /// versions, what says to read [`AccountsApp::page`] again.
     pub fn version(&self) -> u64 {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
+    }
+
+    /// Whether nothing is left to come (`Runtime::is_idle`): what a
+    /// screenshot driver waits on, with the version unchanged.
+    pub fn is_idle(&self) -> bool {
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        self.session.read(|st, _| rt.is_idle(st))
     }
 
     /// The phone's modules, the ones money opts into (money/app.toml),
@@ -163,7 +157,7 @@ pub struct BudgetApp {
     shell: Arc<dyn AppShell>,
     runtime: Mutex<Runtime<Budget>>,
     modules: Mutex<Modules>,
-    inbox: Inbox,
+    inbox: Inbox<BudgetMsg>,
     holds: Mutex<(Vec<domain::MoneyView>, Vec<ark_ffi::Hold<domain::MoneyView>>)>,
 }
 
@@ -187,12 +181,12 @@ impl Host<Budget> for Tab<'_> {
     fn open(&mut self, route: Route) {
         self.app.shell.open_route(route)
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
+    fn ask(&mut self, ticket: Ticket, ask: Ask<BudgetMsg>) {
         let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        self.app.inbox.ask(&modules, ticket, call)
+        self.app.inbox.ask(&modules, ticket, ask)
     }
-    fn native(&mut self, name: &str) {
-        self.app.shell.native(name.into())
+    fn request(&mut self, r: MoneyRequest) {
+        self.app.shell.request(r)
     }
 }
 
@@ -228,15 +222,7 @@ impl BudgetApp {
     pub fn send(&self, msg: BudgetMsg) {
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Tab { app: self });
-        loop {
-            let answers = self.inbox.take();
-            if answers.is_empty() {
-                break;
-            }
-            for (t, a) in answers {
-                rt.answer(t, a, &mut Tab { app: self });
-            }
-        }
+        self.inbox.drain(&mut rt, &mut Tab { app: self });
         self.hold(&rt);
     }
 
@@ -249,6 +235,13 @@ impl BudgetApp {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 
+    /// Whether nothing is left to come (`Runtime::is_idle`): what a
+    /// screenshot driver waits on, with the version unchanged.
+    pub fn is_idle(&self) -> bool {
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        self.session.read(|st, _| rt.is_idle(st))
+    }
+
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());
         m.set(haptics).set(clipboard).set(share);
@@ -259,12 +252,13 @@ impl BudgetApp {
 /// commands (money/app/src/shell). Its generated SwiftUI and Compose
 /// (`MoneyShellView`, `MoneySettingsView`, `MoneyCommands`) read its page
 /// and send it messages; a command only a hosted screen can carry out
-/// goes to the [`AppShell`]'s `native` by name.
+/// goes to the [`AppShell`]'s `request`, typed.
 #[derive(uniffi::Object)]
 pub struct ShellApp {
     session: Arc<ark_ffi::Session<domain::MoneyView>>,
     shell: Arc<dyn AppShell>,
     runtime: Mutex<Runtime<MoneyShell>>,
+    inbox: Inbox<ShellMsg>,
     _holds: Vec<ark_ffi::Hold<domain::MoneyView>>,
 }
 
@@ -289,9 +283,12 @@ impl Host<MoneyShell> for Window<'_> {
     fn open(&mut self, route: Route) {
         self.app.shell.open_route(route)
     }
-    fn ask(&mut self, _: Ticket, _: ModuleCall) {}
-    fn native(&mut self, name: &str) {
-        self.app.shell.native(name.into())
+    fn ask(&mut self, ticket: Ticket, ask: Ask<ShellMsg>) {
+        // The shell asks no module: answered Unavailable, so it is idle.
+        self.app.inbox.ask(&Modules::new(), ticket, ask)
+    }
+    fn request(&mut self, r: MoneyRequest) {
+        self.app.shell.request(r)
     }
 }
 
@@ -307,6 +304,7 @@ impl ShellApp {
             session: inner,
             shell,
             runtime: Mutex::new(rt),
+            inbox: Inbox::default(),
             _holds: holds,
         })
     }
@@ -315,6 +313,7 @@ impl ShellApp {
     pub fn send(&self, msg: ShellMsg) {
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Window { app: self });
+        self.inbox.drain(&mut rt, &mut Window { app: self });
     }
 
     /// What the shell shows now.
@@ -326,6 +325,13 @@ impl ShellApp {
     /// A number that grows with every message taken.
     pub fn version(&self) -> u64 {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
+    }
+
+    /// Whether nothing is left to come (`Runtime::is_idle`): what a
+    /// screenshot driver waits on, with the version unchanged.
+    pub fn is_idle(&self) -> bool {
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        self.session.read(|st, _| rt.is_idle(st))
     }
 }
 

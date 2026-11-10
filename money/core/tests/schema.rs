@@ -1,5 +1,8 @@
 //! The schema a server last stood on, and the steps that read what it
 //! wrote (`src/migrations.rs`).
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use money_core::domain;
 

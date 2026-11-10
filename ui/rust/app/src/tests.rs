@@ -19,7 +19,7 @@ enum Msg {
     Save,
     Saved(Result<(), String>),
     Scan,
-    Scanned(ModuleAnswer),
+    Scanned(Answer<Option<String>>),
     Go,
 }
 
@@ -35,6 +35,7 @@ impl App for Counter {
     type Msg = Msg;
     type Change = i64;
     type Route = &'static str;
+    type Request = &'static str;
     type Screen = String;
 
     fn holds(_: &State) -> Vec<NoView> {
@@ -55,15 +56,12 @@ impl App for Counter {
                 s.said.push(format!("{r:?} at {}", data.now_ms));
                 vec![]
             }
-            Msg::Scan => vec![Command::Ask {
-                call: ark_camera::scan_qr(),
-                then: Some(Msg::Scanned),
-            }],
+            Msg::Scan => vec![Command::ask_then(ark_camera::scan_qr(), Msg::Scanned)],
             Msg::Scanned(a) => {
                 s.said.push(format!("{a:?}"));
                 vec![Command::Then(Msg::Add)]
             }
-            Msg::Go => vec![Command::Open("settings"), Command::Back],
+            Msg::Go => vec![Command::Open("settings"), Command::Back, Command::Request("sync")],
         }
     }
 
@@ -78,7 +76,7 @@ struct Here {
     haptics: ark_haptics::fake::Fake,
     camera: ark_camera::Fake,
     modules: Modules,
-    inbox: Inbox,
+    inbox: Inbox<Msg>,
     sent: Vec<i64>,
     opened: Vec<String>,
 }
@@ -123,8 +121,11 @@ impl Host<Counter> for Here {
     fn back(&mut self) {
         self.opened.push("back".into())
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.modules, ticket, call)
+    fn ask(&mut self, ticket: Ticket, ask: Ask<Msg>) {
+        self.inbox.ask(&self.modules, ticket, ask)
+    }
+    fn request(&mut self, r: &'static str) {
+        self.opened.push(r.into())
     }
 }
 
@@ -157,7 +158,7 @@ fn routes_are_handed_to_the_host() {
     let mut rt = Runtime::<Counter>::new();
     let mut h = Here::new();
     rt.dispatch(Msg::Go, &mut h);
-    assert_eq!(h.opened, vec!["settings", "back"]);
+    assert_eq!(h.opened, vec!["settings", "back", "sync"]);
 }
 
 #[test]
@@ -166,13 +167,52 @@ fn a_later_answer_runs_its_message_then_what_it_asks() {
     let mut h = Here::new();
     rt.dispatch(Msg::Scan, &mut h);
     assert!(rt.awaits(1));
+    assert!(!rt.is_idle(&h.store), "a scan awaited is not idle");
     h.camera.scanned(Some("code".into()));
-    for (t, a) in h.inbox.take() {
-        rt.answer(t, a, &mut h);
-    }
+    let inbox = h.inbox.clone();
+    inbox.drain(&mut rt, &mut h);
     assert!(!rt.awaits(1));
     assert_eq!(rt.state().n, 1);
-    assert_eq!(rt.state().said, vec!["Text { value: Some(\"code\") }"]);
+    assert_eq!(rt.state().said, vec!["Ok(Some(\"code\"))"]);
+    // The haptic the answer asked for was answered at once.
+    assert!(rt.is_idle(&h.store));
+}
+
+/// An operation is data: it compares and prints as itself and its
+/// `then`, whatever its output's type. Falsified by an `Ask` that compared
+/// equal to another module's or another `then`'s.
+#[test]
+fn an_ask_compares_and_prints_as_its_operation() {
+    let a: Command<Counter> = Command::ask(ark_haptics::perform(ark_haptics::Haptic::Selection));
+    assert_eq!(a, Command::ask(ark_haptics::perform(ark_haptics::Haptic::Selection)));
+    assert_ne!(a, Command::ask(ark_haptics::perform(ark_haptics::Haptic::Success)));
+    assert_ne!(a, Command::ask(ark_camera::scan_qr()));
+    let scan: Command<Counter> = Command::ask_then(ark_camera::scan_qr(), Msg::Scanned);
+    assert_eq!(scan, Command::ask_then(ark_camera::scan_qr(), Msg::Scanned));
+    assert_ne!(scan, Command::ask(ark_camera::scan_qr()));
+    assert_eq!(format!("{a:?}"), "Ask(Perform(Selection))");
+    assert_eq!(format!("{scan:?}"), "Ask(ScanQr, then)");
+    let Command::Ask(ask) = scan else { unreachable!() };
+    assert_eq!(ask.module(), "camera");
+    assert_eq!(ask.op::<ark_camera::ScanQr>(), Some(&ark_camera::ScanQr));
+    assert!(ask.op::<ark_camera::TakePhoto>().is_none());
+}
+
+/// Idle is no answer awaited and every view held: a host with no module
+/// answers `Unavailable`, so it is idle again at once.
+#[test]
+fn a_runtime_is_idle_once_nothing_is_left_to_come() {
+    let mut rt = Runtime::<Counter>::new();
+    let mut h = Here::new();
+    assert!(rt.is_idle(&h.store));
+    h.modules = Modules::new();
+    rt.dispatch(Msg::Scan, &mut h);
+    let v = rt.version();
+    let inbox = h.inbox.clone();
+    inbox.drain(&mut rt, &mut h);
+    assert!(rt.is_idle(&h.store));
+    assert_eq!(rt.state().said, vec!["Err(Unavailable)"]);
+    assert!(rt.version() > v);
 }
 
 #[test]

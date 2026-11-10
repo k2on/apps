@@ -60,9 +60,9 @@ use peer::{Ledger, Peer};
 pub use arkui::shell::Pane;
 
 use money_app::shell::ShellMsg;
-/// Where the window is: money's routes (`money_core::routes`), which the
+/// Where the window is: money's routes (`money_app::routes`), which the
 /// address bar spells by their paths (`arkui::router`).
-pub use money_core::routes::Route;
+pub use money_app::Route;
 
 /// What fills the page beside the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +71,7 @@ pub enum Page {
     /// Every account and what the household is worth: the page money_app
     /// lays out once for every platform.
     Accounts,
-    Reflect,
+    Insights,
     Settings,
     Ledger(Ledger),
 }
@@ -296,9 +296,9 @@ pub enum Message {
     RegisterScrolled(f32),
     /// The budget scrolled; and a page opened scrolled to where it was left.
     PageScrolled(f32),
-    /// Reflect or Settings was scrolled to this far down.
+    /// Insights or Settings was scrolled to this far down.
     TopScrolled(f32),
-    /// The small header pressed: Reflect or Settings back to its top.
+    /// The small header pressed: Insights or Settings back to its top.
     PageTop,
     ScrollPage(f32),
     /// The category dropdown: typed into, the pointer on a row, its list
@@ -443,7 +443,7 @@ pub struct App {
     pub pictures: arkui::images::Images,
     /// The note, said for a moment over the page's foot (`arkui::toast`).
     pub toast: arkui::toast::Toast,
-    /// How far down Reflect or Settings is scrolled, as it last said.
+    /// How far down Insights or Settings is scrolled, as it last said.
     pub top_y: f32,
     /// Their small header, in the band once the page's title has scrolled
     /// away (`arkui::compact`), and the page it is for.
@@ -807,7 +807,7 @@ impl App {
         let named = |route: Option<Route>, of: Route| route.unwrap_or_else(|| of.fallback());
         match self.page {
             Page::Budget => Route::Budget,
-            Page::Reflect => Route::Reflect,
+            Page::Insights => Route::Insights,
             // The overview has no path of its own yet: the bar says All Accounts.
             Page::Accounts => Route::Accounts,
             Page::Ledger(Ledger::All) => Route::Accounts,
@@ -844,7 +844,7 @@ impl App {
     pub(crate) fn page_of(&self, route: &Route) -> Option<Page> {
         Some(match route {
             Route::Budget | Route::Category { .. } => Page::Budget,
-            Route::Reflect => Page::Reflect,
+            Route::Insights => Page::Insights,
             Route::Accounts => Page::Ledger(Ledger::All),
             Route::Settings | Route::Banks | Route::Bank { .. } => Page::Settings,
             Route::Inbox => Page::Ledger(Ledger::Inbox),

@@ -26,7 +26,7 @@ pub const FILTER_NAME: &str = "filter-name";
 
 /// The budget's scrollable, which the cursor keeps itself in.
 pub const BUDGET: &str = "budget";
-/// Reflect's scrollable, and Settings': whichever is open, for the small
+/// Insights's scrollable, and Settings': whichever is open, for the small
 /// header's way back to the top.
 pub const PAGE_TOP: &str = "page-top";
 

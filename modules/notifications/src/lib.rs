@@ -1,12 +1,13 @@
 //! Local notifications: a notice at a time, or one taken back. An update
-//! asks with [`schedule`] or [`cancel`]; the module answers `Done`.
+//! asks with [`schedule`] or [`cancel`], a [`NotificationsOp`] whose
+//! output is `()`.
 //!
 //! No native implementation yet (README.md).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply, Modules};
+use ark_module::{Modules, Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -34,31 +35,32 @@ pub trait Notifications: Send + Sync {
 
 /// What an update asks of the notifications.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NotificationsCall {
+pub enum NotificationsOp {
     Schedule(Notice),
     Cancel(String),
 }
 
-impl Call for NotificationsCall {
+impl Op for NotificationsOp {
     type Module = dyn Notifications;
+    type Output = ();
     const MODULE: &'static str = "notifications";
-    fn run(&self, m: &dyn Notifications, reply: Arc<ModuleReply>) {
+    fn run(&self, m: &dyn Notifications, reply: Reply<()>) {
         match self {
-            NotificationsCall::Schedule(n) => m.schedule(n.clone()),
-            NotificationsCall::Cancel(id) => m.cancel(id.clone()),
+            NotificationsOp::Schedule(n) => m.schedule(n.clone()),
+            NotificationsOp::Cancel(id) => m.cancel(id.clone()),
         }
-        reply.answer(ModuleAnswer::Done)
+        reply.done(())
     }
 }
 
 /// `notice` scheduled, in place of any of its id.
-pub fn schedule(notice: Notice) -> ModuleCall {
-    NotificationsCall::Schedule(notice).into()
+pub fn schedule(notice: Notice) -> NotificationsOp {
+    NotificationsOp::Schedule(notice)
 }
 
 /// The notice of `id` taken back.
-pub fn cancel(id: impl Into<String>) -> ModuleCall {
-    NotificationsCall::Cancel(id.into()).into()
+pub fn cancel(id: impl Into<String>) -> NotificationsOp {
+    NotificationsOp::Cancel(id.into())
 }
 
 /// The notifications, faked for tests: what is scheduled, by id.
@@ -109,10 +111,10 @@ mod tests {
             at_ms: None,
             opens: None,
         };
-        m.call(schedule(n("one")), |_| {});
-        m.call(schedule(n("two")), |_| {});
+        m.run(&schedule(n("one")), |_| {});
+        m.run(&schedule(n("two")), |_| {});
         assert_eq!(fake.notices(), vec![n("two")]);
-        m.call(cancel("a"), |_| {});
+        m.run(&cancel("a"), |_| {});
         assert!(fake.notices().is_empty());
     }
 }

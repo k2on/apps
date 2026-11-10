@@ -68,7 +68,8 @@ use ark_peer::{Handle, Memory, Peer, Standing};
 use money_core::plaid::import_of;
 use money_core::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
 
-use crate::plaid::{LinkMode, LinkSession, Linking, Plaid, PlaidError};
+use crate::feed::{BankFeed, Feed, FeedError as PlaidError, LinkMode, LinkSession, Linking};
+use crate::plaid::Plaid;
 use crate::store::{Connection, Store};
 use crate::stores::{put_away, waiting, Stores};
 
@@ -97,6 +98,9 @@ pub struct Banks {
     pub poll: Duration,
     /// How long a Hosted Link page lasts.
     pub lifetime_s: u64,
+    /// The feed asked in place of the one the keys make: a test's
+    /// (`crate::feed::Memory`). None asks Plaid at `url`.
+    pub feed: Option<Feed>,
 }
 
 impl Banks {
@@ -110,6 +114,7 @@ impl Banks {
             history: crate::HISTORY,
             poll: Duration::from_secs(5),
             lifetime_s: 30 * 60,
+            feed: None,
         }
     }
 }
@@ -366,10 +371,15 @@ impl Job {
         self.banks.as_ref().expect("banks are imported only with Plaid's keys")
     }
 
-    fn plaid(&self) -> Result<Plaid> {
+    /// The banks' feed: the one handed over, or Plaid as the keys say,
+    /// read now.
+    fn plaid(&self) -> Result<Arc<dyn BankFeed>> {
+        if let Some(Feed(f)) = &self.banks().feed {
+            return Ok(f.clone());
+        }
         let id = secret(&self.banks().client_id_file)?;
         let s = secret(&self.banks().secret_file)?;
-        Ok(Plaid::new(&self.banks().url, id, s))
+        Ok(Arc::new(Plaid::new(&self.banks().url, id, s)))
     }
 
     fn save(&self) -> Result<()> {
@@ -533,7 +543,7 @@ impl Job {
                     self.live.insert(id, live);
                 }
                 Linking::Connected(Some(public)) if live.what == "connect" => {
-                    if let Err(e) = self.connected(id, &plaid, &public) {
+                    if let Err(e) = self.connected(id, &*plaid, &public) {
                         let (_, why) = failure(&e);
                         self.say(format!("connecting a bank failed: {why}"));
                         self.answer(id, AskState::Failed, &why);
@@ -560,7 +570,7 @@ impl Job {
 
     /// A new bank's public token traded for its login, the bank kept under
     /// a name of its own, the ask answered, and the bank imported at once.
-    fn connected(&mut self, id: Id<BankAsk>, plaid: &Plaid, public: &str) -> Result<()> {
+    fn connected(&mut self, id: Id<BankAsk>, plaid: &dyn BankFeed, public: &str) -> Result<()> {
         let (token, item_id) = plaid.exchange(public)?;
         let item = plaid.accounts(&token).ok();
         let institution_id = item.as_ref().and_then(|i| i.institution_id.clone()).unwrap_or_default();
@@ -620,7 +630,7 @@ impl Job {
     /// One bank, now, as a run of its own.
     fn import_now(&mut self, name: &str) {
         let outcome = match self.plaid() {
-            Ok(plaid) => self.import_or_say(&plaid, name),
+            Ok(plaid) => self.import_or_say(&*plaid, name),
             Err(e) => Outcome::Failed(e.to_string()),
         };
         self.record(Run {
@@ -647,7 +657,7 @@ impl Job {
                 return run;
             }
         };
-        self.retire(&plaid);
+        self.retire(&*plaid);
         let names: Vec<String> = self.store.banks.keys().cloned().collect();
         for name in names {
             if stop.load(Ordering::SeqCst) {
@@ -657,7 +667,7 @@ impl Job {
             if !self.store.banks.contains_key(&name) {
                 continue;
             }
-            let outcome = self.import_or_say(&plaid, &name);
+            let outcome = self.import_or_say(&*plaid, &name);
             run.banks.insert(name, outcome);
         }
         run
@@ -665,7 +675,7 @@ impl Job {
 
     /// One bank imported, or what went wrong said — on stderr, and to the
     /// household as `banks.failed` when it is news.
-    fn import_or_say(&mut self, plaid: &Plaid, name: &str) -> Outcome {
+    fn import_or_say(&mut self, plaid: &dyn BankFeed, name: &str) -> Outcome {
         let replaced = self.read(|db| db.bank.get(name)).flatten().is_some_and(|b| !b.replaced_by.is_empty());
         if replaced {
             self.retire(plaid);
@@ -705,7 +715,7 @@ impl Job {
     /// from the store, and said retired, which has the budget forget it as
     /// it does a disconnected bank. One Plaid will not remove now is tried
     /// again at the next run, and imported by nobody meanwhile.
-    fn retire(&mut self, plaid: &Plaid) {
+    fn retire(&mut self, plaid: &dyn BankFeed) {
         let replaced: Vec<Bank> = self
             .read(|db| db.bank.scan().into_iter().filter(|b: &Bank| !b.replaced_by.is_empty()).collect())
             .unwrap_or_default();
@@ -733,7 +743,7 @@ impl Job {
         }
     }
 
-    fn import_one(&mut self, plaid: &Plaid, name: &str) -> Result<Outcome> {
+    fn import_one(&mut self, plaid: &dyn BankFeed, name: &str) -> Result<Outcome> {
         let Some(conn) = self.store.banks.get(name).cloned() else {
             bail!("no longer connected");
         };

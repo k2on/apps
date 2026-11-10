@@ -5,7 +5,9 @@
 //! Hosted Link page (`/link/token/create`, `/link/token/get`,
 //! `/item/public_token/exchange`) and forgetting one (`/item/remove`).
 //! ArkOS's `cli/plaid.rs`, answering in the domain's types
-//! (`money_core::plaid`), which read Plaid's JSON as it comes.
+//! (`money_core::plaid`), which read Plaid's JSON as it comes. It is the
+//! importer's [`BankFeed`] adapter (`crate::feed`): the importer asks the
+//! port, never this client by name.
 //!
 //! **Nothing secret is ever said.** The client id and the secret travel as
 //! headers and the access token in the body; none of them is in a URL, an
@@ -18,81 +20,8 @@ use money_core::plaid::{PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-/// What Plaid said instead of an answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlaidError {
-    /// Plaid answered with an error object: its `error_code`
-    /// (`ITEM_LOGIN_REQUIRED`), `error_type` and message.
-    Api { code: String, kind: String, message: String },
-    /// No answer, or one that could not be read.
-    Transport(String),
-}
-
-impl PlaidError {
-    pub fn code(&self) -> Option<&str> {
-        match self {
-            PlaidError::Api { code, .. } => Some(code),
-            PlaidError::Transport(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for PlaidError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PlaidError::Api { code, kind, message } => write!(f, "plaid: {kind}/{code}: {message}"),
-            PlaidError::Transport(why) => write!(f, "plaid: {why}"),
-        }
-    }
-}
-
-impl std::error::Error for PlaidError {}
-
-pub type Res<T> = Result<T, PlaidError>;
-
-/// An item's accounts, and the institution it is at when Plaid said.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Item {
-    pub accounts: Vec<PlaidAccount>,
-    pub institution_id: Option<String>,
-    pub item_id: Option<String>,
-}
-
-/// What a Hosted Link page is for.
-pub enum LinkMode {
-    /// A new bank, and this many days of its history.
-    New { days: u32 },
-    /// The item behind this access token, logged in to again.
-    Update(String),
-    /// The item behind this access token, with Plaid's account picker:
-    /// accounts it did not share before shared now.
-    AddAccounts(String),
-}
-
-/// A Hosted Link page: its address for the person, and the link token the
-/// importer asks after it by (held in memory only).
-pub struct LinkSession {
-    pub url: String,
-    link_token: String,
-}
-
-impl fmt::Debug for LinkSession {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LinkSession").field("url", &self.url).finish_non_exhaustive()
-    }
-}
-
-/// Where a Hosted Link page stands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Linking {
-    /// Nobody has finished it yet.
-    Open,
-    /// Finished, with a public token to exchange for a new bank's login
-    /// (none in update mode).
-    Connected(Option<String>),
-    /// Ended without connecting anything, and why when Plaid said.
-    Exited(Option<String>),
-}
+use crate::feed::BankFeed;
+pub use crate::feed::{FeedError as PlaidError, Item, LinkMode, LinkSession, Linking, Res};
 
 /// One page of `/transactions/sync`.
 #[derive(Deserialize)]
@@ -159,9 +88,11 @@ impl Plaid {
             Err(e) => Err(transport(&e)),
         }
     }
+}
 
+impl BankFeed for Plaid {
     /// An item's accounts, with their balances.
-    pub fn accounts(&self, access_token: &str) -> Res<Item> {
+    fn accounts(&self, access_token: &str) -> Res<Item> {
         #[derive(Deserialize)]
         struct Reply {
             accounts: Vec<PlaidAccount>,
@@ -181,7 +112,7 @@ impl Plaid {
     /// the person's browser and there is no redirect to register. `days`
     /// of history for a new bank; an item's token for Plaid's update mode,
     /// where its login is given again, or its accounts picked again.
-    pub fn link_create(&self, mode: &LinkMode, lifetime_s: u64) -> Res<LinkSession> {
+    fn link_create(&self, mode: &LinkMode, lifetime_s: u64) -> Res<LinkSession> {
         let mut body = json!({
             "client_name": "money",
             "language": "en",
@@ -206,15 +137,12 @@ impl Plaid {
             hosted_link_url: String,
         }
         let r: Reply = self.call("/link/token/create", body)?;
-        Ok(LinkSession {
-            url: r.hosted_link_url,
-            link_token: r.link_token,
-        })
+        Ok(LinkSession::new(r.hosted_link_url, r.link_token))
     }
 
     /// Where a Hosted Link session stands.
-    pub fn link_get(&self, session: &LinkSession) -> Res<Linking> {
-        let r: Value = self.call("/link/token/get", json!({ "link_token": session.link_token }))?;
+    fn link_get(&self, session: &LinkSession) -> Res<Linking> {
+        let r: Value = self.call("/link/token/get", json!({ "link_token": session.token() }))?;
         let sessions = r["link_sessions"].as_array().cloned().unwrap_or_default();
         let Some(done) = sessions.iter().find(|s| !s["finished_at"].is_null()) else {
             return Ok(Linking::Open);
@@ -240,7 +168,7 @@ impl Plaid {
 
     /// A public token from Link traded for the item's access token, and
     /// the item's id.
-    pub fn exchange(&self, public_token: &str) -> Res<(String, String)> {
+    fn exchange(&self, public_token: &str) -> Res<(String, String)> {
         #[derive(Deserialize)]
         struct Reply {
             access_token: String,
@@ -252,13 +180,13 @@ impl Plaid {
     }
 
     /// Plaid told to forget an item: its token works no more.
-    pub fn remove(&self, access_token: &str) -> Res<()> {
+    fn remove(&self, access_token: &str) -> Res<()> {
         let _: Value = self.call("/item/remove", json!({ "access_token": access_token }))?;
         Ok(())
     }
 
     /// An institution's name, as people know it ("Chase").
-    pub fn institution(&self, id: &str) -> Res<String> {
+    fn institution(&self, id: &str) -> Res<String> {
         let r: Value = self.call("/institutions/get_by_id", json!({ "institution_id": id, "country_codes": ["US"] }))?;
         r["institution"]["name"]
             .as_str()
@@ -271,7 +199,7 @@ impl Plaid {
     /// the last; the cursor moves only once every page is read, as Plaid
     /// asks. None while Plaid has not finished an item's first pull: the
     /// next run picks it up.
-    pub fn pull(&self, access_token: &str, cursor: Option<&str>, days: u32) -> Res<Option<Pulled>> {
+    fn pull(&self, access_token: &str, cursor: Option<&str>, days: u32) -> Res<Option<Pulled>> {
         let start = cursor.filter(|c| !c.is_empty()).map(str::to_string);
         let mut restarts = 0;
         loop {

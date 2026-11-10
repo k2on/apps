@@ -1,6 +1,9 @@
 //! §1.2 and §1.3 held: constraints refuse, every change inverts exactly,
 //! the incremental state hash is the hash of the rows, the schema is in
 //! it, a volatile table is not, and the compat check is a prefix check.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 #[path = "demo.rs"]
 mod demo;

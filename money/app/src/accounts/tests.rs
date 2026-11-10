@@ -1,6 +1,6 @@
 use super::*;
 use ark_app::Modules;
-use ark_app::{Host, Inbox, ModuleCall, Runtime, Ticket};
+use ark_app::{Ask, Host, Inbox, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer;
 
@@ -11,9 +11,9 @@ pub(crate) struct Demo {
     pub haptics: ark_haptics::fake::Fake,
     pub clipboard: ark_clipboard::fake::Fake,
     pub modules: Modules,
-    pub inbox: Inbox,
+    pub inbox: Inbox<AccountsMsg>,
     pub opened: Vec<Route>,
-    pub native: Vec<String>,
+    pub requests: Vec<crate::MoneyRequest>,
 }
 
 /// 2026-10-26, noon UTC.
@@ -40,7 +40,7 @@ impl Demo {
             modules,
             inbox: Inbox::default(),
             opened: vec![],
-            native: vec![],
+            requests: vec![],
         }
     }
 
@@ -64,11 +64,11 @@ impl Host<Accounts> for Demo {
     fn open(&mut self, route: Route) {
         self.opened.push(route)
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.modules, ticket, call)
+    fn ask(&mut self, ticket: Ticket, ask: Ask<AccountsMsg>) {
+        self.inbox.ask(&self.modules, ticket, ask)
     }
-    fn native(&mut self, name: &str) {
-        self.native.push(name.into())
+    fn request(&mut self, r: crate::MoneyRequest) {
+        self.requests.push(r)
     }
 }
 
@@ -224,7 +224,7 @@ fn copy_balance_and_refresh_reach_the_device_and_the_shell() {
     let a = d.accounts()[0].clone();
     run(&mut rt, &mut d, [AccountsMsg::CopyBalance { id: a.id.hex() }, AccountsMsg::Refresh]);
     assert_eq!(d.clipboard.copied(), vec![ark_format::amount(a.balance, &NumberStyle::us())]);
-    assert_eq!(d.native, vec!["refresh"]);
+    assert_eq!(d.requests, vec![crate::MoneyRequest::Refresh]);
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn reconcile_asks_the_shell_for_an_open_account() {
     let mut rt = Runtime::<Accounts>::new();
     let a = d.accounts().iter().find(|a| !a.closed).unwrap().id.hex();
     run(&mut rt, &mut d, [AccountsMsg::Reconcile { id: a.clone() }]);
-    assert_eq!(d.native, vec![format!("reconcile {a}")]);
+    assert_eq!(d.requests, vec![crate::MoneyRequest::Reconcile { account: a.clone() }]);
     let p = rt.screen(&d);
     let row = p.shelves.iter().flat_map(|s| &s.accounts).find(|r| r.id == a).unwrap();
     assert!(row.is_open);

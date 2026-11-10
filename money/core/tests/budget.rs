@@ -1,6 +1,9 @@
 //! The budget's rules, on a household's month: money in is ready to
 //! assign, a category keeps what it was given until it is spent, and
 //! overspending is paid for by the month after.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

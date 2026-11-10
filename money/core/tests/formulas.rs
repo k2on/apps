@@ -3,6 +3,9 @@
 //! to in the month — from the month the formula is set on (every month
 //! before keeps what was typed), and that amount counted everywhere a
 //! typed one would be. And the phones' old `set_rule`, kept as a formula.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

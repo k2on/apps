@@ -10,7 +10,8 @@ mod common;
 
 use common::*;
 use money_core::*;
-use money_server::importer::Outcome;
+use money_server::importer::{Banks, Outcome};
+use std::time::Duration;
 
 /// Every transaction the hub holds, as the check compares them: date,
 /// payee, amount, whether it cleared, the bank's id.
@@ -236,4 +237,75 @@ fn no_secret_is_ever_said() {
     // Nor is one in the log.
     assert!(!leaked(&server, "access-"), "a token is in the log");
     rt.block_on(server.stop());
+}
+
+/// The importer asks its banks through the `BankFeed` port, so a feed in
+/// memory stands in for Plaid: the first run pulls from the start and
+/// keeps the cursor the feed gave, the next asks from it and changes
+/// nothing, and a token the feed does not know fails that bank alone.
+/// Falsified by an importer that still named Plaid's client: no keys
+/// are written here, so it could not read them and no run would import.
+#[test]
+fn the_importer_asks_its_feed_not_plaid() {
+    use money_core::plaid::{Balances, PlaidAccount, PlaidTransaction, Pulled};
+    use money_server::feed::{Item, Memory, MemoryBank};
+    let rt = runtime();
+    let data = tempfile::tempdir().unwrap();
+    let memory = Memory::new();
+    let checking = PlaidAccount {
+        account_id: "acc1".into(),
+        name: "Plaid Checking".into(),
+        mask: Some("0000".into()),
+        kind: "depository".into(),
+        subtype: Some("checking".into()),
+        balances: Balances { current: Some(923.5) },
+    };
+    let coffee = PlaidTransaction {
+        transaction_id: "T1".into(),
+        account_id: "acc1".into(),
+        amount: 50.25,
+        date: "2026-09-20".into(),
+        name: "COFFEE SHOP #12".into(),
+        merchant_name: Some("Coffee Shop".into()),
+        original_description: None,
+        pending: false,
+        pending_transaction_id: None,
+    };
+    let mut bank = MemoryBank {
+        item: Item {
+            accounts: vec![checking],
+            ..Item::default()
+        },
+        ..MemoryBank::default()
+    };
+    let first = Pulled {
+        added: vec![coffee],
+        cursor: "m1".into(),
+        ..Pulled::default()
+    };
+    bank.pages.insert(None, first);
+    bank.pages.insert(
+        Some("m1".into()),
+        Pulled {
+            cursor: "m1".into(),
+            ..Pulled::default()
+        },
+    );
+    memory.bank(TOKEN, bank);
+    connect(data.path(), &[("chase", TOKEN, None), ("gone", "no-such-token", None)]);
+    let banks = Banks {
+        poll: Duration::from_millis(50),
+        feed: Some(memory.feed()),
+        ..Banks::new("http://127.0.0.1:9", "no-id".into(), "no-secret".into())
+    };
+    let server = serve(&rt, data.path(), |c| c.banks = Some(banks));
+
+    let r = runs(&server, 1);
+    assert_eq!(r[0].banks["chase"], Outcome::Imported { upserts: 1, removed: 0 });
+    assert!(matches!(r[0].banks["gone"], Outcome::Failed(_)), "{:?}", r[0].banks["gone"]);
+    assert_eq!(cursor(data.path()).as_deref(), Some("m1"));
+    server.importer.as_ref().unwrap().nudge();
+    let r = runs(&server, 2);
+    assert_eq!(r[1].banks["chase"], Outcome::Imported { upserts: 0, removed: 0 });
+    assert_eq!(memory.cursors(), [None, Some("m1".to_string())]);
 }

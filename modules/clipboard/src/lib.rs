@@ -1,5 +1,5 @@
 //! The clipboard: text put where the person can paste it. An update asks
-//! with [`copy`]; the module answers `Done`.
+//! with [`copy`], a [`ClipboardOp`] whose output is `()`.
 //!
 //! - iPhone and Mac: `PhoneClipboard` (swift/: UIPasteboard, NSPasteboard).
 //! - Android: `PhoneClipboard` (kotlin/: ClipboardManager).
@@ -8,9 +8,7 @@
 //! - The browser's DOM (feature `web`, wasm32): [`Browser`], the page's
 //!   `navigator.clipboard`.
 
-use std::sync::Arc;
-
-use ark_module::{Call, ModuleAnswer, ModuleCall, ModuleReply};
+use ark_module::{Op, Reply};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
@@ -25,24 +23,25 @@ pub trait Clipboard: Send + Sync {
 
 /// What an update asks of the clipboard.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ClipboardCall {
+pub enum ClipboardOp {
     Copy(String),
 }
 
-impl Call for ClipboardCall {
+impl Op for ClipboardOp {
     type Module = dyn Clipboard;
+    type Output = ();
     const MODULE: &'static str = "clipboard";
-    fn run(&self, m: &dyn Clipboard, reply: Arc<ModuleReply>) {
+    fn run(&self, m: &dyn Clipboard, reply: Reply<()>) {
         match self {
-            ClipboardCall::Copy(t) => m.copy_text(t.clone()),
+            ClipboardOp::Copy(t) => m.copy_text(t.clone()),
         }
-        reply.answer(ModuleAnswer::Done)
+        reply.done(())
     }
 }
 
 /// `text` put on the clipboard.
-pub fn copy(text: impl Into<String>) -> ModuleCall {
-    ClipboardCall::Copy(text.into()).into()
+pub fn copy(text: impl Into<String>) -> ClipboardOp {
+    ClipboardOp::Copy(text.into())
 }
 
 #[cfg(feature = "desktop")]
@@ -107,7 +106,7 @@ mod tests {
         let fake = fake::Fake::new();
         let mut m = Modules::new();
         fake.register(&mut m);
-        m.call(copy("$12.00"), |a| assert_eq!(a, ModuleAnswer::Done));
+        m.run(&copy("$12.00"), |a| assert_eq!(a, Ok(())));
         assert_eq!(fake.copied(), vec!["$12.00".to_string()]);
     }
 
@@ -116,8 +115,8 @@ mod tests {
     fn the_desktop_queues_for_the_window() {
         let q = Queued::new();
         let mut m = Modules::new();
-        m.register::<dyn Clipboard>(Arc::new(q.clone()));
-        m.call(copy("a"), |_| {});
+        m.register::<dyn Clipboard>(std::sync::Arc::new(q.clone()));
+        m.run(&copy("a"), |_| {});
         assert_eq!(q.take(), vec!["a".to_string()]);
         assert!(q.take().is_empty());
     }

@@ -1,5 +1,8 @@
 //! The tree of categories, split transactions, and receipts: a store's
 //! items filed under the tree, and splitting what paid for them.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

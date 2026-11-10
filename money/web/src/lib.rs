@@ -21,7 +21,10 @@
 //! `?popover=<id>` for a field's popover, `?today=2026-11-10` for the day
 //! the demo is seeded to.
 
-use ark_app::{Host, ModuleCall, Runtime, Ticket};
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+
+use ark_app::{Ask, Host, Modules, Runtime, Ticket};
 use ark_peer::store::Store;
 use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
@@ -29,6 +32,7 @@ use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
 use money_app::shell::view::{commands, money_shell};
 use money_app::shell::{MoneyShell, ShellMsg};
+use money_app::MoneyRequest;
 use money_core::dates::{add_months, days_from_civil, parse_day};
 use money_core::*;
 
@@ -230,13 +234,22 @@ impl MoneyWeb {
     }
 
     fn shell_step(&mut self, msg: ShellMsg) {
+        let searching = matches!(msg, ShellMsg::Search { .. } | ShellMsg::ShowActivity);
+        let launching = matches!(msg, ShellMsg::Launch { .. });
         let mut rt = std::mem::take(&mut self.shell);
-        let mut desk = Desk { app: self, natives: vec![] };
+        let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
+        desk.answer(&mut rt);
         let natives = std::mem::take(&mut desk.natives);
         self.shell = rt;
+        if searching {
+            self.search = self.shell.state().search.clone();
+        }
+        if launching {
+            self.appearance();
+        }
         for n in natives {
-            self.native(&n);
+            self.carry(n);
         }
         self.follow_shell();
     }
@@ -256,7 +269,7 @@ impl MoneyWeb {
         if let Some(key) = transaction {
             self.txn = money_app::shell::inspect::transaction_named(screens::all_txns(self), &key).map(|t| t.id);
             let mut rt = std::mem::take(&mut self.shell);
-            let mut desk = Desk { app: self, natives: vec![] };
+            let mut desk = Desk::new(self);
             rt.dispatch(ShellMsg::InspectTransaction { id: None }, &mut desk);
             self.shell = rt;
         }
@@ -264,91 +277,130 @@ impl MoneyWeb {
 
     fn budget_step(&mut self, msg: BudgetMsg) {
         let mut rt = std::mem::take(&mut self.budget);
-        let mut desk = Desk { app: self, natives: vec![] };
+        let mut desk = Desk::new(self);
         if rt.state().month != desk.app.month {
             let month = desk.app.month.clone();
             rt.dispatch(BudgetMsg::Month { month }, &mut desk);
         }
         rt.dispatch(msg, &mut desk);
+        desk.answer(&mut rt);
         let natives = std::mem::take(&mut desk.natives);
         self.budget = rt;
         for n in natives {
-            self.native(&n);
+            self.carry(n);
         }
     }
 
     fn accounts_step(&mut self, msg: AccountsMsg) {
         let mut rt = std::mem::take(&mut self.accounts);
-        let mut desk = Desk { app: self, natives: vec![] };
+        let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
+        desk.answer(&mut rt);
         let natives = std::mem::take(&mut desk.natives);
         self.accounts = rt;
         for n in natives {
-            self.native(&n);
+            self.carry(n);
         }
     }
 
-    /// What the shell asked of this page's own screens, by name.
-    fn native(&mut self, name: &str) {
-        let (word, rest) = name.split_once(' ').unwrap_or((name, ""));
-        match word {
-            "new-transaction" => self.update(Msg::NewTxn),
-            "new-account" => self.accounts_step(AccountsMsg::Add),
-            "previous-month" => self.update(Msg::Month(-1)),
-            "next-month" => self.update(Msg::Month(1)),
-            "this-month" => self.update(Msg::ThisMonth),
-            "auto-assign" => self.budget_step(BudgetMsg::AutoAssign),
-            "new-category" => self.budget_step(BudgetMsg::NewCategory { group: String::new() }),
-            "new-group" => self.budget_step(BudgetMsg::NewGroup),
-            "toggle-hidden" => self.budget_step(BudgetMsg::ToggleHidden),
-            "inspect" => {
-                let found = screens::lines(self).iter().find(|l| l.category_id.hex() == rest).map(|l| l.category_id);
-                self.update(Msg::Category(found));
+    /// What money's runtimes asked of this page ([`MoneyRequest`]), or
+    /// what its host made of a route.
+    fn carry(&mut self, p: Pending) {
+        let r = match p {
+            Pending::Select(tag) => return self.shell_step(ShellMsg::Select { tag }),
+            Pending::Inspect(id) => {
+                let found = screens::lines(self).iter().find(|l| l.category_id.hex() == id).map(|l| l.category_id);
+                return self.update(Msg::Category(found));
             }
-            "refresh" => {
+            Pending::Request(r) => r,
+        };
+        match r {
+            MoneyRequest::NewTransaction => self.update(Msg::NewTxn),
+            MoneyRequest::Accounts { msg } => self.accounts_step(msg),
+            MoneyRequest::Budget { msg } => self.budget_step(msg),
+            MoneyRequest::StepMonth { by } => self.update(Msg::Month(by.into())),
+            MoneyRequest::ThisMonth => self.update(Msg::ThisMonth),
+            MoneyRequest::Refresh => {
                 let _ = self.change(MoneyChange::Sync);
             }
-            "filter" | "review" => self.review = !self.review || word == "review",
-            "find" => {
-                self.shell_step(ShellMsg::Select { tag: "transactions".into() });
-            }
-            "search" => self.search = rest.to_string(),
-            "open-category" => {
-                let n = rest.to_lowercase();
+            MoneyRequest::Filter => self.review = !self.review,
+            MoneyRequest::Review => self.review = true,
+            // The browser's reconcile and receipt import are still to come.
+            MoneyRequest::Reconcile { .. } | MoneyRequest::ImportReceipt => {}
+            MoneyRequest::OpenCategory { key } => {
+                let n = key.to_lowercase();
                 let found = screens::lines(self)
                     .iter()
                     .find(|l| l.name.to_lowercase().contains(&n))
                     .map(|l| l.category_id);
                 self.category = found;
             }
-            "open-transaction" => {
+            MoneyRequest::OpenTransaction { key } => {
                 // `receipt`: the first with a receipt (the reference's word);
                 // else by its payee or its id.
-                let n = rest.to_lowercase();
+                let n = key.to_lowercase();
                 let found = screens::all_txns(self)
                     .iter()
                     .find(|t| match n.as_str() {
                         "receipt" => !t.receipt.is_empty() || t.photos > 0,
-                        _ => t.payee.to_lowercase().contains(&n) || t.id.hex() == rest,
+                        _ => t.payee.to_lowercase().contains(&n) || t.id.hex() == key,
                     })
                     .map(|t| t.id);
                 self.txn = found;
             }
-            "settings" => {
+            MoneyRequest::Settings { pane } => {
                 self.settings = true;
-                if !rest.is_empty() {
-                    self.shell_step(ShellMsg::Pane { title: rest.to_string() });
+                if !pane.is_empty() {
+                    self.shell_step(ShellMsg::Pane { title: pane });
                 }
             }
-            "appearance" if cfg!(target_arch = "wasm32") => {
-                if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-                    let _ = root.set_attribute("data-theme", rest);
-                }
-            }
-            "select" => self.shell_step(ShellMsg::Select { tag: rest.to_string() }),
-            _ => {}
         }
     }
+
+    /// Whether nothing is left to come on the page: no runtime waits on
+    /// an operation and each holds every view it needs
+    /// (`Runtime::is_idle`); with [`MoneyWeb::version`] unchanged, what a
+    /// screenshot driver waits for.
+    pub fn is_idle(&self) -> bool {
+        self.shell.is_idle(&self.store) && self.budget.is_idle(&self.store) && self.accounts.is_idle(&self.store)
+    }
+
+    /// The runtimes' versions summed: grows with every message any took.
+    pub fn version(&self) -> u64 {
+        self.shell.version() + self.budget.version() + self.accounts.version()
+    }
+
+    /// The ready signal on the page's root, read by the screenshot
+    /// drivers (ui/docs/app.md, Effects and Ports): `data-ark-idle` is `1`
+    /// once nothing is left to come, `data-ark-version` the version drawn.
+    fn say_idle(&self) {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
+            let _ = root.set_attribute("data-ark-idle", if self.is_idle() { "1" } else { "0" });
+            let _ = root.set_attribute("data-ark-version", &self.version().to_string());
+        }
+    }
+
+    /// The appearance the shell says, over the system's.
+    fn appearance(&self) {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(a) = self.shell.state().appearance {
+            use money_app::shell::Appearance;
+            if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
+                let _ = root.set_attribute("data-theme", if a == Appearance::Dark { "dark" } else { "light" });
+            }
+        }
+    }
+}
+
+/// What the page's host made of a command, carried out after the message.
+enum Pending {
+    /// A section shown, by its tag.
+    Select(String),
+    /// A category's month in Category Details, by its hex id.
+    Inspect(String),
+    /// What a runtime asked.
+    Request(MoneyRequest),
 }
 
 /// What the address's path says after the section, each a key and its
@@ -482,10 +534,44 @@ fn dates_ok(month: &str) -> bool {
 /// The page as the runtimes' host for one message.
 struct Desk<'a> {
     app: &'a mut MoneyWeb,
-    natives: Vec<String>,
+    natives: Vec<Pending>,
+    /// What the operations asked became, each its runtime's message
+    /// (`Option<A::Msg>`), handed back after the message ([`Desk::answer`]).
+    answered: Arc<Mutex<Answered>>,
 }
 
-impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route>> Host<A> for Desk<'_> {
+/// Each ticket and what its operation became, its type its runtime's.
+type Answered = Vec<(Ticket, Box<dyn Any + Send>)>;
+
+impl<'a> Desk<'a> {
+    fn new(app: &'a mut MoneyWeb) -> Desk<'a> {
+        Desk {
+            app,
+            natives: vec![],
+            answered: Arc::default(),
+        }
+    }
+
+    /// Every operation's answer taken into `rt`, so it waits on none.
+    fn answer<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>>(
+        &mut self,
+        rt: &mut Runtime<A>,
+    ) {
+        loop {
+            let answered = std::mem::take(&mut *self.answered.lock().unwrap_or_else(|e| e.into_inner()));
+            if answered.is_empty() {
+                return;
+            }
+            for (t, m) in answered {
+                if let Ok(m) = m.downcast::<Option<A::Msg>>() {
+                    rt.answer(t, *m, self);
+                }
+            }
+        }
+    }
+}
+
+impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>> Host<A> for Desk<'_> {
     fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
         f(&self.app.store)
     }
@@ -499,27 +585,35 @@ impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::R
         use money_app::Route as R;
         let tag = match route {
             R::Budget => Some("budget".to_string()),
-            R::Reflect => Some("insights".into()),
+            R::Insights => Some("insights".into()),
             R::Accounts | R::Inbox | R::Filtered | R::Filter { .. } => Some("transactions".into()),
             R::Account { id, .. } => Some(money_app::shell::account_tag(&id)),
             // A category's month: Category Details, beside the budget.
             R::Category { id, .. } => {
-                self.natives.push(format!("inspect {id}"));
+                self.natives.push(Pending::Inspect(id));
                 None
             }
             R::Settings | R::Banks | R::Bank { .. } => {
-                self.natives.push("settings Connected Banks".into());
+                self.natives.push(Pending::Request(MoneyRequest::Settings {
+                    pane: "Connected Banks".into(),
+                }));
                 None
             }
             _ => None,
         };
         if let Some(tag) = tag {
-            self.natives.push(format!("select {tag}"));
+            self.natives.push(Pending::Select(tag));
         }
     }
-    fn ask(&mut self, _: Ticket, _: ModuleCall) {}
-    fn native(&mut self, name: &str) {
-        self.natives.push(name.into());
+    fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
+        // The page registers no module yet: answered Unavailable.
+        let answered = self.answered.clone();
+        ask.run(&Modules::new(), move |m| {
+            answered.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, Box::new(m)))
+        })
+    }
+    fn request(&mut self, r: MoneyRequest) {
+        self.natives.push(Pending::Request(r));
     }
 }
 
@@ -527,6 +621,7 @@ impl WebApp for MoneyWeb {
     type Msg = Msg;
 
     fn view(&self) -> AnyView {
+        self.say_idle();
         if let Some(live) = self.live.as_ref().filter(|l| !l.running()) {
             return self.welcome(live);
         }

@@ -3,6 +3,9 @@
 //! pull with a pending transaction and one typed in by hand first, that
 //! transaction posting with another amount while another is modified, and
 //! nothing new. The Plaid answers are the mock's, as JSON.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

@@ -1,40 +1,39 @@
-//! What every device module shares, the way Expo's modules core does it:
-//! the plumbing, and no module. Each module is a package of its own under
-//! `modules/<name>` (`ark-haptics`, `ark-clipboard`, `ark-share`,
-//! `ark-camera`, `ark-media-player`, `ark-notifications`,
-//! `ark-secure-store`): its trait, its calls, its fake, its desktop and web
-//! implementations in Rust, its Swift and Kotlin ones beside the crate, and
-//! a README of what it does on each platform and the permissions it needs
-//! (ui/docs/app.md, The Device).
+//! What every device module shares: the plumbing, and no module. Each
+//! module is a package of its own under `modules/<name>` (`ark-haptics`,
+//! `ark-clipboard`, `ark-share`, `ark-camera`, `ark-media-player`,
+//! `ark-notifications`, `ark-secure-store`): its trait, its operations, its
+//! fake, its desktop and web implementations in Rust, its Swift and Kotlin
+//! ones beside the crate, and a README of what it does on each platform and
+//! the permissions it needs (ui/docs/app.md, Effects and Ports).
 //!
 //! What is here:
 //!
-//! - [`ModuleCall`] — one thing an update asks of the device, as data: a
-//!   module's own call (a type implementing [`Call`]) behind one type the
-//!   runtime carries, compares and prints. An app's `update` (`ark_app`)
-//!   never calls a module itself: it returns a call, the runtime hands it
-//!   to the [`Modules`] the shell registered, and the answer comes back.
-//! - [`ModuleAnswer`] — what came of a call, in the few shapes every
-//!   module answers in: done, a text, some bytes, unavailable, failed.
-//!   `ark_app` turns it into the app's message (`Command::Ask`'s `then`, a
-//!   plain function pointer), so an update is a pure function a test runs
-//!   over the modules' fakes.
-//! - [`ModuleReply`] — where a module that answers later (the camera, when the
-//!   person is done) says what came of a call, once. Under `ffi` it is a
-//!   UniFFI object the Swift and Kotlin implementations are handed.
+//! - [`Op`] — one thing an update asks of the device, as data, with the
+//!   type of what comes of it: a haptic's [`Op::Output`] is `()`, a QR
+//!   scan's the code read, a photo's its JPEG. Each module declares its
+//!   operations (an enum or a struct each) and their outputs, and lists
+//!   them in its `module.toml`'s `[ops]` (ui/prebuild.py checks the two
+//!   agree). An app's `update` (`ark_app`) never runs one: it returns it,
+//!   the runtime hands it to the [`Modules`] the shell registered, and
+//!   what came of it comes back typed.
+//! - [`ModuleError`] — why an operation gave nothing: the module is not
+//!   there, or it failed in the platform's words.
+//! - [`Reply`] — where a module that answers later (the camera, when the
+//!   person is done) says what came of an operation, once.
 //! - [`Modules`] — the registry a shell fills at startup, one trait object
-//!   per module, looked up by the module's trait. A call to a module that
-//!   is not registered (haptics on the desktop) is answered
-//!   [`ModuleAnswer::Unavailable`].
+//!   per module, looked up by the module's trait. An operation of a module
+//!   that is not registered (haptics on the desktop) is answered
+//!   [`ModuleError::Unavailable`].
 //!
-//! The UniFFI foreign-trait pattern: under its `ffi` feature each module
-//! crate marks its trait `#[uniffi::export(with_foreign)]` (harken's
-//! `PhoneSound` pattern), so Swift and Kotlin classes implement the
-//! protocol or interface UniFFI writes, and an app's ffi crate takes them
-//! (`Option<Arc<dyn Haptics>>`) and registers them here. Events a module
-//! sends on its own (a player's position) go through a listener trait of
-//! the module's, which the app's ffi crate implements and turns into
-//! messages (ark-media-player's `MediaListener`).
+//! Under its `ffi` feature each module crate marks its trait
+//! `#[uniffi::export(with_foreign)]`, so Swift and Kotlin classes implement
+//! the protocol or interface UniFFI writes, and an app's ffi crate takes
+//! them (`Option<Arc<dyn Haptics>>`) and registers them here. A module that
+//! answers later hands its foreign implementation a typed reply object of
+//! its own (the camera's `ScanReply` and `PhotoReply`), so what Swift and
+//! Kotlin answer is the operation's output, not a shape shared by all.
+//! Events a module sends on its own (a player's position) go through a
+//! listener trait of the module's (ark-media-player's `MediaListener`).
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -44,135 +43,87 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
-// * The answers
+// * What came of an operation
 
-/// What came of a call.
-#[derive(Clone, Debug, PartialEq)]
+/// Why an operation gave nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum ModuleAnswer {
-    /// It was done (or, for a haptic, asked: nothing says whether it was felt).
-    Done,
-    /// A text: what a scan read, a secret kept. None when the person
-    /// backed out or nothing was there.
-    Text { value: Option<String> },
-    /// Some bytes: a photo's JPEG. None when the person backed out.
-    Bytes { value: Option<Vec<u8>> },
+pub enum ModuleError {
     /// The platform has no such module, or it is not registered.
     Unavailable,
     /// It failed, in the platform's words.
     Failed { why: String },
 }
 
-// * The calls
+impl fmt::Display for ModuleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModuleError::Unavailable => f.write_str("not available here"),
+            ModuleError::Failed { why } => f.write_str(why),
+        }
+    }
+}
 
-/// One module's call: what it asks, and how its module carries it out.
-/// A module crate's calls are an enum of its own that implements this.
-pub trait Call: Debug + PartialEq + Send + Sync + 'static {
+/// What came of an operation whose output is `T`.
+pub type Answer<T> = Result<T, ModuleError>;
+
+// * The operations
+
+/// One module's operation: what it asks, what comes of it, and how its
+/// module carries it out.
+pub trait Op: Debug + PartialEq + Send + Sync + 'static {
     /// The module's trait object, as registered (`dyn Haptics`).
     type Module: ?Sized + Send + Sync + 'static;
+    /// What comes of it: `()` for a haptic, the code a scan read.
+    type Output: Debug + Send + 'static;
     /// The module's name, for what is printed.
     const MODULE: &'static str;
     /// `self` carried out by `module`; what came of it to `reply`, now or
     /// later, once.
-    fn run(&self, module: &Self::Module, reply: Arc<ModuleReply>);
-}
-
-/// A call with its type erased: what [`ModuleCall`] holds.
-trait Erased: Send + Sync {
-    fn run(&self, modules: &Modules, reply: Arc<ModuleReply>);
-    fn module(&self) -> &'static str;
-    fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
-    fn same(&self, other: &dyn Erased) -> bool;
-    fn as_any(&self) -> &dyn Any;
-}
-
-impl<C: Call> Erased for C {
-    fn run(&self, modules: &Modules, reply: Arc<ModuleReply>) {
-        match modules.get::<C::Module>() {
-            Some(m) => Call::run(self, &*m, reply),
-            None => reply.answer(ModuleAnswer::Unavailable),
-        }
-    }
-    fn module(&self) -> &'static str {
-        C::MODULE
-    }
-    fn debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Debug::fmt(self, f)
-    }
-    fn same(&self, other: &dyn Erased) -> bool {
-        other.as_any().downcast_ref::<C>() == Some(self)
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-/// One thing an update asks of the device: any module's call.
-#[derive(Clone)]
-pub struct ModuleCall(Arc<dyn Erased>);
-
-impl ModuleCall {
-    pub fn new(call: impl Call) -> ModuleCall {
-        ModuleCall(Arc::new(call))
-    }
-
-    /// The module it is for (`"haptics"`).
-    pub fn module(&self) -> &'static str {
-        self.0.module()
-    }
-
-    /// The call, as its module's own type, when it is one.
-    pub fn get<C: Call>(&self) -> Option<&C> {
-        self.0.as_any().downcast_ref()
-    }
-}
-
-impl<C: Call> From<C> for ModuleCall {
-    fn from(c: C) -> ModuleCall {
-        ModuleCall::new(c)
-    }
-}
-
-impl Debug for ModuleCall {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.debug(f)
-    }
-}
-
-impl PartialEq for ModuleCall {
-    fn eq(&self, other: &ModuleCall) -> bool {
-        self.0.same(&*other.0)
-    }
+    fn run(&self, module: &Self::Module, reply: Reply<Self::Output>);
 }
 
 // * Answering later
 
 /// What a reply hands its answer to.
-type Answering = Box<dyn FnOnce(ModuleAnswer) + Send>;
+type Answering<T> = Box<dyn FnOnce(Answer<T>) + Send>;
 
-/// Where a module says what came of a call, once.
-#[cfg_attr(feature = "ffi", derive(uniffi::Object))]
-pub struct ModuleReply {
-    to: Mutex<Option<Answering>>,
+/// Where a module says what came of an operation, once: only the first
+/// answer is heard. A clone is the same reply.
+pub struct Reply<T> {
+    to: Arc<Mutex<Option<Answering<T>>>>,
 }
 
-impl ModuleReply {
-    /// A reply that hands its answer to `to`.
-    pub fn new(to: impl FnOnce(ModuleAnswer) + Send + 'static) -> Arc<ModuleReply> {
-        Arc::new(ModuleReply {
-            to: Mutex::new(Some(Box::new(to))),
-        })
+impl<T> Clone for Reply<T> {
+    fn clone(&self) -> Self {
+        Reply { to: self.to.clone() }
     }
 }
 
-#[cfg_attr(feature = "ffi", uniffi::export)]
-impl ModuleReply {
-    /// What came of the call; only the first answer is heard.
-    pub fn answer(&self, answer: ModuleAnswer) {
+impl<T> Reply<T> {
+    /// A reply that hands its answer to `to`.
+    pub fn new(to: impl FnOnce(Answer<T>) + Send + 'static) -> Reply<T> {
+        Reply {
+            to: Arc::new(Mutex::new(Some(Box::new(to)))),
+        }
+    }
+
+    /// What came of the operation.
+    pub fn answer(&self, answer: Answer<T>) {
         let to = self.to.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(to) = to {
             to(answer)
         }
+    }
+
+    /// It was done, and this came of it.
+    pub fn done(&self, output: T) {
+        self.answer(Ok(output))
+    }
+
+    /// It failed, in the platform's words.
+    pub fn failed(&self, why: impl Into<String>) {
+        self.answer(Err(ModuleError::Failed { why: why.into() }))
     }
 }
 
@@ -213,10 +164,14 @@ impl Modules {
         self.by.get(&TypeId::of::<M>())?.downcast_ref::<Arc<M>>().cloned()
     }
 
-    /// `call` carried out by the module registered for it; what came of it
-    /// handed to `reply`, at once or (the camera) when the person is done.
-    pub fn call(&self, call: ModuleCall, reply: impl FnOnce(ModuleAnswer) + Send + 'static) {
-        call.0.run(self, ModuleReply::new(reply))
+    /// `op` carried out by the module registered for it; what came of it
+    /// handed to `answer`, at once or (the camera) when the person is done.
+    pub fn run<O: Op>(&self, op: &O, answer: impl FnOnce(Answer<O::Output>) + Send + 'static) {
+        let reply = Reply::new(answer);
+        match self.get::<O::Module>() {
+            Some(m) => op.run(&*m, reply),
+            None => reply.answer(Err(ModuleError::Unavailable)),
+        }
     }
 }
 
@@ -238,56 +193,45 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct Say(String);
 
-    impl Call for Say {
+    impl Op for Say {
         type Module = dyn Echo;
+        type Output = String;
         const MODULE: &'static str = "echo";
-        fn run(&self, m: &dyn Echo, reply: Arc<ModuleReply>) {
-            reply.answer(ModuleAnswer::Text {
-                value: Some(m.echo(self.0.clone())),
-            })
+        fn run(&self, m: &dyn Echo, reply: Reply<String>) {
+            reply.done(m.echo(self.0.clone()))
         }
     }
 
-    fn heard(modules: &Modules, call: ModuleCall) -> Vec<ModuleAnswer> {
+    fn heard(modules: &Modules, op: Say) -> Vec<Answer<String>> {
         let got = Arc::new(Mutex::new(vec![]));
         let g = got.clone();
-        modules.call(call, move |a| g.lock().unwrap().push(a));
+        modules.run(&op, move |a| g.lock().unwrap().push(a));
         let v = got.lock().unwrap().clone();
         v
     }
 
     #[test]
-    fn a_call_reaches_its_module_and_answers() {
+    fn an_op_reaches_its_module_and_answers_its_output() {
         let mut m = Modules::new();
         m.register::<dyn Echo>(Arc::new(Loud));
-        assert_eq!(heard(&m, Say("hi".into()).into()), vec![ModuleAnswer::Text { value: Some("HI".into()) }]);
+        assert_eq!(heard(&m, Say("hi".into())), vec![Ok("HI".to_string())]);
     }
 
     #[test]
     fn a_missing_module_is_unavailable() {
-        assert_eq!(heard(&Modules::new(), Say("hi".into()).into()), vec![ModuleAnswer::Unavailable]);
+        assert_eq!(heard(&Modules::new(), Say("hi".into())), vec![Err(ModuleError::Unavailable)]);
         let mut m = Modules::new();
         m.register::<dyn Echo>(Arc::new(Loud)).set::<dyn Echo>(None);
-        assert_eq!(heard(&m, Say("hi".into()).into()), vec![ModuleAnswer::Unavailable]);
-    }
-
-    #[test]
-    fn calls_compare_and_print_as_their_own() {
-        let a: ModuleCall = Say("a".into()).into();
-        assert_eq!(a, Say("a".into()).into());
-        assert_ne!(a, Say("b".into()).into());
-        assert_eq!(format!("{a:?}"), "Say(\"a\")");
-        assert_eq!(a.module(), "echo");
-        assert_eq!(a.get::<Say>(), Some(&Say("a".into())));
+        assert_eq!(heard(&m, Say("hi".into())), vec![Err(ModuleError::Unavailable)]);
     }
 
     #[test]
     fn a_reply_is_heard_once() {
         let got = Arc::new(Mutex::new(vec![]));
         let g = got.clone();
-        let r = ModuleReply::new(move |a| g.lock().unwrap().push(a));
-        r.answer(ModuleAnswer::Done);
-        r.answer(ModuleAnswer::Unavailable);
-        assert_eq!(*got.lock().unwrap(), vec![ModuleAnswer::Done]);
+        let r = Reply::<()>::new(move |a| g.lock().unwrap().push(a));
+        r.clone().done(());
+        r.failed("late");
+        assert_eq!(*got.lock().unwrap(), vec![Ok(())]);
     }
 }

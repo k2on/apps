@@ -20,6 +20,8 @@ ark-share = { path = "../../modules/share" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
 money-core = { path = "../core" }
+# Where money can be, spelled as paths (`src/routes.rs`).
+ark-router = { path = "../../ui/rust/router" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
 # The phones (`ffi`, src/ffi): the bridge, the module plumbing as UniFFI's,
 # the demo's household (`money_demo`), and every number, day and length as

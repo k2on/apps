@@ -1,6 +1,9 @@
 //! Connecting banks from the app: the asks a household member makes, the
 //! importer's answers, and the choice of what each of a new bank's
 //! accounts feeds — an account here, one opened for it, or nothing.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

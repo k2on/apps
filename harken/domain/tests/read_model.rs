@@ -2,6 +2,9 @@
 //! `harken/domain/tests/read_model.rs`, assertion for assertion. Each test
 //! was falsified once by breaking the function it names; the doc comment
 //! says how.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 

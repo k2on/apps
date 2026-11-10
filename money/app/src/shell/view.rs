@@ -39,12 +39,13 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                         },
                     ),
                     (
-                        bar_item("Previous Month", "chevron-left", Placement::Navigation, run("previous-month")),
-                        bar_item("Next Month", "chevron-right", Placement::Navigation, run("next-month")),
-                        bar_item("Auto-Assign", "wand-sparkles", Placement::Primary, run("auto-assign")),
-                        bar_item("New Category", "circle-plus", Placement::Secondary, run("new-category")),
-                        bar_item("New Group", "folder", Placement::Secondary, run("new-group")),
-                        bar_item("Show Hidden Categories", "eye", Placement::Secondary, run("toggle-hidden")),
+                        bar_item("Previous Month", "chevron-left", Placement::Navigation, ShellMsg::PreviousMonth),
+                        bar_item("Next Month", "chevron-right", Placement::Navigation, ShellMsg::NextMonth),
+                        bar_item("Auto-Assign", "wand-sparkles", Placement::Primary, ShellMsg::AutoAssign),
+                        bar_item("New Transaction", "plus", Placement::Primary, ShellMsg::NewTransaction),
+                        bar_item("New Category", "circle-plus", Placement::Secondary, ShellMsg::NewCategory),
+                        bar_item("New Group", "folder", Placement::Secondary, ShellMsg::NewGroup),
+                        bar_item("Show Hidden Categories", "eye", Placement::Secondary, ShellMsg::ToggleHidden),
                     ),
                 ),
             ),
@@ -80,8 +81,8 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                         ShellMsg::Back,
                     ),
                     (
-                        bar_item("Sync", "refresh-cw", Placement::Primary, run("refresh")),
-                        bar_item("Add Account", "plus", Placement::Primary, run("new-account")),
+                        bar_item("Sync", "refresh-cw", Placement::Primary, ShellMsg::Refresh),
+                        bar_item("Add Account", "plus", Placement::Primary, ShellMsg::NewAccount),
                     ),
                 ),
             ),
@@ -108,8 +109,8 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                         ),
                     ),
                     (
-                        bar_item("Filter", "list-filter", Placement::Primary, run("filter")),
-                        bar_item("New Transaction", "plus", Placement::Primary, run("new-transaction")),
+                        bar_item("Filter", "list-filter", Placement::Primary, ShellMsg::Filter),
+                        bar_item("New Transaction", "plus", Placement::Primary, ShellMsg::NewTransaction),
                     ),
                 ),
             )
@@ -122,8 +123,8 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                     "Insights",
                     hosted("insights"),
                     (
-                        bar_item("Previous Month", "chevron-left", Placement::Navigation, run("previous-month")),
-                        bar_item("Next Month", "chevron-right", Placement::Navigation, run("next-month")),
+                        bar_item("Previous Month", "chevron-left", Placement::Navigation, ShellMsg::PreviousMonth),
+                        bar_item("Next Month", "chevron-right", Placement::Navigation, ShellMsg::NextMonth),
                     ),
                 ),
             ),
@@ -263,9 +264,9 @@ pub fn transaction_inspector(t: &TransactionInspector) -> View<ShellMsg> {
 /// An account's register's toolbar: ask the bank, reconcile, add.
 fn register_items() -> View<ShellMsg> {
     (
-        bar_item("Sync", "refresh-cw", Placement::Primary, run("refresh")),
-        bar_item("Reconcile", "badge-check", Placement::Primary, run("reconcile")),
-        bar_item("New Transaction", "plus", Placement::Primary, run("new-transaction")),
+        bar_item("Sync", "refresh-cw", Placement::Primary, ShellMsg::Refresh),
+        bar_item("Reconcile", "badge-check", Placement::Primary, ShellMsg::Reconcile),
+        bar_item("New Transaction", "plus", Placement::Primary, ShellMsg::NewTransaction),
     )
         .into()
 }
@@ -285,9 +286,9 @@ pub fn money_settings(p: &ShellPage) -> View<ShellMsg> {
     )
 }
 
-/// A command by name, carried out by the platform's shell.
-pub fn run(command: &str) -> ShellMsg {
-    ShellMsg::Run { command: command.into() }
+/// A section shown, by its tag.
+pub fn go(tag: &str) -> ShellMsg {
+    ShellMsg::Select { tag: tag.into() }
 }
 
 /// The menu bar's commands (ui/docs/apps/money.md, Scenes): File, View,
@@ -299,29 +300,29 @@ pub fn commands() -> Vec<CommandMenu<ShellMsg>> {
         command_menu(
             MenuPlace::File,
             vec![
-                command("New Transaction", "n", run("new-transaction")),
-                command("New Account", "n", run("new-account")).shift(),
-                command_unbound("Import Receipt…", run("import-receipt")),
+                command("New Transaction", "n", ShellMsg::NewTransaction),
+                command("New Account", "n", ShellMsg::NewAccount).shift(),
+                command_unbound("Import Receipt…", ShellMsg::ImportReceipt),
             ],
         ),
         command_menu(
             MenuPlace::View,
             vec![
-                command("Previous Month", "[", run("previous-month")),
-                command("Next Month", "]", run("next-month")),
-                command("This Month", "t", run("this-month")).shift(),
+                command("Previous Month", "[", ShellMsg::PreviousMonth),
+                command("Next Month", "]", ShellMsg::NextMonth),
+                command("This Month", "t", ShellMsg::ThisMonth).shift(),
                 command("Show Inspector", "i", ShellMsg::ToggleInspector).option(),
-                command("Find Transactions…", "f", run("find")),
-                command("Sync with Banks", "r", run("refresh")),
+                command("Find Transactions…", "f", ShellMsg::Find),
+                command("Sync with Banks", "r", ShellMsg::Refresh),
             ],
         ),
         command_menu(
             MenuPlace::Go,
             vec![
-                command("Budget", "1", run("go-budget")),
-                command("Accounts", "2", run("go-accounts")),
-                command("Transactions", "3", run("go-transactions")),
-                command("Insights", "4", run("go-insights")),
+                command("Budget", "1", go("budget")),
+                command("Accounts", "2", go("accounts")),
+                command("Transactions", "3", go("transactions")),
+                command("Insights", "4", go("insights")),
             ],
         ),
     ]

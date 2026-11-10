@@ -9,7 +9,7 @@ Text, and a link when there is one, handed to the system's share sheet.
 ## API
 
 ```rust
-ark_share::share("Checking", Some(url)) // -> ModuleCall, answered Done
+ark_share::share("Checking", Some(url)) // -> ShareOp, output ()
 trait Share { fn share(&self, text: String, url: Option<String>); }
 ark_share::Fake // .shared()
 ```

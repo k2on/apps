@@ -15,7 +15,9 @@
 //! of `add_to_playlist`, which steps by two.
 //!
 //! Included by the other tests with `#[path]`; it has no tests of its own.
-
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 #![allow(dead_code)]
 
 use std::sync::Arc;

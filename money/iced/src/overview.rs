@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use ark_app::{Host, Inbox, ModuleCall, Modules, Ticket};
+use ark_app::{Ask, Host, Inbox, Modules, Ticket};
 use ark_clipboard::{Clipboard, Queued};
 use ark_peer::store::Store;
 use iced::{Element, Task};
@@ -22,10 +22,11 @@ use crate::{App, Message, Route};
 struct Desk<'a> {
     app: &'a mut App,
     /// The desktop's modules: the clipboard; no haptics, no share sheet
-    /// (a call to either is answered Unavailable).
+    /// (an operation of either is answered Unavailable).
     modules: Modules,
     clipboard: Queued,
-    inbox: Inbox,
+    accounts: Inbox<AccountsMsg>,
+    budget: Inbox<BudgetMsg>,
     /// What the window does itself after the message: its own dialogs.
     natives: Vec<Message>,
 }
@@ -39,7 +40,8 @@ impl Desk<'_> {
             app,
             modules,
             clipboard,
-            inbox: Inbox::default(),
+            accounts: Inbox::default(),
+            budget: Inbox::default(),
             natives: vec![],
         }
     }
@@ -71,14 +73,12 @@ impl Host<Accounts> for Desk<'_> {
             let _ = self.app.step(Message::Go(page));
         }
     }
-    fn native(&mut self, name: &str) {
+    fn request(&mut self, r: money_app::MoneyRequest) {
         // Reconciling is the window's own dialog until it moves into Rust.
-        if let Some(id) = name.strip_prefix("reconcile ").and_then(money_app::accounts::account_id) {
-            self.natives.push(Message::Reconcile(id));
-        }
+        self.natives.extend(self.app.requested(r));
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.modules, ticket, call)
+    fn ask(&mut self, ticket: Ticket, ask: Ask<AccountsMsg>) {
+        self.accounts.ask(&self.modules, ticket, ask)
     }
 }
 
@@ -100,13 +100,11 @@ impl Host<Budget> for Desk<'_> {
             }
         }
     }
-    fn native(&mut self, name: &str) {
-        if name == "refresh" {
-            self.natives.push(Message::Sync);
-        }
+    fn request(&mut self, r: money_app::MoneyRequest) {
+        self.natives.extend(self.app.requested(r));
     }
-    fn ask(&mut self, ticket: Ticket, call: ModuleCall) {
-        self.inbox.ask(&self.modules, ticket, call)
+    fn ask(&mut self, ticket: Ticket, ask: Ask<BudgetMsg>) {
+        self.budget.ask(&self.modules, ticket, ask)
     }
 }
 
@@ -116,15 +114,8 @@ impl App {
         let mut rt = std::mem::take(&mut self.budget);
         let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
-        loop {
-            let answers = desk.inbox.take();
-            if answers.is_empty() {
-                break;
-            }
-            for (t, a) in answers {
-                rt.answer(t, a, &mut desk);
-            }
-        }
+        let inbox = desk.budget.clone();
+        inbox.drain(&mut rt, &mut desk);
         let tasks: Vec<Task<Message>> = std::mem::take(&mut desk.natives).into_iter().map(Task::done).collect();
         self.budget = rt;
         Task::batch(tasks)
@@ -151,15 +142,8 @@ impl App {
         let mut rt = std::mem::take(&mut self.accounts);
         let mut desk = Desk::new(self);
         rt.dispatch(msg, &mut desk);
-        loop {
-            let answers = desk.inbox.take();
-            if answers.is_empty() {
-                break;
-            }
-            for (t, a) in answers {
-                rt.answer(t, a, &mut desk);
-            }
-        }
+        let inbox = desk.accounts.clone();
+        inbox.drain(&mut rt, &mut desk);
         // What the window does after: the clipboard written.
         let mut tasks: Vec<Task<Message>> = desk.clipboard.take().into_iter().map(iced::clipboard::write).collect();
         tasks.extend(std::mem::take(&mut desk.natives).into_iter().map(Task::done));

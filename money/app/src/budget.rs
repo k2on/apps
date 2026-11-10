@@ -18,11 +18,11 @@
 //! category whose month follows a rule offers no assigning or moving: its
 //! menu says the rule.
 
+use crate::routes::Route;
 use ark::row::Id;
 use ark_app::{App, Command, Data};
 use ark_format::{amount, NumberStyle};
 use ark_haptics::{perform, Haptic};
-use money_core::routes::Route;
 use money_core::words::Tone;
 use money_core::*;
 
@@ -429,6 +429,7 @@ impl App for Budget {
     type Msg = BudgetMsg;
     type Change = MoneyChange;
     type Route = Route;
+    type Request = crate::MoneyRequest;
     type Screen = BudgetPage;
 
     fn holds(s: &State) -> Vec<MoneyView> {
@@ -453,7 +454,7 @@ impl App for Budget {
                     false => vec![],
                 }
             }
-            M::Refresh => vec![Command::Native("refresh".into())],
+            M::Refresh => vec![Command::Request(crate::MoneyRequest::Refresh)],
             M::Open { id } => match line(lines, &id) {
                 Some(l) => vec![Command::Open(Route::Category { id, name: l.name.clone() })],
                 None => vec![],

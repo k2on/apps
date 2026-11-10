@@ -2,7 +2,7 @@
 //! declares its places in, and every shell reads.
 //!
 //! An app's places are its `Route` enum, declared once in its domain or
-//! app crate (`harken_domain::routes`, `money_core::routes`, the docs'
+//! app crate (`harken_domain::routes`, `money_app::routes`, the docs'
 //! `routes`) with `#[derive(Routes)]`, a pattern per variant as a web
 //! router has them — `#[route("/album/:key")] Album { key: String, title:
 //! String }` — and each route is an [`Address`]: a path that names the

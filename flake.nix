@@ -1482,6 +1482,16 @@
               python3 ui/prebuild.py check
               touch $out
             '';
+            # The layers held (layers.toml, ui/docs/app.md "Layers"): every
+            # workspace member in one layer, and no dependency a layer may
+            # not use but those layers.toml's [allow] lists until fixed —
+            # read from `cargo metadata`, so it holds whatever builds them.
+            layers = pkgs.runCommand "layers" { nativeBuildInputs = [ rust pkgs.python3 ]; } ''
+              cd ${only (rustDirs ++ [ "layers.toml" "tools/layers.py" ])}/rust
+              export CARGO_HOME=$TMPDIR/cargo
+              cargo metadata --no-deps --offline --format-version 1 | python3 ../tools/layers.py ../layers.toml
+              touch $out
+            '';
             theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
               python3 ${./ui}/theme.py contrast
               touch $out
@@ -1535,7 +1545,8 @@
             rust = allOf "arkdb-rust" (map memberTests (members ++ demos));
             # The workspace lint-clean, the demo feature too, a build per
             # member.
-            clippy = allOf "arkdb-clippy" (lib.concatMap (memberClippy crate) (members ++ demos));
+            # And the layers held (`layers`, above), which is lint too.
+            clippy = allOf "arkdb-clippy" ((lib.concatMap (memberClippy crate) (members ++ demos)) ++ [ self.checks.${system}.layers ]);
             # The docs' crate formatted, lint-clean and its tests passing.
             docs = allOf "docs-checks" ([
               (rustfmtCheck "docs" (only [ "docs/site" ]))

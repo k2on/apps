@@ -14,6 +14,9 @@
 //!
 //! Each test was falsified once by breaking the rule it holds; its doc
 //! comment says how, and what failed.
+// A test reads its fixtures and times itself: the kernel's and the core's
+// purity (clippy.toml) is their library's, not their tests'.
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 mod common;
 
