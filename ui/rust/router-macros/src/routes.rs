@@ -1,10 +1,12 @@
 //! `#[derive(Routes)]`: an app's `Route` enum spelled as paths, one pattern
 //! per variant — `#[route("/album/:key")]`, `#[route("/join?server=:server&code=:code")]`
-//! — the way a web router names its routes. What it writes: `path()` and
-//! `from_path()` (each `:name` the variant's field of that name,
-//! percent-encoded by `ark_router::url`), `key()`, the route's identity
-//! (`PartialEq`, `Eq` and `Hash` by it), and `ark_router::Routable`, whose
-//! `home` is the variant marked `#[home]`.
+//! — the way a web router names its routes. What it writes: `address()`
+//! and `from_address()` (`ark_router::Address`: each `:name` a path segment,
+//! the variant's field of that name; each `key=:name` a query key), `url()`
+//! and `from_url()` (the address as a URL, `/album/water-music/`), `key()`,
+//! the route's identity (`PartialEq`, `Eq` and `Hash` by it), and
+//! `ark_router::Routable`, whose `home` is the variant marked `#[home]`.
+//! `#[route("/")]` is the root, with no segment.
 //!
 //! **Ids, and a slug.** `:id(hex)` is a row's id (`ark_router::url::id`): it
 //! reads only 32 hex digits, so an old link's name in its place falls
@@ -22,9 +24,11 @@
 //! type's default. A pattern's last `:name` in the path takes the rest of it,
 //! so a slash an old link left unescaped in it survives.
 //!
-//! A query field is a `String`, which a path must carry, or an
-//! `Option<String>`, which is left out of the path when it is `None` and
-//! read as `None` when it is missing or empty. A query is read in any order.
+//! A query field is a `String`, which an address must carry, or an
+//! `Option<String>`, which is left out when it is `None` and read as `None`
+//! when it is missing or empty. A query is read in any order, and a key a
+//! pattern does not name is the UI's (`?inspector=1`), not the route's: it
+//! is passed over.
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Error, Fields, LitStr, Type};
@@ -75,11 +79,11 @@ fn parse_pattern(lit: &LitStr) -> syn::Result<Pattern> {
         Some((p, q)) => (p.to_string(), Some(q.to_string())),
         None => (text.clone(), None),
     };
-    let body = path.trim_start_matches('/');
-    if body.is_empty() {
-        return Err(Error::new(lit.span(), "a route's path needs at least one segment"));
-    }
-    let parts: Vec<&str> = body.split('/').collect();
+    let body = path.trim_matches('/');
+    let parts: Vec<&str> = match body.is_empty() {
+        true => vec![],
+        false => body.split('/').collect(),
+    };
     let mut segs = vec![];
     for (n, s) in parts.iter().enumerate() {
         let seg = if let Some(name) = s.strip_prefix(':') {
@@ -92,8 +96,14 @@ fn parse_pattern(lit: &LitStr) -> syn::Result<Pattern> {
                 return Err(Error::new(lit.span(), "a slug (`~name`) is the last segment, after another"));
             }
             Seg::Slug(field(name, lit)?)
-        } else if s.is_empty() || s.contains([':', '#', '%', '&', '=', '~', '(', ')']) {
-            return Err(Error::new(lit.span(), format!("`{s}` is not a path segment")));
+        } else if s.is_empty()
+            || s.contains([':', '#', '%', '&', '=', '~', '(', ')'])
+            || s.bytes().any(|b| b.is_ascii_uppercase() || b == b'_' || b == b' ')
+        {
+            return Err(Error::new(
+                lit.span(),
+                format!("`{s}` is not a path segment: lowercase kebab, `expanding-card`"),
+            ));
         } else {
             Seg::Lit(s.to_string())
         };
@@ -177,43 +187,29 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                     bound.push(i.clone());
                 }
             }
-            let pushes = p.segs.iter().enumerate().map(|(n, s)| {
-                let sep = if n > 0 { quote!(out.push('/');) } else { quote!() };
-                match s {
-                    Seg::Lit(l) => quote! { #sep out.push_str(#l); },
-                    Seg::Param(i, _) => quote! { #sep ::ark_router::url::encode(#i, &mut out); },
-                    Seg::Slug(i) => quote! {
-                        if slugs {
-                            let slug = ::ark_router::url::slug(#i);
-                            if !slug.is_empty() {
-                                out.push('/');
-                                out.push_str(&slug);
-                            }
+            let pushes = p.segs.iter().map(|s| match s {
+                Seg::Lit(l) => quote! { out.push(::std::string::String::from(#l)); },
+                Seg::Param(i, _) => quote! { out.push(::std::clone::Clone::clone(#i)); },
+                Seg::Slug(i) => quote! {
+                    if slugs {
+                        let slug = ::ark_router::url::slug(#i);
+                        if !slug.is_empty() {
+                            out.push(slug);
                         }
-                    },
-                }
+                    }
+                },
             });
-            let queries = p.query.iter().map(|(k, f)| {
-                let key = format!("{k}=");
-                match is_optional(f) {
-                    false => quote! {
-                        out.push(sep); sep = '&';
-                        out.push_str(#key);
-                        ::ark_router::url::encode(#f, &mut out);
-                    },
-                    true => quote! {
-                        if let ::core::option::Option::Some(value) = #f {
-                            out.push(sep); sep = '&';
-                            out.push_str(#key);
-                            ::ark_router::url::encode(value, &mut out);
+            let queries = p.query.iter().map(|(k, f)| match is_optional(f) {
+                false => quote! { query.push((::std::string::String::from(#k), ::std::clone::Clone::clone(#f))); },
+                true => quote! {
+                    if let ::core::option::Option::Some(value) = #f {
+                        if !value.is_empty() {
+                            query.push((::std::string::String::from(#k), ::std::clone::Clone::clone(value)));
                         }
-                    },
-                }
+                    }
+                },
             });
-            let query_sep = match p.query.is_empty() {
-                true => quote!(),
-                false => quote!(#[allow(unused_assignments)] let mut sep = '?';),
-            };
+            let query_sep = quote!();
             choices.push((set, needs, quote! { #(#pushes)* #query_sep #(#queries)* }));
         }
         let pat = match &v.fields {
@@ -253,18 +249,18 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                     let #f = ::ark_router::url::id(parts[#i])?;
                 }),
                 Seg::Param(f, false) if last_param && i + 1 == n => Some(quote! {
-                    let #f = ::ark_router::url::decode(&parts[#i..].join("/"));
+                    let #f = parts[#i..].join("/");
                     if #f.is_empty() { return ::core::option::Option::None; }
                 }),
                 Seg::Param(f, false) => Some(quote! {
-                    let #f = ::ark_router::url::decode(parts[#i]);
+                    let #f = ::std::string::String::from(parts[#i]);
                     if #f.is_empty() { return ::core::option::Option::None; }
                 }),
                 Seg::Lit(_) | Seg::Slug(_) => None,
             });
             let query_lets = p.query.iter().map(|(k, f)| {
                 let found = quote! {
-                    query.iter().find(|(key, _)| *key == #k).map(|(_, v)| ::ark_router::url::decode(v)).filter(|v| !v.is_empty())
+                    address.get(#k).filter(|v| !v.is_empty()).map(::std::string::String::from)
                 };
                 match is_optional(f) {
                     true => quote! { let #f = #found; },
@@ -281,13 +277,8 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
                     quote!(#name::#vi { #(#inits,)* })
                 }
             };
-            // A pattern with no query reads a path with none.
-            let no_query = match p.query.is_empty() {
-                true => quote!(&&query.is_empty()),
-                false => quote!(),
-            };
             reads.push(quote! {
-                if #count #no_query #(&& #checks)* {
+                if #count #(&& #checks)* {
                     let read = (|| -> ::core::option::Option<#name> {
                         #(#lets)*
                         #(#query_lets)*
@@ -303,41 +294,46 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
     };
     Ok(quote! {
         impl #name {
-            /// The path, with no `#` or `/` in front: `kind`, `kind/name`,
-            /// `kind/<id>/slug`, or `kind?key=value&…`.
-            pub fn path(&self) -> ::std::string::String {
-                self.write_path(true)
+            /// The address (`ark_router::Address`): the path that names it,
+            /// a readable slug after a row's id, and its own query (a
+            /// sign-in's server). Its URL is [`Self::url`].
+            pub fn address(&self) -> ::ark_router::Address {
+                self.write(true)
             }
 
-            /// Which route this is: its path without a slug. Two routes are
+            /// `/album/water-music/`, `/join/?server=…`: the address as a
+            /// URL, at the root (`Address::url_under` puts it under a base).
+            pub fn url(&self) -> ::std::string::String {
+                self.address().url()
+            }
+
+            /// Which route this is: its URL without a slug. Two routes are
             /// the same when their keys are.
             pub fn key(&self) -> ::std::string::String {
-                self.write_path(false)
+                self.write(false).url()
             }
 
-            #[allow(unused_variables, clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
-            fn write_path(&self, slugs: bool) -> ::std::string::String {
-                let mut out = ::std::string::String::new();
+            #[allow(unused_variables, unused_mut, clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
+            fn write(&self, slugs: bool) -> ::ark_router::Address {
+                let mut out: ::std::vec::Vec<::std::string::String> = ::std::vec::Vec::new();
+                let mut query: ::std::vec::Vec<(::std::string::String, ::std::string::String)> = ::std::vec::Vec::new();
                 match self { #(#writes)* }
-                out
+                ::ark_router::Address { path: out, query }
             }
 
-            /// The route a path names, or `None` for one that names nothing
-            /// here. A leading `#` or `/` is allowed.
-            pub fn from_path(path: &str) -> ::core::option::Option<#name> {
-                let body = path.trim_start_matches('#').trim_start_matches('/');
-                let (body, query) = match body.split_once('?') {
-                    ::core::option::Option::Some((b, q)) => (b, q),
-                    ::core::option::Option::None => (body, ""),
-                };
-                let query: ::std::vec::Vec<(&str, &str)> = query
-                    .split('&')
-                    .filter(|pair| !pair.is_empty())
-                    .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
-                    .collect();
-                let parts: ::std::vec::Vec<&str> = body.split('/').collect();
+            /// The route an address names, or `None` for one that names
+            /// nothing here. A query key no pattern names is the UI's, and
+            /// passed over.
+            pub fn from_address(address: &::ark_router::Address) -> ::core::option::Option<#name> {
+                let parts: ::std::vec::Vec<&str> = address.path.iter().map(::std::string::String::as_str).collect();
                 #(#reads)*
                 ::core::option::Option::None
+            }
+
+            /// The route a URL names (`Address::of_url` at the root: a
+            /// phone's `scheme://…` and a fragment read too), or `None`.
+            pub fn from_url(url: &str) -> ::core::option::Option<#name> {
+                #name::from_address(&::ark_router::Address::of_url(url, "/"))
             }
         }
 
@@ -358,11 +354,11 @@ pub fn routes(input: DeriveInput) -> syn::Result<TokenStream> {
         }
 
         impl ::ark_router::Routable for #name {
-            fn path(&self) -> ::std::string::String {
-                #name::path(self)
+            fn address(&self) -> ::ark_router::Address {
+                #name::address(self)
             }
-            fn from_path(path: &str) -> ::core::option::Option<#name> {
-                #name::from_path(path)
+            fn from_address(address: &::ark_router::Address) -> ::core::option::Option<#name> {
+                #name::from_address(address)
             }
             fn key(&self) -> ::std::string::String {
                 #name::key(self)

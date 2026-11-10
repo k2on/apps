@@ -503,6 +503,7 @@ version = "0.1.0"
 dependencies = [
  "ark-app",
  "ark-format",
+ "ark-router",
  "arkui-glyphs",
  "leptos",
  "wasm-bindgen",

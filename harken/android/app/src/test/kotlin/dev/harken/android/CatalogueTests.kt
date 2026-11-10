@@ -150,9 +150,9 @@ class CatalogueTests {
             assertEquals(p, Page.of(routeOf(p.route(emptyList())!!.destination().substringAfter('/')), emptyList()))
             assertEquals(p, Page.of(p.from(emptyList()), emptyList()))
         }
-        // A composer's address, as the desktop wrote it, is their one page.
-        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.of("#composer/Johann%20Sebastian%20Bach", emptyList()))
-        assertEquals("#work/johann-sebastian-bach%2Fbwv-988", Page.ForWork("johann-sebastian-bach/bwv-988").from(emptyList()))
+        // A person's address is their one page.
+        assertEquals(Page.ForArtist("Johann Sebastian Bach"), Page.of("/artist/Johann%20Sebastian%20Bach/", emptyList()))
+        assertEquals("/work/johann-sebastian-bach%2Fbwv-988/", Page.ForWork("johann-sebastian-bach/bwv-988").from(emptyList()))
     }
 
     // Through the kernel ----------------------------------------------------------------------

@@ -205,7 +205,7 @@ internal fun eventOf(intent: Intent, scheme: String): Event? {
     val data = intent.data ?: return null
     if (data.scheme != scheme) return null
     if (data.host == "auth") return codeOf(intent, scheme)?.let { Event.Code(it) }
-    val join = dev.arkui.Navigator.routeOf(data.toString(), scheme, { uniffi.harken_domain.routeFromPath(it) }) as? uniffi.harken_domain.Route.Join
+    val join = dev.arkui.Navigator.routeOf(data.toString(), scheme, { uniffi.harken_domain.routeFromUrl(it) }) as? uniffi.harken_domain.Route.Join
     return join?.let { Event.Joined(it.server, it.code) }
 }
 

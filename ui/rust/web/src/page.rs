@@ -4,10 +4,11 @@
 //! server for each request ([`Mode::Server`]) — and then taken over in
 //! the browser (`hydrate`) when script runs.
 //!
-//! **The address is the route.** A page's [`Route`] is its path, the
-//! content it shows (`/budget/2026-10/category/<id>/`), and its query, the
-//! UI's state over it (`?inspector=1`), as Next.js has them. A static
-//! site writes a page per path an app declares and never a query.
+//! **The address is the route.** A page's address (`ark_router::Address`)
+//! is its path, the content it shows (`/category/<id>/food/`), and its
+//! query, the UI's state over it (`?inspector=1`): its app's route and the
+//! shell's state over it (ui/docs/app.md, "Addresses"). A static site
+//! writes a page per path an app declares and never a query.
 //!
 //! **The no-JS contract.** Written as HTML, every control a draw makes is
 //! recorded here in the order it is drawn ([`tap`], [`text`]), so the same
@@ -404,145 +405,6 @@ pub fn press(i: usize) -> bool {
     }
 }
 
-/// A page's address, as Next.js has it: its **path** is the content's
-/// identity (the screen, and the ids of what it shows: `/budget/2026-11/
-/// category/<id>/`), and its **query** the UI's state over it (an
-/// inspector open, a search, a sheet and what is typed in it:
-/// `?inspector=1&search=rent`). A static site writes one page per path an
-/// app declares (`WebApp::static_paths`) and never a query: the page is
-/// the path at its default state, and the module applies the query once
-/// it runs. The SPA and a server honour both.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Route {
-    pub path: Vec<String>,
-    pub query: Vec<(String, String)>,
-}
-
-fn encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b':' => out.push(b as char),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-/// A percent-encoded segment read back.
-pub fn decode(s: &str) -> Option<String> {
-    let b = s.as_bytes();
-    let mut out = vec![];
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'%' => {
-                let h = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
-                out.push(u8::from_str_radix(h, 16).ok()?);
-                i += 3;
-            }
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
-impl Route {
-    /// The page at `path`, its UI at its defaults.
-    pub fn at<S: Into<String>>(path: impl IntoIterator<Item = S>) -> Route {
-        Route {
-            path: path.into_iter().map(Into::into).collect(),
-            query: vec![],
-        }
-    }
-
-    /// The path's `i`th segment.
-    pub fn seg(&self, i: usize) -> Option<&str> {
-        self.path.get(i).map(String::as_str)
-    }
-
-    /// The query's `key`.
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.query.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-    }
-
-    /// The query's `key` set to `value`.
-    pub fn with(mut self, key: &str, value: impl Into<String>) -> Route {
-        self.query.retain(|(k, _)| k != key);
-        self.query.push((key.into(), value.into()));
-        self
-    }
-
-    /// The path alone: the page a static site writes for it.
-    pub fn bare(&self) -> Route {
-        Route::at(self.path.clone())
-    }
-
-    /// `/budget/2026-11/`: the path, each segment percent-encoded.
-    pub fn path_url(&self) -> String {
-        match self.path.is_empty() {
-            true => "/".into(),
-            false => format!("/{}/", self.path.iter().map(|s| encode(s)).collect::<Vec<_>>().join("/")),
-        }
-    }
-
-    /// `?inspector=1&search=rent`, or nothing.
-    pub fn query_url(&self) -> String {
-        match self.query.is_empty() {
-            true => String::new(),
-            false => format!(
-                "?{}",
-                self.query
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
-                    .collect::<Vec<_>>()
-                    .join("&")
-            ),
-        }
-    }
-
-    /// The whole address: the path, then the query.
-    pub fn url(&self) -> String {
-        format!("{}{}", self.path_url(), self.query_url())
-    }
-
-    /// An address read back (`/money/budget/?inspector=1` under `/money/`):
-    /// none for a path that is not a route's.
-    pub fn of_url(url: &str, base: &str) -> Option<Route> {
-        let (path, query) = url.split_once('?').unwrap_or((url, ""));
-        let path = path.strip_prefix(base.trim_end_matches('/')).unwrap_or(path);
-        let path = path.trim_end_matches("index.html");
-        let path = path.split('/').filter(|s| !s.is_empty()).map(decode).collect::<Option<Vec<_>>>()?;
-        Some(Route {
-            path,
-            query: Route::of_query(query).query,
-        })
-    }
-
-    /// A query read as a route's (`?screen=budget&inspector=1`), its path
-    /// empty.
-    pub fn of_query(q: &str) -> Route {
-        Route {
-            path: vec![],
-            query: q
-                .trim_start_matches('?')
-                .split('&')
-                .filter_map(|kv| {
-                    let (k, v) = kv.split_once('=')?;
-                    Some((decode(k)?, decode(v)?))
-                })
-                .collect(),
-        }
-    }
-}
-
 /// Every address a written page leads to: its links' and its forms'
 /// (`href`, `formaction`, `action`), as written.
 pub fn links(html: &str) -> Vec<String> {
@@ -576,8 +438,8 @@ pub fn dangling(pages: &[(String, String)], base: &str) -> Vec<String> {
             if off || file || path.is_empty() {
                 continue;
             }
-            let page = Route::of_url(path, base).map(|r| format!("{}{}", base.trim_end_matches('/'), r.path_url()));
-            if !page.as_deref().is_some_and(|p| written.contains(p)) {
+            let page = ark_router::Address::of_url(path, base).url_under(base);
+            if !written.contains(page.as_str()) {
                 out.push(format!("{at} -> {l}"));
             }
         }
@@ -593,22 +455,6 @@ pub fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn routes_round_trip() {
-        for r in [
-            Route::default(),
-            Route::at(["budget"]),
-            Route::at(["budget", "2026-11", "category", "0a1b"]).with("inspector", "1"),
-            Route::at(["transactions", "a b/c"]).with("search", "Trader Joe's & more"),
-            Route::default().with("month", "2026-10"),
-        ] {
-            assert_eq!(Route::of_url(&r.url(), "").as_ref(), Some(&r), "{}", r.url());
-            assert_eq!(Route::of_url(&format!("/money{}", r.url()), "/money/").as_ref(), Some(&r));
-            assert_eq!(Route::of_url(&format!("/money{}index.html", r.path_url()), "/money/"), Some(r.bare()));
-        }
-        assert_eq!(Route::at(["budget"]).with("inspector", "1").url(), "/budget/?inspector=1");
-    }
 
     #[test]
     fn a_link_to_a_page_not_written_is_found() {

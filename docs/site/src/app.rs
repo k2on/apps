@@ -2,14 +2,15 @@
 //! searched, which phone, and the live parts' state; the shell's view
 //! ([`crate::views`]) over it, and what the shell hosts drawn here.
 //!
-//! **Paths are pages.** A page's route is its tag alone (`/`, `/all/`,
-//! `/menu/`), and every one is written ([`DocsWeb::static_paths`]); the
-//! search (`?q=`) and the phone are the reader's, never written, taken up
-//! by the module once it has taken the page over.
+//! **Paths are pages.** A page's route is [`crate::routes::Route`], its tag
+//! alone (`/`, `/all/`, `/menu/`), and every one is written
+//! ([`DocsWeb::static_paths`]); the search (`?q=`) and the phone are the
+//! reader's, never written, taken up by the module once it has taken the
+//! page over.
 use std::rc::Rc;
 
 use ark_app::writing::{self, Block, Inline};
-use arkui_web::page::Route;
+use arkui_web::Address;
 use arkui_web::{AnyView, WebApp};
 use leptos::html;
 use leptos::prelude::*;
@@ -84,12 +85,9 @@ impl DocsWeb {
         self.pages.iter().find(|p| p.tag == self.page).unwrap_or(&self.pages[0])
     }
 
-    /// A page's route: its tag, the overview none.
-    pub fn route_of(tag: &str) -> Route {
-        match tag {
-            OVERVIEW => Route::default(),
-            t => Route::at([t]),
-        }
+    /// A page's address: its route's (`/menu/`), the overview the root.
+    pub fn route_of(tag: &str) -> Address {
+        crate::routes::Route::of(tag).address()
     }
 
     fn card(p: &Page) -> PageCard {
@@ -435,8 +433,10 @@ impl WebApp for DocsWeb {
     }
 
     /// The page is the path; the search is the query's `q`, the reader's.
-    fn arrive(&mut self, route: &Route) -> Vec<Msg> {
-        let tag = route.seg(0).unwrap_or(OVERVIEW).to_string();
+    fn arrive(&mut self, route: &Address) -> Vec<Msg> {
+        let tag = crate::routes::Route::from_address(route)
+            .map(|r| r.tag().to_string())
+            .unwrap_or_else(|| OVERVIEW.into());
         self.page = if self.pages.iter().any(|p| p.tag == tag) { tag } else { OVERVIEW.into() };
         match route.get("q").filter(|q| !q.is_empty()) {
             Some(q) => vec![Msg::Search { text: q.to_string() }],
@@ -444,7 +444,7 @@ impl WebApp for DocsWeb {
         }
     }
 
-    fn route(&self) -> Route {
+    fn route(&self) -> Address {
         match self.search.is_empty() {
             true => Self::route_of(&self.page),
             false => Self::route_of(&self.page).with("q", self.search.clone()),
@@ -453,7 +453,7 @@ impl WebApp for DocsWeb {
 
     /// Every page's path: each is written, and no other (the reader's
     /// search is a query, never a page).
-    fn static_paths(&self) -> Vec<Route> {
+    fn static_paths(&self) -> Vec<Address> {
         self.pages.iter().map(|p| Self::route_of(&p.tag)).collect()
     }
 

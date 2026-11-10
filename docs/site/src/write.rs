@@ -5,7 +5,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use arkui_web::page::{Mode, Route};
+use arkui_web::page::Mode;
+use arkui_web::Address;
 use arkui_web::{document, prerender, WebApp, Written};
 use iced::Theme;
 
@@ -102,7 +103,7 @@ pub fn write(out: &Path, o: &Options) -> io::Result<Vec<String>> {
     let open = || DocsWeb::open(&base, built.clone());
     let app = open();
     let paths = app.static_paths();
-    let titles: Vec<(Route, String, String)> = app
+    let titles: Vec<(Address, String, String)> = app
         .pages()
         .iter()
         .map(|p| {
@@ -115,7 +116,7 @@ pub fn write(out: &Path, o: &Options) -> io::Result<Vec<String>> {
         .collect();
     let css = format!("{}\n{}", arkui_web::writing::WRITING_CSS, DOCS_CSS);
     let args = vec![("base".to_string(), base.clone())];
-    let page = |r: &Route, view: &str| {
+    let page = |r: &Address, view: &str| {
         let (_, title, description) = titles.iter().find(|(t, _, _)| t == r).cloned().unwrap_or_default();
         let canonical = format!("{}{}{}", o.site, base.trim_end_matches('/'), r.path_url());
         let head = format!(

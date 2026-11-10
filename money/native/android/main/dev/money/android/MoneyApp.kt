@@ -97,7 +97,7 @@ import uniffi.money_core.Auto
 import uniffi.money_core.Route
 import uniffi.money_core.TxnLine
 import uniffi.money_core.newDraft
-import uniffi.money_core.routeFromPath
+import uniffi.money_core.routeFromUrl
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -169,7 +169,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     // A link the app was opened with (`money://account/Checking`): its route, navigated to. The
     // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
     Links("money") { link ->
-        Navigator(nav, ::destination).handle(link, "money", ::routeFromPath) { r ->
+        Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
             when (r) {
                 is Route.Join -> true
                 is Route.Budget, is Route.Category -> true.also { sections.send(ShellMsg.Select(tag = "budget")) }
@@ -228,7 +228,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
             composable("register/{arg}") { e ->
                 // The route names the account by its id (an older link's by its name, `names`), so a
                 // renamed one keeps its register; one that is gone is the route's fallback, All Accounts.
-                val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromPath)
+                val route = RouteArg.path(e.arguments?.getString("arg"))?.let(::routeFromUrl)
                 val id = (route as? Route.Account)?.let { a -> ledger.accounts.firstOrNull { a.names(it.id.hex, it.name) }?.id }
                 RegisterScreen(ledger, id, onBack = { nav.popBackStack() })
             }
@@ -274,7 +274,7 @@ private fun AccountOf(ledger: Ledger, shell: Shell, onDismiss: () -> Unit) {
 }
 
 /** Where the back stack goes for a register's route: an account's, or All Accounts. */
-private fun register(route: Route): String = "register/" + RouteArg.of(route.path())
+private fun register(route: Route): String = "register/" + RouteArg.of(route.url())
 
 /**
  * Where the back stack goes for a route this phone pushes: a register (a saved filter's is every

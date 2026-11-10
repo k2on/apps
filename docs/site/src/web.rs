@@ -9,16 +9,11 @@ use docs::pages::{self, Built};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-/// The page's tag at `path` under `base`.
+/// The page's tag at `path` under `base`: its route's (`docs::routes`).
 fn tag_at(path: &str, base: &str) -> String {
-    let rest = path
-        .strip_prefix(base)
-        .or_else(|| path.strip_prefix(base.trim_end_matches('/')))
-        .unwrap_or(path);
-    match rest.trim_matches('/') {
-        "" => pages::OVERVIEW.to_string(),
-        t => t.to_string(),
-    }
+    docs::routes::Route::from_address(&arkui_web::Address::of_url(path, base))
+        .map(|r| r.tag().to_string())
+        .unwrap_or_else(|| pages::OVERVIEW.to_string())
 }
 
 fn main() {

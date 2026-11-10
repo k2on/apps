@@ -1,7 +1,8 @@
 //! A static site (arkui-web's `ssg` mode, `prerender`): a fixture app's
 //! declared paths written at every band, and every link on them resolving.
 
-use arkui_web::page::{self, Route};
+use arkui_web::page;
+use arkui_web::Address;
 use arkui_web::{document, prerender, AnyView, WebApp, Written};
 use leptos::html;
 use leptos::prelude::*;
@@ -42,20 +43,20 @@ impl WebApp for Site {
             Go::Change => self.changes += 1,
         }
     }
-    fn route(&self) -> Route {
-        let r = Route::at(self.at.clone());
+    fn route(&self) -> Address {
+        let r = Address::at(self.at.clone());
         if self.inspector {
             return r.with("inspector", "1");
         }
         r
     }
-    fn arrive(&mut self, r: &Route) -> Vec<Go> {
+    fn arrive(&mut self, r: &Address) -> Vec<Go> {
         self.at = r.path.clone();
         self.inspector = r.get("inspector").is_some();
         vec![]
     }
-    fn static_paths(&self) -> Vec<Route> {
-        vec![Route::default(), Route::at(["notes"])]
+    fn static_paths(&self) -> Vec<Address> {
+        vec![Address::default(), Address::at(["notes"])]
     }
     fn changes(&self) -> u64 {
         self.changes
@@ -64,7 +65,7 @@ impl WebApp for Site {
 
 #[test]
 fn a_static_site_is_its_declared_paths_and_every_link_resolves() {
-    let write = |r: &Route, view: &str| {
+    let write = |r: &Address, view: &str| {
         document(
             &Written {
                 mode: page::Mode::Static,

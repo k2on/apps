@@ -284,9 +284,9 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "router",
         name: "Router",
-        summary: "An app's routes as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
-        api: &["trait Routable { path(), from_path(), home() } (ark-router; #[derive(Routes)] writes it)", "fragment(&route), parse(fragment)", "join(kind, name), split(path)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
-        rules: &["`parse` never fails: a fragment that names nothing is home.", "Call `sync` after every update."],
+        summary: "An app's routes as URLs, the browser's and the desktop's alike (`/album/water-music/`), and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+        api: &["trait Routable { address(), from_address(), url(), from_url(), key(), home() } (ark-router; #[derive(Routes)] writes it)", "Address { path, query }: of_url(url, base), url(), url_under(base), with(key, value), get(key)", "parse(url)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Memory, Nav"],
+        rules: &["`parse` never fails: a URL that names nothing is home.", "Call `sync` after every update.", "A query key no route names is the UI's, passed over."],
     },
     Entry {
         module: "scroll",

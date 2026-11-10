@@ -16,6 +16,7 @@ pub mod catalogue;
 pub mod components;
 pub mod live;
 pub mod pages;
+pub mod routes;
 pub mod views;
 
 #[cfg(feature = "native")]

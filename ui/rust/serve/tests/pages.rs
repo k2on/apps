@@ -13,7 +13,8 @@ use ark_auth::server::{Auth, Mode as SignIn};
 use ark_auth::Account;
 use ark_peer::{Memory, Peer};
 use arkui_serve::{Look, Page, Visit};
-use arkui_web::page::{self, Route};
+use arkui_web::page;
+use arkui_web::Address;
 use arkui_web::{AnyView, WebApp};
 use leptos::html;
 use leptos::prelude::*;
@@ -99,14 +100,14 @@ impl WebApp for Groups {
         }
     }
 
-    fn route(&self) -> Route {
+    fn route(&self) -> Address {
         match self.name.is_empty() {
-            true => Route::default(),
-            false => Route::default().with("name", self.name.clone()),
+            true => Address::default(),
+            false => Address::default().with("name", self.name.clone()),
         }
     }
 
-    fn arrive(&mut self, r: &Route) -> Vec<Msg> {
+    fn arrive(&mut self, r: &Address) -> Vec<Msg> {
         r.get("name").map(|n| Msg::Name(n.into())).into_iter().collect()
     }
 }

@@ -67,7 +67,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
 import uniffi.harken_domain.Playlist
 import uniffi.harken_domain.Route
-import uniffi.harken_domain.routeFromPath
+import uniffi.harken_domain.routeFromUrl
 import dev.harken.android.onboarding.ArkSession
 import dev.arkui.AccountSheet
 import dev.arkui.LifecycleCapped
@@ -766,7 +766,7 @@ fun HarkenApp(
             // shown. The library's own lists are its tab's; a sign-in link (`harken://join?…`) is the
             // onboarding's.
             Links("harken") { link ->
-                Navigator(nav(), Route::destination).handle(link, "harken", ::routeFromPath) { r ->
+                Navigator(nav(), Route::destination).handle(link, "harken", ::routeFromUrl) { r ->
                     val list =
                         when (r) {
                             is Route.Library -> LibraryTab.Songs
@@ -954,7 +954,7 @@ fun Route.destination(): String {
 }
 
 /** The route a destination's argument names ([destination]); null for one that names nothing. */
-fun routeOf(arg: String?): Route? = RouteArg.path(arg)?.let(::routeFromPath)
+fun routeOf(arg: String?): Route? = RouteArg.path(arg)?.let(::routeFromUrl)
 
 /** The route a back stack entry was navigated to. */
 fun routeOf(entry: NavBackStackEntry): Route? = routeOf(entry.arguments?.getString("arg"))

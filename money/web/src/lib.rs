@@ -310,8 +310,7 @@ impl MoneyWeb {
     /// `/budget/2026-10/category/<id>/`. The query is the UI over it: the
     /// inspector, the review, the search, the question, the sheet and what
     /// is written in it. `arrive` reads it back.
-    pub fn route(&self) -> arkui_web::page::Route {
-        use arkui_web::page::Route;
+    pub fn route(&self) -> arkui_web::Address {
         let s = self.shell.state();
         let mut path: Vec<String> = s.section.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         if self.month != self.today[..7] {
@@ -326,7 +325,7 @@ impl MoneyWeb {
         if self.settings {
             path.extend(["settings".into(), s.pane.clone()]);
         }
-        let mut r = Route::at(path);
+        let mut r = arkui_web::Address::at(path);
         if s.inspector {
             r = r.with("inspector", "1");
         }
@@ -601,7 +600,7 @@ impl WebApp for MoneyWeb {
         self.suggestions(field, typed)
     }
 
-    fn arrive(&mut self, route: &arkui_web::page::Route) -> Vec<Msg> {
+    fn arrive(&mut self, route: &arkui_web::Address) -> Vec<Msg> {
         // The launch arguments every shell reads, as the query says them
         // (`?screen=budget&inspector=1`).
         let mut args = vec![];
@@ -644,7 +643,7 @@ impl WebApp for MoneyWeb {
         out
     }
 
-    fn route(&self) -> arkui_web::page::Route {
+    fn route(&self) -> arkui_web::Address {
         self.route()
     }
 

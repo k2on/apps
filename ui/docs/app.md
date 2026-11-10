@@ -477,6 +477,55 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
   `ark_app::shell::Launch`), and arkui-web's `?context=<row>`,
   `?menu=<id>`, `?popover=<id>`, `?command=`, `?keys=1`, `?theme=dark`.
 
+## Addresses
+
+One route model for every app, on every shell (`ark-router`). An app
+declares where it can be once, as a `Route` enum in its domain or app
+crate — `harken_domain::routes`, `money_core::routes`, the docs'
+`docs/site/src/routes.rs` — with `#[derive(Routes)]`, a pattern per
+variant (`#[route("/album/:key")]`), and every shell reads that one enum:
+the browser's address bar (arkui-web, `Address::of_url`), the desktop's
+(arkui's `router`, which says the same URL), the phones' deep links and
+back stacks (`route_from_url`, `Route.url()` over UniFFI), a "played from"
+in a listening session, a notification's target, a static site's pages.
+
+An **address** (`ark_router::Address`) is a path and a query, as Next.js
+has them: the **path** names the content — the page and the ids of what
+it shows — and the **query** holds the UI's state over it (an inspector
+open, a search, a sheet and what is typed in it). A route reads its own
+query keys (a sign-in's `server`, `code`) and passes over every other: a
+key no route names is the UI's.
+
+The URL conventions every app keeps (`assert_round_trips` holds each
+app's routes to them, route → URL → route):
+
+- **A slash at the end** of every path: `/budget/`, `/menu/`; the root is
+  `/`. A link written without it reads the same.
+- **Lowercase kebab** for a kind: `/expanding-card/`, `/bank/…`; the
+  derive refuses an uppercase or `_` segment in a pattern.
+- **One segment, one value**, percent-encoded (`url::encode`): a `/` in a
+  key is `%2F` (`/work/johann-sebastian-bach%2Fbwv-988/`), a space `%20`.
+- **A row by its id**: 32 lowercase hex digits, a readable slug of its
+  name after it, only to read (`/account/<id>/checking/`); the slug is no
+  part of which route it is (`Routable::key`). A row is never found by its
+  name.
+- **A month** is `YYYY-MM` (`month=2026-10`), a day `YYYY-MM-DD`.
+- **Query keys** are lowercase kebab (`inspector`, `search`,
+  `draft-category`), written in the order set; a key with no value is
+  not written, and a flag is `1`.
+- **The base** is the site's, taken off whole and put back on: the docs at
+  `/apps/docs/` (`/apps/docs/menu/`), money and harken at their server's
+  root (`/`). `Address::url_under(base)` writes under it and
+  `Address::of_url(url, base)` reads without it; a phone's link
+  (`money://budget/`) reads as its path.
+- **No old spellings.** A URL that names nothing lands on the app's home
+  (`Routable::route_of`); there are no redirects from earlier forms.
+
+money's browser address still spells its own path from the shell's state
+(`/budget/2026-10/category/<id>/`) and reads the launch arguments
+(`?screen=…`); folding it onto `money_core::Route` and the launch arguments
+onto routes is what is left.
+
 ## The Browser's Modes
 
 How the page is made is chosen per app, by app.toml's `[web] modes`; the
@@ -501,20 +550,12 @@ the server — that no app turns on.
 The SPA is what it always was: none of what follows is drawn in it, and
 its markup is the same.
 
-**Routes** (`arkui_web::page::Route`), as Next.js has them. The **path**
-is the content's identity: the screen and the ids of what it shows —
-money's `/budget/2026-10/category/<id>/`, `/accounts/<id>/txn/<id>/`,
-`/budget/settings/Connected%20Banks/`; a docs page's slug. The **query**
-is the UI's state over it: an inspector open, a search, a question asked,
-a sheet and what is typed in it — `?inspector=1&search=rent`. Each part is
-percent-encoded (`Route::url`, read back by `Route::of_url`; its test
-holds every one to round trip). The app's `WebApp::route` says where it
-is and `WebApp::arrive` brings it back there from a route (money's reads
-`?screen=…`, the launch arguments every shell reads, as well), so the
-state a page is written at is the state the module arrives at, from the
-route and the data alone. The API is small on purpose — `Route::at`,
-`seg`, `get`, `with`, `bare`, `url`, `of_url`, and `static_paths` — so a
-site can be built on it and keep building.
+**Routes** are addresses (`ark_router::Address`, below): the app's
+`WebApp::route` says where it is — its `Route` enum's address and the
+UI's query over it — and `WebApp::arrive` brings it back there from one,
+so the state a page is written at is the state the module arrives at,
+from the address and the data alone. `static_paths` is every page a
+static site writes: an address's path, never a query.
 
 **Browser-only calls** (the window, its width, `DomRect`, history, focus,
 the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`).

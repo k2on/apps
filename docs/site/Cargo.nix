@@ -1161,6 +1161,10 @@ rec {
             packageId = "ark-format";
           }
           {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "arkui-glyphs";
             packageId = "arkui-glyphs";
           }
@@ -4810,6 +4814,10 @@ rec {
           {
             name = "ark-app";
             packageId = "ark-app";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
           }
           {
             name = "arkui";

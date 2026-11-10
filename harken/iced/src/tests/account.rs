@@ -188,9 +188,9 @@ fn the_demo_is_alone() {
 fn settings_resyncs_the_library_for_the_library_alone() {
     use crate::routes::Route;
     assert_eq!(
-        arkui::router::parse::<Route>(&arkui::router::fragment(&Route::Settings)),
+        arkui::router::parse::<Route>(&Route::Settings.url()),
         Route::Settings,
-        "#settings is a page"
+        "/settings/ is a page"
     );
     let mut app = App::with_peer(signed_in("alice"), "http://127.0.0.1:9".into(), Some(login("alice")));
     let entry = app.account().unwrap().entries.remove(0);

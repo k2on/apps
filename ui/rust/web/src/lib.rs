@@ -30,6 +30,7 @@ use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+pub use ark_router::Address;
 pub use leptos::prelude::AnyView;
 
 pub mod fields;
@@ -274,11 +275,11 @@ pub trait WebApp: 'static {
     fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Self::Msg>> {
         vec![]
     }
-    /// What the page's address asks for (`page::Route`: its path, the
+    /// What the page's address asks for (`Address`: its path, the
     /// content, and its query, the UI's state): the messages that bring
     /// the app there. A static page arrives at its path alone and then,
     /// once the module runs, at the whole address.
-    fn arrive(&mut self, _route: &page::Route) -> Vec<Self::Msg> {
+    fn arrive(&mut self, _route: &Address) -> Vec<Self::Msg> {
         vec![]
     }
     /// What the field `field` (`search`, or a form's own id) suggests for
@@ -290,13 +291,13 @@ pub trait WebApp: 'static {
     /// (`arrive` reads it): its screen, its selection, its sheet. A page
     /// written as HTML is at its route, and a press that moves the app
     /// leads to its new one (`page`).
-    fn route(&self) -> page::Route {
-        page::Route::default()
+    fn route(&self) -> Address {
+        Address::default()
     }
     /// Every path a static site writes a page for (Next.js's
     /// `generateStaticParams`): finite, and from the data. A query is never
     /// written: each page is its path at the UI's defaults.
-    fn static_paths(&self) -> Vec<page::Route> {
+    fn static_paths(&self) -> Vec<Address> {
         vec![]
     }
     /// How many changes the app has made to its data: a press that makes
@@ -329,15 +330,15 @@ pub fn query(name: &str) -> Option<String> {
 }
 
 /// The page's address as a route, under the site's base.
-pub fn address() -> page::Route {
+pub fn address() -> Address {
     if !cfg!(target_arch = "wasm32") {
-        return page::Route::default();
+        return Address::default();
     }
     let Some(l) = web_sys::window().map(|w| w.location()) else {
-        return page::Route::default();
+        return Address::default();
     };
     let url = format!("{}{}", l.pathname().unwrap_or_default(), l.search().unwrap_or_default());
-    page::Route::of_url(&url, &page_base()).unwrap_or_default()
+    Address::of_url(&url, &page_base())
 }
 
 /// Where the site is served from (`<html data-ark-base>`), `/` unless said.
@@ -458,7 +459,7 @@ pub fn hydrate<A: WebApp>(app: A) {
     let width = attr("data-ark-width");
     page::set_every_width(width.as_deref() == Some("every"));
     page::set_width(width.and_then(|w| w.parse().ok()));
-    page::set_args(page::Route::of_query(&attr("data-ark-args").unwrap_or_default()).query);
+    page::set_args(Address::query_of(&attr("data-ark-args").unwrap_or_default()));
     let _ = root.set_attribute("data-ark-js", "");
     let app = install(app);
     keys::listen::<A>(app.clone());
@@ -532,7 +533,7 @@ pub fn hydrate<A: WebApp>(app: A) {
 #[derive(Clone, Debug, Default)]
 pub struct Written {
     pub mode: page::Mode,
-    pub route: page::Route,
+    pub route: Address,
     /// Where the site is served from: `/`, or `/money/`.
     pub base: String,
     /// The page's own arguments, read back as the route is (`today=…`).
@@ -611,7 +612,7 @@ pub struct Served<A: WebApp> {
 impl<A: WebApp> Served<A> {
     /// `app` at `route`, in `mode`, drawn at `width` (none: for every
     /// width at once, `page::Band`), with `args`.
-    pub fn new(app: A, mode: page::Mode, route: &page::Route, args: &[(String, String)], width: Option<f64>) -> Served<A> {
+    pub fn new(app: A, mode: page::Mode, route: &Address, args: &[(String, String)], width: Option<f64>) -> Served<A> {
         page::set_mode(mode);
         page::set_width(width);
         page::set_every_width(width.is_none());
@@ -625,7 +626,7 @@ impl<A: WebApp> Served<A> {
     }
 
     /// Put back at `route` as it opened, if the app can be (`WebApp::rewind`).
-    pub fn rewind(&self, route: &page::Route) -> bool {
+    pub fn rewind(&self, route: &Address) -> bool {
         if !self.app.borrow_mut().rewind() {
             return false;
         }
@@ -675,11 +676,11 @@ pub fn prerender<A: WebApp>(
     bound: usize,
     width: Option<f64>,
     args: &[(String, String)],
-    write: &dyn Fn(&page::Route, &str) -> String,
-) -> Result<Vec<(page::Route, String)>, String> {
-    use page::{Lead, Mode, Route};
+    write: &dyn Fn(&Address, &str) -> String,
+) -> Result<Vec<(Address, String)>, String> {
+    use page::{Lead, Mode};
     use std::collections::{HashMap, HashSet};
-    let mut paths: Vec<Route> = vec![];
+    let mut paths: Vec<Address> = vec![];
     for p in open().static_paths() {
         let p = p.bare();
         if !paths.contains(&p) {
@@ -692,7 +693,7 @@ pub fn prerender<A: WebApp>(
             paths.len()
         ));
     }
-    let declared: HashSet<Route> = paths.iter().cloned().collect();
+    let declared: HashSet<Address> = paths.iter().cloned().collect();
     let base = args
         .iter()
         .find(|(k, _)| k == "base")

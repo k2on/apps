@@ -2045,6 +2045,10 @@ rec {
             packageId = "ark-format";
           }
           {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "arkui-glyphs";
             packageId = "arkui-glyphs";
           }

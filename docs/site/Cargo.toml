@@ -37,6 +37,8 @@ required-features = ["hydrate"]
 
 [dependencies]
 ark-app = { path = "../../ui/rust/app" }
+# The site's routes, declared once (`routes`), as every app's are.
+ark-router = { path = "../../ui/rust/router" }
 arkui-glyphs = { path = "../../ui/rust/glyphs" }
 arkui-web = { path = "../../ui/rust/web", default-features = false }
 leptos = { version = "0.8", default-features = false }

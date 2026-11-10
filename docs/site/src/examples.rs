@@ -297,8 +297,12 @@ pub fn answers(component: &str) -> Vec<Answers> {
                     (format!("url::encoded(\"{name}\")"), url::encoded(name)),
                     ("url::decode(url::encoded(…))".into(), url::decode(&url::encoded(name))),
                     (
-                        format!("router::join(\"album\", Some(\"{name}\"))"),
-                        arkui::router::join("album", Some(name)),
+                        format!("Address::at([\"album\", \"{name}\"]).url()"),
+                        arkui::router::Address::at(["album", name]).url(),
+                    ),
+                    (
+                        "Address::of_url(\"money://budget/?inspector=1\", \"/\")".into(),
+                        format!("{:?}", arkui::router::Address::of_url("money://budget/?inspector=1", "/")),
                     ),
                 ],
             }]
@@ -331,7 +335,7 @@ pub fn notes(component: &str) -> &'static [&'static str] {
         "pages" => &["On the desktop, two fingers sideways over the page go back and forward (arkui::swipe)."],
         "scroll" => &["scroll::reveal keeps the cursor on screen as j and k walk past the edge of a list."],
         "keys" => &["A count before a motion repeats it; a Move walks whatever grid the pane with the keys has (vim::Grid, vim::Page)."],
-        "routes" => &["A route is its path (ark-router's #[derive(Routes)]): walking a sidebar writes the bar, and back and forward come back through Router::poll."],
+        "routes" => &["A route is its URL (ark-router's #[derive(Routes)]), the browser's and the desktop's alike: walking a sidebar writes the bar, and back and forward come back through Router::poll."],
         "waking" => &["A window that runs no loop sleeps until something rings its Bell: a socket's reader thread, a media key, a deadline (wake::at)."],
         _ => &[],
     }

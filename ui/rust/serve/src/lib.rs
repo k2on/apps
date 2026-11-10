@@ -37,7 +37,8 @@ use std::time::Duration;
 
 use ark::peer::Who;
 use ark_peer::{Handle, Memory, Peer};
-use arkui_web::page::{escape, Mode, Route};
+use arkui_web::page::{escape, Mode};
+use arkui_web::Address;
 use arkui_web::{document, Served, WebApp, Written};
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
@@ -153,13 +154,7 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 fn form(body: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(body);
-    text.split('&')
-        .filter(|kv| !kv.is_empty())
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
-            Some((arkui_web::page::decode(k)?, arkui_web::page::decode(v)?))
-        })
-        .collect()
+    Address::query_of(&text)
 }
 
 fn html(status: StatusCode, body: String) -> Response {
@@ -180,7 +175,10 @@ fn see(location: &str) -> Response {
 
 /// A sign-in's code traded for the session's cookie, then to `to`.
 async fn session<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response {
-    let q = Route::of_query(req.uri().query().unwrap_or_default());
+    let q = Address {
+        path: vec![],
+        query: Address::query_of(req.uri().query().unwrap_or_default()),
+    };
     let to = q
         .get("to")
         .filter(|t| t.starts_with('/') && !t.starts_with("//"))
@@ -223,8 +221,8 @@ async fn page<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response
         None => None,
     };
     let (Some(who), Some(token)) = (who, token) else {
-        let back = Route::at(["web", "session"]).with("to", url.clone()).url();
-        let login = Route::at(["auth", "login"])
+        let back = Address::at(["web", "session"]).with("to", url.clone()).url();
+        let login = Address::at(["auth", "login"])
             .with("redirect", format!("{}{back}", p.auth.public_url()))
             .url();
         return html(
@@ -240,7 +238,7 @@ async fn page<A: Page>(State(p): State<Arc<Pages<A>>>, req: Request) -> Response
     let csrf = csrf.or_else(|| fresh.clone()).unwrap_or_default();
     let p2 = p.clone();
     let answered = tokio::task::spawn_blocking(move || {
-        let route = Route::of_url(&url, "/").unwrap_or_default();
+        let route = Address::of_url(&url, "/");
         match method {
             Method::POST => p2.post(&route, &body, &csrf, who, &token),
             _ => p2.get(&route, &csrf, who, &token, StatusCode::OK, None),
@@ -282,7 +280,7 @@ impl<A: Page> Pages<A> {
         }
     }
 
-    fn written(&self, route: &Route, csrf: &str, notice: Option<String>) -> Written {
+    fn written(&self, route: &Address, csrf: &str, notice: Option<String>) -> Written {
         Written {
             mode: Mode::Server,
             route: route.clone(),
@@ -298,7 +296,7 @@ impl<A: Page> Pages<A> {
         }
     }
 
-    fn get(&self, route: &Route, csrf: &str, who: Who, token: &str, status: StatusCode, notice: Option<String>) -> Response {
+    fn get(&self, route: &Address, csrf: &str, who: Who, token: &str, status: StatusCode, notice: Option<String>) -> Response {
         let visit = match self.visit(who, token) {
             Ok(v) => v,
             Err(why) => return (StatusCode::SERVICE_UNAVAILABLE, format!("{why}\n")).into_response(),
@@ -308,13 +306,13 @@ impl<A: Page> Pages<A> {
         html(status, document(&self.written(route, csrf, notice), &view))
     }
 
-    fn post(&self, route: &Route, body: &[u8], csrf: &str, who: Who, token: &str) -> Response {
+    fn post(&self, route: &Address, body: &[u8], csrf: &str, who: Who, token: &str) -> Response {
         let fields = form(body);
         let field = |k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
         if csrf.is_empty() || field("csrf") != Some(csrf) {
             return (StatusCode::FORBIDDEN, "this form is not this site's\n").into_response();
         }
-        let route = field("route").and_then(|r| Route::of_url(r, "/")).unwrap_or_else(|| route.clone());
+        let route = field("route").map(|r| Address::of_url(r, "/")).unwrap_or_else(|| route.clone());
         // A form sent again (the back button, a second click) runs nothing.
         let once = field("once").unwrap_or_default().to_string();
         {

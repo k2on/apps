@@ -106,7 +106,7 @@ class CarTests {
             val pick = car.resolve(all[2].mediaId)!!
             assertEquals(want.map { it.id }, pick.queue.map { it.id })
             assertEquals(2, pick.at)
-            assertEquals("#album/music%2FWater%20Music%2Fwater-music", pick.from)
+            assertEquals("/album/music%2FWater%20Music%2Fwater-music/", pick.from)
             assertNull("an id that is not one of ours is nothing", car.children("nowhere", 0, 10, Car.TABS))
         }
         peer.peer.close()
@@ -207,7 +207,7 @@ class CarTests {
             val album = car.voice("Water Music", null)!!
             assertEquals("play <album>: that album, in its order", tracks { Phone.album(peer, Demo.key("Water Music")) }.map { it.id }, album.queue.map { it.id })
             assertEquals(0, album.at)
-            assertEquals("#album/music%2FWater%20Music%2Fwater-music", album.from)
+            assertEquals("/album/music%2FWater%20Music%2Fwater-music/", album.from)
 
             val vivaldi = tracks { Phone.artist(peer, "Antonio Vivaldi") }
             val artist = car.voice("antonio vivaldi", null)!!

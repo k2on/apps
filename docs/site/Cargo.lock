@@ -340,6 +340,7 @@ version = "0.1.0"
 dependencies = [
  "ark-app",
  "ark-format",
+ "ark-router",
  "arkui-glyphs",
  "leptos",
  "wasm-bindgen",
@@ -1576,6 +1577,7 @@ name = "docs"
 version = "0.1.0"
 dependencies = [
  "ark-app",
+ "ark-router",
  "arkui",
  "arkui-glyphs",
  "arkui-web",

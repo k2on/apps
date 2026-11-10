@@ -2762,7 +2762,7 @@ impl App {
     /// Where a queue was pressed from: the page it was on, as the address
     /// bar names it.
     fn from(&self) -> String {
-        arkui::router::fragment(&self.peer.source)
+        self.peer.source.url()
     }
 
     /// Start `rows` at `at` (the first when it is not among them), the queue
@@ -3312,10 +3312,11 @@ impl App {
             // it is pressed on lists performances, not tracks.
             Message::PlayRecording(take) => {
                 let rows = self.peer.recording_rows(&take);
-                let from = arkui::router::fragment(&Route::Recording {
+                let from = (Route::Recording {
                     key: take,
                     title: String::new(),
-                });
+                })
+                .url();
                 return self.play_rows(&rows, None, from);
             }
             Message::PlayWork(work) => {

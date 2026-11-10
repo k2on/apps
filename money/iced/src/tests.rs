@@ -1188,8 +1188,8 @@ fn the_demo_shows_its_bank_and_cannot_connect_one() {
     let _ = app.update(Message::MenuActivate);
     assert_eq!(app.page, Page::Settings);
     assert_eq!(app.route(), crate::Route::Settings);
-    assert_eq!(app.route().path(), "settings");
-    assert_eq!(arkui::router::parse::<crate::Route>("#settings"), crate::Route::Settings);
+    assert_eq!(app.route().url(), "/settings/");
+    assert_eq!(arkui::router::parse::<crate::Route>("/settings/"), crate::Route::Settings);
     let _ = app.act(Action::Move(Motion::Left(1)));
     let _ = app.update(Message::Key(
         iced::keyboard::Key::Character("h".into()),
@@ -1434,7 +1434,7 @@ fn a_filter_is_typed_into_the_bar_and_saved() {
             name: "Acme pay".into()
         }
     );
-    assert_eq!(app.route().path(), format!("filter/{}/acme-pay", saved.id.hex()));
+    assert_eq!(app.route().url(), format!("/filter/{}/acme-pay/", saved.id.hex()));
     assert_eq!(saved.total, app.peer.total().total);
     let entry = app.sidebar_at();
     assert_eq!(app.places()[entry].1, "Transactions", "a saved filter is in Transactions, lit");
@@ -1526,22 +1526,19 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
     let f = app.peer.saved(id).unwrap().filter.clone();
     assert!(app.peer.register().iter().all(|t| t.amount > 0 && t.account_id == f.accounts[0]));
     let checking = account(&app, "Checking").id;
-    for (fragment, page) in [
-        (format!("#filter/{}/acme-pay", id.hex()), Page::Ledger(Ledger::Saved(id))),
-        (format!("#account/{}/checking", checking.hex()), Page::Ledger(Ledger::Account(checking))),
-        // A link from before ids: still read, by name.
-        ("#filter/Acme%20pay".into(), Page::Ledger(Ledger::Saved(id))),
-        ("#account/Checking".into(), Page::Ledger(Ledger::Account(checking))),
-        ("#accounts".into(), Page::Ledger(Ledger::All)),
-        ("#inbox".into(), Page::Ledger(Ledger::Inbox)),
+    for (url, page) in [
+        (format!("/filter/{}/acme-pay/", id.hex()), Page::Ledger(Ledger::Saved(id))),
+        (format!("/account/{}/checking/", checking.hex()), Page::Ledger(Ledger::Account(checking))),
+        ("/accounts/".into(), Page::Ledger(Ledger::All)),
+        ("/inbox/".into(), Page::Ledger(Ledger::Inbox)),
     ] {
-        let route = arkui::router::parse::<Route>(&fragment);
-        assert_eq!(app.page_of(&route), Some(page), "{fragment}");
+        let route = arkui::router::parse::<Route>(&url);
+        assert_eq!(app.page_of(&route), Some(page), "{url}");
         // Read back it has no slug, which is only for reading, and is the same route.
-        assert_eq!(arkui::router::parse::<Route>(&arkui::router::fragment(&route)), route);
+        assert_eq!(arkui::router::parse::<Route>(&route.url()), route);
     }
     // An id that is no row's is not found by its slug's name.
-    let gone = arkui::router::parse::<Route>("#account/ffffffffffffffffffffffffffffffff/checking");
+    let gone = arkui::router::parse::<Route>("/account/ffffffffffffffffffffffffffffffff/checking/");
     assert_eq!(app.page_of(&gone), None);
     assert_eq!(
         app.page_of(&Route::Filter {
@@ -1550,28 +1547,6 @@ fn the_sidebar_and_the_bar_open_saved_filters() {
         }),
         None
     );
-}
-
-/// A link from before ids lands on the account, and is written over with
-/// its id rather than after it: back goes to where the window was, not to
-/// the link and straight back. Falsified by not `landed`'s replace.
-#[test]
-fn an_older_link_is_written_over_with_its_id() {
-    use arkui::navigator::Navigator;
-    use arkui::router::AddressBar;
-    let mut app = app();
-    let checking = account(&app, "Checking").id;
-    let _ = app.update(Message::Go(Page::Budget));
-    app.history.push(&Route::from_path("account/Checking").unwrap());
-    let _ = app.update(Message::Sync);
-    assert_eq!(app.page, Page::Ledger(Ledger::Account(checking)));
-    assert_eq!(
-        app.history.router().bar().read().as_deref(),
-        Some(format!("#account/{}/checking", checking.hex()).as_str())
-    );
-    app.history.back();
-    let _ = app.update(Message::Sync);
-    assert_eq!(app.page, Page::Budget, "back got past the link");
 }
 
 /// Renaming an account keeps its register: the route it was opened at,
@@ -1583,7 +1558,7 @@ fn a_renamed_accounts_register_is_still_its_own() {
     let mut app = app();
     let checking = account(&app, "Checking").id;
     let _ = app.update(Message::Go(Page::Ledger(Ledger::Account(checking))));
-    let link = arkui::router::fragment(&app.route());
+    let link = app.route().url();
     let _ = app.update(Message::Rename(crate::Naming::Account(checking)));
     let _ = app.update(Message::RenameTyped("Everyday".into()));
     let _ = app.update(Message::RenameDone);

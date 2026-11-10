@@ -11,6 +11,8 @@ description = "ArkUI in the browser: an ark-app View drawn by Leptos over the re
 
 [dependencies]
 ark-app = { path = "../app" }
+# Where a page is: its address, the route model every app declares.
+ark-router = { path = "../router" }
 ark-format = { path = "../../../rust/ark-format" }
 arkui-glyphs = { path = "../glyphs" }
 # The DOM. How the page is made is the build's (ui/docs/app.md, "The

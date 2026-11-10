@@ -136,7 +136,7 @@ final class Model: ObservableObject {
     /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
-        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }) {
+        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }) {
             if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
             link = url
             return

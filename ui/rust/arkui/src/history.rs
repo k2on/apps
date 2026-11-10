@@ -107,7 +107,7 @@ impl<R: Routable> History<R> {
 
     /// The page at `at` was scrolled `y` down.
     pub fn scrolled(&mut self, at: &R, y: f32) {
-        self.scrolls.insert(at.path(), y);
+        self.scrolls.insert(at.key(), y);
     }
 
     /// The app opened `at`: how far down to scroll it once it is drawn:
@@ -115,7 +115,7 @@ impl<R: Routable> History<R> {
     /// [`History::poll`]), and the top of a new visit.
     pub fn arrive(&mut self, at: &R) -> f32 {
         match std::mem::take(&mut self.travelling) {
-            true => self.scrolls.get(&at.path()).copied().unwrap_or(0.0),
+            true => self.scrolls.get(&at.key()).copied().unwrap_or(0.0),
             false => 0.0,
         }
     }
@@ -173,11 +173,11 @@ mod tests {
     struct Here(String);
 
     impl Routable for Here {
-        fn path(&self) -> String {
-            crate::router::join(&self.0, None)
+        fn address(&self) -> crate::router::Address {
+            crate::router::Address::at([self.0.clone()])
         }
-        fn from_path(path: &str) -> Option<Self> {
-            Some(Here(crate::router::split(path).0.to_string()))
+        fn from_address(a: &crate::router::Address) -> Option<Self> {
+            Some(Here(a.seg(0).unwrap_or_default().to_string()))
         }
         fn home() -> Self {
             Here(String::new())
