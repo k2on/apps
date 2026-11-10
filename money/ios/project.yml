@@ -50,6 +50,7 @@ targets:
     sources:
       - path: Money
       - path: ../ffi/ios/swift
+        group: Bindings
     dependencies:
       - package: ArkUI
         product: ArkUI
