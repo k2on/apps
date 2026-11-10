@@ -55,7 +55,7 @@ final class AccountsScreen: ObservableObject {
 /// can carry out comes back by name (`native`).
 @MainActor
 final class MoneyShellScreen: ObservableObject {
-    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", toReview: nil, budgetAccounts: [], trackingAccounts: [])
+    @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
     /// A command the hosted screens carry out: "new-transaction", "refresh", "search <text>"…
     var native: (String) -> Void = { _ in }
 
