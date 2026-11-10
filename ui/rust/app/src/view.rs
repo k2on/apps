@@ -495,6 +495,11 @@ pub enum Part<M> {
     Hosted {
         name: &'static str,
     },
+    /// Long-form writing, as Markdown (`crate::writing`): headings,
+    /// paragraphs, lists, code, callouts, tables, pictures.
+    Writing {
+        markdown: Val<String>,
+    },
     /// A question before something that cannot be undone
     /// (`.confirmationDialog`): its actions, then Cancel.
     Confirm {
@@ -1634,6 +1639,7 @@ impl<M> Part<M> {
                 vec![("", &**content), ("inspector", &**inspector)],
             ),
             Part::Hosted { name } => c("HostedScreen", Some(G::Text(name)), vec![], vec![]),
+            Part::Writing { markdown } => c("Writing", Some(G::Val(lit(markdown))), vec![], vec![]),
             Part::Confirm {
                 title,
                 message,
@@ -1989,6 +1995,7 @@ impl<M: 'static> Part<M> {
                 inspector: b(inspector),
             },
             Part::Hosted { name } => Part::Hosted { name },
+            Part::Writing { markdown } => Part::Writing { markdown },
             Part::Confirm {
                 title,
                 message,

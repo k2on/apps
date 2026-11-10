@@ -40,6 +40,7 @@ pub mod page;
 pub mod parts;
 pub mod shell;
 pub mod table;
+pub mod writing;
 
 pub use parts::render;
 pub use shell::shell;

@@ -182,6 +182,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
             tap,
             ..
         } => crate::shell::bar_button(title, g, enabled.get(), tap),
+        Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
         p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => dialog(p),
         // The shell's are `shell`'s.
         _ => return None,

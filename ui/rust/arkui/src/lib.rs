@@ -78,6 +78,8 @@ pub mod vim;
 pub mod wake;
 pub mod which;
 pub mod window;
+#[cfg(feature = "app")]
+pub mod writing;
 
 /// iced's default scrollbar width, which it takes out of the content's.
 ///
