@@ -73,6 +73,14 @@ posture() {
   moved "$before"
 }
 
+# Whether Android's device state is OPENED now (`cmd device_state state`,
+# its committed state): a Fold just booted is, and telling it to unfold
+# only waited three times for a size that never moved (78 s, app-screens
+# 42819916939). Unknown (no such command, another answer): not said open.
+opened() {
+  adb shell cmd device_state state 2>/dev/null | tr -d '\r' | grep -i 'committed' | grep -q "name='OPENED'"
+}
+
 case $device in
   tablet)
     # Landscape, the Pixel Tablet's natural way up, and held there.
@@ -106,7 +114,11 @@ for a in "$@"; do
       ;;
     fold)
       # Open first, signed in there; then folded, as it is, the login kept.
-      posture unfold || echo "$a: the Fold's screen kept its size: open already"
+      if opened; then
+        echo "$a: the Fold is open already ($(adb shell cmd device_state state 2>/dev/null | tr -d '\r' | grep -i committed))"
+      else
+        posture unfold || echo "$a: the Fold's screen kept its size: open already"
+      fi
       if DEVICE_NAME="${FOLD_NAME:-Pixel Fold}" CORNER=60 CUTOUT=hole \
         bash "$here/app-android.sh" "$out/$a/fold-unfolded" "$apk" "$a" "$server"; then
         if posture fold; then

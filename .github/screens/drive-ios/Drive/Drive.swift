@@ -13,8 +13,13 @@
 //               A tap's label is what the element says or its accessibility
 //               identifier; `role` ("tab", "button", "field", "text") says
 //               which kind it is when several say it; `press` holds it
-//               instead (a row's context menu); `a|b` is whichever is
-//               there, and "optional": true passes over a tap with nothing to tap.
+//               instead (a row's context menu), as does "hold": true;
+//               `a|b` is whichever is there, and "optional": true passes
+//               over a tap with nothing to tap. A shot's "args" are its
+//               launch arguments (`-screen budget`, `-menu sort`: the
+//               app's own deep links, read from UserDefaults' argument
+//               domain), given each time it is opened for that shot;
+//               signing in opens it with none.
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
 //               which is what a step can name
@@ -39,9 +44,11 @@ struct Shot: Decodable {
         var relaunch: Bool?
         /// A tap with nothing to tap passed over, a few seconds on.
         var optional: Bool?
+        /// A long press, not a tap: what opens a context menu.
+        var hold: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case tap, press, role, `where`, unless, type, wait, relaunch, optional
+            case tap, press, role, `where`, unless, type, wait, relaunch, optional, hold
             case waitFor = "await"
         }
     }
@@ -141,7 +148,7 @@ final class Drive: XCTestCase {
                         XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
                         return
                     }
-                    if step.press != nil { c.press(forDuration: 1.2) } else { c.tap() }
+                    if step.press != nil || step.hold == true { c.press(forDuration: 1.2) } else { c.tap() }
                 }
                 if step.relaunch == true {
                     app.terminate()

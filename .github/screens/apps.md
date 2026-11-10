@@ -53,7 +53,26 @@ All of it is in `<app>/screens/`:
   `"where": "bottom"` on a tap takes the lowest on the screen of all that
   match, and `"unless": "<label>"` skips a step when that label is on the
   screen already; `{"await": "<label>"}` waits (up to 20 s) until it is (`a|b`: either).
-  `{"relaunch": true}` stops and opens the app again. harken's `player`
+  `{"relaunch": true}` stops and opens the app again.
+  `"hold": true` on a tap presses it long, as a finger opens a context
+  menu (iOS `press(forDuration:)`, Android a still swipe of a second);
+  the menu's items are then tapped by what they say, as any other.
+
+  **A screen opened by its launch arguments** rather than by steps: a
+  shot's `"args"` (`["-screen", "category:dining", "-menu", "sort"]`)
+  are given to the app every time it is opened for that shot (signing
+  in opens it with none). On the iPhone and the iPad they are the
+  process's launch arguments, which an app reads from UserDefaults'
+  argument domain (`UserDefaults.standard.string(forKey: "screen")`); on
+  Android each `-<key> <value>` pair is a string extra of the launch
+  intent (`intent.getStringExtra("screen")`). An app that reads none
+  opens as it always does, so a shot can say both its args and the steps
+  that reach the same screen. What a shot opens that animates in (a
+  dropdown, a submenu, a popover, a sheet) is taken once it has settled:
+  the iPhone's every shot, once the screen is the same three times half a
+  second apart; Android's, for a shot with a `hold` step or
+  `"settle": true`, once it is the same twice running (else, as ever,
+  three seconds after its last step). harken's `player`
   shot: the lowest "Für Elise" (the mini player, if one is there; else
   Recently added's, which plays it), until something plays ("Pause") or
   the player is open ("Close the player"); then the app opened again, so
@@ -124,7 +143,8 @@ All of it is in `<app>/screens/`:
   the text the window lays out (iced's own selector, as iced_test finds
   text): `{"click": "<text>"}` clicks the middle of the text that says
   exactly that (`a|b`, `"where": "bottom"`, `"optional"` and `"unless"` as
-  the phones' taps have them); `{"hover": "<text>"}` moves the pointer over
+  the phones' taps have them; `"button": "right"` for its context menu);
+  `{"hover": "<text>"}` moves the pointer over
   it and leaves it there, so the shot is drawn pointed at it (a shot is
   otherwise drawn with no pointer); `{"scroll": "<text>", "by": <pixels>}`
   turns the wheel over it, `by` down (negative: up), for a page no key
@@ -304,10 +324,11 @@ build, the same driver, the same shots.json, light and dark.
 | `ipad-landscape/` | the same iPad, on its side | the same |
 | `mac/` | the runner's own screen | an app whose commit has `<app>-macos` |
 
-- **Android's tablet and Fold**: each Android job is a phone job (the Pixel
-  7, as before) and a "large" one, at once, both from the same APK. The
-  large one boots a Pixel Tablet, held in landscape (rotation locked, its
-  natural way up), and takes every shot; then the Fold (the Pixel Fold's
+- **Android's tablet and Fold**: each app and theme is three Android jobs
+  at once, all from the same APK: the phone's (the Pixel 7, as before),
+  the tablet's and the Fold's. The tablet's boots a Pixel Tablet, held in
+  landscape (rotation locked, its natural way up), and takes every shot;
+  the Fold's boots the Fold (the Pixel Fold's
   profile where the runner's avdmanager lists it; GitHub's has had only
   the emulator's `7.6in Foldable`, and device.json says which), opened
   (`adb emu unfold`), signed in and every shot taken, then folded and
@@ -345,11 +366,11 @@ build, the same driver, the same shots.json, light and dark.
   seen running an app. Steps are not driven yet: a Mac window needs a
   macOS UI-test driver of its own (`drive-ios` is the iPhone's), which is
   the next thing to add when there is a Mac build to drive.
-- **What a run costs.** Linux: a "large" job per app and theme, beside
-  the phone's, each its own nix, server and emulators (two boots), at
-  once with the phone's: 5 (revelation), 12 (money) and 17 to 18
-  (harken) minutes each, some 70 runner-minutes for every app on a run;
-  the longest Android job goes from about 10 minutes to about 18. The
+- **What a run costs.** Linux: a tablet's and a Fold's job per app and
+  theme, beside the phone's, each its own nix, server and emulator, at
+  once with the phone's. Together, one job after the other, they were 5
+  (revelation), 12 (money) and 17 to 18 (harken) minutes; apart, the
+  longest is the Fold's (two postures). The
   Mac: for apps that take neither the iPad nor the Mac, about five
   seconds (the iPad's check, the listing of the Mac packages); for one
   that takes the iPad, the iPad's boot (about a minute) and its shots

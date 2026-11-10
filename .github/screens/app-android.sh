@@ -16,7 +16,13 @@
 # "<label>" to skip the step when that is on the screen already (what it
 # opens is open), "optional": true to pass over a tap with nothing to tap
 # (after a few seconds), and `a|b` for whichever of two is there; {"await": "<label>"} waits for that label to be there (`a|b`, either);
-# {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}. Writes <out>/device.json,
+# {"relaunch": true} stops and opens the app again; {"type": "<text>"}; or {"wait": <seconds>}.
+# "hold": true on a tap presses it long (a context menu, as a finger opens
+# one). A shot's "args", its launch arguments as the iPhone's are given
+# (`["-screen", "budget"]`), are the intent's string extras here, each
+# `-<key> <value>` pair `--es <key> <value>` (the app reads
+# `intent.getStringExtra("screen")`), every time the app is opened for that
+# shot; signing in opens it with none. Writes <out>/device.json,
 # <out>/<theme>/<id>.png, and beside each the tree it was taken from,
 # <id>.tree.txt (ui.py --tree), which is what a step can name.
 #
@@ -56,15 +62,16 @@ dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 # `a|b`: whichever is there. `optional`: nothing there is no failure.
 # HOLD=1: held for a second and a half (a long press: a row's menu).
 tap() {
-  local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} optional=${5:-} at one screen
+  local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} optional=${5:-} hold=${6:-} at one screen
   local -a each
   IFS='|' read -ra each <<< "$text"
   for _ in $(seq 1 "$seconds"); do
     screen=$(dump)
     for one in "${each[@]}"; do
       if at=$(python3 -I "$here/ui.py" "$one" "$role" "$where" <<< "$screen"); then
+        # A long press: a swipe that does not move, held a second.
         # shellcheck disable=SC2086
-        if [ -n "${HOLD:-}" ]; then
+        if [ -n "${HOLD:-}" ] || [ -n "$hold" ]; then
           read -r x y <<< "$at"
           adb shell input swipe "$x" "$y" "$x" "$y" 1500
         else
@@ -80,6 +87,20 @@ tap() {
   adb exec-out screencap -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
   return 1
+}
+
+# The screen, once it stands still, into `$1`: the same picture twice in a
+# row half a second apart, or what it is after five seconds.
+still() {
+  local prev="" now
+  for _ in $(seq 1 10); do
+    adb exec-out screencap -p > "$1.next"
+    now=$(md5sum < "$1.next")
+    [ "$now" = "$prev" ] && break
+    prev=$now
+    sleep 0.5
+  done
+  mv "$1.next" "$1"
 }
 
 # Whether something on the screen says `text`, now.
@@ -103,10 +124,12 @@ step() {
     done
     echo "::error::$app: '$label' never came"; return 1
   elif jq -e 'has("tap")' <<< "$s" > /dev/null; then
+    local hold
+    hold=$(jq -r 'if .hold == true then "hold" else "" end' <<< "$s")
     if jq -e '.optional == true' <<< "$s" > /dev/null; then
-      tap "$(jq -r .tap <<< "$s")" 3 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" optional
+      tap "$(jq -r .tap <<< "$s")" 3 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" optional "$hold"
     else
-      tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
+      tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" "" "$hold"
     fi
   elif jq -e 'has("press")' <<< "$s" > /dev/null; then
     HOLD=1 tap "$(jq -r .press <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
@@ -155,13 +178,15 @@ why() {
 # drawn), then waited for until its own window has the focus; not a fixed
 # four seconds after `monkey`, which says nothing when a launch is lost.
 # Given launch arguments (a shot of shots.json's `screens`), they go with
-# it as the intent's string array `ark.args` (ark_app::shell::Launch).
+# it as the intent's string array `ark.args` (ark_app::shell::Launch), and
+# each `-key value` pair as a string extra too (`extras`, set per shot).
+extras=()
 open_app() {
   local said extra=()
   if [ -n "${1:-}" ]; then extra=(--esa ark.args "$1"); fi
   adb shell am force-stop "$pkg"
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
-  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} 2>&1 | tr -d '\r')
+  said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} ${extras[@]+"${extras[@]}"} 2>&1 | tr -d '\r')
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
@@ -274,6 +299,11 @@ for theme in ${THEMES:-light dark}; do
     # shots): where a shot went other than it was written to.
     steps="${RESULTS:-$out/../steps}/$app/$(basename "$out")/$theme/$id"
     mkdir -p "$steps"
+    # Its launch arguments: `-key value` pairs, as string extras.
+    extras=()
+    while read -r k v; do
+      [ -n "$k" ] && extras+=(--es "'${k#-}'" "'$v'")
+    done < <(jq -r '(.args // []) as $a | range(0; $a | length; 2) as $i | "\($a[$i]) \($a[$i + 1] // "")"' <<< "$shot")
     open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
@@ -288,9 +318,25 @@ for theme in ${THEMES:-light dark}; do
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
     sleep 3
-    { echo "before the picture"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/shot.txt" 2>&1 || true
-    adb exec-out screencap -p > "$out/$theme/$id.png"
-    dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
+    # The tree the picture is taken from, read once: the run's results'
+    # "before the picture" and the shot's own <id>.tree.txt (each was a
+    # dump of its own, two seconds apiece on the emulator).
+    tree() {
+      dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
+      { echo "before the picture"; cat "$out/$theme/$id.tree.txt"; } > "$steps/shot.txt"
+    }
+    # A shot that opens something that animates in (a held tap's context
+    # menu, a press step, or one that says "settle": true: a dropdown, a
+    # sheet) is taken once the screen stands still: the same picture twice
+    # running, half a second apart, up to five seconds more, and its tree
+    # read then. Every other as before.
+    if jq -e '.settle == true or any(.steps[]?; .hold == true or has("press"))' <<< "$shot" > /dev/null; then
+      still "$out/$theme/$id.png"
+      tree
+    else
+      tree
+      adb exec-out screencap -p > "$out/$theme/$id.png"
+    fi
   done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
 done
 

@@ -42,7 +42,9 @@
 //!   that (`a|b`: whichever is there), waiting up to 20 s for it to be;
 //!   `"where": "bottom"` takes the lowest of several, `"optional": true`
 //!   passes over one not there after 5 s, and `"unless": "<text>"` skips
-//!   the step when that is on the screen already.
+//!   the step when that is on the screen already. `"button": "right"`
+//!   (or `"middle"`) clicks with that button: a context menu, opened as a
+//!   person opens it, and taken once its opening has settled.
 //! - `{"hover": "<text>"}` moves the pointer over the middle of that text,
 //!   as `click` finds it, and leaves it there: what a pointer does to it.
 //! - `{"scroll": "<text>", "by": <pixels>}` turns the wheel over that
@@ -595,9 +597,15 @@ where
                 }
             }
             let bottom = step["where"].as_str() == Some("bottom");
+            let button = match step["button"].as_str() {
+                None | Some("left") => mouse::Button::Left,
+                Some("right") => mouse::Button::Right,
+                Some("middle") => mouse::Button::Middle,
+                Some(other) => return Err(format!("no mouse button {other:?}")),
+            };
             match self.wait_for(label, bottom, if optional { OPTIONAL } else { PATIENCE }) {
                 Some(at) => self.interact(Interaction::Mouse(Mouse::Click {
-                    button: mouse::Button::Left,
+                    button,
                     target: Some(Target::Point(at)),
                 })),
                 None if optional => {}
