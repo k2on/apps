@@ -347,6 +347,62 @@
       "on": [
         "mac"
       ]
+    },
+    {
+      "id": "a-category-vacation-inspector",
+      "args": [
+        "-screen",
+        "category:vacation",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "android",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
+      ]
+    },
+    {
+      "id": "a-transaction-receipt-inspector",
+      "args": [
+        "-screen",
+        "transaction:receipt",
+        "-inspector",
+        "1"
+      ],
+      "on": [
+        "android",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
+      ]
+    },
+    {
+      "id": "a-account-checking",
+      "args": [
+        "-screen",
+        "account:checking"
+      ],
+      "on": [
+        "android",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
+      ]
+    },
+    {
+      "id": "a-settings",
+      "args": [
+        "-screen",
+        "settings"
+      ],
+      "on": [
+        "android",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
+      ]
     }
   ]
 }
