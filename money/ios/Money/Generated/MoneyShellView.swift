@@ -14,7 +14,42 @@ struct MoneyShellView: View {
                     WithInspector("Category Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                         HostedScreen("budget")
                     } inspector: {
-                        HostedScreen("budget.inspector")
+                        if let c = p.category {
+                            DetailPage {
+                                HeaderCard(c.name, figure: c.figure, tint: c.tint, badge: true, line: c.attention, caption: c.group) {
+                                    if c.canAssign {
+                                        ListRow(c.assign, glyph: "target", accent: true, onTap: { screen.send(.assignTarget) })
+                                    }
+                                    if c.cover {
+                                        ListRow("Cover Overspending From", glyph: "arrow-left-right", accent: true, onTap: { screen.send(.coverOverspending) })
+                                    }
+                                }
+                                CardSection(title: c.month) {
+                                    ListRow("Carried Over", amount: c.carried, quiet: true)
+                                    ListRow("Assigned", amount: c.assigned)
+                                    ListRow("Activity", amount: c.activity, quiet: true)
+                                    ListRow("Available", amount: c.available)
+                                }
+                                CardSection(title: "Goal") {
+                                    ListRow("Goal", value: c.goal)
+                                    if c.hasGoal {
+                                        ListRow("Target", amount: c.target)
+                                        GoalProgress(c.progress, tint: c.progressTint, note: c.progressNote)
+                                    }
+                                }
+                                CardSection(title: "Activity") {
+                                    ForEach(c.activityLines, id: \.self) { t in
+                                        ListRow(t.title, subtitle: t.subtitle, amount: t.cents)
+                                    }
+                                    if c.quietMonth {
+                                        ListRow("No transactions this month.", quiet: true)
+                                    }
+                                    ListRow("Show All in Transactions", accent: true, onTap: { screen.send(.showActivity) })
+                                }
+                            }
+                        } else {
+                            HostedScreen("budget.inspector")
+                        }
                     }
                 } items: {
                     BarButton("Previous Month", glyph: "chevron-left", placement: .navigation, enabled: true, onTap: { screen.send(.run(command: "previous-month")) })
@@ -32,7 +67,22 @@ struct MoneyShellView: View {
                                 WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                                     HostedScreen("accounts.register")
                                 } inspector: {
-                                    HostedScreen("transactions.inspector")
+                                    if let t = p.transaction {
+                                        DetailPage {
+                                            HeaderCard(t.payee, figure: t.figure, tint: t.tint, caption: t.category) {
+                                            }
+                                            CardSection {
+                                                ListRow("Account", value: t.account)
+                                                ListRow("Date", value: t.date)
+                                                ListRow("Status", value: t.status)
+                                                if t.hasMemo {
+                                                    ListRow("Memo", value: t.memo)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        HostedScreen("transactions.inspector")
+                                    }
                                 }
                             }
                         } items: {
@@ -52,7 +102,22 @@ struct MoneyShellView: View {
                         WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                             HostedScreen("transactions")
                         } inspector: {
-                            HostedScreen("transactions.inspector")
+                            if let t = p.transaction {
+                                DetailPage {
+                                    HeaderCard(t.payee, figure: t.figure, tint: t.tint, caption: t.category) {
+                                    }
+                                    CardSection {
+                                        ListRow("Account", value: t.account)
+                                        ListRow("Date", value: t.date)
+                                        ListRow("Status", value: t.status)
+                                        if t.hasMemo {
+                                            ListRow("Memo", value: t.memo)
+                                        }
+                                    }
+                                }
+                            } else {
+                                HostedScreen("transactions.inspector")
+                            }
                         }
                     }
                 } items: {
@@ -76,7 +141,22 @@ struct MoneyShellView: View {
                                 WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                                     HostedScreen("accounts.register")
                                 } inspector: {
-                                    HostedScreen("transactions.inspector")
+                                    if let t = p.transaction {
+                                        DetailPage {
+                                            HeaderCard(t.payee, figure: t.figure, tint: t.tint, caption: t.category) {
+                                            }
+                                            CardSection {
+                                                ListRow("Account", value: t.account)
+                                                ListRow("Date", value: t.date)
+                                                ListRow("Status", value: t.status)
+                                                if t.hasMemo {
+                                                    ListRow("Memo", value: t.memo)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        HostedScreen("transactions.inspector")
+                                    }
                                 }
                             }
                         } items: {
@@ -95,7 +175,22 @@ struct MoneyShellView: View {
                                 WithInspector("Transaction Details", isShown: p.inspector, onToggle: { screen.send(.inspector(shown: $0)) }) {
                                     HostedScreen("accounts.register")
                                 } inspector: {
-                                    HostedScreen("transactions.inspector")
+                                    if let t = p.transaction {
+                                        DetailPage {
+                                            HeaderCard(t.payee, figure: t.figure, tint: t.tint, caption: t.category) {
+                                            }
+                                            CardSection {
+                                                ListRow("Account", value: t.account)
+                                                ListRow("Date", value: t.date)
+                                                ListRow("Status", value: t.status)
+                                                if t.hasMemo {
+                                                    ListRow("Memo", value: t.memo)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        HostedScreen("transactions.inspector")
+                                    }
                                 }
                             }
                         } items: {

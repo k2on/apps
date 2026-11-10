@@ -26,7 +26,43 @@ fun MoneyShell(screen: MoneyShellHolder) {
             ) {
                 WithInspector("Category Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
                     inspector = {
-                        HostedScreen("budget.inspector")
+                        p.category?.let { c ->
+                            DetailPage {
+                                HeaderCard(c.name, figure = c.figure, tint = c.tint, badge = true, line = c.attention, caption = c.group) {
+                                    if (c.canAssign) {
+                                        ListRow(c.assign, glyph = "target", accent = true, onTap = { screen.send(ShellMsg.AssignTarget) })
+                                    }
+                                    if (c.cover) {
+                                        ListRow("Cover Overspending From", glyph = "arrow-left-right", accent = true, onTap = { screen.send(ShellMsg.CoverOverspending) })
+                                    }
+                                }
+                                CardSection(title = c.month) {
+                                    ListRow("Carried Over", amount = c.carried, quiet = true)
+                                    ListRow("Assigned", amount = c.assigned)
+                                    ListRow("Activity", amount = c.activity, quiet = true)
+                                    ListRow("Available", amount = c.available)
+                                }
+                                CardSection(title = "Goal") {
+                                    ListRow("Goal", value = c.goal)
+                                    if (c.hasGoal) {
+                                        ListRow("Target", amount = c.target)
+                                        GoalProgress(c.progress, tint = c.progressTint, note = c.progressNote)
+                                    }
+                                }
+                                CardSection(title = "Activity") {
+                                    for (t in c.activityLines) {
+                                        ListRow(t.title, subtitle = t.subtitle, amount = t.cents)
+                                    }
+                                    if (c.quietMonth) {
+                                        ListRow("No transactions this month.", quiet = true)
+                                    }
+                                    ListRow("Show All in Transactions", accent = true, onTap = { screen.send(ShellMsg.ShowActivity) })
+                                }
+                            }
+                        }
+                        if (p.category == null) {
+                            HostedScreen("budget.inspector")
+                        }
                     },
                 ) {
                     HostedScreen("budget")
@@ -52,7 +88,23 @@ fun MoneyShell(screen: MoneyShellHolder) {
                             WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
                                 WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
                                     inspector = {
-                                        HostedScreen("transactions.inspector")
+                                        p.transaction?.let { t ->
+                                            DetailPage {
+                                                HeaderCard(t.payee, figure = t.figure, tint = t.tint, caption = t.category) {
+                                                }
+                                                CardSection {
+                                                    ListRow("Account", value = t.account)
+                                                    ListRow("Date", value = t.date)
+                                                    ListRow("Status", value = t.status)
+                                                    if (t.hasMemo) {
+                                                        ListRow("Memo", value = t.memo)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (p.transaction == null) {
+                                            HostedScreen("transactions.inspector")
+                                        }
                                     },
                                 ) {
                                     HostedScreen("accounts.register")
@@ -75,7 +127,23 @@ fun MoneyShell(screen: MoneyShellHolder) {
                 WithSearch("Payee, category, memo or amount", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
                     WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
                         inspector = {
-                            HostedScreen("transactions.inspector")
+                            p.transaction?.let { t ->
+                                DetailPage {
+                                    HeaderCard(t.payee, figure = t.figure, tint = t.tint, caption = t.category) {
+                                    }
+                                    CardSection {
+                                        ListRow("Account", value = t.account)
+                                        ListRow("Date", value = t.date)
+                                        ListRow("Status", value = t.status)
+                                        if (t.hasMemo) {
+                                            ListRow("Memo", value = t.memo)
+                                        }
+                                    }
+                                }
+                            }
+                            if (p.transaction == null) {
+                                HostedScreen("transactions.inspector")
+                            }
                         },
                     ) {
                         HostedScreen("transactions")
@@ -106,7 +174,23 @@ fun MoneyShell(screen: MoneyShellHolder) {
                         WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
                             WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
                                 inspector = {
-                                    HostedScreen("transactions.inspector")
+                                    p.transaction?.let { t ->
+                                        DetailPage {
+                                            HeaderCard(t.payee, figure = t.figure, tint = t.tint, caption = t.category) {
+                                            }
+                                            CardSection {
+                                                ListRow("Account", value = t.account)
+                                                ListRow("Date", value = t.date)
+                                                ListRow("Status", value = t.status)
+                                                if (t.hasMemo) {
+                                                    ListRow("Memo", value = t.memo)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (p.transaction == null) {
+                                        HostedScreen("transactions.inspector")
+                                    }
                                 },
                             ) {
                                 HostedScreen("accounts.register")
@@ -129,7 +213,23 @@ fun MoneyShell(screen: MoneyShellHolder) {
                         WithSearch("Search", text = p.search, onChange = { screen.send(ShellMsg.Search(text = it)) }) {
                             WithInspector("Transaction Details", isShown = p.inspector, onToggle = { screen.send(ShellMsg.Inspector(shown = it)) },
                                 inspector = {
-                                    HostedScreen("transactions.inspector")
+                                    p.transaction?.let { t ->
+                                        DetailPage {
+                                            HeaderCard(t.payee, figure = t.figure, tint = t.tint, caption = t.category) {
+                                            }
+                                            CardSection {
+                                                ListRow("Account", value = t.account)
+                                                ListRow("Date", value = t.date)
+                                                ListRow("Status", value = t.status)
+                                                if (t.hasMemo) {
+                                                    ListRow("Memo", value = t.memo)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (p.transaction == null) {
+                                        HostedScreen("transactions.inspector")
+                                    }
                                 },
                             ) {
                                 HostedScreen("accounts.register")

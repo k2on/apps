@@ -23,7 +23,10 @@ use ark_app::{App, Command, Data};
 use money_domain::routes::Route;
 use money_domain::*;
 
+pub mod inspect;
 pub mod view;
+
+pub use inspect::{CategoryInspector, DetailLine, TransactionInspector};
 
 /// The shell, as `ark_app` runs it.
 pub struct MoneyShell;
@@ -59,6 +62,10 @@ pub struct ShellState {
     /// launch's `-screen account:checking`): shown as soon as one answers
     /// to it, until another place is chosen.
     pub wanted: Option<String>,
+    /// The category the budget's inspector shows, by its id or (from a
+    /// launch) its name; the transaction a register's inspector shows.
+    pub category: Option<String>,
+    pub transaction: Option<String>,
 }
 
 impl Default for ShellState {
@@ -70,6 +77,8 @@ impl Default for ShellState {
             month: String::new(),
             pane: PANES[0].into(),
             wanted: None,
+            category: None,
+            transaction: None,
         }
     }
 }
@@ -99,6 +108,18 @@ pub enum ShellMsg {
     /// The window's launch arguments (`ark_app::shell::Launch`): the place
     /// it opens on, so any screen is opened with no steps.
     Launch { args: Vec<String> },
+    /// The category (its hex id) the budget's inspector shows, as the
+    /// budget's selection moves; none, nothing selected.
+    InspectCategory { id: Option<String> },
+    /// The transaction a register's inspector shows.
+    InspectTransaction { id: Option<String> },
+    /// The inspected category given the rest of its target this month.
+    AssignTarget,
+    /// Money moved into the inspected, overspent category (the platform's
+    /// sheet: `move <id>`).
+    CoverOverspending,
+    /// The inspected category's transactions, in Transactions.
+    ShowActivity,
 }
 
 /// One account's place in the sidebar.
@@ -130,6 +151,10 @@ pub struct ShellPage {
     pub account_title: String,
     /// The pane Settings shows.
     pub pane: String,
+    /// Category Details, while a category is inspected and the month has it.
+    pub category: Option<CategoryInspector>,
+    /// Transaction Details, while a transaction is inspected.
+    pub transaction: Option<TransactionInspector>,
     /// What waits for a look in Transactions: the bank's imports to review.
     pub to_review: Option<i64>,
     /// The open accounts on the budget, then those only tracked.
@@ -145,8 +170,12 @@ impl App for MoneyShell {
     type Route = Route;
     type Screen = ShellPage;
 
-    fn holds(_: &ShellState) -> Vec<MoneyView> {
-        vec![MoneyView::Accounts]
+    fn holds(s: &ShellState) -> Vec<MoneyView> {
+        let mut v = vec![MoneyView::Accounts, MoneyView::Register { account: None }];
+        if !s.month.is_empty() {
+            v.push(MoneyView::Lines { month: s.month.clone() });
+        }
+        v
     }
 
     fn update(s: &mut ShellState, msg: ShellMsg, data: &Data<'_, MoneyView>) -> Vec<Command<Self>> {
@@ -182,6 +211,37 @@ impl App for MoneyShell {
                 vec![]
             }
             ShellMsg::Launch { args } => launch(s, Launch::parse(&args), data),
+            ShellMsg::InspectCategory { id } => {
+                s.category = id;
+                vec![]
+            }
+            ShellMsg::InspectTransaction { id } => {
+                s.transaction = id;
+                vec![]
+            }
+            ShellMsg::AssignTarget => match inspected(s, data) {
+                Some(l) if l.assignable() && l.target > l.assigned => vec![Command::Send {
+                    change: MoneyChange::Assign(Assign {
+                        month: s.month.clone(),
+                        category_id: l.category_id,
+                        amount: l.target,
+                    }),
+                    then: None,
+                }],
+                _ => vec![],
+            },
+            ShellMsg::CoverOverspending => match inspected(s, data) {
+                Some(l) => vec![Command::Native(format!("move {}", l.category_id.hex()))],
+                None => vec![],
+            },
+            ShellMsg::ShowActivity => match inspected(s, data).map(|l| l.name.clone()) {
+                Some(name) => {
+                    select(s, SECTIONS[2].into(), data);
+                    s.search = name;
+                    vec![Command::Native(format!("search {}", s.search))]
+                }
+                None => vec![],
+            },
             ShellMsg::Run { command } => match command.strip_prefix("go-") {
                 Some(tag) => {
                     select(s, tag.into(), data);
@@ -214,6 +274,12 @@ impl App for MoneyShell {
             month_title: ark_format::month(&s.month),
             account_title: shown.map(|a| a.name.clone()).unwrap_or_default(),
             pane: s.pane.clone(),
+            category: inspected(s, data).map(|l| inspect::category(l, &s.month, data.rows(&MoneyView::Register { account: None }))),
+            transaction: s
+                .transaction
+                .as_deref()
+                .and_then(|k| inspect::transaction_named(data.rows(&MoneyView::Register { account: None }), k))
+                .map(inspect::transaction),
             to_review: (unapproved > 0).then_some(unapproved),
             budget_accounts: open.iter().filter(|a| a.on_budget).map(place).collect(),
             tracking_accounts: open.iter().filter(|a| !a.on_budget).map(place).collect(),
@@ -236,6 +302,13 @@ fn select(s: &mut ShellState, tag: String, data: &Data<'_, MoneyView>) {
         s.section = tag;
         s.search.clear();
     }
+}
+
+/// The category the budget's inspector shows: the month's line its key
+/// names, while the month has one.
+fn inspected<'a>(s: &ShellState, data: &Data<'a, MoneyView>) -> Option<&'a BudgetLine> {
+    let key = s.category.as_deref()?;
+    inspect::category_named(data.rows(&MoneyView::Lines { month: s.month.clone() }), key)
 }
 
 /// The open account `name` names: its id, its name in any case, or a
@@ -289,13 +362,21 @@ fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Comm
                 }
             }
         }
+        // In the inspector when it is shown (Category Details, Transaction
+        // Details); pushed, or in its editor, by the platform otherwise.
         Some("category") => {
             select(s, SECTIONS[0].into(), data);
-            out.push(Command::Native(format!("open-category {item}")));
+            s.category = Some(item.clone());
+            if !s.inspector {
+                out.push(Command::Native(format!("open-category {item}")));
+            }
         }
         Some("transaction") => {
             select(s, SECTIONS[2].into(), data);
-            out.push(Command::Native(format!("open-transaction {item}")));
+            s.transaction = Some(item.clone());
+            if !s.inspector {
+                out.push(Command::Native(format!("open-transaction {item}")));
+            }
         }
         Some("review") => {
             select(s, SECTIONS[2].into(), data);

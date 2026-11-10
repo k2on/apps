@@ -37,6 +37,8 @@ import SwiftUI
 
 struct BudgetView: View {
     @EnvironmentObject private var model: Model
+    /// Where a row opens its category's page: the section's stack.
+    @Environment(\.open) private var openRoute
     @Environment(\.reducesMotion) private var still
     @Environment(\.present) private var present
     @AppStorage("budget.hidden") private var showHidden = false
@@ -225,7 +227,13 @@ struct BudgetView: View {
                 ForEach(g.lines) { l in
                     // A month its rule assigns offers neither: the domain
                     // refuses assigning it and moving money to or from it.
-                    NavigationLink(value: Route.category(id: l.categoryId.hex, name: l.name)) { CategoryRow(line: l, month: model.snapshot.month) }
+                    // With the shell's inspector shown, the row is inspected
+                    // (Category Details, Rust's); else its page is pushed.
+                    Button {
+                        if model.shell.page.inspector { model.shell.send(.inspectCategory(id: l.categoryId.hex)) }
+                        else { openRoute(.category(id: l.categoryId.hex, name: l.name)) }
+                    } label: { CategoryRow(line: l, month: model.snapshot.month) }
+                        .foregroundStyle(.ink)
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if l.assignable() {
                                 Button { present(.assign(l.categoryId)) } label: { Label("Assign", systemImage: "plus.circle.fill") }

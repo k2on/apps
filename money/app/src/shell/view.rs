@@ -6,7 +6,7 @@ use ark_app::shell::*;
 use ark_app::view;
 use ark_app::view::*;
 
-use super::{ShellMsg, ShellPage};
+use super::{CategoryInspector, ShellMsg, ShellPage, TransactionInspector};
 
 /// The main window: the four sections, then each account in the sidebar
 /// under Budget Accounts or Tracking Accounts; each its toolbar — what
@@ -31,7 +31,11 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                         p.inspector,
                         |shown| ShellMsg::Inspector { shown },
                         hosted("budget"),
-                        hosted("budget.inspector"),
+                        if let Some(c) = p.category {
+                            category_inspector(c)
+                        } else {
+                            hosted("budget.inspector")
+                        },
                     ),
                     (
                         bar_item("Previous Month", "chevron-left", Placement::Navigation, run("previous-month")),
@@ -59,7 +63,11 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                                     p.inspector,
                                     |shown| ShellMsg::Inspector { shown },
                                     hosted("accounts.register"),
-                                    hosted("transactions.inspector"),
+                                    if let Some(t) = p.transaction {
+                                        transaction_inspector(t)
+                                    } else {
+                                        hosted("transactions.inspector")
+                                    },
                                 ),
                             ),
                             register_items(),
@@ -88,7 +96,11 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                             p.inspector,
                             |shown| ShellMsg::Inspector { shown },
                             hosted("transactions"),
-                            hosted("transactions.inspector"),
+                            if let Some(t) = p.transaction {
+                                transaction_inspector(t)
+                            } else {
+                                hosted("transactions.inspector")
+                            },
                         ),
                     ),
                     (
@@ -129,7 +141,11 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                                     p.inspector,
                                     |shown| ShellMsg::Inspector { shown },
                                     hosted("accounts.register"),
-                                    hosted("transactions.inspector"),
+                                    if let Some(t) = p.transaction {
+                                        transaction_inspector(t)
+                                    } else {
+                                        hosted("transactions.inspector")
+                                    },
                                 ),
                             ),
                             register_items(),
@@ -156,7 +172,11 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
                                     p.inspector,
                                     |shown| ShellMsg::Inspector { shown },
                                     hosted("accounts.register"),
-                                    hosted("transactions.inspector"),
+                                    if let Some(t) = p.transaction {
+                                        transaction_inspector(t)
+                                    } else {
+                                        hosted("transactions.inspector")
+                                    },
                                 ),
                             ),
                             register_items(),
@@ -169,6 +189,71 @@ pub fn money_shell(p: &ShellPage) -> View<ShellMsg> {
     )
     .footer(hosted("household"))
     .into()
+}
+
+/// Category Details (the reference's): a card of what it has, what needs
+/// attention and its group, with Assign and Cover Overspending; the month's
+/// figures; its goal and how far toward it; the month's transactions in it
+/// and the way to all of them.
+#[view]
+pub fn category_inspector(c: &CategoryInspector) -> View<ShellMsg> {
+    detail_page((
+        header_card(c.name, c.figure, c.tint).badge().line(c.attention).caption(c.group).actions((
+            if c.can_assign {
+                list_row(c.assign).glyph("target").accent().on_tap(ShellMsg::AssignTarget)
+            },
+            if c.cover {
+                list_row("Cover Overspending From")
+                    .glyph("arrow-left-right")
+                    .accent()
+                    .on_tap(ShellMsg::CoverOverspending)
+            },
+        )),
+        card_section((
+            list_row("Carried Over").amount(c.carried).quiet(),
+            list_row("Assigned").amount(c.assigned),
+            list_row("Activity").amount(c.activity).quiet(),
+            list_row("Available").amount(c.available),
+        ))
+        .header(c.month),
+        card_section((
+            list_row("Goal").value(c.goal),
+            if c.has_goal {
+                (
+                    list_row("Target").amount(c.target),
+                    goal_progress(c.progress, c.progress_tint, c.progress_note),
+                )
+            },
+        ))
+        .header("Goal"),
+        card_section((
+            for t in c.activity_lines {
+                list_row(t.title).subtitle(t.subtitle).amount(t.cents)
+            },
+            if c.quiet_month {
+                list_row("No transactions this month.").quiet()
+            },
+            list_row("Show All in Transactions").accent().on_tap(ShellMsg::ShowActivity),
+        ))
+        .header("Activity"),
+    ))
+}
+
+/// Transaction Details: who and how much, in a card; where, when, its
+/// status and its memo.
+#[view]
+pub fn transaction_inspector(t: &TransactionInspector) -> View<ShellMsg> {
+    detail_page((
+        header_card(t.payee, t.figure, t.tint).caption(t.category),
+        card_section((
+            list_row("Account").value(t.account),
+            list_row("Date").value(t.date),
+            list_row("Status").value(t.status),
+            if t.has_memo {
+                list_row("Memo").value(t.memo)
+            },
+        )),
+    ))
 }
 
 /// An account's register's toolbar: ask the bank, reconcile, add.

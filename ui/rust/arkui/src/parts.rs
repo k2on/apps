@@ -32,6 +32,18 @@ pub enum Tint {
 }
 
 impl Tint {
+    /// The tint a view names (`ark_app::view`'s words): `positive`,
+    /// `caution`, `negative`, `accent`; anything else neutral.
+    pub fn named(name: &str) -> Tint {
+        match name {
+            "positive" => Tint::Positive,
+            "caution" => Tint::Caution,
+            "negative" => Tint::Negative,
+            "accent" => Tint::Accent,
+            _ => Tint::Neutral,
+        }
+    }
+
     /// The tint's colour, from the palette's signals; neutral is the text
     /// colour, faint.
     pub fn color(self, theme: &Theme) -> Color {

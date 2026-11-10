@@ -142,7 +142,9 @@ struct TxnButton: View {
     @Environment(\.present) private var present
 
     var body: some View {
-        Button { present(.transaction(TxnForm(txn))) } label: { TxnRow(txn: txn, showAccount: showAccount) }
+        Button {
+            if model.shell.page.inspector { model.shell.send(.inspectTransaction(id: txn.id.hex)) } else { present(.transaction(TxnForm(txn))) }
+        } label: { TxnRow(txn: txn, showAccount: showAccount) }
             .foregroundStyle(.ink)
             .contextMenu {
                 Button { present(.transaction(TxnForm(txn))) } label: { Label("Edit", systemImage: "pencil") }

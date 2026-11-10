@@ -212,6 +212,7 @@ public struct ListRow: View {
     var glyph: String? = nil
     var badge: Int64? = nil
     var amount: Int64? = nil
+    var value: String? = nil
     var quiet = false
     var accent = false
     var pushes = false
@@ -221,7 +222,7 @@ public struct ListRow: View {
     @Environment(\.rowMark) private var rowMark
 
     public init(_ title: String, subtitle: String? = nil, tile: String? = nil, mark: String? = nil, glyph: String? = nil,
-                badge: Int64? = nil, amount: Int64? = nil, quiet: Bool = false, accent: Bool = false, pushes: Bool = false,
+                badge: Int64? = nil, amount: Int64? = nil, value: String? = nil, quiet: Bool = false, accent: Bool = false, pushes: Bool = false,
                 said: String? = nil, menu: [MenuAction] = [], onTap: (() -> Void)? = nil) {
         self.title = title
         self.subtitle = subtitle
@@ -230,6 +231,7 @@ public struct ListRow: View {
         self.glyph = glyph
         self.badge = badge
         self.amount = amount
+        self.value = value
         self.quiet = quiet
         self.accent = accent
         self.pushes = pushes
@@ -271,6 +273,7 @@ public struct ListRow: View {
             if let amount {
                 CentsText(amount).foregroundStyle(quiet ? Color.quiet : amount < 0 ? Color.error : Color.ink)
             }
+            if let value { Text(value).foregroundStyle(.quiet).lineLimit(1) }
             if pushes {
                 // The disclosure a NavigationLink's row draws.
                 Image(systemName: "chevron.forward")

@@ -4,14 +4,7 @@
 name: mac-compile
 
 on:
-  push:
-    branches: [claude/sleepy-faraday-lcbow5-app]
-    paths:
-      - "ui/swift/**"
-      - "money/ios/**"
-      - "harken/ios/**"
-      - "modules/**"
-      - ".github/workflows/mac-compile.yaml"
+  # By hand only: the account's Macs are few and shared.
   workflow_dispatch:
 
 concurrency:

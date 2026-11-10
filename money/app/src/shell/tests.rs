@@ -20,7 +20,11 @@ impl Demo {
     fn new() -> Demo {
         let mut peer = money_seed::open(money_seed::seeded_disk("2026-10-26", NOW));
         let mut store = Store::new();
-        for k in MoneyShell::holds(&ShellState::default()) {
+        let october = ShellState {
+            month: "2026-10".into(),
+            ..ShellState::default()
+        };
+        for k in MoneyShell::holds(&october) {
             store.hold(&mut peer, k);
         }
         store.settle(&mut peer);
@@ -196,8 +200,14 @@ fn launch_arguments_open_a_place() {
     let page = rt.screen(&demo);
     assert_eq!((page.account_title.as_str(), page.showing, page.inspector), ("Checking", true, true));
     rt.dispatch(args(&["-screen", "transaction:receipt", "-appearance", "dark"]), &mut demo);
-    assert_eq!(rt.screen(&demo).section, "transactions");
-    assert_eq!(demo.native, vec!["appearance dark", "open-transaction receipt"]);
+    let page = rt.screen(&demo);
+    assert_eq!(page.section, "transactions");
+    assert!(
+        page.transaction.is_some(),
+        "the receipt's transaction in the inspector: {:?}",
+        page.transaction
+    );
+    assert_eq!(demo.native, vec!["appearance dark"]);
     rt.dispatch(args(&["-screen", "settings", "-settingsTab", "banks"]), &mut demo);
     assert_eq!(rt.screen(&demo).pane, "Connected Banks");
     assert_eq!(demo.native.last().map(String::as_str), Some("settings Connected Banks"));
@@ -212,4 +222,36 @@ fn launch_arguments_open_a_place() {
     assert_eq!((page.account_title.as_str(), page.showing), ("Chase Sapphire", true));
     MoneyShell::update(&mut s, ShellMsg::Back, &data);
     assert_eq!(s.wanted, None, "back is back to Accounts");
+}
+
+/// Category Details is the reference's, worked out in Rust: the badge in
+/// the category's tint, what needs attention, the month's figures, the
+/// goal, the month's transactions; Show All goes to Transactions searching
+/// for it. Falsified by figures that do not add up, or nothing inspected
+/// still drawing an inspector.
+#[test]
+fn the_category_inspector() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    rt.dispatch(ShellMsg::Month { month: "2026-10".into() }, &mut demo);
+    rt.dispatch(
+        ShellMsg::Launch {
+            args: ["-screen", "category:groceries", "-inspector", "1"].map(String::from).to_vec(),
+        },
+        &mut demo,
+    );
+    let page = rt.screen(&demo);
+    let c = page.category.expect("Groceries inspected");
+    assert_eq!((c.name.as_str(), c.month.as_str()), ("Groceries", "October 2026"));
+    assert_eq!(c.available, c.carried + c.assigned + c.activity, "the month's figures add up: {c:?}");
+    assert!(["positive", "caution", "negative", "neutral"].contains(&c.tint.as_str()));
+    assert_eq!(c.quiet_month, c.activity_lines.is_empty());
+    rt.dispatch(ShellMsg::ShowActivity, &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.section.as_str(), page.search.as_str()), ("transactions", "Groceries"));
+    rt.dispatch(ShellMsg::InspectCategory { id: None }, &mut demo);
+    assert!(rt.screen(&demo).category.is_none());
+    let mut names = vec![];
+    hosted(&money_shell::view(&rt.screen(&demo)), &mut names);
+    assert_eq!(names[1], "budget.inspector", "nothing inspected: the platform's own");
 }

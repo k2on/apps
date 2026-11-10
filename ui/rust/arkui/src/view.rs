@@ -121,6 +121,16 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             .style(style::card)
             .into()
         }
+        Part::HeaderCard(h) => header_card(*h),
+        Part::Detail { content } => scrollable(column(nodes(*content)).spacing(14).padding([12, 14]))
+            .height(Length::Fill)
+            .into(),
+        Part::GoalProgress { fraction, tint, note } => column![
+            crate::parts::progress_bar(fraction.get() as f32, crate::parts::Tint::named(&tint.get()), crate::figures::GOAL_GIRTH),
+            text(note.get()).size(11).style(style::dim),
+        ]
+        .spacing(6)
+        .into(),
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::NameField {
@@ -909,6 +919,9 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     if let Some(a) = r.amount {
         line = line.push(amount(a.get(), 14, r.quiet));
     }
+    if let Some(v) = &r.value {
+        line = line.push(text(v.get()).size(14).style(style::dim));
+    }
     if r.pushes {
         line = line.push(icon::plain(glyphs::CHEVRON, true));
     }
@@ -931,6 +944,52 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
         true => b.into(),
         false => context_menu::context_menu(b, r.title.get(), items),
     }
+}
+
+/// What an inspector is about, in a card: its glyph, its title, its
+/// figure in a status badge or large, the line in its tint, the caption
+/// quiet, centred; its actions under a rule.
+fn header_card<M: Clone + 'static>(h: ark_app::view::HeaderCard<M>) -> Element<'static, M> {
+    use crate::parts::Tint;
+    let tint = Tint::named(&h.tint.get());
+    let mut c = column![].spacing(6).align_x(Alignment::Center).width(Length::Fill);
+    if let Some(g) = &h.glyph {
+        c = c.push(parts::tile(shape(&g.get()), move |t| tint.color(t), 36.0));
+    }
+    let title = h.title.get();
+    if !title.is_empty() {
+        c = c.push(text(title).size(15).font(crate::hero::BOLD));
+    }
+    c = c.push(match h.badge {
+        true => crate::figures::status_badge(h.figure.get(), tint),
+        false => text(h.figure.get())
+            .size(crate::figures::HEADLINE)
+            .font(crate::hero::BOLD)
+            .style(move |t| text::Style {
+                color: Some(match tint {
+                    Tint::Neutral => crate::theme::of(t).background.base.text,
+                    _ => tint.color(t),
+                }),
+                ..Default::default()
+            })
+            .into(),
+    });
+    if let Some(l) = h.line.as_ref().map(|l| l.get()).filter(|l| !l.is_empty()) {
+        c = c.push(text(l).size(12).style(move |t| text::Style {
+            color: Some(tint.color(t)),
+            ..Default::default()
+        }));
+    }
+    if let Some(cap) = h.caption.as_ref().map(|c| c.get()).filter(|c| !c.is_empty()) {
+        c = c.push(text(cap).size(11).style(style::dim));
+    }
+    let actions = nodes(*h.actions);
+    let mut all = column![c].spacing(10);
+    if !actions.is_empty() {
+        all = all.push(iced::widget::rule::horizontal(1).style(style::hairline));
+        all = all.extend(actions);
+    }
+    container(all).padding([14, 14]).width(Length::Fill).style(style::card).into()
 }
 
 fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>, typed: Input<String, M>) -> Element<'static, M> {

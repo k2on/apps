@@ -67,6 +67,20 @@ detail), `money_shell` (the four sections, each `toolbar` over
 through money-ffi's `ShellApp`; drawn on the desktop by
 `arkui::view::shell` (money/iced/src/sections.rs).
 
+The inspectors are Rust's (`money/app/src/shell/inspect.rs`, the views
+`category_inspector` and `transaction_inspector`): the shell holds the
+month's lines and every account's register, the platforms tell it what
+is selected (`InspectCategory`, `InspectTransaction`; a launch's
+`-screen category:vacation -inspector 1` does too), and Category Details
+is the reference's — a header card (the available in its status badge,
+what needs attention, the group; Assign the target's rest, Cover
+Overspending From), the month's figures, the goal (money's domain has one
+kind, a target a month, so the reference's Goal picker of kinds and its
+date are not there) and the month's transactions with Show All in
+Transactions; Transaction Details its payee and amount, account, date,
+status and memo (no split or receipt items yet). With nothing selected
+the platform's own placeholder is hosted.
+
 What each section shows is still the platform's own screen, hosted by
 name (`hosted("budget")`): Accounts' list is the generated Accounts
 slice; Budget, Transactions, Insights and Settings' Server pane are the

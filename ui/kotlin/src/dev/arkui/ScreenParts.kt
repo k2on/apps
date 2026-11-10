@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -168,6 +169,7 @@ public fun ListRow(
     glyph: String? = null,
     badge: Long? = null,
     amount: Long? = null,
+    value: String? = null,
     quiet: Boolean = false,
     accent: Boolean = false,
     pushes: Boolean = false,
@@ -218,6 +220,10 @@ public fun ListRow(
                     amount < 0 -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.onSurface
                 })
+        }
+        if (value != null) {
+            Spacer(Modifier.width(Space.s))
+            Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         if (pushes) {
             Spacer(Modifier.width(Space.xs))
@@ -382,4 +388,65 @@ public fun SwitchRow(title: String, note: String? = null, isOn: Boolean, onChang
 @Composable
 public fun FormButton(title: String, enabled: Boolean, onTap: () -> Unit) {
     Button(onClick = onTap, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(title) }
+}
+
+
+/** The tint a view names (`ark_app::view`'s words); anything else neutral. */
+public fun tintNamed(name: String): Tint = when (name) {
+    "positive" -> Tint.Positive
+    "caution" -> Tint.Caution
+    "negative" -> Tint.Negative
+    "accent" -> Tint.Accent
+    else -> Tint.Neutral
+}
+
+/** An inspector's or a detail's page: its cards one under another, scrolling. */
+@Composable
+public fun DetailPage(content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.l),
+    ) { content() }
+}
+
+/**
+ * What an inspector or a detail is about, in a card: its glyph, its title,
+ * its figure in a `StatusBadge` (`badge`) or large, what needs attention in
+ * the tint, a quiet caption, centred; its actions as rows under a divider.
+ */
+@Composable
+public fun HeaderCard(
+    title: String,
+    figure: String,
+    tint: String,
+    glyph: String? = null,
+    badge: Boolean = false,
+    line: String? = null,
+    caption: String? = null,
+    actions: @Composable () -> Unit = {},
+) {
+    val t = tintNamed(tint)
+    GroupCard(Modifier.padding(horizontal = Space.l)) {
+        Column(
+            Modifier.fillMaxWidth().padding(Space.l),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            if (glyph != null) Tile(glyph(glyph), tintInk(t))
+            if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleMedium)
+            if (badge) StatusBadge(figure, t) else Text(figure, style = MaterialTheme.typography.displaySmall, color = if (t == Tint.Neutral) MaterialTheme.colorScheme.onSurface else tintInk(t))
+            if (!line.isNullOrEmpty()) Text(line, style = MaterialTheme.typography.bodyMedium, color = tintInk(t))
+            if (!caption.isNullOrEmpty()) Text(caption, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        actions()
+    }
+}
+
+/** How far toward a goal: the bar in its tint, the words under it. */
+@Composable
+public fun GoalProgress(fraction: Double, tint: String, note: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        ProgressBar(fraction.toFloat(), color = tintInk(tintNamed(tint).let { if (it == Tint.Neutral) Tint.Positive else it }))
+        Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }

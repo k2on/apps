@@ -68,6 +68,7 @@ struct TransactionsView: View {
                 ForEach(rows) { t in
                     Button {
                         if t.needsCategory() { present(.categorize([t.id], approve: true)) }
+                        else if model.shell.page.inspector { model.shell.send(.inspectTransaction(id: t.id.hex)) }
                         else { present(.transaction(TxnForm(t))) }
                     } label: {
                         TxnRow(txn: t, showAccount: true)

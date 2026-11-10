@@ -88,7 +88,10 @@ by the generated views by these names.
 |---|---|---|---|---|
 | TabPage | title, onRefresh, top, content | the app's frame (`LocalTabFrame`) over a scrolling column | `List` (inset grouped) under the large title | a scrolling column under the title |
 | CardSection | title, total, showsTotal, footer, rows | `SectionHeader` + `GroupCard` | `Section` | `section_header` + `group_card` |
-| ListRow | title, subtitle, tile/mark/glyph, badge, amount, quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
+| ListRow | title, subtitle, tile/mark/glyph, badge, amount, value (words at its end), quiet, accent, **pushes**, said, menu, onTap | a `Press.Highlight` row; held, a `DropdownMenu` (lit as it is held); a `Chevron` when it pushes | a button row; held, `.contextMenu`; when it pushes, a `NavigationLink`'s look (the list's highlight, the disclosure chevron) | a bare button; right click, a long press or the menu key, `context_menu` (ArkUI's menu at the pointer, every item); a chevron when it pushes |
+| DetailPage | content | a scrolling column of cards | `List` (grouped) | a scrolling column |
+| HeaderCard | title, figure, tint, glyph?, badge, line, caption, actions | `GroupCard`, centred, its actions as rows | the list's first `Section`, centred | `style::card`, centred, a rule over the actions |
+| GoalProgress | fraction, tint, note | `ProgressBar` and its note | `ProgressView` and its note | `progress_bar` and its note |
 | MenuAction | title, glyph, destructive, shown, onTap | `DropdownMenuItem` | `Button(role:)` with a `Label` | `context_menu::Item` |
 | FormSheet | title, onDismiss, confirm, canConfirm, onConfirm, content | `ModalBottomSheet`, the confirm a full-width button under the form | `.sheet` over a `Form`, Cancel ✕ and the confirming ✓ in its bar | a dialog with Cancel and the confirm |
 | FormSection | header, footer, content | a column, its label over and its note under | `Section(header:footer:)` | a column |

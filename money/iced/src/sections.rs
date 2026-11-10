@@ -99,8 +99,18 @@ impl App {
         rt.dispatch(msg, &mut desk);
         let natives = std::mem::take(&mut desk.natives);
         self.shell = rt;
-        // Where a launch opened: the place the shell shows now.
+        // Where a launch opened: the place the shell shows now, and what
+        // its inspectors show, this window's selection.
         let go = if launching { page_for(self, &self.shell_page().section) } else { go };
+        if launching {
+            let (c, t) = (self.shell.state().category.clone(), self.shell.state().transaction.clone());
+            if let Some(c) = c.and_then(|k| self.category_named(&k)) {
+                self.selected = Some(c);
+            }
+            if let Some(t) = t.and_then(|k| self.txn_named(&k)) {
+                self.txn_at = Some(t);
+            }
+        }
         let mut tasks = vec![];
         if let Some(page) = go.filter(|p| *p != self.page) {
             tasks.push(self.update(Message::Go(page)));
@@ -170,6 +180,20 @@ impl App {
             if rt.state().section != tag {
                 rt.dispatch(ShellMsg::Select { tag }, &mut Desk { app: self, natives: vec![] });
             }
+        }
+        // The budget's selection is what Category Details shows (the
+        // shell's inspector, money/app's), and a register's cursor
+        // Transaction Details.
+        let category = self.selected.map(|c| c.hex());
+        if rt.state().category != category {
+            rt.dispatch(ShellMsg::InspectCategory { id: category }, &mut Desk { app: self, natives: vec![] });
+        }
+        let txn = match self.page {
+            Page::Ledger(_) => self.txn_at.map(|t| t.hex()),
+            _ => None,
+        };
+        if rt.state().transaction != txn {
+            rt.dispatch(ShellMsg::InspectTransaction { id: txn }, &mut Desk { app: self, natives: vec![] });
         }
         if rt.state().month != self.peer.month {
             let month = self.peer.month.clone();

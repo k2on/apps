@@ -304,6 +304,22 @@ pub enum Part<M> {
         second_cents: Val<i64>,
         trend: Val<Vec<i64>>,
     },
+    /// An inspector's or a detail's page: its cards one under another,
+    /// scrolling (a grouped list on Apple's platforms).
+    Detail {
+        content: Box<View<M>>,
+    },
+    /// What an inspector or a detail is about, in a card at its top: its
+    /// glyph, its title, its figure (in a `StatusBadge` of its tint, or
+    /// large), a line in the tint saying what needs attention, a quiet
+    /// caption, and its actions under a divider.
+    HeaderCard(Box<HeaderCard<M>>),
+    /// How far toward a goal: a bar in its tint and the words under it.
+    GoalProgress {
+        fraction: Val<f64>,
+        tint: Val<String>,
+        note: Val<String>,
+    },
     /// A group of rows in a card, under its heading, a note under it.
     Section(Section<M>),
     Row(Box<ListRow<M>>),
@@ -668,6 +684,87 @@ pub struct Section<M> {
     pub rows: Box<View<M>>,
 }
 
+/// ArkUI's `HeaderCard` ([`Part::HeaderCard`]).
+#[derive(Clone, Debug)]
+pub struct HeaderCard<M> {
+    pub title: Val<String>,
+    pub figure: Val<String>,
+    /// `neutral`, `positive`, `caution`, `negative` or `accent`.
+    pub tint: Val<String>,
+    pub glyph: Option<Val<String>>,
+    /// The figure in a status badge; else large and bold.
+    pub badge: bool,
+    pub line: Option<Val<String>>,
+    pub caption: Option<Val<String>>,
+    pub actions: Box<View<M>>,
+}
+
+/// A card at the top of an inspector or a detail: `title` (none: the empty
+/// text, the glyph alone), `figure` in `tint` ([`HeaderCard`]).
+pub fn header_card<M>(title: impl Into<Val<String>>, figure: impl Into<Val<String>>, tint: impl Into<Val<String>>) -> HeaderCard<M> {
+    HeaderCard {
+        title: title.into(),
+        figure: figure.into(),
+        tint: tint.into(),
+        glyph: None,
+        badge: false,
+        line: None,
+        caption: None,
+        actions: Box::new(View::Empty),
+    }
+}
+
+impl<M> HeaderCard<M> {
+    pub fn glyph(mut self, g: impl Into<Val<String>>) -> Self {
+        self.glyph = Some(g.into());
+        self
+    }
+    /// The figure in a status badge (a category's available).
+    pub fn badge(mut self) -> Self {
+        self.badge = true;
+        self
+    }
+    /// What needs attention, in the tint: "Overspent by $21.02".
+    pub fn line(mut self, l: impl Into<Val<String>>) -> Self {
+        self.line = Some(l.into());
+        self
+    }
+    /// A quiet word under it: the group, the account.
+    pub fn caption(mut self, c: impl Into<Val<String>>) -> Self {
+        self.caption = Some(c.into());
+        self
+    }
+    /// Its actions, rows under a divider in the card.
+    pub fn actions(mut self, a: impl Into<View<M>>) -> Self {
+        self.actions = Box::new(a.into());
+        self
+    }
+}
+
+impl<M> From<HeaderCard<M>> for View<M> {
+    fn from(h: HeaderCard<M>) -> View<M> {
+        Part::HeaderCard(Box::new(h)).into()
+    }
+}
+
+/// An inspector's or a detail's page of cards ([`Part::Detail`]).
+pub fn detail_page<M>(content: impl Into<View<M>>) -> View<M> {
+    Part::Detail {
+        content: Box::new(content.into()),
+    }
+    .into()
+}
+
+/// How far toward a goal (`fraction`, 0 to 1), in `tint`, `note` under it.
+pub fn goal_progress<M>(fraction: impl Into<Val<f64>>, tint: impl Into<Val<String>>, note: impl Into<Val<String>>) -> View<M> {
+    Part::GoalProgress {
+        fraction: fraction.into(),
+        tint: tint.into(),
+        note: note.into(),
+    }
+    .into()
+}
+
 pub fn card_section<M>(rows: impl Into<View<M>>) -> Section<M> {
     Section {
         title: None,
@@ -746,6 +843,8 @@ pub struct ListRow<M> {
     pub picture: Picture,
     pub badge: Option<Val<Option<i64>>>,
     pub amount: Option<Val<i64>>,
+    /// Words at its end, quiet (a date, a status), where an amount would be.
+    pub value: Option<Val<String>>,
     /// The amount in the quiet colour (a total).
     pub quiet: bool,
     /// In the accent's colour: an action, not a place.
@@ -765,6 +864,7 @@ pub fn list_row<M>(title: impl Into<Val<String>>) -> ListRow<M> {
         picture: Picture::None,
         badge: None,
         amount: None,
+        value: None,
         quiet: false,
         accent: false,
         pushes: false,
@@ -801,6 +901,11 @@ impl<M> ListRow<M> {
     }
     pub fn amount(mut self, cents: impl Into<Val<i64>>) -> Self {
         self.amount = Some(cents.into());
+        self
+    }
+    /// Words at its end, quiet ([`ListRow::value`]).
+    pub fn value(mut self, v: impl Into<Val<String>>) -> Self {
+        self.value = Some(v.into());
         self
     }
     pub fn quiet(mut self) -> Self {
@@ -1210,6 +1315,29 @@ impl<M> Part<M> {
                 vec![("cents", G::Val(lit(cents))), ("note", G::Text(note))],
                 vec![],
             ),
+            Part::HeaderCard(h) => {
+                let mut args = vec![("figure", G::Val(lit(&h.figure))), ("tint", G::Val(lit(&h.tint)))];
+                if let Some(g) = &h.glyph {
+                    args.push(("glyph", G::Val(lit(g))));
+                }
+                if h.badge {
+                    args.push(("badge", G::Val("true".into())));
+                }
+                if let Some(l) = &h.line {
+                    args.push(("line", G::Val(lit(l))));
+                }
+                if let Some(c) = &h.caption {
+                    args.push(("caption", G::Val(lit(c))));
+                }
+                c("HeaderCard", Some(G::Val(lit(&h.title))), args, vec![("", &*h.actions)])
+            }
+            Part::Detail { content } => c("DetailPage", None, vec![], vec![("", &**content)]),
+            Part::GoalProgress { fraction, tint, note } => c(
+                "GoalProgress",
+                Some(G::Val(lit(fraction))),
+                vec![("tint", G::Val(lit(tint))), ("note", G::Val(lit(note)))],
+                vec![],
+            ),
             Part::Section(s) => {
                 let mut args = vec![];
                 if let Some(t) = &s.title {
@@ -1242,6 +1370,9 @@ impl<M> Part<M> {
                 }
                 if let Some(a) = &r.amount {
                     args.push(("amount", G::Val(lit(a))));
+                }
+                if let Some(v) = &r.value {
+                    args.push(("value", G::Val(lit(v))));
                 }
                 if r.quiet {
                     args.push(("quiet", G::Val("true".into())));
@@ -1624,6 +1755,21 @@ impl<M: 'static> Part<M> {
                 second_cents,
                 trend,
             },
+            Part::HeaderCard(h) => {
+                let h = *h;
+                Part::HeaderCard(Box::new(HeaderCard {
+                    title: h.title,
+                    figure: h.figure,
+                    tint: h.tint,
+                    glyph: h.glyph,
+                    badge: h.badge,
+                    line: h.line,
+                    caption: h.caption,
+                    actions: b(h.actions),
+                }))
+            }
+            Part::GoalProgress { fraction, tint, note } => Part::GoalProgress { fraction, tint, note },
+            Part::Detail { content } => Part::Detail { content: b(content) },
             Part::Section(s) => Part::Section(Section {
                 title: s.title,
                 amount: s.amount,
@@ -1639,6 +1785,7 @@ impl<M: 'static> Part<M> {
                     picture: r.picture,
                     badge: r.badge,
                     amount: r.amount,
+                    value: r.value,
                     quiet: r.quiet,
                     accent: r.accent,
                     pushes: r.pushes,
