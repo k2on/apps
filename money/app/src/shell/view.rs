@@ -1,6 +1,7 @@
 //! money's shell laid out, once (ui/docs/apps/money.md): drawn by iced
 //! from these functions, written out as SwiftUI and Compose from their
-//! recordings (`nix run .#update-ui`).
+//! recordings (`money_app::screens`, written while nix builds the
+//! native projects: nix/ark-app.nix).
 
 use ark_app::shell::*;
 use ark_app::view;

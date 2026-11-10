@@ -13948,13 +13948,6 @@ rec {
         crateName = "money-app";
         version = "0.1.0";
         edition = "2021";
-        crateBin = [
-          {
-            name = "money-ui";
-            path = "src/bin/money-ui.rs";
-            requiredFeatures = [ "gen" ];
-          }
-        ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/app; };
         libName = "money_app";
         dependencies = [
@@ -13982,6 +13975,10 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
           }
           {
             name = "ark-ui-gen";
@@ -14022,7 +14019,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" ];
+          "ffi" = [ "dep:uniffi" "money-domain/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" "ark-share/ffi" ];
           "gen" = [ "dep:ark-ui-gen" ];
           "iced" = [ "dep:arkui" "arkui/app" ];
           "web" = [ "dep:arkui-web" ];

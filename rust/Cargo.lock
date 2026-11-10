@@ -4315,6 +4315,7 @@ dependencies = [
  "ark-format",
  "ark-haptics",
  "ark-peer",
+ "ark-share",
  "ark-ui-gen",
  "arkui",
  "arkui-web",

@@ -107,7 +107,7 @@
   "hero": {
     "name": "Money",
     "line": "A household's budget, shared, on every device and offline",
-    "logo": "money/ios/Money/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+    "logo": "money/icon.svg",
     "screen": "budget"
   },
   "_screens": "`screens`: each opened by its launch arguments alone (ark_app::shell::Launch, the reference's names: .github/screens/apps.md), on the Apple devices it is `on` (ios, ipad-portrait, ipad-landscape, mac); its id is the reference app's shot's (reference/universal-budget/ci/shots.sh on the design-ref branch), so the two pair. `launch.mac` is the Mac's own arguments before each: the demo's household (no browser signs the Mac in) at 1440x900.",

@@ -73,12 +73,16 @@
       # source of every Rust build.
       # The kernel's tests read `spec/vectors`, so a build that runs them
       # adds it.
+      # The Ark apps that are generated (nix/ark-app.nix, ui/docs/app.md:
+      # "Generated, Not Committed"): each its directory with an app.toml.
+      arkApp = import ./nix/ark-app.nix { inherit lib self; };
+      arkApps = [ "money" ];
+
       rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/app" "money/iced" "money/ffi" "money/server" "harken/seed" "money/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's and
       # money/ffi's tests hold to their domains (`tests/gen.rs`).
       genDirs = [
         "harken/android/app/src/main/kotlin/dev/harken/android/gen" "harken/ios/Harken/Gen"
-        "money/android/app/src/main/kotlin/dev/money/android/gen" "money/ios/Money/Gen"
       ];
 
       # The wasm-bindgen CLI must be the exact version of the `wasm-bindgen`
@@ -118,6 +122,8 @@
           rustCrates = import ./nix/rust.nix {
             inherit lib;
             cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
+            # Each Ark app's generated crates (its generator's main).
+            extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs dir) { } arkApps;
           };
           # The root crate `packageId` of the workspace, for the host unless
           # `pkgs` and `rust` say another target; its binaries under `bin/`,
@@ -254,9 +260,10 @@
           # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
           # DATA` writes what that app's server boots seeded from.
           money-seed = crate { packageId = "money-seed"; };
-          # `money-ui`: the phones' screens written from money's views
-          # (money/app, ui/docs/app.md), SwiftUI and Compose.
-          money-ui = crate { packageId = "money-app"; features = [ "gen" ]; };
+          # Each Ark app's generated pieces (nix/ark-app.nix): its
+          # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
+          # its native projects (`<app>-native`) and its prebuild.
+          arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix; build = crate; });
           harken-seed = crate { packageId = "harken-seed"; };
           # The catalogue's covers, kept in the repository (harken/seed/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
@@ -573,19 +580,32 @@
           # properties; `title` and `note` head that page. `shared` are the
           # directories of this tree the app compiles beside its own:
           # `ui/kotlin`, the look every Ark app on Android shares.
-          androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note }:
+          #
+          # An Ark app (`ark`, its nix/ark-app.nix packages) builds its
+          # generated project (`<name>/.native/android`) over its own Kotlin
+          # (`<name>/native/android`), its Maven graph that directory's
+          # deps.json.
+          androidApp = { name, appid, flags ? [ ], shared ? [ ], title, note, ark ? null }:
             let
-              dir = "${name}/android";
+              dir = if ark == null then "${name}/android" else "${name}/.native/android";
+              deps = if ark == null then "${name}/android/deps.json" else "${name}/native/android/deps.json";
+              src =
+                if ark == null then only ([ dir ] ++ shared)
+                else pkgs.runCommand "${name}-android-source" { } ''
+                  cp -r ${only ([ "${name}/native/android" "${name}/app.toml" ] ++ shared)} $out
+                  chmod -R u+w $out
+                  cp -r ${ark.native}/. $out/
+                '';
               apk = pkgs.stdenv.mkDerivation (final: {
                 pname = "${name}-apk";
                 version = "0.1.0";
-                src = only ([ dir ] ++ shared);
+                inherit src;
                 sourceRoot = "source/${dir}";
                 postUnpack = "chmod -R u+w source";
                 nativeBuildInputs = [ pkgs.gradle pkgs.jdk21 ];
                 mitmCache = pkgs.gradle.fetchDeps {
                   pkg = final.finalPackage;
-                  data = ./. + "/${dir}/deps.json";
+                  data = ./. + "/${deps}";
                 };
                 __darwinAllowLocalNetworking = true;
                 ANDROID_HOME = sdkRoot;
@@ -672,18 +692,20 @@
           harken-android-tests = harken.tests;
           harken-android-screens = harken.screens;
 
-          # money's phone (money/android/README.md): Compose over
-          # `money-android-lib`, the look shared with harken (ui/kotlin).
-          # Its Maven graph is harken's, replayed (money/android/deps.json).
+          # money's phone (money/native/android/README.md): Compose over
+          # `money-android-lib`, the look shared with harken (ui/kotlin), in
+          # the project ui/prebuild.py generates. Its Maven graph is
+          # harken's, replayed (money/native/android/deps.json).
           # `appid` here is the package the screenshots are named by; the
           # installed app is us.koon.money.
           money = androidApp {
             name = "money";
-            appid = "dev.money.android";
-            flags = [ "-PmoneyLib=${money-android-lib}" ];
-            # arkui, and the device modules money lists (money/modules.toml),
-            # whose kotlin/ its build.gradle.kts compiles in.
-            shared = [ "ui/kotlin" "modules" "money/modules.toml" ];
+            appid = arkOf.money.a.android.package;
+            ark = arkOf.money;
+            flags = [ "-ParkLib=${money-android-lib}" ];
+            # arkui, and the device modules money lists (money/app.toml),
+            # whose kotlin/ its generated build.gradle.kts compiles in.
+            shared = [ "ui/kotlin" "modules" ];
             title = "money";
             note = "Rendered on the JVM by Paparazzi from the demo's household on 2026-10-26, at a Pixel 5's size, in money's own scheme (a screenshot has no wallpaper); light beside dark.";
           };
@@ -725,8 +747,8 @@
                 appid = "${bundlePrefix}.money";
                 apk = money-apk;
                 apkName = "money.apk";
-                metadata = ./money/android/fdroid/metadata/us.koon.money.yml;
-                icon = ./money/android/fdroid/icon.svg;
+                metadata = ./money/fdroid/metadata/us.koon.money.yml;
+                icon = ./money/icon.svg;
               }
             ];
           };
@@ -763,7 +785,7 @@
           # server's change is no phone's.
           iosTargets = [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ];
           # The Mac's slice, for the same app's macOS destination (one
-          # multiplatform target: money/ios/project.yml).
+          # multiplatform target: ui/prebuild.py's project.yml).
           iosRust = rust.override { targets = iosTargets ++ [ "aarch64-apple-darwin" ]; };
           # Each target's slice of the xcframework: its directory and its
           # platform variant.
@@ -1035,7 +1057,9 @@
           # Mac's screenshots: `<name>-macos`). Its
           # bundle id is `bundlePrefix`.<name>, every app's; its version
           # project.yml's.
-          iosApp = { name, App, ffi, framework, kind }:
+          # An Ark app (`ark`) builds its generated project
+          # (`<name>/.native/ios`) over its own Swift (`<name>/native/ios`).
+          iosApp = { name, App, ffi, framework, kind, ark ? null }:
             let
               bundle = "${bundlePrefix}.${name}";
               # Only the slice it links: the simulator's for the screenshots'
@@ -1082,7 +1106,7 @@
               version = "0.1.0";
               # The app, ArkUI, and the device modules its modules.yml
               # compiles in (modules/<name>/swift, ui/docs/app.md).
-              src = only [ "${name}/ios" "ui/swift" "modules" ];
+              src = only ([ "ui/swift" "modules" ] ++ (if ark == null then [ "${name}/ios" ] else [ "${name}/native/ios" "${name}/app.toml" ]));
               nativeBuildInputs = [ xcodegen ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
@@ -1100,10 +1124,19 @@
                 for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
                   case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
                 done
-                mkdir -p ${name}/ffi/ios
-                cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
-                chmod -R u+w ${name}/ffi/ios
-                cd ${name}/ios
+                ${if ark == null then ''
+                  mkdir -p ${name}/ffi/ios
+                  cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/ffi/ios/
+                  chmod -R u+w ${name}/ffi/ios
+                  cd ${name}/ios
+                '' else ''
+                  # The generated project, and the kernel where it looks (../ffi/ios).
+                  mkdir -p ${name}/.native/ffi/ios
+                  cp -r ${ark.native}/${name}/.native/. ${name}/.native/
+                  cp -r ${kernel}/${framework}.xcframework ${kernel}/swift ${name}/.native/ffi/ios/
+                  chmod -R u+w ${name}/.native
+                  cd ${name}/.native/ios
+                ''}
                 xcodegen generate
                 # SwiftPM sandboxes the manifests and plugins it builds, which
                 # cannot be done inside nix's: told not to.
@@ -1119,12 +1152,17 @@
               passthru = { inherit bundle; };
               meta.platforms = [ "aarch64-darwin" ];
             };
-          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; };
+          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = arkOf.money; };
           harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
           # derivation, so built once.
           money-ios-kernel = iosKernel { inherit (moneyIos) ffi framework; };
+          # `nix run .#money-prebuild`: money's projects into money/.native,
+          # with its Android library linked beside them (and on a Mac its
+          # kernel for the simulator and the Mac), for Xcode and Android Studio.
+          money-prebuild = arkOf.money.prebuild ({ android = money-android-lib; }
+            // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin { ios = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" "aarch64-apple-darwin" ]; }; });
           harken-ios-kernel = iosKernel { inherit (harkenIos) ffi framework; };
           money-ios-kernel-simulator = iosKernel { inherit (moneyIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
           harken-ios-kernel-simulator = iosKernel { inherit (harkenIos) ffi framework; targets = [ "aarch64-apple-ios-sim" ]; };
@@ -1255,25 +1293,11 @@
               done
             '';
           };
-          # `nix run .#update-modules`, from the repository's root: each
-          # app's Xcode list of its device modules (<app>/ios/modules.yml),
-          # written from <app>/modules.toml and each module's module.toml
-          # (ui/docs/app.md, The Device). `checks.modules` holds it current.
-          update-modules = pkgs.writeShellScriptBin "update-modules" ''
-            ${pkgs.python3}/bin/python3 ui/modules.py write
-          '';
           # `nix run .#update-theme`, from the repository's root: the colours
           # every app is drawn in, written from ui/theme.toml into the
           # Kotlin, Swift and Rust each platform's arkui reads (ui/README.md).
           update-theme = pkgs.writeShellScriptBin "update-theme" ''
             ${pkgs.python3}/bin/python3 ui/theme.py write
-          '';
-          # `nix run .#update-ui`, from the repository's root: the phones'
-          # screens that are laid out once in Rust (`#[view]`, money/app),
-          # written as SwiftUI and Compose from their recording. iced and the
-          # browser draw the same functions directly and have nothing generated.
-          update-ui = pkgs.writeShellScriptBin "update-ui" ''
-            ${money-ui}/bin/money-ui write
           '';
           # The catalogue as its repository builds it, and the copy the demo
           # embeds made from it.
@@ -1298,12 +1322,12 @@
             # `nix run .#update-theme`: the theme's generated files, from
             # ui/theme.toml.
             inherit update-theme;
-            # `nix run .#update-modules`: each app's list of its device
-            # modules for Xcode, from <app>/modules.toml.
-            inherit update-modules;
-            # `nix run .#update-ui`: the phones' screens written from the
-            # views laid out in Rust.
-            inherit update-ui money-ui;
+            # An Ark app's generated pieces (nix/ark-app.nix): its
+            # #[view]s as SwiftUI and Compose (`<app>-ui`), its native
+            # projects (`<app>-native`), and `nix run .#<app>-prebuild`.
+            money-ui = arkOf.money.ui;
+            money-native = arkOf.money.native;
+            inherit money-prebuild;
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
@@ -1319,7 +1343,7 @@
             revelation-android-tests = revelation.tests;
             revelation-android-screens = revelation.screens;
             revelation-apk-deps = revelation.deps;
-            # money's phone, over money-android-lib (money/android/README.md).
+            # money's phone, over money-android-lib (money/native/android/README.md).
             inherit money-apk money-android-tests money-android-screens;
             money-apk-deps = money.deps;
             # The workflow builds these first and keeps them as gc roots.
@@ -1375,31 +1399,20 @@
               if [ $status != 0 ]; then exit 1; fi
               touch $out
             '';
-            # What is written from the views laid out in Rust is what is
-            # committed: change the view, then `nix run .#update-ui`.
-            ui = pkgs.runCommand "ui-current" { } ''
-              ${money-ui}/bin/money-ui write generated > /dev/null
-              status=0
-              for f in $(${money-ui}/bin/money-ui files); do
-                cmp "generated/$f" "${self}/$f" || {
-                  echo "$f is not what its view makes: nix run .#update-ui" >&2
-                  status=1
-                }
-              done
-              if [ $status != 0 ]; then exit 1; fi
-              touch $out
-            '';
+            # Each Ark app's native projects are generated: its generator
+            # builds and runs over its views, and ui/prebuild.py writes its
+            # projects (nix/ark-app.nix). The emitters' own snapshots are
+            # ark-ui-gen's tests (checks.rust).
+            money-native = arkOf.money.native;
             # Every text colour the tokens define is legible on every ground
             # it is drawn on, at WCAG's 4.5:1 (3:1 for large text, icons and
             # a control's edge), the player's wash among them.
             # What an app opts into is what it builds with (ui/docs/app.md,
-            # The Device): each module it lists exists; its ffi crate depends
-            # on those modules' crates and on no other; its Android manifest
-            # asks for every permission they declare; and its modules.yml is
-            # what ui/modules.py writes.
-            modules = pkgs.runCommand "modules-current" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              cd ${only [ "ui/modules.py" "modules" "money/modules.toml" "money/ios/modules.yml" "money/ffi/Cargo.toml" "money/android/app/src/main/AndroidManifest.xml" ]}
-              python3 ui/modules.py check
+            # The Device): its app.toml says what it must, each module it
+            # lists exists, and its crate depends on each listed module's.
+            prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" ] ++ lib.concatMap (d: [ "${d}/app.toml" "${d}/app/Cargo.toml" "${d}/icon.svg" ]) arkApps)}
+              python3 ui/prebuild.py check
               touch $out
             '';
             theme-contrast = pkgs.runCommand "theme-contrast" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -1538,12 +1551,12 @@
               '';
               installPhase = "touch $out";
             };
-            # The same for money's iOS app (money/ios/tools/typecheck.sh): its
+            # The same for money's iOS app (money/native/ios/typecheck.sh): its
             # budget arithmetic, first run, session and model with the generated
             # types, UniFFI's Swift for money's library and ArkUICore.
             money-ios-typecheck = pkgs.swiftPackages.stdenv.mkDerivation {
               name = "money-ios-typecheck";
-              src = only [ "money/ios" "money/modules.toml" "modules" "rust/ark-ffi/swift" "ui/swift" ];
+              src = only [ "money/native/ios" "money/app.toml" "modules" "rust/ark-ffi/swift" "ui/swift" ];
               nativeBuildInputs = [ pkgs.swift ];
               buildInputs = [ pkgs.swiftPackages.Foundation pkgs.swiftPackages.Dispatch ];
               buildPhase = ''
@@ -1554,7 +1567,7 @@
                 chmod u+w bindings/*
                 sed -i 's/nonisolated(unsafe) //' bindings/*.swift
                 SWIFT_EXEC=$PWD/bin/swiftc-here TYPED=$PWD/rust/ark-ffi/swift/Typed.swift \
-                  bash money/ios/tools/typecheck.sh bindings
+                  bash money/native/ios/typecheck.sh bindings
               '';
               installPhase = "touch $out";
             };

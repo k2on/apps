@@ -1,0 +1,65 @@
+# money as an Ark app (ui/docs/app.md, "The App's Files"). Every native
+# project is generated from this, the modules' module.toml and the Rust
+# views (`nix run .#money-prebuild` writes them into money/.native, for
+# Xcode and Android Studio; nothing there is committed).
+
+name = "Money"
+# The bundle id and the applicationId are the flake's `bundlePrefix` and
+# this: us.koon.money.
+id = "money"
+version = "0.1"
+# ui/theme.toml's [accent.green].
+accent = "green"
+platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
+# The device modules money's update asks of (modules/<name>).
+modules = ["haptics", "clipboard", "share"]
+# The scheme the server's sign-in sends the code back on (money://auth),
+# and a route opened by a link (money://account/…).
+scheme = "money"
+# The Rust crate that is the app (money/app): its #[view]s, `screens()` and
+# `commands()`; its UniFFI namespace is the crate's.
+crate = "money-app"
+summary = "A household's budget, shared, every dollar given a job"
+
+[icon]
+# icon.svg's full-canvas rectangle is the background; on Android the rest
+# is the adaptive icon's foreground and its themed (monochrome) icon.
+svg = "icon.svg"
+
+[apple]
+# The scheme and the product: Money.app.
+product = "Money"
+category = "public.app-category.finance"
+deployment = "26.0"
+# The team is CI's secret (ios.yaml), never written here or generated.
+# What money itself asks of the iPhone and the Mac, beside its modules'.
+[apple.info]
+ITSAppUsesNonExemptEncryption = false
+NSLocalNetworkUsageDescription = "Money syncs with your own budget server, which may be on this network."
+NSCameraUsageDescription = "Money scans a paper receipt so your server can read its items, and the code another of your devices shows to sign you in."
+NSPhotoLibraryUsageDescription = "Money reads a photo of a receipt you choose so your server can read its items."
+
+[android]
+# The Kotlin package of the app's own code (money/native/android) and the
+# generated screens'.
+package = "dev.money.android"
+min-sdk = 26
+target-sdk = 35
+# The one key every build is signed with, committed and public on purpose
+# (money/native/android/README.md says why): one APK installs over the last.
+keystore = "native/android/debug.keystore"
+# What money's own Kotlin asks for, beside its modules'.
+permissions = ["android.permission.INTERNET", "android.permission.CAMERA"]
+features = [{ name = "android.hardware.camera", required = false }]
+# The hosts its scheme opens on (Start.kt): money://auth, money://join.
+hosts = ["auth", "join"]
+# The libraries its Kotlin compiles against, beyond ArkUI's template:
+# the receipt scanner's (Scanner.kt, Vision.kt) and harken's graph's
+# (native/android/deps.json is that graph, replayed).
+dependencies = [
+  "androidx.media3:media3-exoplayer:1.5.1",
+  "androidx.media3:media3-session:1.5.1",
+]
+
+[fdroid]
+metadata = "fdroid/metadata/us.koon.money.yml"

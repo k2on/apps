@@ -28,7 +28,7 @@ desktop and the browser answer `Unavailable`.
 
 ## Permissions
 
-Declared in `module.toml`, merged by `ui/modules.py`:
+Declared in `module.toml`, merged by `ui/prebuild.py` into the generated projects:
 
 - iPhone, Mac: `NSCameraUsageDescription` (an app's own wording wins).
 - Android: `android.permission.CAMERA` (checked to be in the app's manifest).

@@ -4,7 +4,7 @@
 //! ([`AccountsApp::page`]) and sends it messages ([`AccountsApp::send`]);
 //! the app's update runs here, its changes go to the peer, its routes and
 //! the shell's own work to the [`AppShell`] the phone gave, its module
-//! calls to the modules the phone registered (money/modules.toml: each a
+//! calls to the modules the phone registered (money/app.toml: each a
 //! crate under modules/, a UniFFI foreign trait its swift/ and kotlin/
 //! implement).
 
@@ -145,7 +145,7 @@ impl AccountsApp {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 
-    /// The phone's modules, the ones money opts into (money/modules.toml),
+    /// The phone's modules, the ones money opts into (money/app.toml),
     /// registered once at startup; any may be none.
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
         let mut m = self.modules.lock().unwrap_or_else(|e| e.into_inner());

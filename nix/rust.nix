@@ -16,10 +16,16 @@
 # scripts' dependencies and proc macros), each with its own features. On a
 # native build the two are one, as crate2nix has them, so a crate needed by
 # both is compiled once with the union of their features.
-{ lib, cargoNix }:
+#
+# `extraCrates` are crates that are no workspace member's and are written by
+# nix, in crate2nix's form beside its own (`crates`): an Ark app's generated
+# crates (nix/ark-app.nix), its generator's main and its phones' library,
+# resolved and built as any crate of the workspace is, for any target.
+{ lib, cargoNix, extraCrates ? { } }:
 let
   inherit (cargoNix.internal)
-    crates expandFeatures enableFeatures dependencyFeatures filterEnabledDependencies sortedUnique;
+    expandFeatures enableFeatures dependencyFeatures filterEnabledDependencies sortedUnique;
+  crates = cargoNix.internal.crates // extraCrates;
 
   # crate2nix's makeDefaultTarget, which a dependency's `cfg(...)` is
   # evaluated against, with the os and env rustc has for Android, wasm and

@@ -955,6 +955,8 @@ jobs:
           branch="$RUNNER_TEMP/branch"
           py=$(nix build --no-link --print-out-paths .#screens-python)
           inter=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#inter)
+          # An Ark app's logo is its icon.svg, which hero.py draws with it.
+          PATH="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#librsvg.out)/bin:$PATH"
           for shots in */screens/shots.json; do
             app=${shots%%/*}
             [ -d "$branch/apps/$app" ] || continue

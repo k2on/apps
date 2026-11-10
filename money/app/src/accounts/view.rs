@@ -1,6 +1,7 @@
 //! The Accounts tab laid out, once: drawn by iced and the browser from
 //! this function, written out as SwiftUI and Compose from its recording
-//! (`nix run .#update-ui`).
+//! (`money_app::screens`, written while nix builds the native projects:
+//! nix/ark-app.nix).
 
 use ark_app::view;
 use ark_app::view::*;

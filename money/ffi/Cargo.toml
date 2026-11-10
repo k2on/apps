@@ -22,7 +22,7 @@ money-domain = { path = "../domain", features = ["ffi"] }
 # records and messages, and the device modules they ask.
 money-app = { path = "../app", features = ["ffi"] }
 ark-app = { path = "../../ui/rust/app" }
-# The device modules money opts into (money/modules.toml), as the phone's
+# The device modules money opts into (money/app.toml), as the phone's
 # foreign traits; their Swift and Kotlin are each module's swift/, kotlin/.
 ark-module = { path = "../../ui/rust/module", features = ["ffi"] }
 ark-haptics = { path = "../../modules/haptics", features = ["ffi"] }

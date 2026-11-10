@@ -26,7 +26,7 @@ arkui = { path = "../../ui/rust/arkui" }
 # their runtime.
 money-app = { path = "../app", features = ["iced"] }
 ark-app = { path = "../../ui/rust/app" }
-# The desktop's modules (money/modules.toml): the clipboard, queued for iced's own task.
+# The desktop's modules (money/app.toml): the clipboard, queued for iced's own task.
 ark-clipboard = { path = "../../modules/clipboard", features = ["desktop"] }
 
 # `smol` gives iced an executor; `svg` is every glyph, `image` a

@@ -59,7 +59,11 @@ on:
       - "harken/ffi/**"
       - "harken/domain/**"
       - "harken/player/**"
-      - "money/ios/**"
+      - "money/native/ios/**"
+      - "money/app.toml"
+      - "money/icon.svg"
+      - "ui/prebuild.py"
+      - "nix/ark-app.nix"
       - "money/ffi/**"
       - "money/domain/**"
       # The demo's household, which money's library links for its demo.
@@ -76,7 +80,6 @@ on:
       - "ui/rust/router-macros/**"
       # money's screens run in Rust, and the device modules it lists.
       - "money/app/**"
-      - "money/modules.toml"
       - "ui/rust/app/**"
       - "ui/rust/arkui-macros/**"
       - "ui/rust/module/**"
@@ -262,17 +265,27 @@ jobs:
             bash .github/ios-archive.sh "$NAME" "$(awk -v p="$APP-ios-archive" '$1 == p {print $2}' "$RUNNER_TEMP/built")" "$(git log -1 --format=%ct)"
           fi
           kernel=$(awk -v p="$APP-ios-kernel-simulator" '$1 == p {print $2}' "$RUNNER_TEMP/built")
-          mkdir -p "$APP/ffi/ios" && cp -R "$kernel"/*.xcframework "$kernel"/swift "$APP/ffi/ios/" && chmod -R u+w "$APP/ffi/ios"
+          if [ -f "$APP/app.toml" ]; then
+            # An Ark app's project is generated (ui/prebuild.py): written
+            # into <app>/.native, its kernel where it looks (.native/ffi/ios).
+            native=$(nix build --no-link --print-out-paths ".#$APP-native")
+            mkdir -p "$APP/.native" && cp -R "$native/$APP/.native/." "$APP/.native/" && chmod -R u+w "$APP/.native"
+            dir="$APP/.native"
+          else
+            dir="$APP"
+          fi
+          mkdir -p "$dir/ffi/ios" && cp -R "$kernel"/*.xcframework "$kernel"/swift "$dir/ffi/ios/" && chmod -R u+w "$dir/ffi/ios"
+          echo "PROJECT_DIR=$dir/ios" >> "$GITHUB_ENV"
 
       # Its tests, when the list says it has them run: on the simulator
       # booted meanwhile, the app built here over the same kernel (the
       # simulator's slice, as the screenshots' app links).
       - name: Test
         if: matrix.app.test
-        working-directory: ${{ matrix.app.name }}/ios
         env:
           NAME: ${{ matrix.app.App }}
         run: |
+          cd "$PROJECT_DIR"
           # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
           "$(nix build --no-link --print-out-paths "$GITHUB_WORKSPACE#xcodegen")/bin/xcodegen" generate
           # The simulator booted under the build.

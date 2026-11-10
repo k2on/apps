@@ -161,7 +161,8 @@ dark.on-accent-container = "#F3D99A"
 
 # money's green: a deep, fresh green on white, a lifted one on the dark page.
 [accent.green]
-colorsets = ["money/ios/Money/Assets.xcassets/AccentColor.colorset"]
+# An Ark app's colorset is written by ui/prebuild.py, into its generated project.
+colorsets = []
 art = "green"
 light.accent = "#17734A"
 light.on-accent = "#FFFFFF"

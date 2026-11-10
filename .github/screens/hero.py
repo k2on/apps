@@ -148,7 +148,13 @@ def laptop(shot, width, theme):
 
 
 def icon(path, side):
-    """The app's icon, `side` across, rounded as a home screen rounds it."""
+    """The app's icon, `side` across, rounded as a home screen rounds it;
+    an SVG (an Ark app's icon.svg) drawn by rsvg-convert first."""
+    if path.endswith(".svg"):
+        import io
+        import subprocess
+        png = subprocess.run(["rsvg-convert", "-w", str(side * 2), "-h", str(side * 2), path], check=True, capture_output=True).stdout
+        path = io.BytesIO(png)
     img = Image.open(path).convert("RGB").resize((side, side), Image.LANCZOS)
     out = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     out.paste(img, (0, 0), rounded_mask((side, side), int(side * 0.225)))
