@@ -107,6 +107,13 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["A name loses its middle, a heading its end."],
     },
     Entry {
+        module: "writing",
+        name: "Writing",
+        summary: "Long-form writing drawn in iced (`ark_app::writing`'s blocks): rich text with emphasis, code and links, Fira Mono code coloured by the theme's roles, callouts on the palette's tints, tables and rules, in a column of a reader's measure. arkui-web draws the same blocks as HTML (`arkui_web::writing`).",
+        api: &["markdown(md), markdown_with(md, on_link)", "blocks(&[Block], on_link), block(b, on_link), code(lang, text)", "MEASURE (680), BODY (15)", "ark_app::writing: parse(md), inline(s), highlight(lang, code), writing(md) (Part::Writing)"],
+        rules: &["Every colour is the theme's, asked for as it is drawn: the same writing is right in light and dark.", "Nothing in it moves.", "SwiftUI and Compose have no Writing part yet: the phones' emitters write the call, the part is what is left."],
+    },
+    Entry {
         module: "url",
         name: "URL",
         summary: "Percent-encoding for a fragment, so a `/`, a `#` or an accent survives the address bar.",

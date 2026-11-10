@@ -444,6 +444,12 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 - **`table`**: a Mac's `Table` (headings, rows a grid of cells, striped,
   the selected and the cursor's row lit, a row's menu), and when compact a
   `List` of two-line rows from each column's `Slot`.
+- **`writing`**: long-form writing (`ark_app::writing`, a view's
+  `writing(md)`): Markdown's headings, paragraphs with links, emphasis and
+  code, lists, highlighted code, callouts and tables, as the HTML that
+  says each, in `writing.css`; `arkui::writing` draws the same blocks in
+  iced. SwiftUI's and Compose's `Writing` are what is left. The docs site
+  (docs/site) is written in it.
 - **`figures`**: arkui's figures, the charts as inline SVG in the `[chart]`
   palette (`line_svg` is iced's line, point for point).
 - **`keys`**: the shortcuts of the app's `CommandMenu`s

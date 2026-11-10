@@ -77,6 +77,18 @@
       "shots": []
     },
     {
+      "id": "writing",
+      "name": "Writing",
+      "section": "foundations",
+      "summary": "Long-form writing, once for every toolkit: headings, paragraphs with links, emphasis and code, lists, highlighted code, callouts, quotes and tables, written as Markdown (`ark_app::writing`) and said in a view as `writing(md)`. A help page, a release note, these docs.",
+      "desktop": [
+        "writing"
+      ],
+      "android": null,
+      "ios": null,
+      "shots": []
+    },
+    {
       "id": "art",
       "name": "Art",
       "section": "foundations",
@@ -167,7 +179,7 @@
     },
     {
       "id": "reorder",
-      "name": "Reorderable list",
+      "name": "Reorderable List",
       "section": "components",
       "summary": "Rows dragged into a new order, the rest sliding out of the way: what a queue is rearranged with.",
       "desktop": [
@@ -255,7 +267,7 @@
     },
     {
       "id": "empty",
-      "name": "Empty states",
+      "name": "Empty States",
       "section": "components",
       "summary": "What a page says while it has nothing to show, or is still asking for it.",
       "desktop": [],
@@ -282,7 +294,7 @@
     },
     {
       "id": "account",
-      "name": "Account and sign-in",
+      "name": "Account and Sign-In",
       "section": "components",
       "summary": "Who is signed in, as a circle of their picture or their initials, and the screens that get them signed in.",
       "desktop": [
@@ -368,7 +380,7 @@
     },
     {
       "id": "command",
-      "name": "Command box",
+      "name": "Command Box",
       "section": "overlays",
       "summary": "One search box over everything, opened by Ctrl+K from anywhere.",
       "desktop": [
@@ -406,7 +418,7 @@
     },
     {
       "id": "expanding-card",
-      "name": "Expanding card",
+      "name": "Expanding Card",
       "section": "motion",
       "summary": "A bar at the foot of the screen that rises into the whole screen and falls back, following a finger or on its own.",
       "desktop": [],
@@ -511,7 +523,7 @@
     },
     {
       "id": "pages",
-      "name": "Page motion",
+      "name": "Page Motion",
       "section": "motion",
       "summary": "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",
       "desktop": [
@@ -745,6 +757,22 @@
       ],
       "rules": [
         "A name loses its middle, a heading its end."
+      ]
+    },
+    {
+      "module": "writing",
+      "name": "Writing",
+      "summary": "Long-form writing drawn in iced (`ark_app::writing`'s blocks): rich text with emphasis, code and links, Fira Mono code coloured by the theme's roles, callouts on the palette's tints, tables and rules, in a column of a reader's measure. arkui-web draws the same blocks as HTML (`arkui_web::writing`).",
+      "api": [
+        "markdown(md), markdown_with(md, on_link)",
+        "blocks(&[Block], on_link), block(b, on_link), code(lang, text)",
+        "MEASURE (680), BODY (15)",
+        "ark_app::writing: parse(md), inline(s), highlight(lang, code), writing(md) (Part::Writing)"
+      ],
+      "rules": [
+        "Every colour is the theme's, asked for as it is drawn: the same writing is right in light and dark.",
+        "Nothing in it moves.",
+        "SwiftUI and Compose have no Writing part yet: the phones' emitters write the call, the part is what is left."
       ]
     },
     {

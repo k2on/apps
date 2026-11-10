@@ -2,59 +2,82 @@
 
 The documentation site: for now arkui's, and ArkDB's can join it.
 
-A static site, generated: plain HTML and CSS with a few lines of script,
-published at https://k2on.github.io/apps/docs/ (`nix build .#docs`, or
-`cargo run --release -- out` here to write it into `out/`). Each page is
-whole HTML, so a load is that page and nothing it does not show. It is
-organised by component — a menu, cards, a list — and each page says how to
-use it:
+An ArkUI app, written as static HTML: published at
+https://k2on.github.io/apps/docs/ (`nix build .#docs`). Every page is a
+path (`/`, `/all/`, `/menu/`) and a `#[view]` in ArkUI's own shell — the
+sidebar of pages by section, each page's toolbar, the search field — drawn
+by arkui-web as HTML (ui/docs/app.md, "The Browser's Modes") and right
+without script at every width (arkui-web writes each size class's draw and
+theme.css shows the one the window is in). With script, the page's module
+(`docs-web`) takes it over: the sidebar walks the pages without a load, the
+search finds words on any page, the live parts answer.
 
-- **Desktop**: arkui's modules for it, pictures of it drawn by arkui itself,
-  tables of what its functions answer (worked out when the site is built),
-  and each module's API and rules.
-- **Mobile**, with a switch between **Android** and **iOS**: where the
-  Compose or SwiftUI version is and how to call it, and the latest capture
-  from a real emulator or simulator — a screenshot, or a recording as an
-  MP4 at 60 frames a second — inside a frame of that device at its own dimensions.
-  Where both phones take a shot, a third choice, **Side by side**, shows
-  each such capture from Android beside iOS's, so the two can be compared.
+Each component's page says how to use it:
 
-Below 700 pixels wide the sidebar becomes a dropdown in the top bar and the
-pictures are the ones drawn at a phone's width. The theme follows the
-system, or the dropdown at the top right.
+- **In the browser**: arkui-web's own parts, live — the same
+  `ark_app::view` parts an app's screen is made of (`src/live.rs`).
+- **On the desktop**: arkui's modules for it, pictures of it drawn by arkui
+  itself, tables of what its functions answer (worked out when the site is
+  built), and each module's API and rules.
+- **On the phones**, Android and iOS: where the Compose or SwiftUI version
+  is and how to call it, and the latest capture from a real emulator or
+  simulator in a frame of that device; **Side by Side** shows Android's
+  beside iOS's where both take one.
 
-## The pictures are the components
+The words are long-form writing (`ark_app::writing`, Markdown), which any
+app can use for its own help pages: `writing(md)` in a view.
+
+## Pages, Paths and What Is the Reader's
+
+A page's path is the page and nothing else: `DocsWeb::static_paths` is
+every page, and each is written, with its `<title>`, its description, a
+canonical link, and a line in `sitemap.xml`. The search (`?q=`), the phone
+chosen and the appearance are the reader's: never a page, taken up by the
+module once it has taken the page over. Without script the search field is
+disabled and **All Pages** in the toolbar is the index of every page; the
+live parts are drawn as they open. The old addresses (`menu.html`) are sent
+on to the new.
+
+## The Pictures Are the Components
 
 `src/render.rs` lays an iced element out at a width and draws it with
 tiny-skia, iced's CPU renderer, with no window and no GPU, then cuts it to
 its own height and writes it as lossless WebP. Every picture is drawn four
 times: in iced's light and dark themes with arkui's palette, at 640 and at
 320 logical pixels, all at twice that. The page fetches only the one it
-shows. The stylesheet's colours are written from the same palette
-(`site::colours`), so a picture sits on the page's own ground.
+shows, by its theme and a media query.
 
-`src/examples.rs` is what each component shows: its pictures (overlays are
-drawn open, over a page), its tables, and its notes. `src/site.rs` writes
-the HTML; `web/style.css` and `web/site.js` are the page's style and its
-script (the theme, the phone, j and k between pages, the captures).
+`src/examples.rs` is what each component's pictures, tables and notes are.
+What the browser cannot work out (the pictures' sizes, the tables) is
+carried in each page as `#docs-built`, so the module draws the page it
+takes over exactly as it was written.
 
-## A workspace of its own
+## A Workspace of Its Own
 
 `docs/site` is a Cargo workspace on its own, with its own `Cargo.lock`, and
 not a member of `rust/`'s. So the docs and the apps never share a build: an
-edit here is no input to ArkDB's kernel or to any app, and the kernel moving
-does not rebuild the docs. The docs reach the rest by path — `arkui` now,
-and ArkDB's crates when their docs join — so they rebuild exactly when
-something they name changes. Its checks are `nix build .#checks.<system>.docs`
+edit here is no input to ArkDB's kernel or to any app. The docs reach the
+rest by path — arkui, arkui-web, ark-app — so they rebuild exactly when
+something they name changes. One crate, two builds: `docs` (feature
+`native`, the default) writes the site, `docs-web` (feature `hydrate`,
+wasm32) is the module. Its checks are `nix build .#checks.<system>.docs`
 (format, clippy, tests); the site is `nix build .#docs`.
 
-## The one place the components are described
+By hand, in a small target directory:
+
+    cargo run -- out --base /                     # the pages and pictures
+    cargo build --release --target wasm32-unknown-unknown \
+      --no-default-features --features hydrate --bin docs-web
+    wasm-bindgen --target web --no-typescript --out-dir out/pkg \
+      $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/docs-web.wasm
+
+## The One Place the Components Are Described
 
 `src/components.rs` lists the components: each one's desktop modules, its
-Android and iOS halves, and the captures the phones take of it. `src/catalogue.rs`
-describes every arkui module. The pages say both, and `catalogue.json`
-beside this file is the same data for any site or agent that wants it
-(it is published beside the pages).
+Android and iOS halves, and the captures the phones take of it.
+`src/catalogue.rs` describes every arkui module. The pages say both, and
+`catalogue.json` beside this file is the same data for any site or agent
+that wants it (it is published beside the pages).
 
 **If you change a component, change its entry here in the same commit**, then
 regenerate the JSON:
@@ -66,13 +89,16 @@ regenerate the JSON:
 - no two captures, pictures or pages share a name;
 - `catalogue.json` is what the catalogue prints;
 - the Icons picture draws every glyph;
-- every link on every page lands;
+- every page has a title and a description, is in the sitemap, and every
+  link on it lands;
+- every page is a path, and the search is not;
 - a picture draws, and is cut to its own height.
 
-## The captures
+## The Captures
 
-`web/site.js` reads `manifest.json` from the `screens` branch through
+`web/docs.js` reads `manifest.json` from the `screens` branch through
 raw.githubusercontent.com, which any page may fetch, so a capture appears on
-the next load with nothing redeployed. To try the site against captures of
-your own, serve a directory laid out like the branch and build with
+the next load with nothing redeployed; a capture the module draws again is
+filled again. To try the site against captures of your own, serve a
+directory laid out like the branch and build with
 `DOCS_SCREENS=http://localhost:8000/` set.

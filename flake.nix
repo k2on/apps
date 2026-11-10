@@ -234,10 +234,29 @@
             cargoNix = import ./docs/site/Cargo.nix { inherit pkgs; };
           };
           docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; overrides = desktopOverrides; } // args);
-          # The site: plain HTML, CSS and a few lines of script, and each
-          # desktop component's pictures drawn by iced's own renderer on the
-          # CPU (tiny-skia: no window, no GPU), which the sandbox allows.
-          docs = pkgs.runCommand "docs" { } "${docsCrate { }}/bin/docs $out";
+          # The site, an ArkUI app written as static HTML (ui/docs/app.md,
+          # "The Browser's Modes"): every page drawn by arkui-web natively,
+          # each desktop component's pictures drawn by iced's own renderer
+          # on the CPU (tiny-skia: no window, no GPU), which the sandbox
+          # allows, and beside them the module that takes a page over
+          # (`docs-web`, the same crate for wasm32 under `hydrate`).
+          docs-web =
+            let
+              wasm = docsCrates.build { pkgs = wasmPkgs; rust = wasmRust; packageId = "docs"; features = [ "hydrate" ]; overrides = wasmOverrides; };
+            in
+            pkgs.runCommand "docs-web" { nativeBuildInputs = [ wasm-bindgen-cli pkgs.binaryen ]; passthru = { inherit wasm; }; } ''
+              wasm-bindgen --target web --no-typescript --out-dir $out/pkg ${wasm}/bin/docs-web.wasm
+              wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+                --enable-sign-ext --enable-mutable-globals --enable-reference-types \
+                -o $out/pkg/docs-web_bg.wasm $out/pkg/docs-web_bg.wasm
+            '';
+          # Served at https://k2on.github.io/apps/docs/; the module's URLs
+          # named by its build's hash, so a browser holding an older one is
+          # sent URLs its cache has never seen.
+          docs = pkgs.runCommand "docs" { } ''
+            ${docsCrate { }}/bin/docs $out --base /apps/docs/ --site https://k2on.github.io --version $(basename ${docs-web} | cut -c1-32)
+            cp -r ${docs-web}/pkg $out/
+          '';
 
           # Python with Pillow, which draws the README's heroes from the
           # published screenshots (.github/screens/hero.py).
@@ -1362,7 +1381,7 @@
             # `nix run .#harken-serve [ADDR]`: the dev server, anyone is
             # whoever they say.
             harken-serve = pkgs.callPackage ./harken/server/nix/serve.nix { inherit harken-server; };
-            inherit harken-iced docs screens-ffmpeg screens-python xcodegen;
+            inherit harken-iced docs docs-web screens-ffmpeg screens-python xcodegen;
             inherit money-iced money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
           } // {
@@ -1510,7 +1529,7 @@
                 name = "docs";
                 build = docsCrate;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
-                dirs = [ "docs/site" "ui/rust/arkui" "ui/rust/glyphs" "rust/Cargo.toml" ];
+                dirs = [ "docs/site" "ui/rust/arkui" "ui/rust/glyphs" "ui/rust/web" "rust/Cargo.toml" ];
               })
             ] ++ memberClippy docsCrate { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
@@ -1659,7 +1678,7 @@
             in
             {
               pages = [
-                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each, pictured by arkui itself, and catalogue.json beside it.")
+                (page "docs" "docs" "docs" "the components every app here shares (arkui), a page each in an ArkUI app written as static HTML, with live arkui-web parts, pictures drawn by arkui itself, and catalogue.json beside it.")
               ];
               apks = [
                 # The kernel for every ABI first, so its failure reads on its own.

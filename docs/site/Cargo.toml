@@ -1,30 +1,63 @@
 [package]
 name = "docs"
 version = "0.1.0"
-description = "The documentation site, generated: a page of HTML per shared component, with pictures of arkui's drawn by arkui itself."
+description = "The documentation site, an ArkUI app: a page per shared component in ArkUI's shell, written as static HTML that works without script and is taken over by its wasm module, with live arkui-web examples and pictures of arkui's drawn by arkui itself."
 edition = "2021"
 license = "MIT OR Apache-2.0"
+default-run = "docs"
 
 # A workspace of its own, with its own lockfile, so that the docs and the
 # apps never share a build: an edit here moves no input of ArkDB's kernel or
 # of any app's, and an edit there moves the docs only through the crates they
-# name (arkui now; ArkDB's when its docs join).
+# name (arkui, arkui-web and ark-app now; ArkDB's when its docs join).
 [workspace]
 
-# A generator, run once at build time: `cargo run -- <dir>` writes the site,
-# plain HTML and CSS with a few lines of script, into <dir>. A desktop
-# component's picture is the component, drawn by iced's own renderer on the
-# CPU (tiny-skia, no window and no GPU), so a picture of a menu cannot drift
-# from the menu. `--json` prints the catalogue instead.
+# The site is an ark app (`docs`, the library): its shell, its pages and
+# their live examples, the same in both of its builds.
+#
+# - `docs` (feature `native`, the default) writes the site: every page
+#   drawn as HTML by arkui-web's `ssr` (ui/docs/app.md, "The Browser's
+#   Modes"), the desktop pictures drawn by iced's own renderer on the CPU
+#   (tiny-skia, no window and no GPU), sitemap.xml and catalogue.json.
+#   `--json` prints the catalogue instead.
+# - `docs-web` (feature `hydrate`, for wasm32) takes a written page over.
+[lib]
+name = "docs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "docs"
+path = "src/main.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "docs-web"
+path = "src/web.rs"
+required-features = ["hydrate"]
 
 [dependencies]
-arkui = { path = "../../ui/rust/arkui" }
+ark-app = { path = "../../ui/rust/app" }
+arkui-glyphs = { path = "../../ui/rust/glyphs" }
+arkui-web = { path = "../../ui/rust/web", default-features = false }
+leptos = { version = "0.8", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "Location", "History", "Storage", "PopStateEvent", "MouseEvent", "Event", "EventTarget", "Node"] }
+wasm-bindgen = "0.2.129"
+arkui = { path = "../../ui/rust/arkui", features = ["app"], optional = true }
 # The apps' iced (rust/Cargo.toml says which and why), at the same revision.
-iced = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad", default-features = false, features = ["winit", "wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "x11", "wayland", "a11y", "smol", "svg", "image", "advanced", "fira-sans"] }
+iced = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad", default-features = false, features = ["winit", "wgpu", "tiny-skia", "crisp", "web-colors", "thread-pool", "linux-theme-detection", "x11", "wayland", "a11y", "smol", "svg", "image", "advanced", "fira-sans"], optional = true }
 # A UserInterface built, drawn and read back off screen: iced_test's
 # Simulator, less the part that keeps the pixels to itself.
-iced_runtime = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad" }
+iced_runtime = { git = "https://github.com/pop-os/iced", rev = "d5d638c3a3022396fcf5b9b588b3446820dc11ad", optional = true }
 # The pictures, as lossless WebP: a third smaller than a PNG of flat colour.
-image = { version = "0.25", default-features = false, features = ["webp"] }
+image = { version = "0.25", default-features = false, features = ["webp"], optional = true }
+
+[features]
+default = ["native"]
+native = ["dep:arkui", "dep:iced", "dep:iced_runtime", "dep:image", "arkui-web/ssr", "leptos/ssr"]
+hydrate = ["arkui-web/hydrate", "leptos/hydrate"]
+# What `#[view]` writes beside each view under its crate's features:
+# `web(&record)` and `iced(&record)`. Unused here; said so cargo knows them.
+web = []
+iced = []

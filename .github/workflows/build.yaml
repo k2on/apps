@@ -56,6 +56,7 @@ on:
       - "nix/**"
       - "flake.nix"
       - "flake.lock"
+      - "docs/site/**"
   workflow_dispatch:
 
 permissions:
@@ -139,6 +140,43 @@ jobs:
           name: page-${{ matrix.page.name }}
           path: page-out
           if-no-files-found: error
+
+  # The docs site (docs/site, an ArkUI app written as static HTML): built
+  # as it is published, and every page shot at a phone's width and a
+  # desktop's, light and dark, with script and without. With script a page
+  # fails on any console error or word of hydration (docs-shots.js).
+  # Nothing is published: the shots are this run's artifact.
+  docs-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build the site
+        run: nix build .#docs --out-link "$RUNNER_TEMP/docs" --print-build-logs
+
+      - name: Playwright's Chromium
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
+          npm install --no-save --no-audit --no-fund playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      - name: Every page, with script and without
+        run: NODE_PATH="$RUNNER_TEMP/pw/node_modules" node .github/screens/docs-shots.js "$RUNNER_TEMP/docs" docs-site
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs-site
+          if-no-files-found: ignore
 
   # The flake's Linux checks: each member's tests and lints a derivation of
   # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a

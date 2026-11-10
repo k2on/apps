@@ -10,7 +10,7 @@
 //! draw them (`showcase/`), the `screens` workflow takes them
 //! (`.github/workflows/screens.yaml`), and the page fetches what it last
 //! published.
-use arkui::glyphs;
+use arkui_glyphs as glyphs;
 use serde::Serialize;
 
 /// The sidebar's headings, in the order they are drawn.
@@ -181,6 +181,17 @@ pub const COMPONENTS: &[Component] = &[
         shots: &[],
     },
     Component {
+        id: "writing",
+        name: "Writing",
+        section: Section::Foundations,
+        glyph: glyphs::RENAME,
+        summary: "Long-form writing, once for every toolkit: headings, paragraphs with links, emphasis and code, lists, highlighted code, callouts, quotes and tables, written as Markdown (`ark_app::writing`) and said in a view as `writing(md)`. A help page, a release note, these docs.",
+        desktop: &["writing"],
+        android: None,
+        ios: None,
+        shots: &[],
+    },
+    Component {
         id: "art",
         name: "Art",
         section: Section::Foundations,
@@ -228,7 +239,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "reorder",
-        name: "Reorderable list",
+        name: "Reorderable List",
         section: Section::Components,
         glyph: glyphs::PLAYLIST,
         summary: "Rows dragged into a new order, the rest sliding out of the way: what a queue is rearranged with.",
@@ -280,7 +291,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "empty",
-        name: "Empty states",
+        name: "Empty States",
         section: Section::Components,
         glyph: glyphs::MINUS,
         summary: "What a page says while it has nothing to show, or is still asking for it.",
@@ -294,7 +305,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "account",
-        name: "Account and sign-in",
+        name: "Account and Sign-In",
         section: Section::Components,
         glyph: glyphs::ARTIST,
         summary: "Who is signed in, as a circle of their picture or their initials, and the screens that get them signed in.",
@@ -337,7 +348,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "command",
-        name: "Command box",
+        name: "Command Box",
         section: Section::Overlays,
         glyph: glyphs::SEARCH,
         summary: "One search box over everything, opened by Ctrl+K from anywhere.",
@@ -371,7 +382,7 @@ pub const COMPONENTS: &[Component] = &[
     // Motion.
     Component {
         id: "expanding-card",
-        name: "Expanding card",
+        name: "Expanding Card",
         section: Section::Motion,
         glyph: glyphs::PLAY,
         summary: "A bar at the foot of the screen that rises into the whole screen and falls back, following a finger or on its own.",
@@ -428,7 +439,7 @@ pub const COMPONENTS: &[Component] = &[
     },
     Component {
         id: "pages",
-        name: "Page motion",
+        name: "Page Motion",
         section: Section::Motion,
         glyph: glyphs::SKIP_BACK,
         summary: "Going in and coming back: a page grows over the last, and a swipe from the edge takes it away.",

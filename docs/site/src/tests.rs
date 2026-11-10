@@ -65,34 +65,81 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// Every page is written, and every page, picture, glyph and file a page
-/// names is one the site has. Falsified by linking `menus.html`.
+/// Every page is written, with its title and description, and every page,
+/// picture and file a page names is one the site has; the sitemap lists
+/// every page and no other. Falsified by linking `menus/`.
 #[test]
 fn every_link_lands() {
     let out = scratch("links");
-    crate::site::write(&out, false).unwrap();
-    let pages: Vec<PathBuf> = std::iter::once(out.join("index.html"))
-        .chain(COMPONENTS.iter().map(|c| out.join(format!("{}.html", c.id))))
-        .collect();
+    let o = crate::write::Options {
+        base: "/docs/".into(),
+        site: "https://example.org".into(),
+        pictures: false,
+        version: "dev".into(),
+    };
+    let paths = crate::write::write(&out, &o).unwrap();
+    assert_eq!(paths.len(), COMPONENTS.len() + 2, "{paths:?}");
+    let sitemap = read(&out.join("sitemap.xml"));
+    for p in &paths {
+        assert!(
+            sitemap.contains(&format!("<loc>https://example.org/docs{p}</loc>")),
+            "{p} is not in the sitemap"
+        );
+    }
     let pictures: Vec<String> = COMPONENTS
         .iter()
         .flat_map(|c| crate::examples::pictures(c.id).iter().map(|e| e.name))
-        .flat_map(|n| ["light-wide", "light-narrow", "dark-wide", "dark-narrow"].map(|v| format!("pictures/{n}-{v}.webp")))
+        .flat_map(|n| crate::pages::VARIANTS.map(|v| format!("pictures/{n}-{v}.webp")))
         .collect();
-    for page in &pages {
-        let html = read(page);
-        for attr in ["href=\"", "src=\"", "srcset=\"", "url("] {
+    for p in &paths {
+        let page = p
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .fold(out.clone(), |d, s| d.join(s))
+            .join("index.html");
+        let html = read(&page);
+        assert!(
+            html.contains("<title>") && html.contains("<meta name=\"description\" content=\""),
+            "{p} has no title or description"
+        );
+        for attr in ["href=\"", "src=\"", "srcset=\"", "formaction=\""] {
             for link in html.split(attr).skip(1) {
-                let link = link.split(['"', ')', '?', '#']).next().unwrap();
-                if link.is_empty() || link.starts_with("http") {
+                let link = link.split(['"', '?', '#']).next().unwrap();
+                if link.is_empty() || link.starts_with("http") || link.starts_with("mailto:") {
                     continue;
                 }
-                let there = out.join(link).exists() || pictures.iter().any(|p| p == link);
-                assert!(there, "{} links {link}, which the site does not have", page.display());
+                let Some(rel) = link.strip_prefix("/docs/") else {
+                    panic!("{p} links {link}, outside the site");
+                };
+                let there = out.join(rel).exists()
+                    || out.join(rel).join("index.html").exists()
+                    || pictures.iter().any(|x| x == rel)
+                    || rel.starts_with("pkg/");
+                assert!(there, "{p} links {link}, which the site does not have");
             }
         }
     }
     let _ = std::fs::remove_dir_all(&out);
+}
+
+/// A page's every way to another page is a link without script, and the
+/// app's view of a page is the same written natively as drawn again.
+/// Falsified by a route that keeps the search (the reader's) in its path.
+#[test]
+fn every_page_is_a_path_and_the_search_is_not() {
+    use arkui_web::WebApp;
+    let mut app = crate::app::DocsWeb::open("/", crate::pages::Built::default());
+    app.update(crate::app::Msg::Go { tag: "menu".into() });
+    assert_eq!(app.route().path_url(), "/menu/");
+    app.update(crate::app::Msg::Search { text: "spring".into() });
+    assert_eq!(app.route().path_url(), "/menu/");
+    assert_eq!(app.route().get("q"), Some("spring"));
+    assert_eq!(app.static_paths().len(), COMPONENTS.len() + 2);
+    assert!(app.static_paths().iter().all(|r| r.query.is_empty()));
+    assert!(app.found().iter().any(|h| h.tag == "springs"), "{:?}", app.found());
+    assert!(app.found().iter().all(|h| h.tag != "overview" || h.title == "ArkUI"));
+    app.update(crate::app::Msg::Go { tag: "nowhere".into() });
+    assert_eq!(app.route().path_url(), "/");
 }
 
 /// A picture is drawn, cut to its own height and encoded, light and dark
