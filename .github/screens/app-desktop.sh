@@ -43,3 +43,5 @@ HOME=$home XDG_CONFIG_HOME=$home/.config XDG_DATA_HOME=$home/.local/share XDG_CA
   ARK_SHOTS_FONTS="$fonts/share/fonts" VK_ICD_FILENAMES="$icd" \
   timeout 900 "$bin" "${args[@]}"
 rm -rf "$home"
+# Each shot its own screen: none the same picture as another.
+bash "$(dirname "$0")/distinct.sh" "$out"
