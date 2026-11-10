@@ -944,11 +944,11 @@ enum class Destination(val pattern: String, val tab: Tab?) {
 
 /**
  * What the back stack navigates to for this route: its kind, the destination its pattern names,
- * then its path as an argument (`ark-ui`'s [RouteArg]). A route with no name is its kind alone
+ * then its URL as an argument (`ark-ui`'s [RouteArg]). A route with no name is its kind alone
  * (`settings`).
  */
 fun Route.destination(): String {
-    val path = path()
+    val path = url().trim('/')
     val kind = path.substringBefore('/')
     return if (kind == path) path else kind + "/" + RouteArg.of(path)
 }
