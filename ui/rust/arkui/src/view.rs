@@ -10,11 +10,12 @@
 
 use crate::text::{self, text};
 use crate::text_input::text_input;
+use ark_app::shell::compact_tag;
 use ark_app::view::{Confirm, Input, ListRow, Part, Picture, Placement, Section, Val, View};
-use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, Column, Space};
-use iced::{Alignment, Length};
+use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, tooltip, Column, Space};
+use iced::{Alignment, Length, Padding};
 
-use crate::layout_tokens::{CONTENT_WIDTH, INSPECTOR_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
+use crate::layout_tokens::{CONTENT_WIDTH, INSPECTOR_WIDTH, SEARCH_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH, TOOLBAR_HEIGHT};
 use crate::shell::{Frame, Pane, SizeClass};
 use crate::{context_menu, glyphs, icon, layer, parts, sidebar, style};
 
@@ -24,6 +25,13 @@ pub use iced::Element;
 const PAD: f32 = 18.0;
 /// A dialog's width.
 const DIALOG: f32 = 420.0;
+/// Above the sidebar's first place and below its last.
+const SIDEBAR_PAD: f32 = 10.0;
+/// A toolbar button's glyph, and the square it is pressed in.
+const BAR_GLYPH: f32 = 17.0;
+const BAR_BUTTON: f32 = 30.0;
+/// A large title's size, under the toolbar short of a sidebar.
+const LARGE_TITLE: f32 = 28.0;
 
 /// `view` as iced draws it.
 pub fn element<M: Clone + 'static>(view: View<M>) -> Element<'static, M> {
@@ -42,11 +50,9 @@ fn page<M: Clone + 'static>(title: &'static str, content: View<M>) -> Element<'s
             v => body.extend(nodes(v)),
         }
     }
-    let list = column![text(title).size(26).font(crate::hero::BOLD)]
-        .extend(body)
-        .spacing(10)
-        .padding(PAD)
-        .max_width(640);
+    // Its title is the toolbar's (`shell`), inline or large: not said twice.
+    let _ = title;
+    let list = column(body).spacing(10).padding(PAD).max_width(720);
     let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
     for v in over {
         if let Some((dismiss, dialog)) = dialog(v) {
@@ -82,6 +88,39 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         ]
         .spacing(2)
         .into(),
+        Part::Summary {
+            label,
+            cents,
+            first,
+            first_cents,
+            second,
+            second_cents,
+            trend,
+        } => {
+            let (a, b) = (first_cents.get(), second_cents.get());
+            let facts = row![
+                column![text(first).size(11).style(style::dim), amount(a, 13, false)].spacing(1),
+                column![text(second).size(11).style(style::dim), amount(b, 13, false)].spacing(1),
+            ]
+            .spacing(18);
+            container(
+                column![
+                    text(label).size(12).style(style::dim),
+                    amount_bold(cents.get(), crate::figures::HEADLINE),
+                    row![
+                        facts,
+                        Space::new().width(Length::Fill),
+                        container(crate::figures::sparkline(&trend.get(), 34.0)).width(160)
+                    ]
+                    .align_y(Alignment::End),
+                ]
+                .spacing(4),
+            )
+            .padding([12, 14])
+            .width(Length::Fill)
+            .style(style::card)
+            .into()
+        }
         Part::Section(s) => section(s),
         Part::Row(r) => list_row(*r),
         Part::NameField {
@@ -145,6 +184,8 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         | Part::Prompt { .. }
         | Part::Tabs { .. }
         | Part::SectionTab { .. }
+        | Part::TabGroup { .. }
+        | Part::Push { .. }
         | Part::Split { .. }
         | Part::Toolbar { .. }
         | Part::Searchable { .. }
@@ -159,21 +200,73 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
 
 // * The shell (ark_app::shell)
 
-/// A section's title, glyph, tag, badge and content.
-type Tab<M> = (&'static str, &'static str, &'static str, Option<i64>, View<M>);
+/// A section as the shell draws it: its title, glyph, tag, count, the
+/// heading of the group it is in, what it shows.
+struct Tab<M> {
+    title: String,
+    glyph: String,
+    tag: String,
+    badge: Option<i64>,
+    group: Option<&'static str>,
+    content: View<M>,
+}
+
+/// The sections of a `Tabs`, its groups' opened out under their headings.
+fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>) {
+    for v in flatten(v) {
+        match v {
+            View::Part(Part::SectionTab {
+                title,
+                glyph,
+                tag,
+                badge,
+                content,
+            }) => out.push(Tab {
+                title: title.get(),
+                glyph: glyph.get(),
+                tag: tag.get(),
+                badge: badge.and_then(|b| b.get()),
+                group,
+                content: *content,
+            }),
+            View::Part(Part::TabGroup { title, tabs }) => tabs_of(*tabs, Some(title), out),
+            _ => {}
+        }
+    }
+}
+
+/// What a part drawn inside the shell is handed from the parts around it:
+/// the window, a pushed detail's way back, and the sections' bar while it
+/// waits for the first toolbar to sit in (a regular width short of a
+/// sidebar: the iPad upright's tab bar at the top).
+struct Ctx<'a, 'h, M> {
+    frame: Frame,
+    back: Option<M>,
+    top_tabs: Option<Element<'a, M>>,
+    hosts: &'h mut dyn FnMut(&'static str) -> Element<'a, M>,
+}
 
 /// A shell's view as iced draws it, a standard Mac window's way: the
-/// sections a sidebar (tabs at the foot when compact), a list beside what
-/// it opens (one at a time when narrower than expanded), a toolbar row
-/// with the search field in it, an inspector at the trailing edge (a sheet
-/// when compact), a question or a notice over everything. `frame` is the
+/// sections a sidebar on a wide window (groups under their headings, the
+/// footer at its foot), a tab bar at the top of a narrower regular one and
+/// at the foot of a compact one; a toolbar row — what goes back and the
+/// title at its leading end, the actions, the inspector's toggle and the
+/// search field at its trailing end — with a large title under it short of
+/// a sidebar; the inspector a pane at the trailing edge (a sheet when
+/// compact); a question or a notice over everything. `frame` is the
 /// window's width and which pane has the keys (`crate::shell`); each
 /// hosted screen is what `hosts` draws for its name.
 pub fn shell<'a, M: Clone + 'static>(view: View<M>, frame: Frame, hosts: &mut dyn FnMut(&'static str) -> Element<'a, M>) -> Element<'a, M> {
-    draw(view, frame, hosts)
+    let mut ctx = Ctx {
+        frame,
+        back: None,
+        top_tabs: None,
+        hosts,
+    };
+    draw(view, &mut ctx)
 }
 
-fn draw<'a, M: Clone + 'static>(v: View<M>, frame: Frame, hosts: &mut dyn FnMut(&'static str) -> Element<'a, M>) -> Element<'a, M> {
+fn draw<'a, M: Clone + 'static>(v: View<M>, ctx: &mut Ctx<'a, '_, M>) -> Element<'a, M> {
     let mut body: Vec<Element<'a, M>> = vec![];
     let mut over: Vec<Element<'a, M>> = vec![];
     for v in flatten(v) {
@@ -185,7 +278,7 @@ fn draw<'a, M: Clone + 'static>(v: View<M>, frame: Frame, hosts: &mut dyn FnMut(
                     over.push(layer::centred(panel));
                 }
             }
-            p => body.push(shell_part(p, frame, hosts)),
+            p => body.push(shell_part(p, ctx)),
         }
     }
     let base: Element<'a, M> = match body.len() {
@@ -198,77 +291,106 @@ fn draw<'a, M: Clone + 'static>(v: View<M>, frame: Frame, hosts: &mut dyn FnMut(
     }
 }
 
-fn shell_part<'a, M: Clone + 'static>(p: Part<M>, frame: Frame, hosts: &mut dyn FnMut(&'static str) -> Element<'a, M>) -> Element<'a, M> {
+/// How the sections are shown at a width.
+#[derive(Clone, Copy, PartialEq)]
+enum Sections {
+    Sidebar,
+    TopBar,
+    BottomBar,
+}
+
+fn sections(frame: Frame) -> Sections {
+    match frame.class() {
+        SizeClass::Compact => Sections::BottomBar,
+        _ if frame.width >= SIDEBAR_MIN_WIDTH => Sections::Sidebar,
+        _ => Sections::TopBar,
+    }
+}
+
+fn shell_part<'a, M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'a, '_, M>) -> Element<'a, M> {
+    let frame = ctx.frame;
     match p {
-        Part::Tabs { selected, select, tabs } => {
+        Part::Tabs {
+            selected,
+            select,
+            tabs,
+            footer,
+        } => {
             let chosen = selected.get();
-            let tabs: Vec<Tab<M>> = flatten(*tabs)
-                .into_iter()
-                .filter_map(|v| match v {
-                    View::Part(Part::SectionTab {
-                        title,
-                        glyph,
-                        tag,
-                        badge,
-                        content,
-                    }) => Some((title, glyph, tag, badge.and_then(|b| b.get()), *content)),
-                    _ => None,
-                })
-                .collect();
-            let at = tabs.iter().position(|t| t.2 == chosen).unwrap_or(0);
-            let heads: Vec<_> = tabs.iter().map(|t| (t.0, t.1, t.2, t.3)).collect();
-            let content = tabs.into_iter().nth(at).map(|t| t.4).unwrap_or(View::Empty);
-            let shown = draw(content, frame, hosts);
-            match frame.class() {
-                SizeClass::Compact => {
-                    let bar = row(heads.into_iter().enumerate().map(|(i, (title, glyph, tag, _))| {
-                        let on = i == at;
-                        let label = column![
-                            icon::line(shape(glyph), on),
-                            text(title).size(10).style(move |t| text::Style {
-                                color: Some(match on {
-                                    true => crate::theme::of(t).primary.base.color,
-                                    false => style::entry_text(t, false),
-                                }),
-                                ..Default::default()
-                            })
-                        ]
-                        .spacing(2)
-                        .align_x(Alignment::Center);
-                        button(container(label).center_x(Length::Fill))
-                            .width(Length::Fill)
-                            .padding([6, 0])
-                            .style(style::bare)
-                            .on_press(select.call(tag.to_string()))
-                            .into()
-                    }));
-                    column![
-                        container(shown).height(Length::Fill),
-                        rule::horizontal(1).style(style::edge),
-                        container(bar).style(style::surface)
-                    ]
-                    .into()
-                }
-                _ => {
-                    let items = heads
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, (title, glyph, tag, badge))| sidebar::Item {
-                            glyph: shape(glyph),
-                            label: title.to_string(),
-                            heading: None,
-                            trailing: badge.map(|n| sidebar::count(n, sidebar::lit(i, at, frame.focus == Pane::Sidebar))),
-                            press: select.call(tag.to_string()),
-                        })
-                        .collect();
-                    let side = sidebar::view(items, at, frame.focus == Pane::Sidebar, SIDEBAR_WIDTH, PAD, "ark-shell-sidebar");
+            let mut all = vec![];
+            tabs_of(*tabs, None, &mut all);
+            let how = sections(frame);
+            // Short of a sidebar a child is shown in its parent's tab, which
+            // pushes it (`ark_app::shell::compact_tag`).
+            let shown_tag = match how {
+                Sections::Sidebar => chosen.as_str(),
+                _ => compact_tag(&chosen),
+            };
+            let at = all.iter().position(|t| t.tag == shown_tag).unwrap_or(0);
+            match how {
+                Sections::Sidebar => {
+                    let focused = frame.focus == Pane::Sidebar;
+                    let mut items = vec![];
+                    let mut content = View::Empty;
+                    for (i, t) in all.into_iter().enumerate() {
+                        if i == at {
+                            content = t.content;
+                        }
+                        items.push(sidebar::Item {
+                            glyph: shape(&t.glyph),
+                            label: t.title,
+                            heading: t.group,
+                            trailing: t.badge.map(|n| sidebar::count(n, sidebar::lit(i, at, focused))),
+                            press: select.call(t.tag),
+                        });
+                    }
+                    let foot = match *footer {
+                        View::Empty => None,
+                        f => Some(draw(f, ctx)),
+                    };
+                    let side = sidebar::view_with_footer(items, at, focused, SIDEBAR_WIDTH, SIDEBAR_PAD, "ark-shell-sidebar", foot);
+                    let shown = draw(content, ctx);
                     row![side, rule::vertical(1).style(style::edge), container(shown).width(Length::Fill)]
                         .height(Length::Fill)
                         .into()
                 }
+                Sections::TopBar | Sections::BottomBar => {
+                    // The tab bar has the sections alone: a group's are the
+                    // sidebar's (`TabSection` hidden from the tab bar).
+                    let mut heads = vec![];
+                    let mut content = View::Empty;
+                    for (i, t) in all.into_iter().enumerate() {
+                        if i == at {
+                            content = t.content;
+                        }
+                        if t.group.is_none() {
+                            heads.push((t.title, t.glyph, t.tag.clone(), t.badge, t.tag == shown_tag));
+                        }
+                    }
+                    if how == Sections::TopBar {
+                        let bar = row(heads
+                            .into_iter()
+                            .map(|(title, _, tag, badge, on)| top_tab(title, badge, on, select.call(tag))))
+                        .spacing(2)
+                        .align_y(Alignment::Center);
+                        ctx.top_tabs = Some(container(bar).padding(3).style(style::capsule_group).into());
+                        return draw(content, ctx);
+                    }
+                    let bar = row(heads
+                        .into_iter()
+                        .map(|(title, glyph, tag, badge, on)| bottom_tab(title, glyph, badge, on, select.call(tag))));
+                    let shown = draw(content, ctx);
+                    column![
+                        container(shown).height(Length::Fill),
+                        rule::horizontal(1).style(style::edge),
+                        container(bar).padding([2, 8]).style(style::surface)
+                    ]
+                    .into()
+                }
             }
         }
-        Part::SectionTab { content, .. } | Part::SettingsPane { content, .. } => draw(*content, frame, hosts),
+        Part::SectionTab { content, .. } | Part::SettingsPane { content, .. } => draw(*content, ctx),
+        Part::TabGroup { tabs, .. } => draw(*tabs, ctx),
         Part::Split {
             content,
             detail,
@@ -276,79 +398,30 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, frame: Frame, hosts: &mut dyn 
             back,
         } => match (frame.class(), showing.get()) {
             (SizeClass::Expanded, _) => row![
-                container(draw(*content, frame, hosts)).width(CONTENT_WIDTH).height(Length::Fill),
+                container(draw(*content, ctx)).width(CONTENT_WIDTH).height(Length::Fill),
                 rule::vertical(1).style(style::edge),
-                container(draw(*detail, frame, hosts)).width(Length::Fill).height(Length::Fill),
+                container(draw(*detail, ctx)).width(Length::Fill).height(Length::Fill),
             ]
             .into(),
-            (_, true) => column![
-                container(bar_button("Back", "chevron-left", Placement::Navigation, true, back)).padding([4, 8]),
-                container(draw(*detail, frame, hosts)).height(Length::Fill),
-            ]
-            .into(),
-            (_, false) => draw(*content, frame, hosts),
+            (_, true) => pushed(*detail, back, ctx),
+            (_, false) => draw(*content, ctx),
         },
-        Part::Toolbar { title, items, content } => {
-            // The search field goes in the toolbar, as the Mac's does.
-            let (search, content) = match *content {
-                View::Part(Part::Searchable {
-                    prompt,
-                    text: t,
-                    typed,
-                    content,
-                }) => (Some(search(prompt, t.get(), typed)), *content),
-                c => (None, c),
-            };
-            let items: Vec<(Placement, Element<'a, M>)> = flatten(*items)
-                .into_iter()
-                .filter_map(|v| match v {
-                    View::Part(Part::BarItem {
-                        title,
-                        glyph,
-                        placement,
-                        enabled,
-                        tap,
-                    }) => Some((placement, bar_button(title, glyph, placement, enabled.get(), tap))),
-                    _ => None,
-                })
-                .collect();
-            let mut line = row![].spacing(6).align_y(Alignment::Center);
-            let mut principal = vec![];
-            let mut trailing = vec![];
-            for (placement, item) in items {
-                match placement {
-                    Placement::Navigation => line = line.push(item),
-                    Placement::Principal => principal.push(item),
-                    Placement::Primary | Placement::Secondary => trailing.push(item),
-                }
-            }
-            line = line.push(text(title.get()).size(15).font(crate::hero::BOLD));
-            line = line.push(Space::new().width(Length::Fill));
-            line = line.extend(principal);
-            line = line.push(Space::new().width(Length::Fill));
-            let (in_bar, under) = match frame.class() == SizeClass::Compact {
-                true => (None, search),
-                false => (search, None),
-            };
-            if let Some(s) = in_bar {
-                line = line.push(container(s).width(220));
-            }
-            line = line.extend(trailing);
-            let mut out = column![
-                container(line).height(TOOLBAR_HEIGHT).padding([0, 12]).center_y(TOOLBAR_HEIGHT),
-                rule::horizontal(1).style(style::edge)
-            ];
-            if let Some(s) = under {
-                out = out.push(container(s).padding([6, 12]));
-            }
-            out.push(container(draw(content, frame, hosts)).height(Length::Fill)).into()
-        }
+        Part::Push {
+            content,
+            detail,
+            showing,
+            back,
+        } => match showing.get() {
+            true => pushed(*detail, back, ctx),
+            false => draw(*content, ctx),
+        },
+        Part::Toolbar { title, items, content } => toolbar(title.get(), *items, *content, ctx),
         Part::Searchable {
             prompt,
             text: t,
             typed,
             content,
-        } => column![container(search(prompt, t.get(), typed)).padding([6, 12]), draw(*content, frame, hosts)].into(),
+        } => column![container(search(prompt, t.get(), typed)).padding([6, 12]), draw(*content, ctx)].into(),
         Part::Inspector {
             title,
             shown,
@@ -356,68 +429,344 @@ fn shell_part<'a, M: Clone + 'static>(p: Part<M>, frame: Frame, hosts: &mut dyn 
             content,
             inspector,
         } => {
-            let content = draw(*content, frame, hosts);
+            let content = draw(*content, ctx);
             if !shown.get() {
                 return content;
             }
-            let pane = column![
-                container(text(title).size(13).font(crate::hero::BOLD)).padding([10, 12]),
-                container(draw(*inspector, frame, hosts)).height(Length::Fill)
-            ];
             match frame.class() {
                 SizeClass::Compact => {
                     let close = toggle.call(false);
+                    let pane = column![
+                        row![
+                            text(title).size(15).font(crate::hero::BOLD),
+                            Space::new().width(Length::Fill),
+                            bar_button("Done", "x", Placement::Primary, true, close.clone())
+                        ]
+                        .align_y(Alignment::Center)
+                        .padding([8, 12]),
+                        container(draw(*inspector, ctx)).height(Length::Fill)
+                    ];
                     stack![
                         content,
                         layer::dimmed(close.clone(), close),
-                        container(container(pane).height(Length::FillPortion(1)).style(style::card))
-                            .height(Length::Fill)
-                            .align_y(iced::alignment::Vertical::Bottom)
+                        column![
+                            Space::new().height(Length::FillPortion(1)),
+                            container(pane).height(Length::FillPortion(3)).style(style::sheet)
+                        ]
                     ]
                     .into()
                 }
                 _ => row![
                     container(content).width(Length::Fill),
                     rule::vertical(1).style(style::edge),
-                    container(pane).width(INSPECTOR_WIDTH).height(Length::Fill).style(style::surface)
+                    container(draw(*inspector, ctx))
+                        .width(INSPECTOR_WIDTH)
+                        .height(Length::Fill)
+                        .style(style::surface)
                 ]
                 .into(),
             }
         }
-        Part::Hosted { name } => hosts(name),
-        Part::SettingsPanes { panes } => {
-            let panes = flatten(*panes).into_iter().filter_map(|v| match v {
-                View::Part(Part::SettingsPane { title, content, .. }) => Some(
-                    column![text(title).size(15).font(crate::hero::BOLD), draw(*content, frame, hosts)]
-                        .spacing(8)
-                        .into(),
-                ),
-                _ => None,
-            });
-            scrollable(column(panes.collect::<Vec<Element<'a, M>>>()).spacing(24).padding(PAD)).into()
+        Part::Hosted { name } => (ctx.hosts)(name),
+        Part::SettingsPanes { selected, select, panes } => {
+            // A Mac's Settings window: its panes' glyphs and titles across
+            // the top, the chosen one lit, and only its content under them.
+            let chosen = selected.get();
+            let mut heads = vec![];
+            let mut shown = View::Empty;
+            for (i, v) in flatten(*panes).into_iter().enumerate() {
+                if let View::Part(Part::SettingsPane { title, glyph, content }) = v {
+                    let on = title == chosen || (chosen.is_empty() && i == 0);
+                    if on {
+                        shown = *content;
+                    }
+                    heads.push(pane_tab(title, glyph, on, select.call(title.to_string())));
+                }
+            }
+            column![
+                container(row(heads).spacing(4).align_y(Alignment::Center))
+                    .center_x(Length::Fill)
+                    .padding([6, 12]),
+                rule::horizontal(1).style(style::edge),
+                container(draw(shown, ctx)).height(Length::Fill)
+            ]
+            .into()
         }
         Part::Page { title, top, content, .. } => page(title, View::List(vec![*top, *content])),
         p => part(View::Part(p)).unwrap_or_else(|| Space::new().into()),
     }
 }
 
-/// A toolbar's button: its glyph, and its title beside it on the desktop
-/// (a Mac toolbar's "icon and text"), quiet when it is secondary.
-fn bar_button<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, placement: Placement, enabled: bool, tap: M) -> Element<'a, M> {
-    let quiet = placement == Placement::Secondary;
-    let label = row![
-        icon::line(shape(glyph), false),
-        text(title).size(13).style(move |t| match quiet {
-            true => style::dim(t),
-            false => text::Style::default(),
+/// A detail pushed onto its section: its own toolbar with the way back at
+/// its leading end, or a Back row over it when it has none.
+fn pushed<'a, M: Clone + 'static>(detail: View<M>, back: M, ctx: &mut Ctx<'a, '_, M>) -> Element<'a, M> {
+    let has_bar = flatten_ref(&detail).iter().any(|v| matches!(v, View::Part(Part::Toolbar { .. })));
+    if has_bar {
+        ctx.back = Some(back);
+        return draw(detail, ctx);
+    }
+    column![
+        container(bar_button("Back", "chevron-left", Placement::Navigation, true, back)).padding([4, 8]),
+        container(draw(detail, ctx)).height(Length::Fill),
+    ]
+    .into()
+}
+
+/// The parts lying one after another in `v`, without taking it apart.
+fn flatten_ref<M>(v: &View<M>) -> Vec<&View<M>> {
+    match v {
+        View::List(vs) => vs.iter().flat_map(flatten_ref).collect(),
+        View::Empty => vec![],
+        v => vec![v],
+    }
+}
+
+/// A section's toolbar over its content: the way back and the navigation
+/// items, then the title (inline beside a sidebar, large under the row
+/// short of one); the principal items in the middle (or the sections' tab
+/// bar, short of a sidebar); the actions, the inspector's toggle and the
+/// search field at the trailing end (the search under the title when
+/// compact, as the iPhone's is).
+fn toolbar<'a, M: Clone + 'static>(title: String, items: View<M>, content: View<M>, ctx: &mut Ctx<'a, '_, M>) -> Element<'a, M> {
+    // What the section pushed takes the bar: its own title, its own items,
+    // the way back at its leading end.
+    let content = match content {
+        View::Part(Part::Push {
+            detail,
+            showing,
+            back,
+            content,
+        }) => match showing.get() {
+            true => return pushed(*detail, back, ctx),
+            false => *content,
+        },
+        c => c,
+    };
+    let frame = ctx.frame;
+    let how = sections(frame);
+    let (search, toggle, content) = peel(content);
+    let mut lead = row![].spacing(2).align_y(Alignment::Center);
+    if let Some(back) = ctx.back.take() {
+        lead = lead.push(bar_button("Back", "chevron-left", Placement::Navigation, true, back));
+    }
+    let mut principal = vec![];
+    let mut trailing = vec![];
+    for v in flatten(items) {
+        if let View::Part(Part::BarItem {
+            title,
+            glyph,
+            placement,
+            enabled,
+            tap,
+        }) = v
+        {
+            let b = bar_button(title, glyph, placement, enabled.get(), tap);
+            match placement {
+                Placement::Navigation => lead = lead.push(b),
+                Placement::Principal => principal.push(b),
+                Placement::Primary | Placement::Secondary => trailing.push(b),
+            }
+        }
+    }
+    if let Some((title, shown, tap)) = toggle {
+        trailing.push(toggle_button(title, shown, tap));
+    }
+    let inline = how == Sections::Sidebar;
+    let mut line = row![lead].spacing(8).align_y(Alignment::Center);
+    if inline {
+        line = line.push(text(title.clone()).size(15).font(crate::hero::BOLD).wrapping(text::Wrapping::None));
+    }
+    line = line.push(Space::new().width(Length::Fill));
+    match ctx.top_tabs.take() {
+        Some(tabs) => line = line.push(tabs),
+        None => line = line.extend(principal),
+    }
+    line = line.push(Space::new().width(Length::Fill));
+    line = line.push(row(trailing).spacing(2).align_y(Alignment::Center));
+    let (in_bar, under) = match how {
+        Sections::BottomBar => (None, search),
+        _ => (search, None),
+    };
+    if let Some(s) = in_bar {
+        let wide = match how {
+            Sections::Sidebar => SEARCH_WIDTH,
+            _ => SEARCH_WIDTH * 0.7,
+        };
+        line = line.push(container(s).width(wide));
+    }
+    let mut out = column![container(line).height(TOOLBAR_HEIGHT).padding([0, 12]).center_y(TOOLBAR_HEIGHT)];
+    if inline {
+        out = out.push(rule::horizontal(1).style(style::edge));
+    } else {
+        out = out.push(container(text(title).size(LARGE_TITLE).font(crate::hero::BOLD)).padding(Padding {
+            top: 2.0,
+            right: PAD,
+            bottom: 6.0,
+            left: PAD,
+        }));
+    }
+    if let Some(s) = under {
+        out = out.push(container(s).padding(Padding {
+            top: 0.0,
+            right: PAD,
+            bottom: 8.0,
+            left: PAD,
+        }));
+    }
+    out.push(container(draw(content, ctx)).height(Length::Fill)).into()
+}
+
+/// The search field and the inspector's toggle a toolbar takes from what it
+/// is over (`.searchable` and `.inspector` put theirs in the toolbar), and
+/// what is left to draw: the inspector stays, its search taken out.
+#[allow(clippy::type_complexity)]
+fn peel<'a, M: Clone + 'static>(v: View<M>) -> (Option<Element<'a, M>>, Option<(&'static str, bool, M)>, View<M>) {
+    match v {
+        View::Part(Part::Searchable {
+            prompt,
+            text: t,
+            typed,
+            content,
+        }) => {
+            let (_, toggle, rest) = peel(*content);
+            (Some(search(prompt, t.get(), typed)), toggle, rest)
+        }
+        View::Part(Part::Inspector {
+            title,
+            shown,
+            toggle,
+            content,
+            inspector,
+        }) => {
+            let (search, _, rest) = peel(*content);
+            let on = shown.get();
+            let tap = toggle.call(!on);
+            let kept = Part::Inspector {
+                title,
+                shown,
+                toggle,
+                content: Box::new(rest),
+                inspector,
+            };
+            (search, Some((title, on, tap)), View::Part(kept))
+        }
+        v => (None, None, v),
+    }
+}
+
+/// A toolbar's button: its glyph alone, as a Mac toolbar draws one, its
+/// title said when the pointer rests on it.
+fn bar_button<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, _placement: Placement, enabled: bool, tap: M) -> Element<'a, M> {
+    let b = button(
+        container(icon::tinted(shape(glyph), BAR_GLYPH, move |p| match enabled {
+            true => p.background.base.text.scale_alpha(0.75),
+            false => p.background.base.text.scale_alpha(0.3),
+        }))
+        .center(BAR_BUTTON),
+    )
+    .padding(0)
+    .style(style::quiet)
+    .on_press_maybe(enabled.then_some(tap));
+    tip(b, title)
+}
+
+/// The inspector's toggle at the toolbar's trailing end: the trailing
+/// pane's glyph, lit while it shows.
+fn toggle_button<'a, M: Clone + 'a>(title: &'static str, shown: bool, tap: M) -> Element<'a, M> {
+    let b = button(
+        container(icon::tinted(glyphs::PANEL_RIGHT, BAR_GLYPH, move |p| match shown {
+            true => p.primary.base.color,
+            false => p.background.base.text.scale_alpha(0.75),
+        }))
+        .center(BAR_BUTTON),
+    )
+    .padding(0)
+    .style(style::quiet)
+    .on_press(tap);
+    tip(b, title)
+}
+
+/// `content` with `words` said by it while the pointer rests on it.
+fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, words: &'static str) -> Element<'a, M> {
+    tooltip(
+        content,
+        container(text(words).size(12)).padding([3, 8]).style(style::card),
+        tooltip::Position::Bottom,
+    )
+    .gap(4)
+    .into()
+}
+
+/// A pane of Settings at its window's top: its glyph over its title, lit
+/// when shown, as a Mac's Settings toolbar draws its tabs.
+fn pane_tab<'a, M: Clone + 'a>(title: &'static str, glyph: &'static str, on: bool, press: M) -> Element<'a, M> {
+    let tint = move |p: &iced::theme::palette::Extended| match on {
+        true => p.primary.base.color,
+        false => p.background.base.text.scale_alpha(0.65),
+    };
+    let label = column![
+        icon::tinted(shape(glyph), 22.0, tint),
+        text(title).size(11).style(move |t| text::Style {
+            color: Some(tint(crate::theme::of(t))),
+            ..Default::default()
         })
     ]
+    .spacing(3)
+    .align_x(Alignment::Center);
+    button(label)
+        .padding([4, 12])
+        .style(move |t, s| style::capsule(t, s, on))
+        .on_press(press)
+        .into()
+}
+
+/// A section in the tab bar at the top: its title in a capsule, lit when
+/// shown, its count a dot of the error's colour.
+fn top_tab<'a, M: Clone + 'a>(title: String, badge: Option<i64>, on: bool, press: M) -> Element<'a, M> {
+    let mut label = row![text(title).size(13).style(move |t| text::Style {
+        color: Some(match on {
+            true => crate::theme::of(t).primary.base.color,
+            false => crate::theme::of(t).background.base.text,
+        }),
+        ..Default::default()
+    })]
     .spacing(4)
     .align_y(Alignment::Center);
+    if let Some(n) = badge {
+        label = label.push(parts::count_badge(n));
+    }
     button(label)
-        .padding([4, 8])
+        .padding([5, 12])
+        .style(move |t, s| style::capsule(t, s, on))
+        .on_press(press)
+        .into()
+}
+
+/// A section in the tab bar at the foot: its glyph over its title, lit
+/// when shown, its count on the glyph's corner.
+fn bottom_tab<'a, M: Clone + 'a>(title: String, glyph: String, badge: Option<i64>, on: bool, press: M) -> Element<'a, M> {
+    let tint = move |p: &iced::theme::palette::Extended| match on {
+        true => p.primary.base.color,
+        false => p.background.base.text.scale_alpha(0.6),
+    };
+    let mut mark = row![icon::tinted(shape(&glyph), BAR_GLYPH, tint)].spacing(2);
+    if let Some(n) = badge {
+        mark = mark.push(parts::count_badge(n));
+    }
+    let label = column![
+        mark,
+        text(title).size(10).style(move |t| text::Style {
+            color: Some(tint(crate::theme::of(t))),
+            ..Default::default()
+        })
+    ]
+    .spacing(2)
+    .align_x(Alignment::Center);
+    button(container(label).center_x(Length::Fill))
+        .width(Length::Fill)
+        .padding([6, 0])
         .style(style::bare)
-        .on_press_maybe(enabled.then_some(tap))
+        .on_press(press)
         .into()
 }
 
@@ -597,6 +946,21 @@ fn field<M: Clone + 'static>(label: &str, value: String, problem: Option<String>
         }));
     }
     c.into()
+}
+
+/// A headline amount, bold: red below nothing.
+fn amount_bold<M: 'static>(cents: i64, size: f32) -> Element<'static, M> {
+    text(ark_format::amount(cents, &ark_format::NumberStyle::us()))
+        .size(size)
+        .font(crate::hero::BOLD)
+        .style(move |t| text::Style {
+            color: Some(match cents < 0 {
+                true => crate::theme::of(t).danger.base.color,
+                false => crate::theme::of(t).background.base.text,
+            }),
+            ..Default::default()
+        })
+        .into()
 }
 
 /// An amount: red below nothing, or quiet.

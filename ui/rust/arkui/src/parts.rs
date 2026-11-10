@@ -172,6 +172,25 @@ pub fn badge<'a, M: 'a>(count: usize) -> Element<'a, M> {
     .into()
 }
 
+/// A count of what waits somewhere, in a quiet capsule: a sidebar's
+/// section, a tab (`Tab.badge`'s count on the desktop).
+pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
+    container(text(count.to_string()).size(11).style(move |theme| text::Style {
+        color: Some(of(theme).background.base.text.scale_alpha(0.7)),
+        ..Default::default()
+    }))
+    .padding([0, 6])
+    .style(move |theme| container::Style {
+        background: Some(Background::Color(of(theme).background.base.text.scale_alpha(0.08))),
+        border: Border {
+            radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// A glyph in `color` on a rounded square washed in it, `side` across.
 pub fn tile<'a, M: 'a>(shape: &'static [u8], color: impl Fn(&Theme) -> Color + Copy + 'a, side: f32) -> Element<'a, M> {
     let mark = svg(svg::Handle::from_memory(shape))

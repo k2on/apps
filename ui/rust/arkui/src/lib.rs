@@ -29,6 +29,7 @@ pub mod context;
 pub mod context_menu;
 pub mod dialog;
 pub mod edge;
+pub mod figures;
 pub mod files;
 pub mod fit;
 pub mod fonts;

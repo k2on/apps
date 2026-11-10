@@ -9,26 +9,34 @@ ark-app today (money/app); the rest is the plan for the port.
 ## Scenes
 
 - **Main window** (`WindowGroup`): the sidebar-adaptable tabs below.
-- **Settings** (`Settings`): Server and Sign-In, Bank Connections,
-  Household, Appearance. A window on the Mac and the desktop, a screen
+- **Settings** (`Settings`): General (the server and sign-in, Amazon,
+  Costco, the display), Household, Connected Banks — one pane at a time. A window on the Mac and the desktop, a screen
   elsewhere, a dialog route in the browser.
 - **Commands**: File (New Transaction ⌘N, New Account ⇧⌘N, Import
   Receipt…), View (Previous Month ⌘[, Next Month ⌘], This Month ⌘T,
   Show Inspector ⌥⌘I, Refresh ⌘R), Go (Budget ⌘1, Accounts ⌘2,
   Transactions ⌘3, Insights ⌘4).
 
-## Sections (the sidebar, a tab bar when compact)
+## Sections (the sidebar, a tab bar when narrower)
 
-| Section | Content | Detail | Toolbar | Inspector |
-|---|---|---|---|---|
-| Budget | the month's category groups as a table (Assigned, Activity, Available) | — (the table is the page) | the month pager (principal), Assign (primary) | the selected category: target, history, notes |
-| Accounts | net worth, then the accounts by shelf (Budget, Tracking, Closed) | the selected account's register | Add Account (primary), search (`/`) | the selected transaction |
-| Transactions | every account's register, searchable, with saved filters in the sidebar | the selected transaction | New Transaction (primary), filter (secondary), search | the selected transaction's splits and receipt |
-| Insights | the month's spending and income charts | — | the month pager | the selected category's trend |
+Matched to the universal SwiftUI reference (`reference/universal-budget`
+on the design-ref branch): its Mac shots at 1440×900, its iPad upright
+ones, its iPhone ones.
 
-On a compact width the split view collapses to a stack: the Accounts list
-pushes the register (a list row that opens a page draws the platform's
-disclosure: `ListRow(pushes:)`), and the inspector is a sheet.
+| Section | Content | Toolbar | Inspector |
+|---|---|---|---|
+| Budget (title: the month) | Ready to Assign (`Headline`, Auto-Assign), the groups with their totals (tiny column titles on the first), rows with a goal bar, what needs attention in words, Assigned / Activity and the Available `StatusBadge` (the badge alone when compact) | ‹ › (navigation), Auto-Assign, the inspector's toggle | Category Details |
+| Accounts | Net Worth's `SummaryCard` (assets, liabilities, twelve weeks' sparkline), Budget Accounts and Tracking Accounts with totals and notes | Sync, Add Account | — |
+| Transactions (badged with what waits) | the review bar (n new from your banks · Review · Approve All), the table (Date, Payee with the review dot, Category — orange Needs Category —, Account, Memo, Amount with its `+`, Cleared), striped; two-line rows when compact | Filter, New Transaction, the inspector's toggle, search | Transaction Details (the receipt) |
+| Insights | Income, Spending, Kept tiles; Spending by Category, Income vs Spending (three months), Net Worth | ‹ › | — |
+
+Each open account is a place of its own in the sidebar under Budget
+Accounts or Tracking Accounts (`tab_group`), badged with what waits in it;
+its tag is `accounts/<id>`, a child of Accounts, so on a compact width the
+Accounts tab is lit and the register is pushed onto it. A register shows
+Cleared / Uncleared / Working Balance (`FigureStrip`) and its bank's sync.
+Who is signed in is at the sidebar's foot with Settings, never over the
+toolbar.
 
 ## The Accounts Slice (Written)
 

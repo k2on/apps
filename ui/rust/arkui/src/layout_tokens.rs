@@ -6,13 +6,21 @@
 pub const COMPACT_WIDTH: f32 = 600.0;
 /// At least this wide a window is expanded: the split view shows its sidebar, its content and its detail at once.
 pub const EXPANDED_WIDTH: f32 = 840.0;
+/// At least this wide the sections are a sidebar; narrower but regular, a tab bar at the top (an iPad upright).
+pub const SIDEBAR_MIN_WIDTH: f32 = 1200.0;
 /// A split view's sidebar, at rest.
-pub const SIDEBAR_WIDTH: f32 = 220.0;
+pub const SIDEBAR_WIDTH: f32 = 200.0;
 /// A split view's content column beside a detail, at rest.
 pub const CONTENT_WIDTH: f32 = 360.0;
 /// An inspector at the trailing edge, at rest.
-pub const INSPECTOR_WIDTH: f32 = 280.0;
+pub const INSPECTOR_WIDTH: f32 = 300.0;
 /// A window's toolbar row.
-pub const TOOLBAR_HEIGHT: f32 = 44.0;
+pub const TOOLBAR_HEIGHT: f32 = 52.0;
+/// The search field at a toolbar's trailing end.
+pub const SEARCH_WIDTH: f32 = 320.0;
+/// A column of figures in a table or a budget's row.
+pub const AMOUNT_COLUMN_WIDTH: f32 = 112.0;
+/// The bar under a row's name that fills toward its goal, beside columns.
+pub const PROGRESS_WIDTH: f32 = 220.0;
 /// A line of text as tall as this many times its size (the desktop's: iced's).
 pub const LINE_HEIGHT: f32 = 1.3;

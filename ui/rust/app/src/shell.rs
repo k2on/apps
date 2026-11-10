@@ -30,32 +30,69 @@
 use crate::view::{DialogAction, Input, Part, Placement, Val, View};
 
 /// The app's sections: a sidebar on a regular width and the Mac, a tab bar
-/// when compact. `tabs` are [`section_tab`]s; `selected` is the tag of the
-/// one shown, and choosing another sends `select` with its tag.
-pub fn adaptive_tabs<M: 'static>(selected: impl Into<Val<String>>, select: fn(String) -> M, tabs: impl Into<View<M>>) -> View<M> {
-    Part::Tabs {
+/// when compact. `tabs` are [`section_tab`]s and [`tab_group`]s; `selected`
+/// is the tag of the one shown, and choosing another sends `select` with
+/// its tag. [`Tabs::footer`] is the sidebar's foot.
+pub fn adaptive_tabs<M: 'static>(selected: impl Into<Val<String>>, select: fn(String) -> M, tabs: impl Into<View<M>>) -> Tabs<M> {
+    Tabs {
         selected: selected.into(),
         select: Input::new(select),
-        tabs: Box::new(tabs.into()),
+        tabs: tabs.into(),
+        footer: View::Empty,
     }
-    .into()
+}
+
+pub struct Tabs<M> {
+    selected: Val<String>,
+    select: Input<String, M>,
+    tabs: View<M>,
+    footer: View<M>,
+}
+
+impl<M> Tabs<M> {
+    /// What sits at the sidebar's foot: who is signed in, the household
+    /// (`.tabViewSidebarBottomBar`). Never on a compact tab bar.
+    pub fn footer(mut self, footer: impl Into<View<M>>) -> Self {
+        self.footer = footer.into();
+        self
+    }
+}
+
+impl<M> From<Tabs<M>> for View<M> {
+    fn from(t: Tabs<M>) -> View<M> {
+        Part::Tabs {
+            selected: t.selected,
+            select: t.select,
+            tabs: Box::new(t.tabs),
+            footer: Box::new(t.footer),
+        }
+        .into()
+    }
 }
 
 /// One of the app's sections: its title, its glyph, its tag, what it shows.
-pub fn section_tab<M>(title: &'static str, glyph: &'static str, tag: &'static str, content: impl Into<View<M>>) -> SectionTab<M> {
+/// A tag `parent/child` (`accounts/<id>`) is a child of the section
+/// `parent`: a place of its own in the sidebar, and when compact the
+/// parent's tab, lit, with the child pushed in it.
+pub fn section_tab<M>(
+    title: impl Into<Val<String>>,
+    glyph: impl Into<Val<String>>,
+    tag: impl Into<Val<String>>,
+    content: impl Into<View<M>>,
+) -> SectionTab<M> {
     SectionTab {
-        title,
-        glyph,
-        tag,
+        title: title.into(),
+        glyph: glyph.into(),
+        tag: tag.into(),
         badge: None,
         content: content.into(),
     }
 }
 
 pub struct SectionTab<M> {
-    title: &'static str,
-    glyph: &'static str,
-    tag: &'static str,
+    title: Val<String>,
+    glyph: Val<String>,
+    tag: Val<String>,
     badge: Option<Val<Option<i64>>>,
     content: View<M>,
 }
@@ -79,6 +116,34 @@ impl<M> From<SectionTab<M>> for View<M> {
         }
         .into()
     }
+}
+
+/// Sections under a heading, in the sidebar alone (`TabSection`, hidden
+/// from a compact tab bar): an app's own places, as Mail's mailboxes are.
+pub fn tab_group<M>(title: &'static str, tabs: impl Into<View<M>>) -> View<M> {
+    Part::TabGroup {
+        title,
+        tabs: Box::new(tabs.into()),
+    }
+    .into()
+}
+
+/// What `content` opens, pushed onto the section's stack while `showing`,
+/// at every width, `back` to leave it (a Back button, the edge swipe).
+pub fn pushes<M>(content: impl Into<View<M>>, detail: impl Into<View<M>>, showing: impl Into<Val<bool>>, back: M) -> View<M> {
+    Part::Push {
+        content: Box::new(content.into()),
+        detail: Box::new(detail.into()),
+        showing: showing.into(),
+        back,
+    }
+    .into()
+}
+
+/// The section a tag is shown in when compact: a child's parent
+/// (`accounts/<id>` is `accounts`), any other tag itself.
+pub fn compact_tag(tag: &str) -> &str {
+    tag.split_once('/').map_or(tag, |(parent, _)| parent)
 }
 
 /// A list beside what it opens: columns on a regular width, a stack when
@@ -234,9 +299,12 @@ pub fn alert<M>(title: impl Into<Val<String>>, message: impl Into<Val<String>>, 
     .into()
 }
 
-/// The Settings scene's panes ([`settings_pane`]s).
-pub fn settings_panes<M>(panes: impl Into<View<M>>) -> View<M> {
+/// The Settings scene's panes ([`settings_pane`]s): one shown at a time,
+/// `selected` by its title, choosing another sends `select` with its.
+pub fn settings_panes<M: 'static>(selected: impl Into<Val<String>>, select: fn(String) -> M, panes: impl Into<View<M>>) -> View<M> {
     Part::SettingsPanes {
+        selected: selected.into(),
+        select: Input::new(select),
         panes: Box::new(panes.into()),
     }
     .into()

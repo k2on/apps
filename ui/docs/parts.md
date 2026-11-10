@@ -41,6 +41,29 @@ phone: what is the same is the part and what it is handed.
 | VolumeSlider | level, muted, about, onLevel, onDone, onMute | `VolumeSlider` | `VolumeSlider` | — (the desktop's mute and bar are two controls) |
 | Glyphs | a Lucide name | `ArkGlyphs.named` | `ArkGlyphs.symbol` (an SF Symbol) | `glyphs::named` |
 
+## Figures
+
+A page of figures — a budget, a register's balances, a report — is laid
+out of these (`arkui::figures`, `FigureParts.swift`, `FigureParts.kt`).
+Charts are Swift Charts on Apple's platforms, a Canvas on Android, plain
+shapes and an SVG line on the desktop, in the theme's `[chart]` palette.
+
+| Part | Inputs | Compose | SwiftUI | iced |
+|---|---|---|---|---|
+| StatusBadge | figure, tint (negative filled with a warning, caution a clock) | `StatusBadge` | `StatusBadge` | `figures::status_badge` |
+| GoalBar | fraction, tint (`progress-width` wide beside columns) | `GoalBar` | `GoalBar` (`ProgressView`) | `figures::goal_bar` |
+| Headline | label, figure, tint, caption, trailing | `Headline` | `Headline` (large, bold, rounded) | `figures::headline` |
+| CapsuleButton | title, glyph?, prominent, action | `CapsuleButton` | `CapsuleButton` (bordered / prominent) | `figures::capsule_button` |
+| NoticeBar | glyph, text, actions | `NoticeBar` | `NoticeBar` (on `.bar`) | `figures::notice_bar` |
+| FigureStrip | (label, figure, tint)… | `FigureStrip` | `FigureStrip` | `figures::figure_strip` |
+| StatTile | label, figure, caption? (its line kept, so tiles are one height) | `StatTile` | `StatTile` | `figures::stat_tile` |
+| ChartCard | title, chart | `ChartCard` | `ChartCard` | `figures::chart_card` |
+| LabelledBars | (label, value, said)… | `LabelledBars` | `LabelledBars` | `figures::labelled_bars` |
+| ColumnChart | series, groups (label, values) | `ColumnChart` | `ColumnChart` | `figures::column_chart` |
+| LineChart, Sparkline | points (oldest first); the area runs to the foot | `LineChart`, `Sparkline` | `LineChart`, `Sparkline` | `figures::line_chart`, `sparkline` |
+| SummaryCard | label, cents, first/second (owned, owed), trend | `SummaryCard` | `SummaryCard` | the view's `Part::Summary` |
+| Grid | items, columns, gap | a `Row` of weights | `LazyVGrid` | `figures::grid` |
+
 The slider is called `Bar`, not `Slider`: `Slider` is SwiftUI's and
 Material's own, and an app that imports both could not say which.
 
@@ -48,8 +71,12 @@ Material's own, and an app that imports both could not say which.
 `chevron-right`, `chevron-down`, `ellipsis-vertical`, `x`, `plus`, `minus`,
 `check`, `circle-check`, `circle`, `search`, `wifi-off`, `volume-2`,
 `volume-x`, `log-out`, and for a row's menu `pencil`, `copy`, `archive`,
-`undo-2`, `badge-check`, `circle-plus`. Android and the desktop draw Lucide's paths; the
-iPhone draws the SF Symbol each maps to.
+`undo-2`, `badge-check`, `circle-plus`; for the shell and the figures
+`panel-right` (the inspector's toggle), `wand-sparkles`, `refresh-cw`,
+`list-filter`, `mail`, `chart-column`, `list`, `settings`, `inbox`,
+`triangle-alert`, `clock`, `dollar-sign`, `banknote`, `cloud`, `target`,
+`arrow-left-right`, `users`, `house`, `landmark`. Android and the desktop
+draw Lucide's paths; the iPhone draws the SF Symbol each maps to.
 
 ## A screen laid out in Rust
 

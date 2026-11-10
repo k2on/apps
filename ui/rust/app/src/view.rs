@@ -292,6 +292,18 @@ pub enum Part<M> {
         cents: Val<i64>,
         note: &'static str,
     },
+    /// The page's figure in a card: its label, the amount large, the two
+    /// it is made of under it (what is owned, what is owed), and a
+    /// sparkline of how it went (oldest first).
+    Summary {
+        label: &'static str,
+        cents: Val<i64>,
+        first: &'static str,
+        first_cents: Val<i64>,
+        second: &'static str,
+        second_cents: Val<i64>,
+        trend: Val<Vec<i64>>,
+    },
     /// A group of rows in a card, under its heading, a note under it.
     Section(Section<M>),
     Row(Box<ListRow<M>>),
@@ -391,14 +403,35 @@ pub enum Part<M> {
         selected: Val<String>,
         select: Input<String, M>,
         tabs: Box<View<M>>,
+        /// At the sidebar's foot (`.tabViewSidebarBottomBar`): who is signed
+        /// in, the household. Not on a compact tab bar.
+        footer: Box<View<M>>,
     },
-    /// One section: its title, glyph and tag, a count at its end, what it shows.
+    /// One section: its title, glyph and tag, a count at its end, what it
+    /// shows. A tag `parent/child` is a child of the section tagged
+    /// `parent`: its own place in the sidebar, the parent's tab (and the
+    /// parent's pushed detail) when compact.
     SectionTab {
-        title: &'static str,
-        glyph: &'static str,
-        tag: &'static str,
+        title: Val<String>,
+        glyph: Val<String>,
+        tag: Val<String>,
         badge: Option<Val<Option<i64>>>,
         content: Box<View<M>>,
+    },
+    /// A group of sections under a heading (`TabSection`): in the sidebar
+    /// only, never on a compact tab bar — Mail's mailboxes.
+    TabGroup {
+        title: &'static str,
+        tabs: Box<View<M>>,
+    },
+    /// What a list opens, pushed onto the section's stack at every width
+    /// while `showing` (`navigationDestination(isPresented:)`), `back` to
+    /// leave it.
+    Push {
+        content: Box<View<M>>,
+        detail: Box<View<M>>,
+        showing: Val<bool>,
+        back: M,
     },
     /// A list beside what it opens: `NavigationSplitView`'s content and
     /// detail, a stack when compact (the detail pushed while `showing`,
@@ -463,6 +496,9 @@ pub enum Part<M> {
     /// The Settings scene: its panes ([`Part::SettingsPane`]), a window of
     /// tabs on the Mac and the desktop, a list of screens elsewhere.
     SettingsPanes {
+        /// The shown pane's title; choosing another sends `select` with its.
+        selected: Val<String>,
+        select: Input<String, M>,
         panes: Box<View<M>>,
     },
     SettingsPane {
@@ -594,6 +630,29 @@ pub fn hero_figure<M>(label: &'static str, cents: impl Into<Val<i64>>, note: &'s
         label,
         cents: cents.into(),
         note,
+    }
+    .into()
+}
+
+/// The page's figure in a card, made of `first` and `second` (what is
+/// owned and what is owed), with a sparkline of `trend`, oldest first.
+pub fn summary_card<M>(
+    label: &'static str,
+    cents: impl Into<Val<i64>>,
+    first: &'static str,
+    first_cents: impl Into<Val<i64>>,
+    second: &'static str,
+    second_cents: impl Into<Val<i64>>,
+    trend: impl Into<Val<Vec<i64>>>,
+) -> View<M> {
+    Part::Summary {
+        label,
+        cents: cents.into(),
+        first,
+        first_cents: first_cents.into(),
+        second,
+        second_cents: second_cents.into(),
+        trend: trend.into(),
     }
     .into()
 }
@@ -1124,6 +1183,27 @@ impl<M> Part<M> {
                 }
                 c("TabPage", Some(G::Text(title)), args, vec![("", &**content), ("top", &**top)])
             }
+            Part::Summary {
+                label,
+                cents,
+                first,
+                first_cents,
+                second,
+                second_cents,
+                trend,
+            } => c(
+                "SummaryCard",
+                Some(G::Text(label)),
+                vec![
+                    ("cents", G::Val(lit(cents))),
+                    ("first", G::Text(first)),
+                    ("firstCents", G::Val(lit(first_cents))),
+                    ("second", G::Text(second)),
+                    ("secondCents", G::Val(lit(second_cents))),
+                    ("trend", G::Val(lit(trend))),
+                ],
+                vec![],
+            ),
             Part::Hero { label, cents, note } => c(
                 "HeroFigure",
                 Some(G::Text(label)),
@@ -1323,11 +1403,16 @@ impl<M> Part<M> {
                 vec![("enabled", G::Val(lit(enabled))), ("onTap", G::Act(tap))],
                 vec![],
             ),
-            Part::Tabs { selected, select, tabs } => c(
+            Part::Tabs {
+                selected,
+                select,
+                tabs,
+                footer,
+            } => c(
                 "AdaptiveTabs",
                 None,
                 vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))],
-                vec![("", &**tabs)],
+                vec![("", &**tabs), ("footer", &**footer)],
             ),
             Part::SectionTab {
                 title,
@@ -1336,12 +1421,24 @@ impl<M> Part<M> {
                 badge,
                 content,
             } => {
-                let mut args = vec![("glyph", G::Text(glyph)), ("tag", G::Text(tag))];
+                let mut args = vec![("glyph", G::Val(lit(glyph))), ("tag", G::Val(lit(tag)))];
                 if let Some(b) = badge {
                     args.push(("badge", G::Val(lit(b))));
                 }
-                c("SectionTab", Some(G::Text(title)), args, vec![("", &**content)])
+                c("SectionTab", Some(G::Val(lit(title))), args, vec![("", &**content)])
             }
+            Part::TabGroup { title, tabs } => c("SectionGroup", Some(G::Text(title)), vec![], vec![("", &**tabs)]),
+            Part::Push {
+                content,
+                detail,
+                showing,
+                back,
+            } => c(
+                "PushedDetail",
+                None,
+                vec![("showing", G::Val(lit(showing))), ("onBack", G::Act(back))],
+                vec![("", &**content), ("detail", &**detail)],
+            ),
             Part::Split {
                 content,
                 detail,
@@ -1440,7 +1537,12 @@ impl<M> Part<M> {
                 vec![("message", G::Val(lit(message))), ("onOk", G::Act(ok))],
                 vec![],
             ),
-            Part::SettingsPanes { panes } => c("SettingsPanes", None, vec![], vec![("", &**panes)]),
+            Part::SettingsPanes { selected, select, panes } => c(
+                "SettingsPanes",
+                None,
+                vec![("selection", G::Val(lit(selected))), ("onSelect", G::Typed(select))],
+                vec![("", &**panes)],
+            ),
             Part::SettingsPane { title, glyph, content } => c(
                 "SettingsPane",
                 Some(G::Text(title)),
@@ -1505,6 +1607,23 @@ impl<M: 'static> Part<M> {
                 content: b(content),
             },
             Part::Hero { label, cents, note } => Part::Hero { label, cents, note },
+            Part::Summary {
+                label,
+                cents,
+                first,
+                first_cents,
+                second,
+                second_cents,
+                trend,
+            } => Part::Summary {
+                label,
+                cents,
+                first,
+                first_cents,
+                second,
+                second_cents,
+                trend,
+            },
             Part::Section(s) => Part::Section(Section {
                 title: s.title,
                 amount: s.amount,
@@ -1633,10 +1752,28 @@ impl<M: 'static> Part<M> {
                 change: input(change, f),
             },
             Part::Button { title, enabled, tap } => Part::Button { title, enabled, tap: f(tap) },
-            Part::Tabs { selected, select, tabs } => Part::Tabs {
+            Part::Tabs {
+                selected,
+                select,
+                tabs,
+                footer,
+            } => Part::Tabs {
                 selected,
                 select: input(select, f),
                 tabs: b(tabs),
+                footer: b(footer),
+            },
+            Part::TabGroup { title, tabs } => Part::TabGroup { title, tabs: b(tabs) },
+            Part::Push {
+                content,
+                detail,
+                showing,
+                back,
+            } => Part::Push {
+                content: b(content),
+                detail: b(detail),
+                showing,
+                back: f(back),
             },
             Part::SectionTab {
                 title,
@@ -1724,7 +1861,11 @@ impl<M: 'static> Part<M> {
                 cancel: f(cancel),
             },
             Part::Alert { title, message, ok } => Part::Alert { title, message, ok: f(ok) },
-            Part::SettingsPanes { panes } => Part::SettingsPanes { panes: b(panes) },
+            Part::SettingsPanes { selected, select, panes } => Part::SettingsPanes {
+                selected,
+                select: input(select, f),
+                panes: b(panes),
+            },
             Part::SettingsPane { title, glyph, content } => Part::SettingsPane {
                 title,
                 glyph,

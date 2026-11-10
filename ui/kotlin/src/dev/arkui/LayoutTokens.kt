@@ -7,14 +7,22 @@ public object LayoutTokens {
     public const val COMPACT_WIDTH: Float = 600.0f
     /** At least this wide a window is expanded: the split view shows its sidebar, its content and its detail at once. */
     public const val EXPANDED_WIDTH: Float = 840.0f
+    /** At least this wide the sections are a sidebar; narrower but regular, a tab bar at the top (an iPad upright). */
+    public const val SIDEBAR_MIN_WIDTH: Float = 1200.0f
     /** A split view's sidebar, at rest. */
-    public const val SIDEBAR_WIDTH: Float = 220.0f
+    public const val SIDEBAR_WIDTH: Float = 200.0f
     /** A split view's content column beside a detail, at rest. */
     public const val CONTENT_WIDTH: Float = 360.0f
     /** An inspector at the trailing edge, at rest. */
-    public const val INSPECTOR_WIDTH: Float = 280.0f
+    public const val INSPECTOR_WIDTH: Float = 300.0f
     /** A window's toolbar row. */
-    public const val TOOLBAR_HEIGHT: Float = 44.0f
+    public const val TOOLBAR_HEIGHT: Float = 52.0f
+    /** The search field at a toolbar's trailing end. */
+    public const val SEARCH_WIDTH: Float = 320.0f
+    /** A column of figures in a table or a budget's row. */
+    public const val AMOUNT_COLUMN_WIDTH: Float = 112.0f
+    /** The bar under a row's name that fills toward its goal, beside columns. */
+    public const val PROGRESS_WIDTH: Float = 220.0f
     /** A line of text as tall as this many times its size (the desktop's: iced's). */
     public const val LINE_HEIGHT: Float = 1.3f
 }

@@ -174,11 +174,60 @@ public object ArkGlyphs {
     /** Adding a thing of a list's own (`circle-plus`). */
     public val Add: ImageVector = glyph("circle-plus", circle(12f, 12f, 10f), "M8 12h8", "M12 8v8")
 
+    /** `panel-right`, Lucide's. */
+    public val PanelRight: ImageVector = glyph("panel-right", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M15 3v18")
+
+    /** `wand-sparkles`, Lucide's. */
+    public val Wand: ImageVector = glyph("wand-sparkles", "m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72", "m14 7 3 3", "M5 6v4", "M19 14v4", "M10 2v2", "M7 8H3", "M21 16h-4", "M11 3H9")
+
+    /** `refresh-cw`, Lucide's. */
+    public val Sync: ImageVector = glyph("refresh-cw", "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", "M21 3v5h-5", "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", "M8 16H3v5")
+
+    /** `list-filter`, Lucide's. */
+    public val Filter: ImageVector = glyph("list-filter", "M3 6h18", "M7 12h10", "M10 18h4")
+
+    /** `mail`, Lucide's. */
+    public val Mail: ImageVector = glyph("mail", "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7")
+
+    /** `chart-column`, Lucide's. */
+    public val Chart: ImageVector = glyph("chart-column", "M3 3v16a2 2 0 0 0 2 2h16", "M18 17V9", "M13 17V5", "M8 17v-3")
+
+    /** `list`, Lucide's. */
+    public val Rows: ImageVector = glyph("list", "M3 12h.01", "M3 18h.01", "M3 6h.01", "M8 12h13", "M8 18h13", "M8 6h13")
+
+    /** `inbox`, Lucide's. */
+    public val Inbox: ImageVector = glyph("inbox", "M22 12h-6l-2 3h-4l-2-3H2", "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z")
+
+    /** `triangle-alert`, Lucide's. */
+    public val Alert: ImageVector = glyph("triangle-alert", "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4", "M12 17h.01")
+
+    /** `clock`, Lucide's. */
+    public val Clock: ImageVector = glyph("clock", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M12 6v6l4 2")
+
+    /** `dollar-sign`, Lucide's. */
+    public val Dollar: ImageVector = glyph("dollar-sign", "M12 2v20", "M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6")
+
+    /** `banknote`, Lucide's. */
+    public val Banknote: ImageVector = glyph("banknote", "M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z", "M14 12a2 2 0 1 1-4 0a2 2 0 1 1 4 0z", "M6 12h.01", "M18 12h.01")
+
+    /** `target`, Lucide's. */
+    public val Target: ImageVector = glyph("target", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M18 12a6 6 0 1 1-12 0a6 6 0 1 1 12 0z", "M14 12a2 2 0 1 1-4 0a2 2 0 1 1 4 0z")
+
+    /** `arrow-left-right`, Lucide's. */
+    public val Arrows: ImageVector = glyph("arrow-left-right", "M8 3 4 7l4 4", "M4 7h16", "m16 21 4-4-4-4", "M20 17H4")
+
+    /** `users`, Lucide's. */
+    public val Users: ImageVector = glyph("users", "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M13 7a4 4 0 1 1-8 0a4 4 0 1 1 8 0z", "M22 21v-2a4 4 0 0 0-3-3.87", "M16 3.13a4 4 0 0 1 0 7.75")
+
+    /** `house`, Lucide's: a home, a mortgage. */
+    public val House: ImageVector = glyph("house", "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
             More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked,
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
+            PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

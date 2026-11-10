@@ -52,16 +52,16 @@ extension ArkGlyphs {
 
 // MARK: the page
 
-/// A tab's page: an inset grouped list under the large title (the face at
-/// its end), `top` under the title, then `content`; pulled down, `onRefresh`.
+/// A tab's page: an inset grouped list, `top` first, then `content`;
+/// pulled down, `onRefresh`. Its title is the section's toolbar's
+/// (`WithToolbar`'s `navigationTitle`): large on the iPhone and the iPad,
+/// inline on the Mac, and nothing else at the title's end — who is signed
+/// in is at the sidebar's foot.
 public struct TabPage<Content: View, Top: View>: View {
     let title: String
     let onRefresh: (() -> Void)?
     let content: Content
     let top: Top
-    @Environment(\.tabFace) private var face
-    /// How tall the large title's row is: past it, the inline title comes into the bar.
-    @State private var fold: CGFloat = 0
 
     public init(_ title: String, onRefresh: (() -> Void)? = nil, @ViewBuilder content: () -> Content, @ViewBuilder top: () -> Top) {
         self.title = title
@@ -72,12 +72,64 @@ public struct TabPage<Content: View, Top: View>: View {
 
     public var body: some View {
         List {
-            TitleSection(title, fold: $fold) { face() } below: { top } rows: { EmptyView() }
+            top
             content
         }
         .groupedList()
         .refreshable { onRefresh?() }
-        .largeTitleBar(title, fold: fold)
+        .navigationTitle(title)
+    }
+}
+
+/// The page's figure in a card: its label, the amount large and bold in
+/// the rounded face, the two it is made of under it (what is owned, what
+/// is owed) and a sparkline of how it went, oldest first.
+public struct SummaryCard: View {
+    let label: String
+    let cents: Int64
+    let first: String
+    let firstCents: Int64
+    let second: String
+    let secondCents: Int64
+    let trend: [Int64]
+
+    public init(_ label: String, cents: Int64, first: String, firstCents: Int64, second: String, secondCents: Int64, trend: [Int64]) {
+        self.label = label
+        self.cents = cents
+        self.first = first
+        self.firstCents = firstCents
+        self.second = second
+        self.secondCents = secondCents
+        self.trend = trend
+    }
+
+    public var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(label).font(.subheadline).foregroundStyle(.quiet)
+                CentsText(cents)
+                    .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    .foregroundStyle(cents < 0 ? Color.error : Color.ink)
+                    .contentTransition(.numericText(value: Double(cents)))
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                HStack(alignment: .bottom, spacing: Space.l) {
+                    fact(first, firstCents)
+                    fact(second, secondCents)
+                    Spacer(minLength: Space.s)
+                    Sparkline(trend).frame(width: 140, height: 34)
+                }
+            }
+            .padding(.vertical, Space.xs)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func fact(_ title: String, _ c: Int64) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(.quiet)
+            CentsText(c).font(.footnote.weight(.semibold)).foregroundStyle(c < 0 ? Color.error : Color.ink)
+        }
     }
 }
 

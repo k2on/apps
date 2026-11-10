@@ -33,10 +33,14 @@ RUST_LAYOUT = "ui/rust/arkui/src/layout_tokens.rs"
 LAYOUT = {
     "compact-width": "Narrower than this (dp, pt or logical px) a window is compact: the sidebar is a tab bar, the split view a stack, the inspector a sheet.",
     "expanded-width": "At least this wide a window is expanded: the split view shows its sidebar, its content and its detail at once.",
+    "sidebar-min-width": "At least this wide the sections are a sidebar; narrower but regular, a tab bar at the top (an iPad upright).",
     "sidebar-width": "A split view's sidebar, at rest.",
     "content-width": "A split view's content column beside a detail, at rest.",
     "inspector-width": "An inspector at the trailing edge, at rest.",
     "toolbar-height": "A window's toolbar row.",
+    "search-width": "The search field at a toolbar's trailing end.",
+    "amount-column-width": "A column of figures in a table or a budget's row.",
+    "progress-width": "The bar under a row's name that fills toward its goal, beside columns.",
     "line-height": "A line of text as tall as this many times its size (the desktop's: iced's).",
 }
 

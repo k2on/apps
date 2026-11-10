@@ -350,13 +350,23 @@ then written in this vocabulary, then its domain underneath;
 ui/docs/apps/money.md for money):
 
 1. **The shell's vocabulary** — written (`ui/rust/app/src/shell.rs`):
-   `adaptive_tabs`/`section_tab` (with a badge), `split_view`, `toolbar`
+   `adaptive_tabs`/`section_tab` (with a badge; a tag `parent/child` is a
+   child of `parent`, its own place in the sidebar and the parent's pushed
+   page when compact) and its `footer` (`.tabViewSidebarBottomBar`; the
+   toolbar's end where there is no sidebar), `tab_group` (`TabSection`,
+   sidebar only, Mail's mailboxes), `pushes` (`navigationDestination`),
+   `split_view`, `toolbar`
    with `bar_item`s by `Placement`, `searchable`, `inspector`, `hosted`,
-   `confirmation_dialog`, `alert`, `settings_panes`, and the menu bar's
+   `confirmation_dialog`, `alert`, `settings_panes` (one shown, by title),
+   and the menu bar's
    `CommandMenu`s; `View::map` hosts a shell in another app's messages.
    The size classes are `ui/theme.toml`'s `[layout]` (`LayoutTokens`,
    `arkui::layout_tokens`), decided by the parts alone (`arkui::shell::
-   SizeClass`). Parts by hand: `ShellParts.swift` (TabView
+   SizeClass`; a sidebar from `sidebar-min-width`, a tab bar at the top
+   short of it, as an iPad upright). The inspector puts its own toggle at
+   the toolbar's trailing end and the search field sits after it, as on a
+   Mac; nothing (no account button) floats over the toolbar. The figures'
+   parts are ui/docs/parts.md's "Figures". Parts by hand: `ShellParts.swift` (TabView
    `.sidebarAdaptable`, `.toolbar`, `.searchable`, `.inspector`, the
    `Settings` scene as `ArkSettings`, `ArkCommands`), `ShellParts.kt`
    (bar/rail/drawer by width, side-by-side panes or one at a time,

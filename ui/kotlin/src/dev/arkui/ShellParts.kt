@@ -45,7 +45,9 @@ import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -102,24 +104,40 @@ private val LocalSizeClass = compositionLocalOf { SizeClass.Compact }
 
 // * The sections
 
-/** One section, as `SectionTab` registers it. */
+/** One section, as `SectionTab` registers it: in a group (`SectionGroup`) when `group` is said. */
 public class SectionTabItem internal constructor(
     public val title: String,
     public val glyph: String,
     public val tag: String,
     public val badge: Long?,
+    public val group: String?,
     public val content: @Composable () -> Unit,
 )
 
 /** What `AdaptiveTabs`' sections are said in. */
 public class TabsScope internal constructor() {
     internal val tabs = mutableListOf<SectionTabItem>()
+    internal var group: String? = null
 }
 
 /** One section: its title and glyph, its tag, what waits there, what it shows. */
 public fun TabsScope.SectionTab(title: String, glyph: String, tag: String, badge: Long? = null, content: @Composable () -> Unit) {
-    tabs += SectionTabItem(title, glyph, tag, badge, content)
+    tabs += SectionTabItem(title, glyph, tag, badge, group, content)
 }
+
+/**
+ * Sections under a heading in the drawer alone (Mail's mailboxes): never on
+ * the navigation bar or the rail. A child's tag is `parent/child`.
+ */
+public fun TabsScope.SectionGroup(title: String, tabs: TabsScope.() -> Unit) {
+    val was = group
+    group = title
+    tabs()
+    group = was
+}
+
+/** The section a tag is shown in when there is no drawer: a child's parent. */
+public fun compactTag(tag: String): String = tag.substringBefore('/')
 
 /**
  * The app's sections: a navigation bar when compact, a rail when medium, a
@@ -127,51 +145,72 @@ public fun TabsScope.SectionTab(title: String, glyph: String, tag: String, badge
  * theme's widths).
  */
 @Composable
-public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, tabs: TabsScope.() -> Unit) {
+public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @Composable () -> Unit = {}, tabs: TabsScope.() -> Unit) {
     val items = TabsScope().apply(tabs).tabs
     val lookup = LocalGlyphs.current
-    val shown = items.firstOrNull { it.tag == selection } ?: items.firstOrNull() ?: return
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val size = sizeClassOf(maxWidth)
+        val drawer = maxWidth >= LayoutTokens.SIDEBAR_MIN_WIDTH.dp
+        // Short of a drawer, a child is shown in its parent's tab, which pushes it.
+        val shownTag = if (drawer) selection else compactTag(selection)
+        val shown = items.firstOrNull { it.tag == shownTag } ?: items.firstOrNull() ?: return@BoxWithConstraints
+        val sections = items.filter { it.group == null }
         val icon: @Composable (SectionTabItem) -> Unit = { t ->
             BadgedBox(badge = { t.badge?.let { Badge { Text(it.toString()) } } }) {
                 Icon(shellGlyph(t.glyph, lookup), contentDescription = null)
             }
         }
-        CompositionLocalProvider(LocalSizeClass provides size) {
-            when (size) {
-                SizeClass.Compact -> Scaffold(bottomBar = {
+        CompositionLocalProvider(LocalSizeClass provides size, LocalShellFooter provides if (drawer) null else footer) {
+            when {
+                size == SizeClass.Compact -> Scaffold(bottomBar = {
                     NavigationBar {
-                        items.forEach { t ->
+                        sections.forEach { t ->
                             NavigationBarItem(selected = t.tag == shown.tag, onClick = { onSelect(t.tag) }, icon = { icon(t) }, label = { Text(t.title) })
                         }
                     }
                 }) { pad -> Box(Modifier.padding(pad)) { shown.content() } }
-                SizeClass.Medium -> Row(Modifier.fillMaxSize()) {
+                !drawer -> Row(Modifier.fillMaxSize()) {
                     NavigationRail {
-                        items.forEach { t ->
+                        sections.forEach { t ->
                             NavigationRailItem(selected = t.tag == shown.tag, onClick = { onSelect(t.tag) }, icon = { icon(t) }, label = { Text(t.title) })
                         }
                     }
                     Box(Modifier.weight(1f)) { shown.content() }
                 }
-                SizeClass.Expanded -> PermanentNavigationDrawer(drawerContent = {
+                else -> PermanentNavigationDrawer(drawerContent = {
                     PermanentDrawerSheet(Modifier.width(LayoutTokens.SIDEBAR_WIDTH.dp)) {
-                        items.forEach { t ->
-                            NavigationDrawerItem(
-                                label = { Text(t.title) },
-                                icon = { icon(t) },
-                                selected = t.tag == shown.tag,
-                                onClick = { onSelect(t.tag) },
-                                modifier = Modifier.padding(horizontal = 12.dp),
-                            )
+                        Column(Modifier.weight(1f)) {
+                            var heading: String? = null
+                            items.forEach { t ->
+                                if (t.group != null && t.group != heading) {
+                                    Text(
+                                        t.group,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 28.dp, top = 16.dp, bottom = 4.dp),
+                                    )
+                                }
+                                heading = t.group
+                                NavigationDrawerItem(
+                                    label = { Text(t.title) },
+                                    icon = { Icon(shellGlyph(t.glyph, lookup), contentDescription = null) },
+                                    badge = { t.badge?.let { Text(it.toString()) } },
+                                    selected = t.tag == shown.tag,
+                                    onClick = { onSelect(t.tag) },
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                )
+                            }
                         }
+                        Box(Modifier.padding(12.dp)) { footer() }
                     }
                 }) { shown.content() }
             }
         }
     }
 }
+
+/** The drawer's foot, which a top app bar carries at its end where there is no drawer. */
+private val LocalShellFooter = compositionLocalOf<(@Composable () -> Unit)?> { null }
 
 // * Columns
 
@@ -189,6 +228,17 @@ public fun SplitColumns(showing: Boolean, onBack: () -> Unit, detail: @Composabl
             Box(Modifier.weight(1f).fillMaxHeight()) { detail() }
         }
     } else if (showing) {
+        BackHandler(onBack = onBack)
+        detail()
+    } else {
+        content()
+    }
+}
+
+/** What a list opens, pushed over it while `showing`, at every width; back sends `onBack`. */
+@Composable
+public fun PushedDetail(showing: Boolean, onBack: () -> Unit, detail: @Composable () -> Unit, content: @Composable () -> Unit) {
+    if (showing) {
         BackHandler(onBack = onBack)
         detail()
     } else {
@@ -246,6 +296,10 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
             navigationIcon = { all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) } },
             actions = {
                 all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
+                LocalInspectorToggle.current?.let { t ->
+                    IconButton(onClick = t.second) { Icon(ArkGlyphs.PanelRight, contentDescription = t.first) }
+                }
+                LocalShellFooter.current?.invoke()
                 val secondary = all.filter { it.placement == BarPlacement.Secondary }
                 if (secondary.isNotEmpty()) {
                     IconButton(onClick = { overflow = true }) { Icon(ArkGlyphs.named("ellipsis-vertical") ?: ArkGlyphs.Chevron, contentDescription = "More") }
@@ -297,28 +351,30 @@ public fun WithSearch(prompt: String, text: String, onChange: (String) -> Unit, 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun WithInspector(title: String, isShown: Boolean, onToggle: (Boolean) -> Unit, inspector: @Composable () -> Unit, content: @Composable () -> Unit) {
-    if (LocalSizeClass.current == SizeClass.Expanded) {
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f)) { content() }
+    // Its toggle goes in the section's top app bar (`WithToolbar`'s actions).
+    CompositionLocalProvider(LocalInspectorToggle provides (title to { onToggle(!isShown) })) {
+        if (LocalSizeClass.current == SizeClass.Expanded) {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f)) { content() }
+                if (isShown) {
+                    VerticalDivider()
+                    Column(Modifier.width(LayoutTokens.INSPECTOR_WIDTH.dp).fillMaxHeight()) { inspector() }
+                }
+            }
+        } else {
+            content()
             if (isShown) {
-                VerticalDivider()
-                Column(Modifier.width(LayoutTokens.INSPECTOR_WIDTH.dp).fillMaxHeight()) {
-                    Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(16.dp))
-                    HorizontalDivider()
+                ModalBottomSheet(onDismissRequest = { onToggle(false) }) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
                     inspector()
                 }
             }
         }
-    } else {
-        content()
-        if (isShown) {
-            ModalBottomSheet(onDismissRequest = { onToggle(false) }) {
-                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
-                inspector()
-            }
-        }
     }
 }
+
+/** The inspector's title and its toggle, for the top app bar over it. */
+internal val LocalInspectorToggle = compositionLocalOf<Pair<String, () -> Unit>?> { null }
 
 // * A question and a notice
 
@@ -358,17 +414,41 @@ public fun NoticeAlert(title: String, message: String, onOk: () -> Unit) {
 
 // * Settings
 
-/** Settings: its panes, one after another (Android's Settings screen). */
-@Composable
-public fun SettingsPanes(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxSize()) { content() }
+/** One pane of Settings, as `SettingsPane` registers it. */
+public class SettingsPaneItem internal constructor(public val title: String, public val glyph: String, public val content: @Composable () -> Unit)
+
+/** What `SettingsPanes`' panes are said in. */
+public class PanesScope internal constructor() {
+    internal val panes = mutableListOf<SettingsPaneItem>()
 }
 
-/** One pane of Settings: its heading over what it holds. */
+/** One pane of Settings: its title, its glyph, what it holds. */
+public fun PanesScope.SettingsPane(title: String, glyph: String, content: @Composable () -> Unit) {
+    panes += SettingsPaneItem(title, glyph, content)
+}
+
+/**
+ * Settings: its panes' tabs across the top, the one titled `selection`
+ * under them (choosing another sends `onSelect`).
+ */
 @Composable
-public fun SettingsPane(title: String, glyph: String, content: @Composable () -> Unit) {
-    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
-    content()
+public fun SettingsPanes(selection: String, onSelect: (String) -> Unit, panes: PanesScope.() -> Unit) {
+    val all = PanesScope().apply(panes).panes
+    val lookup = LocalGlyphs.current
+    val shown = all.firstOrNull { it.title == selection } ?: all.firstOrNull() ?: return
+    Column(Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = all.indexOf(shown)) {
+            all.forEach { p ->
+                Tab(
+                    selected = p == shown,
+                    onClick = { onSelect(p.title) },
+                    text = { Text(p.title) },
+                    icon = { Icon(shellGlyph(p.glyph, lookup), contentDescription = null) },
+                )
+            }
+        }
+        Box(Modifier.weight(1f)) { shown.content() }
+    }
 }
 
 // * Commands

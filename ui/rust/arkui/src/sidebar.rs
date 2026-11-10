@@ -13,13 +13,13 @@
 //! money's balance. It is drawn on the row's ground, so it asks
 //! [`style::entry_text`] with the same `lit` the row was drawn with
 //! ([`lit`]).
-use crate::text::{self, text};
+use crate::text::text;
 use iced::widget::{column, container, mouse_area, row, scrollable};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::fit::Cut;
 use crate::line::Line;
-use crate::{icon, style, theme};
+use crate::{icon, style};
 
 /// What a window that has a sidebar usually makes it, edge included.
 pub const WIDTH: f32 = 200.0;
@@ -43,18 +43,10 @@ pub fn lit(i: usize, cursor: usize, focused: bool) -> bool {
     i == cursor && focused
 }
 
-/// A tally on a row's right: how many are in the place.
+/// A tally on a row's right: how many are in the place, in a quiet
+/// capsule as a Mac's sidebar draws one.
 pub fn count<'a, M: 'a>(n: i64, _lit: bool) -> Element<'a, M> {
-    text(n.to_string())
-        .size(10)
-        .style(move |t| {
-            let p = theme::of(t);
-            text::Style {
-                color: Some(p.background.base.text.scale_alpha(0.5)),
-                ..Default::default()
-            }
-        })
-        .into()
+    crate::parts::count_badge(n)
 }
 
 /// The sidebar `width` wide, edge included, with the cursor on `cursor`.
@@ -64,6 +56,20 @@ pub fn count<'a, M: 'a>(n: i64, _lit: bool) -> Element<'a, M> {
 /// lines up with whatever starts the page. `id` is its scrollable's, for
 /// [`crate::scroll::reveal`].
 pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: bool, width: f32, padding: f32, id: &'static str) -> Element<'a, M> {
+    view_with_footer(items, cursor, focused, width, padding, id, None)
+}
+
+/// [`view`], with `footer` at its foot under the places: who is signed in,
+/// the household (a Mac's sidebar's bottom bar).
+pub fn view_with_footer<'a, M: Clone + 'a>(
+    items: Vec<Item<'a, M>>,
+    cursor: usize,
+    focused: bool,
+    width: f32,
+    padding: f32,
+    id: &'static str,
+    footer: Option<Element<'a, M>>,
+) -> Element<'a, M> {
     let mut side = column![].spacing(1).padding(Padding {
         top: padding,
         right: 10.0,
@@ -73,7 +79,20 @@ pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: 
     let mut under: Option<&str> = None;
     for (i, item) in items.into_iter().enumerate() {
         if item.heading.is_some() && item.heading != under {
-            side = side.push(container(text(item.heading.unwrap_or_default()).size(10).style(style::faint(0.5))).padding([8, 10]));
+            side = side.push(
+                container(
+                    text(item.heading.unwrap_or_default())
+                        .size(11)
+                        .font(crate::hero::BOLD)
+                        .style(style::faint(0.45)),
+                )
+                .padding(Padding {
+                    top: 14.0,
+                    right: 10.0,
+                    bottom: 4.0,
+                    left: 10.0,
+                }),
+            );
         }
         under = item.heading;
         let on_cursor = i == cursor;
@@ -98,7 +117,12 @@ pub fn view<'a, M: Clone + 'a>(items: Vec<Item<'a, M>>, cursor: usize, focused: 
             .on_press(item.press),
         );
     }
-    container(crate::scroll::elastic(scrollable(side).id(id).style(style::bars)))
+    let places: Element<'a, M> = crate::scroll::elastic(scrollable(side).id(id).style(style::bars).height(Length::Fill));
+    let body: Element<'a, M> = match footer {
+        Some(f) => column![places, container(f).padding([8, 10])].into(),
+        None => places,
+    };
+    container(body)
         // Its edge, a pixel, is part of its width (drawn by the window beside
         // it, `style::edge`), so the page is as wide as the window less this.
         .width(Length::Fixed(width - 1.0))

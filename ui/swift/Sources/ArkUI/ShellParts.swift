@@ -21,6 +21,10 @@ private struct SectionPathKey: EnvironmentKey {
     static let defaultValue: (String) -> Binding<NavigationPath>? = { _ in nil }
 }
 
+private struct ShellFooterKey: EnvironmentKey {
+    static let defaultValue: AnyView? = nil
+}
+
 extension EnvironmentValues {
     /// The screens a shell hosts, by name: the app's own (hand-written, or
     /// generated apart), until they move into Rust.
@@ -34,6 +38,13 @@ extension EnvironmentValues {
     public var sectionPath: (String) -> Binding<NavigationPath>? {
         get { self[SectionPathKey.self] }
         set { self[SectionPathKey.self] = newValue }
+    }
+
+    /// The sidebar's foot (who is signed in), which a toolbar carries at
+    /// its trailing end where there is no sidebar (the iPhone's tab bar).
+    var shellFooter: AnyView? {
+        get { self[ShellFooterKey.self] }
+        set { self[ShellFooterKey.self] = newValue }
     }
 }
 
@@ -62,21 +73,50 @@ public struct HostedScreen: View {
 // MARK: the sections
 
 /// The app's sections: a tab bar on the iPhone, a sidebar on the iPad
-/// (the person can turn it into the tab bar) and on the Mac.
-public struct AdaptiveTabs<Tabs: TabContent<String>>: View {
+/// (the person can turn it into the tab bar) and on the Mac, with
+/// `footer` (who is signed in) at the sidebar's foot. A tag `parent/child`
+/// is a child of `parent` (an account of Accounts): a place of its own in
+/// the sidebar; on a compact width the parent's tab, which pushes it.
+public struct AdaptiveTabs<Tabs: TabContent<String>, Footer: View>: View {
     let selection: String
     let onSelect: (String) -> Void
     let tabs: Tabs
+    let footer: Footer
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var size
+    #endif
 
-    public init(selection: String, onSelect: @escaping (String) -> Void, @TabContentBuilder<String> _ tabs: () -> Tabs) {
+    public init(
+        selection: String,
+        onSelect: @escaping (String) -> Void,
+        @TabContentBuilder<String> _ tabs: () -> Tabs,
+        @ViewBuilder footer: () -> Footer
+    ) {
         self.selection = selection
         self.onSelect = onSelect
         self.tabs = tabs()
+        self.footer = footer()
+    }
+
+    private var compact: Bool {
+        #if os(iOS)
+        size == .compact
+        #else
+        false
+        #endif
+    }
+
+    /// The tab shown: a child's parent when compact.
+    private var shown: String {
+        guard compact, let slash = selection.firstIndex(of: "/") else { return selection }
+        return String(selection[..<slash])
     }
 
     public var body: some View {
-        TabView(selection: Binding(get: { selection }, set: onSelect)) { tabs }
+        TabView(selection: Binding(get: { shown }, set: onSelect)) { tabs }
             .tabViewStyle(.sidebarAdaptable)
+            .tabViewSidebarBottomBar { footer }
+            .environment(\.shellFooter, compact ? AnyView(footer) : nil)
     }
 }
 
@@ -90,6 +130,17 @@ public func SectionTab<Content: View>(
 ) -> some TabContent<String> {
     Tab(title, systemImage: ArkGlyphs.sf(glyph), value: tag) { SectionStack(tag: tag, content: content()) }
         .badge(Int(badge ?? 0))
+}
+
+/// Sections under a heading, in the sidebar alone (Mail's mailboxes): a
+/// `TabSection` hidden from the tab bar, each of its tabs only the
+/// sidebar's, so a compact tab bar has no More tab for them.
+public func SectionGroup<Tabs: TabContent<String>>(_ title: String, @TabContentBuilder<String> _ tabs: () -> Tabs) -> some TabContent<String> {
+    TabSection(title) { tabs() }
+        .defaultVisibility(.hidden, for: .tabBar)
+        #if os(iOS)
+        .tabPlacement(.sidebarOnly)
+        #endif
 }
 
 // MARK: columns
@@ -136,6 +187,26 @@ public struct SplitColumns<Content: View, Detail: View>: View {
     }
 }
 
+/// What a list opens, pushed onto the section's stack while `showing`, at
+/// every width (`navigationDestination(isPresented:)`); back sends `onBack`.
+public struct PushedDetail<Content: View, Detail: View>: View {
+    let showing: Bool
+    let onBack: () -> Void
+    let content: Content
+    let detail: Detail
+
+    public init(showing: Bool, onBack: @escaping () -> Void, @ViewBuilder _ content: () -> Content, @ViewBuilder detail: () -> Detail) {
+        self.showing = showing
+        self.onBack = onBack
+        self.content = content()
+        self.detail = detail()
+    }
+
+    public var body: some View {
+        content.navigationDestination(isPresented: Binding(get: { showing }, set: { if !$0 { onBack() } })) { detail }
+    }
+}
+
 // MARK: the toolbar
 
 /// Where a toolbar's button goes.
@@ -165,10 +236,22 @@ public struct WithToolbar<Content: View, Items: ToolbarContent>: View {
         self.items = items()
     }
 
+    @Environment(\.shellFooter) private var footer
+
     public var body: some View {
         content
             .navigationTitle(title)
-            .toolbar { items }
+            #if os(iOS)
+            .toolbarTitleDisplayMode(.automatic)
+            #endif
+            .toolbar {
+                items
+                // No sidebar to stand at the foot of: who is signed in sits
+                // at the toolbar's end, never over its title.
+                if let footer {
+                    ToolbarItem(placement: .secondaryAction) { footer }
+                }
+            }
     }
 }
 
@@ -243,11 +326,19 @@ public struct WithInspector<Content: View, Inspector: View>: View {
     }
 
     public var body: some View {
-        content.inspector(isPresented: Binding(get: { isShown }, set: onToggle)) {
-            inspector
-                .navigationTitle(title)
-                .inspectorColumnWidth(ideal: LayoutTokens.inspectorWidth)
-        }
+        content
+            .inspector(isPresented: Binding(get: { isShown }, set: onToggle)) {
+                inspector
+                    .navigationTitle(title)
+                    .inspectorColumnWidth(min: LayoutTokens.inspectorWidth, ideal: LayoutTokens.inspectorWidth + 40)
+            }
+            // Its toggle at the toolbar's trailing end, as Apple's apps put it.
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { onToggle(!isShown) } label: { Label(title, systemImage: "sidebar.trailing") }
+                        .help("Show or hide \(title.lowercased()) (⌥⌘I)")
+                }
+            }
     }
 }
 
@@ -318,17 +409,24 @@ public struct NoticeAlert: View {
 
 // MARK: Settings
 
-/// The Settings scene's panes: a window of tabs on the Mac, a list of
-/// screens on the iPhone and the iPad.
+/// The Settings scene's panes: a window of tabs on the Mac (the one
+/// shown by its title, `selection`), a list of screens on the iPhone and
+/// the iPad.
 public struct SettingsPanes<Panes: View>: View {
+    let selection: String
+    let onSelect: (String) -> Void
     let panes: Panes
 
-    public init(@ViewBuilder _ panes: () -> Panes) { self.panes = panes() }
+    public init(selection: String, onSelect: @escaping (String) -> Void, @ViewBuilder _ panes: () -> Panes) {
+        self.selection = selection
+        self.onSelect = onSelect
+        self.panes = panes()
+    }
 
     public var body: some View {
         #if os(macOS)
-        TabView { panes }
-            .frame(minWidth: 480, minHeight: 320)
+        TabView(selection: Binding(get: { selection }, set: onSelect)) { panes }
+            .frame(minWidth: 520, minHeight: 360)
         #else
         NavigationStack {
             List { panes }
@@ -338,7 +436,8 @@ public struct SettingsPanes<Panes: View>: View {
     }
 }
 
-/// One pane of Settings: a tab on the Mac, a row that opens it elsewhere.
+/// One pane of Settings: a tab on the Mac, tagged by its title; a row that
+/// opens it elsewhere.
 public struct SettingsPane<Content: View>: View {
     let title: String
     let glyph: String
@@ -355,6 +454,7 @@ public struct SettingsPane<Content: View>: View {
         content
             .padding()
             .tabItem { Label(title, systemImage: ArkGlyphs.sf(glyph)) }
+            .tag(title)
         #else
         NavigationLink {
             content.navigationTitle(title)

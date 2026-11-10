@@ -367,6 +367,24 @@ pub fn row(theme: &Theme, on_cursor: bool, focused: bool, _odd: bool) -> contain
     }
 }
 
+/// What a row of a Mac's table is painted: [`row`]'s cursor, and every
+/// other row a faint stripe, so a wide row is followed across.
+pub fn striped(theme: &Theme, on_cursor: bool, focused: bool, odd: bool) -> container::Style {
+    let ground = match (on_cursor, odd) {
+        (true, _) => Some(Background::Color(focus(theme, focused))),
+        (false, true) => Some(Background::Color(of(theme).background.base.text.scale_alpha(0.035))),
+        (false, false) => None,
+    };
+    container::Style {
+        background: ground,
+        border: Border {
+            radius: 4.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
 /// What one entry inside a panel or a sidebar is painted: the [`focus`]'s
 /// rounded ground under the cursor, fainter while its pane does not have
 /// the keyboard (a menu with its submenu up), the same rule as [`row`].
@@ -423,6 +441,59 @@ pub fn card(theme: &Theme) -> container::Style {
         text_color: Some(of(theme).background.base.text),
         border: Border {
             radius: 8.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// The capsule a regular width's tab bar at the top sits in (an iPad
+/// upright's): the surface's step, fully rounded.
+pub fn capsule_group(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(surface_color(theme))),
+        border: Border {
+            radius: 20.0.into(),
+            width: 1.0,
+            color: edge_color(theme),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// One section in that bar: lit, a wash of the accent behind its title;
+/// pointed at, the faintest tint.
+pub fn capsule(theme: &Theme, status: button::Status, on: bool) -> button::Style {
+    let p = of(theme);
+    let background = match (on, status) {
+        (true, _) => Some(Background::Color(p.primary.base.color.scale_alpha(0.14))),
+        (false, button::Status::Hovered) => Some(Background::Color(p.background.base.text.scale_alpha(HOVER_ALPHA))),
+        (false, button::Status::Pressed) => pressed(theme, status),
+        _ => None,
+    };
+    button::Style {
+        background,
+        text_color: p.background.base.text,
+        border: Border {
+            radius: 16.0.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
+/// A sheet over a compact window: the page's ground, its top corners rounded.
+pub fn sheet(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(of(theme).background.base.color)),
+        text_color: Some(of(theme).background.base.text),
+        border: Border {
+            radius: iced::border::Radius {
+                top_left: 12.0,
+                top_right: 12.0,
+                bottom_right: 0.0,
+                bottom_left: 0.0,
+            },
             ..Border::default()
         },
         ..container::Style::default()

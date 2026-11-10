@@ -7,14 +7,22 @@ public enum LayoutTokens {
     public static let compactWidth: Double = 600.0
     /// At least this wide a window is expanded: the split view shows its sidebar, its content and its detail at once.
     public static let expandedWidth: Double = 840.0
+    /// At least this wide the sections are a sidebar; narrower but regular, a tab bar at the top (an iPad upright).
+    public static let sidebarMinWidth: Double = 1200.0
     /// A split view's sidebar, at rest.
-    public static let sidebarWidth: Double = 220.0
+    public static let sidebarWidth: Double = 200.0
     /// A split view's content column beside a detail, at rest.
     public static let contentWidth: Double = 360.0
     /// An inspector at the trailing edge, at rest.
-    public static let inspectorWidth: Double = 280.0
+    public static let inspectorWidth: Double = 300.0
     /// A window's toolbar row.
-    public static let toolbarHeight: Double = 44.0
+    public static let toolbarHeight: Double = 52.0
+    /// The search field at a toolbar's trailing end.
+    public static let searchWidth: Double = 320.0
+    /// A column of figures in a table or a budget's row.
+    public static let amountColumnWidth: Double = 112.0
+    /// The bar under a row's name that fills toward its goal, beside columns.
+    public static let progressWidth: Double = 220.0
     /// A line of text as tall as this many times its size (the desktop's: iced's).
     public static let lineHeight: Double = 1.3
 }

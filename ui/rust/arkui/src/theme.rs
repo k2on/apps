@@ -121,6 +121,16 @@ pub fn of(theme: &Theme) -> &'static Extended {
     }
 }
 
+/// A chart's `i`-th colour on this side (ui/theme.toml `[chart]`): the
+/// largest part, or the first series, takes the first.
+pub fn chart(theme: &Theme, i: usize) -> Color {
+    let colours = match is_dark(theme) {
+        true => crate::tokens::CHART_DARK,
+        false => crate::tokens::CHART_LIGHT,
+    };
+    colours[i % colours.len()]
+}
+
 /// The gradient pairs the derived square picks from, for this theme.
 pub fn art(theme: &Theme) -> &'static [[Color; 2]] {
     current().palette.art(is_dark(theme))
