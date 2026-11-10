@@ -4,10 +4,10 @@
 //! server for each request ([`Mode::Server`]) — and then taken over in
 //! the browser (`hydrate`) when script runs.
 //!
-//! **The address is the route.** A page's [`Route`] is the launch
-//! arguments every shell reads (`screen`, `inspector`, `pane`, …) as
-//! segments of the path: `/budget/`, `/category:dining/inspector=1/`. The
-//! SPA reads `?screen=…` as before and the path besides.
+//! **The address is the route.** A page's [`Route`] is its path, the
+//! content it shows (`/budget/2026-10/category/<id>/`), and its query, the
+//! UI's state over it (`?inspector=1`), as Next.js has them. A static
+//! site writes a page per path an app declares and never a query.
 //!
 //! **The no-JS contract.** Written as HTML, every control a draw makes is
 //! recorded here in the order it is drawn ([`tap`], [`text`]), so the same
@@ -16,9 +16,9 @@
 //! hash of its label, so a press the current draw cannot make is refused.
 //! On a server the press is the control's own action, run as the click
 //! would run it; in a static site there is no server, so a control whose
-//! press only moves about is a link to the page it leads to (`formaction`
-//! of the form `#ark-go`, found by the prerenderer pressing it), and one
-//! that changes the data is drawn disabled. In the SPA none of this is
+//! press only moves to another declared path is a link to that page
+//! (`formaction` of the form `#ark-go`, found by the prerenderer pressing
+//! it), and the rest are drawn disabled until script runs. In the SPA none of this is
 //! drawn and the markup is what it always was.
 
 use std::cell::{Cell, RefCell};
