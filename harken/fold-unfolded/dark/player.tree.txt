@@ -1,0 +1,30 @@
+    #content
+          [button] pressable
+            [button] pressable
+              'Close the player'
+            'Bagatelles' [text]
+            [button] pressable
+              'More'
+            'Für Elise' [button] pressable
+            'Ludwig van Beethoven' [button] pressable
+            'Position'
+            '1:28' [text]
+            '-1:28' [text]
+            [button] pressable
+              'Previous'
+              [button]
+            [button] pressable
+              'Play'
+              [button]
+            [button] pressable
+              'Next'
+              [button]
+            [button] pressable
+              'Mute Pixel Fold'
+              [button]
+            'Pixel Fold'
+            [button] pressable
+              'Playing on'
+              'Pixel Fold' [text]
+            [button] pressable
+              'Up next: Gigue' [text]

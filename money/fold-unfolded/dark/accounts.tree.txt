@@ -1,0 +1,38 @@
+    #content
+                    "Net Worth, -$227,616.48, Every open account, less what's owed"
+                    'Net Worth' [text]
+                    '-$227,616.48' [text]
+                    "Every open account, less what's owed" [text]
+                    [button] pressable
+                      'All Accounts' [text]
+                      '$20,533.52' [text]
+                  'Budget' [text]
+                  '$20,533.52' [text]
+                    [button] pressable
+                      'Checking, Checking, $14,166.90'
+                      'Checking' [text]
+                      'Checking' [text]
+                      '$14,166.90' [text]
+                    [button] pressable
+                      'Savings, Savings, $6,900.00'
+                      'Savings' [text]
+                      'Savings' [text]
+                      '$6,900.00' [text]
+                    [button] pressable
+                      'Cash, Cash, $50.18'
+                      'Cash' [text]
+                      '$50.18' [text]
+                'Accounts' [text]
+                [button] pressable
+                  'Signed in as Alex'
+                  [button]
+                [button] pressable
+                  'Add a transaction'
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                    'Accounts' [text]
+                  [button] pressable
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]
