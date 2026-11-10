@@ -13,7 +13,12 @@
 //               A tap's label is what the element says or its accessibility
 //               identifier; `role` ("tab", "button", "field", "text") says
 //               which kind it is when several say it; `a|b` is whichever is
-//               there, and "optional": true passes over a tap with nothing to tap.
+//               there, and "optional": true passes over a tap with nothing to tap;
+//               "hold": true presses it long (a context menu, as a finger
+//               opens one). A shot's "args" are its launch arguments
+//               (`-screen budget`, `-menu sort`: the app's own deep links,
+//               read from UserDefaults' argument domain), given each time
+//               it is opened for that shot; signing in opens it with none.
 //   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
 //               the app's accessibility tree as it was taken (<id>.tree.txt),
 //               which is what a step can name
@@ -36,22 +41,27 @@ struct Shot: Decodable {
         var relaunch: Bool?
         /// A tap with nothing to tap passed over, a few seconds on.
         var optional: Bool?
+        /// A long press, not a tap: what opens a context menu.
+        var hold: Bool?
 
         enum CodingKeys: String, CodingKey {
-            case tap, role, `where`, unless, type, wait, relaunch, optional
+            case tap, role, `where`, unless, type, wait, relaunch, optional, hold
             case waitFor = "await"
         }
     }
 
     var id: String
     var steps: [Step] = []
+    /// The launch arguments the app is opened with for this shot.
+    var args: [String] = []
 
-    enum CodingKeys: String, CodingKey { case id, steps }
+    enum CodingKeys: String, CodingKey { case id, steps, args }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         steps = try c.decodeIfPresent([Step].self, forKey: .steps) ?? []
+        args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
     }
 }
 
@@ -111,6 +121,7 @@ final class Drive: XCTestCase {
 
         for shot in shots {
             app.terminate()
+            app.launchArguments = shot.args
             app.launch()
             // Up, not a fixed two seconds: each step waits for what it names.
             _ = app.wait(for: .runningForeground, timeout: 10)
@@ -133,7 +144,7 @@ final class Drive: XCTestCase {
                         XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
                         return
                     }
-                    c.tap()
+                    if step.hold == true { c.press(forDuration: 1.0) } else { c.tap() }
                 }
                 if step.relaunch == true {
                     app.terminate()
