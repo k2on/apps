@@ -51,8 +51,10 @@ final class AccountsScreen: ObservableObject {
 /// `MoneyShellView`, `MoneySettingsView` and `MoneyCommands` read and send
 /// to. It is the app's for its whole life — the Mac's menu bar is made
 /// before any session is open — and runs once one is (`connect`); until
-/// then it shows Budget and takes nothing. A command only a hosted screen
-/// can carry out comes back by name (`native`).
+/// then it shows Budget and keeps what it is sent (the launch's place, the
+/// month), which it takes as soon as it runs: a remembered session opens
+/// after the shell has appeared and sent them. A command only a hosted
+/// screen can carry out comes back by name (`native`).
 @MainActor
 final class MoneyShellScreen: ObservableObject {
     @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
@@ -61,6 +63,8 @@ final class MoneyShellScreen: ObservableObject {
 
     private var app: ShellApp? = nil
     private var shell: ScreenShell? = nil
+    /// What it was sent before it ran, in order: taken by `connect`.
+    private var early: [ShellMsg] = []
 
     /// Running over `session`.
     func connect(session: Session, refresh: @escaping () -> Void, today: @escaping () -> String) {
@@ -69,6 +73,9 @@ final class MoneyShellScreen: ObservableObject {
         self.shell = shell
         let app = ShellApp(session: session, shell: shell)
         self.app = app
+        let waiting = early
+        early = []
+        for msg in waiting { app.send(msg: msg) }
         page = app.page()
     }
 
@@ -80,7 +87,7 @@ final class MoneyShellScreen: ObservableObject {
 
     /// `msg` taken by the shell; the page read again.
     func send(_ msg: ShellMsg) {
-        guard let app else { return }
+        guard let app else { return early.append(msg) }
         app.send(msg: msg)
         page = app.page()
     }

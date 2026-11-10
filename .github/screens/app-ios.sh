@@ -31,8 +31,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
 kind=$(basename "$out")
 # The shots, then each of the `screens` that is `on` this device (ios,
-# ipad-portrait, ipad-landscape): opened by its launch arguments alone.
-shots=$(jq -c --arg k "$kind" '.shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, args, steps: (.steps // [])}]' "$app/screens/shots.json")
+# ipad-portrait, ipad-landscape): opened by its launch arguments alone,
+# after shots.json's `launch.ios` (the iPhone's and the iPad's own: a demo
+# on a fixed day).
+shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, args: ($l + (.args // [])), steps: (.steps // [])}]' "$app/screens/shots.json")
 bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle_app/Info.plist")
 orientation=${ORIENTATION:-}
 udid=$(xcrun simctl list devices booted -j | jq -r --arg d "$device" '[.devices[][] | select(.state == "Booted")] | (map(select(.name == $d)) + .)[0].udid')

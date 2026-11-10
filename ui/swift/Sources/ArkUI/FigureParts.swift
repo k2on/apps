@@ -167,13 +167,15 @@ public struct GoalProgress: View {
 }
 
 /// A page's headline figure: what it is (small, quiet), the figure large,
-/// bold and rounded in its tint, a caption; `trailing` at its end.
+/// bold and rounded in its tint, a caption; `trailing` at its end, at its
+/// own size (a capsule button), or under it at the accessibility sizes.
 public struct Headline<Trailing: View>: View {
     let label: String
     let figure: String
     let tint: Tint
     let caption: String
     let trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var type
 
     public init(_ label: String, figure: String, tint: Tint, caption: String, @ViewBuilder trailing: () -> Trailing) {
         self.label = label
@@ -184,9 +186,16 @@ public struct Headline<Trailing: View>: View {
     }
 
     public var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: Space.l) { words; Spacer(minLength: 0); trailing }
-            VStack(alignment: .leading, spacing: Space.m) { words; trailing }
+        // Not ViewThatFits: under it, Budget's Auto-Assign menu was seen
+        // drawn as a tall, empty capsule on the iPhone.
+        let stacked = type.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.m))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: Space.l))
+        layout {
+            words
+            if !stacked { Spacer(minLength: 0) }
+            trailing.fixedSize()
         }
         .padding(.vertical, 6)
     }

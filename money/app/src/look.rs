@@ -1,6 +1,6 @@
 //! What money's screens look like that is money's, not ArkUI's, for
 //! every client that draws them: a category's glyph by the words in its
-//! name, and the tile it sits on. (The desktop's `view.rs` and the
+//! name, the tile it sits on, and the emoji the phones draw it with. (The desktop's `view.rs` and the
 //! browser's `screens.rs` read these.)
 
 /// What a category is for, by the words in its name, as one of ArkUI's
@@ -28,6 +28,37 @@ pub fn category_glyph(name: &str) -> &'static str {
         _ if says(&["laptop", "computer", "tech"]) => "laptop",
         _ if says(&["saving", "invest", "retire"]) => "trending-up",
         _ => "tag",
+    }
+}
+
+/// The emoji a category is drawn with before its name on the phones (the
+/// reference's household: 🏠 Mortgage, ⚡️ Electricity), by the words in
+/// its name as [`category_glyph`] reads them; none when no word says.
+pub fn category_emoji(name: &str) -> &'static str {
+    let name = name.to_lowercase();
+    let says = |words: &[&str]| words.iter().any(|w| name.contains(w));
+    match () {
+        _ if says(&["household"]) => "\u{1F9FA}",
+        _ if says(&["rent", "mortgage", "home"]) => "\u{1F3E0}",
+        _ if says(&["electric", "power", "utilit"]) => "\u{26A1}\u{FE0F}",
+        _ if says(&["water"]) => "\u{1F4A7}",
+        _ if says(&["internet", "wifi"]) => "\u{1F310}",
+        _ if says(&["phone", "mobile"]) => "\u{1F4F1}",
+        _ if says(&["insurance"]) => "\u{2602}\u{FE0F}",
+        _ if says(&["emergency"]) => "\u{1F6DF}",
+        _ if says(&["grocer", "food", "supermarket"]) => "\u{1F6D2}",
+        _ if says(&["dining", "restaurant", "coffee", "eat"]) => "\u{1F35C}",
+        _ if says(&["gas", "transit", "transport", "fuel", "commute"]) => "\u{1F686}",
+        _ if says(&["car", "repair", "maintenance"]) => "\u{1F527}",
+        _ if says(&["entertain", "movie", "game", "fun"]) => "\u{1F39F}\u{FE0F}",
+        _ if says(&["subscription", "streaming"]) => "\u{1F4FA}",
+        _ if says(&["cloth", "shoe"]) => "\u{1F455}",
+        _ if says(&["health", "medical", "doctor", "pharmacy"]) => "\u{1FA7A}",
+        _ if says(&["vacation", "trip", "travel", "flight"]) => "\u{1F3D6}\u{FE0F}",
+        _ if says(&["gift", "holiday", "birthday"]) => "\u{1F381}",
+        _ if says(&["laptop", "computer", "tech"]) => "\u{1F4BB}",
+        _ if says(&["saving", "invest", "retire"]) => "\u{1F4B0}",
+        _ => "",
     }
 }
 
@@ -63,5 +94,15 @@ mod tests {
         assert_eq!(category_glyph("Dining Out"), "utensils");
         assert_eq!(category_glyph("Something Else"), "tag");
         assert_eq!(tile_of("Groceries"), tile_of("Groceries"));
+    }
+
+    /// The reference's emoji, by the same words; none for a name no word
+    /// says. Falsified by Household drawn as a home, or a stray emoji.
+    #[test]
+    fn a_category_wears_its_emoji() {
+        assert_eq!(category_emoji("Mortgage"), "\u{1F3E0}");
+        assert_eq!(category_emoji("Household"), "\u{1F9FA}");
+        assert_eq!(category_emoji("Dining Out"), "\u{1F35C}");
+        assert_eq!(category_emoji("Something Else"), "");
     }
 }

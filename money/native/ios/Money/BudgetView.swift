@@ -212,9 +212,9 @@ struct BudgetView: View {
             } label: {
                 Label("Auto-Assign", systemImage: "wand.and.stars")
             }
+            // Its glyph and its title, whatever the row's label style.
+            .labelStyle(.titleAndIcon)
             .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .fixedSize()
         }
     }
 
@@ -360,7 +360,9 @@ struct CategoryRow: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(spacing: Space.s) {
                     if card { AccountMark(kind: "credit", side: 20) }
-                    Text(line.name)
+                    // Its emoji before its name, as the reference draws it
+                    // (money_app::look); a card's payment wears the card's mark.
+                    Text(card ? line.name : Self.titled(line.name))
                         .foregroundStyle(line.hidden ? Color.quiet : Color.ink)
                         .lineLimit(2)
                 }
@@ -389,6 +391,12 @@ struct CategoryRow: View {
         .accessibilityLabel(line.name)
         .accessibilityValue(card ? paymentWords : words(tone))
         .accessibilityHint(line.assignable() ? "Swipe right to assign, left to move money" : "Its rule assigns it")
+    }
+
+    /// A category's name after its emoji, when a word of it has one.
+    static func titled(_ name: String) -> String {
+        let emoji = moneyCategoryEmoji(name: name)
+        return emoji.isEmpty ? name : "\(emoji) \(name)"
     }
 
     /// A card's payment under its name: how much of the debt is set aside,

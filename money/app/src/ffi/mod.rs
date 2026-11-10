@@ -93,6 +93,13 @@ pub fn money_today() -> String {
     money_domain::dates::day_of_ms(ark_peer::now_ms())
 }
 
+/// The emoji the phones draw before a category's name, by the words in
+/// it ([`crate::look::category_emoji`]); empty when none says.
+#[uniffi::export]
+pub fn money_category_emoji(name: String) -> String {
+    crate::look::category_emoji(&name).into()
+}
+
 /// The month `n` months from `month` (`2026-10`), either way.
 #[uniffi::export]
 pub fn money_add_months(month: String, n: i64) -> String {

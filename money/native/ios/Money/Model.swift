@@ -56,22 +56,29 @@ final class Model: ObservableObject {
     private let root: URL
     /// The demo's day when it is a fixed one (previews, tests, screenshots); today when none.
     private let demoDay: String?
+    /// Opened on the demo by the launch (`-demo`, the screenshots'): the
+    /// demo for this launch alone, whatever sign-in is remembered, which
+    /// it leaves as it was for the next.
+    private let demoLaunch: Bool
     private var bridge: Bridge? = nil
     /// How a session's snapshot reaches the model: the main queue in the app.
     private let deliver: (@escaping () -> Void) -> Void
     /// When this phone asked for a Plaid page it has not opened yet.
     private var awaiting: Id?? = nil
 
-    /// The model over `shelf` (the app's `UserDefaults`), replicas under `root`.
-    init(shelf: Shelf, root: URL, demoDay: String? = nil,
+    /// The model over `shelf` (the app's `UserDefaults`), replicas under
+    /// `root`; on the demo for this launch alone when `demoLaunch`.
+    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
         kept = Kept(shelf)
         self.root = root
         self.demoDay = demoDay
+        self.demoLaunch = demoLaunch
         self.deliver = deliver
         step = machine.step()
         month = Months.of(demoDay ?? moneyToday())
-        send(.launched(remembered: kept.remembered, code: nil, returned: false))
+        let remembered = demoLaunch ? Remembered(server: nil, login: nil, demo: true) : kept.remembered
+        send(.launched(remembered: remembered, code: nil, returned: false))
     }
 
     // MARK: the first run
@@ -93,7 +100,7 @@ final class Model: ObservableObject {
                 let found = await Probe.find(typed, domain: domain, get: Probe.get)
                 self.send(.checked(found: Found(found)))
             }
-        case let .remember(r): kept.remembered = r
+        case let .remember(r): if !demoLaunch { kept.remembered = r }
         case let .browse(_, url): browse = URL(string: url)
         case let .exchange(server, code): trade { try exchange(server: server, code: code) }
         case let .redeem(server, code): trade { try redeem(server: server, code: code) }

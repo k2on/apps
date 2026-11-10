@@ -27,11 +27,12 @@ struct MoneyApp: App {
         Numbers.install()
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         // `-demo YES` (or a day, `-demo 2026-11-18`) at launch: the demo's
-        // household, as its first page's Try the Demo opens it (the Mac's
-        // screenshots, which no browser signs in for).
+        // household for this launch, whatever sign-in is remembered (the
+        // screenshots': the Mac's, which no browser signs in for, and the
+        // iPhone's and the iPad's reference screens, on the reference's day).
         let demo = UserDefaults.standard.string(forKey: "demo")
-        let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil })
-        if demo != nil && !model.step.isRunning { model.send(.tryDemo) }
+        let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
+                          demoLaunch: demo != nil)
         model.modules = PhoneModules(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare())
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }
