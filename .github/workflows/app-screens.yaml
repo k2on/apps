@@ -692,13 +692,17 @@ jobs:
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
       # A simulator per app (apps-ios-lanes.sh): the newest iPhone Pro, the
-      # first app's the image's own, every other one created beside it,
-      # booting under the rest while fewer than LANES are (the rest as
-      # their turn comes). Only after nix and the evaluation: under a
-      # booting simulator (CoreSimulator coming up) cachix's setup took
-      # minutes, not seconds (app-screens 42820636768).
+      # first app's the image's own, every other one created beside it.
+      # One boots now, under the servers' and the apps' fetch; the others
+      # once the servers are in (two booting at once under the servers'
+      # fetch, it took 7 minutes, not one: app-screens 42829780045). Only
+      # after nix and the evaluation: under a booting simulator
+      # (CoreSimulator coming up) cachix's setup took minutes, not seconds
+      # (app-screens 42820636768).
       - if: steps.open.outputs.open == 'true'
         name: Start booting the iPhones
+        env:
+          LANES: 1
         run: bash .github/screens/apps-ios-lanes.sh boot iphone $APPS
 
       # The UI test that drives the apps (drive-ios/), as nix builds it with
@@ -749,8 +753,9 @@ jobs:
             echo "no app's build takes the iPad: none will be booted"
           else
             echo "the iPad's: $ipad"
+            # Booted with the rest once the servers are in.
             # shellcheck disable=SC2086
-            bash .github/screens/apps-ios-lanes.sh boot ipad $ipad
+            LANES=0 bash .github/screens/apps-ios-lanes.sh boot ipad $ipad
           fi
 
       - if: steps.open.outputs.open == 'true'
@@ -759,6 +764,8 @@ jobs:
           # XcodeGen from the flake (the cache's), as every other tool here: no Homebrew.
           bash .github/screens/tools.sh get xcodegen
           bash .github/screens/meanwhile.sh wait servers
+          # The lanes' other simulators, booting now, LANES at a time.
+          bash .github/screens/apps-ios-lanes.sh warm
 
       # The driver, once: nix's, or else built here for any simulator,
       # before the lanes, which would each build it at once.

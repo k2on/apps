@@ -11,6 +11,9 @@
 #                                              background while fewer than
 #                                              LANES are; the rest boot as
 #                                              their turn comes
+#   apps-ios-lanes.sh warm                     start booting the lanes not
+#                                              booting yet, while fewer than
+#                                              LANES are
 #   apps-ios-lanes.sh take <out> <apps> <app>...  take every lane booted
 #                                              or asked for; fail, once all
 #                                              are tried, if any did
@@ -71,6 +74,17 @@ case $what in
       if [ "${#booting[@]}" -lt "$lanes" ]; then start "$a-$kind" "$udid"; fi
     done
     ;;
+  warm)
+    shopt -s nullglob
+    for f in "$dir"/*-iphone "$dir"/*-ipad; do
+      l=${f##*/}
+      [ -f "$dir/$l.started" ] && continue
+      booting=("$dir"/*.started)
+      [ "${#booting[@]}" -lt "$lanes" ] || break
+      IFS=$'\t' read -r udid name < "$f"
+      start "$l" "$udid"
+    done
+    ;;
   take)
     out=$1
     apps=$2
@@ -92,30 +106,32 @@ case $what in
     todo=()
     for a in "$@"; do
       for kind in iphone ipad; do
-        if [ -f "$dir/$a-$kind" ]; then todo+=("$a $kind"); fi
+        if [ -f "$dir/$a-$kind" ]; then todo+=("$a-$kind"); fi
       done
     done
-    declare -A pids=()
+    # macOS's own bash is 3.2 (no associative arrays): each lane says it
+    # has ended in <lane>.status, and its log is printed whole then.
     failed=0
-    # Each lane's log, whole, as it ends; its exit kept.
+    running=()
     reap() {
-      local key
-      for key in "${!pids[@]}"; do
-        if ! kill -0 "${pids[$key]}" 2> /dev/null; then
-          wait "${pids[$key]}" || { failed=1; echo "${key% *}" >> "${PARTIAL:-/dev/null}"; }
-          echo "::group::$key"; cat "$dir/${key/ /-}.log"; echo "::endgroup::"
-          unset "pids[$key]"
+      local l still=()
+      for l in ${running[@]+"${running[@]}"}; do
+        if [ -f "$dir/$l.status" ]; then
+          echo "::group::$l ($(cat "$dir/$l.status"))"; cat "$dir/$l.log"; echo "::endgroup::"
+          if [ "$(cat "$dir/$l.status")" != 0 ]; then failed=1; echo "${l%-*}" >> "${PARTIAL:-/dev/null}"; fi
+        else
+          still+=("$l")
         fi
       done
+      running=(${still[@]+"${still[@]}"})
     }
     for l in "${todo[@]}"; do
-      while [ "${#pids[@]}" -ge "$lanes" ]; do reap; sleep 2; done
-      read -r a kind <<< "$l"
-      echo "$a $kind: taken"
-      lane "$a" "$kind" > "$dir/$a-$kind.log" 2>&1 &
-      pids[$l]=$!
+      while [ "${#running[@]}" -ge "$lanes" ]; do sleep 2; reap; done
+      echo "${l%-*} ${l##*-}: taken"
+      { lane "${l%-*}" "${l##*-}" > "$dir/$l.log" 2>&1; echo $? > "$dir/$l.status"; } &
+      running+=("$l")
     done
-    while [ "${#pids[@]}" -gt 0 ]; do reap; sleep 2; done
+    while [ "${#running[@]}" -gt 0 ]; do sleep 2; reap; done
     exit $failed
     ;;
 esac
