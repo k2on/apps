@@ -17,6 +17,8 @@ ark-format = { path = "../../../rust/ark-format" }
 # How an app's routes are spelled: UI-free, so a domain spells its `Route`
 # enum with it too; `router` is the address bar over it.
 ark-router = { path = "../router" }
+# The glyph table, toolkit-free (`glyphs.rs` re-exports it): the browser draws the same.
+arkui-glyphs = { path = "../glyphs" }
 # A view laid out once in Rust (`view.rs` draws it), and `#[view]`.
 ark-app = { path = "../app", optional = true }
 

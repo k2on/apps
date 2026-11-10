@@ -119,6 +119,18 @@ And iced's springs are the same spring too: `motion::SMOOTH`, `THROWN`,
 of the phones' 700 stiffness), and every module's spring is one of them,
 so a new iced motion uses those rather than adding another number.
 
+**The browser** (arkui-web, ui/rust/web) has no spring, so the same springs
+are drawn as CSS `linear()` curves that ui/theme.py samples from the
+stiffness and damping above (`--ark-move` and `--ark-move-ms`, `--ark-size`,
+`--ark-fade`, in `theme.css`), with `--ark-enter-scale`, `--ark-press` and
+`--ark-rise`. Reduced motion is `data-motion="reduced"` on the page, which
+puts the fade in every move's place and the travel to nothing; it is set by
+`arkui_web::reduced()`, which, like the others, reads the system only when
+`arkui_web::ALWAYS_ANIMATE` is off (`?reduce-motion=1` forces the gentle
+path). A menu or a dialog opened by the pointer grows from the enter scale
+on the move curve, a sheet rises from its edge; opened by a key, nothing
+moves. Presses are the desktop's: a colour at once, faded on release, no give.
+
 ### Translating the Web's Curves
 
 The skills give strong cubic-béziers for each job. Here each job has a

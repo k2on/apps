@@ -708,6 +708,10 @@ rec {
             packageId = "ark-router";
           }
           {
+            name = "arkui-glyphs";
+            packageId = "arkui-glyphs";
+          }
+          {
             name = "chrono";
             packageId = "chrono";
             usesDefaultFeatures = false;
@@ -763,6 +767,14 @@ rec {
         features = {
           "app" = [ "dep:ark-app" ];
         };
+      };
+      "arkui-glyphs" = rec {
+        crateName = "arkui-glyphs";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../ui/rust/glyphs; };
+        libName = "arkui_glyphs";
+
       };
       "arrayref" = rec {
         crateName = "arrayref";

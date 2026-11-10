@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "ark-format", "../ui/rust/module", "../modules/haptics", "../modules/clipboard", "../modules/share", "../modules/camera", "../modules/media-player", "../modules/notifications", "../modules/secure-store", "../ui/rust/router", "../ui/rust/router-macros", "../ui/rust/app", "../ui/rust/arkui-macros", "../ui/rust/gen", "../ui/rust/arkui", "../ui/rust/shots", "../harken/domain", "../money/domain", "../money/app", "../money/iced", "../money/server", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player", "../money/ffi", "../money/seed", "../harken/seed"]
+members = ["ark", "ark-macros", "ark-peer", "ark-ffi", "arkdb", "ark-auth", "ark-format", "../ui/rust/module", "../modules/haptics", "../modules/clipboard", "../modules/share", "../modules/camera", "../modules/media-player", "../modules/notifications", "../modules/secure-store", "../ui/rust/router", "../ui/rust/router-macros", "../ui/rust/app", "../ui/rust/arkui-macros", "../ui/rust/gen", "../ui/rust/arkui", "../ui/rust/glyphs", "../ui/rust/web", "../ui/rust/shots", "../harken/domain", "../money/domain", "../money/app", "../money/iced", "../money/server", "../harken/server", "../harken/iced", "../harken/ffi", "../harken/player", "../money/ffi", "../money/seed", "../money/web", "../harken/seed"]
 
 [workspace.package]
 edition = "2021"

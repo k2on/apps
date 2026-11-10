@@ -428,5 +428,166 @@
         "android-tablet"
       ]
     }
-  ]
+  ],
+  "web": {
+    "_": "The browser's (app-web.sh, web-shots.js): money-web over the demo household seeded to `today`, at each of `sizes` (named as `screens`' `on`) in light and dark. Every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address (`-screen budget` is `?screen=budget`); `shots` are the browser's own besides, on every size unless they say: the transient parts, each opened by its address — arkui-web's `context` (a row's menu), `menu` (a control's), `popover` (a field's), `command` (the command box), `keys` (the keys panel) — then its steps in the desktop's vocabulary (click, key, type, await, wait).",
+    "today": "2026-11-10",
+    "sizes": {
+      "mac": [
+        1440,
+        900
+      ],
+      "ipad-landscape": [
+        1366,
+        1024
+      ],
+      "ipad-portrait": [
+        900,
+        1100
+      ],
+      "ios": [
+        400,
+        860
+      ]
+    },
+    "shots": [
+      {
+        "id": "09-settings-household",
+        "query": "screen=settings&pane=household"
+      },
+      {
+        "id": "10-context-menu",
+        "query": "screen=budget&context=Groceries"
+      },
+      {
+        "id": "11-submenu",
+        "query": "screen=budget&context=Groceries",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "12-auto-assign-menu",
+        "query": "screen=budget&menu=auto-assign"
+      },
+      {
+        "id": "13-date-picker",
+        "query": "screen=add-transaction&popover=date"
+      },
+      {
+        "id": "14-search-suggestions",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "key": "/"
+          },
+          {
+            "type": "Tar"
+          }
+        ],
+        "sizes": [
+          "mac",
+          "ipad-portrait"
+        ]
+      },
+      {
+        "id": "15-approve-all",
+        "query": "screen=transactions",
+        "steps": [
+          {
+            "click": "Approve All"
+          }
+        ]
+      },
+      {
+        "id": "16-command-box",
+        "query": "command=Month"
+      },
+      {
+        "id": "17-keys-panel",
+        "query": "screen=budget&keys=1",
+        "sizes": [
+          "mac",
+          "ipad-portrait"
+        ]
+      },
+      {
+        "id": "18-categorize-submenu",
+        "query": "screen=transactions&context=Target",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          },
+          {
+            "key": "ArrowDown"
+          }
+        ]
+      },
+      {
+        "id": "19-category-picker",
+        "query": "screen=add-transaction&menu=category",
+        "steps": [
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowDown"
+          },
+          {
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "id": "20-keys-cursor",
+        "query": "screen=budget",
+        "steps": [
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          },
+          {
+            "key": "j"
+          }
+        ]
+      }
+    ]
+  }
 }
