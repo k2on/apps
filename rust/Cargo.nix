@@ -1277,7 +1277,7 @@ rec {
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Headers" "History" "Location" "Request" "RequestInit" "Response" "Storage" "Window" ];
+            features = [ "Headers" "History" "Location" "Request" "RequestCredentials" "RequestInit" "Response" "Storage" "Window" ];
           }
         ];
         devDependencies = [

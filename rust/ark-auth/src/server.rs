@@ -316,6 +316,29 @@ impl Auth {
         self.redirects.iter().any(|p| url.starts_with(p))
     }
 
+    /// The `Set-Cookie` that keeps a browser's session ([`crate::COOKIE`]):
+    /// the token, `HttpOnly` (no script reads it), `SameSite=Strict` (no
+    /// other site's page sends it), the whole origin's (`Path=/`), until
+    /// the session expires; `Secure` when the server is reached over
+    /// https.
+    pub fn session_cookie(&self, login: &Login) -> String {
+        let age = ((login.expires_ms - now_ms()) / 1000).max(0);
+        self.cookie(&login.token, age)
+    }
+
+    /// The `Set-Cookie` that forgets it: signing out.
+    pub fn cleared_cookie(&self) -> String {
+        self.cookie("", 0)
+    }
+
+    fn cookie(&self, value: &str, age: i64) -> String {
+        let secure = match self.public_url.starts_with("https://") {
+            true => "; Secure",
+            false => "",
+        };
+        format!("{}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={age}{secure}", crate::COOKIE)
+    }
+
     /// The hub every sign-in's row is written to and every token judged
     /// over. Once; a sign-in before it is refused.
     pub fn serve(&self, hub: Box<dyn Hub>) {
