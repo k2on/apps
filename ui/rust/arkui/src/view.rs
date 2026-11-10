@@ -905,9 +905,14 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
         Picture::None => {}
         Picture::Tile(g) => line = line.push(parts::tile(shape(g), |t| style::dim(t).color.unwrap_or_default(), 28.0)),
         Picture::Mark { glyph, .. } => line = line.push(parts::tile(shape(&glyph.get()), |t| crate::theme::of(t).primary.base.color, 28.0)),
-        Picture::Glyph(g) => line = line.push(icon::plain(shape(g), false)),
+        Picture::Glyph(g) => line = line.push(icon::tinted(shape(g), 16.0, |p| p.primary.base.color)),
     }
-    let title = text(r.title.get()).size(14);
+    // An action's row is in the accent, as the phones draw it.
+    let accent = r.accent;
+    let title = text(r.title.get()).size(14).style(move |t| text::Style {
+        color: accent.then(|| crate::theme::of(t).primary.base.color),
+        ..Default::default()
+    });
     let words: Element<'static, M> = match &r.subtitle {
         Some(s) => column![title, text(s.get()).size(12).style(style::dim)].spacing(1).into(),
         None => title.into(),
@@ -925,10 +930,12 @@ fn list_row<M: Clone + 'static>(r: ListRow<M>) -> Element<'static, M> {
     if r.pushes {
         line = line.push(icon::plain(glyphs::CHEVRON, true));
     }
-    let mut b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare);
-    if let Some(t) = r.tap {
-        b = b.on_press(t);
+    // A row that does nothing is no button: a button without a press is
+    // drawn disabled, faded.
+    if r.tap.is_none() && r.menu.is_empty() {
+        return container(line).width(Length::Fill).padding([2, 0]).into();
     }
+    let b = button(line).width(Length::Fill).padding([2, 0]).style(style::bare).on_press_maybe(r.tap);
     let items: Vec<context_menu::Item<M>> = r
         .menu
         .into_iter()
@@ -1026,6 +1033,7 @@ fn amount_bold<M: 'static>(cents: i64, size: f32) -> Element<'static, M> {
 fn amount<M: 'static>(cents: i64, size: u32, quiet: bool) -> Element<'static, M> {
     text(ark_format::amount(cents, &ark_format::NumberStyle::us()))
         .size(size)
+        .wrapping(text::Wrapping::None)
         .style(move |t| text::Style {
             color: Some(match (cents < 0, quiet) {
                 (true, _) => crate::theme::of(t).danger.base.color,
