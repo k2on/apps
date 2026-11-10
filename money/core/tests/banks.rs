@@ -5,8 +5,8 @@
 mod common;
 
 use common::Book;
-use money_domain::plaid::{import_of, PlaidAccount, Pulled};
-use money_domain::*;
+use money_core::plaid::{import_of, PlaidAccount, Pulled};
+use money_core::*;
 
 /// A bank of a checking account and a credit card.
 fn accounts() -> Vec<PlaidAccount> {

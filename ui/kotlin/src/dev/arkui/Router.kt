@@ -1,5 +1,5 @@
 // An app's routes on Compose's back stack. A route is the domain's `Route`
-// (`harken_domain::routes`, `money_domain::routes`), and its one spelling is
+// (`harken_domain::routes`, `money_core::routes`), and its one spelling is
 // its path (`album/Water%20Music`); a destination's pattern takes it as an
 // argument. Compose decodes an argument once on the way back, so a path whose
 // names are already percent-encoded would come back changed: it goes as the

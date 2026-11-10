@@ -17,14 +17,14 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import uniffi.money_domain.AccountKind
-import uniffi.money_domain.Auto
-import uniffi.money_domain.Cleared
-import uniffi.money_domain.Draft
-import uniffi.money_domain.MoneyChange
-import uniffi.money_domain.OpenAccount
-import uniffi.money_domain.cardGroupId
-import uniffi.money_domain.readyToAssignId
+import uniffi.money_core.AccountKind
+import uniffi.money_core.Auto
+import uniffi.money_core.Cleared
+import uniffi.money_core.Draft
+import uniffi.money_core.MoneyChange
+import uniffi.money_core.OpenAccount
+import uniffi.money_core.cardGroupId
+import uniffi.money_core.readyToAssignId
 
 const val TODAY = "2026-10-26"
 

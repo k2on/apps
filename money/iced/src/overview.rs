@@ -12,8 +12,8 @@ use ark_clipboard::{Clipboard, Queued};
 use ark_peer::store::Store;
 use iced::{Element, Task};
 use money_app::accounts::{Accounts, AccountsMsg};
-use money_domain::dates::{days_from_civil, parse_day};
-use money_domain::{MoneyChange, MoneyView};
+use money_core::dates::{days_from_civil, parse_day};
+use money_core::{MoneyChange, MoneyView};
 
 use crate::{App, Message, Route};
 

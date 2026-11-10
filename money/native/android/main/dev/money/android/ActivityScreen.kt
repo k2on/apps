@@ -64,7 +64,7 @@ import dev.arkui.SearchField
 import dev.arkui.ArkGlyphs
 import dev.arkui.Space
 import dev.arkui.reflowing
-import uniffi.money_domain.TxnLine
+import uniffi.money_core.TxnLine
 import uniffi.ark_format.formatAmount
 import uniffi.ark_format.numberStyleUs
 

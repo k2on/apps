@@ -3,7 +3,7 @@ name = "money-server"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "money's server, an ark-peer that listens: the household's budget (money/domain) on the hub, sign-in (ark-auth), the browser client, and the bank importer, which asks Plaid for each bank's news and authors it as banks.import."
+description = "money's server, an ark-peer that listens: the household's budget (money/core) on the hub, sign-in (ark-auth), the browser client, and the bank importer, which asks Plaid for each bank's news and authors it as banks.import."
 workspace = "../../rust"
 
 [[bin]]
@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-money-domain = { path = "../domain" }
+money-core = { path = "../core" }
 # The server is a peer that listens; the importer is a peer in this process
 # that reaches it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
@@ -37,4 +37,4 @@ axum = "0.7"
 tempfile = "3"
 # The demo's household, seeded into a data directory as money-seed does it
 # (tests/seed.rs).
-money-seed = { path = "../seed", default-features = false }
+money-core = { path = "../core", features = ["demo"] }

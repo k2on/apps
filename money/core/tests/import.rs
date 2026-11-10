@@ -7,8 +7,8 @@
 mod common;
 
 use common::Book;
-use money_domain::plaid::{import_of, PlaidAccount, Pulled};
-use money_domain::*;
+use money_core::plaid::{import_of, PlaidAccount, Pulled};
+use money_core::*;
 
 fn accounts() -> Vec<PlaidAccount> {
     serde_json::from_str(

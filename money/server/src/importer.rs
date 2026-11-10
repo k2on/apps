@@ -4,21 +4,21 @@
 //!
 //! It is a peer like any other: an `ark_peer::Peer` in this process,
 //! dialling the hub through its handle (no socket), signed in as the
-//! account `bank` and holding the [`money_domain::BANK`] role, which the
+//! account `bank` and holding the [`money_core::BANK`] role, which the
 //! server grants that account and nobody else unless told.
 //!
 //! **What it imports** is every bank in the server's store
 //! ([`crate::store`], `banks.json` in the data directory): for each, a run
 //! asks Plaid for the item's accounts and for every page of what changed
 //! since the bank's cursor, makes them one import
-//! (`money_domain::plaid::import_of`) and authors it as `banks.import`. The
+//! (`money_core::plaid::import_of`) and authors it as `banks.import`. The
 //! cursor after it is kept in the store only once the hub has confirmed the
 //! entry, which it does only once the entry is on its disk; a run that
 //! stops anywhere before that is asked again from the old cursor next
 //! time, and an import says the same thing twice without changing anything
 //! (Plaid's id is the `imported_id`). An account the import is the first to
 //! see waits for somebody in the household to say what it feeds
-//! (`money_domain::banks`); when somebody does, the bank's next import is
+//! (`money_core::banks`); when somebody does, the bank's next import is
 //! asked from no cursor, its whole history again. What Plaid says when a
 //! bank fails is authored as `banks.failed`, for the household to see.
 //!
@@ -43,7 +43,7 @@
 //! picker (`update.account_selection_enabled`); what is picked there is
 //! opened at the import after. A second login to a bank already
 //! connected folds into the first at its first import
-//! (`money_domain::plaid`), and the login it replaced is removed at Plaid
+//! (`money_core::plaid`), and the login it replaced is removed at Plaid
 //! and dropped from the store as a disconnection's is, then said retired
 //! (`banks.retired`).
 //!
@@ -65,8 +65,8 @@ use ark::peer::Who;
 use ark::row::Id;
 use ark_auth::Login;
 use ark_peer::{Handle, Memory, Peer, Standing};
-use money_domain::plaid::import_of;
-use money_domain::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
+use money_core::plaid::import_of;
+use money_core::{Answer, AskState, Asked, Bank, BankAsk, BankFailed, BankName, Import, ReceiptImport};
 
 use crate::plaid::{LinkMode, LinkSession, Linking, Plaid, PlaidError};
 use crate::store::{Connection, Store};
@@ -142,7 +142,7 @@ pub enum Outcome {
     },
     /// Plaid has not finished the bank's first pull.
     NotReady,
-    /// Another login to the same bank replaced it (`money_domain::plaid`):
+    /// Another login to the same bank replaced it (`money_core::plaid`):
     /// not imported, and removed at Plaid as soon as Plaid answers.
     Replaced,
     /// A store's receipts, imported and confirmed.
@@ -171,7 +171,7 @@ impl Importer {
     /// store in `data`. It runs once as soon as it is linked.
     pub fn start(banks: Option<Banks>, stores: Stores, hub: Handle, data: PathBuf, login: Login) -> Result<Importer> {
         let mut roles = login.user.roles.clone();
-        roles.push(money_domain::BANK.to_string());
+        roles.push(money_core::BANK.to_string());
         roles.sort();
         roles.dedup();
         let who = Who {
@@ -182,7 +182,7 @@ impl Importer {
         // In memory: what it holds is the hub's, filled at every start, and
         // an import it had not seen confirmed is pulled again from the
         // cursor kept, rather than pushed again from a disk.
-        let config = ark_peer::Config::of(money_domain::shared());
+        let config = ark_peer::Config::of(money_core::shared());
         let mut peer = Peer::open(config, who.clone(), Box::new(Memory::default()), false);
         peer.sign_in(who.clone());
         let token = login.token.clone();
@@ -342,15 +342,15 @@ impl Job {
     }
 
     /// A read of what the importer holds.
-    fn read<T>(&self, f: impl FnOnce(&ark::db::Db<money_domain::Money>) -> T) -> Option<T> {
-        ark::db::read::<money_domain::Money, _>(&self.peer.log.store, |db| Ok::<_, ark::Refusal>(f(db))).ok()
+    fn read<T>(&self, f: impl FnOnce(&ark::db::Db<money_core::Money>) -> T) -> Option<T> {
+        ark::db::read::<money_core::Money, _>(&self.peer.log.store, |db| Ok::<_, ark::Refusal>(f(db))).ok()
     }
 
     /// The day of the first transaction any bank brought; none before one
     /// has.
     fn first_bank_day(&self) -> Option<String> {
         self.read(|db| {
-            let txns: Vec<money_domain::Txn> = db.txn.scan();
+            let txns: Vec<money_core::Txn> = db.txn.scan();
             txns.into_iter().filter(|t| !t.imported_by.is_empty()).map(|t| t.date).min()
         })
         .flatten()
@@ -358,7 +358,7 @@ impl Job {
 
     /// The newest ask the importer holds.
     fn asked(&self) -> i64 {
-        self.read(money_domain::plaid::last_asked).flatten().map_or(0, |a: Asked| a.asked_ms)
+        self.read(money_core::plaid::last_asked).flatten().map_or(0, |a: Asked| a.asked_ms)
     }
 
     /// The banks' configuration: only asked on a server with Plaid's keys.
@@ -425,7 +425,7 @@ impl Job {
     /// connection, a disconnection done. A page the store says is open but
     /// this process never opened was opened before a restart: expired.
     fn answer_asks(&mut self) {
-        let open = self.read(money_domain::banks::open_asks).unwrap_or_default();
+        let open = self.read(money_core::banks::open_asks).unwrap_or_default();
         for a in open {
             if self.live.contains_key(&a.id) {
                 continue;
@@ -681,7 +681,7 @@ impl Job {
             Err(e) => e,
         };
         let (code, why) = failure(&e);
-        match money_domain::plaid::LOGIN_CODES.contains(&code.as_str()) {
+        match money_core::plaid::LOGIN_CODES.contains(&code.as_str()) {
             true => self.say(format!("{name}: the bank wants a fresh login; Reconnect it from the app")),
             false => self.say(format!("{name}: failed: {e:#}")),
         }
@@ -822,7 +822,7 @@ impl Job {
                 Some(day) => amazon.orders_since(&self.data, day, &today),
                 None => amazon.run(&self.data),
             }
-            .and_then(|text| money_domain::stores::amazon(&text).map_err(|e| anyhow!(e)))
+            .and_then(|text| money_core::stores::amazon(&text).map_err(|e| anyhow!(e)))
             .and_then(|import| self.author_receipts(&import));
             let ordered = got.is_ok();
             out.insert("amazon".to_string(), self.outcome("amazon", got));
@@ -832,7 +832,7 @@ impl Job {
                     Some(day) => amazon.charges_since(&self.data, day, &today),
                     None => amazon.charges(&self.data),
                 }
-                .and_then(|text| money_domain::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
+                .and_then(|text| money_core::stores::amazon_charges(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_charges(&import));
                 let charged = got.is_ok();
                 out.insert("amazon charges".to_string(), self.outcome_charges("amazon charges", got));
@@ -848,7 +848,7 @@ impl Job {
         let since = (!crate::costco::pulled(&self.data)).then(|| self.first_bank_day()).flatten();
         if let Some(got) = self.stores.costco.receipts(since.as_deref()).transpose() {
             let got = got
-                .and_then(|text| money_domain::stores::costco(&text).map_err(|e| anyhow!(e)))
+                .and_then(|text| money_core::stores::costco(&text).map_err(|e| anyhow!(e)))
                 .and_then(|import| self.author_receipts(&import));
             if got.is_ok() && since.is_some() {
                 if let Err(e) = crate::costco::mark_pulled(&self.data) {
@@ -865,7 +865,7 @@ impl Job {
             let name = format!("{}/{}", w.store, w.file.file_name().and_then(|n| n.to_str()).unwrap_or("?"));
             let read = std::fs::read_to_string(&w.file)
                 .map_err(|e| anyhow!("cannot read it: {e}"))
-                .and_then(|text| money_domain::stores::read(&w.store, &text).map_err(|e| anyhow!(e)));
+                .and_then(|text| money_core::stores::read(&w.store, &text).map_err(|e| anyhow!(e)));
             let (got, under) = match read {
                 Err(e) => (Err(e), "failed"),
                 Ok(import) => match self.author_receipts(&import) {
@@ -913,7 +913,7 @@ impl Job {
 
     /// A store's charges authored as `receipts.add_charges`, and
     /// confirmed: how many.
-    fn author_charges(&mut self, import: &money_domain::ChargeImport) -> Result<usize> {
+    fn author_charges(&mut self, import: &money_core::ChargeImport) -> Result<usize> {
         if import.charges.is_empty() {
             return Ok(0);
         }

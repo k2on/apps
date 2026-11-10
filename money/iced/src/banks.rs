@@ -2,7 +2,7 @@
 //! Plaid, how each is doing, and what each of their accounts feeds.
 //!
 //! **Connecting** is an ask of the server's (`banks.connect`,
-//! `money_domain::banks`): the bank's login is the server's alone, so this
+//! `money_core::banks`): the bank's login is the server's alone, so this
 //! window never sees it. The server answers with the address of a Plaid
 //! page, which this window opens as soon as the answer arrives — in the
 //! system's browser on the desktop, in a tab opened at the click in a
@@ -21,7 +21,7 @@ use arkui::text::{self, text};
 use arkui::{glyphs, icon, menu, style};
 use iced::widget::{button, column, container, row, Column};
 use iced::{Alignment, Element, Length, Padding};
-use money_domain::*;
+use money_core::*;
 
 use crate::amount::money;
 use crate::view::{action, bold, dim, fill, link, quiet};
@@ -188,13 +188,13 @@ impl App {
     /// it; nothing more to wait for once the ask is otherwise answered.
     pub fn follow_ask(&mut self) {
         let Some(since) = self.awaiting else { return };
-        match money_domain::banks::follow(self.peer.asks(), since) {
-            money_domain::banks::Follow::Wait => {}
-            money_domain::banks::Follow::Page { url } => {
+        match money_core::banks::follow(self.peer.asks(), since) {
+            money_core::banks::Follow::Wait => {}
+            money_core::banks::Follow::Page { url } => {
                 self.awaiting = None;
                 self.open_page(url);
             }
-            money_domain::banks::Follow::Over => self.awaiting = None,
+            money_core::banks::Follow::Over => self.awaiting = None,
         }
     }
 
@@ -209,13 +209,13 @@ impl App {
     /// What wants somebody on Settings: a login run out, or an
     /// account waiting for a choice.
     pub fn banks_wanting(&self) -> usize {
-        money_domain::words::banks_wanting(self.peer.banks()) as usize
+        money_core::words::banks_wanting(self.peer.banks()) as usize
     }
 
     /// The ask on show: the newest of this person's, while it is open or
     /// lately answered, unless it was put away.
     fn ask_shown(&self, now: i64) -> Option<AskLine> {
-        money_domain::words::ask_shown(self.peer.asks(), self.dismissed, now)
+        money_core::words::ask_shown(self.peer.asks(), self.dismissed, now)
     }
 
     fn view_ask<'a>(&'a self, a: AskLine, now: i64) -> Element<'a, Message> {

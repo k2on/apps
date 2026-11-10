@@ -17,7 +17,7 @@ use arkui::text::{self, text};
 use arkui::text_input::text_input;
 use iced::widget::{button, column, container, image, mouse_area, row, scrollable, Column, Space};
 use iced::{Alignment, Color, Element, Length, Task};
-use money_domain::*;
+use money_core::*;
 
 use crate::amount::{self, money};
 use crate::view::{action, bold, dim, fill, link, quiet};
@@ -271,7 +271,7 @@ impl App {
                     ]
                     .spacing(16),
                 );
-                let free = money_domain::words::unmatched_for(self.peer.receipts(), t.amount, &t.date);
+                let free = money_core::words::unmatched_for(self.peer.receipts(), t.amount, &t.date);
                 if !free.is_empty() {
                     side = side.push(dim("Or attach one that paid for nothing yet:", 12));
                     for r in &free {
@@ -324,7 +324,7 @@ impl App {
                     match i.quantity {
                         // One, or none said (a coupon is -1): no count.
                         q if q == 1000 || q <= 0 => format!("  {filed}"),
-                        q => format!("  {} \u{b7} {filed}", money_domain::words::quantity(q, &i.unit)),
+                        q => format!("  {} \u{b7} {filed}", money_core::words::quantity(q, &i.unit)),
                     },
                     10,
                     tint
@@ -456,7 +456,7 @@ impl App {
 /// A receipt's store, as its paper names it.
 fn place_of(r: &ReceiptLine) -> String {
     match (r.place.trim(), r.store.as_str()) {
-        ("", s) => money_domain::words::store_name(s),
+        ("", s) => money_core::words::store_name(s),
         (p, _) => p.into(),
     }
 }

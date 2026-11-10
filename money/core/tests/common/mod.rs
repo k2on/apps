@@ -10,12 +10,12 @@ use ark::format::Encode;
 use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::store::{Change, Store};
-use money_domain::*;
+use money_core::*;
 
 /// The domain, assembled once.
 pub fn domain() -> &'static Domain {
     static D: OnceLock<Domain> = OnceLock::new();
-    D.get_or_init(money_domain::domain)
+    D.get_or_init(money_core::domain)
 }
 
 /// A function's binding by its last name: `assign` is `budget.assign`.
@@ -148,8 +148,8 @@ impl Book {
     pub fn account(&mut self, name: &str, kind: &str, balance: i64) -> Id<Account> {
         let open = OpenAccount {
             name: name.into(),
-            kind: money_domain::accounts::AccountKind::of(kind).expect("a kind"),
-            on_budget: money_domain::accounts::on_budget_by_default(kind),
+            kind: money_core::accounts::AccountKind::of(kind).expect("a kind"),
+            on_budget: money_core::accounts::on_budget_by_default(kind),
             balance,
             date: "2026-09-01".into(),
         };

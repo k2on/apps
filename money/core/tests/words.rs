@@ -1,4 +1,4 @@
-//! What the rows say, as every client says it (`money_domain::words`,
+//! What the rows say, as every client says it (`money_core::words`,
 //! `accounts`, `banks::follow`, `transactions::Draft`): the rules the
 //! phones held in their own tests before (Android's CardsTests, BanksTests,
 //! BookTests and RulesTests; the iPhone's BudgetTests, CardTests,
@@ -6,11 +6,11 @@
 
 use ark::row::Id;
 use ark_format::NumberStyle;
-use money_domain::accounts::{self, AccountKind, Shelving};
-use money_domain::banks::{follow, Follow};
-use money_domain::transactions::{suggest, Draft};
-use money_domain::words::{self, Tone};
-use money_domain::*;
+use money_core::accounts::{self, AccountKind, Shelving};
+use money_core::banks::{follow, Follow};
+use money_core::transactions::{suggest, Draft};
+use money_core::words::{self, Tone};
+use money_core::*;
 
 fn us() -> NumberStyle {
     NumberStyle::us()
@@ -34,7 +34,7 @@ fn line(available: i64, target: i64, assigned: i64) -> BudgetLine {
 fn payment(available: i64, debt: i64, underfunded: i64) -> BudgetLine {
     BudgetLine {
         card: Some(id(7)),
-        group_id: money_domain::cards::card_group(),
+        group_id: money_core::cards::card_group(),
         available,
         debt,
         underfunded,
@@ -139,7 +139,7 @@ fn a_lines_words() {
     assert!(!ruled.assignable());
     assert_eq!(line(0, 0, 0).rule_words(), None);
     let rta = BudgetLine {
-        category_id: money_domain::budget::ready_to_assign(),
+        category_id: money_core::budget::ready_to_assign(),
         ..line(0, 0, 0)
     };
     assert!(rta.is_ready_to_assign() && !rta.assignable());
@@ -180,7 +180,7 @@ fn a_transaction_says_what_the_bank_did() {
     t.imported_payee = "CHIPOTLE 1234".into();
     t.imported = false;
     assert_eq!(t.bank_said(), None, "typed in");
-    t.category = money_domain::transactions::NEEDS_A_CATEGORY.into();
+    t.category = money_core::transactions::NEEDS_A_CATEGORY.into();
     assert!(t.needs_category());
 }
 

@@ -1,7 +1,7 @@
 //! The schema a server last stood on, and the steps that read what it
 //! wrote (`src/migrations.rs`).
 
-use money_domain::domain;
+use money_core::domain;
 
 /// The schema reads every row the one a server last stood on wrote
 /// (`tests/schema.json`): as they are (`ark::schema::compat`), or through

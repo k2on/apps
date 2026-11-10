@@ -37,9 +37,9 @@ import dev.arkui.AmountText
 import dev.arkui.Pill
 import dev.arkui.Space
 import dev.arkui.Tint
-import uniffi.money_domain.kindTitle
-import uniffi.money_domain.readyToAssignId
-import uniffi.money_domain.AccountLine
+import uniffi.money_core.kindTitle
+import uniffi.money_core.readyToAssignId
+import uniffi.money_core.AccountLine
 
 /** What a picker answered. */
 sealed class Pick {
@@ -127,7 +127,7 @@ fun CategoryPicker(
  * The groups and categories a picker offers: the budget's, the cards' payment categories only with
  * `cards`, and where money is `moving`, only those whose month is assigned by hand.
  */
-fun choosable(ledger: Ledger, cards: Boolean, moving: Boolean = false): List<Pair<uniffi.money_domain.GroupLine, List<uniffi.money_domain.BudgetLine>>> =
+fun choosable(ledger: Ledger, cards: Boolean, moving: Boolean = false): List<Pair<uniffi.money_core.GroupLine, List<uniffi.money_core.BudgetLine>>> =
     ledger.byGroup()
         .map { (g, ls) -> g to ls.filter { (cards || !it.isPayment()) && (!moving || it.assignable()) } }
         .filter { it.second.isNotEmpty() }

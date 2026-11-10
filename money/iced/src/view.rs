@@ -7,9 +7,9 @@ use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, layer, menu, outline, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
-use money_domain::budget::ready_to_assign;
-use money_domain::dates::add_months;
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::dates::add_months;
+use money_core::*;
 
 use crate::amount::money;
 use crate::look::{self, Looks, Tone};
@@ -364,7 +364,7 @@ impl App {
     fn group_row<'a>(&self, g: &GroupLine, lines: &[&BudgetLine], first: bool, compact: bool) -> Element<'a, Message> {
         let sum = |f: fn(&BudgetLine) -> i64| lines.iter().map(|l| f(l)).sum::<i64>();
         let collapsed = self.collapsed.contains(&g.id);
-        let cards = g.id == money_domain::cards::card_group();
+        let cards = g.id == money_core::cards::card_group();
         let heading = text(g.name.clone()).size(12).font(arkui::hero::BOLD).style(style::faint(0.55));
         let mut name = row![button(
             icon::faint(if collapsed { glyphs::CHEVRON } else { glyphs::DOWN }, false)
@@ -758,7 +758,7 @@ impl App {
     /// Whether a category of the tree is under `id`, at any depth.
     fn is_under(&self, n: &CategoryNode, id: Id<Category>) -> bool {
         let mut at = n.parent_id;
-        for _ in 0..money_domain::budget::DEEPEST {
+        for _ in 0..money_core::budget::DEEPEST {
             match at {
                 Some(p) if p == id => return true,
                 Some(p) => at = self.peer.node(p).and_then(|n| n.parent_id),

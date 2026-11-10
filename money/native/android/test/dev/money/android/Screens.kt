@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import dev.arkui.Space
-import uniffi.money_domain.StoreItem
-import uniffi.money_domain.WriteReceipt
+import uniffi.money_core.StoreItem
+import uniffi.money_core.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import dev.arkdb.auth.Phase

@@ -10,7 +10,7 @@
 // when it has a target, a bar of how far it is funded. A category opens its
 // sheet (CategorySheet.kt).
 //
-// Credit cards are budgeted as YNAB budgets them (`money/domain/src/cards.rs`):
+// Credit cards are budgeted as YNAB budgets them (`money/core/src/cards.rs`):
 // the budget's own Credit Card Payments group comes first, a payment category
 // per card, each marked with the card's glyph and a bar of what of the card's
 // debt is set aside, "Covered" or "$X short" — short in amber, and the
@@ -19,7 +19,7 @@
 // covered"), where cash overspent is red. The cards' group takes no new
 // category, and a payment category is dragged only among the cards.
 //
-// A category can be assigned by rule (`money/domain/src/rules.rs`, set on
+// A category can be assigned by rule (`money/core/src/rules.rs`, set on
 // the desktop): in a month that follows one, its amount is the rule's, so
 // its pill carries the rule's mark and nothing here assigns it, moves money
 // to or from it, or auto-assigns it ([assignable]).
@@ -121,11 +121,11 @@ import dev.arkui.makingWay
 import dev.arkui.rememberReorder
 import dev.arkui.sections
 import dev.arkui.tintColors
-import uniffi.money_domain.Auto
-import uniffi.money_domain.Tone
-import uniffi.money_domain.cardGroupId
-import uniffi.money_domain.BudgetLine
-import uniffi.money_domain.GroupLine
+import uniffi.money_core.Auto
+import uniffi.money_core.Tone
+import uniffi.money_core.cardGroupId
+import uniffi.money_core.BudgetLine
+import uniffi.money_core.GroupLine
 import dev.arkui.pressable
 import dev.arkui.Press
 

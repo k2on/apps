@@ -4,15 +4,15 @@
 //! menu, a factor typed as "10%", "0.1" or "1.5x"), with what it would
 //! give the month on screen as it is typed, and each term's filter opened
 //! as a register limited to the month. Saved, it holds from the month on
-//! screen on (`money_domain::formulas`).
+//! screen on (`money_core::formulas`).
 
 use arkui::text::{self, text};
 use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, menu};
 use iced::widget::{button, column, container, row};
 use iced::{Alignment, Element, Length, Task};
-use money_domain::formulas::{parse_share, percent};
-use money_domain::*;
+use money_core::formulas::{parse_share, percent};
+use money_core::*;
 
 use crate::amount::money;
 use crate::peer::Ledger;
@@ -93,7 +93,7 @@ impl App {
                 self.preview_formula();
             }
             Msg::Add => {
-                if self.formula.terms.len() < money_domain::formulas::TERMS {
+                if self.formula.terms.len() < money_core::formulas::TERMS {
                     self.formula.terms.push(TermForm::default());
                 }
                 self.preview_formula();
@@ -267,7 +267,7 @@ impl App {
             }
             c = c.push(column![line, under].spacing(2));
         }
-        if self.formula.terms.len() < money_domain::formulas::TERMS {
+        if self.formula.terms.len() < money_core::formulas::TERMS {
             c = c.push(link("+ Add a term", Message::Formula(Msg::Add)));
         }
         c = c.push(match preview {

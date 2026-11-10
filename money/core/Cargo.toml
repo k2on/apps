@@ -1,12 +1,12 @@
 [package]
-name = "money-domain"
+name = "money-core"
 version = "0.1.0"
 workspace = "../../rust"
 edition = "2021"
-description = "money's domain in plain Rust (docs/plan-v5.md §1.16): a household's budget — accounts, categories, the month's assignments, transactions and the Plaid import — and its tests."
+description = "money's core in plain Rust (docs/plan-v5.md §1.16): the domain of a household's budget — accounts, categories, the month's assignments, transactions and the Plaid import — its tests, and behind `demo` the demo's household (money-seed)."
 
 [lib]
-name = "money_domain"
+name = "money_core"
 path = "src/lib.rs"
 
 [dependencies]
@@ -24,6 +24,22 @@ serde_json = { workspace = true }
 # rows of the views the phones read typed, as UniFFI records.
 uniffi = { version = "0.32.2", default-features = false, optional = true }
 ark-ffi = { path = "../../rust/ark-ffi", optional = true }
+# `money-seed DATA` (`cli`).
+anyhow = { version = "1", optional = true }
 
 [features]
 ffi = ["dep:uniffi", "dep:ark-ffi", "ark-format/ffi"]
+# The demo's household (`demo`, docs/seed.md): three months of a family's
+# budget up to a day, which the demo window, the phones' demo and a seeded
+# server's data directory open on. Off by default, so a client or a server
+# carries none of it unless it asks.
+demo = []
+# `money-seed DATA`: the household written into a server's data directory.
+# Only with `cli`, so the demos that link the library (one of them wasm)
+# build no binary and none of its dependencies.
+cli = ["demo", "dep:anyhow"]
+
+[[bin]]
+name = "money-seed"
+path = "src/bin/money-seed.rs"
+required-features = ["cli"]

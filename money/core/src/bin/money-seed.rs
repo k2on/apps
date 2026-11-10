@@ -1,4 +1,4 @@
-//! `money-seed DATA`: the demo's household (this crate's library) written
+//! `money-seed DATA`: the demo's household (the core's `demo`) written
 //! into a money server's data directory before it first starts, as the log
 //! it boots on, so a phone signed in as `alex` under dev auth opens on a
 //! household three months deep: what the app screenshots run
@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     let log = data.join("log");
     let mut disk = ark_peer::Files::new(&log).with_context(|| format!("opening {}", log.display()))?;
     let now = ark_peer::now_ms();
-    money_seed::log(&mut disk, &money_domain::dates::day_of_ms(now), now).with_context(|| format!("writing {}", log.display()))?;
-    eprintln!("money-seed: the demo's household in {}, as {}", log.display(), money_seed::ME);
+    money_core::demo::log(&mut disk, &money_core::dates::day_of_ms(now), now).with_context(|| format!("writing {}", log.display()))?;
+    eprintln!("money-seed: the demo's household in {}, as {}", log.display(), money_core::demo::ME);
     Ok(())
 }

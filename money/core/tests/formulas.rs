@@ -7,10 +7,10 @@
 mod common;
 
 use common::Book;
-use money_domain::budget::ready_to_assign;
-use money_domain::cards::payment_category;
-use money_domain::formulas::{parse_share, FOLLOWS};
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::cards::payment_category;
+use money_core::formulas::{parse_share, FOLLOWS};
+use money_core::*;
 
 /// A household: $3,000 in checking, savings and cash with nothing yet, a
 /// card, and a giving category beside groceries.

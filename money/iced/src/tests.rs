@@ -5,14 +5,14 @@
 
 use std::sync::OnceLock;
 
-use money_domain::budget::ready_to_assign;
-use money_domain::dates::{add_months, month_of};
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::dates::{add_months, month_of};
+use money_core::*;
 
 use crate::peer::Ledger;
 use crate::{seed, App, Choice, Choosing, Field, Message, Modal, Page, Pane, SplitRow};
 #[allow(unused_imports)]
-use money_domain::PaidFor;
+use money_core::PaidFor;
 
 /// A day the demo is seeded for: late in a month, so every habit has
 /// happened at least once in it.
@@ -400,7 +400,7 @@ fn the_cursor_walks_categories_not_groups() {
 /// The cursor on the first category of the household's own groups: past
 /// the cards' payments, which come first, as YNAB draws them.
 fn first_own(app: &mut App) {
-    assert_eq!(app.shown()[0].group.id, money_domain::cards::card_group());
+    assert_eq!(app.shown()[0].group.id, money_core::cards::card_group());
     let _ = app.act(Action::Move(Motion::First));
     let _ = app.act(Action::Move(Motion::Down(group_rows(app, 0).len())));
 }
@@ -881,7 +881,7 @@ fn a_receipt_is_typed_put_right_and_attached() {
     assert!(app.peer.txn_receipts().is_empty());
     let line = app.peer.register().iter().find(|x| x.id == t.id).unwrap().clone();
     assert!(
-        money_domain::words::unmatched_for(app.peer.receipts(), line.amount, &line.date)
+        money_core::words::unmatched_for(app.peer.receipts(), line.amount, &line.date)
             .iter()
             .any(|x| x.id == r.id),
         "offered again"
@@ -1248,7 +1248,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     settle(&mut app, &mut importer, &|a| a.peer.client.status().link == "online");
     let open = OpenAccount {
         name: "Checking".into(),
-        kind: money_domain::accounts::AccountKind::Checking,
+        kind: money_core::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 50_000,
         date: TODAY.into(),
@@ -1295,13 +1295,13 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
             ..Answer::default()
         },
     );
-    let plaid = |id: &str, name: &str, kind: &str, subtype: &str| money_domain::plaid::PlaidAccount {
+    let plaid = |id: &str, name: &str, kind: &str, subtype: &str| money_core::plaid::PlaidAccount {
         account_id: id.into(),
         name: name.into(),
         mask: Some("4321".into()),
         kind: kind.into(),
         subtype: Some(subtype.into()),
-        balances: money_domain::plaid::Balances { current: Some(300.0) },
+        balances: money_core::plaid::Balances { current: Some(300.0) },
     };
     let accounts = [
         plaid("wf-chk", "Everyday Checking", "depository", "checking"),
@@ -1310,7 +1310,7 @@ fn on_a_server_a_bank_is_connected_from_the_banks_page() {
     let import = Import {
         choose: true,
         from_start: true,
-        ..money_domain::plaid::import_of("wells-fargo", "Wells Fargo", &accounts, &Default::default())
+        ..money_core::plaid::import_of("wells-fargo", "Wells Fargo", &accounts, &Default::default())
     };
     importer.mutate("import", &import).expect("the importer imports");
     settle(&mut app, &mut importer, &|a| a.peer.linked().len() == 2);

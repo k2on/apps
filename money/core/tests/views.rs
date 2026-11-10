@@ -10,8 +10,8 @@ use ark::log::EntryId;
 use ark::peer::Ctx;
 use ark::plan::splice;
 use common::{domain, full, Book};
-use money_domain::plaid::{import_of, PlaidAccount, Pulled};
-use money_domain::*;
+use money_core::plaid::{import_of, PlaidAccount, Pulled};
+use money_core::*;
 
 type Step = Box<dyn Fn(&mut Book)>;
 

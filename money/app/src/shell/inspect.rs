@@ -9,8 +9,8 @@
 //! picker's place says that kind and the target, and there is no date.
 
 use ark_format::{amount, day_long, month, NumberStyle};
-use money_domain::words::Tone;
-use money_domain::{BudgetLine, Cleared, TxnLine};
+use money_core::words::Tone;
+use money_core::{BudgetLine, Cleared, TxnLine};
 
 /// One line of an inspector's list: a transaction, an item.
 #[derive(Clone, Debug, PartialEq, Default)]

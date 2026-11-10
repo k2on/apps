@@ -1,7 +1,7 @@
 //! What the views' rows say, decided once for every client: a budget
 //! line's tone and the words under it, the month's, a transaction's, a
 //! bank's and an ask's. The phones read these through their records'
-//! methods (`money/domain`'s `ffi` feature), the window calls them as they
+//! methods (`money/core`'s `ffi` feature), the window calls them as they
 //! are; no client works them out again. Amounts are written in the
 //! client's own number style (`ark_format`).
 

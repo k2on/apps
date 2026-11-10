@@ -4322,8 +4322,7 @@ dependencies = [
  "arkui",
  "arkui-web",
  "image",
- "money-domain",
- "money-seed",
+ "money-core",
  "serde_json",
  "tempfile",
  "tract-onnx",
@@ -4331,9 +4330,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "money-domain"
+name = "money-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "ark",
  "ark-auth",
  "ark-ffi",
@@ -4359,21 +4359,10 @@ dependencies = [
  "iced",
  "iced_test",
  "money-app",
- "money-domain",
- "money-seed",
+ "money-core",
  "money-server",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "money-seed"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark",
- "ark-peer",
- "money-domain",
 ]
 
 [[package]]
@@ -4387,8 +4376,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "money-domain",
- "money-seed",
+ "money-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -4407,8 +4395,7 @@ dependencies = [
  "arkui-web",
  "leptos",
  "money-app",
- "money-domain",
- "money-seed",
+ "money-core",
  "web-sys",
 ]
 

@@ -70,8 +70,8 @@ import dev.arkui.AmountField
 import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import uniffi.ark_format.formatDayLong
-import uniffi.money_domain.readyToAssignId
-import uniffi.money_domain.suggestPayees
+import uniffi.money_core.readyToAssignId
+import uniffi.money_core.suggestPayees
 
 private enum class Choosing {
     None,

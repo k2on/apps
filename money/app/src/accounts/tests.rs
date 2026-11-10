@@ -21,7 +21,7 @@ const NOW: i64 = 1_792_929_600_000;
 
 impl Demo {
     pub fn new() -> Demo {
-        let mut peer = money_seed::open(money_seed::seeded_disk("2026-10-26", NOW));
+        let mut peer = money_core::demo::open(money_core::demo::seeded_disk("2026-10-26", NOW));
         let mut store = Store::new();
         for k in Accounts::holds(&State::default()) {
             store.hold(&mut peer, k);

@@ -1,5 +1,5 @@
 //! A hall: a money server in this process — the hub a server runs, the
-//! household's log fed whole to every connection (`money_domain::feed`) —
+//! household's log fed whole to every connection (`money_core::feed`) —
 //! over memory, which devices dial without a socket. Its devices are
 //! pumped by hand ([`Hall::carry`]), so a test says when what was said has
 //! been answered. What the apps' own tests sync two phones through, and

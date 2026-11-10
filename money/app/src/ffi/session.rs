@@ -1,7 +1,7 @@
 //! money's views on the phones (`ark_peer::store`, `ark_ffi::Session`):
 //! one [`Session`] over a peer holds the views the screens show — each
 //! named by a [`MoneyView`], what a page is made of said by the domain
-//! (`money_domain::MoneyView`) — keeps them spliced on the bridge's thread
+//! (`money_core::MoneyView`) — keeps them spliced on the bridge's thread
 //! and tells the app which moved ([`Changed`]). A screen holds its view
 //! while it shows ([`Session::hold`], a [`Holding`] let go when dropped)
 //! and reads it by name: `budget(month)`, `register(account)`, … — the
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use ark::format::Encode;
 use ark_ffi::{Peer, Refusal, RowId, Twin};
-use money_domain::{
+use money_core::{
     self as domain, AccountLine, AskLine, BankLine, BudgetLine, Filter, Filtered, GroupLine, ItemLine, LinkedLine, MoneyChange, PayeeLine, PhotoLine,
     ReceiptLine, SpendingLine, Summary, TxnLine,
 };

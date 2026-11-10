@@ -75,7 +75,7 @@ import dev.arkui.Space
 import dev.arkui.Stat
 import dev.arkui.Tint
 import dev.arkui.tintColors
-import uniffi.money_domain.BudgetLine
+import uniffi.money_core.BudgetLine
 import uniffi.ark_format.formatMonthAlone
 
 /** Which page of the sheet is showing. */

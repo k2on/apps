@@ -7,7 +7,7 @@
 //! saved ones, and a formula's terms sum them (`formula.rs`).
 //!
 //! What a transaction must meet is the domain's alone
-//! (`money_domain::filters`): this file only edits a `Filter` and opens
+//! (`money_core::filters`): this file only edits a `Filter` and opens
 //! the register for it.
 
 use arkui::text::{self, text};
@@ -15,8 +15,8 @@ use arkui::text_input::text_input;
 use arkui::{format, glyphs, icon, menu, style};
 use iced::widget::{button, column, row};
 use iced::{Alignment, Element, Length, Task};
-use money_domain::dates::{add_months, first_day, last_day, month_of};
-use money_domain::*;
+use money_core::dates::{add_months, first_day, last_day, month_of};
+use money_core::*;
 
 use crate::look;
 use crate::peer::Ledger;
@@ -330,7 +330,7 @@ impl App {
         let categories = match &f.categories[..] {
             [] => "Any category".to_string(),
             [None] => "No category".into(),
-            [Some(c)] if *c == money_domain::budget::ready_to_assign() => "Ready to Assign".into(),
+            [Some(c)] if *c == money_core::budget::ready_to_assign() => "Ready to Assign".into(),
             [Some(c)] => self.peer.line(*c).map_or_else(|| "A category".into(), |l| l.name.clone()),
             all => format!("{} categories", all.len()),
         };

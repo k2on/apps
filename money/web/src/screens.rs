@@ -16,10 +16,10 @@ use leptos::prelude::*;
 use money_app::look;
 use money_app::shell::view::money_settings;
 use money_app::shell::{tagged_account, ShellMsg, ShellPage};
-use money_domain::budget::ready_to_assign;
-use money_domain::dates::add_months;
-use money_domain::words::Tone;
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::dates::add_months;
+use money_core::words::Tone;
+use money_core::*;
 
 use crate::{Asking, DraftMsg, MoneyWeb, Msg};
 

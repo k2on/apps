@@ -6,7 +6,7 @@
 
 use ark_ffi::Standing;
 use money_app::ffi::Hall;
-use money_domain::{AccountLineView, TxnLineView};
+use money_core::{AccountLineView, TxnLineView};
 
 fn dir() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()

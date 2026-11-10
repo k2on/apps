@@ -1,4 +1,4 @@
-//! The demo: the seeded household (`money_seed`) on a peer that is
+//! The demo: the seeded household (`money_core::demo`) on a peer that is
 //! its own authority, in memory — what the apps run with no server, their
 //! previews draw and their screenshots are taken of. It is the demo
 //! window's (`money/iced`) to the cent: Alex's, some of it Sam's, the
@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use ark::format::Encode;
 use ark_ffi::{Peer, Refusal};
-use money_domain::dates::{days_from_civil, parse_day};
-use money_domain::AccountLine;
-use money_seed as seed;
+use money_core::dates::{days_from_civil, parse_day};
+use money_core::demo as seed;
+use money_core::AccountLine;
 
 /// Noon of `day` (UTC), in ms: when a demo seeded for that day says it is.
 fn noon(day: &str) -> Option<i64> {
@@ -33,7 +33,7 @@ pub fn money_demo(today: Option<String>) -> Result<Arc<Peer>, Refusal> {
         }
         None => {
             let now = ark_peer::now_ms();
-            (money_domain::dates::day_of_ms(now), now)
+            (money_core::dates::day_of_ms(now), now)
         }
     };
     Peer::of(seed::open(seed::seeded_disk(&today, now)))

@@ -64,9 +64,8 @@ on:
       - "money/icon.svg"
       - "ui/prebuild.py"
       - "nix/ark-app.nix"
-      - "money/domain/**"
+      - "money/core/**"
       # The demo's household, which money's library links for its demo.
-      - "money/seed/**"
       # The crates the phones link, not the whole workspace: arkui, arkdb
       # and the desktop apps are none of an iPhone's.
       - "rust/ark/**"

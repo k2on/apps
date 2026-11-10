@@ -261,7 +261,7 @@ app is committed. An app is
 <app>/
 ├── app.toml      what it is: name, id, accent, platforms, modules, what it asks of each platform
 ├── icon.svg      its icon, every platform's
-├── core/         its domain (money/domain until it moves)
+├── core/         its domain, and (`demo`) its demo's household
 ├── app/          ark-app: its state, messages, update, #[view]s, `screens()` and `commands()`
 ├── server/       when it has one
 ├── screens/      shots.json, server.sh

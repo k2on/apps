@@ -44,7 +44,7 @@ pub struct Peer {
 }
 
 pub fn open(who: Who) -> Peer {
-    let config = ark_peer::Config::of(money_domain::shared());
+    let config = ark_peer::Config::of(money_core::shared());
     let mut client = ark_peer::Peer::open(config, who, Box::new(Memory::default()), false);
     client.link.backoff = (20, 200);
     Peer { client, refused: vec![] }
@@ -93,7 +93,7 @@ impl Peer {
     }
 
     /// One of the server's own functions called over the link
-    /// (`money_domain::setup`), once it is up, and its answer.
+    /// (`money_core::setup`), once it is up, and its answer.
     pub fn call<T: Encode>(&mut self, name: &str, input: &impl Encode) -> Result<T, String> {
         let linked = ark_peer::link::until(Duration::from_secs(10), Duration::from_millis(5), || {
             self.pump();
@@ -137,7 +137,7 @@ pub fn hub_query<T: Encode + Send + 'static>(server: &Server, name: &'static str
                 session: "q".into(),
                 ..Default::default()
             };
-            let d = money_domain::shared();
+            let d = money_core::shared();
             let f = d.binding(name).unwrap().to_string();
             let b = d.ask(&h.log.store, &ctx, &f, &input.to_bytes()).unwrap_or_else(|r| panic!("{name}: {r}"));
             T::from_bytes(&b).unwrap()
@@ -217,7 +217,7 @@ pub struct Script {
 }
 
 /// ArkOS's mock Plaid (`sync/actual-import/src/test/mock-plaid.ts`), whose
-/// answers `money/domain/tests/import.rs` walks the domain through: one
+/// answers `money/core/tests/import.rs` walks the domain through: one
 /// bank of two accounts, its initial pull over two pages with a pending
 /// transaction and a payroll; that transaction posting with another amount
 /// while the coffee is modified; and nothing new. Beside it, Plaid's
@@ -525,7 +525,7 @@ pub fn caught_up(server: &Server, user: &str) -> Peer {
 /// Whether `needle` is anywhere in a store's rows, any table's.
 pub fn in_rows(store: &ark::store::Store, needle: &str) -> bool {
     let n = needle.as_bytes();
-    let tables: Vec<String> = money_domain::shared().schema.tables.iter().map(|t| t.name.clone()).collect();
+    let tables: Vec<String> = money_core::shared().schema.tables.iter().map(|t| t.name.clone()).collect();
     tables.iter().any(|t| store.rows(t).any(|r| r.windows(n.len()).any(|w| w == n)))
 }
 

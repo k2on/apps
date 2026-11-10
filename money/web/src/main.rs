@@ -4,7 +4,7 @@
 //! desktop, drawn by arkui-web (Leptos over the DOM); the screens the
 //! shell hosts that are not in Rust's vocabulary yet are this crate's
 //! (`screens`), as money/iced has its own. The household is the demo's
-//! (`money_seed`), in the page's memory, its own authority: no server.
+//! (`money_core::demo`), in the page's memory, its own authority: no server.
 //!
 //! The address opens any screen with no steps, with the launch arguments
 //! every shell reads (`ark_app::shell::Launch`): `?screen=budget`,
@@ -23,8 +23,8 @@ use arkui_web::{AnyView, WebApp};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::shell::view::{commands, money_shell};
 use money_app::shell::{MoneyShell, ShellMsg};
-use money_domain::dates::{add_months, day_of_ms, days_from_civil, parse_day};
-use money_domain::*;
+use money_core::dates::{add_months, day_of_ms, days_from_civil, parse_day};
+use money_core::*;
 
 mod screens;
 
@@ -122,7 +122,7 @@ pub fn noon(today: &str) -> i64 {
 impl MoneyWeb {
     fn open(today: String) -> MoneyWeb {
         let now = noon(&today);
-        let mut peer = money_seed::open(money_seed::seeded_disk(&today, now));
+        let mut peer = money_core::demo::open(money_core::demo::seeded_disk(&today, now));
         let mut store = Store::new();
         for v in ALWAYS {
             store.hold(&mut peer, v);

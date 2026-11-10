@@ -6,12 +6,12 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 
 fn open_account(name: &str) -> OpenAccount {
     OpenAccount {
         name: name.into(),
-        kind: money_domain::accounts::AccountKind::Checking,
+        kind: money_core::accounts::AccountKind::Checking,
         on_budget: true,
         balance: 10_000,
         date: "2026-10-01".into(),
@@ -155,10 +155,10 @@ fn health_says_which_domain() {
     let mut alice = signed_in(&server, "alice");
     pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
     let text = ureq::get(&format!("{}/healthz", server.url())).call().unwrap().into_string().unwrap();
-    let d = money_domain::shared();
+    let d = money_core::shared();
     assert!(text.starts_with("ok\n"), "{text}");
     assert!(
-        text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_domain::VERSION)),
+        text.contains(&format!("domain {} {} current\n", d.schema_hash(), money_core::VERSION)),
         "{text}"
     );
     assert!(text.contains("connections 2\n"), "{text}");

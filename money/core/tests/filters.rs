@@ -5,9 +5,9 @@
 mod common;
 
 use common::Book;
-use money_domain::budget::ready_to_assign;
-use money_domain::plaid::{import_of, PlaidAccount, Pulled};
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::plaid::{import_of, PlaidAccount, Pulled};
+use money_core::*;
 
 /// A household with a bit of everything: paychecks, spending on and off
 /// the budget, a transfer each way, something for no category, and the

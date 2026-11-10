@@ -9,8 +9,8 @@
 mod common;
 
 use common::Book;
-use money_domain::dates::add_days;
-use money_domain::*;
+use money_core::dates::add_days;
+use money_core::*;
 
 /// The book's today.
 const TODAY: &str = "2026-10-26";

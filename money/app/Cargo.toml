@@ -19,14 +19,13 @@ ark-clipboard = { path = "../../modules/clipboard" }
 ark-share = { path = "../../modules/share" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
-money-domain = { path = "../domain" }
+money-core = { path = "../core" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
 # The phones (`ffi`, src/ffi): the bridge, the module plumbing as UniFFI's,
 # the demo's household (`money_demo`), and every number, day and length as
 # the apps write them (re-exported, so its functions are in the library).
 ark-ffi = { path = "../../rust/ark-ffi", optional = true }
 ark-module = { path = "../../ui/rust/module", optional = true }
-money-seed = { path = "../seed", default-features = false, optional = true }
 serde_json = { workspace = true, optional = true }
 # Where a receipt is in a camera frame (`page`, src/ffi/page.rs).
 tract-onnx = { version = "0.22", optional = true }
@@ -39,8 +38,8 @@ arkui-web = { path = "../../ui/rust/web", optional = true }
 # money for the phones (src/ffi), which nix's generated `money-ffi` links
 # into their library (nix/ark-app.nix).
 ffi = [
-  "dep:uniffi", "dep:ark-ffi", "dep:ark-module", "dep:money-seed", "dep:serde_json",
-  "money-domain/ffi", "ark-format/ffi", "ark-module/ffi", "ark-haptics/ffi", "ark-clipboard/ffi", "ark-share/ffi",
+  "dep:uniffi", "dep:ark-ffi", "dep:ark-module", "dep:serde_json",
+  "money-core/ffi", "money-core/demo", "ark-format/ffi", "ark-module/ffi", "ark-haptics/ffi", "ark-clipboard/ffi", "ark-share/ffi",
 ]
 # Where a receipt is in a camera frame: the corner model on a runtime in
 # Rust (src/ffi/page.rs), so the phone links none of its own. Android's
@@ -56,7 +55,7 @@ web = ["dep:arkui-web"]
 
 [dev-dependencies]
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-money-seed = { path = "../seed", default-features = false }
+money-core = { path = "../core", features = ["demo"] }
 tempfile = "3"
 # The scanner's pages, read (tests/page.rs).
 image = { version = "0.25", default-features = false, features = ["png"] }

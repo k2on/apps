@@ -1,7 +1,7 @@
 //! How an app's routes are spelled, as one string.
 //!
 //! An app's routes are its domain's `Route` enum (`harken_domain::routes`,
-//! `money_domain::routes`), and each route has one path — its
+//! `money_core::routes`), and each route has one path — its
 //! [`Routable::path`]: `album/Water%20Music`, `account/Checking`, `budget`.
 //! That one spelling is what the desktop's and the browser's address bar say
 //! (arkui's router puts a `#` in front), and what a deep link, a

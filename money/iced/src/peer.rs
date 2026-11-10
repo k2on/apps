@@ -1,7 +1,7 @@
 //! The replica, and the lists a window draws from it — every one a view
 //! the peer keeps up to date (§1.10), patched by the rows a change touched,
 //! held in the store every app of money holds its views in
-//! (`ark_peer::store`, keyed by `money_domain::MoneyView`).
+//! (`ark_peer::store`, keyed by `money_core::MoneyView`).
 //!
 //! The sidebar's accounts and saved filters, what needs looking at, the
 //! payees a form offers, the banks, their accounts and this person's asks
@@ -11,7 +11,7 @@
 //! when the window moves to another month or filter.
 
 use ark_peer::store::Store;
-use money_domain::*;
+use money_core::*;
 
 use crate::client::Replica;
 

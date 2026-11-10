@@ -19,7 +19,7 @@ use ark_ffi::Refusal;
 use ark_haptics::Haptics;
 use ark_peer::store::Store;
 use ark_share::Share;
-use money_domain::{self as domain, routes::Route, MoneyChange};
+use money_core::{self as domain, routes::Route, MoneyChange};
 
 use crate::ffi::Session;
 
@@ -240,6 +240,6 @@ mod tests {
         let noon_26 = session_now(0, "2026-10-26");
         assert_eq!(session_now(noon_26 + 3_600_000, "2026-10-26"), noon_26 + 3_600_000);
         assert_eq!(session_now(noon_26 + 30 * 86_400_000, "2026-10-26"), noon_26);
-        assert_eq!(money_domain::dates::day_of_ms(session_now(0, "2026-10-26")), "2026-10-26");
+        assert_eq!(money_core::dates::day_of_ms(session_now(0, "2026-10-26")), "2026-10-26");
     }
 }

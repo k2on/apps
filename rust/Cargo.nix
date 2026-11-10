@@ -347,10 +347,10 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "money-domain" = rec {
-      packageId = "money-domain";
+    "money-core" = rec {
+      packageId = "money-core";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "money-domain";
+        packageId = "money-core";
       };
 
       # Debug support which might change between releases.
@@ -361,16 +361,6 @@ rec {
       packageId = "money-iced";
       build = internal.buildRustCrateWithFeatures {
         packageId = "money-iced";
-      };
-
-      # Debug support which might change between releases.
-      # File a bug if you depend on any for non-debug work!
-      debug = internal.debugCrate { inherit packageId; };
-    };
-    "money-seed" = rec {
-      packageId = "money-seed";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "money-seed";
       };
 
       # Debug support which might change between releases.
@@ -13996,14 +13986,8 @@ rec {
             optional = true;
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-            optional = true;
-            usesDefaultFeatures = false;
+            name = "money-core";
+            packageId = "money-core";
           }
           {
             name = "serde_json";
@@ -14036,9 +14020,9 @@ rec {
             features = [ "png" ];
           }
           {
-            name = "money-seed";
-            packageId = "money-seed";
-            usesDefaultFeatures = false;
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
           {
             name = "tempfile";
@@ -14046,7 +14030,7 @@ rec {
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "dep:ark-module" "dep:money-seed" "dep:serde_json" "money-domain/ffi" "ark-format/ffi" "ark-module/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" "ark-share/ffi" ];
+          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "dep:ark-module" "dep:serde_json" "money-core/ffi" "money-core/demo" "ark-format/ffi" "ark-module/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" "ark-share/ffi" ];
           "gen" = [ "dep:ark-ui-gen" ];
           "iced" = [ "dep:arkui" "arkui/app" ];
           "page" = [ "ffi" "dep:tract-onnx" ];
@@ -14054,13 +14038,25 @@ rec {
         };
         resolvedDefaultFeatures = [ "ffi" "gen" "iced" "page" "web" ];
       };
-      "money-domain" = rec {
-        crateName = "money-domain";
+      "money-core" = rec {
+        crateName = "money-core";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/domain; };
-        libName = "money_domain";
+        crateBin = [
+          {
+            name = "money-seed";
+            path = "src/bin/money-seed.rs";
+            requiredFeatures = [ "cli" ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/core; };
+        libName = "money_core";
         dependencies = [
+          {
+            name = "anyhow";
+            packageId = "anyhow";
+            optional = true;
+          }
           {
             name = "ark";
             packageId = "ark";
@@ -14106,9 +14102,10 @@ rec {
           }
         ];
         features = {
+          "cli" = [ "demo" "dep:anyhow" ];
           "ffi" = [ "dep:uniffi" "dep:ark-ffi" "ark-format/ffi" ];
         };
-        resolvedDefaultFeatures = [ "ffi" ];
+        resolvedDefaultFeatures = [ "cli" "demo" "ffi" ];
       };
       "money-iced" = rec {
         crateName = "money-iced";
@@ -14166,13 +14163,9 @@ rec {
             features = [ "iced" ];
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-            usesDefaultFeatures = false;
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
         ];
         devDependencies = [
@@ -14197,45 +14190,6 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "demo" ];
-      };
-      "money-seed" = rec {
-        crateName = "money-seed";
-        version = "0.1.0";
-        edition = "2021";
-        crateBin = [
-          {
-            name = "money-seed";
-            path = "src/main.rs";
-            requiredFeatures = [ "cli" ];
-          }
-        ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
-        libName = "money_seed";
-        dependencies = [
-          {
-            name = "anyhow";
-            packageId = "anyhow";
-            optional = true;
-          }
-          {
-            name = "ark";
-            packageId = "ark";
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
-            name = "money-domain";
-            packageId = "money-domain";
-          }
-        ];
-        features = {
-          "cli" = [ "dep:anyhow" ];
-          "default" = [ "cli" ];
-        };
-        resolvedDefaultFeatures = [ "cli" "default" ];
       };
       "money-server" = rec {
         crateName = "money-server";
@@ -14283,8 +14237,8 @@ rec {
             features = [ "clock" ];
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
+            name = "money-core";
+            packageId = "money-core";
           }
           {
             name = "serde";
@@ -14316,9 +14270,9 @@ rec {
         ];
         devDependencies = [
           {
-            name = "money-seed";
-            packageId = "money-seed";
-            usesDefaultFeatures = false;
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
           {
             name = "tempfile";
@@ -14369,13 +14323,9 @@ rec {
             features = [ "web" ];
           }
           {
-            name = "money-domain";
-            packageId = "money-domain";
-          }
-          {
-            name = "money-seed";
-            packageId = "money-seed";
-            usesDefaultFeatures = false;
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
           }
           {
             name = "web-sys";

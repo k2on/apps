@@ -15,7 +15,7 @@ Three ways in, each an `ark_ffi::Peer`:
   disk, one directory per server, as whoever last signed in there or as
   `login`. Then `peer.connect(socketUrl(server))`: it dials whenever
   signed in, and redials by itself.
-- **`moneyDemo(today)`** — the demo's household (`money/seed`, the
+- **`moneyDemo(today)`** — the demo's household (`money_core::demo`, the
   demo window's to the cent) in memory, its own authority, signed in as
   Alex with the importer's role: what the apps run with no server, their
   previews draw, and the screenshots are taken of. A fixed `today`
@@ -30,14 +30,14 @@ Three ways in, each an `ark_ffi::Peer`:
   phones through (`roles: ["bank"]` is the importer).
 
 **Changes are typed.** Every mutation the domain has is a case of
-`MoneyChange` (`money_domain::changes`), its input UniFFI's record of the
+`MoneyChange` (`money_core::changes`), its input UniFFI's record of the
 domain's own: `session.send(.assign(value: Assign(month:categoryId:amount:)))`
 in Swift, `session.send(MoneyChange.Assign(Assign(month, id, 25_000)))` in
 Kotlin. It crosses as its bytes, never JSON; `session.check(change)` is the
 domain's sentence for its first failed refinement, before it is sent.
 
 **Rows say what they mean.** The records carry their rules as methods
-(`money_domain::words`, exported in its `ffi` feature): a budget line's
+(`money_core::words`, exported in its `ffi` feature): a budget line's
 `tone()`, `meter()`, `story(style)`, `captions(style)`, `isPayment()`,
 `toCover()`; a transaction's `needsCategory()`, `bankSaid()`,
 `transferAccountId` and `draft()`; the form's `Draft` with `problem()` and
@@ -50,7 +50,7 @@ draw, each named by a `MoneyView` — `accounts`, `groups`, `budget(month)`,
 `inbox`, `register(account)`, `payees`, `banks`, `linked`, `asks`,
 `photos`, `receipts`, `paid(txn)`, `items(receipt)`, `search(account,
 text)` (the core's filter: payee, the bank's words, memo, category, account or amount) — and what a page is
-made of is the domain's (`money_domain::MoneyView`): a month's budget is
+made of is the domain's (`money_core::MoneyView`): a month's budget is
 its lines, its summary, its spending and its formulas on every platform.
 `session.hold(view)` holds one while a screen shows it (a `Holding`, let
 go when dropped; held twice, it stays until both are), the core keeps its
@@ -59,7 +59,7 @@ which views moved (`moved(views)`, on that thread; the app hops to its
 main thread), and `session.version(view)` grows whenever one did. A view is
 read by name: `session.budget(month)` (`Budget`: lines, summary, spending),
 `session.register(account)`, … — UniFFI's own records
-(`uniffi.money_domain` on Android; the same module on iOS), no JSON. ArkUI
+(`uniffi.money_core` on Android; the same module on iOS), no JSON. ArkUI
 draws them: `watched.watch(view) { read }` on Android, `.holding(view)` on
 iOS; the iced window holds `ark_peer::store::Store<MoneyView>` itself.
 `session.send(change)` is `moneySend` with its refusal kept

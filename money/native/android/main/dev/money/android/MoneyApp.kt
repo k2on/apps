@@ -93,11 +93,11 @@ import dev.arkui.Transitions
 import dev.arkui.reducedMotion
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
-import uniffi.money_domain.Auto
-import uniffi.money_domain.Route
-import uniffi.money_domain.TxnLine
-import uniffi.money_domain.newDraft
-import uniffi.money_domain.routeFromPath
+import uniffi.money_core.Auto
+import uniffi.money_core.Route
+import uniffi.money_core.TxnLine
+import uniffi.money_core.newDraft
+import uniffi.money_core.routeFromPath
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {

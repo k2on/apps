@@ -28,7 +28,7 @@ card, a section's heading, a pill, a tile, a badge, a pager, a progress bar.
 ## What each reads from the core
 
 The components hold no rule of their own: each reads what it says from the
-domain's records and their methods (`money_domain::words`, `accounts`,
+domain's records and their methods (`money_core::words`, `accounts`,
 `transactions::Draft`, `banks::follow`; UniFFI's methods of the same names
 on the phones), and draws the core's `Tone` in ArkUI's `Tint` by one small
 map per shell (Android `Tone.tint()` in `Theme.kt`, iPhone `Tone.tint` in

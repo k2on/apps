@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 
 /// Checking, and a budget of two groups: Everyday (Groceries, and Eggs a
 /// kind of it) and Home (Home Improvement).
@@ -574,7 +574,7 @@ fn a_deleted_category_takes_its_kinds() {
 /// them, are one tree: a group a heading, a category under its group.
 #[test]
 fn groups_and_categories_become_one_tree() {
-    let d = money_domain::domain();
+    let d = money_core::domain();
     let was: ark::schema::Schema = serde_json::from_str(include_str!("../migrations/categories-as-a-tree.json")).unwrap();
     let id = |n: u8| format!("{n:032x}");
     let rows = |t: &str, objects: Vec<serde_json::Value>| {

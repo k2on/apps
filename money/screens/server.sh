@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # money's server for its screenshots (.github/screens/apps.md): the demo's
-# household written into a fresh data directory (money-seed, money/seed),
+# household written into a fresh data directory (money-seed, money/core's `demo`),
 # then money-server on it with dev auth. Run from the repository's root;
 # leaves the server running.
 #

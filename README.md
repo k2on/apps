@@ -79,9 +79,9 @@ says what is built and what is not.
 
 ## The rest
 
-Each app's demo data is its `seed/` (`money/seed`, `harken/seed`): a
-crate beside the app's own, not in it (`money-seed`, `harken-seed`), that
-the demos and tests link and whose binary seeds a server's data directory
+Each app's demo data is beside its code, not in it: money's core's `demo`
+feature (`money/core`), harken's `harken/seed` crate. The demos and tests
+link it, and its binary (`money-seed`, `harken-seed`) seeds a server's data directory
 for the screenshots or for `nix run .#<app>-demo`. `docs/seed.md` says
 what each holds and the contract they share.
 

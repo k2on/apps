@@ -18,8 +18,8 @@ pub mod ffi;
 pub mod look;
 pub mod shell;
 
-pub use money_domain::routes::Route;
-pub use money_domain::{MoneyChange, MoneyView};
+pub use money_core::routes::Route;
+pub use money_core::{MoneyChange, MoneyView};
 
 /// Every screen of money's laid out in Rust, as the phones' generator takes
 /// them (ui/docs/app.md, "Generated, Not Committed"): nix links this with

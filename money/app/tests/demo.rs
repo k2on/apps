@@ -4,8 +4,8 @@
 
 use ark_ffi::{Peer, Taken};
 use money_app::ffi::{money_add_months, money_demo, DemoBank};
-use money_domain::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
-use money_seed as seed;
+use money_core::demo as seed;
+use money_core::{AccountLineView, BudgetLineView, SummaryView, TxnLineView};
 use std::sync::Arc;
 
 const TODAY: &str = "2026-10-26";

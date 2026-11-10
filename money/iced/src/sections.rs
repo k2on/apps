@@ -21,7 +21,7 @@ use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length, Task};
 use money_app::shell::view::{commands, money_settings, money_shell};
 use money_app::shell::{account_tag, tagged_account, MoneyShell, ShellMsg, ShellPage, SECTIONS};
-use money_domain::{Auto, MoneyChange, MoneyView};
+use money_core::{Auto, MoneyChange, MoneyView};
 
 use crate::peer::Ledger;
 use crate::{App, Message, Page, Route};
@@ -144,7 +144,7 @@ impl App {
     }
 
     /// The category a launch names: its name in any case, or a part of it.
-    fn category_named(&self, n: &str) -> Option<money_domain::Id<money_domain::Category>> {
+    fn category_named(&self, n: &str) -> Option<money_core::Id<money_core::Category>> {
         let w = n.to_lowercase();
         let lines = self.peer.lines();
         lines
@@ -157,7 +157,7 @@ impl App {
     /// The transaction a launch names (the reference's keys): `receipt`,
     /// the newest with one; `review`, the newest waiting; `transfer`; a
     /// number, the n-th oldest; else a payee.
-    fn txn_named(&self, key: &str) -> Option<money_domain::Id<money_domain::Txn>> {
+    fn txn_named(&self, key: &str) -> Option<money_core::Id<money_core::Txn>> {
         let all = self.peer.register();
         let k = key.to_lowercase();
         let t = match k.as_str() {

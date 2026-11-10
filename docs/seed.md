@@ -1,15 +1,16 @@
 # The apps' seeds
 
-Each app's demo data is a crate of its own beside the app's, `<app>/seed`:
-what a demo window opens on, what the phones' demo opens on, and what a
-server is seeded with for the screenshots (`.github/screens/apps.md`) or
-for a person to try. Not in the app's code: the real clients and servers
-are built without them. One crate per app, the same shape for each,
-members of the workspace in `rust/`.
+Each app's demo data is what a demo window opens on, what the phones'
+demo opens on, and what a server is seeded with for the screenshots
+(`.github/screens/apps.md`) or for a person to try. Not in the app's
+code: the real clients and servers are built without it. money's is its
+core's `demo` feature (`money/core`, `money_core::demo`), an app moved to
+the shape of ui/docs/app.md; harken's is still a crate of its own beside
+the app's, `harken/seed`. Both are members of the workspace in `rust/`.
 
-| crate | its library | its binary |
+| where | its library | its binary |
 | --- | --- | --- |
-| `money/seed` (`money-seed`) | the demo household: three months of a family's budget up to today, run through the domain's own mutations (`seeded_disk`, `log`, `open`, `seeded`, `Bank`, `ME`, …) | `money-seed DATA`: the household as `DATA/log`, the log a money server boots on |
+| `money/core` (`money-core`, `demo`) | the demo household: three months of a family's budget up to today, run through the domain's own mutations (`seeded_disk`, `log`, `open`, `seeded`, `Bank`, `ME`, …) | `money-seed DATA`: the household as `DATA/log`, the log a money server boots on |
 | `harken/seed` (`harken-seed`) | the demo library: the classical catalogue (`catalogue.json`) and the shows (`shows.json`), embedded, and the library made of them (`catalogue`, `shelf`, `seeded_disk`) | `harken-seed [--covers DIR] DATA`: the catalogue as a media root, `DATA/media`: a FLAC of silence per track, tagged as the catalogue says, and each album's cover (from `--covers`, the flake's `harken-covers`, the covers kept in `harken/seed/covers`), which a harken server's scanner reads |
 
 The binaries share one contract: `<app>-seed DATA` writes what that app's
@@ -17,7 +18,7 @@ server needs to boot seeded, with `DATA` its data directory, and refuses
 a `DATA` that already has anything in it. From `rust/`:
 
 ```sh
-cargo run -p money-seed -- /tmp/money
+cargo run -p money-core --features cli --bin money-seed -- /tmp/money
 MONEY_DEV_AUTH=1 MONEY_DATA=/tmp/money cargo run -p money-server -- 127.0.0.1:8788
 
 cargo run -p harken-seed -- /tmp/harken
@@ -31,9 +32,11 @@ The screenshots run the same from nix's builds (`nix build .#<app>-seed
 Dev auth lets anyone in as whoever they say; money's household is
 `alex`'s.
 
-The binaries are behind each crate's `cli` feature, on by default; the
-demos depend with `default-features = false`, so a demo (money's and
-harken's in a browser too) links the data and builds no binary.
+The binaries are behind a `cli` feature: harken-seed's, on by default, so
+its demos depend with `default-features = false`; money-core's, off by
+default (it implies `demo`), so its demos ask for `demo` alone. Either
+way a demo (money's and harken's in a browser too) links the data and
+builds no binary.
 
 `harken/seed/catalogue.json` is a copy of the flake's `classical` input:
 `nix flake update classical`, then `nix run .#update-catalogue` writes it,

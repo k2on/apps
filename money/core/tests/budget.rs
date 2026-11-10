@@ -5,8 +5,8 @@
 mod common;
 
 use common::Book;
-use money_domain::budget::ready_to_assign;
-use money_domain::*;
+use money_core::budget::ready_to_assign;
+use money_core::*;
 
 /// A household: a checking account with $3,000 in it, and two categories.
 fn household() -> (Book, Id<Account>, Id<Category>, Id<Category>) {
@@ -200,7 +200,7 @@ fn reconciling_agrees_with_the_bank_and_locks_what_it_agreed_to() {
     };
     b.run("reconcile", &r).unwrap();
     let lines = b.register(Some(checking));
-    let adjustment = lines.iter().find(|l| l.payee == money_domain::transactions::ADJUSTMENT).unwrap();
+    let adjustment = lines.iter().find(|l| l.payee == money_core::transactions::ADJUSTMENT).unwrap();
     assert_eq!((adjustment.amount, adjustment.cleared), (-100, Cleared::Reconciled));
     let landlord = lines.iter().find(|l| l.id == first).unwrap();
     assert_eq!(landlord.cleared, Cleared::Reconciled);

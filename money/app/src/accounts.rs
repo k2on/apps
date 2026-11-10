@@ -13,10 +13,10 @@ use ark::row::Id;
 use ark_app::{App, Command, Data};
 use ark_format::NumberStyle;
 use ark_haptics::{perform, Haptic};
-use money_domain::accounts::{net_worth, shelves, AccountKind, Shelving, STARTING_BALANCE};
-use money_domain::dates::day_of_ms;
-use money_domain::routes::Route;
-use money_domain::*;
+use money_core::accounts::{net_worth, shelves, AccountKind, Shelving, STARTING_BALANCE};
+use money_core::dates::day_of_ms;
+use money_core::routes::Route;
+use money_core::*;
 
 pub mod view;
 

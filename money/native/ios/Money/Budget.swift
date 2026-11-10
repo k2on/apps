@@ -1,11 +1,11 @@
 // The budget as SwiftUI lists it, and nothing of Apple's but Foundation:
 // the month's lines in their groups, the rows Edit rearranges, which way
 // Move Money goes, the transaction form's state, a register by day, and
-// days as a picker holds them. Every rule is the core's (`money_domain`:
+// days as a picker holds them. Every rule is the core's (`money_core`:
 // a line's `tone()`, `story`, `captions`, `meter()`, `isPayment()`; the
 // accounts' `accountShelves`; the form's `Draft`; the asks' `follow`), so
 // the phone, Android and the window say the same; the core's tests hold
-// them (money/domain/tests/words.rs).
+// them (money/core/tests/words.rs).
 import ArkUICore
 import Foundation
 

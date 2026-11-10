@@ -1,6 +1,6 @@
 //! The bank importer, inside the server, against a scripted Plaid on
 //! loopback: the three phases ArkOS's end-to-end check walked Actual
-//! through (`money/domain/tests/import.rs` walks the domain through the
+//! through (`money/core/tests/import.rs` walks the domain through the
 //! same answers), a new bank's accounts waiting for the household to say
 //! what each feeds, a household member's ask answered, the cursor kept
 //! across a restart and only once the import is in, a run said twice
@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use money_domain::*;
+use money_core::*;
 use money_server::importer::Outcome;
 
 /// Every transaction the hub holds, as the check compares them: date,

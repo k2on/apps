@@ -1,5 +1,5 @@
 //! The demo's household seeded into a data directory (`money-seed`, in
-//! `money/seed`), the server started on it, and a phone signed in as the
+//! `money/core`), the server started on it, and a phone signed in as the
 //! household's owner: what the app screenshots sign in to
 //! (.github/screens/apps.md). The phone gets every account the demo window
 //! has.
@@ -7,8 +7,8 @@
 mod common;
 
 use common::*;
-use money_domain::*;
-use money_seed as seed;
+use money_core::demo as seed;
+use money_core::*;
 
 fn accounts(p: &Peer) -> Vec<AccountLine> {
     p.query("accounts", &()).unwrap_or_default()

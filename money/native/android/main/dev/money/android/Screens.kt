@@ -30,7 +30,7 @@ import uniffi.money_app.AccountsMsg
 import uniffi.money_app.AccountsPage
 import uniffi.money_app.ShellMsg
 import uniffi.money_app.ShellPage
-import uniffi.money_domain.Route
+import uniffi.money_core.Route
 
 /** The Accounts tab, running in Rust. */
 class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?, clipboard: Clipboard?) {

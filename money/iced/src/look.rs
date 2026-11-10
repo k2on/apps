@@ -1,5 +1,5 @@
 //! money's own looks, beside `arkui::style`'s: the tint the domain's tone
-//! of an amount is drawn in ([`Looks`]: `money_domain::words::Tone` in
+//! of an amount is drawn in ([`Looks`]: `money_core::words::Tone` in
 //! arkui's [`Tint`]s, for `arkui::style::pill` and `progress`). The
 //! fields, cards, chips and pills are arkui's (`arkui::style::field`,
 //! `card`, `chip`, `pill`). Every colour asks [`arkui::theme::of`].
@@ -31,7 +31,7 @@ pub const BUDGET: &str = "budget";
 pub const PAGE_TOP: &str = "page-top";
 
 /// What an amount says about the money, the domain's (`words::Tone`).
-pub use money_domain::words::Tone;
+pub use money_core::words::Tone;
 
 /// A tone as arkui draws it: money's one map, the phones each have the
 /// same one.

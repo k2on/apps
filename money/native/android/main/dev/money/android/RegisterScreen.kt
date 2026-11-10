@@ -74,8 +74,8 @@ import dev.arkui.Space
 import dev.arkui.reflowing
 import dev.arkui.Stat
 import dev.arkui.SwipeToAct
-import uniffi.money_domain.Cleared
-import uniffi.money_domain.TxnLine
+import uniffi.money_core.Cleared
+import uniffi.money_core.TxnLine
 import dev.arkui.pressable
 import dev.arkui.Press
 import uniffi.ark_format.formatDayHeading

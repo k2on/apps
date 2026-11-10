@@ -2,7 +2,7 @@
 //! from here and kept on the server alone.
 //!
 //! Each is a call of the server's own over this window's link
-//! (`money_domain::setup`), never an intent: what it carries — Amazon's
+//! (`money_core::setup`), never an intent: what it carries — Amazon's
 //! password — goes to the server and nowhere else, and is in no row, so no
 //! device has it, this one included. Every answer is the stores as the
 //! server has them, who masked, which the sections draw.
@@ -21,7 +21,7 @@ use arkui::text::text;
 use arkui::text_input::text_input;
 use iced::widget::{column, container, row};
 use iced::{Alignment, Element, Length};
-use money_domain::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
+use money_core::setup::{self as calls, AmazonLogin, BrowserPage, Stores};
 
 use crate::view::{action, bold, dim, quiet};
 use crate::{browser, look, App, Message};

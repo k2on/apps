@@ -7,7 +7,7 @@
 //! [`money_open`] — or the demo's household with [`money_demo`] — and
 //! send every change of the domain's through it as a `MoneyChange`
 //! ([`Session::send`]). Every view hands over UniFFI's records, and the
-//! records carry the domain's rules as methods (`money_domain`'s `ffi`
+//! records carry the domain's rules as methods (`money_core`'s `ffi`
 //! feature): nothing crosses as JSON.
 //!
 //! Signing in is `ark_auth::onboarding`'s machine, through the bridge: the server's page
@@ -49,7 +49,7 @@ pub use session::{Budget, Changed, Holding, MoneyView, Session};
 /// money's peer as a phone is made of it: the domain for the log, and no
 /// live space — a budget has nothing but what was said.
 pub fn config() -> Config {
-    Config::of(money_domain::shared())
+    Config::of(money_core::shared())
 }
 
 /// money's peer on the disk at `dir`, as whoever last signed in there or
@@ -63,7 +63,7 @@ pub fn money_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusa
 /// schema's hash and its version (the server's `domain` line).
 #[uniffi::export]
 pub fn money_domain() -> String {
-    let d = money_domain::shared();
+    let d = money_core::shared();
     format!("{} {}", d.schema_hash(), d.version)
 }
 
@@ -78,8 +78,8 @@ pub enum Sent {
 /// A change sent over `peer` with no session, its refusal a value: the
 /// tests', and anything that sends before it holds a view.
 #[uniffi::export]
-pub fn money_send(peer: Arc<Peer>, change: <money_domain::MoneyChange as ark_ffi::Twin<money_domain::UniFfiTag>>::Ffi) -> Sent {
-    let c = <money_domain::MoneyChange as ark_ffi::Twin<money_domain::UniFfiTag>>::from_ffi(change);
+pub fn money_send(peer: Arc<Peer>, change: <money_core::MoneyChange as ark_ffi::Twin<money_core::UniFfiTag>>::Ffi) -> Sent {
+    let c = <money_core::MoneyChange as ark_ffi::Twin<money_core::UniFfiTag>>::from_ffi(change);
     match peer.mutate_encoded(c.name(), c.input()) {
         Ok(id) => Sent::Intent { id },
         Err(Refusal::Refused { why }) => Sent::Refused { why },
@@ -90,7 +90,7 @@ pub fn money_send(peer: Arc<Peer>, change: <money_domain::MoneyChange as ark_ffi
 /// reads one.
 #[uniffi::export]
 pub fn money_today() -> String {
-    money_domain::dates::day_of_ms(ark_peer::now_ms())
+    money_core::dates::day_of_ms(ark_peer::now_ms())
 }
 
 /// The emoji the phones draw before a category's name, by the words in
@@ -103,5 +103,5 @@ pub fn money_category_emoji(name: String) -> String {
 /// The month `n` months from `month` (`2026-10`), either way.
 #[uniffi::export]
 pub fn money_add_months(month: String, n: i64) -> String {
-    money_domain::dates::add_months(&month, n)
+    money_core::dates::add_months(&month, n)
 }

@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/domain" "money/app" "money/iced" "money/server" "harken/seed" "money/seed" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/app" "money/iced" "money/server" "harken/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -257,9 +257,9 @@
           # money's server (money/server: the hub and the bank importer), the
           # same way: no GUI stack under a server.
           money-server = crate { packageId = "money-server"; };
-          # Each app's demo data, its `seed/` beside the app (docs/seed.md): `<app>-seed
-          # DATA` writes what that app's server boots seeded from.
-          money-seed = crate { packageId = "money-seed"; };
+          # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
+          # that app's server boots seeded from; money's is its core's `cli`.
+          money-seed = crate { packageId = "money-core"; features = [ "cli" ]; };
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.
@@ -1537,7 +1537,7 @@
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
                   grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/uniffi/money_app/money_app.kt"
-                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_domain/money_domain.kt"
+                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_core/money_core.kt"
                   grep -q "func moneyDemo" "$TMPDIR/money/swift/money_app.swift"
                   # Every client's formatting, linked into each library.
                   grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"

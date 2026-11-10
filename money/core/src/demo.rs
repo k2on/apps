@@ -1,8 +1,9 @@
 //! The demo's household: three months of a family's money, up to today —
 //! what the demo window (`money/iced`), the phones' demo and previews
-//! (`money/ffi`, `money_demo`) and a seeded server (`money-seed`, beside
-//! this file) open on. It lives beside the app, not in it (`docs/seed.md`), so the
-//! client and the server carry none of it unless they ask for it.
+//! (money-app's `ffi`, `money_demo`) and a seeded server (`money-seed`,
+//! src/bin) open on. It is behind the core's `demo` feature
+//! (`docs/seed.md`), so a client or a server carries none of it unless it
+//! asks for it.
 //!
 //! Everything goes in through the domain's own mutations, the ones every
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
@@ -24,12 +25,12 @@ use ark::peer::Ctx;
 use ark::store::Store;
 use ark_peer::{Config, Disk, Memory, Peer as Replica};
 
-use money_domain::dates::{add_days, add_months, day_of_ms, month_of};
-use money_domain::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
-use money_domain::*;
+use crate::dates::{add_days, add_months, day_of_ms, month_of};
+use crate::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
+use crate::*;
 
 fn domain() -> std::sync::Arc<ark::domain::Domain> {
-    money_domain::shared()
+    crate::shared()
 }
 
 /// Whose window the demo is.
@@ -228,8 +229,8 @@ const HABITS: &[Habit] = &[
 
 /// The day `d` of `month`, when it has come yet.
 fn day_in(month: &str, d: i64, today: &str) -> Option<String> {
-    let (y, m) = money_domain::dates::parse_month(month)?;
-    let day = money_domain::dates::day(y, m, d.min(money_domain::dates::days_in_month(y, m)));
+    let (y, m) = crate::dates::parse_month(month)?;
+    let day = crate::dates::day(y, m, d.min(crate::dates::days_in_month(y, m)));
     (day.as_str() <= today).then_some(day)
 }
 
@@ -302,7 +303,7 @@ impl Seeder {
     fn open(&mut self, name: &str, kind: &str, on_budget: bool, balance: i64, date: &str) {
         let a = OpenAccount {
             name: name.into(),
-            kind: money_domain::accounts::AccountKind::of(kind).expect("the seed's kinds are kinds"),
+            kind: crate::accounts::AccountKind::of(kind).expect("the seed's kinds are kinds"),
             on_budget,
             balance,
             date: date.into(),
@@ -360,7 +361,7 @@ pub fn card(owed: i64) -> PlaidAccount {
         mask: Some("4417".into()),
         kind: "credit".into(),
         subtype: Some("credit card".into()),
-        balances: money_domain::plaid::Balances {
+        balances: crate::plaid::Balances {
             current: Some(-owed as f64 / 100.0),
         },
     }
@@ -571,7 +572,7 @@ fn household(today: &str, now: i64) -> Store {
         // so the statement it pays next month is all set aside. This
         // month's last days are not filed yet: their debt waits.
         if !current {
-            let pay = money_domain::cards::payment_category(card);
+            let pay = crate::cards::payment_category(card);
             let short = s
                 .ask::<BudgetLine>("month", &Month { month: month.clone() })
                 .into_iter()
@@ -791,12 +792,7 @@ impl Bank {
             },
             _ => Pulled::default(),
         };
-        let added: i64 = pulled
-            .added
-            .iter()
-            .filter(|t| !t.pending)
-            .map(|t| -money_domain::plaid::cents(t.amount))
-            .sum();
+        let added: i64 = pulled.added.iter().filter(|t| !t.pending).map(|t| -crate::plaid::cents(t.amount)).sum();
         let pulled = Pulled {
             cursor: format!("live-{k}"),
             ..pulled

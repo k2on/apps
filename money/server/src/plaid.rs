@@ -5,7 +5,7 @@
 //! Hosted Link page (`/link/token/create`, `/link/token/get`,
 //! `/item/public_token/exchange`) and forgetting one (`/item/remove`).
 //! ArkOS's `cli/plaid.rs`, answering in the domain's types
-//! (`money_domain::plaid`), which read Plaid's JSON as it comes.
+//! (`money_core::plaid`), which read Plaid's JSON as it comes.
 //!
 //! **Nothing secret is ever said.** The client id and the secret travel as
 //! headers and the access token in the body; none of them is in a URL, an
@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use money_domain::plaid::{PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
+use money_core::plaid::{PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
 use serde::Deserialize;
 use serde_json::{json, Value};
 

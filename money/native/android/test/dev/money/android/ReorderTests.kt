@@ -6,8 +6,8 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import uniffi.money_domain.AccountKind
-import uniffi.money_domain.cardGroupId
+import uniffi.money_core.AccountKind
+import uniffi.money_core.cardGroupId
 import dev.arkui.Landing
 import dev.arkui.landing
 import dev.arkui.reordered

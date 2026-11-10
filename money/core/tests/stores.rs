@@ -3,9 +3,9 @@
 //! and Target's are their pages' JSON as community scripts have recorded
 //! it, and as near as is known — the adapters read the spellings seen.
 
-use money_domain::stores::{amazon, amazon_charges, costco, read, target};
+use money_core::stores::{amazon, amazon_charges, costco, read, target};
 
-fn items(r: &money_domain::StoreReceipt) -> Vec<(&str, &str, i64, i64)> {
+fn items(r: &money_core::StoreReceipt) -> Vec<(&str, &str, i64, i64)> {
     r.items.iter().map(|i| (i.name.as_str(), i.sku.as_str(), i.quantity, i.amount)).collect()
 }
 

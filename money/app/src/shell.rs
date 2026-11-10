@@ -20,8 +20,8 @@
 
 use ark_app::shell::Launch;
 use ark_app::{App, Command, Data};
-use money_domain::routes::Route;
-use money_domain::*;
+use money_core::routes::Route;
+use money_core::*;
 
 pub mod inspect;
 pub mod view;

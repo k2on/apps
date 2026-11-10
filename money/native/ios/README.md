@@ -44,7 +44,7 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   What was let go is drawn where it went until the session agrees. Done
   ends it.
 - **Credit cards**, budgeted the way YNAB budgets them
-  (`money_domain::cards`): the cards' group, Credit Card Payments, comes
+  (`money_core::cards`): the cards' group, Credit Card Payments, comes
   first, its header saying what of the cards' debt is not covered; each
   card's payment category wears the card's mark and a bar of how much of
   what the card owes is set aside, "$X short" in orange or "Covered" in
@@ -64,7 +64,7 @@ Four tabs in the system's Liquid Glass bar, which shrinks as a list scrolls:
   Auto-Assign's three amounts as one-tap choices, the month's transactions
   in it, and rename, hide and delete last. Spending on a card beyond what
   it had is its own line, in amber.
-- **A category assigned by rule** (`money_domain::rules`, set on the
+- **A category assigned by rule** (`money_core::rules`, set on the
   desktop: a share of matching income from a month on) is read-only in a
   month its rule assigns: its row wears the rule's mark (`function`) by
   what it was assigned and has no swipes, holding it says the rule, and
@@ -158,7 +158,7 @@ sheet (ArkUI's `AccountSheet`): who and where, the banks that want a look,
 Settings, and Sign Out or Leave the Demo.
 
 **Settings** (from the account sheet) has
-the **Banks** (`money_domain::banks`, money/README.md's banks): each
+the **Banks** (`money_core::banks`, money/README.md's banks): each
 connected bank with how it is doing and when it last synced, and
 **Connect a Bank**, which asks the server (`banks.connect`) and opens
 Plaid's page in Safari's view (ArkUI's `SafariView`,
@@ -208,7 +208,7 @@ directory's `Money/` beside the generated views (`Generated/`), and the
 
 CI (`.github/workflows/ios.yaml`) does the same on `macos-15` for
 every push touching `money/native/ios`, `money/app.toml`, `money/app`,
-`money/domain`, `rust/`, `ui/prebuild.py` or `ui/swift`, and on demand: the kernel for the phone, the simulator and
+`money/core`, `rust/`, `ui/prebuild.py` or `ui/swift`, and on demand: the kernel for the phone, the simulator and
 the Mac, the bindings, the xcframework, the project, the archive, then the
 tests on the newest iOS 26 iPhone simulator. The upload to TestFlight runs
 only on `main` and only when the repository variable `MONEY_IOS_UPLOAD` is

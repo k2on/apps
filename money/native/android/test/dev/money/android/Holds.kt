@@ -6,7 +6,7 @@ package dev.money.android
 import dev.arkdb.ffi.Id
 import uniffi.money_app.Holding
 import uniffi.money_app.MoneyView
-import uniffi.money_domain.TxnLine
+import uniffi.money_core.TxnLine
 
 private val holds = HashMap<Pair<Book, MoneyView>, ArrayDeque<Holding>>()
 

@@ -1,5 +1,5 @@
-//! money's domain in plain Rust (`docs/plan-v5.md` §1.16): a household's
-//! budget. The schema ([`schema`]), the types ([`types`]), days and months
+//! money's core in plain Rust (`docs/plan-v5.md` §1.16): the domain of a
+//! household's budget. The schema ([`schema`]), the types ([`types`]), days and months
 //! ([`dates`]); the accounts ([`accounts`]), the budget's shape
 //! ([`categories`]), the budget itself ([`budget`]), its assignments by
 //! formula ([`formulas`]) and its credit cards
@@ -11,7 +11,9 @@
 //! ([`views`]). Who is signed in is `ark-auth`'s two tables and functions, and
 //! [`feed`]. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
-//! `money/ffi`). The demo's household is beside the app, not in it: `money/seed`.
+//! the phones' library), and the demo's household ([`demo`], `demo`; and
+//! `money-seed`, which writes it into a server's data directory, `cli`),
+//! which an app or a server carries only when it asks for it.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
@@ -32,6 +34,8 @@ pub mod cards;
 pub mod categories;
 pub mod changes;
 pub mod dates;
+#[cfg(feature = "demo")]
+pub mod demo;
 #[cfg(feature = "ffi")]
 mod ffi;
 pub mod filters;

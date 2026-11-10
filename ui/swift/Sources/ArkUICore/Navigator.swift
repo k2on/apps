@@ -2,7 +2,7 @@
 // `back`, `reset` and `handle` — this one over a `NavigationStack`'s path,
 // Android's over Compose's back stack (ui/kotlin), the desktop's over its
 // address bar's history (ui/rust/arkui's `navigator`). A route is the app's
-// domain's `Route` (`harken_domain::routes`, `money_domain::routes`), whose
+// domain's `Route` (`harken_domain::routes`, `money_core::routes`), whose
 // one spelling is its path; the back stack is a list of them.
 //
 // A value, so a tab's stack is `@State` and a `NavigationStack(path:)`

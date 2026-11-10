@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use ark_ffi::Twin;
 use money_app::ffi::{money_demo, Changed, MoneyView, Sent, Session};
-use money_domain::accounts::AccountKind;
-use money_domain::changes::MoneyChangeFfi;
-use money_domain::{Assign, MoneyChange, OpenAccount, UniFfiTag};
+use money_core::accounts::AccountKind;
+use money_core::changes::MoneyChangeFfi;
+use money_core::{Assign, MoneyChange, OpenAccount, UniFfiTag};
 
 const TODAY: &str = "2026-10-26";
 
@@ -84,7 +84,7 @@ fn the_app_is_told_what_moved() {
     let v = s.version(budget("2026-10"));
     let assign = change(MoneyChange::Assign(Assign {
         month: "2026-10".into(),
-        category_id: money_domain::Id::new(line.category_id.0),
+        category_id: money_core::Id::new(line.category_id.0),
         amount: line.assigned + 2_500,
     }));
     assert!(matches!(s.send(assign), Sent::Intent { .. }));

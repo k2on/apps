@@ -7,7 +7,7 @@ the kernel keeps the household's replica on the phone's disk, dials the
 server, rebases, and keeps the views; the app's own code is its screens,
 its model and its way in. Every change it makes is one of the domain's
 (`MoneyChange`, sent with `session.send`), every view hands over UniFFI's
-own records (`uniffi.money_domain`), and what a row says — a line's tone,
+own records (`uniffi.money_core`), and what a row says — a line's tone,
 story and captions, an ask's sentence, the form's rules (`Draft`) — is the
 records' own methods: nothing crosses as JSON, and no rule is the app's.
 The look it shares with harken is `ui/kotlin` (package `dev.arkui`),

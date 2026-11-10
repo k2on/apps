@@ -18,7 +18,7 @@ struct Demo {
 
 impl Demo {
     fn new() -> Demo {
-        let mut peer = money_seed::open(money_seed::seeded_disk("2026-10-26", NOW));
+        let mut peer = money_core::demo::open(money_core::demo::seeded_disk("2026-10-26", NOW));
         let mut store = Store::new();
         let october = ShellState {
             month: "2026-10".into(),

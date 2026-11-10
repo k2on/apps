@@ -8,8 +8,8 @@
 mod common;
 
 use common::Book;
-use money_domain::cards::{card_group, payment_category, CARD_GROUP};
-use money_domain::*;
+use money_core::cards::{card_group, payment_category, CARD_GROUP};
+use money_core::*;
 
 /// A household: $3,000 in checking, a card that owes nothing yet, and an
 /// everyday group with groceries and dining in it.
@@ -75,7 +75,7 @@ fn a_card_on_the_budget_has_a_payment_category_in_the_cards_group() {
         "open_account",
         &OpenAccount {
             name: "Store Card".into(),
-            kind: money_domain::accounts::AccountKind::Credit,
+            kind: money_core::accounts::AccountKind::Credit,
             on_budget: false,
             balance: -5_000,
             date: "2026-09-01".into(),

@@ -3,7 +3,7 @@
 //! Two builds of one window. Without features it is the household's
 //! client: it signs in to a money server and dials it (`live.rs`), and
 //! "Sync" asks the server's importer to ask the banks now. With `demo` it
-//! is the demo: no server and no sign-in, a seeded household (`money_seed`)
+//! is the demo: no server and no sign-in, a seeded household (`money_core::demo`)
 //! on a peer that is its own authority, and the card's bank standing in
 //! for Plaid behind "Sync" — what GitHub Pages publishes, and a separate
 //! build on purpose, as harken's is: a flag could be set by accident, a
@@ -15,7 +15,7 @@
 //! selected category's story on the right.
 //!
 //! None of the budget's arithmetic is here. Every figure on screen is a
-//! view of the domain (`money/domain`), kept up to date by the rows a
+//! view of the domain (`money/core`), kept up to date by the rows a
 //! change touched; every button is a mutation by name, and a refusal is
 //! the domain's own sentence, said for a moment over the page.
 //!
@@ -49,10 +49,10 @@ use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
 use iced::keyboard::{Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
-use money_domain::dates::{add_months, day_of_ms, month_of};
-use money_domain::*;
+use money_core::dates::{add_months, day_of_ms, month_of};
 #[cfg(any(feature = "demo", test))]
-use money_seed as seed;
+use money_core::demo as seed;
+use money_core::*;
 
 use peer::{Ledger, Peer};
 
@@ -60,9 +60,9 @@ use peer::{Ledger, Peer};
 pub use arkui::shell::Pane;
 
 use money_app::shell::ShellMsg;
-/// Where the window is: money's routes (`money_domain::routes`), which the
+/// Where the window is: money's routes (`money_core::routes`), which the
 /// address bar spells by their paths (`arkui::router`).
-pub use money_domain::routes::Route;
+pub use money_core::routes::Route;
 
 /// What fills the page beside the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -713,7 +713,7 @@ impl App {
 
     /// Author one of money's changes ([`MoneyChange`]): whether it was
     /// taken, as [`App::author`].
-    pub fn change(&mut self, what: &str, change: &money_domain::MoneyChange) -> bool {
+    pub fn change(&mut self, what: &str, change: &money_core::MoneyChange) -> bool {
         self.taken(what, |c| c.mutate_bytes(change.name(), change.input()))
     }
 
@@ -1228,7 +1228,7 @@ impl App {
                         self.note = format!("{balance:?} is not an amount");
                         return Task::none();
                     };
-                    let kind = money_domain::accounts::AccountKind::of(kind).unwrap_or_default();
+                    let kind = money_core::accounts::AccountKind::of(kind).unwrap_or_default();
                     let owed = kind.owes();
                     let open = OpenAccount {
                         name,
@@ -2108,7 +2108,7 @@ impl App {
                 Choice::AnyCategory => glyphs::CLOSE,
                 Choice::Transfer(_) => glyphs::SEND,
                 Choice::Paid(_) => glyphs::CARD,
-                Choice::Category(Some(c)) if c == money_domain::budget::ready_to_assign() => glyphs::GROWTH,
+                Choice::Category(Some(c)) if c == money_core::budget::ready_to_assign() => glyphs::GROWTH,
                 Choice::Category(Some(_)) => view::category_glyph(&label),
                 Choice::Category(None) => glyphs::CLOSE,
             },
@@ -2143,12 +2143,12 @@ impl App {
                 items: vec![item(
                     "Ready to Assign".into(),
                     Some(amount::money(rta)),
-                    Choice::Category(Some(money_domain::budget::ready_to_assign())),
+                    Choice::Category(Some(money_core::budget::ready_to_assign())),
                 )],
             });
         }
         let moving = matches!(d.choosing, Choosing::Move { .. });
-        let cards = money_domain::cards::card_group();
+        let cards = money_core::cards::card_group();
         for g in self.peer.groups().iter().filter(|g| !g.hidden && (moving || g.id != cards)) {
             let items = self
                 .peer
@@ -2182,11 +2182,11 @@ impl App {
         // else, as its starting balance is.
         if let Some(l) = self
             .own_card(&d.choosing)
-            .and_then(|c| self.peer.line(money_domain::cards::payment_category(c)))
+            .and_then(|c| self.peer.line(money_core::cards::payment_category(c)))
         {
             if !moving && has(&l.name) {
                 groups.push(arkui::command::Group {
-                    heading: money_domain::cards::CARD_GROUP.into(),
+                    heading: money_core::cards::CARD_GROUP.into(),
                     items: vec![item(
                         l.name.clone(),
                         Some(amount::money(l.available)),
@@ -2288,7 +2288,7 @@ impl App {
     fn follows(&mut self, c: Id<Category>) -> bool {
         let ruled = self.peer.line(c).is_some_and(|l| l.ruled);
         if ruled {
-            self.note = format!("could not assign: {}", money_domain::formulas::FOLLOWS);
+            self.note = format!("could not assign: {}", money_core::formulas::FOLLOWS);
         }
         ruled
     }
@@ -2434,7 +2434,7 @@ impl App {
             _ => {
                 // The one form every client has (`transactions::Draft`):
                 // its rules, and the change it is.
-                let d = money_domain::transactions::Draft {
+                let d = money_core::transactions::Draft {
                     editing: f.editing,
                     account: f.account,
                     date: f.date,

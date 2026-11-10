@@ -6,9 +6,9 @@
 use ark_ffi::Taken;
 use ark_ffi::Twin;
 use money_app::ffi::{money_domain, money_open, money_send, Sent};
-use money_domain::accounts::AccountKind;
-use money_domain::AccountLineView;
-use money_domain::{MoneyChange, OpenAccount, UniFfiTag};
+use money_core::accounts::AccountKind;
+use money_core::AccountLineView;
+use money_core::{MoneyChange, OpenAccount, UniFfiTag};
 
 /// Falsified by `config` registering the module alone (no domain): there
 /// was no function `open_account`; and by `money_send` throwing its
@@ -51,5 +51,5 @@ fn money_opens_and_is_called_by_name() {
         }
     );
     let (hash, version) = money_domain().split_once(' ').map(|(h, v)| (h.to_string(), v.to_string())).unwrap();
-    assert_eq!((hash.len(), version.as_str()), (64, money_domain::VERSION));
+    assert_eq!((hash.len(), version.as_str()), (64, money_core::VERSION));
 }
