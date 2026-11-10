@@ -135,6 +135,10 @@ dependencies {
 tasks.withType<Test>().configureEach {
     systemProperty("dev.arkdb.ui.strict", "true")
     systemProperty("jna.library.path", "$moneyLib/host")
+    // The suites side by side, a JVM each, over the machine's cores: one
+    // JVM ran them in turn, seven minutes of harken's ten in build.yaml's
+    // `tests` job, every time the kernel moved.
+    maxParallelForks = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 }
 
 // The screenshots (src/test/.../Screens.kt) are `recordPaparazziDebug`'s, which

@@ -154,6 +154,9 @@
             , out ? "touch $out"
               # The workspace the crates are of.
             , build ? crate
+              # Its crates' features as cargo's `--workspace` resolves them
+              # (`checksUnified`), or each test build's own (null).
+            , unified ? checksUnified
             }:
             let
               src = only dirs;
@@ -163,7 +166,7 @@
               built = { packageId, member, features ? [ "default" ], doctests ? false }:
                 let name' = lib.replaceStrings [ "-" ] [ "_" ] packageId; in
                 build {
-                  inherit packageId features;
+                  inherit packageId features unified;
                   tests = true;
                   root = { src = only [ member ]; workspace_member = member; };
                   # rustdoc compiles and runs the doctests against the
@@ -190,7 +193,12 @@
                 done
               '';
             in
-            pkgs.runCommand "test-${name}" ({ inherit nativeBuildInputs; } // env) ''
+            pkgs.runCommand "test-${name}" ({
+              inherit nativeBuildInputs;
+              # The crates' test builds, whose dependencies `checks-crates`
+              # builds ahead (`rootsOf`).
+              passthru.roots = map built crates;
+            } // env) ''
               # The build's directory, where the tests were compiled from.
               cp -r ${src} "$NIX_BUILD_TOP/source"
               chmod -R u+w "$NIX_BUILD_TOP/source"
@@ -1156,6 +1164,7 @@
           # feature), run from a tree that is what any of them reads.
           memberTests = m: crateTests {
             name = m.packageId + lib.optionalString (m ? features) "-demo";
+            unified = if m ? features then demoUnified else checksUnified;
             crates = [ m ];
             dirs = rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ];
             # What makes a speaker's copy of a hi-res file (harken/server/tests/speaker.rs).
@@ -1171,7 +1180,20 @@
             features = m.features or [ "default" ];
             inherit tests;
             rootAttrs = rustcHook { inherit (m) packageId; clippy = true; };
+            unified = if m ? features then demoUnified else checksUnified;
           }) [ false true ];
+          # The checks' crates resolved as one `cargo test --workspace`
+          # resolves them: every member's tests and libraries at once, each
+          # crate built with the union of what they ask of it, and so built
+          # once for all of them. Without it each test and lint build
+          # resolved its own graph, and a crate reached with different
+          # features was a build of its own, with everything over it: ark-peer
+          # was thirteen builds, and a change to it thirteen recompiles of it
+          # and of every crate above each. The demos are resolved with the
+          # demo feature beside them, which moves only the crates it reaches.
+          workspaceRoots = ms: lib.concatMap (m: map (tests: { inherit (m) packageId; features = m.features or [ "default" ]; inherit tests; }) [ false true ]) ms;
+          checksUnified = rustCrates.unify { inherit pkgs; roots = workspaceRoots members; };
+          demoUnified = rustCrates.unify { inherit pkgs; roots = workspaceRoots (members ++ demos); };
           # Every `.rs` under `dir` formatted as the rustfmt.toml nearest it says.
           rustfmtCheck = name: dir: pkgs.runCommand "check-${name}-fmt" { nativeBuildInputs = [ rust ]; } ''
             cd ${dir}
@@ -1179,7 +1201,21 @@
             touch $out
           '';
           # Derivations as one, for a check that is many.
-          allOf = name: drvs: pkgs.linkFarm name (lib.imap0 (i: d: { name = "${toString i}-${d.name}"; path = d; }) drvs);
+          allOf = name: drvs: (pkgs.linkFarm name (lib.imap0 (i: d: { name = "${toString i}-${d.name}"; path = d; }) drvs))
+            // { roots = lib.concatMap rootsOf drvs; };
+          # The crate builds a check is made of at its top (each test build,
+          # each lint-clean build), whose dependencies are what checks share.
+          rootsOf = d: d.roots or (if d ? completeDeps then [ d ] else [ ]);
+          # Every crate the named checks' top builds depend on, once: what
+          # build.yaml's `crates` job builds and pushes before the checks
+          # fan out, so that two checks never compile the same crate at once.
+          checksCrates = names:
+            let
+              roots = lib.concatMap (n: rootsOf self.checks.${system}.${n}) names;
+              deps = lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) roots;
+              key = d: builtins.unsafeDiscardStringContext (baseNameOf d.drvPath);
+            in
+            allOf "checks-crates" (lib.attrValues (lib.listToAttrs (map (d: lib.nameValuePair (key d) d) deps)));
 
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
@@ -1279,6 +1315,12 @@
             harken-fdroid = fdroid.apps-fdroid;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # The crates build.yaml's checks share, built once before they
+            # fan out (`checksCrates`): of every check its `checks` jobs run.
+            checks-crates = checksCrates [
+              "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
+              "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
+            ];
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
             # scanner over a bound directory. A package and not a check: it
@@ -1382,10 +1424,11 @@
               (crateTests {
                 name = "docs";
                 build = docsCrate;
+                unified = null;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
                 dirs = [ "docs/site" "rust/arkui" "rust/Cargo.toml" ];
               })
-            ] ++ memberClippy docsCrate { packageId = "docs"; });
+            ] ++ memberClippy (args: docsCrate (removeAttrs args [ "unified" ])) { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only rustDirs);
             # harken's domain crate builds, and its schema's hash is the one

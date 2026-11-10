@@ -142,8 +142,15 @@ jobs:
 
   # The flake's Linux checks: each member's tests and lints a derivation of
   # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a
-  # commit compiles and runs only what its change reaches.
-  checks:
+  # commit compiles and runs only what its change reaches. First `crates`:
+  # every crate the checks' test and lint builds depend on (flake.nix,
+  # `checks-crates`; resolved once for the whole workspace, as `cargo test
+  # --workspace` resolves them, so each is one build), compiled once and
+  # pushed. Then the checks fan out, a job per group, each fetching those
+  # crates and building only its own tests and lints: no crate is compiled
+  # by two jobs. They were one job of 16 to 22 minutes, nearly all of it one
+  # step on one runner's four cores.
+  crates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -163,16 +170,40 @@ jobs:
             echo "::error::rust/Cargo.nix or docs/site/Cargo.nix is not the lockfile's: nix run .#update-cargo-nix"
             exit 1
           }
+      - name: Build the checks' crates
+        run: nix build --print-build-logs --no-link .#checks-crates
+
+  checks:
+    needs: crates
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each group a job; together every check the one job built. The
+        # checks a group names share its test builds' crates with no other
+        # group's beyond `crates`.
+        group:
+          - { name: rust, checks: "rust" }
+          - { name: clippy, checks: "clippy" }
+          - { name: ffi, checks: "ffi harken-domain harken-module traces vectors fuzz-smoke versions" }
+          - { name: docs, checks: "docs" }
+          - { name: lint, checks: "fmt theme theme-contrast" }
+    name: checks (${{ matrix.group.name }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build the checks
+        env:
+          CHECKS: ${{ matrix.group.checks }}
         run: |
-          nix build --print-build-logs --no-link \
-            .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy \
-            .#checks.x86_64-linux.rust .#checks.x86_64-linux.ffi \
-            .#checks.x86_64-linux.traces .#checks.x86_64-linux.vectors \
-            .#checks.x86_64-linux.fuzz-smoke .#checks.x86_64-linux.versions \
-            .#checks.x86_64-linux.harken-domain .#checks.x86_64-linux.harken-module \
-            .#checks.x86_64-linux.docs \
-            .#checks.x86_64-linux.theme .#checks.x86_64-linux.theme-contrast
+          refs=()
+          for c in $CHECKS; do refs+=(".#checks.x86_64-linux.$c"); done
+          nix build --print-build-logs --no-link "${refs[@]}"
 
   # What a server runs — the harken and money NixOS modules' packages — built and
   # pushed to Cachix, which ark substitutes from: a deploy of a commit this
