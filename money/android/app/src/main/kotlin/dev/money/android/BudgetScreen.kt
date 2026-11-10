@@ -161,6 +161,8 @@ fun BudgetScreen(ledger: Ledger) {
     var newGroup by remember { mutableStateOf<String?>(null) }
     var newCategory by remember { mutableStateOf<Pair<Id, String>?>(null) }
     val list = rememberLazyListState()
+    // Under the shell's bar (ArkUI's), the month and its arrows are the bar's.
+    val underBar = dev.arkui.LocalUnderToolbar.current
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
 
     // The groups and their categories as the reorder holds them: each group's key, then its
@@ -173,7 +175,7 @@ fun BudgetScreen(ledger: Ledger) {
     val fits = remember(budget) { fitsOf(budget) }
     // After the ready card and the notices.
     val reorder =
-        rememberReorder(list, lead = 2, isHeader = ::isGroupKey, fits = fits) { key, landing ->
+        rememberReorder(list, lead = if (underBar) 1 else 2, isHeader = ::isGroupKey, fits = fits) { key, landing ->
             when (val d = dropOf(key, landing)) {
                 is Drop.Category -> {
                     book.moveCategory(d.id, d.group, d.before)
@@ -220,7 +222,7 @@ fun BudgetScreen(ledger: Ledger) {
             state = list,
             contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp),
         ) {
-            item(key = "month") { MonthPager(ledger) }
+            if (!underBar) item(key = "month") { MonthPager(ledger) }
             item(key = "ready") { ReadyCard(ledger, Modifier.padding(top = Space.s)) }
             for ((gk, rows) in sections(drawn, ::isGroupKey)) {
                 val g = groups[gk] ?: continue

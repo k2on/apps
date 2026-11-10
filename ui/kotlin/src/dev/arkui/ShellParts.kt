@@ -274,6 +274,12 @@ public fun ToolbarScope.BarButton(title: String, glyph: String, placement: BarPl
  * start, the title (or the principal items), the primary items as its
  * actions, the secondary ones in its overflow menu.
  */
+/**
+ * Whether a screen is under the shell's top bar (`WithToolbar`): its own large title, its month
+ * pager and its add button are the bar's there, and it draws none of them.
+ */
+public val LocalUnderToolbar = compositionLocalOf { false }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @Composable () -> Unit) {
@@ -293,7 +299,8 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                     Row { principal.forEach { button(it) } }
                 }
             },
-            navigationIcon = { all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) } },
+            // Side by side: the slot is a box, where two would lie one over the other.
+            navigationIcon = { Row { all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) } } },
             actions = {
                 all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
                 LocalInspectorToggle.current?.let { t ->
@@ -314,7 +321,7 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                 }
             },
         )
-    }) { pad -> Box(Modifier.padding(pad)) { content() } }
+    }) { pad -> Box(Modifier.padding(pad)) { CompositionLocalProvider(LocalUnderToolbar provides true) { content() } } }
 }
 
 // * Search and the inspector

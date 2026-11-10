@@ -349,6 +349,8 @@ fun Page(
     val shell = LocalShell.current
     val ledger by shell.book.state.collectAsStateWithLifecycle()
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Under the shell's top bar (ArkUI's): the bar has the title, the actions and the add button.
+    val hosted = dev.arkui.LocalUnderToolbar.current && onBack == null
     Scaffold(
         modifier = modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
@@ -356,7 +358,9 @@ fun Page(
             if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
-            if (onBack == null) {
+            if (hosted) {
+                // The shell's bar is over it.
+            } else if (onBack == null) {
                 // The tab's large title row, from the status bar's foot, going up under it as the
                 // page scrolls: the scroll behaviour's offset, read as it is laid out, not composed.
                 Box(
@@ -399,10 +403,10 @@ fun Page(
                 }
             }
         },
-        floatingActionButton = fab,
+        floatingActionButton = { if (!hosted) fab() },
         snackbarHost = { SnackbarHost(shell.snackbar) },
     ) { pad ->
-        val under = if (onBack == null) TabTitle.BELOW else 0.dp
+        val under = if (onBack == null && !hosted) TabTitle.BELOW else 0.dp
         if (refresh) {
             PullToRefreshBox(
                 isRefreshing = ledger.syncing,

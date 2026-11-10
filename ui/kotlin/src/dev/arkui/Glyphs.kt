@@ -222,12 +222,22 @@ public object ArkGlyphs {
     /** `house`, Lucide's: a home, a mortgage. */
     public val House: ImageVector = glyph("house", "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z")
 
+    /** `landmark`, Lucide's: a bank, a checking account. */
+    public val Landmark: ImageVector = glyph("landmark", "M3 22h18", "M6 18v-7", "M10 18v-7", "M14 18v-7", "M18 18v-7", "M12 2 20 7H4z")
+
+    /** `credit-card`, Lucide's. */
+    public val Card: ImageVector = glyph("credit-card", "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M2 10h20")
+
+    /** `trending-up`, Lucide's: an investment. */
+    public val Trending: ImageVector = glyph("trending-up", "M16 7h6v6", "m22 7-8.5 8.5-5-5L2 17")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
             More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked,
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
+            Landmark, Card, Trending,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

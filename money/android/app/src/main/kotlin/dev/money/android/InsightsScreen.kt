@@ -54,6 +54,8 @@ import uniffi.ark_format.formatPercent
 @Composable
 fun InsightsScreen(ledger: Ledger) {
     val a = LocalAmounts.current
+    // Under the shell's bar (ArkUI's), the month and its arrows are the bar's.
+    val underBar = dev.arkui.LocalUnderToolbar.current
     val palette = chartPalette()
     val parts =
         ledger.spending
@@ -70,7 +72,7 @@ fun InsightsScreen(ledger: Ledger) {
 
     Page(title = "Insights") { pad, _ ->
         LazyColumn(contentPadding = PaddingValues(start = Space.page, end = Space.page, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + Space.xl)) {
-            item(key = "month") { MonthPager(ledger) }
+            if (!underBar) item(key = "month") { MonthPager(ledger) }
             item(key = "h-spending") { SectionHeader("Spending") }
             item(key = "spending") {
                 GroupCard {
