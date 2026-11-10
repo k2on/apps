@@ -29,6 +29,31 @@ case $phone in
       curl -fsSL --retry 3 -o "$dir/apk-$a/$a.apk" "$FDROID/$name" && echo "$a: $name" ||
         { echo "::warning::$a: $name would not download"; rm -rf "${dir:?}/apk-$a"; }
     done
+    # COMMIT (a dry run, app-screens.yaml): the APKs build built at that
+    # commit (its pull request's run), in place of the published ones, as
+    # the iPhone's and the desktop's are the commit's; waited for while that
+    # run is making them (await-apk.sh). An app it built none of (its
+    # inputs had not moved from main's) keeps what F-Droid offers.
+    if [ -n "${COMMIT:-}" ]; then
+      run=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/workflows/build.yaml/runs?head_sha=$COMMIT&per_page=1" --jq '.workflow_runs[0].id // empty')
+      if [ -z "$run" ]; then
+        echo "no build run at ${COMMIT:0:7}: the published APKs"
+      else
+        for a in "$@"; do
+          got=$(mktemp -d)
+          code=0
+          bash "$(dirname "$0")/await-apk.sh" "$run" "$a" "$got" || code=$?
+          if [ "$code" = 0 ]; then
+            rm -rf "${dir:?}/apk-$a"
+            mv "$got/apk-$a" "$dir/apk-$a"
+            echo "$a: build's APK at ${COMMIT:0:7} (run $run)"
+          elif [ "$code" != 3 ]; then
+            echo "::error::$a: build's APK at ${COMMIT:0:7} (run $run) would not come"
+            exit 1
+          fi
+        done
+      fi
+    fi
     ;;
   *) echo "usage: published.sh android <dir> <app>..."; exit 1 ;;
 esac
