@@ -292,7 +292,7 @@ pub struct GroupItem {
 /// A choice of a sheet's picker: a category, a group, Ready to Assign.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct Choice {
+pub struct BudgetChoice {
     pub key: String,
     pub title: String,
     pub glyph: String,
@@ -319,7 +319,7 @@ pub struct AmountForm {
 pub struct MoveForm {
     pub from: String,
     pub to: String,
-    pub choices: Vec<Choice>,
+    pub choices: Vec<BudgetChoice>,
     pub amount: AmountForm,
 }
 
@@ -330,7 +330,7 @@ pub struct CategoryForm {
     pub name: String,
     pub problem: Option<String>,
     pub group: String,
-    pub groups: Vec<Choice>,
+    pub groups: Vec<BudgetChoice>,
     pub can_save: bool,
 }
 
@@ -947,12 +947,12 @@ fn amount_form(subject: String, label: &str, prompt: &str, f: &Figure, note: Str
 const READY: &str = "";
 
 fn move_form(lines: &[BudgetLine], from: &Option<String>, to: &Option<String>, f: &Figure, style: &NumberStyle) -> MoveForm {
-    let mut choices = vec![Choice {
+    let mut choices = vec![BudgetChoice {
         key: READY.into(),
         title: "Ready to Assign".into(),
         glyph: "inbox".into(),
     }];
-    choices.extend(lines.iter().filter(|l| l.assignable() && !l.hidden).map(|l| Choice {
+    choices.extend(lines.iter().filter(|l| l.assignable() && !l.hidden).map(|l| BudgetChoice {
         key: l.category_id.hex(),
         title: l.name.clone(),
         glyph: crate::look::category_glyph(&l.name).into(),
@@ -999,7 +999,7 @@ fn category_form(groups: &[GroupLine], group: &str, name: &str) -> CategoryForm 
         group: group.into(),
         groups: gs
             .iter()
-            .map(|g| Choice {
+            .map(|g| BudgetChoice {
                 key: g.id.hex(),
                 title: g.name.clone(),
                 glyph: "folder".into(),

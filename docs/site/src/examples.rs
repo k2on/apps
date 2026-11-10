@@ -106,6 +106,13 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("TARGET", glyphs::TARGET),
     ("ARROWS", glyphs::ARROWS),
     ("USERS", glyphs::USERS),
+    ("EYE", glyphs::EYE),
+    ("EYE_OFF", glyphs::EYE_OFF),
+    ("ARROW_UP", glyphs::ARROW_UP),
+    ("ARROW_DOWN", glyphs::ARROW_DOWN),
+    ("TRASH", glyphs::TRASH),
+    ("CROSSHAIR", glyphs::CROSSHAIR),
+    ("FOLDER", glyphs::FOLDER),
 ];
 
 /// Rows to draw with: places, long enough to be cut, and with the
