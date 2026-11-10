@@ -603,7 +603,7 @@ jobs:
         run: |
           attrs=()
           for a in $APPS; do attrs+=("$a-ios-simulator" "$a-macos"); done
-          bash .github/apple-ahead.sh "git+file://$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
+          bash .github/apple-ahead.sh "$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
 
   ios:
     needs: [which, kernels]

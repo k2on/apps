@@ -7,6 +7,8 @@
 #
 #   apple-ahead.sh <flake> <out> <attr>...
 #
+# <flake> as nix takes it: `.`, or a checkout's path (not `git+file:` of a
+# shallow clone, which nix refuses).
 # <attr> is an aarch64-darwin package (`money-ios-simulator`,
 # `harken-ios-archive`, `money-macos`); one the flake does not have is said
 # and passed over. Writes the built store paths to <out>, one a line, for a
@@ -18,9 +20,14 @@ shift 2
 : > "$out"
 drvs=()
 for attr in "$@"; do
-  if ! drv=$(nix eval --raw "$flake#packages.aarch64-darwin.$attr.drvPath" 2> /dev/null); then
-    echo "$attr: no such Mac package here; passed over"
-    continue
+  if ! drv=$(nix eval --raw "$flake#packages.aarch64-darwin.$attr.drvPath" 2> "${TMPDIR:-/tmp}/apple-ahead.err"); then
+    if grep -q "does not provide attribute" "${TMPDIR:-/tmp}/apple-ahead.err"; then
+      echo "$attr: no such Mac package here; passed over"
+      continue
+    fi
+    cat "${TMPDIR:-/tmp}/apple-ahead.err" >&2
+    echo "::error::$attr did not evaluate"
+    exit 1
   fi
   # Of everything it is built from, what is Linux's and a Mac build's own
   # input (what those need on Linux is built with them). Either form of
