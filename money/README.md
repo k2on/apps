@@ -354,6 +354,30 @@ page, the desktop to a loopback port, and a phone to `money://…` — the
 scheme every money server allows. Whoever the provider lets in is the
 household.
 
+**The browser** is a client like the others (`web/src/live.rs`). The
+page the server serves walks the sign-in machine every shell walks
+(`ark_auth::onboarding`): with nobody signed in it goes to `/auth/login`
+by itself, once a load, comes back to its own address with the code and
+trades it at `POST /auth/session`, which answers the login without its
+token and keeps the token in the session cookie, `ark-session`:
+`HttpOnly` (no script on the page reads it), `SameSite=Strict`, `Secure`
+behind https. The page's socket sends nothing as its first message, and
+the server takes the cookie — only from a page of its own origin (the
+upgrade's `Origin` is its `Host`; a proxy in front must pass `Host`
+through). What the page keeps in `localStorage` is who is signed in,
+never the token. Its replica is an ark-peer compiled to wasm, in memory:
+it fills at every load, shows every device's changes as they land,
+authors through the domain's mutators like every device, and keeps what
+was authored while the server was away to push when it is back (until
+the page is closed: no durable replica yet). `?demo` is the demo
+household in the page instead, with no server — the screenshots', and
+the public demo's (`money/screens/shots.json`'s `web.query`).
+
+`money-peer SERVER USER wait PAYEE | add PAYEE AMOUNT`
+(`server/src/peer.rs`, beside the server's binary) is another device with
+no window, signed in to a dev server by name: what
+`checks.money-web-sync` stands up beside the page (below).
+
 **The importer** (`server/src/importer.rs`) is a peer in the server's
 process, signed in as the account `bank` and holding the `bank` role,
 which the server grants it and nobody else unless `MONEY_ROLES` says so.
@@ -456,8 +480,9 @@ nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
 the server answers, in the system's browser, with the page's link in
 Settings too. The browser client (money/web, Leptos over arkui-web) runs
-the shell over the demo household in the page for now; a client that
-signs in and syncs is what is left (ui/docs/app.md, What Is Left).
+the same shell, signed in to the server that serves it and synced
+(above); Settings' Account pane and signing out there are not drawn in
+the page yet.
 
 ## The demo
 
@@ -546,3 +571,20 @@ signal, the credentials, the hardening); the live window drawn, and the desktop'
 in or to Plaid's page;
 typing into the demo's fields under Xvfb; and a phone, which does not
 exist yet.
+
+**The browser, end to end** (`checks.money-web-sync`,
+`web/tests/sync.py`, in CI's build): money-server on the seeded
+household with dev auth, the SPA it serves in Playwright's headless
+Chromium. A bad code is said on the sign-in page with Sign In; Sign In
+goes to the server's sign-in and back to the seeded household; the
+session is the `HttpOnly`, `SameSite=Strict` cookie and nothing in
+`localStorage` holds the token; a transaction added through New
+Transaction reaches `money-peer`, and one `money-peer` adds appears on
+the page without a reload; one added while the server is stopped
+reaches `money-peer` once the server is back on the same data; and a
+reload is still signed in. Its screenshots are the check's output. The
+socket's half is `server/tests/server.rs` (a page's cookie is its
+session from the server's own origin, and nobody from another). Not
+verified for the browser: a real provider's sign-in page, a proxy in
+front, Safari and Firefox, a phone's browser, and a session expiring
+while the page is open.

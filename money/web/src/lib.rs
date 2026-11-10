@@ -3,8 +3,13 @@
 //! (`money_app::accounts`), run by ark-app here as on the phones and the
 //! desktop, drawn by arkui-web (Leptos over the DOM); the screens the
 //! shell hosts that are not in Rust's vocabulary yet are this crate's
-//! (`screens`), as money/iced has its own. The household is the demo's
-//! (`money_core::demo`), in the page's memory, its own authority: no server.
+//! (`screens`), as money/iced has its own.
+//!
+//! The household is the server's that served the page (`live`): the page
+//! signs in through it as the phones do, holds a replica of the budget
+//! and syncs over its socket. With `?demo` it is the demo's
+//! (`money_core::demo`), in the page's memory, its own authority, with no
+//! server: what the screenshots and the public demo run.
 //!
 //! The address opens any screen with no steps, with the launch arguments
 //! every shell reads (`ark_app::shell::Launch`): `?screen=budget`,
@@ -26,6 +31,7 @@ use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::dates::{add_months, days_from_civil, parse_day};
 use money_core::*;
 
+pub mod live;
 pub mod screens;
 
 /// Everything the page can be told.
@@ -59,6 +65,12 @@ pub enum Msg {
     /// Where the address says the page is besides the shell's launch
     /// arguments (`MoneyWeb::route`): a key and its value.
     At(String, String),
+    /// The socket has something to say, or the peer's deadline came
+    /// (`live`): it is pumped.
+    Wake,
+    /// What came of one of the sign-in machine's effects, or a press on
+    /// the sign-in page (`live`).
+    Onboard(ark_auth::onboarding::Event),
 }
 
 /// A change to the new transaction being written.
@@ -108,6 +120,8 @@ pub struct MoneyWeb {
     pub changes: u64,
     /// Changes counted and not sent (`WebApp::dry_run`).
     pub dry: bool,
+    /// The page on its server, signed in there; none for the demo.
+    pub live: Option<live::Live>,
 }
 
 /// The views the page holds as long as it is open.
@@ -145,7 +159,11 @@ impl MoneyWeb {
                 }
             }
         });
-        let mut peer = money_core::demo::open(disk);
+        MoneyWeb::over(money_core::demo::open(disk), today)
+    }
+
+    /// The page over `peer`: its views held, the shell on this month.
+    pub fn over(mut peer: Replica, today: String) -> MoneyWeb {
         let mut store = Store::new();
         for v in ALWAYS {
             store.hold(&mut peer, v);
@@ -169,6 +187,7 @@ impl MoneyWeb {
             settings: false,
             changes: 0,
             dry: false,
+            live: None,
         };
         app.shell_step(ShellMsg::Month { month });
         app
@@ -477,6 +496,9 @@ impl WebApp for MoneyWeb {
     type Msg = Msg;
 
     fn view(&self) -> AnyView {
+        if let Some(live) = self.live.as_ref().filter(|l| !l.running()) {
+            return self.welcome(live);
+        }
         let page = self.shell_page();
         let hosts = |name: &'static str| screens::hosted(self, name);
         let window = arkui_web::shell(money_shell::view(&page).map(Msg::Shell), &hosts);
@@ -604,6 +626,8 @@ impl WebApp for MoneyWeb {
             }
             Msg::Settings(on) => self.settings = on,
             Msg::At(k, v) => self.at(&k, v),
+            Msg::Wake => self.wake(),
+            Msg::Onboard(e) => self.onboard(e),
         }
     }
 

@@ -434,7 +434,8 @@ browser's own `web.shots`, each opened by its address — the launch arguments e
 `key`, `type`, `await`, `wait`), at each of `web.sizes` (`mac`,
 `ipad-landscape`, `ipad-portrait`, `ios`) in light and dark, reduced motion so nothing is
 caught moving. It writes `<out>/<size>/<theme>/<id>.png` and each its
-`<id>.tree.txt`. The demo needs no server.
+`<id>.tree.txt`. Every shot's address starts with the app's `web.query`
+(money's `demo`: the household in the page, no server to sign in to).
 
 `ARK_WEB_MODE=ssg` takes a static site instead (an app whose app.toml's
 `[web] modes` has `ssg`; money's and harken's are the SPA alone), each

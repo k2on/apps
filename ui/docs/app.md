@@ -486,7 +486,13 @@ app's crate is the same in each.
 (`modes = ["spa"]`), served by their own servers beside the sync socket
 and sign-in: a household's budget and a person's library are private, so
 there is nothing to write ahead for anybody, and a page that draws itself
-over what it syncs needs no server to draw it. The docs site is the static
+over what it syncs needs no server to draw it. money's page is a client
+like the phones (`money/web/src/live.rs`): it walks the same sign-in
+machine (`ark_auth::onboarding`), trades the code at `/auth/session` so
+its session is an `HttpOnly`, `SameSite=Strict` cookie no script reads,
+and holds a replica (an ark-peer in wasm, in memory) synced over the
+socket, which takes the cookie from a page of the server's own origin.
+`?demo` runs the demo household in the page instead, with no server. The docs site is the static
 case (`ssg`): public, finite, read more than written. harken's public
 pages (a show, an episode, a transcript) are the next. `ssr` is a
 capability the layers keep — the same routes, controls and forms, taken by
@@ -711,10 +717,14 @@ ui/docs/apps/money.md for money):
    app (plain Kotlin) and stays as it is.
 3. **The browser** — written: `ui/rust/web` (crate `arkui-web`) draws a
    `View` with Leptos over the real DOM ("The Browser", below) and
-   `money/web` runs money's shell and the Accounts slice over the demo
-   household in wasm, its other sections hosted by its own screens as
-   money/iced hosts its; `nix build .#money-web` is the page
-   (`checks.money-web`), `.github/screens/app-web.sh` photographs it.
+   `money/web` runs money's shell and the Accounts slice, signed in to
+   the server that serves it and synced over its socket as every device
+   is (an ark-peer in wasm; `?demo` is the demo household in the page),
+   its other sections hosted by its own screens as money/iced hosts its;
+   `nix build .#money-web` is the page (`checks.money-web`),
+   `checks.money-web-sync` holds it to signing in and syncing with
+   another device in Playwright's Chromium, and
+   `.github/screens/app-web.sh` photographs the demo.
    Left: harken's client, an SSR or pre-rendered page for the docs, the
    vim grammar shared with iced (below), the page's own history.
 4. **macOS, iPad, Android tablets and foldables**: money's target is one
@@ -748,8 +758,11 @@ ui/docs/apps/money.md for money):
    ui/swift and ui/kotlin. Today's `ScreenParts` are the component layer
    written by hand, the step before that.
 8. **The browser's modes**: money and harken are the SPA alone, served
-   by their own server (ark-peer's `web::Site`), and money-web is the
-   demo household in the page: a client that signs in and syncs is next.
+   by their own server (ark-peer's `web::Site`), and money-web is a
+   client of it, signed in and synced (`money/web/src/live.rs`): the
+   sign-in machine the phones walk, the session an `HttpOnly` cookie the
+   socket takes, the replica in memory. Next: a durable replica (ark-peer's
+   `Disk` is synchronous and IndexedDB is not), and harken's client.
    The docs site is the static case (`static_paths`, `prerender`,
    `page::dangling`), harken's public pages after it. `ssr`
    (`arkui-serve`) is built and tested and turned on by no app; "The

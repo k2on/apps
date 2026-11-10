@@ -92,7 +92,10 @@ pub async fn session(server: &str, code: &str) -> Result<Login, String> {
     let headers = web_sys::Headers::new().map_err(js)?;
     headers.set("Content-Type", "application/json").map_err(js)?;
     init.set_headers(&headers);
-    let text = fetch_text(&url, &init).await?;
+    // The server's sentence, without its status: what the page says.
+    let text = fetch_text(&url, &init)
+        .await
+        .map_err(|e| e.split_once(' ').map_or(e.clone(), |(_, t)| t.to_string()))?;
     serde_json::from_str(&text).map_err(|e| format!("the login did not parse: {e}"))
 }
 

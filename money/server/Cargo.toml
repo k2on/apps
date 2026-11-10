@@ -10,9 +10,17 @@ workspace = "../../rust"
 name = "money-server"
 path = "src/main.rs"
 
+# A device with no window, signed in to a dev server by name: another
+# device for a test or a script (src/peer.rs).
+[[bin]]
+name = "money-peer"
+path = "src/peer.rs"
+
 [dependencies]
 ark = { path = "../../rust/ark" }
 money-core = { path = "../core" }
+# An amount as a person types it (`money-peer`).
+ark-format = { path = "../../rust/ark-format" }
 # The server is a peer that listens; the importer is a peer in this process
 # that reaches it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }

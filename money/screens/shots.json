@@ -434,7 +434,8 @@
     }
   ],
   "web": {
-    "_": "The browser's (app-web.sh, web-shots.js): money-web over the demo household seeded to `today`, at each of `sizes` (named as `screens`' `on`) in light and dark. Every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address (`-screen budget` is `?screen=budget`); `shots` are the browser's own besides, on every size unless they say: the transient parts, each opened by its address — arkui-web's `context` (a row's menu), `menu` (a control's), `popover` (a field's), `command` (the command box), `keys` (the keys panel) — then its steps in the desktop's vocabulary (click, key, type, await, wait).",
+    "_": "The browser's (app-web.sh, web-shots.js): money-web over the demo household in the page (`query`'s `demo`: no server to sign in to) seeded to `today`, at each of `sizes` (named as `screens`' `on`) in light and dark. Every one of `screens` is taken on the sizes it is `on`, its launch arguments as the page's address (`-screen budget` is `?screen=budget`); `shots` are the browser's own besides, on every size unless they say: the transient parts, each opened by its address — arkui-web's `context` (a row's menu), `menu` (a control's), `popover` (a field's), `command` (the command box), `keys` (the keys panel) — then its steps in the desktop's vocabulary (click, key, type, await, wait).",
+    "query": "demo",
     "today": "2026-11-10",
     "sizes": {
       "mac": [

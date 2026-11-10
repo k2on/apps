@@ -14311,6 +14311,11 @@ rec {
         edition = "2021";
         crateBin = [
           {
+            name = "money-peer";
+            path = "src/peer.rs";
+            requiredFeatures = [ ];
+          }
+          {
             name = "money-server";
             path = "src/main.rs";
             requiredFeatures = [ ];
@@ -14330,6 +14335,10 @@ rec {
           {
             name = "ark-auth";
             packageId = "ark-auth";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
           }
           {
             name = "ark-peer";
@@ -14410,8 +14419,17 @@ rec {
         libName = "money_web";
         dependencies = [
           {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
             name = "ark-app";
             packageId = "ark-app";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+            usesDefaultFeatures = false;
           }
           {
             name = "ark-format";
@@ -14443,9 +14461,19 @@ rec {
             features = [ "demo" ];
           }
           {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
             name = "web-sys";
             packageId = "web-sys";
-            features = [ "Window" "Document" "Element" ];
+            features = [ "Window" "Document" "Element" "Location" ];
           }
         ];
         features = {

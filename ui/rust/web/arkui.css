@@ -284,6 +284,14 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-inspector-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
 .ark-inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ark-inspector-title { font-size: 17px; font-weight: 700; }
+/* The sign-in page (`welcome`): the machine's words centred in the window */
+.ark-welcome { height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.ark-welcome-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.ark-welcome-title { font-size: 28px; font-weight: 700; }
+.ark-welcome-status:empty { display: none; }
+.ark-welcome-error { font-size: 13px; }
+.ark-welcome-actions { display: flex; gap: 8px; margin-top: 6px; }
+
 /* An inspector's page of cards (`detail_page`) and the card at its top (`header_card`), as iced draws them */
 .ark-detail { gap: 14px; }
 .ark-header-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }

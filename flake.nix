@@ -1409,6 +1409,13 @@
             # money's web client builds for wasm32 and is bound
             # (`.github/screens/app-web.sh` photographs it).
             inherit money-web;
+            # And is a real client: signed in through money-server, synced
+            # with another device over its socket, offline and back
+            # (money/web/nix/sync.nix, in Playwright's Chromium).
+            money-web-sync = pkgs.callPackage ./money/web/nix/sync.nix {
+              inherit money-web money-seed;
+              money-server = money-server-bin;
+            };
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
