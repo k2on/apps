@@ -242,10 +242,11 @@ final class Drive: XCTestCase {
         // again if it asks.
         let signing = app.staticTexts["Sign In"]
         let allow = springboard.buttons["Continue"]
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
         let until = Date().addingTimeInterval(90)
         while Date() < until && (field.exists || signing.exists) {
             if allow.exists { allow.tap() }
+            // An expectation is waited on once: a new one each time round.
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
             _ = XCTWaiter.wait(for: [gone], timeout: 1)
         }
         if field.exists || signing.exists {
