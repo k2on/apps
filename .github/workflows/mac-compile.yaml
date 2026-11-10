@@ -1,0 +1,81 @@
+# TEMPORARY (removed before the branch is done): the app prototype's Swift
+# compiled on a Mac, fast. The kernels by nix (the cache's when unmoved),
+# then each destination's xcodebuild here, its errors alone said.
+name: mac-compile
+
+on:
+  push:
+    branches: [claude/sleepy-faraday-lcbow5-app]
+    paths:
+      - "ui/swift/**"
+      - "money/ios/**"
+      - "harken/ios/**"
+      - "modules/**"
+      - ".github/workflows/mac-compile.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: mac-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NIX_CONFIG: |
+    sandbox = relaxed
+    extra-substituters = https://k2on.cachix.org
+    extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+jobs:
+  compile:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash .github/xcode-pinned.sh .
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            ${{ env.NIX_CONFIG }}
+            ${{ env.XCODE_NIX_CONF }}
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "[Xx]code([^Gg]|$)"
+      - name: Kernels
+        run: |
+          # Both of money's slices and the Mac's (the iPhone's simulator and the Mac's).
+          nix build --no-link --print-out-paths -L "git+file://$PWD#packages.aarch64-darwin.money-ios-kernel-simulator" > "$RUNNER_TEMP/k-sim"
+          drv=$(nix eval --raw "git+file://$PWD#packages.aarch64-darwin.money-macos.drvPath")
+          mac=$(nix-store -q --references "$drv" | grep -- '-ios-xcframework.*\.drv$')
+          echo "$mac"
+          for d in $mac; do nix build --no-link --print-out-paths -L "$d^out" >> "$RUNNER_TEMP/k-mac" || true; done
+          cat "$RUNNER_TEMP/k-sim" "$RUNNER_TEMP/k-mac"
+          xg=$(nix build --no-link --print-out-paths "git+file://$PWD#xcodegen")/bin/xcodegen
+          echo "XG=$xg" >> "$GITHUB_ENV"
+      - name: Compile
+        run: |
+          set +e
+          status=0
+          one() { # <slice dir> <label> <xcodebuild args...>
+            k=$1; label=$2; shift 2
+            rm -rf money/ffi/ios && mkdir -p money/ffi/ios
+            cp -R "$k"/*.xcframework "$k"/swift money/ffi/ios/ && chmod -R u+w money/ffi/ios
+            (cd money/ios && "$XG" generate > /dev/null)
+            (cd money/ios && xcodebuild build -project Money.xcodeproj -scheme Money -configuration Debug \
+              -derivedDataPath "$RUNNER_TEMP/dd-$label" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+              COMPILER_INDEX_STORE_ENABLE=NO -IDEPackageSupportDisableManifestSandbox=1 "$@" > "$RUNNER_TEMP/$label.log" 2>&1)
+            r=$?
+            echo "== $label: exit $r"
+            grep -E '(error|warning: .*(deprecated|unavailable))' "$RUNNER_TEMP/$label.log" | grep -v '^ld: warning' | sort -u | head -150
+            grep -E '^\*\* BUILD' "$RUNNER_TEMP/$label.log"
+            [ $r = 0 ] || status=1
+          }
+          one "$(head -1 "$RUNNER_TEMP/k-sim")" ios -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
+          one "$(head -1 "$RUNNER_TEMP/k-mac")" mac -destination 'generic/platform=macOS'
+          exit $status
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: ${{ runner.temp }}/*.log
