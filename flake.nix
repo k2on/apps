@@ -1029,15 +1029,32 @@
           # files) and UniFFI's Swift, read from the library built for this
           # machine.
           appleKernel = { name, crate, so, framework, targets }:
+            let llvm = pkgs.llvmPackages.bintools-unwrapped; in
             pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" { } ''
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
               cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
               x=$out/${framework}.xcframework
+              # The archive as Apple's linker reads it. rustc on Linux writes
+              # the static library in GNU's format (a `//` name table), and
+              # copies ring's own symbol table in as a member (`__.SYMDEF`):
+              # ld64 refuses both ("archive member '//' not a mach-o file",
+              # app-screens 42897443933). So its members are taken out and
+              # put in again in Darwin's format, with a symbol table of its
+              # own; two members of one name would be lost, and stop it.
+              darwin() {
+                local from=$1 to=$2 dir
+                dir=$(mktemp -d)
+                names=$(${llvm}/bin/llvm-ar t "$from" | grep -v '^__\.SYMDEF')
+                if [ -n "$(sort <<< "$names" | uniq -d)" ]; then echo "$from: members of one name" >&2; exit 1; fi
+                (cd "$dir" && ${llvm}/bin/llvm-ar x "$from")
+                (cd "$dir" && ${llvm}/bin/llvm-ar --format=darwin rcs "$to" $names)
+                rm -rf "$dir"
+              }
               ${lib.concatMapStrings (t: ''
                 mkdir -p $x/${iosSlice.${t}.id}
-                cp ${(appleLib { inherit crate; target = t; }).lib}/lib/lib${so}*.a $x/${iosSlice.${t}.id}/lib${so}.a
+                darwin ${(appleLib { inherit crate; target = t; }).lib}/lib/lib${so}*.a $x/${iosSlice.${t}.id}/lib${so}.a
                 cp -r headers $x/${iosSlice.${t}.id}/Headers
               '') targets}
               slice() {
