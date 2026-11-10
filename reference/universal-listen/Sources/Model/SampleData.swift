@@ -1,0 +1,286 @@
+import Foundation
+
+/// The household's library as the home server would serve it: invented
+/// artists and songs, public-domain classical works, four shows. Everything
+/// is derived deterministically from the tables below.
+enum SampleData {
+    struct ArtistSpec { let id, name, genre: String; let hue: Double; let symbol: String }
+    struct AlbumSpec {
+        let id, title, artist: String
+        let year: Int
+        let genre: String
+        let composer: String
+        let addedDaysAgo: Int
+        let hue, hue2: Double
+        let symbol: String
+        let style: Art.Style
+        /// "Title" or "Title|Composer" when a track's composer differs.
+        let tracks: [String]
+    }
+
+    static let artists: [ArtistSpec] = [
+        .init(id: "mira-okafor", name: "Mira Okafor", genre: "Classical", hue: 0.08, symbol: "pianokeys"),
+        .init(id: "halden-chamber", name: "Halden Chamber Orchestra", genre: "Classical", hue: 0.58, symbol: "music.quarternote.3"),
+        .init(id: "theo-lindqvist", name: "Theo Lindqvist", genre: "Classical", hue: 0.66, symbol: "pianokeys.inverse"),
+        .init(id: "halden-quartet", name: "Halden String Quartet", genre: "Classical", hue: 0.95, symbol: "music.quarternote.3"),
+        .init(id: "ines-varga", name: "Ines Varga", genre: "Classical", hue: 0.03, symbol: "music.note"),
+        .init(id: "northgate", name: "Northgate Symphony", genre: "Classical", hue: 0.12, symbol: "music.quarternote.3"),
+        .init(id: "lantern-keepers", name: "The Lantern Keepers", genre: "Folk", hue: 0.10, symbol: "lamp.desk"),
+        .init(id: "juniper-vale", name: "Juniper Vale", genre: "Dream Pop", hue: 0.78, symbol: "sparkles"),
+        .init(id: "achterberg-trio", name: "Ruben Achterberg Trio", genre: "Jazz", hue: 0.55, symbol: "music.mic"),
+        .init(id: "moss-meridian", name: "Moss & Meridian", genre: "Ambient", hue: 0.36, symbol: "leaf"),
+        .init(id: "della-marsh", name: "Della Marsh", genre: "Americana", hue: 0.06, symbol: "guitars"),
+        .init(id: "kito-ferreira", name: "Kito Ferreira", genre: "Electronic", hue: 0.70, symbol: "waveform"),
+        .init(id: "grace-hill-choir", name: "Grace Hill Choir", genre: "Hymns", hue: 0.14, symbol: "music.note.house"),
+        .init(id: "pocket-orchestra", name: "The Pocket Orchestra", genre: "Kids", hue: 0.16, symbol: "balloon.2"),
+        .init(id: "ottoline", name: "Ottoline", genre: "Indie Pop", hue: 0.88, symbol: "camera.macro"),
+    ]
+
+    static let albums: [AlbumSpec] = [
+        .init(id: "goldberg", title: "Goldberg Variations", artist: "mira-okafor", year: 2019, genre: "Classical",
+              composer: "Johann Sebastian Bach", addedDaysAgo: 400, hue: 0.10, hue2: 0.05, symbol: "pianokeys", style: .type,
+              tracks: ["Aria", "Variation 1", "Variation 2", "Variation 3: Canone all'Unisono", "Variation 4", "Variation 5",
+                       "Variation 6: Canone alla Seconda", "Variation 7: al tempo di Giga", "Variation 8", "Aria da capo"]),
+        .init(id: "clair-de-lune", title: "Clair de Lune & Other Pieces", artist: "mira-okafor", year: 2022, genre: "Classical",
+              composer: "Claude Debussy", addedDaysAgo: 210, hue: 0.60, hue2: 0.68, symbol: "moon.stars", style: .blobs,
+              tracks: ["Arabesque No. 1", "Arabesque No. 2", "Rêverie", "Clair de lune", "Passepied",
+                       "La fille aux cheveux de lin", "The Snow Is Dancing", "Golliwogg's Cakewalk"]),
+        .init(id: "four-seasons", title: "The Four Seasons", artist: "halden-chamber", year: 2018, genre: "Classical",
+              composer: "Antonio Vivaldi", addedDaysAgo: 520, hue: 0.32, hue2: 0.08, symbol: "leaf", style: .type,
+              tracks: ["Spring: I. Allegro", "Spring: II. Largo", "Spring: III. Allegro", "Summer: I. Allegro non molto",
+                       "Summer: II. Adagio", "Summer: III. Presto", "Autumn: I. Allegro", "Autumn: II. Adagio molto",
+                       "Autumn: III. Allegro", "Winter: I. Allegro non molto", "Winter: II. Largo", "Winter: III. Allegro"]),
+        .init(id: "gymnopedies", title: "Gymnopédies", artist: "theo-lindqvist", year: 2021, genre: "Classical",
+              composer: "Erik Satie", addedDaysAgo: 300, hue: 0.52, hue2: 0.60, symbol: "drop", style: .rings,
+              tracks: ["Gymnopédie No. 1", "Gymnopédie No. 2", "Gymnopédie No. 3", "Gnossienne No. 1", "Gnossienne No. 2",
+                       "Gnossienne No. 3", "Je te veux", "Le Picadilly"]),
+        .init(id: "nocturnes", title: "Nocturnes", artist: "theo-lindqvist", year: 2023, genre: "Classical",
+              composer: "Frédéric Chopin", addedDaysAgo: 120, hue: 0.70, hue2: 0.74, symbol: "moon", style: .type,
+              tracks: ["Nocturne in B-flat minor, Op. 9 No. 1", "Nocturne in E-flat major, Op. 9 No. 2",
+                       "Nocturne in B major, Op. 9 No. 3", "Nocturne in F major, Op. 15 No. 1",
+                       "Nocturne in F-sharp major, Op. 15 No. 2", "Nocturne in G minor, Op. 15 No. 3",
+                       "Nocturne in C-sharp minor, Op. 27 No. 1", "Nocturne in D-flat major, Op. 27 No. 2",
+                       "Nocturne in C minor, Op. 48 No. 1"]),
+        .init(id: "american", title: "American & Death and the Maiden", artist: "halden-quartet", year: 2020, genre: "Classical",
+              composer: "Antonín Dvořák", addedDaysAgo: 340, hue: 0.98, hue2: 0.92, symbol: "music.quarternote.3", style: .stripes,
+              tracks: ["Quartet No. 12 \"American\": I. Allegro ma non troppo", "Quartet No. 12 \"American\": II. Lento",
+                       "Quartet No. 12 \"American\": III. Molto vivace", "Quartet No. 12 \"American\": IV. Finale",
+                       "Death and the Maiden: I. Allegro|Franz Schubert", "Death and the Maiden: II. Andante con moto|Franz Schubert",
+                       "Death and the Maiden: III. Scherzo|Franz Schubert", "Death and the Maiden: IV. Presto|Franz Schubert"]),
+        .init(id: "cello-suites", title: "Cello Suite No. 1", artist: "ines-varga", year: 2024, genre: "Classical",
+              composer: "Johann Sebastian Bach", addedDaysAgo: 60, hue: 0.05, hue2: 0.02, symbol: "music.note", style: .rings,
+              tracks: ["Prélude", "Allemande", "Courante", "Sarabande", "Menuets I & II", "Gigue"]),
+        .init(id: "seventh", title: "Symphony No. 7", artist: "northgate", year: 2017, genre: "Classical",
+              composer: "Ludwig van Beethoven", addedDaysAgo: 610, hue: 0.13, hue2: 0.99, symbol: "music.quarternote.3", style: .type,
+              tracks: ["I. Poco sostenuto – Vivace", "II. Allegretto", "III. Presto", "IV. Allegro con brio", "Egmont Overture, Op. 84"]),
+        .init(id: "harbor-lights", title: "Harbor Lights", artist: "lantern-keepers", year: 2024, genre: "Folk",
+              composer: "A. Linde & B. Oyelaran", addedDaysAgo: 90, hue: 0.09, hue2: 0.62, symbol: "sailboat", style: .rings,
+              tracks: ["Salt on the Window", "Harbor Lights", "Rope & Anchor", "The Long Way Round", "Ferry at Six",
+                       "Gulls (Interlude)", "Lanterns", "Weathervane", "Home Before the Rain"]),
+        .init(id: "paper-satellites", title: "Paper Satellites", artist: "juniper-vale", year: 2023, genre: "Dream Pop",
+              composer: "J. Vale", addedDaysAgo: 150, hue: 0.80, hue2: 0.58, symbol: "sparkles", style: .blobs,
+              tracks: ["Paper Satellites", "Glow-in-the-Dark Ceiling", "Orbit", "Static Hearts", "Slow Comet",
+                       "Afterimage", "Tin Can Telephone", "Signal Lost"]),
+        .init(id: "low-tide", title: "Low Tide Sessions", artist: "achterberg-trio", year: 2022, genre: "Jazz",
+              composer: "R. Achterberg", addedDaysAgo: 260, hue: 0.56, hue2: 0.64, symbol: "water.waves", style: .stripes,
+              tracks: ["Low Tide", "Brackish", "Sandbar Blues", "Mudflat Waltz", "Pilot Light", "Estuary", "High Water"]),
+        .init(id: "field-recordings", title: "Field Recordings Vol. 2", artist: "moss-meridian", year: 2025, genre: "Ambient",
+              composer: "Moss & Meridian", addedDaysAgo: 30, hue: 0.38, hue2: 0.45, symbol: "leaf", style: .blobs,
+              tracks: ["Fern Light", "Under the Canopy", "Rain on Slate", "Lichen", "Morning Fog Lifts", "Root System"]),
+        .init(id: "copper-roads", title: "Copper Roads", artist: "della-marsh", year: 2021, genre: "Americana",
+              composer: "D. Marsh & T. Oyelaran", addedDaysAgo: 480, hue: 0.07, hue2: 0.03, symbol: "road.lanes", style: .stripes,
+              tracks: ["Copper Roads", "Two-Lane Prayer", "Dust Devil", "Grain Elevator", "Porch Light Waltz",
+                       "Mile Marker 9", "Cottonwood", "Last Exit Diner"]),
+        .init(id: "night-bus", title: "Night Bus", artist: "kito-ferreira", year: 2025, genre: "Electronic",
+              composer: "K. Ferreira", addedDaysAgo: 14, hue: 0.72, hue2: 0.88, symbol: "bus.doubledecker", style: .stripes,
+              tracks: ["Night Bus", "Sodium Lamps", "Last Stop", "Fare Zone 3", "Tunnel Hum", "Rear Window",
+                       "Depot", "Daybreak Terminal"]),
+        .init(id: "small-hours", title: "Small Hours", artist: "achterberg-trio", year: 2024, genre: "Jazz",
+              composer: "R. Achterberg", addedDaysAgo: 75, hue: 0.62, hue2: 0.10, symbol: "moon.zzz", style: .rings,
+              tracks: ["Small Hours", "Kettle On", "3 A.M. Ballad", "Insomniac's Stroll", "Blue Lamp", "Dawn Chorus", "Coda"]),
+        .init(id: "wildflower-radio", title: "Wildflower Radio", artist: "juniper-vale", year: 2025, genre: "Dream Pop",
+              composer: "J. Vale", addedDaysAgo: 21, hue: 0.90, hue2: 0.15, symbol: "camera.macro", style: .blobs,
+              tracks: ["Wildflower Radio", "Pollen Count", "Clover", "Meadowlark", "Summer Static", "Seed Bank", "Bloom"]),
+        .init(id: "kitchen-hymns", title: "Kitchen Table Hymns", artist: "grace-hill-choir", year: 2020, genre: "Hymns",
+              composer: "Traditional", addedDaysAgo: 700, hue: 0.13, hue2: 0.07, symbol: "cup.and.saucer", style: .type,
+              tracks: ["Amazing Grace|John Newton", "Be Thou My Vision", "Abide with Me|William Henry Monk",
+                       "It Is Well with My Soul|Philip Bliss", "Holy, Holy, Holy|John Bacchus Dykes",
+                       "Come Thou Fount|Robert Robinson", "Nearer, My God, to Thee|Lowell Mason",
+                       "All Creatures of Our God and King"]),
+        .init(id: "saturday-cartoons", title: "Saturday Cartoons", artist: "pocket-orchestra", year: 2023, genre: "Kids",
+              composer: "The Pocket Orchestra", addedDaysAgo: 200, hue: 0.15, hue2: 0.50, symbol: "balloon.2", style: .rings,
+              tracks: ["Cereal Song", "The Robot Who Couldn't Dance", "Puddle Jumping", "Brush Your Teeth Blues",
+                       "Dinosaur Parade", "Bubble Bath Boogie", "Goodnight, Moon Rocket", "Pillow Fort"]),
+        .init(id: "glasshouse", title: "Glasshouse", artist: "ottoline", year: 2026, genre: "Indie Pop",
+              composer: "O. Brandt", addedDaysAgo: 3, hue: 0.86, hue2: 0.95, symbol: "camera.macro", style: .stripes,
+              tracks: ["Glasshouse", "Fogged", "Tomato Vines", "Condensation", "Hothouse Flowers", "Shatterproof",
+                       "Sunroom", "Greenhouse Effect", "Open the Windows"]),
+        .init(id: "northern-lines", title: "Northern Lines", artist: "lantern-keepers", year: 2026, genre: "Folk",
+              composer: "A. Linde & B. Oyelaran", addedDaysAgo: 6, hue: 0.50, hue2: 0.72, symbol: "train.side.front.car", style: .blobs,
+              tracks: ["Northern Lines", "Platform 4", "Snowfield", "Sleeper Car", "Aurora", "Coal Smoke",
+                       "Terminus", "The Way Back South"]),
+    ]
+
+    static let composerYears: [String: String] = [
+        "Johann Sebastian Bach": "1685–1750", "Claude Debussy": "1862–1918", "Antonio Vivaldi": "1678–1741",
+        "Erik Satie": "1866–1925", "Frédéric Chopin": "1810–1849", "Antonín Dvořák": "1841–1904",
+        "Franz Schubert": "1797–1828", "Ludwig van Beethoven": "1770–1827", "John Newton": "1725–1807",
+        "William Henry Monk": "1823–1889", "Philip Bliss": "1838–1876", "John Bacchus Dykes": "1823–1876",
+        "Robert Robinson": "1735–1790", "Lowell Mason": "1792–1872",
+    ]
+
+    /// Invented lyric lines, combined per song.
+    static let lyricPool: [String] = [
+        "I left the porch light on for you", "The kettle's singing in the dark", "We drew our maps on paper napkins",
+        "And every road came back to here", "Hold the door, the wind is turning", "There's salt still on the window glass",
+        "Count the lanterns down the harbor", "One for every year we've had", "Don't you know the tide comes back",
+        "Even when the moon forgets", "Static on the kitchen radio", "Playing songs we used to know",
+        "Fold the evening into quarters", "Keep a corner for the morning", "I'm not lost, I'm taking the long way",
+        "Through the fields of someday soon", "Ooh, the night bus hums our names", "Past the shuttered bakery",
+        "All the windows lit like embers", "We're the last ones on the line", "So sing it low and sing it slow",
+        "Let the old house hold the tune", "Home before the rain, home before the rain", "Home before the rain comes down",
+    ]
+
+    struct ShowSpec {
+        let id, title, author: String
+        let kind: Show.Kind
+        let summary, feed: String
+        let hue, hue2: Double
+        let symbol: String
+        let style: Art.Style
+        let minutes: ClosedRange<Int>
+        let episodes: [(String, String, String?)]
+        let transcript: [(String, String)]
+    }
+
+    static let shows: [ShowSpec] = [
+        .init(id: "workbench", title: "The Workbench", author: "Priya Nandakumar & Sam Okoro", kind: .podcast,
+              summary: "Two friends, one garage, and the slow joy of making things by hand. Woodworking, repair and finishing — every Tuesday.",
+              feed: "feeds.workbench.example/rss", hue: 0.08, hue2: 0.04, symbol: "hammer", style: .stripes, minutes: 38...62,
+              episodes: [
+                ("The Last Ten Percent", "Why finishing is the hardest part of any project, and a listener question about oil finishes.", nil),
+                ("Dovetails Without Fear", "Hand-cut joinery for people who own one saw and a lot of patience.", nil),
+                ("The Repair Café", "We visit a neighbourhood repair night and fix a toaster, a lamp and a very old radio.", nil),
+                ("Sharpening, Finally", "Stones, strops and the ten-minute routine that changed our shop.", nil),
+                ("Wood Movement", "Why tabletops crack, and how to build for the seasons.", nil),
+                ("Shop Safety Is Boring (Listen Anyway)", "Push sticks, dust and the habits that keep all ten fingers.", nil),
+                ("Milk Paint", "An old finish, a new obsession: mixing, layering and distressing.", nil),
+                ("The Workbench Workbench", "We finally build ourselves a proper bench. It takes four episodes' worth of mistakes.", nil),
+                ("Tools Under Twenty", "The cheapest tools we'd never give up.", nil),
+                ("Listener Builds", "Your birdhouses, bookcases and one ambitious canoe.", nil),
+              ],
+              transcript: [
+                ("Priya", "Welcome back to The Workbench. I'm Priya."),
+                ("Sam", "And I'm Sam. This week we're talking about finishing things."),
+                ("Priya", "Which, for the record, neither of us is good at."),
+                ("Sam", "I have four chairs in the garage that are ninety percent done."),
+                ("Priya", "The last ten percent is where the real work hides."),
+                ("Sam", "Sanding, mostly. It's always sanding."),
+                ("Priya", "Let's start with a listener question about oil finishes."),
+                ("Sam", "Danish oil versus hardwax oil. A classic fight."),
+                ("Priya", "Danish oil soaks in and gives you that warm, low sheen."),
+                ("Sam", "Hardwax oil sits closer to the surface and takes a beating."),
+                ("Priya", "For a kitchen table, I'd pick hardwax every time."),
+                ("Sam", "Thin coats. Wipe off the excess after ten minutes."),
+                ("Priya", "And let it cure longer than the can says."),
+                ("Sam", "Patience is a finish too, if you think about it."),
+                ("Priya", "That's going on a mug."),
+                ("Sam", "After the break: the joint that changed how I build boxes."),
+              ]),
+        .init(id: "slow-science", title: "Slow Science", author: "Tomas Reyes", kind: .podcast,
+              summary: "One question per episode, and all the time it needs. Unhurried stories about how the world works.",
+              feed: "slowscience.example/feed.xml", hue: 0.60, hue2: 0.70, symbol: "atom", style: .rings, minutes: 24...41,
+              episodes: [
+                ("Why Is Dusk Blue?", "Light, air and the twenty minutes after sunset.", nil),
+                ("The Patience of Lichens", "Organisms that grow a millimetre a year, and what they remember.", nil),
+                ("How Bread Rises", "Yeast, gluten and a very long Saturday.", nil),
+                ("Counting Birds", "What a century of volunteer bird counts tells us.", nil),
+                ("The Sound of Snow", "Why a snowy street is so quiet.", nil),
+                ("Tides, Slowly", "The moon, the sun and the shape of the sea floor.", nil),
+                ("Why Cats Purr", "Nobody is entirely sure, and that's the fun part.", nil),
+                ("The Oldest Clock", "Tree rings, ice cores and other ways the earth keeps time.", nil),
+                ("Mushroom Networks", "What's happening underneath the forest floor.", nil),
+                ("Where Does Wind Come From?", "Pressure, heat and a kite on a windy hill.", nil),
+              ],
+              transcript: [
+                ("Tomas", "This is Slow Science, where we take one question and stay with it."),
+                ("Tomas", "I'm Tomas Reyes. Today: why is the sky so blue just after sunset?"),
+                ("Tomas", "You'd think it would simply get darker, evenly, like a dimmer switch."),
+                ("Tomas", "But for twenty minutes or so, the sky overhead turns a deep, clear blue."),
+                ("Anneke", "That's ozone doing something most people never hear about."),
+                ("Tomas", "That's Anneke Visser, who studies the upper atmosphere."),
+                ("Anneke", "When the sun is below the horizon, its light takes a long path through the air."),
+                ("Anneke", "Ozone absorbs the orange and red parts of that light."),
+                ("Anneke", "So what reaches you from overhead is mostly blue."),
+                ("Tomas", "So the blue hour isn't the same blue as midday."),
+                ("Anneke", "Not at all. Midday blue is scattering. Dusk blue is absorption."),
+                ("Tomas", "Two different reasons for the same colour."),
+                ("Anneke", "Nature reuses its best ideas."),
+                ("Tomas", "After a short break, we'll go up a mountain to see it for ourselves."),
+              ]),
+        .init(id: "grace-hill", title: "Grace Hill Sundays", author: "Grace Hill Community Church", kind: .sermons,
+              summary: "Sunday sermons from Grace Hill, recorded live. This season: the parables of Luke.",
+              feed: "gracehill.example/sermons.rss", hue: 0.11, hue2: 0.58, symbol: "book.closed", style: .type, minutes: 28...44,
+              episodes: [
+                ("The Father Who Ran", "Pastor Ruth Adeyemi on the prodigal son — and the father watching the road.", "Luke 15:11–32"),
+                ("The Lost Coin", "A woman, a lamp and a broom: the joy of finding.", "Luke 15:8–10"),
+                ("The Good Neighbour", "Who is my neighbour? The question behind the question.", "Luke 10:25–37"),
+                ("The Mustard Seed", "Small beginnings and patient growth.", "Luke 13:18–19"),
+                ("The Great Banquet", "An open table and the excuses we make.", "Luke 14:15–24"),
+                ("The Persistent Widow", "On praying and not giving up.", "Luke 18:1–8"),
+                ("The Rich Fool", "Bigger barns and the question of enough.", "Luke 12:13–21"),
+                ("The Sower", "Seed, soil and the shape of a listening life.", "Luke 8:4–15"),
+                ("The Two Debtors", "Much forgiven, much loved.", "Luke 7:36–50"),
+                ("The Lost Sheep", "Ninety-nine, and the one.", "Luke 15:1–7"),
+              ],
+              transcript: [
+                ("Pastor Ruth", "Good morning, church. Let's open to Luke, chapter fifteen."),
+                ("Pastor Ruth", "It's a story most of us could tell from memory."),
+                ("Pastor Ruth", "A younger son asks for his inheritance and leaves for a far country."),
+                ("Pastor Ruth", "And I want us to notice something small this morning."),
+                ("Pastor Ruth", "The father sees him while he is still a long way off."),
+                ("Pastor Ruth", "Which means the father had been watching the road."),
+                ("Pastor Ruth", "Some of you have been on that road a long time."),
+                ("Pastor Ruth", "Maybe you're the one walking home, rehearsing your speech."),
+                ("Pastor Ruth", "\"I am no longer worthy to be called your son.\""),
+                ("Pastor Ruth", "But the father doesn't let him finish the speech."),
+                ("Pastor Ruth", "He runs. In that culture, grown men did not run."),
+                ("Pastor Ruth", "He gathers up his robe and he runs down the road."),
+                ("Pastor Ruth", "Grace is not the reward at the end of the speech."),
+                ("Pastor Ruth", "Grace is the father, already running."),
+                ("Pastor Ruth", "And then there's the older brother, standing outside."),
+                ("Pastor Ruth", "We'll come to him in a moment, because he's here too."),
+              ]),
+        .init(id: "vespers", title: "Vespers at St. Columba", author: "St. Columba Abbey", kind: .sermons,
+              summary: "A short evening reflection and a psalm, to close the day quietly. New every weekday.",
+              feed: "stcolumba.example/vespers.xml", hue: 0.66, hue2: 0.76, symbol: "moon.stars", style: .blobs, minutes: 9...16,
+              episodes: [
+                ("In Peace I Will Lie Down", "An evening with Psalm 4.", "Psalm 4"),
+                ("The Lord Is My Shepherd", "Green pastures at the end of a long day.", "Psalm 23"),
+                ("Be Still", "Quiet, and the God who is a refuge.", "Psalm 46"),
+                ("From the Depths", "A psalm for hard evenings.", "Psalm 130"),
+                ("As the Deer", "Thirst, longing and hope.", "Psalm 42"),
+                ("Unless the Lord Builds the House", "Work, rest and letting go.", "Psalm 127"),
+                ("I Lift My Eyes", "A psalm for travellers.", "Psalm 121"),
+                ("How Lovely Is Your Dwelling", "Even the sparrow finds a home.", "Psalm 84"),
+                ("Search Me", "Being known, completely.", "Psalm 139"),
+                ("Let Everything That Has Breath", "The last psalm, and the first word of the morning.", "Psalm 150"),
+              ],
+              transcript: [
+                ("Br. Aidan", "Good evening. Let us settle, and let the day be finished."),
+                ("Br. Aidan", "Tonight we pray with the fourth psalm."),
+                ("Br. Aidan", "\"Stand in awe, and sin not: commune with your own heart upon your bed, and be still.\""),
+                ("Br. Aidan", "Commune with your own heart. Not with your inbox."),
+                ("Br. Aidan", "Not with tomorrow's list, which will still be there."),
+                ("Br. Aidan", "The psalmist is not pretending the day was easy."),
+                ("Br. Aidan", "\"There be many that say, Who will shew us any good?\""),
+                ("Br. Aidan", "That's an honest question at the end of a long day."),
+                ("Br. Aidan", "And the answer is not an argument. It's a light."),
+                ("Br. Aidan", "\"Lord, lift thou up the light of thy countenance upon us.\""),
+                ("Br. Aidan", "Then the last line, which is really a permission."),
+                ("Br. Aidan", "\"I will both lay me down in peace, and sleep.\""),
+                ("Br. Aidan", "You may lay it down now. All of it."),
+                ("Br. Aidan", "Let us keep a moment of silence together."),
+              ]),
+    ]
+}

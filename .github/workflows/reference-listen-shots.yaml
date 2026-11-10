@@ -1,0 +1,136 @@
+# The clean-room reference listening app (reference/universal-listen/): built
+# for the iOS Simulator and for macOS with the pinned Xcode, and
+# screenshotted on the iPhone 17 Pro, the iPad Pro 13-inch (portrait and
+# landscape) and in a 1440x900 Mac window, light and dark, with the launch
+# arguments its SCREENS.md lists; menus, context menus and submenus through
+# a UI test (ci/drive). A one-off reference, uploaded as an
+# artifact (`reference-listen-shots`, <device>/<theme>/<screen>.png); nothing is
+# published.
+name: reference-listen-shots
+
+on:
+  push:
+    branches: [claude/sleepy-faraday-lcbow5-design-listen]
+    paths:
+      - "reference/universal-listen/**"
+      - ".github/workflows/reference-listen-shots.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-listen-shots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    runs-on: macos-15
+    timeout-minutes: 110
+    env:
+      REF: reference/universal-listen
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Xcode flake.nix pins (as ios.yaml and app-screens.yaml select it).
+      - name: The pinned Xcode
+        run: bash .github/xcode-pinned.sh .
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+
+      # XcodeGen from the flake (the cache's), as the screens jobs have it: no Homebrew.
+      - name: XcodeGen, and the project
+        run: |
+          bash .github/screens/tools.sh get xcodegen
+          export PATH="$(nix build --no-link --print-out-paths .#xcodegen)/bin:$PATH"
+          cd "$REF" && xcodegen generate
+
+      # Both platforms in one step, each tried whatever the other did, so one
+      # push shows every compile error of both. Unsigned for the simulator;
+      # ad hoc for the Mac, which must be signed to launch.
+      - name: Build (iOS Simulator and macOS)
+        id: build
+        continue-on-error: true
+        run: |
+          cd "$REF"
+          status=0
+          for p in ios mac; do
+            if [ $p = ios ]; then
+              dest='generic/platform=iOS Simulator'; sign=(CODE_SIGNING_ALLOWED=NO)
+            else
+              dest='generic/platform=macOS'; sign=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= ENABLE_HARDENED_RUNTIME=NO)
+            fi
+            echo "::group::$p"
+            xcodebuild build -project UniversalListen.xcodeproj -scheme Listen -configuration Debug \
+              -destination "$dest" -derivedDataPath "$RUNNER_TEMP/dd" -quiet \
+              ENABLE_DEBUG_DYLIB=NO ENABLE_PREVIEWS=NO "${sign[@]}" > "$RUNNER_TEMP/build-$p.log" 2>&1 && echo "$p=ok" >> "$GITHUB_OUTPUT" || status=1
+            echo "::endgroup::"
+            # The errors, once each, first.
+            grep -E "error:" "$RUNNER_TEMP/build-$p.log" | sort -u | head -150 || true
+            grep -cE "warning:" "$RUNNER_TEMP/build-$p.log" | sed "s/^/$p warnings: /" || true
+            tail -n 15 "$RUNNER_TEMP/build-$p.log"
+          done
+          ls "$RUNNER_TEMP/dd/Build/Products" || true
+          exit $status
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-listen-build-logs
+          path: ${{ runner.temp }}/build-*.log
+          if-no-files-found: ignore
+
+      - name: Capture (iPhone, iPad)
+        if: ${{ !cancelled() && steps.build.outputs.ios == 'ok' }}
+        run: |
+          export PATH="$(nix build --no-link --print-out-paths .#xcodegen)/bin:$PATH"
+          bash "$REF/ci/shots.sh" ios "$RUNNER_TEMP/out" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/Listen.app"
+
+      - name: Capture (Mac)
+        if: ${{ !cancelled() && steps.build.outputs.mac == 'ok' }}
+        run: |
+          export PATH="$(nix build --no-link --print-out-paths .#xcodegen)/bin:$PATH"
+          bash "$REF/ci/shots.sh" mac "$RUNNER_TEMP/out" "$RUNNER_TEMP/dd/Build/Products/Debug/Listen.app"
+
+      # A contact sheet of each device and theme, for a quick look.
+      - name: Contact sheets
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -c 'import PIL' 2> /dev/null || pip3 install --quiet --break-system-packages pillow || exit 0
+          python3 - "$RUNNER_TEMP/out" <<'PY'
+          import sys, pathlib
+          from PIL import Image, ImageDraw
+          root = pathlib.Path(sys.argv[1])
+          for d in sorted(p for p in root.glob("*/*") if p.is_dir()):
+              shots = sorted(p for p in d.glob("*.png") if not p.name.endswith("-screen.png"))
+              if not shots: continue
+              ims = [Image.open(p).convert("RGB") for p in shots]
+              h = 600
+              ims = [im.resize((int(im.width * h / im.height), h)) for im in ims]
+              cols = 4
+              w = max(im.width for im in ims)
+              rows = (len(ims) + cols - 1) // cols
+              sheet = Image.new("RGB", (cols * (w + 20) + 20, rows * (h + 50) + 20), "white")
+              draw = ImageDraw.Draw(sheet)
+              for i, (im, p) in enumerate(zip(ims, shots)):
+                  x = 20 + (i % cols) * (w + 20); y = 20 + (i // cols) * (h + 50)
+                  sheet.paste(im, (x, y)); draw.text((x, y + h + 8), p.stem, fill="black")
+              sheet.save(root / f"contact-{d.parent.name}-{d.name}.png")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-listen-shots
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
+
+      - name: Both built
+        if: ${{ !cancelled() && steps.build.outcome == 'failure' }}
+        run: |
+          echo "::error::a build failed (Build says which)"
+          exit 1

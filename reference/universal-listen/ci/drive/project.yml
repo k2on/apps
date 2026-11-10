@@ -1,0 +1,67 @@
+# Listen's driven shots (../shots.sh): simctl cannot turn a simulator on its
+# side or open a menu, XCUITest can, so a UI test (one for iOS, one for the
+# Mac) launches the installed Listen with each shot's arguments, acts on it
+# and writes the screen once it is still.
+name: Drive
+options:
+  bundleIdPrefix: com.example.universallisten.ci
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+targets:
+  Host:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+  Shots:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Shots]
+    dependencies:
+      - target: Host
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Host
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+  HostMac:
+    type: application
+    platform: macOS
+    sources: [Host]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+  ShotsMac:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [Shots]
+    dependencies:
+      - target: HostMac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: HostMac
+        SWIFT_VERSION: "5.0"
+schemes:
+  Shots:
+    build:
+      targets:
+        Host: all
+        Shots: [test]
+    test:
+      targets: [Shots]
+  ShotsMac:
+    build:
+      targets:
+        HostMac: all
+        ShotsMac: [test]
+    test:
+      targets: [ShotsMac]
