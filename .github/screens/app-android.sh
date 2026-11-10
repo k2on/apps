@@ -275,6 +275,14 @@ fi
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1
+# The system's own motion off too (the app's is, in shots mode): the status
+# bar's icons recoloured for a new theme and the gesture bar's shade, each
+# eased in by SystemUI, were drawn part way in a dark run's shots and not in
+# another's (dry runs 42897638770 and 42909207650: rows 51-83 and the
+# handle differed, the app's own pixels the same).
+for scale in animator_duration_scale transition_animation_scale window_animation_scale; do
+  adb shell settings put global "$scale" 0
+done
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
 demo enter
