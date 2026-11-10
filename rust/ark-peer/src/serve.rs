@@ -138,7 +138,7 @@ impl Server {
         if let Some(auth) = self.auth {
             router = router.merge(ark_auth::server::router(auth));
         }
-        router = router.merge(self.web.router());
+        router = router.merge(self.web.router(&hub));
         for layer in self.layers {
             router = layer(router, &hub);
         }

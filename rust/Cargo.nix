@@ -257,6 +257,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "arkui-serve" = rec {
+      packageId = "arkui-serve";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-serve";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "arkui-shots" = rec {
       packageId = "arkui-shots";
       build = internal.buildRustCrateWithFeatures {
@@ -1920,6 +1930,70 @@ rec {
             packageId = "syn 2.0.119";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" "visit-mut" ];
+          }
+        ];
+
+      };
+      "arkui-serve" = rec {
+        crateName = "arkui-serve";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/serve; };
+        libName = "arkui_serve";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            features = [ "server" ];
+          }
+          {
+            name = "arkui-web";
+            packageId = "arkui-web";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" ];
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "leptos";
+            packageId = "leptos";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            usesDefaultFeatures = false;
           }
         ];
 

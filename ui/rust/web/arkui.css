@@ -377,3 +377,12 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 :root[data-ark-mode] button[disabled]:not(.ark-hit) { cursor: default; }
 /* The page a written control is already on is disabled, not dimmed. */
 :root[data-ark-mode] :is(.ark-selected, .ark-on, [aria-current])[disabled] { color: inherit; opacity: 1; }
+
+/* Why a form a server was sent was not taken (arkui-serve): the domain's
+   own words, over the page, in the error roles. */
+.ark-notice {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--ark-error-container);
+  color: var(--ark-on-error-container);
+}

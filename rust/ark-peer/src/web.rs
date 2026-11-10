@@ -26,17 +26,21 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 
+/// The pages a server writes itself, made once the hub is up.
+pub type Pages = Box<dyn FnOnce(&crate::handle::Handle) -> Router + Send>;
+
 /// An app's web, as its server serves it.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct Site {
     /// The build's files: index.html (an SPA's, or a static site's page
     /// per path), the module, the favicon. None: no files.
     pub dir: Option<PathBuf>,
     /// The file whose change is a rebuild (the module), when named.
     pub module: Option<String>,
-    /// Pages the server writes itself, asked before the files: a route
-    /// none of whose answers is a 404 falls through to them.
-    pub pages: Option<Router>,
+    /// Pages the server writes itself (arkui-serve's), given the hub, and
+    /// answering every path the files do not: they serve the files
+    /// themselves when there are both.
+    pub pages: Option<Pages>,
 }
 
 impl Site {
@@ -49,13 +53,11 @@ impl Site {
         }
     }
 
-    /// The site as one router: its pages, then its files.
-    pub fn router(self) -> Router {
-        let files = self.dir.map(|d| router(d, self.module));
-        match (self.pages, files) {
-            (Some(p), Some(f)) => p.fallback_service(f),
-            (Some(p), None) => p,
-            (None, Some(f)) => f,
+    /// The site as one router: its pages if it writes any, else its files.
+    pub fn router(self, hub: &crate::handle::Handle) -> Router {
+        match (self.pages, self.dir) {
+            (Some(p), _) => p(hub),
+            (None, Some(d)) => router(d, self.module),
             (None, None) => Router::new(),
         }
     }

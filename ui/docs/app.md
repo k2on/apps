@@ -567,23 +567,56 @@ that page (`formaction` on the form `#ark-go`, a plain GET); one that
 changes the data, or leads to UI state (a query) or to a path not
 declared, is drawn **disabled** until script runs. A control's menu is
 the browser's own `popover` within the page. `page::dangling` finds every
-link on a written page that leads to no written page (arkui-web's test
-holds a fixture site to none), the check a site's build runs over what it
+link on a written page that leads to no written page (arkui-serve's
+test holds a fixture site to none), the check a site's build runs over what it
 wrote.
 
-**Server-rendered** (`ssr`) is the static page with a server behind the
-form: the app's own server (money-server, one process with the sync socket
-and sign-in) opening the app at the request's route as the session's
-`Who`, drawing it (`arkui_web::Served`), taking a form against that draw
-(`Served::take`) so that a press runs `update` and its changes go through
-the in-process peer as that `Who`, then 303 to the app's new route. The
-pieces are built and tested here (`Served`, `page::take`, `Written`'s
-`action` and `hidden` for the CSRF and idempotency tokens); the server's
-routes, the session cookie, and their tests are what is left (the last
-section).
+**Server-rendered** (`ssr`, crate `arkui-serve`) is a capability no app
+turns on: the same page with the app's own server behind its form, one
+call — `arkui_serve::site::<A>(auth, config, look, dir)` given to
+`ark_peer::Server::site` — beside the sync socket and sign-in and under
+the server's layers (`Server::layer`), so one process answers it all.
 
-**Checked**: arkui-web's tests (feature `ssr`) write a fixture site from
-its declared paths — a band each, a link to each declared path, the rest
+- **Who** is the ark-auth login in the `ark-session` cookie (HttpOnly,
+  same-site `Lax`), set at `/web/session` where a sign-in's code is traded
+  for it, and judged by `Auth::authenticate`: the `Who` (account, session,
+  roles) the sync socket resolves a token to. Nobody signed in is sent a
+  page that links to sign in.
+- **Reads**: the app (`arkui_serve::Page::open`) is opened over a replica
+  the hub feeds through its in-process dialer, as the bank importer is —
+  never a socket — caught up to the hub's head, so its feed and row scopes
+  are the socket's, and it asks the domain's queries and views once as
+  that `Who` (`Peer::ask`, a query's `Ctx`). The page is written at its
+  path and its query, at every band.
+- **Writes**: a form is taken against the same draw made again
+  (`Served::take`: a stale press `409`, a malformed one refused, the body
+  held to `MAX_BODY` and each field to `page::MAX_TEXT`), so the app's own
+  `update` runs — a sheet's fields (a payee, an amount, a category, a
+  date) taken together, then its press — and what it
+  authors is the domain's mutators on the replica, their role checks and
+  `Refusal`s run there and again on the hub. Confirmed, `303` to the
+  app's new route (UI state in its query, never the server's memory);
+  refused, `422`, the page drawn as the form left it, its input kept, and
+  the refusal's own words — the native apps' — over it (`.ark-notice`).
+- **Forms** carry the `ark-csrf` cookie's token (same-site `Strict`) as
+  `csrf`, which must match (`403` otherwise), and a token of their own,
+  `once`: sent again — the back button, a second click — a form runs
+  nothing and is sent where the first went.
+
+Its tests (ui/rust/serve/tests/pages.rs, with script off, over money's
+domain as it is and a fixture page of its groups and bank asks): a group
+added is the hub's and a socket client sees it; a form sent twice authors
+once; no CSRF token, another's, a stale press and nobody signed in run
+nothing; a group's name past its refinement and the bank's Import without
+the `bank` role are `422` in the words the socket's client is refused
+with, the name as typed; alice's bank ask is on her page and not sam's.
+What is left before an app could turn it on: a bank login's waiting page
+(the importer's Hosted Link address, refreshing itself until answered),
+money's own screens served so, and the replica kept per session rather
+than caught up each request.
+
+**Checked**: arkui-serve's tests (tests/static_site.rs) write a fixture
+site from its declared paths — a band each, a link to each declared path, the rest
 disabled, nothing dangling, the bound refused — and round-trip routes.
 `.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` photographs a static
 site by its routes' addresses, with script and with `ARK_WEB_JS=0`
@@ -714,19 +747,11 @@ ui/docs/apps/money.md for money):
    controls, motion), and ArkUI's components become `#[view]`s emitted into
    ui/swift and ui/kotlin. Today's `ScreenParts` are the component layer
    written by hand, the step before that.
-8. **Server-rendered pages, in the app's server** ("The Browser's
-   Modes"): an `ark-web-serve` layer (or ark-peer's `web` feature) that
-   mounts arkui-web's routes on the peer's axum router in one call —
-   `GET` a route drawn by `Served` as the ark-auth session's `Who`, its
-   views asked once through a replica the hub serves in-process (the
-   importer's way), so row scopes are the socket's; `POST` taken by
-   `Served::take`, its changes authored through the same mutators (role
-   checks and `Refusal`s the socket's, shown in the same words), then 303
-   to the new route, or 422 with the form kept; a same-site session
-   cookie, a CSRF token and an idempotency token on every form — and its
-   tests with script off (assign, add, edit and delete a transaction seen
-   by a socket client, a refused change, a user without a role, a bank's
-   connect round trip against the fake Plaid with a waiting page that
-   refreshes itself). Then `ssr` in `[web] modes`, the server's NixOS
-   module serving the static site and the module from the one process.
+8. **The browser's modes**: money and harken are the SPA alone, served
+   by their own server (ark-peer's `web::Site`), and money-web is the
+   demo household in the page: a client that signs in and syncs is next.
+   The docs site is the static case (`static_paths`, `prerender`,
+   `page::dangling`), harken's public pages after it. `ssr`
+   (`arkui-serve`) is built and tested and turned on by no app; "The
+   Browser's Modes" says what it lacks.
 

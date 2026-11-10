@@ -471,6 +471,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkui-serve"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-auth",
+ "ark-peer",
+ "arkui-web",
+ "axum",
+ "leptos",
+ "money-core",
+ "tempfile",
+ "tokio",
+ "tower",
+ "ureq",
+]
+
+[[package]]
 name = "arkui-shots"
 version = "0.1.0"
 dependencies = [

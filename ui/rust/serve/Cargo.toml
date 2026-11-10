@@ -1,0 +1,26 @@
+[package]
+name = "arkui-serve"
+workspace = "../../../rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "An app's pages written by its own server (arkui-web's `ssr` mode): each request drawn as the ark-auth session's Who over a replica the hub feeds in this process, each form taken by the app's `update` and authored through the domain's mutators, with a same-site CSRF token and an idempotency token. A capability no app turns on today (ui/docs/app.md, \"The Browser's Modes\")."
+
+# Knows nothing of any domain: an app hands it how to open itself over a
+# replica (`Page`), and its look.
+
+[dependencies]
+ark = { path = "../../../rust/ark" }
+ark-auth = { path = "../../../rust/ark-auth" }
+ark-peer = { path = "../../../rust/ark-peer", features = ["server"] }
+arkui-web = { path = "../web", default-features = false, features = ["ssr"] }
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+# The fixture's domain: money's, its roles and its views as they are.
+money-core = { path = "../../../money/core" }
+leptos = { version = "0.8", default-features = false, features = ["ssr"] }
+ureq = { version = "2", default-features = false }
+tempfile = "3"

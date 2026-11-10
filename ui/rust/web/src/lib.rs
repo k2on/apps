@@ -514,6 +514,9 @@ pub struct Written {
     /// CSRF token, the form's own idempotency token).
     pub action: String,
     pub hidden: Vec<(String, String)>,
+    /// Why the last form was not taken (a refusal, in the domain's words),
+    /// said over the page.
+    pub notice: Option<String>,
 }
 
 /// A whole page: `view` (a [`Served::draw`]) inside the document
@@ -543,7 +546,7 @@ pub fn document(w: &Written, view: &str) -> String {
          <form id=\"ark-go\" method=\"get\"></form>\n\
          <form id=\"ark-act\" method=\"post\" action=\"{action}\"><button name=\"ark\" value=\"\" hidden></button>\
          <input type=\"hidden\" name=\"route\" value=\"{route}\">{hidden}</form>\n\
-         <div id=\"ark-root\">{view}</div>\n</body>\n</html>\n",
+         {notice}<div id=\"ark-root\">{view}</div>\n</body>\n</html>\n",
         accent = e(&w.accent),
         motion = if reduced { "reduced" } else { "full" },
         mode = w.mode.word(),
@@ -553,6 +556,11 @@ pub fn document(w: &Written, view: &str) -> String {
         head = w.head,
         action = e(&w.action),
         route = e(&w.route.url()),
+        notice = w
+            .notice
+            .as_ref()
+            .map(|n| format!("<p class=\"ark-notice\" role=\"alert\">{}</p>\n", e(n)))
+            .unwrap_or_default(),
     )
 }
 
@@ -882,96 +890,4 @@ pub fn signed(cents: i64) -> AnyView {
 /// A word quiet and centred where there is nothing to show yet.
 pub fn quiet(words: impl Into<String>) -> AnyView {
     html::div().class("ark-empty").child(words.into()).into_any()
-}
-
-#[cfg(all(test, feature = "ssr"))]
-mod tests {
-    use super::*;
-    use page::Route;
-
-    /// A site of three paths: a link to each declared one, and the
-    /// controls a static page cannot run.
-    #[derive(Default)]
-    struct Site {
-        at: Vec<String>,
-        inspector: bool,
-        changes: u64,
-    }
-
-    #[derive(Clone)]
-    enum Go {
-        To(&'static str),
-        Inspector,
-        Change,
-    }
-
-    impl WebApp for Site {
-        type Msg = Go;
-        fn view(&self) -> AnyView {
-            let b = |label: &'static str, m: Go| crate::wired!(html::button(), tapped(label, &m)).child(label).into_any();
-            vec![
-                b("Home", Go::To("")),
-                b("Notes", Go::To("notes")),
-                b("Elsewhere", Go::To("elsewhere")),
-                b("Inspector", Go::Inspector),
-                b("Delete", Go::Change),
-            ]
-            .into_any()
-        }
-        fn update(&mut self, m: Go) {
-            match m {
-                Go::To(p) => self.at = (!p.is_empty()).then(|| p.to_string()).into_iter().collect(),
-                Go::Inspector => self.inspector = true,
-                Go::Change => self.changes += 1,
-            }
-        }
-        fn route(&self) -> Route {
-            let r = Route::at(self.at.clone());
-            if self.inspector {
-                return r.with("inspector", "1");
-            }
-            r
-        }
-        fn arrive(&mut self, r: &Route) -> Vec<Go> {
-            self.at = r.path.clone();
-            self.inspector = r.get("inspector").is_some();
-            vec![]
-        }
-        fn static_paths(&self) -> Vec<Route> {
-            vec![Route::default(), Route::at(["notes"])]
-        }
-        fn changes(&self) -> u64 {
-            self.changes
-        }
-    }
-
-    #[test]
-    fn a_static_site_is_its_declared_paths_and_every_link_resolves() {
-        let write = |r: &Route, view: &str| {
-            document(
-                &Written {
-                    mode: page::Mode::Static,
-                    route: r.clone(),
-                    base: "/".into(),
-                    ..Written::default()
-                },
-                view,
-            )
-        };
-        let pages = prerender(&Site::default, 10, None, &[], &write).unwrap();
-        let urls: Vec<String> = pages.iter().map(|(r, _)| r.url()).collect();
-        assert_eq!(urls, ["/", "/notes/"]);
-        let written: Vec<(String, String)> = pages.iter().map(|(r, h)| (r.url(), h.clone())).collect();
-        assert_eq!(page::dangling(&written, "/"), Vec::<String>::new());
-        let home = &pages[0].1;
-        assert!(home.contains(r#"formaction="/notes/""#), "a declared path is a link");
-        for off in ["Elsewhere", "Inspector", "Delete"] {
-            let at = home.find(&format!(">{off}<")).unwrap();
-            let tag = &home[home[..at].rfind("<button").unwrap()..at];
-            assert!(tag.contains("disabled") && !tag.contains("formaction"), "{off}: {tag}");
-        }
-        assert_eq!(home.matches("class=\"ark-at ark-at-").count(), page::Band::ALL.len(), "a band each");
-        let e = prerender(&Site::default, 1, None, &[], &write).unwrap_err();
-        assert!(e.contains("static-bound"), "{e}");
-    }
 }
