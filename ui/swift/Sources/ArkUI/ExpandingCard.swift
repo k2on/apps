@@ -7,7 +7,7 @@
 // being the one it reads — and the bar is on the system's glass, which
 // frosts under Reduce Transparency by itself. This is only the wiring, so
 // every app's bar and screen are the same pair.
-#if canImport(SwiftUI)
+#if os(iOS)
 import SwiftUI
 
 @available(iOS 26.0, *)

@@ -373,7 +373,7 @@ public struct AccountSheet<Rows: View>: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .groupedList()
             .navigationTitle("Account")
             .inlineTitle()
             .toolbar {
