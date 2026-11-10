@@ -176,6 +176,8 @@ jobs:
       # Each iPhone app taken, and the hash of what it is taken from
       # (ios-inputs.sh), as a JSON object: kept beside its shots.
       ios-inputs: ${{ steps.which.outputs.ios-inputs }}
+      # The Macs' jobs: [{app, device}], device iphone, ipad or mac.
+      ios-matrix: ${{ steps.which.outputs.ios-matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -208,6 +210,33 @@ jobs:
               printf '%s-json=%s\n' "$k" "$(tr ' ' '\n' <<< "${!k}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
             done
           }
+          # The commit's tree, fetched once (ios-inputs.sh evaluates it;
+          # the Macs' matrix reads its projects).
+          src=$RUNNER_TEMP/src
+          fetched() {
+            [ -d "$src/.git" ] && return 0
+            git init -q "$src"
+            git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$sha"
+            git -C "$src" checkout -q FETCH_HEAD
+          }
+          # The Macs' jobs, one per app and device, at once (the `ios`
+          # matrix): each iPhone app's iPhone; its iPad when its project
+          # may take it (a TARGETED_DEVICE_FAMILY with 2: the built app's
+          # UIDeviceFamily, ios-family.sh, still decides, so a job for one
+          # that does not passes over it in seconds); its Mac window when
+          # the commit has <app>-macos (by name, nothing evaluated).
+          macs() {
+            local a names=[] rows=()
+            [ -n "${ios// /}" ] || { echo '[]'; return; }
+            fetched
+            names=$(nix eval --json "$src#packages.aarch64-darwin" --apply builtins.attrNames 2> /dev/null) || names=[]
+            for a in $ios; do
+              rows+=("$a iphone")
+              if grep -qE 'TARGETED_DEVICE_FAMILY: *"?[0-9,]*2' "$src/$a/ios/project.yml" 2> /dev/null; then rows+=("$a ipad"); fi
+              if jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then rows+=("$a mac"); fi
+            done
+            printf '%s\n' "${rows[@]}" | jq -Rsc 'split("\n") | map(select(. != "") | split(" ") | {app: .[0], device: .[1]})'
+          }
           # What was decided, as the jobs read it. Nothing for this event
           # (ios's start, a PR's build ending, a PR closed, nothing moved):
           # nothing to do, publish included.
@@ -217,6 +246,7 @@ jobs:
             {
               echo "mode=$mode"; echo "pr=$pr"; echo "sha=$sha"; echo "branch=$branch"
               echo "android=$android"; echo "ios=$ios"; echo "desktop=$desktop"; echo "ios-inputs=$inputs"
+              echo "ios-matrix=$(macs)"
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
@@ -239,10 +269,8 @@ jobs:
           # rebuilt"); on main, those published. Each said, and why.
           iphone() {
             [ $# -gt 0 ] || return 0
-            local src=$RUNNER_TEMP/src a hash main mine
-            git init -q "$src"
-            git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$sha"
-            git -C "$src" checkout -q FETCH_HEAD
+            local a hash main mine
+            fetched
             while read -r a hash; do
               main=$(kept screens "apps/$a") mine=""
               if [ "$mode" = pr ]; then mine=$(kept "screens-pr-$pr" "$a"); fi
@@ -550,27 +578,35 @@ jobs:
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
-  # Every iPhone app on one Mac, in turn: the scarce runner, which a job per
-  # app had waiting in the queue twice, each paying its own Xcode, nix's
-  # install, the servers' builds and a simulator's boot. Here they are paid
-  # once: one simulator booted, every app built (ios-build.sh) and its
-  # server started under the boot, then each app taken in turn on it
-  # (apps-ios.sh), the driver built once for all. One that fails to build
-  # or to be taken is said, the others still taken and kept, and the job
-  # fails at its end. Each app's shots are its own <app>/ios/ in the
-  # artifact, as a job each had them.
+  # The Macs: a job per app and device, at once (`which`'s ios-matrix):
+  # each app's iPhone, its iPad (upright and on its side, signed in once)
+  # when its build takes it, and its Mac window when the commit has one.
+  # One Mac did them all in turn, the iPad's after every iPhone's, so the
+  # loop waited for the sum (an iPhone app's shots some five minutes, an
+  # iPad's some ten); each job now pays its own nix, servers and boot (a
+  # few minutes, under which the app comes from the cache and the driver
+  # from the actions cache) and the loop waits for the longest. Each job's
+  # shots are its <app>/<device dir>/ in an artifact of its own; whether
+  # they were taken whole is its `ios-status-*` artifact, which
+  # `ios-inputs` reads to keep an app's hash only when every job of it was.
   ios:
     needs: which
     # Built from the run's own commit, so only a run of this repository's.
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.which.outputs.ios-matrix) }}
+    name: ios (${{ matrix.app }}, ${{ matrix.device }})
     runs-on: macos-15
-    # One at a time on a branch: a newer commit's (or the same commit's
-    # again, from another event: on main a push that moves the scripts and
-    # starts ios) takes over from the one going, rather than a second Mac.
+    # One of each at a time on a branch: a newer commit's (or the same
+    # commit's again, from another event: on main a push that moves the
+    # scripts and starts ios) takes over from the one going, rather than a
+    # second Mac.
     concurrency:
-      group: app-screens-ios-${{ needs.which.outputs.branch }}
+      group: app-screens-ios-${{ needs.which.outputs.branch }}-${{ matrix.app }}-${{ matrix.device }}
       cancel-in-progress: true
     timeout-minutes: 150
     # It builds the commit's code, one step of it outside nix's sandbox
@@ -579,13 +615,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    outputs:
-      # `false` when its PR had been merged or closed by the time a Mac took
-      # it up: nothing was taken, and nothing is compared.
-      open: ${{ steps.open.outputs.open }}
     env:
-      APPS: ${{ needs.which.outputs.ios }}
-      INPUTS: ${{ needs.which.outputs.ios-inputs }}
+      APPS: ${{ matrix.app }}
+      DEVICE: ${{ matrix.device }}
       SOURCE: ${{ needs.which.outputs.sha }}
       PR: ${{ needs.which.outputs.pr }}
     steps:
@@ -612,10 +644,13 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver, built once for the iPhone and the iPad (app-ios.sh);
-          # and each app any of whose shots failed (apps-ios.sh,
+          # The driver (app-ios.sh), from the actions cache or built under
+          # the boot; and each app any of whose shots failed (apps-ios.sh,
           # apps-mac.sh), for which no hash is kept.
           { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
+          # What `ios-inputs` reads: closed, or (below) whole or partial.
+          mkdir -p "$RUNNER_TEMP/status/$APPS"
+          [ "$open" = true ] || echo closed > "$RUNNER_TEMP/status/$APPS/$DEVICE"
 
       # The scripts, main's; and the commit whose apps are built, beside them.
       - if: steps.open.outputs.open == 'true'
@@ -633,10 +668,28 @@ jobs:
         name: The pinned Xcode
         run: bash .github/xcode-pinned.sh src
 
+      # The simulator, booting under everything after: as soon as the
+      # Xcode is selected (its boot is the longest wait of a warm run).
+      # The newest iPhone Pro, or the newest iPad Pro 13-inch (else an iPad
+      # Air 13-inch, else the newest iPad); none for the Mac's window.
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
+        name: Start booting a simulator
+        run: |
+          bash .github/screens/meanwhile.sh start boot bash -c '
+            if [ "$DEVICE" = ipad ]; then kinds="[\"^iPad Pro 13-inch\", \"^iPad Air 13-inch\", \"^iPad\"]"; else kinds="[\"^iPhone [0-9]+ Pro$\"]"; fi
+            read -r udid name < <(xcrun simctl list devices available -j | jq -r --argjson k "$kinds" "
+              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value as \$d
+              | \$k | map(. as \$p | \$d | map(select(.name | test(\$p))) | sort_by(.name) | last) | map(select(. != null)) | first
+              | \"\(.udid) \(.name)\"")
+            echo "Booting $name ($udid)"
+            echo "$name" > "$RUNNER_TEMP/device"
+            start=$(date +%s)
+            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b > /dev/null
+            echo "booted in $(( $(date +%s) - start ))s"'
+
       # Relaxed: every build is sandboxed but the one that says __noChroot
-      # (the app's own xcodebuild, flake.nix says why). Installed before
-      # anything starts in the background: setting up its build users while
-      # a booting simulator brought CoreSimulator up took minutes.
+      # (the app's own xcodebuild, flake.nix says why). Its build users
+      # are set up before the servers' and the apps' builds start.
       - if: steps.open.outputs.open == 'true'
         uses: cachix/install-nix-action@v31
         with:
@@ -659,11 +712,22 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
 
-      # The servers' packages (each server.sh's `.#<name>`) and the apps
-      # (ios-build.sh's), evaluated once, with nothing beside them: under a
-      # booting simulator and the servers' build, each evaluating a flake at
-      # once, it took one to five minutes. Their builds then find them in
-      # nix's evaluation cache.
+      # The UI test that drives the apps (drive-ios/), as it was last built
+      # for this Xcode: from the actions cache (this repository's alone, so
+      # nothing built with Xcode goes anywhere public), keyed by its sources,
+      # or built under the boot. Not for the Mac's window, which it does not
+      # drive.
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
+        id: driver
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/driver
+          key: drive-ios-${{ env.XCODE }}-${{ hashFiles('.github/screens/drive-ios/**', '.github/screens/app-ios.sh') }}
+
+      # The servers' packages (each server.sh's `.#<name>`) and the app
+      # (ios-build.sh's), evaluated once, with nothing beside them: under the
+      # servers' build, each evaluating a flake at once, it took one to five
+      # minutes. Their builds then find them in nix's evaluation cache.
       - if: steps.open.outputs.open == 'true'
         name: The servers' packages and the apps, evaluated
         run: |
@@ -679,29 +743,18 @@ jobs:
           # warm-up: what fails here is said again by the build after.
           if [ ${#refs[@]} -gt 0 ]; then nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::the servers' packages did not all evaluate"; fi
           echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
-          # An app the commit has none of is said by ios-build.sh.
-          start=$(date +%s)
-          for a in $APPS; do
-            nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
-          done
-          echo "evaluated the apps in $(( $(date +%s) - start ))s"
+          # An app the commit has none of is said by ios-build.sh. The Mac's
+          # window is built by apps-mac.sh.
+          if [ "$DEVICE" != mac ]; then
+            start=$(date +%s)
+            for a in $APPS; do
+              nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
+            done
+            echo "evaluated the apps in $(( $(date +%s) - start ))s"
+          fi
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
-      # for every app: each is installed on it in turn.
-      - if: steps.open.outputs.open == 'true'
-        name: Start booting a simulator
-        run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            device=$(xcrun simctl list devices available -j | jq -r "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
-            echo "Booting $device"
-            echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
-
-      # Each app's server, as nix builds it (its server.sh), all at once, each
-      # on its own port: the cache's once main's run has pushed it, or else
-      # built, under the apps' build.
+      # The app's server, as nix builds it (its server.sh): the cache's
+      # once main's run has pushed it, or else built, under the app's build.
       - if: steps.open.outputs.open == 'true'
         name: Start the servers
         run: |
@@ -710,105 +763,99 @@ jobs:
               if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
-      # Each app as nix has it at the commit (ios-build.sh): the cache's
+      # XcodeGen from the flake (the cache's), as every other tool here: no
+      # Homebrew. Then the driver, when the cache had none, built for any
+      # simulator under the boot and the app's build.
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
+        name: The driver's tools, and the driver
+        run: |
+          bash .github/screens/tools.sh get xcodegen
+          xcodegen=$(nix build --no-link --print-out-paths .#xcodegen)
+          (cd .github/screens/drive-ios && PATH="$xcodegen/bin:$PATH" && xcodegen generate > /dev/null)
+          if [ -f "$DRIVER/built" ]; then echo "the driver, from the cache"; exit 0; fi
+          touch "$RUNNER_TEMP/driver-building"
+          bash .github/screens/meanwhile.sh start driver bash -c '
+            start=$(date +%s)
+            xcodebuild build-for-testing -project .github/screens/drive-ios/Drive.xcodeproj -scheme Drive \
+              -destination "generic/platform=iOS Simulator" -derivedDataPath "$DRIVER" \
+              CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO -quiet && touch "$DRIVER/built"
+            echo "built in $(( $(date +%s) - start ))s"'
+
+      # The app as nix has it at the commit (ios-build.sh): the cache's
       # (what ios built and pushed, as this run starts once it has ended),
-      # or built.
-      - if: steps.open.outputs.open == 'true'
+      # or built. The Mac's window is built by apps-mac.sh.
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
         id: build
         name: The apps, built by nix
-        # One that fails is said; the others are still taken, and the job
-        # fails at its end.
-        continue-on-error: true
         run: bash .github/screens/ios-build.sh src "$XCODE" "$RUNNER_TEMP/apps" $APPS
 
-      # The iPad's apps: those whose build takes it (its Info.plist's
-      # UIDeviceFamily has 2: ios-family.sh). With none, no iPad is booted
-      # and nothing more is done on this Mac.
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
-        name: The iPad, if an app takes it
+      - if: steps.open.outputs.open == 'true'
+        name: The servers
+        run: bash .github/screens/meanwhile.sh wait servers
+
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
+        name: The driver, and the simulator, booted
         run: |
-          ipad=$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" $APPS | tr '\n' ' ')
-          echo "IPAD_APPS=${ipad% }" >> "$GITHUB_ENV"
-          if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
+          if [ -f "$RUNNER_TEMP/driver-building" ]; then
+            bash .github/screens/meanwhile.sh wait driver
+          fi
+          bash .github/screens/meanwhile.sh wait boot
 
-      - if: steps.open.outputs.open == 'true'
-        name: The servers, and the driver's tools
-        run: |
-          # XcodeGen from the flake (the cache's), as every other tool here: no Homebrew.
-          bash .github/screens/tools.sh get xcodegen
-          bash .github/screens/meanwhile.sh wait servers
-
-      - if: steps.open.outputs.open == 'true'
-        name: The simulator, booted
-        run: bash .github/screens/meanwhile.sh wait boot
-
-      # Each app in turn on the one simulator (apps-ios.sh); one that fails
-      # is said, and the others still taken.
-      - if: steps.open.outputs.open == 'true'
+      # The iPhone's: the app on the one simulator (apps-ios.sh).
+      - if: steps.open.outputs.open == 'true' && matrix.device == 'iphone'
         name: Capture
         env:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
 
-      # The iPad's, after the iPhone's: the iPhone shut down and only then
-      # the iPad booted (not under the iPhone's shots, which a second
-      # simulator would slow), the newest iPad Pro 13-inch (else an iPad Air
-      # 13-inch, else the newest iPad); each app whose build takes it, in
-      # portrait and then on its side, light and dark, on the same driver
-      # (apps-ios.sh, FAMILY=ipad).
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
+      # The iPad's: the app, if its build takes it (ios-family.sh), upright
+      # and then on its side, light and dark, on the same driver
+      # (apps-ios.sh, FAMILY=ipad); else said, and nothing taken.
+      - if: steps.open.outputs.open == 'true' && matrix.device == 'ipad'
         name: Capture (iPad)
         env:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
         run: |
-          xcrun simctl shutdown all || true
-          # Of the newest iOS's simulators, the first kind there is.
-          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
-            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
-            | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
-            | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
-            | "\(.udid) \(.name)"')
-          echo "Booting $name ($udid)"
-          start=$(date +%s)
-          xcrun simctl boot "$udid"
-          xcrun simctl bootstatus "$udid" -b > /dev/null
-          echo "booted in $(( $(date +%s) - start ))s"
-          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
+          if [ -z "$(bash .github/screens/ios-family.sh "$RUNNER_TEMP/apps" "$APPS")" ]; then
+            echo "$APPS: its build does not take the iPad; nothing taken"
+            exit 0
+          fi
+          bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
 
-      # The Mac's own window, of each app whose commit has a Mac build
-      # (`<app>-macos`, apps-mac.sh): on this Mac, signed in to the same
-      # server. None has one yet, and each is passed over in seconds.
-      - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
+      # The Mac's own window, of an app whose commit has a Mac build
+      # (`<app>-macos`, apps-mac.sh): signed in to the same server.
+      - if: steps.open.outputs.open == 'true' && matrix.device == 'mac'
         name: Capture (Mac)
         run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
 
-      # Beside each app's shots, taken whole, the hash of what they were
-      # taken from (`which`, ios-inputs.sh): the next run that has the same
-      # takes none. One taken in part keeps none, and is taken again.
+      # Whether this job's shots were taken whole, for `ios-inputs`: a
+      # failed build or shot, or the iPhone's not there in both themes, is
+      # partial, and no hash is kept for the app (it is taken again).
       - if: always() && steps.open.outputs.open == 'true'
-        name: What each app's shots were taken from
+        name: Taken whole?
         run: |
-          for a in $APPS; do
-            at=$RUNNER_TEMP/out/$a/ios
-            hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
-            # A shot of it failed (its iPhone's, iPad's or Mac's): taken again next time, whole.
-            if [ -f "$PARTIAL" ] && grep -qx "$a" "$PARTIAL"; then
-              echo "$a: a shot of it failed; no hash kept"
-            elif [ -n "$hash" ] && [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; then
-              echo "$hash" > "$at/inputs"
-              echo "$a: $hash"
-            else
-              echo "$a: not taken whole; no hash kept"
-            fi
-          done
+          state=whole
+          if [ -f "$PARTIAL" ] && grep -qx "$APPS" "$PARTIAL"; then state=partial; fi
+          if [ "${{ steps.build.outcome }}" = failure ]; then state=partial; fi
+          case "${{ job.status }}" in success) ;; *) state=partial ;; esac
+          at=$RUNNER_TEMP/out/$APPS/ios
+          if [ "$DEVICE" = iphone ] && ! { [ -f "$at/device.json" ] && [ -d "$at/light" ] && [ -d "$at/dark" ]; }; then state=partial; fi
+          echo "$state" > "$RUNNER_TEMP/status/$APPS/$DEVICE"
+          echo "$APPS $DEVICE: $state"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-status-${{ matrix.app }}-${{ matrix.device }}
+          path: ${{ runner.temp }}/status
 
       # The driver's results (its log, and the test's recording of the
-      # screen), when a capture failed: what to look at, each app's its own.
+      # screen), when a capture failed: what to look at.
       - uses: actions/upload-artifact@v4
         if: failure() && steps.open.outputs.open == 'true'
         with:
-          name: ios-driver-results
+          name: ios-driver-results-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/results
           if-no-files-found: ignore
 
@@ -816,22 +863,67 @@ jobs:
         name: The servers' logs
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
 
-      # Every app's in one artifact, each its own <app>/ios/: compare and
-      # publish lay the app-screens-* artifacts over each other as one tree.
+      # Its shots, <app>/ios/ (or ipad-portrait/ and ipad-landscape/, or
+      # mac/): compare and publish lay the app-screens-* artifacts over each
+      # other as one tree.
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
-          name: app-screens-ios
+          name: app-screens-ios-${{ matrix.app }}-${{ matrix.device }}
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
 
-      # The build of one app failed, and the others were taken: the job fails
-      # now that they are kept.
-      - if: always() && steps.build.outcome == 'failure'
-        name: Every app built
+  # Beside each iPhone app's shots, when every Mac job of it took them
+  # whole, the hash of what they were taken from (`which`, ios-inputs.sh):
+  # the next run that has the same takes none. One taken in part keeps
+  # none, and is taken again. And whether a Mac found its PR gone, for
+  # `compare`.
+  ios-inputs:
+    needs: [which, ios]
+    if: ${{ always() && needs.ios.result != 'skipped' && needs.which.outputs.ios != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      # `false` when its PR had been merged or closed (or moved on) by the
+      # time a Mac took it up: nothing was taken, and nothing is compared.
+      open: ${{ steps.kept.outputs.open }}
+    env:
+      APPS: ${{ needs.which.outputs.ios }}
+      INPUTS: ${{ needs.which.outputs.ios-inputs }}
+      MATRIX: ${{ needs.which.outputs.ios-matrix }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ios-status-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/status
+      - id: kept
+        name: What each app's shots were taken from
         run: |
-          echo "::error::an iPhone app did not build (The apps, built by nix, says which)"
-          exit 1
+          open=true
+          for a in $APPS; do
+            hash=$(jq -r --arg a "$a" '.[$a] // empty' <<< "$INPUTS")
+            whole=true
+            for d in $(jq -r --arg a "$a" '.[] | select(.app == $a) | .device' <<< "$MATRIX"); do
+              s=$(cat "$RUNNER_TEMP/status/$a/$d" 2> /dev/null || echo missing)
+              [ "$s" != closed ] || open=false
+              [ "$s" = whole ] || { echo "$a $d: $s"; whole=false; }
+            done
+            if [ "$whole" = true ] && [ -n "$hash" ]; then
+              mkdir -p "$RUNNER_TEMP/out/$a/ios"
+              echo "$hash" > "$RUNNER_TEMP/out/$a/ios/inputs"
+              echo "$a: $hash"
+            else
+              echo "$a: not taken whole; no hash kept"
+            fi
+          done
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-screens-ios-inputs
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore
 
   # The desktop windows: each app's built by nix at the run's commit, as the
   # iPhone's are, and photographed with no window (arkui-shots) on Linux.
@@ -920,7 +1012,7 @@ jobs:
   # Main's, onto the `screens` branch: each app and phone taken whole this
   # run replaced, the rest as it was.
   publish:
-    needs: [which, android, ios, desktop]
+    needs: [which, android, ios, ios-inputs, desktop]
     if: ${{ !cancelled() && needs.which.outputs.mode == 'release' && inputs.dry != true }}
     runs-on: ubuntu-latest
     # One writer of the branch at a time, with screens.yaml's publish.
@@ -978,10 +1070,10 @@ jobs:
 
   # A PR's, compared with main's and shown on the PR.
   compare:
-    needs: [which, android, ios, desktop]
+    needs: [which, android, ios, ios-inputs, desktop]
     # Only when this run took something: a run with no build of its own says
     # nothing. Nor one whose PR had gone by the time the iPhone's Mac came.
-    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' && needs.ios.outputs.open != 'false' && (needs.which.outputs.android != '' || needs.which.outputs.ios != '' || needs.which.outputs.desktop != '') }}
+    if: ${{ !cancelled() && needs.which.outputs.mode == 'pr' && needs.ios-inputs.outputs.open != 'false' && (needs.which.outputs.android != '' || needs.which.outputs.ios != '' || needs.which.outputs.desktop != '') }}
     runs-on: ubuntu-latest
     # The PR's comment and its branch, one run at a time.
     concurrency:
