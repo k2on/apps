@@ -387,28 +387,6 @@
             crate = "money-web";
             files = [ ./money/web/index.html ./money/web/favicon.svg ];
           };
-          # The browser's other modes (ui/docs/app.md, "The Browser's Modes"):
-          # the module that takes over written HTML (`hydrate`), and the
-          # static site — every page the screens lead to prerendered by the
-          # app's own crate natively (`ssr`), at the day the screenshots are
-          # seeded to, beside that module. Served as files by anything, or
-          # by the app's server (`MONEY_WEB`).
-          moneyWebModes = ((arkApp.read "money").web or { }).modes or [ "spa" ];
-          money-web-hydrate = wasmPage {
-            pname = "money-web-hydrate";
-            crate = "money-web";
-            features = [ "hydrate" ];
-            files = [ ./money/web/favicon.svg ];
-          };
-          money-web-prerender = crate { packageId = "money-web"; features = [ "ssr" ]; };
-          money-web-static = pkgs.runCommand "money-web-static" { } ''
-            ${money-web-prerender}/bin/money-web-static $out --shots ${./money/screens/shots.json} --today ${(lib.importJSON ./money/screens/shots.json).web.today}
-            cp -r ${money-web-hydrate}/pkg ${money-web-hydrate}/favicon.svg $out/
-            # The module's URLs named by this build, as the SPA's are.
-            v=$(basename ${money-web-hydrate} | cut -c1-32)
-            find $out -name index.html -exec sed -i "s/v=dev/v=$v/g" {} +
-          '';
-
           # The specification is `rust/ark` (spec/README.md), and the tools
           # over it are `rust/arkdb`, whose binary is `arkdb` (`gen`, `fuzz`,
           # and reading a system's events: `tail`, `trace`, `peer`): `ark` is
@@ -1379,9 +1357,6 @@
             inherit harken-iced docs screens-ffmpeg screens-python xcodegen;
             inherit money-iced money-web money-server;
             inherit money-seed harken-seed harken-covers money-demo harken-demo;
-          } // lib.optionalAttrs (lib.elem "ssg" moneyWebModes) {
-            # app.toml's `[web] modes`: the static site and its module.
-            inherit money-web-hydrate money-web-static;
           } // {
             # money's library for its phones (the generated shim over
             # money/app), as harken's.

@@ -473,30 +473,42 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 
 ## The Browser's Modes
 
-How the page is made is chosen per build, by app.toml's `[web] modes`
-(money's: `["spa", "ssg"]`); the app's crate is the same in each.
+How the page is made is chosen per app, by app.toml's `[web] modes`; the
+app's crate is the same in each.
 
-| Mode | Built by | What the browser is sent | Without script |
-|---|---|---|---|
-| `spa` (the default) | `nix build .#<app>-web` (feature `csr`) | index.html and the module; the page draws itself | nothing |
-| `ssg` | `nix build .#<app>-web-static` (the app's prerenderer, feature `ssr`, and the module built with `hydrate`) | a page of HTML per route, then the module, which takes it over | every page, every way between pages; nothing that changes the data |
-| `ssr` | not built yet (see below) | each request's page, written by the app's server, then the module | everything: a press is a form the server answers |
+| Mode | What the browser is sent | Without script |
+|---|---|---|
+| `spa` (the default) | index.html and the module (`nix build .#<app>-web`, feature `csr`); the page draws itself | nothing |
+| `ssg` | a page of HTML per path the app declares, written natively (`arkui_web::prerender`, feature `ssr`), then the module (`hydrate`), which takes it over | every page and every link between them; no UI state, nothing that changes the data |
+| `ssr` | each request's page, written by the app's own server, then the module | everything: a press is a form the server answers |
+
+**Which app uses which.** money and harken are the SPA alone
+(`modes = ["spa"]`), served by their own servers beside the sync socket
+and sign-in: a household's budget and a person's library are private, so
+there is nothing to write ahead for anybody, and a page that draws itself
+over what it syncs needs no server to draw it. The docs site is the static
+case (`ssg`): public, finite, read more than written. harken's public
+pages (a show, an episode, a transcript) are the next. `ssr` is a
+capability the layers keep — the same routes, controls and forms, taken by
+the server — that no app turns on.
 
 The SPA is what it always was: none of what follows is drawn in it, and
 its markup is the same.
 
-**Routes.** A page's address is its route (`arkui_web::page::Route`): the
-launch arguments every shell reads (`screen`, `inspector`, `pane`, …) and
-whatever else the app's `WebApp::route` says it is at — for money the
-month, the selection, the review, the search, Settings and its pane, the
-question asked, the sheet and what is written in it — as segments of the
-path: `/budget/`, `/budget/inspector=1/category=<id>/`,
-`/transactions/sheet=add-transaction/payee=Target/`. `screen` is bare and
-first, the rest `key=value`, each percent-encoded (`page::Route::path`,
-read back by `of_path`; its test holds every one to round trip). The
-app's `arrive` reads them back, from the path as from `?screen=…` (which
-the SPA still takes), so the state a page is written at is the state the
-module arrives at, from the route and the data alone.
+**Routes** (`arkui_web::page::Route`), as Next.js has them. The **path**
+is the content's identity: the screen and the ids of what it shows —
+money's `/budget/2026-10/category/<id>/`, `/accounts/<id>/txn/<id>/`,
+`/budget/settings/Connected%20Banks/`; a docs page's slug. The **query**
+is the UI's state over it: an inspector open, a search, a question asked,
+a sheet and what is typed in it — `?inspector=1&search=rent`. Each part is
+percent-encoded (`Route::url`, read back by `Route::of_url`; its test
+holds every one to round trip). The app's `WebApp::route` says where it
+is and `WebApp::arrive` brings it back there from a route (money's reads
+`?screen=…`, the launch arguments every shell reads, as well), so the
+state a page is written at is the state the module arrives at, from the
+route and the data alone. The API is small on purpose — `Route::at`,
+`seg`, `get`, `with`, `bare`, `url`, `of_url`, and `static_paths` — so a
+site can be built on it and keep building.
 
 **Browser-only calls** (the window, its width, `DomRect`, history, focus,
 the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`).
@@ -540,20 +552,24 @@ script:
   what the writer disabled) before taking the page over, and catches any
   form sent from then on: a press is the click's, as in the SPA.
 
-**The static site** (`ssg`) has no server to run `update`, so the
-prerenderer (`arkui_web::prerender`, money's `money-web-static`) presses
-every control of every page on the app as it was opened (`WebApp::rewind`
-puts it back; `dry_run` counts a change to the data and sends none): a
-press that only moves the app to another route is a link to that page
-(`formaction` on the form `#ark-go`, a plain GET), and it is written too;
-a press that would change the data, or leaves the page where it is, is
-drawn **disabled**. The pages are found breadth first from `/`, each of
-the app's shots.json `screens` and any `--start`, up to `--cap` (250): the
-routes are the product of every selection, month and sheet, so not every
-one is written, and a way to one that is not is disabled too. Without
-script a static page is a reader's: every screen, every selection the
-cap reaches, nothing that writes. With script it is the SPA over the demo
-household, from the page it was opened on.
+**The static site** (`ssg`) writes one page per path the app declares,
+`WebApp::static_paths` (Next.js's `generateStaticParams`): finite, and
+from the data — for a docs site its pages. There is no crawl and no cap;
+`arkui_web::prerender` refuses past the sanity bound app.toml's
+`[web] static-bound` sets, saying so. A query is never written: each page
+is its path at the UI's defaults, and with script the module takes the
+address's query once it has taken the page over (Next.js's client-only
+`searchParams`). There is no server to run `update`, so each control is
+pressed on the app put back where the page opened (`WebApp::rewind`;
+`dry_run` counts a change to the data and sends none): one that only
+moves the app to another declared path, its query empty, is a link to
+that page (`formaction` on the form `#ark-go`, a plain GET); one that
+changes the data, or leads to UI state (a query) or to a path not
+declared, is drawn **disabled** until script runs. A control's menu is
+the browser's own `popover` within the page. `page::dangling` finds every
+link on a written page that leads to no written page (arkui-web's test
+holds a fixture site to none), the check a site's build runs over what it
+wrote.
 
 **Server-rendered** (`ssr`) is the static page with a server behind the
 form: the app's own server (money-server, one process with the sync socket
@@ -566,10 +582,13 @@ pieces are built and tested here (`Served`, `page::take`, `Written`'s
 routes, the session cookie, and their tests are what is left (the last
 section).
 
-**Checked**: `.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` opens
-each screen by its route's path, with script and with `ARK_WEB_JS=0`
+**Checked**: arkui-web's tests (feature `ssr`) write a fixture site from
+its declared paths — a band each, a link to each declared path, the rest
+disabled, nothing dangling, the bound refused — and round-trip routes.
+`.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` photographs a static
+site by its routes' addresses, with script and with `ARK_WEB_JS=0`
 without; with script, a written page fails its shot on any error or any
-word of hydration in the console (build.yaml's `web-modes`).
+word of hydration in the console.
 
 ## The iced Fork: COSMIC's
 

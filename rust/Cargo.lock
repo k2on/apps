@@ -4407,7 +4407,6 @@ dependencies = [
  "leptos",
  "money-app",
  "money-core",
- "serde_json",
  "web-sys",
 ]
 

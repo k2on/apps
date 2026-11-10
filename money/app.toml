@@ -63,10 +63,11 @@ dependencies = [
 
 [web]
 # How the browser's page is made (ui/docs/app.md, "The Browser's Modes"):
-# `spa` drawn by the page alone (`<id>-web`), `ssg` every page prerendered
-# and taken over by script when it runs (`<id>-web-static`), `ssr` written
-# by the app's server for each request (not built yet).
-modes = ["spa", "ssg"]
+# the SPA alone, served by money-server beside the sync socket. The budget
+# is private, so no page of it is written ahead (`ssg`), and the server
+# writes none either (`ssr`): the page draws itself over the household it
+# syncs.
+modes = ["spa"]
 
 [fdroid]
 metadata = "fdroid/metadata/us.koon.money.yml"

@@ -404,9 +404,19 @@ pub fn press(i: usize) -> bool {
     }
 }
 
-/// A page's address: the launch arguments as segments of the path.
+/// A page's address, as Next.js has it: its **path** is the content's
+/// identity (the screen, and the ids of what it shows: `/budget/2026-11/
+/// category/<id>/`), and its **query** the UI's state over it (an
+/// inspector open, a search, a sheet and what is typed in it:
+/// `?inspector=1&search=rent`). A static site writes one page per path an
+/// app declares (`WebApp::static_paths`) and never a query: the page is
+/// the path at its default state, and the module applies the query once
+/// it runs. The SPA and a server honour both.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Route(pub Vec<(String, String)>);
+pub struct Route {
+    pub path: Vec<String>,
+    pub query: Vec<(String, String)>,
+}
 
 fn encode(s: &str) -> String {
     let mut out = String::new();
@@ -445,67 +455,127 @@ pub fn decode(s: &str) -> Option<String> {
 }
 
 impl Route {
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    /// The page at `path`, its UI at its defaults.
+    pub fn at<S: Into<String>>(path: impl IntoIterator<Item = S>) -> Route {
+        Route {
+            path: path.into_iter().map(Into::into).collect(),
+            query: vec![],
+        }
     }
 
+    /// The path's `i`th segment.
+    pub fn seg(&self, i: usize) -> Option<&str> {
+        self.path.get(i).map(String::as_str)
+    }
+
+    /// The query's `key`.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.query.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    /// The query's `key` set to `value`.
     pub fn with(mut self, key: &str, value: impl Into<String>) -> Route {
-        self.0.retain(|(k, _)| k != key);
-        self.0.push((key.into(), value.into()));
+        self.query.retain(|(k, _)| k != key);
+        self.query.push((key.into(), value.into()));
         self
     }
 
-    /// `/budget/`, `/category:dining/inspector=1/`: `screen` bare and first,
-    /// the rest `key=value`.
-    pub fn path(&self) -> String {
-        let mut segs = vec![];
-        if let Some(s) = self.get("screen") {
-            segs.push(encode(s));
-        }
-        for (k, v) in &self.0 {
-            if k != "screen" {
-                segs.push(format!("{}={}", encode(k), encode(v)));
-            }
-        }
-        match segs.is_empty() {
+    /// The path alone: the page a static site writes for it.
+    pub fn bare(&self) -> Route {
+        Route::at(self.path.clone())
+    }
+
+    /// `/budget/2026-11/`: the path, each segment percent-encoded.
+    pub fn path_url(&self) -> String {
+        match self.path.is_empty() {
             true => "/".into(),
-            false => format!("/{}/", segs.join("/")),
+            false => format!("/{}/", self.path.iter().map(|s| encode(s)).collect::<Vec<_>>().join("/")),
         }
     }
 
-    /// A path read back, under `base` (where the site is served from);
-    /// `None` for one that is not a route's.
-    pub fn of_path(path: &str, base: &str) -> Option<Route> {
+    /// `?inspector=1&search=rent`, or nothing.
+    pub fn query_url(&self) -> String {
+        match self.query.is_empty() {
+            true => String::new(),
+            false => format!("?{}", self.query.iter().map(|(k, v)| format!("{}={}", encode(k), encode(v))).collect::<Vec<_>>().join("&")),
+        }
+    }
+
+    /// The whole address: the path, then the query.
+    pub fn url(&self) -> String {
+        format!("{}{}", self.path_url(), self.query_url())
+    }
+
+    /// An address read back (`/money/budget/?inspector=1` under `/money/`):
+    /// none for a path that is not a route's.
+    pub fn of_url(url: &str, base: &str) -> Option<Route> {
+        let (path, query) = url.split_once('?').unwrap_or((url, ""));
         let path = path.strip_prefix(base.trim_end_matches('/')).unwrap_or(path);
         let path = path.trim_end_matches("index.html");
-        let mut r = vec![];
-        for seg in path.split('/').filter(|s| !s.is_empty()) {
-            match seg.split_once('=') {
-                Some((k, v)) => r.push((decode(k)?, decode(v)?)),
-                None if r.is_empty() => r.push(("screen".into(), decode(seg)?)),
-                None => return None,
-            }
-        }
-        Some(Route(r))
+        let path = path.split('/').filter(|s| !s.is_empty()).map(decode).collect::<Option<Vec<_>>>()?;
+        Some(Route {
+            path,
+            query: Route::of_query(query).query,
+        })
     }
 
-    /// An address's query read as a route (`?screen=budget&inspector=1`).
+    /// A query read as a route's (`?screen=budget&inspector=1`), its path
+    /// empty.
     pub fn of_query(q: &str) -> Route {
-        Route(
-            q.trim_start_matches('?')
+        Route {
+            path: vec![],
+            query: q
+                .trim_start_matches('?')
                 .split('&')
                 .filter_map(|kv| {
                     let (k, v) = kv.split_once('=')?;
                     Some((decode(k)?, decode(v)?))
                 })
                 .collect(),
-        )
+        }
     }
+}
 
-    /// The route as the launch arguments a shell reads: `-screen budget`.
-    pub fn args(&self) -> Vec<String> {
-        self.0.iter().flat_map(|(k, v)| [format!("-{k}"), v.clone()]).collect()
+/// Every address a written page leads to: its links' and its forms'
+/// (`href`, `formaction`, `action`), as written.
+pub fn links(html: &str) -> Vec<String> {
+    let mut out = vec![];
+    for attr in [" href=\"", " formaction=\"", " action=\""] {
+        let mut rest = html;
+        while let Some(at) = rest.find(attr) {
+            rest = &rest[at + attr.len()..];
+            let Some(end) = rest.find('"') else { break };
+            out.push(rest[..end].replace("&amp;", "&"));
+            rest = &rest[end..];
+        }
     }
+    out
+}
+
+/// Whether every link of every written page (`pages`, each its path's
+/// address and its HTML) leads to a page written, under `base`; the ones
+/// that do not, as `<page> -> <link>`. A link off the site (a scheme, `//`)
+/// and one to a file beside the pages (`pkg/…`, a favicon: a last segment
+/// with a dot) are not pages; a control that leads nowhere written is
+/// drawn disabled, not linked.
+pub fn dangling(pages: &[(String, String)], base: &str) -> Vec<String> {
+    let written: std::collections::HashSet<&str> = pages.iter().map(|(u, _)| u.as_str()).collect();
+    let mut out = vec![];
+    for (at, html) in pages {
+        for l in links(html) {
+            let off = l.contains("://") || l.starts_with("//") || l.starts_with('#') || l.starts_with("mailto:");
+            let path = l.split(['?', '#']).next().unwrap_or("");
+            let file = path.rsplit('/').next().is_some_and(|last| last.contains('.') && !last.ends_with(".html"));
+            if off || file || path.is_empty() {
+                continue;
+            }
+            let page = Route::of_url(path, base).map(|r| format!("{}{}", base.trim_end_matches('/'), r.path_url()));
+            if !page.as_deref().is_some_and(|p| written.contains(p)) {
+                out.push(format!("{at} -> {l}"));
+            }
+        }
+    }
+    out
 }
 
 /// What's in a page's text, escaped for HTML.
@@ -521,19 +591,28 @@ mod tests {
     fn routes_round_trip() {
         for r in [
             Route::default(),
-            Route(vec![("screen".into(), "budget".into())]),
-            Route(vec![("screen".into(), "category:dining".into()), ("inspector".into(), "1".into())]),
-            Route(vec![
-                ("screen".into(), "transaction:a b/c".into()),
-                ("pane".into(), "Connected Banks".into()),
-            ]),
-            Route(vec![("month".into(), "2026-10".into())]),
+            Route::at(["budget"]),
+            Route::at(["budget", "2026-11", "category", "0a1b"]).with("inspector", "1"),
+            Route::at(["transactions", "a b/c"]).with("search", "Trader Joe's & more"),
+            Route::default().with("month", "2026-10"),
         ] {
-            assert_eq!(Route::of_path(&r.path(), "").as_ref(), Some(&r), "{}", r.path());
-            assert_eq!(Route::of_path(&format!("/money{}index.html", r.path()), "/money/").as_ref(), Some(&r));
+            assert_eq!(Route::of_url(&r.url(), "").as_ref(), Some(&r), "{}", r.url());
+            assert_eq!(Route::of_url(&format!("/money{}", r.url()), "/money/").as_ref(), Some(&r));
+            assert_eq!(Route::of_url(&format!("/money{}index.html", r.path_url()), "/money/"), Some(r.bare()));
         }
-        assert_eq!(Route(vec![("screen".into(), "budget".into())]).path(), "/budget/");
-        assert_eq!(Route::of_path("/budget/x/", ""), None);
+        assert_eq!(Route::at(["budget"]).with("inspector", "1").url(), "/budget/?inspector=1");
+    }
+
+    #[test]
+    fn a_link_to_a_page_not_written_is_found() {
+        let pages = vec![
+            ("/".to_string(), r#"<a href="/budget/">B</a><link href="/favicon.svg">"#.to_string()),
+            ("/budget/".to_string(), r#"<button formaction="/budget/?inspector=1"></button><a href="https://x.org/">x</a>"#.to_string()),
+        ];
+        assert!(dangling(&pages, "/").is_empty());
+        let mut more = pages.clone();
+        more[0].1.push_str(r#"<a href="/insights/">I</a>"#);
+        assert_eq!(dangling(&more, "/"), vec!["/ -> /insights/".to_string()]);
     }
 
     #[test]

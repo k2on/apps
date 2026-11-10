@@ -14331,11 +14331,6 @@ rec {
             path = "src/main.rs";
             requiredFeatures = [ ];
           }
-          {
-            name = "money-web-static";
-            path = "src/bin/static.rs";
-            requiredFeatures = [ "ssr" ];
-          }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/web; };
         libName = "money_web";
@@ -14374,12 +14369,6 @@ rec {
             features = [ "demo" ];
           }
           {
-            name = "serde_json";
-            packageId = "serde_json";
-            optional = true;
-            features = [ "raw_value" ];
-          }
-          {
             name = "web-sys";
             packageId = "web-sys";
             features = [ "Window" "Document" "Element" ];
@@ -14388,10 +14377,9 @@ rec {
         features = {
           "csr" = [ "arkui-web/csr" "leptos/csr" ];
           "default" = [ "csr" ];
-          "hydrate" = [ "arkui-web/hydrate" "leptos/hydrate" ];
-          "ssr" = [ "arkui-web/ssr" "leptos/ssr" "dep:serde_json" ];
+          "ssr" = [ "arkui-web/ssr" "leptos/ssr" ];
         };
-        resolvedDefaultFeatures = [ "csr" "default" "hydrate" "ssr" ];
+        resolvedDefaultFeatures = [ "csr" "default" "ssr" ];
       };
       "moxcms" = rec {
         crateName = "moxcms";

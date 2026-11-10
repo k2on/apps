@@ -13,7 +13,7 @@
 //
 // The page's mode (ui/docs/app.md, "The Browser's Modes") is ARK_WEB_MODE:
 // `spa` (the default) as above; `ssg`, a static site, where each of
-// `screens` is opened by its route's path (`/budget/inspector=1/`) and the
+// `screens` is opened by its route's address (`/budget/?inspector=1`) and the
 // browser's own `web.shots` (which open the page's transient parts by its
 // query) are left out. ARK_WEB_JS=0 takes them with script off. With
 // script on, a page written as HTML fails its shot on any error or any
@@ -39,14 +39,17 @@ async function main() {
   };
   const mode = process.env.ARK_WEB_MODE || 'spa';
   const js = process.env.ARK_WEB_JS !== '0';
-  // A route's path, as arkui-web's `page::Route::path` writes it.
+  // A route's address, as arkui-web's `page::Route::url` writes it: the
+  // screen the path, the rest the query (the UI's state, which a static
+  // page takes once its script runs).
   const routePath = args => {
-    const segs = [];
+    const q = [];
+    let path = '/';
     for (let i = 0; i + 1 < args.length; i += 2) {
       const k = args[i].replace(/^-+/, ''), v = encodeURIComponent(args[i + 1]).replace(/%3A/g, ':');
-      if (k === 'screen') segs.unshift(v); else segs.push(`${k}=${v}`);
+      if (k === 'screen') path = `/${v}/`; else q.push(`${k}=${v}`);
     }
-    return segs.length ? `/${segs.join('/')}/` : '/';
+    return q.length ? `${path}?${q.join('&')}` : path;
   };
   const screens = (all.screens || []).map(s => ({ id: s.id, query: query(s.args), path: routePath(s.args), sizes: s.on }));
   const shots = mode === 'spa' ? screens.concat(web.shots || []) : screens;

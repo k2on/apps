@@ -22,7 +22,7 @@ use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::shell::view::{commands, money_shell};
-use money_app::shell::{tagged_account, MoneyShell, ShellMsg};
+use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::dates::{add_months, days_from_civil, parse_day};
 use money_core::*;
 
@@ -283,15 +283,14 @@ impl MoneyWeb {
     }
 }
 
-/// What the address says of the page besides the shell's launch arguments,
-/// in the order they are read back (`MoneyWeb::at`).
-const ROUTE_KEYS: [&str; 14] = [
-    "month",
-    "category",
-    "txn",
+/// What the address's path says after the section, each a key and its
+/// value (`MoneyWeb::route`): what the page shows.
+const PATH_KEYS: [&str; 3] = ["category", "txn", "settings"];
+
+/// What its query says: the UI's state over it, in the order read back.
+const QUERY_KEYS: [&str; 11] = [
     "review",
     "search",
-    "settings",
     "ask",
     "sheet",
     "payee",
@@ -300,50 +299,42 @@ const ROUTE_KEYS: [&str; 14] = [
     "draft-category",
     "account",
     "memo",
+    "month",
 ];
 
 impl MoneyWeb {
     /// Where the page is, as its address (ui/docs/app.md, "The Browser's
-    /// Modes"): the shell's section as `-screen`, its inspector, and what
-    /// only this page holds — the month, the selection, the review, the
-    /// search, Settings and its pane, the question, the sheet and what is
-    /// written in it. `arrive` reads it back.
+    /// Modes"). The path is what it shows: the section's tag
+    /// (`budget`, `accounts/<id>`), the month when it is not this one, the
+    /// category or the transaction chosen, Settings and its pane —
+    /// `/budget/2026-10/category/<id>/`. The query is the UI over it: the
+    /// inspector, the review, the search, the question, the sheet and what
+    /// is written in it. `arrive` reads it back.
     pub fn route(&self) -> arkui_web::page::Route {
         use arkui_web::page::Route;
         let s = self.shell.state();
-        let mut r = Route::default();
-        let screen = match tagged_account(&s.section) {
-            Some(hex) => self
-                .store
-                .rows::<AccountLine>(&MoneyView::Accounts)
-                .iter()
-                .find(|a| a.id.hex() == hex)
-                .map(|a| format!("account:{}", a.name.to_lowercase())),
-            None => Some(s.section.clone()),
-        };
-        if let Some(screen) = screen {
-            r = r.with("screen", screen);
-        }
-        if s.inspector {
-            r = r.with("inspector", "1");
-        }
+        let mut path: Vec<String> = s.section.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
         if self.month != self.today[..7] {
-            r = r.with("month", self.month.clone());
+            path.push(self.month.clone());
         }
         if let Some(c) = self.category {
-            r = r.with("category", c.hex());
+            path.extend(["category".into(), c.hex()]);
         }
         if let Some(t) = self.txn {
-            r = r.with("txn", t.hex());
+            path.extend(["txn".into(), t.hex()]);
+        }
+        if self.settings {
+            path.extend(["settings".into(), s.pane.clone()]);
+        }
+        let mut r = Route::at(path);
+        if s.inspector {
+            r = r.with("inspector", "1");
         }
         if self.review {
             r = r.with("review", "1");
         }
         if !self.search.is_empty() {
             r = r.with("search", self.search.clone());
-        }
-        if self.settings {
-            r = r.with("settings", s.pane.clone());
         }
         if let Some(Asking::ApproveAll(_)) = self.asking {
             r = r.with("ask", "approve-all");
@@ -610,21 +601,40 @@ impl WebApp for MoneyWeb {
         self.suggestions(field, typed)
     }
 
-    fn arrive(&mut self, query: &dyn Fn(&str) -> Option<String>) -> Vec<Msg> {
+    fn arrive(&mut self, route: &arkui_web::page::Route) -> Vec<Msg> {
+        // The launch arguments every shell reads, as the query says them
+        // (`?screen=budget&inspector=1`).
         let mut args = vec![];
         for key in ["screen", "inspector", "appearance", "pane", "settingsTab"] {
-            if let Some(v) = query(key) {
+            if let Some(v) = route.get(key).map(str::to_string).or_else(|| arkui_web::page::args().into_iter().find(|(k, _)| k == key).map(|(_, v)| v)) {
                 args.push(format!("-{key}"));
                 args.push(v);
             }
         }
-        let mut out = match args.is_empty() {
-            true => vec![],
-            false => vec![Msg::Shell(ShellMsg::Launch { args })],
+        let mut out = vec![];
+        // The path: the section's tag, then what it shows.
+        let mut segs = route.path.iter().map(String::as_str).peekable();
+        let section = match segs.next() {
+            Some("accounts") if segs.peek().is_some_and(|s| !PATH_KEYS.contains(s)) => segs.next().map(money_app::shell::account_tag),
+            Some(s) => Some(s.to_string()),
+            None => None,
         };
-        for key in ROUTE_KEYS {
-            if let Some(v) = query(key) {
-                out.push(Msg::At(key.into(), v));
+        if let Some(tag) = section {
+            out.push(Msg::Shell(ShellMsg::Select { tag }));
+        }
+        if !args.is_empty() {
+            out.push(Msg::Shell(ShellMsg::Launch { args }));
+        }
+        while let Some(seg) = segs.next() {
+            match seg {
+                k if PATH_KEYS.contains(&k) => out.push(Msg::At(k.into(), segs.next().unwrap_or_default().into())),
+                m if dates_ok(m) => out.push(Msg::At("month".into(), m.into())),
+                _ => {}
+            }
+        }
+        for key in QUERY_KEYS {
+            if let Some(v) = route.get(key) {
+                out.push(Msg::At(key.into(), v.into()));
             }
         }
         out

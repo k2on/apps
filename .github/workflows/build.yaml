@@ -140,49 +140,6 @@ jobs:
           path: page-out
           if-no-files-found: error
 
-  # The browser's modes (ui/docs/app.md, "The Browser's Modes"), money's:
-  # the SPA, and the static site with script and without, every screen
-  # photographed at each size in light and dark (app-web.sh). A written
-  # page fails its shot on any error or word of hydration in the console.
-  # Nothing is published: the shots are this run's artifact.
-  web-modes:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - if: vars.CACHIX_NAME != ''
-        uses: cachix/cachix-action@v15
-        with:
-          name: ${{ vars.CACHIX_NAME }}
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-
-      - name: Build the SPA and the static site
-        run: |
-          nix build .#money-web --out-link "$RUNNER_TEMP/spa" --print-build-logs
-          nix build .#money-web-static --out-link "$RUNNER_TEMP/ssg" --print-build-logs
-
-      - name: Playwright's Chromium
-        run: |
-          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
-          npm install --no-save --no-audit --no-fund playwright@1.63.0
-          npx playwright install --with-deps chromium
-
-      - name: The shots, in each mode
-        run: |
-          export NODE_PATH="$RUNNER_TEMP/pw/node_modules"
-          .github/screens/app-web.sh web-modes/spa "$RUNNER_TEMP/spa" money
-          ARK_WEB_MODE=ssg .github/screens/app-web.sh web-modes/ssg-js "$RUNNER_TEMP/ssg" money
-          ARK_WEB_MODE=ssg ARK_WEB_JS=0 .github/screens/app-web.sh web-modes/ssg-nojs "$RUNNER_TEMP/ssg" money
-
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-modes
-          path: web-modes
-          if-no-files-found: ignore
-
   # The flake's Linux checks: each member's tests and lints a derivation of
   # its own over the crates' (flake.nix, nix/rust.nix), so with Cachix a
   # commit compiles and runs only what its change reaches.

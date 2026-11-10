@@ -240,9 +240,11 @@ pub trait WebApp: 'static {
     fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Self::Msg>> {
         vec![]
     }
-    /// What the page's address asks for once the first draw is up
-    /// (`?screen=`, `?run=` and the rest an app reads): the messages.
-    fn arrive(&mut self, _query: &dyn Fn(&str) -> Option<String>) -> Vec<Self::Msg> {
+    /// What the page's address asks for (`page::Route`: its path, the
+    /// content, and its query, the UI's state): the messages that bring
+    /// the app there. A static page arrives at its path alone and then,
+    /// once the module runs, at the whole address.
+    fn arrive(&mut self, _route: &page::Route) -> Vec<Self::Msg> {
         vec![]
     }
     /// What the field `field` (`search`, or a form's own id) suggests for
@@ -256,6 +258,12 @@ pub trait WebApp: 'static {
     /// leads to its new one (`page`).
     fn route(&self) -> page::Route {
         page::Route::default()
+    }
+    /// Every path a static site writes a page for (Next.js's
+    /// `generateStaticParams`): finite, and from the data. A query is never
+    /// written: each page is its path at the UI's defaults.
+    fn static_paths(&self) -> Vec<page::Route> {
+        vec![]
     }
     /// How many changes the app has made to its data: a press that makes
     /// one is an action, not a way to another page.
@@ -274,26 +282,28 @@ pub trait WebApp: 'static {
     fn dry_run(&mut self, _on: bool) {}
 }
 
-/// The page's address's `name` parameter.
-///
-/// Then the route in the path (`/budget/inspector=1/`, [`page::Route`]),
-/// then what the page was written with (`page::args`): a page written as
-/// HTML reads the same arguments in the browser as it was written with.
+/// The page's address's query `name`, or else what the page was written
+/// with (`page::args`): a page written as HTML reads the same arguments in
+/// the browser as it was written with.
 pub fn query(name: &str) -> Option<String> {
     let written = || page::args().into_iter().find(|(k, _)| k == name).map(|(_, v)| v);
     if !cfg!(target_arch = "wasm32") {
         return written();
     }
-    let location = web_sys::window()?.location();
-    let search = location.search().ok()?;
-    if let Some(v) = web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name) {
-        return Some(v);
+    let search = web_sys::window()?.location().search().ok()?;
+    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name).or_else(written)
+}
+
+/// The page's address as a route, under the site's base.
+pub fn address() -> page::Route {
+    if !cfg!(target_arch = "wasm32") {
+        return page::Route::default();
     }
-    let base = page_base();
-    let path = location.pathname().ok()?;
-    page::Route::of_path(&path, &base)
-        .and_then(|r| r.get(name).map(str::to_string))
-        .or_else(written)
+    let Some(l) = web_sys::window().map(|w| w.location()) else {
+        return page::Route::default();
+    };
+    let url = format!("{}{}", l.pathname().unwrap_or_default(), l.search().unwrap_or_default());
+    page::Route::of_url(&url, &page_base()).unwrap_or_default()
 }
 
 /// Where the site is served from (`<html data-ark-base>`), `/` unless said.
@@ -355,7 +365,7 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         }
     });
     // What the address asks for, after the first draw.
-    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&|n| query(n));
+    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&address());
     for m in arrive {
         send(m);
     }
@@ -414,11 +424,19 @@ pub fn hydrate<A: WebApp>(app: A) {
     let width = attr("data-ark-width");
     page::set_every_width(width.as_deref() == Some("every"));
     page::set_width(width.and_then(|w| w.parse().ok()));
-    page::set_args(page::Route::of_query(&attr("data-ark-args").unwrap_or_default()).0);
+    page::set_args(page::Route::of_query(&attr("data-ark-args").unwrap_or_default()).query);
     let _ = root.set_attribute("data-ark-js", "");
     let app = install(app);
     keys::listen::<A>(app.clone());
-    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&|n| query(n));
+    // A static page was written at its path alone, a server's at its whole
+    // address: the first draw is the written one, and a static page's query
+    // is taken once the page is the module's.
+    let here = address();
+    let written = match page::mode() {
+        page::Mode::Server => here.clone(),
+        _ => here.bare(),
+    };
+    let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&written);
     for m in arrive {
         app.borrow_mut().update(m);
     }
@@ -463,9 +481,15 @@ pub fn hydrate<A: WebApp>(app: A) {
     });
     std::mem::forget(handle);
     // At the window's own width from the next frame.
-    request_frame(|| {
+    request_frame(move || {
         page::set_every_width(false);
         page::set_width(None);
+        if here != written {
+            let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&here);
+            for m in arrive {
+                send(m);
+            }
+        }
         redraw();
     });
 }
@@ -500,11 +524,11 @@ pub fn document(w: &Written, view: &str) -> String {
     let theme = w
         .args
         .iter()
-        .chain(w.route.0.iter())
+        .chain(w.route.query.iter())
         .find(|(k, v)| k == "theme" && (v == "light" || v == "dark"))
         .map(|(_, v)| format!(" data-theme=\"{v}\""))
         .unwrap_or_default();
-    let reduced = w.args.iter().chain(w.route.0.iter()).any(|(k, v)| k == "reduce-motion" && v == "1");
+    let reduced = w.args.iter().chain(w.route.query.iter()).any(|(k, v)| k == "reduce-motion" && v == "1");
     let args = w.args.iter().map(|(k, v)| format!("{}={}", e(k), e(v))).collect::<Vec<_>>().join("&amp;");
     let hidden: String = w
         .hidden
@@ -528,7 +552,7 @@ pub fn document(w: &Written, view: &str) -> String {
         css = w.css,
         head = w.head,
         action = e(&w.action),
-        route = e(&w.route.path()),
+        route = e(&w.route.url()),
     )
 }
 
@@ -551,15 +575,7 @@ impl<A: WebApp> Served<A> {
         page::set_every_width(width.is_none());
         page::set_args(args.to_vec());
         let app = install(app);
-        let arrive = {
-            let ask = |n: &str| {
-                route
-                    .get(n)
-                    .map(str::to_string)
-                    .or_else(|| args.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()))
-            };
-            app.borrow_mut().arrive(&ask)
-        };
+        let arrive = app.borrow_mut().arrive(route);
         for m in arrive {
             app.borrow_mut().update(m);
         }
@@ -567,18 +583,12 @@ impl<A: WebApp> Served<A> {
     }
 
     /// Put back at `route` as it opened, if the app can be (`WebApp::rewind`).
-    pub fn rewind(&self, route: &page::Route, args: &[(String, String)]) -> bool {
+    pub fn rewind(&self, route: &page::Route) -> bool {
         if !self.app.borrow_mut().rewind() {
             return false;
         }
         UI.with(|u| *u.borrow_mut() = Ui::default());
-        let ask = |n: &str| {
-            route
-                .get(n)
-                .map(str::to_string)
-                .or_else(|| args.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()))
-        };
-        let arrive = self.app.borrow_mut().arrive(&ask);
+        let arrive = self.app.borrow_mut().arrive(route);
         for m in arrive {
             self.app.borrow_mut().update(m);
         }
@@ -607,40 +617,55 @@ impl<A: WebApp> Served<A> {
     }
 }
 
-/// Every page of a static site (`page::Mode::Static`), from `starts` and
-/// every page a control leads to, up to `cap` pages; each control's lead
-/// found by pressing it on an app opened afresh (`open`). Returns the
-/// pages, each its route and its HTML (written by `write` from its view).
+/// Every page of a static site (`page::Mode::Static`): one per path the
+/// app declares (`WebApp::static_paths`), each at the UI's defaults, or
+/// why not — more paths than `bound`, the sanity bound the app's
+/// app.toml sets. A control whose press only moves the app to another
+/// declared path, its query empty, is a link to that page; one that
+/// changes the data, or leads to UI state (a query) or a path not
+/// declared, is drawn disabled until script runs. Each control's lead is
+/// found by pressing it on the app put back where the page opened
+/// (`WebApp::rewind`) or opened afresh (`open`). Returns each page's
+/// route and its HTML (written by `write` from its view).
 #[cfg(feature = "ssr")]
 pub fn prerender<A: WebApp>(
     open: &dyn Fn() -> A,
-    starts: Vec<page::Route>,
-    cap: usize,
+    bound: usize,
     width: Option<f64>,
     args: &[(String, String)],
     write: &dyn Fn(&page::Route, &str) -> String,
-) -> Vec<(page::Route, String)> {
+) -> Result<Vec<(page::Route, String)>, String> {
     use page::{Lead, Mode, Route};
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{HashMap, HashSet};
+    let mut paths: Vec<Route> = vec![];
+    for p in open().static_paths() {
+        let p = p.bare();
+        if !paths.contains(&p) {
+            paths.push(p);
+        }
+    }
+    if paths.len() > bound {
+        return Err(format!(
+            "{} static paths, past the bound of {bound} app.toml's [web] static-bound sets: raise it, or declare fewer",
+            paths.len()
+        ));
+    }
+    let declared: HashSet<Route> = paths.iter().cloned().collect();
+    let base = args
+        .iter()
+        .find(|(k, _)| k == "base")
+        .map(|(_, v)| v.trim_end_matches('/').to_string())
+        .unwrap_or_default();
     let quiet = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let mut seen: Vec<Route> = vec![];
-    let mut leads: HashMap<Route, HashMap<usize, Option<Route>>> = HashMap::new();
-    let mut queue: VecDeque<Route> = starts.into_iter().collect();
-    while let Some(r) = queue.pop_front() {
-        if seen.contains(&r) || seen.len() >= cap {
-            continue;
-        }
-        seen.push(r.clone());
-        if std::env::var_os("ARK_PRERENDER_SAY").is_some() {
-            eprintln!("{} ({} waiting)", r.path(), queue.len());
-        }
+    let mut out = vec![];
+    for r in &paths {
         let n = {
-            let s = Served::new(open(), Mode::Static, &r, args, width);
+            let s = Served::new(open(), Mode::Static, r, args, width);
             s.draw();
             page::controls()
         };
-        let mut found = HashMap::new();
+        let mut leads: HashMap<usize, Lead> = HashMap::new();
         let mut kept: Option<Served<A>> = None;
         for i in 0..n {
             // An app that only moved is put back and pressed again; one
@@ -648,9 +673,9 @@ pub fn prerender<A: WebApp>(
             // The controls of the draw before stay recorded: an app put
             // back is where that draw was made.
             let s = match kept.take() {
-                Some(s) if s.rewind(&r, args) => s,
+                Some(s) if s.rewind(r) => s,
                 _ => {
-                    let s = Served::new(open(), Mode::Static, &r, args, width);
+                    let s = Served::new(open(), Mode::Static, r, args, width);
                     s.draw();
                     s.app_mut().dry_run(true);
                     s
@@ -659,44 +684,20 @@ pub fn prerender<A: WebApp>(
             let before = s.app().changes();
             let pressed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| page::press(i))).unwrap_or(false);
             let to = s.app().route();
-            let lead = (pressed && s.app().changes() == before && to != r).then_some(to);
+            let leads_to = pressed && s.app().changes() == before && to.query.is_empty() && to != *r && declared.contains(&to);
+            leads.insert(i, if leads_to { Lead::To(format!("{base}{}", to.path_url())) } else { Lead::Stays });
             if pressed {
                 kept = Some(s);
             }
-            if let Some(to) = &lead {
-                if !seen.contains(to) {
-                    queue.push_back(to.clone());
-                }
-            }
-            found.insert(i, lead);
         }
-        leads.insert(r, found);
+        page::set_leads(Some(leads));
+        let s = Served::new(open(), Mode::Static, r, args, width);
+        let html = write(r, &s.draw());
+        page::set_leads(None);
+        out.push((r.clone(), html));
     }
     std::panic::set_hook(quiet);
-    let base = args
-        .iter()
-        .find(|(k, _)| k == "base")
-        .map(|(_, v)| v.trim_end_matches('/').to_string())
-        .unwrap_or_default();
-    seen.iter()
-        .map(|r| {
-            let l = leads[r]
-                .iter()
-                .map(|(i, to)| {
-                    let lead = match to {
-                        Some(to) if seen.contains(to) => Lead::To(format!("{base}{}", to.path())),
-                        _ => Lead::Stays,
-                    };
-                    (*i, lead)
-                })
-                .collect();
-            page::set_leads(Some(l));
-            let s = Served::new(open(), Mode::Static, r, args, width);
-            let html = write(r, &s.draw());
-            page::set_leads(None);
-            (r.clone(), html)
-        })
-        .collect()
+    Ok(out)
 }
 
 thread_local! {
@@ -874,4 +875,96 @@ pub fn signed(cents: i64) -> AnyView {
 /// A word quiet and centred where there is nothing to show yet.
 pub fn quiet(words: impl Into<String>) -> AnyView {
     html::div().class("ark-empty").child(words.into()).into_any()
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    use super::*;
+    use page::Route;
+
+    /// A site of three paths: a link to each declared one, and the
+    /// controls a static page cannot run.
+    #[derive(Default)]
+    struct Site {
+        at: Vec<String>,
+        inspector: bool,
+        changes: u64,
+    }
+
+    #[derive(Clone)]
+    enum Go {
+        To(&'static str),
+        Inspector,
+        Change,
+    }
+
+    impl WebApp for Site {
+        type Msg = Go;
+        fn view(&self) -> AnyView {
+            let b = |label: &'static str, m: Go| crate::wired!(html::button(), tapped(label, &m)).child(label).into_any();
+            vec![
+                b("Home", Go::To("")),
+                b("Notes", Go::To("notes")),
+                b("Elsewhere", Go::To("elsewhere")),
+                b("Inspector", Go::Inspector),
+                b("Delete", Go::Change),
+            ]
+            .into_any()
+        }
+        fn update(&mut self, m: Go) {
+            match m {
+                Go::To(p) => self.at = (!p.is_empty()).then(|| p.to_string()).into_iter().collect(),
+                Go::Inspector => self.inspector = true,
+                Go::Change => self.changes += 1,
+            }
+        }
+        fn route(&self) -> Route {
+            let r = Route::at(self.at.clone());
+            if self.inspector {
+                return r.with("inspector", "1");
+            }
+            r
+        }
+        fn arrive(&mut self, r: &Route) -> Vec<Go> {
+            self.at = r.path.clone();
+            self.inspector = r.get("inspector").is_some();
+            vec![]
+        }
+        fn static_paths(&self) -> Vec<Route> {
+            vec![Route::default(), Route::at(["notes"])]
+        }
+        fn changes(&self) -> u64 {
+            self.changes
+        }
+    }
+
+    #[test]
+    fn a_static_site_is_its_declared_paths_and_every_link_resolves() {
+        let write = |r: &Route, view: &str| {
+            document(
+                &Written {
+                    mode: page::Mode::Static,
+                    route: r.clone(),
+                    base: "/".into(),
+                    ..Written::default()
+                },
+                view,
+            )
+        };
+        let pages = prerender(&Site::default, 10, None, &[], &write).unwrap();
+        let urls: Vec<String> = pages.iter().map(|(r, _)| r.url()).collect();
+        assert_eq!(urls, ["/", "/notes/"]);
+        let written: Vec<(String, String)> = pages.iter().map(|(r, h)| (r.url(), h.clone())).collect();
+        assert_eq!(page::dangling(&written, "/"), Vec::<String>::new());
+        let home = &pages[0].1;
+        assert!(home.contains(r#"formaction="/notes/""#), "a declared path is a link");
+        for off in ["Elsewhere", "Inspector", "Delete"] {
+            let at = home.find(&format!(">{off}<")).unwrap();
+            let tag = &home[home[..at].rfind("<button").unwrap()..at];
+            assert!(tag.contains("disabled") && !tag.contains("formaction"), "{off}: {tag}");
+        }
+        assert_eq!(home.matches("class=\"ark-at ark-at-").count(), page::Band::ALL.len(), "a band each");
+        let e = prerender(&Site::default, 1, None, &[], &write).unwrap_err();
+        assert!(e.contains("static-bound"), "{e}");
+    }
 }
