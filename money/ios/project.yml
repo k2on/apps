@@ -49,8 +49,10 @@ targets:
     templates: [ArkModules]
     sources:
       - path: Money
+      # A group of its own, not laid out in the directories it climbs
+      # through (ui/modules.py says why).
       - path: ../ffi/ios/swift
-        group: Bindings
+        createIntermediateGroups: false
     dependencies:
       - package: ArkUI
         product: ArkUI

@@ -48,24 +48,17 @@ jobs:
           echo "XG=$xg" >> "$GITHUB_ENV"
       - name: Compile
         run: |
+          # The very derivations app-screens builds (nix-xcode.sh), each one's
+          # log kept and its errors said.
           set +e
           status=0
-          one() { # <slice dir> <label> <xcodebuild args...>
-            k=$1; label=$2; shift 2
-            rm -rf money/ffi/ios && mkdir -p money/ffi/ios
-            cp -R "$k"/*.xcframework "$k"/swift money/ffi/ios/ && chmod -R u+w money/ffi/ios
-            (cd money/ios && "$XG" generate > /dev/null)
-            (cd money/ios && xcodebuild build -project Money.xcodeproj -scheme Money -configuration Debug \
-              -derivedDataPath "$RUNNER_TEMP/dd-$label" CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
-              COMPILER_INDEX_STORE_ENABLE=NO -IDEPackageSupportDisableManifestSandbox=1 "$@" > "$RUNNER_TEMP/$label.log" 2>&1)
+          for a in money-ios-simulator money-macos; do
+            bash .github/nix-xcode.sh . "$XCODE" "$a" > "$RUNNER_TEMP/$a.out" 2> "$RUNNER_TEMP/$a.log"
             r=$?
-            echo "== $label: exit $r"
-            grep -E '(error|warning: .*(deprecated|unavailable))' "$RUNNER_TEMP/$label.log" | grep -v '^ld: warning' | sort -u | head -150
-            grep -E '^\*\* BUILD' "$RUNNER_TEMP/$label.log"
+            echo "== $a: exit $r"
+            grep -E ' error: |\*\* BUILD' "$RUNNER_TEMP/$a.log" | sed 's|/nix/var/nix/builds/[^/]*/source/||' | sort -u | head -80
             [ $r = 0 ] || status=1
-          }
-          one "$(head -1 "$RUNNER_TEMP/k-sim")" ios -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
-          one "$(head -1 "$RUNNER_TEMP/k-mac")" mac -destination 'generic/platform=macOS'
+          done
           exit $status
       - if: always()
         uses: actions/upload-artifact@v4

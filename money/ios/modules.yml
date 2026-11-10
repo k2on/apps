@@ -3,8 +3,8 @@ targetTemplates:
   ArkModules:
     sources:
       - path: ../../modules/haptics/swift
-        group: Modules/haptics
+        createIntermediateGroups: false
       - path: ../../modules/clipboard/swift
-        group: Modules/clipboard
+        createIntermediateGroups: false
       - path: ../../modules/share/swift
-        group: Modules/share
+        createIntermediateGroups: false
