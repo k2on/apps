@@ -217,19 +217,37 @@ fn focus() -> Pane {
     }
 }
 
+/// Where `pane`'s cursor is: the sidebar's is the section shown, as the
+/// desktop's is (`arkui::shell::Routed::Section`).
+fn cursor_of(pane: Pane) -> usize {
+    match (pane, drawn(|d| d.sidebar_at)) {
+        (Pane::Sidebar, Some(at)) => at,
+        _ => ui(|u| u.cursor[pane_index(pane)]),
+    }
+}
+
+/// The cursor put on row `i` of `pane`. On the sidebar the cursor is the
+/// section, so moving it shows the section it lands on: `j`/`k` walk the
+/// app's places (the docs' pages) as the desktop's sidebar does.
 fn set_cursor(pane: Pane, i: usize) {
     let n = rows_in(pane);
+    let i = i.min(n.saturating_sub(1));
     ui_mut(|u| {
         u.focus = pane;
         u.keyed = true;
-        u.cursor[pane_index(pane)] = i.min(n.saturating_sub(1));
+        u.cursor[pane_index(pane)] = i;
         u.reveal = true;
     });
+    if pane == Pane::Sidebar && drawn(|d| d.sidebar_at) != Some(i) {
+        if let Some(open) = drawn(|d| d.rows[pane_index(pane)].get(i).and_then(|r| r.open.clone())) {
+            open();
+        }
+    }
 }
 
 fn step(d: isize) {
     let p = focus();
-    let at = ui(|u| u.cursor[pane_index(p)]) as isize;
+    let at = cursor_of(p) as isize;
     set_cursor(p, (at + d).max(0) as usize);
 }
 
@@ -288,13 +306,12 @@ fn vim(key: &str, shift: bool) -> bool {
                 (at + d).clamp(0, ps.len() as isize - 1)
             };
             let p = ps[to as usize];
-            let c = ui(|u| u.cursor[pane_index(p)]);
-            set_cursor(p, c);
+            set_cursor(p, cursor_of(p));
         }
         (_, "Enter" | "o") => {
             clear();
             let p = focus();
-            let c = ui(|u| u.cursor[pane_index(p)]);
+            let c = cursor_of(p);
             if let Some(open) = drawn(|d| d.rows[pane_index(p)].get(c).and_then(|r| r.open.clone())) {
                 open();
             }
@@ -366,7 +383,7 @@ fn next_match(d: isize) {
     let p = focus();
     let titles: Vec<String> = drawn(|dr| dr.rows[pane_index(p)].iter().map(|r| r.title.to_lowercase()).collect());
     let n = titles.len() as isize;
-    let at = ui(|u| u.cursor[pane_index(p)]) as isize;
+    let at = cursor_of(p) as isize;
     for k in 1..=n {
         let i = (at + d * k).rem_euclid(n.max(1));
         if titles[i as usize].contains(&needle) {
@@ -379,7 +396,7 @@ fn next_match(d: isize) {
 /// The cursor's row's menu, at the row: the menu key's, Shift-F10's.
 fn context_on_cursor() {
     let p = focus();
-    let c = ui(|u| u.cursor[pane_index(p)]);
+    let c = cursor_of(p);
     let Some(open) = drawn(|d| d.rows[pane_index(p)].get(c).and_then(|r| r.menu.clone())) else {
         return;
     };
@@ -516,10 +533,56 @@ fn command_box() -> AnyView {
         .into_any()
 }
 
+/// The command box written open in the page's flow, for a page that shows
+/// what it is (the docs): `query` typed, each row its title, its shortcut
+/// and what it runs, the `lit` one lit. `typed` is what is typed sent;
+/// a row pressed runs. The same box as `:` and ⌘K open over the window.
+pub fn command_written(query: &str, rows: Vec<(String, Option<String>, crate::Action)>, lit: usize, typed: Rc<dyn Fn(String)>) -> AnyView {
+    let rows: Vec<AnyView> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, (t, k, run))| {
+            html::div()
+                .class(if i == lit { "ark-command-row ark-lit" } else { "ark-command-row" })
+                .role("option")
+                .attr("aria-selected", (i == lit).then_some("true"))
+                .on(leptos::ev::click, move |_| run())
+                .child((html::span().child(t), k.map(|k| html::span().class("ark-menu-key").child(k))))
+                .into_any()
+        })
+        .collect();
+    html::div()
+        .class("ark-command ark-command-written")
+        .role("dialog")
+        .attr("aria-label", "Commands")
+        .child((
+            html::input()
+                .class("ark-command-input")
+                .attr("placeholder", "Type a Command")
+                .attr("aria-label", "Type a Command")
+                .attr("value", query.to_string())
+                .prop("value", query.to_string())
+                .on(leptos::ev::input, move |e| typed(event_target_value(&e))),
+            html::div().class("ark-command-list").role("listbox").child(rows),
+        ))
+        .into_any()
+}
+
+/// The keys panel written open in the page's flow (`?` opens it over the
+/// window): the grammar every app has, and `commands`' shortcuts.
+pub fn panel_written(commands: &[(String, String)]) -> AnyView {
+    keys_drawn(commands.to_vec(), "ark-keys-panel ark-keys-written")
+}
+
 fn keys_panel() -> AnyView {
     if !ui(|u| u.keys_panel) {
         return ().into_any();
     }
+    let commands: Vec<(String, String)> = all_commands().into_iter().filter_map(|(t, k, _)| k.map(|k| (k, t))).collect();
+    keys_drawn(commands, "ark-keys-panel")
+}
+
+fn keys_drawn(commands: Vec<(String, String)>, class: &'static str) -> AnyView {
     let grammar: Vec<AnyView> = GRAMMAR
         .iter()
         .map(|(k, w)| {
@@ -529,19 +592,17 @@ fn keys_panel() -> AnyView {
                 .into_any()
         })
         .collect();
-    let commands: Vec<AnyView> = all_commands()
+    let commands: Vec<AnyView> = commands
         .into_iter()
-        .filter_map(|(t, k, _)| {
-            k.map(|k| {
-                html::div()
-                    .class("ark-key-row")
-                    .child((html::kbd().child(k), html::span().child(t)))
-                    .into_any()
-            })
+        .map(|(k, t)| {
+            html::div()
+                .class("ark-key-row")
+                .child((html::kbd().child(k), html::span().child(t)))
+                .into_any()
         })
         .collect();
     html::div()
-        .class("ark-keys-panel")
+        .class(class)
         .role("dialog")
         .attr("aria-label", "Keys")
         .child((

@@ -46,36 +46,57 @@ thread_local! {
     static TOKENS: Cell<Option<(f64, f64, f64)>> = const { Cell::new(None) };
 }
 
-/// `[layout]`'s compact, expanded and sidebar widths, from the theme's CSS.
-fn widths() -> (f64, f64, f64) {
+/// `[layout]`'s compact, expanded and sidebar widths, from the theme's
+/// CSS: the page's computed variables in a browser, and natively the
+/// same variables as ui/theme.py wrote them into `theme.css`.
+pub fn widths() -> (f64, f64, f64) {
     if let Some(t) = TOKENS.with(|t| t.get()) {
         return t;
     }
-    let read = |name: &str, or: f64| -> f64 {
-        web_sys::window()
-            .and_then(|w| {
-                let root = w.document()?.document_element()?;
-                let style = w.get_computed_style(&root).ok()??;
-                style.get_property_value(name).ok()
-            })
-            .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
-            .unwrap_or(or)
+    let written = |name: &str| -> Option<f64> {
+        let at = crate::THEME_CSS.find(&format!("{name}:"))? + name.len() + 1;
+        let rest = &crate::THEME_CSS[at..];
+        rest[..rest.find(';')?].trim().trim_end_matches("px").parse().ok()
     };
-    let t = (
-        read("--ark-compact-width", 600.0),
-        read("--ark-expanded-width", 840.0),
-        read("--ark-sidebar-min-width", 1200.0),
-    );
+    let read = |name: &str| -> f64 {
+        let computed = || {
+            web_sys::window()
+                .and_then(|w| {
+                    let root = w.document()?.document_element()?;
+                    let style = w.get_computed_style(&root).ok()??;
+                    style.get_property_value(name).ok()
+                })
+                .and_then(|v| v.trim().trim_end_matches("px").parse().ok())
+        };
+        let found = if cfg!(target_arch = "wasm32") {
+            computed().or_else(|| written(name))
+        } else {
+            written(name)
+        };
+        found.unwrap_or_else(|| panic!("theme.css has no {name}"))
+    };
+    let t = (read("--ark-compact-width"), read("--ark-expanded-width"), read("--ark-sidebar-min-width"));
     TOKENS.with(|c| c.set(Some(t)));
     t
 }
 
-/// The window's width, in CSS pixels.
+/// The window's width, in CSS pixels: the band's being drawn when a page
+/// is drawn for every width (`page::Band`).
 pub fn width() -> f64 {
+    if let Some(b) = crate::page::band() {
+        return b.width();
+    }
+    if let Some(w) = crate::page::width() {
+        return w;
+    }
+    let sidebar = || widths().2;
+    if !cfg!(target_arch = "wasm32") {
+        return sidebar();
+    }
     web_sys::window()
         .and_then(|w| w.inner_width().ok())
         .and_then(|v| v.as_f64())
-        .unwrap_or(1440.0)
+        .unwrap_or_else(sidebar)
 }
 
 pub fn size_class() -> SizeClass {
@@ -101,6 +122,9 @@ pub fn sections() -> Sections {
 /// What a part drawn inside the shell is handed from the parts around it.
 struct Ctx<'h> {
     back: Option<crate::Action>,
+    /// Where the way back goes, said beside its chevron (a group's
+    /// heading, as an iPhone's Back says the page it returns to).
+    back_label: Option<String>,
     top_tabs: Option<AnyView>,
     hosts: &'h dyn Fn(&'static str) -> AnyView,
 }
@@ -110,6 +134,7 @@ struct Ctx<'h> {
 pub fn shell<M: Clone + 'static>(view: View<M>, hosts: &dyn Fn(&'static str) -> AnyView) -> AnyView {
     let mut ctx = Ctx {
         back: None,
+        back_label: None,
         top_tabs: None,
         hosts,
     };
@@ -146,7 +171,17 @@ struct Tab<M> {
     content: View<M>,
 }
 
-fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>) {
+/// A group of sections that is a place of its own (`tab_section`): its
+/// heading, glyph and tag, what it shows, and where its sections start.
+struct Group<M> {
+    title: &'static str,
+    glyph: &'static str,
+    tag: &'static str,
+    index: View<M>,
+    first: usize,
+}
+
+fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>, groups: &mut Vec<Group<M>>) {
     for v in flatten(v) {
         match v {
             View::Part(Part::SectionTab {
@@ -163,7 +198,18 @@ fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>) {
                 group,
                 content: *content,
             }),
-            View::Part(Part::TabGroup { title, tabs }) => tabs_of(*tabs, Some(title), out),
+            View::Part(Part::TabGroup { title, tabs, place }) => {
+                if let Some((glyph, tag, index)) = place {
+                    groups.push(Group {
+                        title,
+                        glyph,
+                        tag,
+                        index: *index,
+                        first: out.len(),
+                    });
+                }
+                tabs_of(*tabs, Some(title), out, groups)
+            }
             _ => {}
         }
     }
@@ -179,30 +225,51 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
         } => {
             let chosen = selected.get();
             let mut all = vec![];
-            tabs_of(*tabs, None, &mut all);
+            let mut groups = vec![];
+            tabs_of(*tabs, None, &mut all, &mut groups);
             let how = sections();
-            let shown_tag = match how {
-                Sections::Sidebar => chosen.as_str(),
-                _ => compact_tag(&chosen),
-            };
-            let at = all.iter().position(|t| t.tag == shown_tag).unwrap_or(0);
+            // A group's own place, when that is what is chosen.
+            let place = groups.iter().position(|g| g.tag == chosen);
             match how {
                 Sections::Sidebar => {
+                    let at = all.iter().position(|t| t.tag == chosen).or(match place {
+                        Some(_) => None,
+                        None => Some(0),
+                    });
                     let mut items: Vec<AnyView> = vec![];
                     let mut content = View::Empty;
                     let mut heading = None;
                     for (i, t) in all.into_iter().enumerate() {
                         if t.group != heading {
                             heading = t.group;
-                            if let Some(h) = heading {
-                                items.push(html::div().class("ark-sidebar-heading").child(h).into_any());
+                            match (heading, groups.iter().find(|g| g.first == i)) {
+                                (Some(""), _) | (None, _) => {}
+                                (Some(h), Some(g)) => {
+                                    let tap = select.call(g.tag.to_string());
+                                    items.push(
+                                        crate::wired!(html::button(), crate::tapped(h, &tap))
+                                            .class(if place.is_some_and(|p| groups[p].first == i) {
+                                                "ark-sidebar-heading ark-on"
+                                            } else {
+                                                "ark-sidebar-heading"
+                                            })
+                                            .on(leptos::ev::click, move |_| send(tap.clone()))
+                                            .child(h)
+                                            .into_any(),
+                                    );
+                                }
+                                (Some(h), None) => items.push(html::div().class("ark-sidebar-heading").child(h).into_any()),
                             }
                         }
-                        if i == at {
+                        if Some(i) == at {
                             content = t.content;
+                            crate::drawn(|d| d.sidebar_at = Some(i));
                         }
                         let tap = select.call(t.tag.clone());
-                        items.push(in_pane(Pane::Sidebar, || sidebar_item(&t.title, &t.glyph, t.badge, i == at, tap)));
+                        items.push(in_pane(Pane::Sidebar, || sidebar_item(&t.title, &t.glyph, t.badge, Some(i) == at, tap)));
+                    }
+                    if let Some(p) = place {
+                        content = groups.swap_remove(p).index;
                     }
                     let foot = match *footer {
                         View::Empty => None,
@@ -220,15 +287,42 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
                         .into_any()
                 }
                 Sections::TopBar | Sections::BottomBar => {
+                    // The tab shown: a group's when its place or one of its
+                    // sections is chosen, else the chosen tag's parent's.
+                    let exact = all.iter().position(|t| t.tag == chosen);
+                    let in_group = exact.and_then(|i| {
+                        let g = all[i].group?;
+                        groups.iter().position(|p| p.title == g)
+                    });
+                    let on_group = place.or(in_group);
+                    let shown_tag = compact_tag(&chosen).to_string();
+                    let at = match on_group {
+                        Some(_) => exact,
+                        None => Some(all.iter().position(|t| t.tag == shown_tag).unwrap_or(0)),
+                    };
                     let mut heads = vec![];
                     let mut content = View::Empty;
                     for (i, t) in all.into_iter().enumerate() {
-                        if i == at {
+                        if let Some(k) = groups.iter().position(|g| g.first == i) {
+                            let g = &groups[k];
+                            heads.push((g.title.to_string(), g.glyph.to_string(), g.tag.to_string(), None, on_group == Some(k)));
+                        }
+                        if Some(i) == at {
                             content = t.content;
                         }
                         if t.group.is_none() {
-                            heads.push((t.title, t.glyph, t.tag.clone(), t.badge, t.tag == shown_tag));
+                            heads.push((t.title, t.glyph, t.tag.clone(), t.badge, on_group.is_none() && t.tag == shown_tag));
                         }
+                    }
+                    match (place, in_group) {
+                        (Some(p), _) => content = groups.swap_remove(p).index,
+                        // A section of a group, pushed over its index.
+                        (None, Some(g)) => {
+                            let back = select.call(groups[g].tag.to_string());
+                            ctx.back = Some(Rc::new(move || send(back.clone())));
+                            ctx.back_label = Some(groups[g].title.to_string());
+                        }
+                        _ => {}
                     }
                     if how == Sections::TopBar {
                         let bar: Vec<AnyView> = heads
@@ -354,7 +448,7 @@ fn shell_part<M: Clone + 'static>(p: Part<M>, ctx: &mut Ctx<'_>) -> AnyView {
                     }
                     let tap = select.call(title.to_string());
                     heads.push(
-                        html::button()
+                        crate::wired!(html::button(), crate::tapped(title, &tap))
                             .class(if on { "ark-pane-tab ark-on" } else { "ark-pane-tab" })
                             .role("tab")
                             .attr("aria-selected", if on { "true" } else { "false" })
@@ -421,13 +515,19 @@ fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, 
     let (found, toggle, content) = peel(content);
     let mut lead: Vec<AnyView> = vec![];
     if let Some(back) = ctx.back.take() {
+        let said = ctx.back_label.take();
+        let name = said.clone().unwrap_or_else(|| "Back".into());
         lead.push(
-            html::button()
-                .class("ark-bar-button")
-                .attr("title", "Back")
-                .attr("aria-label", "Back")
+            crate::wired!(html::button(), crate::page::tap(&name, back.clone()))
+                .class(if said.is_some() {
+                    "ark-bar-button ark-bar-back"
+                } else {
+                    "ark-bar-button"
+                })
+                .attr("title", name.clone())
+                .attr("aria-label", name)
                 .on(leptos::ev::click, move |_| back())
-                .child(glyph("chevron-left", 17))
+                .child((glyph("chevron-left", 17), said.map(|s| html::span().child(s))))
                 .into_any(),
         );
     }
@@ -452,7 +552,7 @@ fn toolbar<M: Clone + 'static>(title: String, items: View<M>, content: View<M>, 
     }
     if let Some((t, shown, tap)) = toggle {
         trailing.push(
-            html::button()
+            crate::wired!(html::button(), crate::tapped(t, &tap))
                 .class(if shown { "ark-bar-button ark-on" } else { "ark-bar-button" })
                 .attr("title", t)
                 .attr("aria-label", t)
@@ -540,7 +640,7 @@ fn peel<M: Clone + 'static>(v: View<M>) -> (Option<Found<M>>, Option<(&'static s
 /// A toolbar's button: its glyph alone, as a Mac toolbar draws one, its
 /// title said when the pointer rests on it.
 pub fn bar_button<M: Clone + 'static>(title: &'static str, g: &'static str, enabled: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &tap))
         .class("ark-bar-button")
         .attr("title", title)
         .attr("aria-label", title)
@@ -564,7 +664,7 @@ fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, se
     if lit {
         class.push_str(" ark-cursor");
     }
-    html::button()
+    crate::wired!(html::button(), crate::tapped(title, &tap))
         .class(class)
         .attr("data-cursor", lit.then_some("true"))
         .attr("aria-current", selected.then_some("page"))
@@ -578,7 +678,7 @@ fn sidebar_item<M: Clone + 'static>(title: &str, g: &str, badge: Option<i64>, se
 }
 
 fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-top-tab ark-on" } else { "ark-top-tab" })
         .role("tab")
         .attr("aria-selected", if on { "true" } else { "false" })
@@ -588,7 +688,7 @@ fn top_tab<M: Clone + 'static>(title: String, badge: Option<i64>, on: bool, tap:
 }
 
 fn bottom_tab<M: Clone + 'static>(title: String, g: String, badge: Option<i64>, on: bool, tap: M) -> AnyView {
-    html::button()
+    crate::wired!(html::button(), crate::tapped(&title, &tap))
         .class(if on { "ark-bottom-tab ark-on" } else { "ark-bottom-tab" })
         .role("tab")
         .attr("aria-selected", if on { "true" } else { "false" })

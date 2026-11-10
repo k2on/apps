@@ -12,7 +12,9 @@
 //!
 //! A token proving nobody is closed with code 4401. The server
 //! pings every `keepalive` and closes a socket that leaves three
-//! unanswered.
+//! unanswered. The app's web ([`web::Site`], [`Server::site`]) is merged
+//! beside them and the app's own middleware ([`Server::layer`]) is over
+//! all of it: one process answers the socket, sign-in and every page.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -40,10 +42,18 @@ pub struct Server {
     pub data: Option<PathBuf>,
     pub authenticate: Authenticate,
     pub auth: Option<Arc<ark_auth::server::Auth>>,
-    pub web: Option<(PathBuf, Option<String>)>,
+    /// The app's web ([`web::Site`]): its build's files and the pages it
+    /// writes, beside the socket and sign-in.
+    pub web: web::Site,
     pub routes: Router,
+    /// The app's own middleware over every route (`/healthz` said in more
+    /// words, a header), each given the hub: in order, the last outermost.
+    pub layers: Vec<Layer>,
     pub keepalive: Duration,
 }
+
+/// Middleware over every route a server answers, given the hub.
+pub type Layer = Box<dyn FnOnce(Router, &Handle) -> Router + Send>;
 
 /// A server listening, until [`Running::stop`].
 pub struct Running {
@@ -66,8 +76,9 @@ impl Server {
             data: None,
             authenticate: Arc::new(dev),
             auth: None,
-            web: None,
+            web: web::Site::default(),
             routes: Router::new(),
+            layers: vec![],
             keepalive: Duration::from_secs(20),
         }
     }
@@ -77,6 +88,20 @@ impl Server {
     /// watching for sessions to close — all `ark_auth::server::Auth`'s.
     pub fn auth(mut self, auth: Arc<ark_auth::server::Auth>) -> Self {
         self.auth = Some(auth);
+        self
+    }
+
+    /// The app's web mounted beside the socket and sign-in: its files, and
+    /// the pages it writes, if any (`web::Site`).
+    pub fn site(mut self, site: web::Site) -> Self {
+        self.web = site;
+        self
+    }
+
+    /// Middleware over every route, the web's included: `f` is given the
+    /// router and the hub.
+    pub fn layer(mut self, f: impl FnOnce(Router, &Handle) -> Router + Send + 'static) -> Self {
+        self.layers.push(Box::new(f));
         self
     }
 
@@ -113,8 +138,9 @@ impl Server {
         if let Some(auth) = self.auth {
             router = router.merge(ark_auth::server::router(auth));
         }
-        if let Some((dir, module)) = self.web {
-            router = router.merge(web::router(dir, module));
+        router = router.merge(self.web.router(&hub));
+        for layer in self.layers {
+            router = layer(router, &hub);
         }
         Ok((hub, router))
     }

@@ -570,8 +570,15 @@ pub fn button(id: &'static str, title: &'static str, face: AnyView, class: &'sta
         })
     };
     crate::drawn(|d| d.menus.push((id.to_string(), opener)));
-    html::button()
+    // Without script, the menu is the browser's own popover under the
+    // button, its entries the page's controls (`page`).
+    // In a specimen, written open under it.
+    let shown = crate::in_specimen().then(|| written(id, title, entries(), vec![]));
+    let nojs = (crate::page::mode() != crate::page::Mode::Spa && !crate::in_specimen()).then(|| popover(id, title, &entries()));
+    let target = (crate::page::writing()).then(|| crate::page::unique(&format!("ark-menu-{id}")));
+    let button = html::button()
         .class(class)
+        .attr("popovertarget", target)
         .attr("data-menu", id)
         .attr("title", title)
         .attr("aria-haspopup", "menu")
@@ -582,7 +589,159 @@ pub fn button(id: &'static str, title: &'static str, face: AnyView, class: &'sta
                 open_below(title, entries(), &el, e.detail() == 0);
             }
         })
-        .child(face)
+        .child(face);
+    (button, nojs, shown).into_any()
+}
+
+/// A menu written open in the page's flow, not over it: its panel and the
+/// submenu off each entry `lit` names, from the menu inward, beside it as
+/// the open menu hangs one (arkui's `SUBMENU_OVERLAP`). The same panels
+/// as [`open`]'s, for a page that shows what a menu is (the docs) and for
+/// a part drawn in a specimen ([`crate::specimen`]): right without script,
+/// and with it the pointer lights an entry, rests a submenu open, and a
+/// press runs what it offers. `id` keeps where the pointer has been
+/// apart from another written menu's.
+pub fn written(id: &str, title: &str, entries: Vec<Entry>, lit: Vec<usize>) -> AnyView {
+    let lit = ui(|u| u.written.iter().find(|(i, _)| i == id).map(|(_, l)| l.clone())).unwrap_or(lit);
+    let id = id.to_string();
+    let mut panels: Vec<AnyView> = vec![];
+    let mut level: Vec<Entry> = entries;
+    let mut drop = 0.0;
+    for k in 0.. {
+        let titled = k == 0 && !title.is_empty();
+        let on = lit.get(k).copied();
+        let rows: Vec<AnyView> = level
+            .iter()
+            .enumerate()
+            .map(|(i, e)| written_entry(&id, &lit, k, i, e, on == Some(i)))
+            .collect();
+        let head = titled.then(|| html::div().class("ark-menu-title").child(title.to_string()));
+        panels.push(
+            html::div()
+                .role("menu")
+                .class("ark-menu ark-menu-written")
+                .attr("aria-label", (k == 0).then(|| title.to_string()))
+                .attr(
+                    "style",
+                    format!("width:{}px;margin-top:{drop}px", width_of(if k == 0 { title } else { "" }, &level)),
+                )
+                .child((head, rows))
+                .into_any(),
+        );
+        let Some(Entry::Sub { entries, .. }) = on.and_then(|i| level.get(i)).cloned() else {
+            break;
+        };
+        let i = on.unwrap_or(0);
+        drop += if titled { TITLE } else { 0.0 } + level[..i].iter().map(Entry::height).sum::<f64>();
+        level = entries;
+    }
+    html::div().class("ark-menu-shown").child(panels).into_any()
+}
+
+fn written_entry(id: &str, lit: &[usize], k: usize, i: usize, e: &Entry, on: bool) -> AnyView {
+    let rest_on = {
+        let (id, mut to) = (id.to_string(), lit[..k.min(lit.len())].to_vec());
+        to.push(i);
+        move || {
+            let (id, to) = (id.clone(), to.clone());
+            ui_mut(|u| {
+                u.written.retain(|(i, _)| *i != id);
+                u.written.push((id, to));
+            })
+        }
+    };
+    let (mark, label, end, run): (AnyView, String, Option<AnyView>, Option<Action>) = match e {
+        Entry::Separator => return html::div().class("ark-menu-separator").role("separator").into_any(),
+        Entry::Run {
+            glyph: g,
+            label,
+            checked,
+            shortcut,
+            action,
+            ..
+        } => (
+            match (checked, g) {
+                (true, _) => glyph("check", 16),
+                (false, Some(g)) => glyph(g, 16),
+                (false, None) => html::span().class("ark-glyph-space").into_any(),
+            },
+            label.clone(),
+            shortcut.clone().map(|s| html::span().class("ark-menu-key").child(s).into_any()),
+            Some(action.clone()),
+        ),
+        Entry::Sub { glyph: g, label, .. } => (
+            match g {
+                Some(g) => glyph(g, 16),
+                None => html::span().class("ark-glyph-space").into_any(),
+            },
+            label.clone(),
+            Some(glyph("chevron-right", 14)),
+            None,
+        ),
+    };
+    let mut class = String::from("ark-menu-entry");
+    if on {
+        class.push_str(" ark-lit");
+    }
+    if matches!(e, Entry::Run { destructive: true, .. }) {
+        class.push_str(" ark-destructive");
+    }
+    let (hover, press) = (rest_on.clone(), rest_on);
+    html::div()
+        .class(class)
+        .role("menuitem")
+        .attr("aria-haspopup", matches!(e, Entry::Sub { .. }).then_some("menu"))
+        .attr("aria-checked", matches!(e, Entry::Run { checked: true, .. }).then_some("true"))
+        .on(leptos::ev::mouseenter, move |_| hover())
+        .on(leptos::ev::click, move |_| match &run {
+            Some(a) => a(),
+            None => press(),
+        })
+        .child((mark, html::span().class("ark-menu-label").child(label), end))
+        .into_any()
+}
+
+/// A menu as an HTML `popover`, for the page without script: its title and
+/// its entries, a submenu's under its label.
+fn popover(id: &str, title: &str, entries: &[Entry]) -> AnyView {
+    fn items(entries: &[Entry], out: &mut Vec<AnyView>) {
+        for e in entries {
+            match e {
+                Entry::Run {
+                    label,
+                    action,
+                    destructive,
+                    checked,
+                    ..
+                } => out.push(
+                    crate::wired!(html::button(), crate::page::tap(label, action.clone()))
+                        .class(if *destructive {
+                            "ark-menu-entry ark-destructive"
+                        } else {
+                            "ark-menu-entry"
+                        })
+                        .attr("role", "menuitem")
+                        .attr("aria-checked", checked.then_some("true"))
+                        .child(label.clone())
+                        .into_any(),
+                ),
+                Entry::Sub { label, entries, .. } => {
+                    out.push(html::div().class("ark-menu-title").child(label.clone()).into_any());
+                    items(entries, out);
+                }
+                Entry::Separator => out.push(html::div().class("ark-menu-separator").into_any()),
+            }
+        }
+    }
+    let mut out = vec![];
+    items(entries, &mut out);
+    html::div()
+        .id(crate::page::unique(&format!("ark-menu-{id}")))
+        .class("ark-menu ark-menu-popover")
+        .attr("popover", "")
+        .attr("role", "menu")
+        .attr("aria-label", title.to_string())
+        .child((html::div().class("ark-menu-title").child(title.to_string()), out))
         .into_any()
 }
 

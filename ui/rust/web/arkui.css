@@ -16,7 +16,9 @@ body {
   overflow: hidden;
 }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; text-align: inherit; }
-button:disabled { color: var(--ark-disabled); }
+/* A control that waits for script (`data-ark-off`, page.rs) looks as it
+   will once it answers: only what the app disabled is drawn so. */
+button:disabled:not([data-ark-off]) { color: var(--ark-disabled); }
 input { font: inherit; color: inherit; }
 h1, h2, h3, p { margin: 0; font: inherit; }
 :focus-visible { outline: 2px solid var(--ark-accent); outline-offset: -2px; }
@@ -42,6 +44,8 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 }
 .ark-sidebar-places { flex: 1; overflow-y: auto; padding: 10px 10px; display: flex; flex-direction: column; gap: 1px; }
 .ark-sidebar-heading { font-size: 11px; font-weight: 600; color: var(--ark-quiet); padding: 14px 10px 4px; }
+button.ark-sidebar-heading { width: 100%; border-radius: 6px; }
+button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var(--ark-ink); }
 .ark-sidebar-item {
   display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; width: 100%;
   color: var(--ark-ink); transition: background-color var(--ark-fade-ms) var(--ark-fade);
@@ -71,8 +75,13 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-bar-button:hover { background: var(--ark-container); }
 .ark-bar-button:active { background: var(--ark-container-highest); transition: none; }
 .ark-bar-button.ark-on { color: var(--ark-accent); }
-.ark-bar-button:disabled { color: color-mix(in srgb, var(--ark-ink) 30%, transparent); background: none; }
-.ark-large-title { font-size: 28px; font-weight: 700; padding: 2px 18px 6px; }
+.ark-bar-button:disabled:not([data-ark-off]) { color: color-mix(in srgb, var(--ark-ink) 30%, transparent); background: none; }
+/* Short of a sidebar, the title is the page's own, large under the bar
+   (an iPhone's large title), and the bar over it has no rule of its own:
+   the title is what parts the bar from the page. */
+.ark-large-title { font-size: 30px; line-height: 1.15; font-weight: 700; padding: 14px 18px 10px; }
+.ark-toolbar:has(+ .ark-large-title) { border-bottom-color: transparent; }
+.ark-bar-button.ark-bar-back { width: auto; padding: 0 8px 0 2px; gap: 2px; color: var(--ark-accent-text); }
 .ark-under-search { padding: 0 18px 8px; }
 .ark-search-row { padding: 6px 12px; }
 .ark-back-row { padding: 4px 8px; }
@@ -160,7 +169,7 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-push:active, .ark-button:active { background: var(--ark-container-high); }
 .ark-push.ark-default { background: var(--ark-accent); color: var(--ark-on-accent); border-color: transparent; }
 .ark-push.ark-destructive { color: var(--ark-error); }
-.ark-push:disabled { opacity: 0.5; }
+.ark-push:disabled:not([data-ark-off]) { opacity: 0.5; }
 
 /* * Search, and what it suggests */
 .ark-search { position: relative; display: flex; align-items: center; }
@@ -193,6 +202,17 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .ark-menu-key { color: var(--ark-quiet); font-size: 12px; }
 .ark-menu-separator { height: 1px; margin: 4px 10px; background: var(--ark-hairline); }
+/* A menu written open in the page (menu::written): its panels side by
+   side, a submenu overlapping the menu by the panel's padding; on a
+   phone's width, under it. */
+.ark-menu-shown { display: flex; align-items: flex-start; }
+.ark-menu.ark-menu-written { position: relative; flex: none; max-width: 100%; }
+.ark-menu-written + .ark-menu-written { margin-left: -4px; z-index: 1; }
+.ark-menu-written .ark-menu-entry:not(.ark-lit):hover { background: var(--ark-container); }
+@media (max-width: 600px) {
+  .ark-menu-shown { flex-direction: column; }
+  .ark-menu-written + .ark-menu-written { margin: 4px 0 0 28px !important; }
+}
 
 /* * Popovers: a calendar */
 .ark-popover-anchor { position: relative; display: inline-block; }
@@ -237,6 +257,14 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-sheet-title { flex: 1; font-size: 15px; font-weight: 700; }
 .ark-sheet-body { flex: 1; overflow-y: auto; }
 
+/* * A specimen (arkui_web::specimen): what goes over a window drawn in its
+   frame instead, as written, so a page can show it open. */
+.ark-specimen { position: relative; contain: layout; display: flex; flex-direction: column; gap: 10px; }
+.ark-specimen:has(> * .ark-modal-layer) { min-height: 360px; }
+.ark-specimen .ark-modal-layer { position: absolute; z-index: 1; border-radius: inherit; overflow: hidden; }
+.ark-specimen .ark-dialog { max-width: calc(100% - 32px); }
+.ark-specimen .ark-dialog.ark-dialog-sheet { max-width: 100%; }
+
 /* * The command box and the keys panel: opened by a key, no motion */
 .ark-command-layer { align-items: flex-start; padding-top: 14vh; }
 .ark-command { position: relative; width: 520px; max-width: calc(100vw - 32px); padding: 6px; }
@@ -249,6 +277,11 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 .ark-keys-column h3 { font-weight: 700; margin-bottom: 6px; }
 .ark-key-row { display: flex; gap: 12px; padding: 2px 0; }
 .ark-key-row kbd { font: inherit; font-variant-numeric: tabular-nums; min-width: 110px; color: var(--ark-accent-text); }
+/* Written open in the page (keys::command_written, keys::panel_written). */
+.ark-command.ark-command-written { width: 100%; max-width: 520px; }
+.ark-command-written .ark-command-list { max-height: 240px; }
+.ark-command-written .ark-command-row:not(.ark-lit):hover { background: var(--ark-container); }
+.ark-keys-panel.ark-keys-written { position: relative; right: auto; bottom: auto; z-index: auto; flex-wrap: wrap; max-width: 100%; }
 
 /* * Tables (arkui::table): headings, then rows a grid of cells */
 .ark-table { display: grid; align-content: start; grid-auto-rows: max-content; overflow-y: auto; height: 100%; }
@@ -361,3 +394,28 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 [data-motion="rise"] { animation: ark-rise var(--ark-move-ms) var(--ark-move); }
 [data-motion="none"] { animation: none; }
 :root[data-motion="reduced"] [data-motion="rise"] { animation-name: ark-fade; }
+
+/* * A page written as HTML (src/page.rs, ui/docs/app.md "The Browser's
+   Modes"). A part that is no button is pressed through a button over all
+   of it; what only works with script (`.ark-js`) is put away until script
+   runs, and what stands in for it without (`.ark-nojs`) once it does. A
+   control's menu is the browser's own popover, in the menu's panel. */
+:has(> .ark-hit) { position: relative; }
+.ark-hit { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: none; opacity: 0; cursor: default; }
+.ark-hit:focus-visible { opacity: 1; outline: 2px solid var(--ark-accent); outline-offset: -2px; }
+:root[data-ark-mode]:not([data-ark-js]) .ark-js { display: none; }
+:root[data-ark-js] .ark-nojs { display: none; }
+.ark-menu-popover:popover-open { position: fixed; inset: 0; margin: auto; width: max-content; height: max-content; min-width: 198px; display: flex; flex-direction: column; }
+.ark-menu-popover .ark-menu-entry { text-align: start; }
+:root[data-ark-mode] button[disabled]:not(.ark-hit) { cursor: default; }
+/* The page a written control is already on is disabled, not dimmed. */
+:root[data-ark-mode] :is(.ark-selected, .ark-on, [aria-current])[disabled] { color: inherit; opacity: 1; }
+
+/* Why a form a server was sent was not taken (arkui-serve): the domain's
+   own words, over the page, in the error roles. */
+.ark-notice {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--ark-error-container);
+  color: var(--ark-on-error-container);
+}

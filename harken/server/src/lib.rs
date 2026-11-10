@@ -436,7 +436,10 @@ pub async fn start(config: Config) -> Result<Server> {
     // with the build as its validator: a store path cannot be one, since nix
     // dates every file in it 1970.
     if let Some(dir) = &config.web {
-        server.web = Some((dir.clone(), config.web_module.clone()));
+        server = server.site(ark_peer::web::Site::files(
+            dir.clone(),
+            config.web_module.clone(),
+        ));
     }
     let (hub, router) = server.build()?;
     let router = router.layer(axum::middleware::from_fn_with_state(

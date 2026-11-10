@@ -1,0 +1,55 @@
+/* Long-form writing (src/writing.rs), over the theme's variables: a
+   reader's measure, its headings, its code highlighted in the theme's
+   roles, its callouts by what they say. Nothing here moves. */
+.ark-writing { font-size: 15px; line-height: 1.6; color: var(--ark-ink); max-width: 72ch; overflow-wrap: anywhere; }
+.ark-writing > :first-child { margin-top: 0; }
+.ark-writing h1, .ark-writing h2, .ark-writing h3, .ark-writing h4, .ark-writing h5, .ark-writing h6 { line-height: 1.25; scroll-margin-top: calc(var(--ark-toolbar-height) + 12px); }
+.ark-writing h1 { font-size: 30px; font-weight: 700; margin: 0 0 12px; }
+.ark-writing h2 { font-size: 21px; font-weight: 700; margin: 32px 0 8px; }
+.ark-writing h3 { font-size: 17px; font-weight: 650; margin: 24px 0 6px; }
+.ark-writing h4, .ark-writing h5, .ark-writing h6 { font-size: 15px; font-weight: 650; margin: 18px 0 4px; }
+.ark-writing p, .ark-writing ul, .ark-writing ol, .ark-writing blockquote, .ark-writing figure { margin: 0 0 12px; }
+.ark-writing ul, .ark-writing ol { padding-left: 22px; }
+.ark-writing li { margin: 3px 0; }
+.ark-writing li > ul, .ark-writing li > ol { margin: 3px 0 0; }
+.ark-writing a { color: var(--ark-accent-text); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.ark-writing a:hover { text-decoration-thickness: 2px; }
+.ark-writing a:focus-visible { outline: 2px solid var(--ark-accent); outline-offset: 2px; border-radius: 2px; }
+.ark-writing code { font-family: ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", monospace; font-size: 0.88em; background: var(--ark-container); border-radius: 4px; padding: 1px 4px; }
+.ark-writing hr { border: 0; border-top: 1px solid var(--ark-hairline); margin: 24px 0; }
+.ark-writing blockquote { padding: 0 0 0 14px; border-left: 3px solid var(--ark-hairline); color: var(--ark-quiet); }
+.ark-writing figure img { max-width: 100%; height: auto; border-radius: 8px; }
+.ark-writing figcaption { font-size: 13px; color: var(--ark-quiet); margin-top: 4px; }
+.ark-code { margin: 0 0 14px; padding: 12px 14px; background: var(--ark-container); border: 1px solid var(--ark-hairline); border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.5; tab-size: 4; }
+.ark-code code, .ark-writing .ark-code code { background: none; padding: 0; font-size: inherit; white-space: pre; }
+.ark-tok-keyword { color: var(--ark-accent-text); font-weight: 600; }
+.ark-tok-type { color: var(--ark-chart-1); }
+.ark-tok-function { color: var(--ark-chart-0); }
+.ark-tok-string { color: var(--ark-positive); }
+.ark-tok-number { color: var(--ark-chart-3); }
+.ark-tok-comment { color: var(--ark-quiet); font-style: italic; }
+.ark-tok-attribute { color: var(--ark-caution); }
+.ark-callout { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--ark-hairline); border-left: 4px solid var(--ark-callout); background: color-mix(in srgb, var(--ark-callout) 8%, var(--ark-background)); --ark-callout: var(--ark-accent); }
+.ark-callout > :last-child { margin-bottom: 0; }
+.ark-callout-title { display: flex; align-items: center; gap: 6px; font-weight: 650; color: var(--ark-callout); margin: 0 0 4px; }
+.ark-callout[data-kind=tip] { --ark-callout: var(--ark-positive); }
+.ark-callout[data-kind=important] { --ark-callout: var(--ark-chart-2); }
+.ark-callout[data-kind=warning] { --ark-callout: var(--ark-caution); }
+.ark-callout[data-kind=caution] { --ark-callout: var(--ark-error); }
+.ark-writing-table { overflow-x: auto; margin: 0 0 14px; }
+.ark-writing-table table { border-collapse: collapse; font-size: 14px; min-width: 100%; }
+.ark-writing-table th, .ark-writing-table td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--ark-hairline); vertical-align: top; }
+.ark-writing-table th { font-weight: 650; color: var(--ark-quiet); }
+/* The way to the page before and the page after, at a page's foot. */
+.ark-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 40px 0 0; padding-top: 20px; border-top: 1px solid var(--ark-hairline); }
+.ark-pager a { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border: 1px solid var(--ark-hairline); border-radius: 8px; color: var(--ark-ink); text-decoration: none; transition: background-color var(--ark-fade-ms) var(--ark-fade); }
+.ark-pager a:hover { background: var(--ark-container-low); }
+.ark-pager a:active { background: var(--ark-container); transition: none; }
+.ark-pager a:focus-visible { outline: 2px solid var(--ark-accent); outline-offset: 2px; }
+.ark-pager .ark-pager-next { grid-column: 2; text-align: end; align-items: flex-end; }
+.ark-pager-said { font-size: 12px; color: var(--ark-quiet); display: inline-flex; align-items: center; gap: 2px; }
+.ark-pager-title { font-size: 15px; font-weight: 650; color: var(--ark-accent-text); }
+@media (max-width: 600px) {
+  .ark-writing-table table { font-size: 13px; }
+  .ark-writing-table th, .ark-writing-table td { padding-right: 10px; }
+}

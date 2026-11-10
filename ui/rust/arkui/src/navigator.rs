@@ -8,18 +8,16 @@
 //! written into it, and the app arrives there by its next `poll`, the road
 //! the back button and a link somebody typed already take. So navigating
 //! never sets the app's page behind the bar's back.
-use crate::router::{fragment, AddressBar, Nav, Routable, Router};
+use crate::router::{AddressBar, Nav, Routable, Router};
 
-/// The route a link names: `scheme://album/Water%20Music` (an app's own
-/// URL scheme), `#album/…` (a page's fragment) or the bare path. `None` for
-/// a link of another scheme, or one that names nothing here.
+/// The route a link names: `scheme://album/water-music/` (an app's own
+/// URL scheme) or the URL itself (`/album/water-music/`). `None` for a link
+/// of another scheme, or one that names nothing here.
 pub fn route_of_link<R: Routable>(link: &str, scheme: &str) -> Option<R> {
-    let path = match link.strip_prefix(scheme).and_then(|rest| rest.strip_prefix("://")) {
-        Some(path) => path,
-        None if link.contains("://") => return None,
-        None => link,
-    };
-    R::from_path(path)
+    if link.contains("://") && !link.strip_prefix(scheme).is_some_and(|rest| rest.starts_with("://")) {
+        return None;
+    }
+    R::from_url(link)
 }
 
 /// The link a desktop app was opened with — `scheme://…` among its
@@ -50,11 +48,11 @@ pub trait Navigator<R> {
 
 impl<R: Routable, B: AddressBar> Navigator<R> for Router<R, B> {
     fn push(&mut self, route: &R) {
-        self.write(&fragment(route), Nav::Push);
+        self.write(&route.url(), Nav::Push);
     }
 
     fn replace(&mut self, route: &R) {
-        self.write(&fragment(route), Nav::Replace);
+        self.write(&route.url(), Nav::Replace);
     }
 
     fn back(&mut self) {
@@ -79,36 +77,21 @@ impl<R: Routable, B: AddressBar> Navigator<R> for Router<R, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::router::{join, split};
+    use ark_router::Routes;
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, Routes)]
     enum Here {
+        #[home]
+        #[route("/home")]
         Home,
-        Album(String),
-        Join(String),
+        #[route("/album/:name")]
+        Album { name: String },
+        #[route("/join?server=:server")]
+        Join { server: String },
     }
 
-    impl Routable for Here {
-        fn path(&self) -> String {
-            match self {
-                Here::Home => join("home", None),
-                Here::Album(n) => join("album", Some(n)),
-                Here::Join(s) => format!("join?server={}", crate::url::encoded(s)),
-            }
-        }
-        fn from_path(path: &str) -> Option<Self> {
-            if let Some(q) = path.strip_prefix("join?server=") {
-                return Some(Here::Join(crate::url::decode(q)));
-            }
-            match split(path) {
-                ("home", None) => Some(Here::Home),
-                ("album", Some(n)) => Some(Here::Album(n)),
-                _ => None,
-            }
-        }
-        fn home() -> Self {
-            Here::Home
-        }
+    fn album(n: &str) -> Here {
+        Here::Album { name: n.into() }
     }
 
     #[derive(Default)]
@@ -120,11 +103,11 @@ mod tests {
         fn read(&self) -> Option<String> {
             self.history.last().cloned()
         }
-        fn write(&mut self, fragment: &str, nav: Nav) {
+        fn write(&mut self, url: &str, nav: Nav) {
             if nav == Nav::Replace {
                 self.history.pop();
             }
-            self.history.push(fragment.to_string());
+            self.history.push(url.to_string());
         }
         fn go(&mut self, by: isize) {
             if by < 0 {
@@ -136,33 +119,33 @@ mod tests {
     /// Navigating writes the bar and the app arrives by `poll`; a link is
     /// pushed, a sign-in link is handed over and not navigated to, and a link
     /// of another scheme names nothing. Falsified by `handle` pushing what
-    /// `take` took: the bar would say `#join?…`.
+    /// `take` took: the bar would say `/join/?…`.
     #[test]
     fn navigating_goes_through_the_bar() {
         let mut router: Router<Here, Fake> = Router::with_bar(Fake::default());
         router.sync(&Here::Home);
-        router.push(&Here::Album("Water Music".into()));
-        assert_eq!(router.poll(true), Some(Here::Album("Water Music".into())));
-        router.replace(&Here::Album("Messiah".into()));
-        assert_eq!(router.bar().history, ["#home", "#album/Messiah"]);
+        router.push(&album("Water Music"));
+        assert_eq!(router.poll(true), Some(album("Water Music")));
+        router.replace(&album("Messiah"));
+        assert_eq!(router.bar().history, ["/home/", "/album/Messiah/"]);
         router.back();
         assert_eq!(router.poll(true), Some(Here::Home));
 
         let mut joined = vec![];
         let mut take = |r: &Here| match r {
-            Here::Join(s) => {
-                joined.push(s.clone());
+            Here::Join { server } => {
+                joined.push(server.clone());
                 true
             }
             _ => false,
         };
-        assert!(router.handle("harken://album/Bol%C3%A9ro", "harken", &mut take));
-        assert_eq!(router.poll(true), Some(Here::Album("Boléro".into())));
-        assert!(router.handle("harken://join?server=https%3A%2F%2Fh%3A8443", "harken", &mut take));
-        assert!(!router.handle("money://album/x", "harken", &mut take), "another app's link");
-        assert!(!router.handle("harken://auth?code=1", "harken", &mut take), "the sign-in's own");
-        assert!(router.handle("#album/x", "harken", &mut take), "a page's fragment");
+        assert!(router.handle("harken://album/Bol%C3%A9ro/", "harken", &mut take));
+        assert_eq!(router.poll(true), Some(album("Boléro")));
+        assert!(router.handle("harken://join/?server=https%3A%2F%2Fh%3A8443", "harken", &mut take));
+        assert!(!router.handle("money://album/x/", "harken", &mut take), "another app's link");
+        assert!(!router.handle("harken://auth/?code=1", "harken", &mut take), "the sign-in's own");
+        assert!(router.handle("/album/x/", "harken", &mut take), "a page's own URL");
         assert_eq!(joined, ["https://h:8443"]);
-        assert_eq!(router.bar().history.last().map(String::as_str), Some("#album/x"));
+        assert_eq!(router.bar().history.last().map(String::as_str), Some("/album/x/"));
     }
 }

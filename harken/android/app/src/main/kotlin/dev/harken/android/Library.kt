@@ -50,7 +50,7 @@ import dev.harken.ffi.HarkenView
 import dev.harken.ffi.Holding
 import uniffi.harken_domain.Playlist
 import uniffi.harken_domain.Route
-import uniffi.harken_domain.routeFromPath
+import uniffi.harken_domain.routeFromUrl
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -95,13 +95,13 @@ sealed class Page {
 
     /**
      * Where a track was played from, as the listening session and the plays carry it: the route's
-     * path as the desktop's address bar says it (`#album/Water%20Music`), so a page named on one
-     * device is the same page on another. One this phone cannot name is nowhere in particular.
+     * URL as every address bar says it (`/album/Water%20Music/`), so a page named on one device is
+     * the same page on another. One this phone cannot name is nowhere in particular.
      */
-    fun from(playlists: List<Playlist>): String = route(playlists)?.let { "#" + it.path() } ?: ""
+    fun from(playlists: List<Playlist>): String = route(playlists)?.url() ?: ""
 
     companion object {
-        /** The page a route shows, if it is a list this phone has: a playlist by its id (an older link's by its name, `names`). */
+        /** The page a route shows, if it is a list this phone has: a playlist by its id (`names`). */
         fun of(route: Route?, playlists: List<Playlist>): Page? =
             when (route) {
                 is Route.Album -> ForAlbum(route.key)
@@ -115,7 +115,7 @@ sealed class Page {
             }
 
         /** The page a "played from" (or a car's media id) names; null for nowhere, or a page this phone has not got. */
-        fun of(from: String, playlists: List<Playlist>): Page? = of(routeFromPath(from), playlists)
+        fun of(from: String, playlists: List<Playlist>): Page? = of(routeFromUrl(from), playlists)
     }
 }
 

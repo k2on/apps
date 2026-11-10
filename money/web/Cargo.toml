@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 description = "money in the browser: the same money-app shell and screens as every platform, drawn by arkui-web (Leptos over the DOM), over the demo household in wasm with no server."
 
+[lib]
+name = "money_web"
+path = "src/lib.rs"
+
+# The page's module: the SPA.
 [[bin]]
 name = "money-web"
 path = "src/main.rs"
@@ -14,9 +19,16 @@ path = "src/main.rs"
 ark-app = { path = "../../ui/rust/app" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
-arkui-web = { path = "../../ui/rust/web" }
-leptos = { version = "0.8", default-features = false, features = ["csr"] }
+arkui-web = { path = "../../ui/rust/web", default-features = false }
+leptos = { version = "0.8", default-features = false }
 money-app = { path = "../app", features = ["web"] }
 # The domain, and (`demo`) its household: three months of a family's budget up to today.
 money-core = { path = "../core", features = ["demo"] }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element"] }
+
+[features]
+default = ["csr"]
+csr = ["arkui-web/csr", "leptos/csr"]
+# Written natively (the static site's and the server's mode, which money
+# ships neither of: ui/docs/app.md): what the tests draw its pages with.
+ssr = ["arkui-web/ssr", "leptos/ssr"]

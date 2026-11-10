@@ -824,7 +824,18 @@ def css(t):
             f"@container ark-window (min-width: {c}) and (max-width: {below('sidebar-min-width')}) {{", "  .ark-unless-topbar { display: none !important; }", "}",
             f"@container ark-window (max-width: {below('compact-width')}), (min-width: {s}) {{", "  .ark-if-topbar { display: none !important; }", "}",
             f"@container ark-window (min-width: {e}) {{", "  .ark-unless-expanded { display: none !important; }", "}",
-            f"@container ark-window (max-width: {below('expanded-width')}) {{", "  .ark-if-expanded { display: none !important; }", "}"]
+            f"@container ark-window (max-width: {below('expanded-width')}) {{", "  .ark-if-expanded { display: none !important; }", "}", ""]
+    if not float(lay["compact-width"]) < float(lay["expanded-width"]) < float(lay["sidebar-min-width"]):
+        sys.exit("theme.toml [layout]: compact-width < expanded-width < sidebar-min-width")
+    out += ["/* A page written as HTML for every width at once (arkui-web's",
+            "   `page::Band`): the shell drawn once per band of the size classes, each",
+            "   in its `.ark-at-<band>`, and the viewport's width showing one, so the",
+            "   page is right at every width with no script. */",
+            ".ark-at { display: contents; }",
+            f"@media (min-width: {c}) {{", "  .ark-at-compact { display: none !important; }", "}",
+            f"@media (max-width: {below('compact-width')}), (min-width: {e}) {{", "  .ark-at-medium { display: none !important; }", "}",
+            f"@media (max-width: {below('expanded-width')}), (min-width: {s}) {{", "  .ark-at-large { display: none !important; }", "}",
+            f"@media (max-width: {below('sidebar-min-width')}) {{", "  .ark-at-sidebar { display: none !important; }", "}"]
     return "\n".join(out) + "\n"
 
 

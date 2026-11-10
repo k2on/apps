@@ -1,96 +1,100 @@
-//! How an app's routes are spelled, as one string.
+//! Where an app is, one way on every shell: the one route model every app
+//! declares its places in, and every shell reads.
 //!
-//! An app's routes are its domain's `Route` enum (`harken_domain::routes`,
-//! `money_core::routes`), and each route has one path — its
-//! [`Routable::path`]: `album/Water%20Music`, `account/Checking`, `budget`.
-//! That one spelling is what the desktop's and the browser's address bar say
-//! (arkui's router puts a `#` in front), and what a deep link, a
-//! notification's target or a restored back stack would say, so a route
-//! named on one device is the same route on another.
+//! An app's places are its `Route` enum, declared once in its domain or
+//! app crate (`harken_domain::routes`, `money_core::routes`, the docs'
+//! `routes`) with `#[derive(Routes)]`, a pattern per variant as a web
+//! router has them — `#[route("/album/:key")] Album { key: String, title:
+//! String }` — and each route is an [`Address`]: a path that names the
+//! content, and the query the UI's state over it. The address's URL
+//! (`/album/water-music/`) is what the browser's address bar says, what the
+//! desktop's says (arkui's router), the path of a phone's deep link
+//! (`harken://album/water-music/`) and of its launch argument, a
+//! notification's target, a static site's page and a restored back stack:
+//! a route named on one device is the same route on another. The
+//! conventions every app's URLs keep are ui/docs/app.md's "Addresses".
 //!
 //! **A row is named by its id.** A route to a row that has one — an
 //! account, a category, a playlist — carries the id, and the name after it
-//! only to be read (`account/<id>/checking`; [`Routable::key`] leaves it
+//! only to be read (`/account/<id>/checking/`; [`Routable::key`] leaves it
 //! out), so a renamed row keeps its routes and two rows of one name are two
 //! routes. What has no row of its own is named by a name or a derived key
-//! (`album/Water%20Music`). Either way a shell resolves the route against
+//! (`/album/water-music/`). Either way a shell resolves the route against
 //! what it has, which also decides what a stale link does: land somewhere
 //! that is a page, rather than on a heading with nothing under it.
 //!
-//! **One separator.** A path is a kind, or a kind, `/` and one
-//! percent-encoded name ([`join`], [`split`]): a `/` in a name is `%2F`, so
-//! the first `/` is always the separator, and a key with slashes of its own
-//! (`johann-sebastian-bach/bwv-988`) survives.
+//! **One segment, one name.** Each `:name` is one segment, percent-encoded
+//! ([`url::encode`]): a `/` in a name is `%2F`, so a key with slashes of its
+//! own (`johann-sebastian-bach/bwv-988`) is one segment and survives.
 //!
-//! **Declared, not written by hand.** An app's enum derives [`Routes`],
-//! a pattern per variant as a web router has them —
-//! `#[route("/album/:key")] Album { key: String, title: String }` — and the
-//! derive writes the path, the reading back and [`Routable`]; a test holds
-//! every variant to [`assert_round_trips`].
+//! **Declared, not written by hand.** The derive writes the address, the
+//! reading back and [`Routable`]; a test holds every variant to
+//! [`assert_round_trips`].
 extern crate self as ark_router;
 
+pub mod address;
 pub mod url;
 
+pub use address::Address;
 pub use ark_router_macros::Routes;
 
-/// Every route reads back from its path as itself — from its path and from
-/// the path as a URL's fragment — and its path read back is written the
-/// same. A domain's test calls it with one of every variant, names with
-/// awkward characters among them.
+/// Every route reads back from its URL as itself — from its address, its
+/// URL, its URL under a base, a phone's link and its URL with the UI's
+/// query after it — and its URL read back is written the same, with a
+/// slash at its end. A domain's test calls it with one of every variant,
+/// names with awkward characters among them.
 pub fn assert_round_trips<R: Routable + std::fmt::Debug>(routes: &[R]) {
     for route in routes {
-        let path = route.path();
-        let back = R::from_path(&path).unwrap_or_else(|| panic!("{path} reads back as nothing"));
-        assert_eq!(&back, route, "round trip of {path}");
+        let url = route.url();
+        let back = R::from_url(&url).unwrap_or_else(|| panic!("{url} reads back as nothing"));
+        assert_eq!(&back, route, "round trip of {url}");
+        assert_eq!(R::from_address(&route.address()).as_ref(), Some(route), "{url}'s address");
         // Read back, a route has no slug (its title is the shell's to find),
         // so it is written as its key.
-        assert_eq!(back.path(), route.key(), "{path} reads back spelled otherwise");
-        assert_eq!(R::from_path(&route.key()).as_ref(), Some(route), "{path}'s key reads as it");
-        assert_eq!(R::from_path(&format!("#{path}")).as_ref(), Some(route), "#{path}, as a URL's fragment");
-        assert!(!path.contains(['#', ' ']), "{path} would not survive a URL");
+        assert_eq!(back.url(), route.key(), "{url} reads back spelled otherwise");
+        assert_eq!(R::from_url(&route.key()).as_ref(), Some(route), "{url}'s key reads as it");
+        let under = route.address().url_under("/base/");
+        assert_eq!(R::from_address(&Address::of_url(&under, "/base/")).as_ref(), Some(route), "{under}");
+        assert_eq!(R::from_url(&format!("app:/{url}")).as_ref(), Some(route), "app:/{url}, a phone's link");
+        let ui = route.address().with("inspector", "1");
+        assert_eq!(R::from_address(&ui).as_ref(), Some(route), "{url} with the UI's query");
+        let path = url.split('?').next().unwrap_or("");
+        assert!(path.ends_with('/'), "{url} has no slash at its end");
+        assert!(!url.contains(['#', ' ']), "{url} would not survive a URL");
     }
 }
 
-/// What a route enum is to a router: a path, read back.
+/// What a route enum is to a router: an address, read back.
 ///
-/// `from_path(&r.path()) == Some(r)` for every route an app makes: two
-/// routes are the same route when their paths are, whatever else they carry
-/// (a title is what a route is called, not which it is).
+/// `from_address(&r.address()) == Some(r)` for every route an app makes:
+/// two routes are the same route when their keys are, whatever else they
+/// carry (a title is what a route is called, not which it is).
 pub trait Routable: Clone + PartialEq {
-    /// The path, with no `#` in front: `kind` or `kind/name`.
-    fn path(&self) -> String;
-    /// The route a path names, or `None` for a path that names nothing here.
-    /// A leading `#` is allowed, so a URL's fragment reads as it is.
-    fn from_path(path: &str) -> Option<Self>;
-    /// Which route it is: the path without its readable slug
-    /// (`account/<id>`, not `account/<id>/checking`). Two routes are the same
-    /// when their keys are.
+    /// The address: the path that names it, and its own query.
+    fn address(&self) -> Address;
+    /// The route an address names, or `None` for one that names nothing
+    /// here. A query key the route does not name is the UI's: passed over.
+    fn from_address(address: &Address) -> Option<Self>;
+    /// Which route it is: its URL without its readable slug
+    /// (`/account/<id>/`, not `/account/<id>/checking/`). Two routes are
+    /// the same when their keys are.
     fn key(&self) -> String {
-        self.path()
+        self.address().url()
     }
-    /// Where a path that names nothing lands: the app's first page.
+    /// Where an address that names nothing lands: the app's first page.
     fn home() -> Self;
-}
-
-/// `kind`, or `kind/name` with the name percent-encoded — so a `/` in a name
-/// cannot read as the separator, a `#` cannot end a URL's fragment, and an
-/// accent survives as the two bytes it is.
-pub fn join(kind: &str, name: Option<&str>) -> String {
-    let mut out = kind.to_string();
-    if let Some(name) = name {
-        out.push('/');
-        url::encode(name, &mut out);
+    /// The URL, at the root: `/album/water-music/`.
+    fn url(&self) -> String {
+        self.address().url()
     }
-    out
-}
-
-/// The other half of [`join`]: the kind, and the decoded name after the
-/// *first* `/` if there is one. A leading `#` (a URL's fragment) is dropped.
-pub fn split(path: &str) -> (&str, Option<String>) {
-    let body = path.trim_start_matches('#');
-    match body.split_once('/') {
-        Some((kind, name)) => (kind, Some(url::decode(name))),
-        None => (body, None),
+    /// The route a URL names (any spelling `Address::of_url` reads).
+    fn from_url(url: &str) -> Option<Self> {
+        Self::from_address(&Address::of_url(url, "/"))
+    }
+    /// The route a URL names, or home: a link somebody typed wrong lands
+    /// somewhere rather than nowhere.
+    fn route_of(url: &str) -> Self {
+        Self::from_url(url).unwrap_or_else(Self::home)
     }
 }
 
@@ -98,31 +102,30 @@ pub fn split(path: &str) -> (&str, Option<String>) {
 mod tests {
     use super::*;
 
-    /// A name with every awkward character comes back as it went in, and the
-    /// spelling escapes what a URL would otherwise read: falsified by writing
-    /// the name unencoded in `join` (the round trip still passes; the
-    /// spelling does not).
+    /// A name with every awkward character is one segment, and comes back
+    /// as it went in. Falsified by writing the name unencoded: the `/` is
+    /// two segments.
     #[test]
-    fn a_name_survives_its_path() {
-        for name in ["Water Music", "Boléro / Pavane #1", "johann-sebastian-bach/bwv-988", "100% & more?", ""] {
-            let path = join("album", Some(name));
-            assert_eq!(split(&path), ("album", Some(name.to_string())), "round trip of {path}");
-            assert_eq!(
-                split(&format!("#{path}")),
-                ("album", Some(name.to_string())),
-                "a fragment reads as its path"
-            );
+    fn a_name_survives_its_url() {
+        for name in ["Water Music", "Boléro / Pavane #1", "johann-sebastian-bach/bwv-988", "100% & more?"] {
+            let album = Route::Album {
+                key: name.into(),
+                title: String::new(),
+            };
+            assert_eq!(Route::from_url(&album.url()), Some(album.clone()), "round trip of {}", album.url());
         }
-        assert_eq!(join("album", Some("Boléro / Pavane #1")), "album/Bol%C3%A9ro%20%2F%20Pavane%20%231");
-        assert_eq!(join("library", None), "library");
-        assert_eq!(split("library"), ("library", None));
-        assert_eq!(split("#"), ("", None));
+        let album = Route::Album {
+            key: "Boléro / Pavane #1".into(),
+            title: String::new(),
+        };
+        assert_eq!(album.url(), "/album/Bol%C3%A9ro%20%2F%20Pavane%20%231/");
+        assert_eq!(Route::Library.url(), "/");
     }
 
     #[derive(Debug, Clone, Routes)]
     enum Route {
         #[home]
-        #[route("/library")]
+        #[route("/")]
         Library,
         #[route("/album/:key")]
         Album { key: String, title: String },
@@ -154,8 +157,8 @@ mod tests {
     #[test]
     fn an_id_is_which_and_a_slug_is_for_reading() {
         let checking = account(ID, "Joint / Savings #2");
-        assert_eq!(checking.path(), format!("account/{ID}/joint-savings-2"));
-        assert_eq!(checking.key(), format!("account/{ID}"));
+        assert_eq!(checking.url(), format!("/account/{ID}/joint-savings-2/"));
+        assert_eq!(checking.key(), format!("/account/{ID}/"));
         assert_round_trips(&[
             checking.clone(),
             account(ID, ""),
@@ -164,24 +167,24 @@ mod tests {
         ]);
         // Renamed, it is the same route, and a link with the old slug finds it.
         assert_eq!(account(ID, "Shared"), checking);
-        assert_eq!(Route::from_path(&format!("#account/{ID}/old-name")), Some(account(ID, "")));
-        assert_eq!(Route::from_path(&format!("account/{}", ID.to_uppercase())), Some(account(ID, "")));
+        assert_eq!(Route::from_url(&format!("/account/{ID}/old-name/")), Some(account(ID, "")));
+        assert_eq!(Route::from_url(&format!("/account/{}/", ID.to_uppercase())), Some(account(ID, "")));
         // Two of one name are two routes.
         assert_ne!(account(ID, "Checking"), account(&ID.replace('0', "f"), "Checking"));
         // The old spelling: a name, written back as it was.
         assert_eq!(
-            Route::from_path("account/Joint%20%2F%20Savings%20%232"),
+            Route::from_url("/account/Joint%20%2F%20Savings%20%232/"),
             Some(account("", "Joint / Savings #2"))
         );
-        assert_eq!(account("", "Checking").path(), "account/Checking");
+        assert_eq!(account("", "Checking").url(), "/account/Checking/");
         assert_ne!(account("", "Checking"), account(ID, "Checking"), "a name is not an id");
-        assert_eq!(Route::from_path("account"), None);
-        assert_eq!(Route::from_path("account/"), None);
+        assert_eq!(Route::from_url("/account/"), None);
     }
 
     /// A query's fields are escaped, read in any order, and an optional one
-    /// is left out when it is `None`. Falsified by not escaping a value: a
-    /// server's own `?` and `&` would read as the route's.
+    /// is left out when it is `None`; a key the route does not name is the
+    /// UI's. Falsified by not escaping a value: a server's own `?` and `&`
+    /// would read as the route's.
     #[test]
     fn a_query_survives_its_path() {
         let join = |server: &str, code: Option<&str>| Route::Join {
@@ -194,28 +197,27 @@ mod tests {
             join("localhost:3000", Some("ABC-123")),
         ]);
         assert_eq!(
-            join("https://h:8443/p", Some("1")).path(),
-            "join?server=https%3A%2F%2Fh%3A8443%2Fp&code=1"
+            join("https://h:8443/p", Some("1")).url(),
+            "/join/?server=https%3A%2F%2Fh%3A8443%2Fp&code=1"
         );
-        assert_eq!(join("h", None).path(), "join?server=h");
-        assert_eq!(Route::from_path("join?code=9&server=h"), Some(join("h", Some("9"))));
-        assert_eq!(Route::from_path("join?server=h&code="), Some(join("h", None)));
-        assert_eq!(Route::from_path("join?code=9"), None, "a server is needed");
-        assert_eq!(Route::from_path("join"), None);
-        assert_eq!(Route::from_path("library?x=1"), None, "a route with no query takes none");
+        assert_eq!(join("h", None).url(), "/join/?server=h");
+        assert_eq!(Route::from_url("/join/?code=9&server=h"), Some(join("h", Some("9"))));
+        assert_eq!(Route::from_url("/join/?server=h&code="), Some(join("h", None)));
+        assert_eq!(Route::from_url("/join/?code=9"), None, "a server is needed");
+        assert_eq!(Route::from_url("/join/"), None);
+        assert_eq!(Route::from_url("/?inspector=1"), Some(Route::Library), "the UI's query is passed over");
     }
 
-    /// The derive writes what `join` would, reads back every pattern, an old
-    /// spelling and an old link's unescaped slash, and refuses what names
-    /// nothing. Falsified by dropping the `is_empty` check: `album/` reads
-    /// as an album with no key.
+    /// The derive reads back every pattern, a link's unescaped slash in its
+    /// last segment, and refuses what names nothing. Falsified by dropping
+    /// the `is_empty` check: an empty segment reads as an album with no key.
     #[test]
     fn the_derive_spells_and_reads() {
         let album = Route::Album {
             key: "music/Ravel/Boléro / Pavane #1".into(),
             title: "Boléro".into(),
         };
-        assert_eq!(album.path(), join("album", Some("music/Ravel/Boléro / Pavane #1")));
+        assert_eq!(album.url(), "/album/music%2FRavel%2FBol%C3%A9ro%20%2F%20Pavane%20%231/");
         assert_round_trips(&[
             Route::Library,
             album.clone(),
@@ -225,21 +227,22 @@ mod tests {
                 key: "c d".into(),
             },
         ]);
-        let Some(Route::Album { title, .. }) = Route::from_path(&album.path()) else {
+        let Some(Route::Album { title, .. }) = Route::from_url(&album.url()) else {
             panic!()
         };
         assert_eq!(title, "", "a title is not in the path");
-        assert_eq!(Route::from_path("composer/Bach"), Some(Route::Artist { name: "Bach".into() }));
+        assert_eq!(Route::from_url("/composer/Bach/"), Some(Route::Artist { name: "Bach".into() }));
         assert_eq!(
-            Route::from_path("#album/johann-sebastian-bach/bwv-988"),
+            Route::from_url("/album/johann-sebastian-bach/bwv-988/"),
             Some(Route::Album {
                 key: "johann-sebastian-bach/bwv-988".into(),
                 title: String::new()
             })
         );
-        for nothing in ["", "#", "album", "album/", "library/x", "nonsense", "shelf/a"] {
-            assert_eq!(Route::from_path(nothing), None, "{nothing}");
+        for nothing in ["/album/", "/library/x/", "/nonsense/", "/shelf/a/", "/x/"] {
+            assert_eq!(Route::from_url(nothing), None, "{nothing}");
         }
+        assert_eq!(Route::from_url(""), Some(Route::Library), "the root");
         assert_eq!(<Route as Routable>::home(), Route::Library);
     }
 }

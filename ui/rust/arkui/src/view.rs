@@ -187,6 +187,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             tap,
             placement,
         } => bar_button(title, glyph, placement, enabled.get(), tap),
+        Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
         // The shell's are drawn by `shell`, with the window's frame; a
         // hosted screen and the dialogs need it too.
         Part::Page { .. }
@@ -239,7 +240,7 @@ fn tabs_of<M>(v: View<M>, group: Option<&'static str>, out: &mut Vec<Tab<M>>) {
                 group,
                 content: *content,
             }),
-            View::Part(Part::TabGroup { title, tabs }) => tabs_of(*tabs, Some(title), out),
+            View::Part(Part::TabGroup { title, tabs, .. }) => tabs_of(*tabs, Some(title), out),
             _ => {}
         }
     }

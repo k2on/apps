@@ -295,11 +295,14 @@ pub async fn start(config: Config) -> Result<Server> {
     }
     let mut server = ark_peer::Server::new(hub).auth(auth.clone());
     (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
+    // One process: the browser client's files beside the socket and
+    // sign-in (the build the package embeds unless told another), and
+    // `/healthz` said in more words over all of it.
     if let Some(dir) = &config.web {
-        server.web = Some((dir.clone(), config.web_module.clone()));
+        server = server.site(ark_peer::web::Site::files(dir.clone(), config.web_module.clone()));
     }
+    let server = server.layer(|r, hub| r.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz)));
     let (hub, router) = server.build()?;
-    let router = router.layer(axum::middleware::from_fn_with_state(hub.clone(), healthz));
     let running = Running::listen(hub.clone(), router, &config.listen).await?;
     eprintln!("money-server: listening on http://{}", running.addr);
     match &config.web {

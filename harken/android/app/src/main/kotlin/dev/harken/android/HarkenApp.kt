@@ -67,7 +67,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.arkdb.ffi.Id
 import uniffi.harken_domain.Playlist
 import uniffi.harken_domain.Route
-import uniffi.harken_domain.routeFromPath
+import uniffi.harken_domain.routeFromUrl
 import dev.harken.android.onboarding.ArkSession
 import dev.arkui.AccountSheet
 import dev.arkui.LifecycleCapped
@@ -766,7 +766,7 @@ fun HarkenApp(
             // shown. The library's own lists are its tab's; a sign-in link (`harken://join?…`) is the
             // onboarding's.
             Links("harken") { link ->
-                Navigator(nav(), Route::destination).handle(link, "harken", ::routeFromPath) { r ->
+                Navigator(nav(), Route::destination).handle(link, "harken", ::routeFromUrl) { r ->
                     val list =
                         when (r) {
                             is Route.Library -> LibraryTab.Songs
@@ -944,17 +944,17 @@ enum class Destination(val pattern: String, val tab: Tab?) {
 
 /**
  * What the back stack navigates to for this route: its kind, the destination its pattern names,
- * then its path as an argument (`ark-ui`'s [RouteArg]). A route with no name is its kind alone
+ * then its URL as an argument (`ark-ui`'s [RouteArg]). A route with no name is its kind alone
  * (`settings`).
  */
 fun Route.destination(): String {
-    val path = path()
+    val path = url().trim('/')
     val kind = path.substringBefore('/')
     return if (kind == path) path else kind + "/" + RouteArg.of(path)
 }
 
 /** The route a destination's argument names ([destination]); null for one that names nothing. */
-fun routeOf(arg: String?): Route? = RouteArg.path(arg)?.let(::routeFromPath)
+fun routeOf(arg: String?): Route? = RouteArg.path(arg)?.let(::routeFromUrl)
 
 /** The route a back stack entry was navigated to. */
 fun routeOf(entry: NavBackStackEntry): Route? = routeOf(entry.arguments?.getString("arg"))

@@ -18,6 +18,12 @@ pub struct Painter {
     renderer: iced::Renderer,
 }
 
+impl Default for Painter {
+    fn default() -> Self {
+        Painter::new()
+    }
+}
+
 impl Painter {
     pub fn new() -> Painter {
         let fonts = iced::advanced::graphics::text::font_system();

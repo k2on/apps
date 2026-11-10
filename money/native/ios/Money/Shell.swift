@@ -139,7 +139,7 @@ struct Shell: View {
                 model.link = nil
                 let tag = model.shell.page.section
                 var nav = Navigator<Route>()
-                if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromPath(path: $0) }, take: model.takes) {
+                if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }, take: model.takes) {
                     for r in nav.path { push(tag, r) }
                 }
             }

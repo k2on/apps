@@ -164,3 +164,30 @@ fn health_says_which_domain() {
     assert!(text.contains("connections 2\n"), "{text}");
     rt.block_on(server.stop());
 }
+
+/// One process: the browser client's build is served by the server that
+/// holds the socket and sign-in — a deep link answered with its
+/// index.html, the module with the build as its validator — and
+/// `/healthz`, money's middleware, is still over all of it.
+#[test]
+fn the_browser_client_is_served_beside_the_socket() {
+    let rt = runtime();
+    let (data, web) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(web.path().join("index.html"), "<!doctype html><title>Money</title>").unwrap();
+    std::fs::create_dir(web.path().join("pkg")).unwrap();
+    std::fs::write(web.path().join("pkg/money-web.js"), "export default 1").unwrap();
+    let dir = web.path().to_path_buf();
+    let server = serve(&rt, data.path(), move |c| c.web = Some(dir));
+    let get = |path: &str| ureq::get(&format!("{}{path}", server.url())).call().unwrap();
+    for deep in ["/", "/budget/2026-10/category/0a1b/?inspector=1"] {
+        let page = get(deep);
+        assert_eq!(page.header("cache-control"), Some("no-cache"));
+        assert!(page.header("etag").is_some());
+        assert!(page.into_string().unwrap().contains("<title>Money</title>"), "{deep}");
+    }
+    assert_eq!(get("/pkg/money-web.js").into_string().unwrap(), "export default 1");
+    assert!(get("/healthz").into_string().unwrap().contains("\ndomain "));
+    let mut alice = signed_in(&server, "alice");
+    pump_until(&mut [&mut alice], 10, |ps| ps[0].client.linked);
+    rt.block_on(server.stop());
+}

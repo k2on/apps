@@ -436,6 +436,12 @@ browser's own `web.shots`, each opened by its address — the launch arguments e
 caught moving. It writes `<out>/<size>/<theme>/<id>.png` and each its
 `<id>.tree.txt`. The demo needs no server.
 
+`ARK_WEB_MODE=ssg` takes a static site instead (an app whose app.toml's
+`[web] modes` has `ssg`; money's and harken's are the SPA alone), each
+screen by its route's address (ui/docs/app.md, "The Browser's Modes"),
+the browser's own `web.shots` left out; `ARK_WEB_JS=0` takes it with
+script off.
+
 Not yet a job of app-screens.yaml: a job would build `.#money-web`
 (cached), `npx playwright install --with-deps chromium`, and run
 `app-web.sh screens/web money` from the repository's root, then publish

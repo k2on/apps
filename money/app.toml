@@ -61,6 +61,14 @@ dependencies = [
   "androidx.media3:media3-session:1.5.1",
 ]
 
+[web]
+# How the browser's page is made (ui/docs/app.md, "The Browser's Modes"):
+# the SPA alone, served by money-server beside the sync socket. The budget
+# is private, so no page of it is written ahead (`ssg`), and the server
+# writes none either (`ssr`): the page draws itself over the household it
+# syncs.
+modes = ["spa"]
+
 [fdroid]
 metadata = "fdroid/metadata/us.koon.money.yml"
 

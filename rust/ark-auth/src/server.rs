@@ -285,6 +285,11 @@ impl Auth {
         self
     }
 
+    /// Where people reach this server, with no trailing slash.
+    pub fn public_url(&self) -> &str {
+        &self.public_url
+    }
+
     pub fn mode(&self) -> &Mode {
         &self.mode
     }

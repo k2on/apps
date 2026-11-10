@@ -63,7 +63,7 @@ struct Shell: View {
         .onChange(of: model.link) {
             guard let url = model.link else { return }
             model.link = nil
-            navs[tab, default: Navigator()].handle(url, scheme: AppInfo.harken.scheme, parse: { routeFromPath(path: $0) }, take: model.takes)
+            navs[tab, default: Navigator()].handle(url, scheme: AppInfo.harken.scheme, parse: { routeFromUrl(url: $0) }, take: model.takes)
         }
         .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
             Button("OK", role: .cancel) { model.notice = nil }

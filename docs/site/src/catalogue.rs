@@ -107,6 +107,13 @@ pub const ENTRIES: &[Entry] = &[
         rules: &["A name loses its middle, a heading its end."],
     },
     Entry {
+        module: "writing",
+        name: "Writing",
+        summary: "Long-form writing drawn in iced (`ark_app::writing`'s blocks): rich text with emphasis, code and links, Fira Mono code coloured by the theme's roles, callouts on the palette's tints, tables and rules, in a column of a reader's measure. arkui-web draws the same blocks as HTML (`arkui_web::writing`).",
+        api: &["markdown(md), markdown_with(md, on_link)", "blocks(&[Block], on_link), block(b, on_link), code(lang, text)", "MEASURE (680), BODY (15)", "ark_app::writing: parse(md), inline(s), highlight(lang, code), writing(md) (Part::Writing)"],
+        rules: &["Every colour is the theme's, asked for as it is drawn: the same writing is right in light and dark.", "Nothing in it moves.", "SwiftUI and Compose have no Writing part yet: the phones' emitters write the call, the part is what is left."],
+    },
+    Entry {
         module: "url",
         name: "URL",
         summary: "Percent-encoding for a fragment, so a `/`, a `#` or an accent survives the address bar.",
@@ -277,9 +284,9 @@ pub const ENTRIES: &[Entry] = &[
     Entry {
         module: "router",
         name: "Router",
-        summary: "An app's routes as URL fragments, and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
-        api: &["trait Routable { path(), from_path(), home() } (ark-router; #[derive(Routes)] writes it)", "fragment(&route), parse(fragment)", "join(kind, name), split(path)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Browser, Nav"],
-        rules: &["`parse` never fails: a fragment that names nothing is home.", "Call `sync` after every update."],
+        summary: "An app's routes as URLs, the browser's and the desktop's alike (`/album/water-music/`), and the address bar kept in step: reconciled, not pushed, and a scrub one history entry. Each page here has one.",
+        api: &["trait Routable { address(), from_address(), url(), from_url(), key(), home() } (ark-router; #[derive(Routes)] writes it)", "Address { path, query }: of_url(url, base), url(), url_under(base), with(key, value), get(key)", "parse(url)", "Router::new(), sync(&route), replace_next(), poll(ready), go(by), can_go(by)", "AddressBar, Memory, Nav"],
+        rules: &["`parse` never fails: a URL that names nothing is home.", "Call `sync` after every update.", "A query key no route names is the UI's, passed over."],
     },
     Entry {
         module: "scroll",

@@ -350,7 +350,7 @@ fn a_work_link_resolves_by_its_key() {
     let id = crate::domain::host::work_key("Johann Sebastian Bach", "BWV 988", "Goldberg Variations");
     assert!(id.contains('/'), "{id}");
     // A route read from a path has no title: resolving finds it.
-    let work = peer.resolve(&Route::from_path(&format!("work/{}", arkui::url::encoded(&id))).unwrap());
+    let work = peer.resolve(&Route::from_url(&format!("/work/{}/", arkui::url::encoded(&id))).unwrap());
     assert_eq!(
         work,
         Route::Work {
@@ -372,13 +372,13 @@ fn a_work_link_resolves_by_its_key() {
         title: String::new(),
     });
     assert_eq!(
-        (album.path(), album.title()),
+        (album.url(), album.title()),
         (
             Route::Album {
                 key: water,
                 title: String::new()
             }
-            .path(),
+            .url(),
             "Water Music".to_string()
         )
     );
@@ -426,10 +426,11 @@ fn a_featured_play_queues_the_performance() {
     assert_eq!(app.queue.len() as i64, take.tracks);
     assert_eq!(
         app.queued_from,
-        arkui::router::fragment(&Route::Recording {
+        Route::Recording {
             key: take.id.clone(),
             title: String::new()
-        })
+        }
+        .url()
     );
 
     app.queue.clear();
@@ -467,16 +468,14 @@ fn the_best_known_works_are_the_most_recorded() {
     assert!(!app.all_works, "gone with the page");
 }
 
-/// A person has one page: a composer's card, an old `#composer/…` link and
-/// the artist's card all open it, and it lists their works where some are
+/// A person has one page: a composer's card and the artist's card both
+/// open it, and it lists their works where some are
 /// by them and their songs where none are. Falsified by opening `works`
 /// only for a composer's card: the artist's card opened a page of no works.
 #[test]
 fn a_composer_and_an_artist_are_one_page() {
     let mut app = super::demo_app();
     let bach = "Johann Sebastian Bach".to_string();
-    let composer = Route::from_path(&format!("composer/{}", arkui::url::encoded(&bach))).unwrap();
-    assert_eq!(app.peer.resolve(&composer), Route::Artist { name: bach.clone() });
     assert_eq!(
         app.peer.resolve(&Route::Artist { name: bach.clone() }),
         Route::Artist { name: bach.clone() }
@@ -579,7 +578,7 @@ fn the_demo_has_a_podcast_and_sermons() {
         key: "podcast/full-time-nix".into(),
         title: String::new(),
     });
-    assert_eq!((found.path(), found.title()), (show.path(), show.title()));
+    assert_eq!((found.url(), found.title()), (show.url(), show.title()));
     let (_, entries) = app.row_entries(rows[0].id).unwrap();
     assert!(entries.iter().any(|e| e.label == "Go to Full Time Nix"));
 }

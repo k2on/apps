@@ -7,6 +7,14 @@
 //! store the module's mtime and length when one is named, or every file's
 //! latest mtime, total length and count. A miss falls back to
 //! `index.html`, so a deep link reloads.
+//!
+//! An app's web is mounted on its server in one call ([`Site`],
+//! `serve::Server::site`): its build's files (an SPA, or a static site's
+//! pages beside its module) and, optionally, the pages its server writes
+//! for each request (`pages`, a router asked first: arkui-web's `ssr`
+//! mode, which no app turns on today; ui/docs/app.md). It is merged beside
+//! the sync socket and sign-in, under every layer the server is given, so
+//! a page is answered by the same process, behind the same middleware.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,6 +25,43 @@ use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
+
+/// The pages a server writes itself, made once the hub is up.
+pub type Pages = Box<dyn FnOnce(&crate::handle::Handle) -> Router + Send>;
+
+/// An app's web, as its server serves it.
+#[derive(Default)]
+pub struct Site {
+    /// The build's files: index.html (an SPA's, or a static site's page
+    /// per path), the module, the favicon. None: no files.
+    pub dir: Option<PathBuf>,
+    /// The file whose change is a rebuild (the module), when named.
+    pub module: Option<String>,
+    /// Pages the server writes itself (arkui-serve's), given the hub, and
+    /// answering every path the files do not: they serve the files
+    /// themselves when there are both.
+    pub pages: Option<Pages>,
+}
+
+impl Site {
+    /// The files of the build in `dir`.
+    pub fn files(dir: PathBuf, module: Option<String>) -> Site {
+        Site {
+            dir: Some(dir),
+            module,
+            pages: None,
+        }
+    }
+
+    /// The site as one router: its pages if it writes any, else its files.
+    pub fn router(self, hub: &crate::handle::Handle) -> Router {
+        match (self.pages, self.dir) {
+            (Some(p), _) => p(hub),
+            (None, Some(d)) => router(d, self.module),
+            (None, None) => Router::new(),
+        }
+    }
+}
 
 /// `dir` at `/`, with the file whose change is a rebuild named or not.
 pub fn router(dir: PathBuf, module: Option<String>) -> Router {

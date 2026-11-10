@@ -257,6 +257,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "arkui-serve" = rec {
+      packageId = "arkui-serve";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "arkui-serve";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "arkui-shots" = rec {
       packageId = "arkui-shots";
       build = internal.buildRustCrateWithFeatures {
@@ -1924,6 +1934,70 @@ rec {
         ];
 
       };
+      "arkui-serve" = rec {
+        crateName = "arkui-serve";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../ui/rust/serve; };
+        libName = "arkui_serve";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-auth";
+            packageId = "ark-auth";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            features = [ "server" ];
+          }
+          {
+            name = "arkui-web";
+            packageId = "arkui-web";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "axum";
+            packageId = "axum";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt-multi-thread" "macros" ];
+          }
+          {
+            name = "tower";
+            packageId = "tower";
+            features = [ "util" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "leptos";
+            packageId = "leptos";
+            usesDefaultFeatures = false;
+            features = [ "ssr" ];
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+          }
+          {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
+            name = "ureq";
+            packageId = "ureq";
+            usesDefaultFeatures = false;
+          }
+        ];
+
+      };
       "arkui-shots" = rec {
         crateName = "arkui-shots";
         version = "0.1.0";
@@ -1971,6 +2045,10 @@ rec {
             packageId = "ark-format";
           }
           {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+          {
             name = "arkui-glyphs";
             packageId = "arkui-glyphs";
           }
@@ -1978,7 +2056,6 @@ rec {
             name = "leptos";
             packageId = "leptos";
             usesDefaultFeatures = false;
-            features = [ "csr" ];
           }
           {
             name = "wasm-bindgen";
@@ -1990,7 +2067,13 @@ rec {
             features = [ "Window" "Document" "Element" "HtmlElement" "HtmlInputElement" "KeyboardEvent" "MouseEvent" "Event" "EventTarget" "DomRect" "Location" "UrlSearchParams" "MediaQueryList" "CssStyleDeclaration" "Node" "History" "FocusEvent" "PointerEvent" "ScrollIntoViewOptions" "ScrollLogicalPosition" "Navigator" "NodeList" "HtmlDocument" ];
           }
         ];
-
+        features = {
+          "csr" = [ "leptos/csr" ];
+          "default" = [ "csr" ];
+          "hydrate" = [ "leptos/hydrate" ];
+          "ssr" = [ "leptos/ssr" ];
+        };
+        resolvedDefaultFeatures = [ "csr" "default" "hydrate" "ssr" ];
       };
       "arrayref" = rec {
         crateName = "arrayref";
@@ -9539,6 +9622,11 @@ rec {
             packageId = "futures";
           }
           {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+          }
+          {
             name = "or_poisoned";
             packageId = "or_poisoned";
           }
@@ -9555,10 +9643,16 @@ rec {
             name = "throw_error";
             packageId = "throw_error";
           }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+          }
         ];
         features = {
           "browser" = [ "dep:wasm-bindgen" "dep:js-sys" ];
         };
+        resolvedDefaultFeatures = [ "browser" ];
       };
       "hyper" = rec {
         crateName = "hyper";
@@ -11623,6 +11717,29 @@ rec {
         };
         resolvedDefaultFeatures = [ "iter" ];
       };
+      "inventory" = rec {
+        crateName = "inventory";
+        version = "0.3.25";
+        edition = "2021";
+        sha256 = "0z6d57l6pkan8sdr4j87fwk1rfih1awir6hwpy8ss8n84ql2ha39";
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+            target = { target, features }: (builtins.elem "wasm" target."family");
+          }
+        ];
+        devDependencies = [
+          {
+            name = "rustversion";
+            packageId = "rustversion";
+          }
+        ];
+
+      };
       "itertools 0.10.5" = rec {
         crateName = "itertools";
         version = "0.10.5";
@@ -12592,7 +12709,7 @@ rec {
           "trace-component-props" = [ "leptos_macro/trace-component-props" "leptos_dom/trace-component-props" ];
           "tracing" = [ "dep:tracing" "reactive_graph/tracing" "tachys/tracing" "leptos_macro/tracing" "leptos_dom/tracing" "leptos_server/tracing" ];
         };
-        resolvedDefaultFeatures = [ "csr" ];
+        resolvedDefaultFeatures = [ "csr" "hydrate" "hydration" "ssr" ];
       };
       "leptos_config" = rec {
         crateName = "leptos_config";
@@ -12673,7 +12790,7 @@ rec {
           "trace-component-props" = [ "dep:serde" "dep:serde_json" ];
           "tracing" = [ "dep:tracing" ];
         };
-        resolvedDefaultFeatures = [ "default" ];
+        resolvedDefaultFeatures = [ "default" "hydration" ];
       };
       "leptos_hot_reload" = rec {
         crateName = "leptos_hot_reload";
@@ -12814,7 +12931,7 @@ rec {
           "ssr" = [ "server_fn_macro/ssr" ];
           "tracing" = [ "dep:tracing" ];
         };
-        resolvedDefaultFeatures = [ "__internal_erase_components" "csr" ];
+        resolvedDefaultFeatures = [ "__internal_erase_components" "csr" "hydrate" "ssr" ];
       };
       "leptos_server" = rec {
         crateName = "leptos_server";
@@ -12888,7 +13005,7 @@ rec {
           "tracing" = [ "dep:tracing" ];
           "wasm-bindgen" = [ "dep:wasm-bindgen" ];
         };
-        resolvedDefaultFeatures = [ "tachys" ];
+        resolvedDefaultFeatures = [ "hydration" "ssr" "tachys" ];
       };
       "libc" = rec {
         crateName = "libc";
@@ -13984,6 +14101,7 @@ rec {
             name = "arkui-web";
             packageId = "arkui-web";
             optional = true;
+            usesDefaultFeatures = false;
           }
           {
             name = "money-core";
@@ -14293,6 +14411,7 @@ rec {
           }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/web; };
+        libName = "money_web";
         dependencies = [
           {
             name = "ark-app";
@@ -14310,12 +14429,12 @@ rec {
           {
             name = "arkui-web";
             packageId = "arkui-web";
+            usesDefaultFeatures = false;
           }
           {
             name = "leptos";
             packageId = "leptos";
             usesDefaultFeatures = false;
-            features = [ "csr" ];
           }
           {
             name = "money-app";
@@ -14333,7 +14452,12 @@ rec {
             features = [ "Window" "Document" "Element" ];
           }
         ];
-
+        features = {
+          "csr" = [ "arkui-web/csr" "leptos/csr" ];
+          "default" = [ "csr" ];
+          "ssr" = [ "arkui-web/ssr" "leptos/ssr" ];
+        };
+        resolvedDefaultFeatures = [ "csr" "default" "ssr" ];
       };
       "moxcms" = rec {
         crateName = "moxcms";
@@ -22975,6 +23099,11 @@ rec {
             packageId = "http";
           }
           {
+            name = "inventory";
+            packageId = "inventory";
+            optional = true;
+          }
+          {
             name = "js-sys";
             packageId = "js-sys";
             optional = true;
@@ -23079,7 +23208,7 @@ rec {
           "serde-lite" = [ "dep:serde-lite" ];
           "ssr" = [ "inventory" ];
         };
-        resolvedDefaultFeatures = [ "browser" "form-redirects" ];
+        resolvedDefaultFeatures = [ "browser" "form-redirects" "inventory" "ssr" ];
       };
       "server_fn_macro" = rec {
         crateName = "server_fn_macro";
@@ -23125,6 +23254,7 @@ rec {
         ];
         features = {
         };
+        resolvedDefaultFeatures = [ "ssr" ];
       };
       "server_fn_macro_default" = rec {
         crateName = "server_fn_macro_default";
@@ -24626,7 +24756,7 @@ rec {
           "testing" = [ "dep:slotmap" ];
           "tracing" = [ "dep:tracing" ];
         };
-        resolvedDefaultFeatures = [ "default" "oco" "reactive_graph" "reactive_stores" "testing" ];
+        resolvedDefaultFeatures = [ "default" "hydrate" "oco" "reactive_graph" "reactive_stores" "ssr" "testing" ];
       };
       "tar" = rec {
         crateName = "tar";

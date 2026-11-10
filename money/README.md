@@ -333,9 +333,16 @@ nix build .#money-server                          # what services.money runs
 (`server/src/lib.rs`): the log on the hub, the sync socket at `/sync`,
 the sign-in routes under `/auth`, `/healthz` (which says `domain <schema
 hash> <version> current`, what a phone holds its build to), and the
-browser client at `/`; state in the data directory. Everything is the
-environment, under `MONEY_` (`money-server --help`; `Config::from_env`
-lists it), which the NixOS module writes.
+browser client at `/`; state in the data directory. It is one process
+and one NixOS service for all of it: the browser client is money-web, the
+SPA (app.toml's `[web] modes`; ui/docs/app.md, "The Browser's Modes"),
+whose build the `money-server` package carries as its default `MONEY_WEB`
+and serves through ark-peer's `web::Site` beside the socket, a deep link
+answered with its index.html, every file with the build as its validator,
+and money's own middleware (`/healthz`) over everything
+(`Server::layer`). Everything is the environment, under `MONEY_`
+(`money-server --help`; `Config::from_env` lists it), which the NixOS
+module writes.
 
 **Signing in.** The server is the only OpenID Connect client, a
 confidential one: it holds the secret, and the provider is told one
@@ -448,9 +455,9 @@ with one control for what it feeds, a menu: a new account of its kind (the curso
 nothing (`iced/src/banks.rs`); **Account** says who is signed in where,
 with Sign out (`iced/src/settings.rs`). Connecting opens Plaid's page as soon as
 the server answers, in the system's browser, with the page's link in
-Settings too. There is no browser client yet: iced is the desktop's
-alone, and money's web client will be Leptos over the DOM
-(ui/docs/app.md, What Is Left).
+Settings too. The browser client (money/web, Leptos over arkui-web) runs
+the shell over the demo household in the page for now; a client that
+signs in and syncs is what is left (ui/docs/app.md, What Is Left).
 
 ## The demo
 

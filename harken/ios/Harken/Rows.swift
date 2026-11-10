@@ -438,16 +438,16 @@ enum Page: Hashable {
     }
 
     /// Where a track was played from, as the listening session and the plays
-    /// carry it: the route's path as the desktop's address bar says it
-    /// (`#album/Water%20Music`), so a page named on one device is the same
+    /// carry it: the route's URL as every address bar says it
+    /// (`/album/Water%20Music/`), so a page named on one device is the same
     /// page on another. One this phone cannot name is nowhere in particular.
     func from(_ playlists: [Playlist]) -> String {
-        route(playlists).map { "#" + $0.path() } ?? ""
+        route(playlists).map { $0.url() } ?? ""
     }
 
     /// The page a "played from" names; nil for nowhere, or a page this phone has not got.
     static func of(from: String, playlists: [Playlist]) -> Page? {
-        routeFromPath(path: from).flatMap { of($0, playlists: playlists) }
+        routeFromUrl(url: from).flatMap { of($0, playlists: playlists) }
     }
 }
 

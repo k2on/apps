@@ -4,16 +4,15 @@
 //! Auto's media ids.
 //!
 //! **A row is named by its id.** A playlist carries its row's id and, after
-//! it, a slug of its name only to read (`playlist/<id>/road-trip`), so a
+//! it, a slug of its name only to read (`/playlist/<id>/road-trip/`), so a
 //! renamed playlist keeps its page and two of one name (two people's) are
-//! two routes; an older link's name (`playlist/Road%20trip`) still reads, and
-//! only that one is found by name ([`Route::names`]). An album, a work, a
-//! recording and a show have no row of their own: they are named by the key
-//! the domain derives, which has slashes of its own
-//! (`johann-sebastian-bach/bwv-988`), and the title to draw beside it. What a
-//! route is called is not which route it is: two routes are the same when
-//! their keys are (`Routable::key`, the path without a slug), so a route read back from a path — which has no title —
-//! is the route it was written from.
+//! two routes. An album, a work, a recording and a show have no row of
+//! their own: they are named by the key the domain derives, which has
+//! slashes of its own (`johann-sebastian-bach/bwv-988`, one segment,
+//! `%2F`), and the title to draw beside it. What a route is called is not
+//! which route it is: two routes are the same when their keys are
+//! (`Routable::key`, the URL without a slug), so a route read back from a
+//! URL — which has no title — is the route it was written from.
 //!
 //! **A stale route lands on the library.** A link to a playlist since
 //! deleted, or to an album not received yet, is resolved by the shell
@@ -42,19 +41,15 @@ pub enum Route {
     Podcasts,
     #[route("/sermons")]
     Sermons,
-    /// A playlist, by its id (`Id::hex`), its name after it only to read;
-    /// an older link's by its name (`Route::names`).
+    /// A playlist, by its id (`Id::hex`), its name after it only to read.
     #[route("/playlist/:id(hex)/~name")]
-    #[route("/playlist/:name")]
     Playlist { id: String, name: String },
     /// An album by its key (`keys::album_id`), and its name: two records of
     /// one title are two albums.
     #[route("/album/:key")]
     Album { key: String, title: String },
-    /// One person's page, whatever they did. An old `composer/…` link is
-    /// their page too.
+    /// One person's page, whatever they did.
     #[route("/artist/:name")]
-    #[route("/composer/:name")]
     Artist { name: String },
     /// One work and the performances of it: the derived key, and its title.
     #[route("/work/:key")]
@@ -76,7 +71,7 @@ pub enum Route {
     /// The numbers behind the sync, on a phone.
     #[route("/diagnostics")]
     Diagnostics,
-    /// Sign in to a server from a link or a QR code: `join?server=…&code=…`.
+    /// Sign in to a server from a link or a QR code: `/join/?server=…&code=…`.
     /// Not a page: a shell hands it to the onboarding.
     #[route("/join?server=:server&code=:code")]
     Join { server: String, code: Option<String> },
@@ -145,16 +140,12 @@ impl Route {
         Route::Library
     }
 
-    /// Whether the route is the playlist of this id (`Id::hex`) and name —
-    /// what every shell finds a playlist's route by. By the id; by the name
-    /// only for an older link's, which has none. So a renamed playlist keeps
-    /// its page, and of two of one name only the one meant is found.
-    pub fn names(&self, id: &str, name: &str) -> bool {
-        match self {
-            Route::Playlist { id: mine, .. } if !mine.is_empty() => mine == id,
-            Route::Playlist { name: mine, .. } => !mine.is_empty() && mine == name,
-            _ => false,
-        }
+    /// Whether the route is the playlist of this id (`Id::hex`) — what
+    /// every shell finds a playlist's route by. So a renamed playlist keeps
+    /// its page, and of two of one name only the one meant is found. The
+    /// name is the shells' to pass; it is not which playlist.
+    pub fn names(&self, id: &str, _name: &str) -> bool {
+        matches!(self, Route::Playlist { id: mine, .. } if !mine.is_empty() && mine == id)
     }
 
     /// The work a recording is a performance of, by its key: everything
@@ -170,20 +161,21 @@ impl Route {
     }
 }
 
-/// The route a path names, or none: `Route::from_path`, for the phones
-/// (UniFFI writes no constructor on an enum).
+/// The route a URL names, or none: `Route::from_url`, for the phones'
+/// deep links and launch arguments (UniFFI writes no constructor on an
+/// enum): `/album/water-music/`, `harken://album/water-music/`.
 #[cfg_attr(feature = "ffi", uniffi::export)]
-pub fn route_from_path(path: String) -> Option<Route> {
-    Route::from_path(&path)
+pub fn route_from_url(url: String) -> Option<Route> {
+    Route::from_url(&url)
 }
 
 #[cfg(feature = "ffi")]
 #[uniffi::export]
 impl Route {
-    /// The path (`Route::path`): `album/Water%20Music`.
-    #[uniffi::method(name = "path")]
-    pub fn ffi_path(&self) -> String {
-        self.path()
+    /// The URL (`Route::url`): `/album/Water%20Music/`.
+    #[uniffi::method(name = "url")]
+    pub fn ffi_url(&self) -> String {
+        self.url()
     }
 
     #[uniffi::method(name = "title")]
@@ -242,12 +234,12 @@ mod tests {
         }
     }
 
-    /// Every variant survives its path — a slash would look like the
-    /// separator, a `#` would end a URL's fragment, an accent is two bytes —
-    /// and a key with a slash of its own. Falsified by spelling `Diagnostics`
-    /// as `/settings`: it reads back as Settings.
+    /// Every variant survives its URL — a slash would read as two
+    /// segments, a `#` would end the URL, an accent is two bytes — and a key
+    /// with a slash of its own. Falsified by spelling `Diagnostics` as
+    /// `/settings`: it reads back as Settings.
     #[test]
-    fn every_route_survives_its_path() {
+    fn every_route_survives_its_url() {
         let (ak, at) = keyed("music/Ravel/Boléro / Pavane #1/bolero", "Boléro / Pavane #1");
         let (wk, wt) = keyed("johann-sebastian-bach/bwv-988", "Goldberg Variations");
         let (rk, rt) = keyed("johann-sebastian-bach/bwv-988@kimiko-ishizaka", "Kimiko Ishizaka");
@@ -261,7 +253,6 @@ mod tests {
             Route::Sermons,
             playlist(ROAD, "Favorites"),
             playlist(ROAD, "100% & more? #2"),
-            playlist("", "100% & more? #2"),
             Route::Album { key: ak, title: at },
             Route::Artist {
                 name: "Antonín Dvořák".into(),
@@ -281,19 +272,18 @@ mod tests {
                 code: None,
             },
         ]);
-        // The spelling itself: a playlist by its id, and an older link's,
-        // which the listening session's records carry, as it was.
-        assert_eq!(playlist(ROAD, "Road trip").path(), format!("playlist/{ROAD}/road-trip"));
-        assert_eq!(playlist("", "100% & more? #2").path(), "playlist/100%25%20%26%20more%3F%20%232");
+        // The spelling itself: a playlist by its id, a key's slash one
+        // segment's, a slash at the end.
+        assert_eq!(playlist(ROAD, "Road trip").url(), format!("/playlist/{ROAD}/road-trip/"));
         assert_eq!(
             Route::Work {
                 key: "johann-sebastian-bach/bwv-988".into(),
                 title: "Goldberg Variations".into()
             }
-            .path(),
-            "work/johann-sebastian-bach%2Fbwv-988"
+            .url(),
+            "/work/johann-sebastian-bach%2Fbwv-988/"
         );
-        assert_eq!(Route::Library.path(), "library");
+        assert_eq!(Route::Library.url(), "/library/");
     }
 
     /// A route is which page, not what it is called: one read back from its
@@ -305,7 +295,7 @@ mod tests {
             key: "x/y".into(),
             title: "Y".into(),
         };
-        let read = Route::from_path(&titled.path()).unwrap();
+        let read = Route::from_url(&titled.url()).unwrap();
         assert_eq!(read.title(), "");
         assert_eq!(read, titled);
         let set: std::collections::HashSet<Route> = [titled].into();
@@ -313,37 +303,29 @@ mod tests {
     }
 
     /// A renamed playlist is the same route, still found; two playlists of
-    /// one name are two; an older link's name is found by name, and only it.
-    /// Falsified by finding a playlist by its name.
+    /// one name are two; a playlist by its name is no route. Falsified by
+    /// finding a playlist by its name.
     #[test]
     fn a_playlist_is_its_id() {
         let before = playlist(ROAD, "Road trip");
         assert_eq!(before, playlist(ROAD, "Summer"));
-        assert_eq!(Route::from_path(&before.path()), Some(playlist(ROAD, "")));
+        assert_eq!(Route::from_url(&before.url()), Some(playlist(ROAD, "")));
         assert!(before.names(ROAD, "Summer") && !before.names(OTHER, "Road trip"));
         assert_ne!(playlist(ROAD, "Favorites"), playlist(OTHER, "Favorites"));
-        let old = Route::from_path("#playlist/Road%20trip").unwrap();
-        assert_eq!(old, playlist("", "Road trip"));
-        assert!(old.names(OTHER, "Road trip") && !old.names(OTHER, "Summer"));
+        assert_eq!(Route::from_url("/playlist/Road%20trip/"), None, "a name is no playlist's");
         assert!(!Route::Library.names(ROAD, "Songs"));
     }
 
-    /// A path nobody wrote names nothing, and an old `composer/` link is the
-    /// person's page.
+    /// A URL nobody wrote names nothing, and the root is the library.
     #[test]
-    fn a_path_that_means_nothing_is_none() {
-        for path in ["", "#", "nonsense/Water Music", "album", "album/", "library/x"] {
-            assert_eq!(Route::from_path(path), None, "{path}");
+    fn a_url_that_means_nothing_is_none() {
+        for url in ["/nonsense/Water%20Music/", "/album/", "/library/x/", "/composer/Antonio%20Vivaldi/"] {
+            assert_eq!(Route::from_url(url), None, "{url}");
         }
-        assert_eq!(
-            Route::from_path("#composer/Antonio%20Vivaldi"),
-            Some(Route::Artist {
-                name: "Antonio Vivaldi".into()
-            })
-        );
         assert_eq!(<Route as Routable>::home(), Route::Library);
+        assert_eq!(Route::route_of("/"), Route::Library);
         // A truncated escape is not a reason to fail: what decoded, decoded.
-        assert_eq!(Route::from_path("artist/Bol%"), Some(Route::Artist { name: "Bol%".into() }));
+        assert_eq!(Route::from_url("/artist/Bol%/"), Some(Route::Artist { name: "Bol%".into() }));
     }
 
     /// What each route says of itself, as the shells drew it.

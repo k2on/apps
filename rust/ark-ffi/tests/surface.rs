@@ -234,6 +234,9 @@ pub mod jobs {
 
     /// Whether `fetch.every` refuses the next time it is made.
     pub static REFUSE: AtomicBool = AtomicBool::new(false);
+    /// Held by every test that makes `fetch.every`: `REFUSE` is the
+    /// process's, and tests run side by side.
+    pub static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Every job, as a plan that reads the row `id` names, so that a write
     /// to it makes the plan again — which refuses once when asked to.
@@ -280,6 +283,7 @@ fn a_kinds_due_jobs_are_asked_by_name() {
 /// view made again read nothing.
 #[test]
 fn a_view_made_again_after_a_reset_is_made_from_its_input() {
+    let _one = jobs::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();
@@ -360,6 +364,7 @@ fn an_apps_mutate_is_the_root_of_its_trace() {
 /// held the row twice (money's budget, a category twice, the app gone).
 #[test]
 fn a_views_rows_are_its_base_and_take_says_what_came_after() {
+    let _one = jobs::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let d = Peer::open(Config::of(Arc::new(jobs::domain())), dir.path().to_str().unwrap(), None).unwrap();
     let every = d.view("fetch.every".into(), r#"{"id":"a"}"#.into()).unwrap();

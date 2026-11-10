@@ -411,8 +411,9 @@ the debug key. Nothing there is a project file.
 
 ## The Browser: `arkui-web`
 
-`ui/rust/web` draws an `ark_app` `View` in the DOM, client-side, with
-Leptos 0.8 (`csr`; no server functions, no hydration), the way
+`ui/rust/web` draws an `ark_app` `View` in the DOM with Leptos 0.8 — in
+the browser alone by default (`csr`), or written as HTML first and taken
+over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 `arkui::view` draws it in iced:
 
 - **`render(view)`** a page's view (`#[view]`'s `web(&record)`);
@@ -443,6 +444,12 @@ Leptos 0.8 (`csr`; no server functions, no hydration), the way
 - **`table`**: a Mac's `Table` (headings, rows a grid of cells, striped,
   the selected and the cursor's row lit, a row's menu), and when compact a
   `List` of two-line rows from each column's `Slot`.
+- **`writing`**: long-form writing (`ark_app::writing`, a view's
+  `writing(md)`): Markdown's headings, paragraphs with links, emphasis and
+  code, lists, highlighted code, callouts and tables, as the HTML that
+  says each, in `writing.css`; `arkui::writing` draws the same blocks in
+  iced. SwiftUI's and Compose's `Writing` are what is left. The docs site
+  (docs/site) is written in it.
 - **`figures`**: arkui's figures, the charts as inline SVG in the `[chart]`
   palette (`line_svg` is iced's line, point for point).
 - **`keys`**: the shortcuts of the app's `CommandMenu`s
@@ -469,6 +476,199 @@ Leptos 0.8 (`csr`; no server functions, no hydration), the way
   every shell reads (`?screen=account:checking&inspector=1&pane=banks`,
   `ark_app::shell::Launch`), and arkui-web's `?context=<row>`,
   `?menu=<id>`, `?popover=<id>`, `?command=`, `?keys=1`, `?theme=dark`.
+
+## Addresses
+
+One route model for every app, on every shell (`ark-router`). An app
+declares where it can be once, as a `Route` enum in its domain or app
+crate — `harken_domain::routes`, `money_core::routes`, the docs'
+`docs/site/src/routes.rs` — with `#[derive(Routes)]`, a pattern per
+variant (`#[route("/album/:key")]`), and every shell reads that one enum:
+the browser's address bar (arkui-web, `Address::of_url`), the desktop's
+(arkui's `router`, which says the same URL), the phones' deep links and
+back stacks (`route_from_url`, `Route.url()` over UniFFI), a "played from"
+in a listening session, a notification's target, a static site's pages.
+
+An **address** (`ark_router::Address`) is a path and a query, as Next.js
+has them: the **path** names the content — the page and the ids of what
+it shows — and the **query** holds the UI's state over it (an inspector
+open, a search, a sheet and what is typed in it). A route reads its own
+query keys (a sign-in's `server`, `code`) and passes over every other: a
+key no route names is the UI's.
+
+The URL conventions every app keeps (`assert_round_trips` holds each
+app's routes to them, route → URL → route):
+
+- **A slash at the end** of every path: `/budget/`, `/menu/`; the root is
+  `/`. A link written without it reads the same.
+- **Lowercase kebab** for a kind: `/expanding-card/`, `/bank/…`; the
+  derive refuses an uppercase or `_` segment in a pattern.
+- **One segment, one value**, percent-encoded (`url::encode`): a `/` in a
+  key is `%2F` (`/work/johann-sebastian-bach%2Fbwv-988/`), a space `%20`.
+- **A row by its id**: 32 lowercase hex digits, a readable slug of its
+  name after it, only to read (`/account/<id>/checking/`); the slug is no
+  part of which route it is (`Routable::key`). A row is never found by its
+  name.
+- **A month** is `YYYY-MM` (`month=2026-10`), a day `YYYY-MM-DD`.
+- **Query keys** are lowercase kebab (`inspector`, `search`,
+  `draft-category`), written in the order set; a key with no value is
+  not written, and a flag is `1`.
+- **The base** is the site's, taken off whole and put back on: the docs at
+  `/apps/docs/` (`/apps/docs/menu/`), money and harken at their server's
+  root (`/`). `Address::url_under(base)` writes under it and
+  `Address::of_url(url, base)` reads without it; a phone's link
+  (`money://budget/`) reads as its path.
+- **No old spellings.** A URL that names nothing lands on the app's home
+  (`Routable::route_of`); there are no redirects from earlier forms.
+
+money's browser address still spells its own path from the shell's state
+(`/budget/2026-10/category/<id>/`) and reads the launch arguments
+(`?screen=…`); folding it onto `money_core::Route` and the launch arguments
+onto routes is what is left.
+
+## The Browser's Modes
+
+How the page is made is chosen per app, by app.toml's `[web] modes`; the
+app's crate is the same in each.
+
+| Mode | What the browser is sent | Without script |
+|---|---|---|
+| `spa` (the default) | index.html and the module (`nix build .#<app>-web`, feature `csr`); the page draws itself | nothing |
+| `ssg` | a page of HTML per path the app declares, written natively (`arkui_web::prerender`, feature `ssr`), then the module (`hydrate`), which takes it over | every page and every link between them; no UI state, nothing that changes the data |
+| `ssr` | each request's page, written by the app's own server, then the module | everything: a press is a form the server answers |
+
+**Which app uses which.** money and harken are the SPA alone
+(`modes = ["spa"]`), served by their own servers beside the sync socket
+and sign-in: a household's budget and a person's library are private, so
+there is nothing to write ahead for anybody, and a page that draws itself
+over what it syncs needs no server to draw it. The docs site is the static
+case (`ssg`): public, finite, read more than written. harken's public
+pages (a show, an episode, a transcript) are the next. `ssr` is a
+capability the layers keep — the same routes, controls and forms, taken by
+the server — that no app turns on.
+
+The SPA is what it always was: none of what follows is drawn in it, and
+its markup is the same.
+
+**Routes** are addresses (`ark_router::Address`, below): the app's
+`WebApp::route` says where it is — its `Route` enum's address and the
+UI's query over it — and `WebApp::arrive` brings it back there from one,
+so the state a page is written at is the state the module arrives at,
+from the address and the data alone. `static_paths` is every page a
+static site writes: an address's path, never a query.
+
+**Browser-only calls** (the window, its width, `DomRect`, history, focus,
+the keyboard) run only in wasm (`cfg!(target_arch = "wasm32")`).
+
+**Every width without script** (`page::Band`). Natively there is no
+window, so a written page is drawn once per band of `[layout]`'s size
+classes — compact (the tab bar at the foot), medium (the tab bar at the
+top, a split view a column at a time), large (its columns side by side)
+and sidebar — each in a `.ark-at-<band>` that theme.css's media queries
+(written by ui/theme.py from the same tokens) show alone at its widths.
+Each band's controls are the page's, in the order drawn, so a form from
+any band is taken against the same draw made again; an element id is
+suffixed by its band (`page::unique`). The module's first draw is the same
+four bands (`data-ark-width="every"`), so it takes over exactly what was
+written; from its next frame it is the window's own width, one band.
+
+**The no-JS contract** (`page`). Written as HTML, every control a draw
+makes is recorded in the order it is drawn, by what it says and what it
+does (`page::tap`, `page::text`), and wired so that it works with no
+script:
+
+- a button is a submit button of the page's one form, `#ark-act`, its
+  value `<index>.<check>` (the check a hash of its label); a field is that
+  form's `t<index>`. A part that is no button (a table's row, a toggle) is
+  pressed through an invisible button over all of it (`.ark-hit`).
+- a control's menu (`menu::button`) is the browser's own `popover`; a date
+  field is the browser's `<input type="date">` in its place (`.ark-nojs`,
+  put away once script runs; `.ark-js` is what is put away until then).
+- a form is taken against the same draw made again (`page::take`): every
+  field whose text changed sent first, then the press. A press the draw
+  cannot make — another page's, a stale one, a label that is not the one
+  at that index — is refused (`Refused::Stale`) and nothing runs; a value
+  past `page::MAX_TEXT` or not of the form is refused (`Malformed`). So no
+  message is taken that the page as it is could not send.
+- what needs script — the keyboard's shortcuts and vim layer, a row's
+  right-click menu, a hold, a drag, a spring — is not there without it:
+  the same commands are buttons, menus and links on the page. With script
+  it all behaves as in the SPA, and motion is the shared tokens' as ever
+  (ui/docs/motion.md): the written page draws no motion of its own.
+- once the module runs it takes the wiring away (the forms' attributes,
+  what the writer disabled) before taking the page over, and catches any
+  form sent from then on: a press is the click's, as in the SPA.
+
+**The static site** (`ssg`) writes one page per path the app declares,
+`WebApp::static_paths` (Next.js's `generateStaticParams`): finite, and
+from the data — for a docs site its pages. There is no crawl and no cap;
+`arkui_web::prerender` refuses past the sanity bound app.toml's
+`[web] static-bound` sets, saying so. A query is never written: each page
+is its path at the UI's defaults, and with script the module takes the
+address's query once it has taken the page over (Next.js's client-only
+`searchParams`). There is no server to run `update`, so each control is
+pressed on the app put back where the page opened (`WebApp::rewind`;
+`dry_run` counts a change to the data and sends none): one that only
+moves the app to another declared path, its query empty, is a link to
+that page (`formaction` on the form `#ark-go`, a plain GET); one that
+changes the data, or leads to UI state (a query) or to a path not
+declared, is drawn **disabled** until script runs. A control's menu is
+the browser's own `popover` within the page. `page::dangling` finds every
+link on a written page that leads to no written page (arkui-serve's
+test holds a fixture site to none), the check a site's build runs over what it
+wrote.
+
+**Server-rendered** (`ssr`, crate `arkui-serve`) is a capability no app
+turns on: the same page with the app's own server behind its form, one
+call — `arkui_serve::site::<A>(auth, config, look, dir)` given to
+`ark_peer::Server::site` — beside the sync socket and sign-in and under
+the server's layers (`Server::layer`), so one process answers it all.
+
+- **Who** is the ark-auth login in the `ark-session` cookie (HttpOnly,
+  same-site `Lax`), set at `/web/session` where a sign-in's code is traded
+  for it, and judged by `Auth::authenticate`: the `Who` (account, session,
+  roles) the sync socket resolves a token to. Nobody signed in is sent a
+  page that links to sign in.
+- **Reads**: the app (`arkui_serve::Page::open`) is opened over a replica
+  the hub feeds through its in-process dialer, as the bank importer is —
+  never a socket — caught up to the hub's head, so its feed and row scopes
+  are the socket's, and it asks the domain's queries and views once as
+  that `Who` (`Peer::ask`, a query's `Ctx`). The page is written at its
+  path and its query, at every band.
+- **Writes**: a form is taken against the same draw made again
+  (`Served::take`: a stale press `409`, a malformed one refused, the body
+  held to `MAX_BODY` and each field to `page::MAX_TEXT`), so the app's own
+  `update` runs — a sheet's fields (a payee, an amount, a category, a
+  date) taken together, then its press — and what it
+  authors is the domain's mutators on the replica, their role checks and
+  `Refusal`s run there and again on the hub. Confirmed, `303` to the
+  app's new route (UI state in its query, never the server's memory);
+  refused, `422`, the page drawn as the form left it, its input kept, and
+  the refusal's own words — the native apps' — over it (`.ark-notice`).
+- **Forms** carry the `ark-csrf` cookie's token (same-site `Strict`) as
+  `csrf`, which must match (`403` otherwise), and a token of their own,
+  `once`: sent again — the back button, a second click — a form runs
+  nothing and is sent where the first went.
+
+Its tests (ui/rust/serve/tests/pages.rs, with script off, over money's
+domain as it is and a fixture page of its groups and bank asks): a group
+added is the hub's and a socket client sees it; a form sent twice authors
+once; no CSRF token, another's, a stale press and nobody signed in run
+nothing; a group's name past its refinement and the bank's Import without
+the `bank` role are `422` in the words the socket's client is refused
+with, the name as typed; alice's bank ask is on her page and not sam's.
+What is left before an app could turn it on: a bank login's waiting page
+(the importer's Hosted Link address, refreshing itself until answered),
+money's own screens served so, and the replica kept per session rather
+than caught up each request.
+
+**Checked**: arkui-serve's tests (tests/static_site.rs) write a fixture
+site from its declared paths — a band each, a link to each declared path, the rest
+disabled, nothing dangling, the bound refused — and round-trip routes.
+`.github/screens/app-web.sh` with `ARK_WEB_MODE=ssg` photographs a static
+site by its routes' addresses, with script and with `ARK_WEB_JS=0`
+without; with script, a written page fails its shot on any error or any
+word of hydration in the console.
 
 ## The iced Fork: COSMIC's
 
@@ -522,7 +722,11 @@ ui/docs/apps/money.md for money):
    child of `parent`, its own place in the sidebar and the parent's pushed
    page when compact) and its `footer` (`.tabViewSidebarBottomBar`; the
    toolbar's end where there is no sidebar), `tab_group` (`TabSection`,
-   sidebar only, Mail's mailboxes), `pushes` (`navigationDestination`),
+   sidebar only, Mail's mailboxes), `tab_section` (a group that is a
+   place of its own: in the sidebar its heading, short of one a tab whose
+   page is an index of its sections, each pushed over it with the way
+   back named for the group — so far arkui-web's alone, for the docs),
+   `pushes` (`navigationDestination`),
    `split_view`, `toolbar`
    with `bar_item`s by `Placement`, `searchable`, `inspector`, `hosted`,
    `confirmation_dialog`, `alert`, `settings_panes` (one shown, by title),
@@ -594,3 +798,11 @@ ui/docs/apps/money.md for money):
    controls, motion), and ArkUI's components become `#[view]`s emitted into
    ui/swift and ui/kotlin. Today's `ScreenParts` are the component layer
    written by hand, the step before that.
+8. **The browser's modes**: money and harken are the SPA alone, served
+   by their own server (ark-peer's `web::Site`), and money-web is the
+   demo household in the page: a client that signs in and syncs is next.
+   The docs site is the static case (`static_paths`, `prerender`,
+   `page::dangling`), harken's public pages after it. `ssr`
+   (`arkui-serve`) is built and tested and turned on by no app; "The
+   Browser's Modes" says what it lacks.
+

@@ -2,19 +2,11 @@
 //! kept in memory on the desktop ([`Memory`]) so that back and forward work
 //! as a browser's do.
 //!
-//! Where the app is goes in a fragment, and the fragment is read back. An app's routes are its domain's `Route` enum, spelled by
-//! `ark-router` ([`Routable`]: a path such as `album/Water%20Music`); this
-//! file owns the address bar, which says that path after a `#`.
-//!
-//! **The fragment, not the query.** The query is where a page is told things —
-//! which server, a sign-in's `?code=` — and recording a click there would mean
-//! rewriting those on every click. A fragment is also the one part of a URL a
-//! static host never has to be told about.
-//!
-//! **A route carries names, not ids.** An id is not something a person types;
-//! `#album/Water%20Music` is. So an app resolves a name against what it has —
-//! which also decides what a stale link does: land somewhere that is a page,
-//! rather than on a heading with nothing under it.
+//! An app's routes are its `Route` enum, declared once with `ark-router`
+//! ([`Routable`]), and the bar says each one's URL — `/album/water-music/`,
+//! `/account/<id>/checking/` — the same URL the browser's bar says for it
+//! and the path of a phone's deep link (ui/docs/app.md, "Addresses"); this
+//! file owns the bar.
 //!
 //! **Read after every update, not on a clock.** The app calls
 //! [`Router::poll`] after every update — a string compare, which also
@@ -26,17 +18,12 @@
 //! [`Router::sync`] is called after *every* update with where the app now is,
 //! and is the only thing that writes the bar; a rule every call site has to
 //! remember is a rule that is already broken.
-pub use ark_router::{join, split, Routable};
+pub use ark_router::{Address, Routable};
 
-/// The fragment `route` is written as in the bar: its path, `#` in front.
-pub fn fragment<R: Routable>(route: &R) -> String {
-    format!("#{}", route.path())
-}
-
-/// The route a fragment names. Never fails: a URL somebody typed wrong
-/// lands on the app's home rather than nowhere.
-pub fn parse<R: Routable>(fragment: &str) -> R {
-    R::from_path(fragment).unwrap_or_else(R::home)
+/// The route a URL names. Never fails: a URL somebody typed wrong lands on
+/// the app's home rather than nowhere.
+pub fn parse<R: Routable>(url: &str) -> R {
+    R::route_of(url)
 }
 
 /// How the next change to the bar should reach the history.
@@ -54,11 +41,11 @@ pub enum Nav {
 /// Where fragments are read from and written to. [`Memory`] is the real one;
 /// a test can hand a [`Router`] anything else.
 pub trait AddressBar {
-    /// The fragment, `#` included, or `None` when there is none (or no bar).
+    /// The URL, or `None` when there is none (or no bar).
     fn read(&self) -> Option<String>;
-    /// Put `fragment` in the bar, as a new history entry or in place of the
+    /// Put `url` in the bar, as a new history entry or in place of the
     /// current one.
-    fn write(&mut self, fragment: &str, nav: Nav);
+    fn write(&mut self, url: &str, nav: Nav);
     /// Go `by` entries through the history — back for `-1`, forward for `1`
     /// — as the browser's buttons do. The bar moves; [`Router::poll`] reads
     /// where to, as it does for the buttons themselves. Past either end, it
@@ -84,13 +71,13 @@ impl AddressBar for Memory {
         self.entries.get(self.at).cloned()
     }
 
-    fn write(&mut self, fragment: &str, nav: Nav) {
+    fn write(&mut self, url: &str, nav: Nav) {
         // A new place drops whatever was forward of here, as a browser does.
         match (nav, self.entries.is_empty()) {
             (Nav::Replace, false) => self.entries.truncate(self.at),
             _ => self.entries.truncate(self.at + 1),
         }
-        self.entries.push(fragment.to_string());
+        self.entries.push(url.to_string());
         self.at = self.entries.len() - 1;
     }
 
@@ -111,7 +98,7 @@ impl AddressBar for Memory {
 pub struct Router<R, B = Memory> {
     bar: B,
     /// The last route this app acted on or wrote. Without it every update
-    /// would re-resolve the same fragment — and a fragment naming something
+    /// would re-resolve the same URL — and a URL naming something
     /// this peer has not got resolves to home every time, so it would re-read
     /// the page on every update for as long as the URL said so.
     routed: Option<R>,
@@ -153,10 +140,10 @@ impl<R: Routable, B: AddressBar> Router<R, B> {
         self.bar.can_go(by)
     }
 
-    /// Put `fragment` in the bar, for the next [`Router::poll`] to find:
-    /// what a [`crate::navigator::Navigator`] does.
-    pub(crate) fn write(&mut self, fragment: &str, nav: Nav) {
-        self.bar.write(fragment, nav);
+    /// Put `url` in the bar, for the next [`Router::poll`] to find: what a
+    /// [`crate::navigator::Navigator`] does.
+    pub(crate) fn write(&mut self, url: &str, nav: Nav) {
+        self.bar.write(url, nav);
     }
 
     /// Make the next [`Router::sync`] rewrite the current entry rather than add
@@ -185,9 +172,9 @@ impl<R: Routable, B: AddressBar> Router<R, B> {
         if self.routed.as_ref() == Some(want) {
             return;
         }
-        let fragment = fragment(want);
-        if self.bar.read().as_deref() != Some(fragment.as_str()) {
-            self.bar.write(&fragment, self.nav);
+        let url = want.url();
+        if self.bar.read().as_deref() != Some(url.as_str()) {
+            self.bar.write(&url, self.nav);
         }
         self.routed = Some(want.clone());
         self.nav = Nav::Push;
@@ -200,97 +187,73 @@ impl<R: Routable, B: AddressBar> Router<R, B> {
     /// name against — so a deep link that arrives before the database has
     /// opened is still waiting when it does.
     pub fn poll(&mut self, ready: bool) -> Option<R> {
-        let fragment = self.bar.read().map(|f| parse::<R>(&f));
-        if !ready || fragment == self.routed {
+        let at = self.bar.read().map(|u| parse::<R>(&u));
+        if !ready || at == self.routed {
             return None;
         }
-        self.routed = fragment.clone();
-        fragment
+        self.routed = at.clone();
+        at
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_router::Routes;
 
     /// A stand-in for an app's routes, shaped like harken's.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, Routes)]
     enum Here {
+        #[home]
+        #[route("/library")]
         Library,
+        #[route("/albums")]
         Albums,
-        Playlist(String),
-        Album(String),
-        Artist(String),
-        Work(String),
+        #[route("/playlist/:name")]
+        Playlist { name: String },
+        #[route("/album/:name")]
+        Album { name: String },
+        #[route("/work/:name")]
+        Work { name: String },
     }
 
-    impl Routable for Here {
-        fn path(&self) -> String {
-            match self {
-                Here::Library => join("library", None),
-                Here::Albums => join("albums", None),
-                Here::Playlist(n) => join("playlist", Some(n)),
-                Here::Album(n) => join("album", Some(n)),
-                Here::Artist(n) => join("artist", Some(n)),
-                Here::Work(n) => join("work", Some(n)),
-            }
-        }
-
-        fn from_path(path: &str) -> Option<Self> {
-            Some(match split(path) {
-                ("library", None) => Here::Library,
-                ("albums", None) => Here::Albums,
-                ("playlist", Some(n)) => Here::Playlist(n),
-                ("album", Some(n)) => Here::Album(n),
-                ("artist", Some(n)) => Here::Artist(n),
-                ("work", Some(n)) => Here::Work(n),
-                _ => return None,
-            })
-        }
-
-        fn home() -> Self {
-            Here::Library
-        }
+    fn playlist(n: &str) -> Here {
+        Here::Playlist { name: n.into() }
     }
 
-    /// Every route survives the round trip, including the characters a real
-    /// library is full of: a slash would look like the separator, a `#` would
-    /// end the fragment, and an accent is two bytes. Falsified by writing the
-    /// name unencoded in `join`: the round trips still pass (a string does not
-    /// end at a `#`; a browser's fragment does), and the spelling fails.
+    fn album(n: &str) -> Here {
+        Here::Album { name: n.into() }
+    }
+
+    /// Every route survives the bar, including the characters a real library
+    /// is full of: a slash would read as two segments, a `#` would end the
+    /// URL, an accent is two bytes. Falsified by writing the name
+    /// unencoded: the spelling fails.
     #[test]
     fn a_route_survives_the_address_bar() {
         for route in [
             Here::Library,
             Here::Albums,
-            Here::Playlist("Favorites".into()),
-            Here::Album("Water Music".into()),
-            Here::Artist("Johann Sebastian Bach".into()),
-            Here::Album("Boléro / Pavane #1".into()),
-            // A key with a slash of its own, which only survives because
-            // `split` splits on the first separator.
-            Here::Work("johann-sebastian-bach/bwv-988".into()),
+            playlist("Favorites"),
+            album("Water Music"),
+            album("Boléro / Pavane #1"),
+            Here::Work {
+                name: "johann-sebastian-bach/bwv-988".into(),
+            },
         ] {
-            let fragment = fragment(&route);
-            assert_eq!(parse::<Here>(&fragment), route, "round trip of {fragment}");
+            assert_eq!(parse::<Here>(&route.url()), route, "round trip of {}", route.url());
         }
-        // The round trip alone cannot see the encoding — a raw `#` or `/`
-        // parses back fine from a string; it is the *browser* that ends the
-        // fragment at a `#`. So the spelling itself, once.
-        assert_eq!(
-            fragment(&Here::Album("Boléro / Pavane #1".into())),
-            "#album/Bol%C3%A9ro%20%2F%20Pavane%20%231"
-        );
+        assert_eq!(album("Boléro / Pavane #1").url(), "/album/Bol%C3%A9ro%20%2F%20Pavane%20%231/");
     }
 
-    /// A fragment nobody wrote lands somewhere rather than nowhere.
+    /// A URL that means nothing lands somewhere rather than nowhere.
     #[test]
-    fn a_fragment_that_means_nothing_is_home() {
+    fn a_url_that_means_nothing_is_home() {
         assert_eq!(parse::<Here>(""), Here::Library);
-        assert_eq!(parse::<Here>("#"), Here::Library);
-        assert_eq!(parse::<Here>("#nonsense/Water Music"), Here::Library);
+        assert_eq!(parse::<Here>("/"), Here::Library);
+        assert_eq!(parse::<Here>("/nonsense/Water Music/"), Here::Library);
         // A truncated escape is not a reason to fail: what decoded, decoded.
-        assert_eq!(parse::<Here>("#album/Bol%"), Here::Album("Bol%".into()));
+        assert_eq!(parse::<Here>("/album/Bol%/"), album("Bol%"));
     }
 
     /// A bar with a history, the way a browser has one.
@@ -303,11 +266,11 @@ mod tests {
         fn read(&self) -> Option<String> {
             self.history.last().cloned()
         }
-        fn write(&mut self, fragment: &str, nav: Nav) {
+        fn write(&mut self, url: &str, nav: Nav) {
             if nav == Nav::Replace {
                 self.history.pop();
             }
-            self.history.push(fragment.to_string());
+            self.history.push(url.to_string());
         }
         fn go(&mut self, _by: isize) {}
     }
@@ -321,10 +284,8 @@ mod tests {
     /// the route in `poll` makes it report the same route twice.
     #[test]
     fn the_bar_is_reconciled_and_a_scrub_is_one_entry() {
-        // A page opened on a link: the bar already says where the app is
-        // going, so arriving there is not a second entry for the same place.
         let mut linked: Router<Here, Fake> = Router::with_bar(Fake {
-            history: vec!["#library".into(), "#albums".into()],
+            history: vec!["/library/".into(), "/albums/".into()],
         });
         linked.sync(&Here::Albums);
         assert_eq!(linked.bar().history.len(), 2, "the link was pushed a second time");
@@ -332,31 +293,22 @@ mod tests {
         let mut router: Router<Here, Fake> = Router::with_bar(Fake::default());
         router.sync(&Here::Library);
         router.sync(&Here::Albums);
-        assert_eq!(router.bar().history, ["#library", "#albums"]);
-
-        // Asked twice for where it already is: nothing written.
+        assert_eq!(router.bar().history, ["/library/", "/albums/"]);
         router.sync(&Here::Albums);
         assert_eq!(router.bar().history.len(), 2);
-
-        // A scrub through three playlists adds nothing: every step rewrites
-        // the entry it started from, and the bar is right at every step.
         for name in ["A", "B", "C"] {
             router.replace_next();
-            router.sync(&Here::Playlist(name.into()));
-            assert_eq!(router.bar().read().unwrap(), format!("#playlist/{name}"));
+            router.sync(&playlist(name));
+            assert_eq!(router.bar().read().unwrap(), format!("/playlist/{name}/"));
         }
-        assert_eq!(router.bar().history, ["#library", "#playlist/C"], "one scroll, one entry");
-        // …and the reset is automatic: the next place is a place again.
-        router.sync(&Here::Album("Messiah".into()));
+        assert_eq!(router.bar().history, ["/library/", "/playlist/C/"], "one scroll, one entry");
+        router.sync(&album("Messiah"));
         assert_eq!(router.bar().history.len(), 3);
-
-        // The back button: the bar moves under the app, `poll` reports it
-        // once, and the app arriving there writes nothing.
         router.bar.history.pop();
         assert_eq!(router.poll(false), None, "not before there is anything to resolve against");
-        assert_eq!(router.poll(true), Some(Here::Playlist("C".into())));
+        assert_eq!(router.poll(true), Some(playlist("C")));
         assert_eq!(router.poll(true), None, "reported once");
-        router.sync(&Here::Playlist("C".into()));
+        router.sync(&playlist("C"));
         assert_eq!(router.bar().history.len(), 2, "arriving where the back button went is not a new entry");
     }
 
@@ -368,7 +320,7 @@ mod tests {
         let mut router: Router<Here> = Router::new();
         router.sync(&Here::Library);
         router.sync(&Here::Albums);
-        router.sync(&Here::Album("Messiah".into()));
+        router.sync(&album("Messiah"));
         router.go(-1);
         assert_eq!(router.poll(true), Some(Here::Albums));
         router.go(-1);
@@ -377,7 +329,7 @@ mod tests {
         assert_eq!(router.poll(true), None, "nothing before the first");
         router.go(1);
         assert_eq!(router.poll(true), Some(Here::Albums));
-        router.sync(&Here::Work("bwv-988".into()));
+        router.sync(&Here::Work { name: "bwv-988".into() });
         router.go(1);
         assert_eq!(router.poll(true), None, "a new place dropped what was forward");
         router.go(-1);
