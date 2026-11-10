@@ -11,6 +11,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.arkui.Ready
+import dev.arkui.watchForShots
 
 class MainActivity : ComponentActivity() {
     private lateinit var surface: BibleView
@@ -24,6 +26,9 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
+        // A screenshot's launch: the ready signal (ArkUI's Shots.kt), not ready until the text is.
+        watchForShots()
+        Ready.waiting("text", true)
         surface = BibleView(this)
         surface.onPlace = { place = it }
         val saved = Saved.load(this)

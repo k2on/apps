@@ -99,9 +99,8 @@ public fun reducedMotion(): Boolean = LocalReducedMotion.current ?: ReducedMotio
 @OptIn(ExperimentalComposeUiApi::class)
 public fun ComponentActivity.keepMotion() {
     // A screenshot's launch (`-shots 1`): no motion, and the ready signal on the window (Shots.kt).
-    Shots.read(intent)
+    watchForShots()
     val root = window.decorView.findViewById<ViewGroup>(android.R.id.content) ?: return
-    Ready.attach(window)
     val scale =
         object : MotionDurationScale {
             override val scaleFactor: Float

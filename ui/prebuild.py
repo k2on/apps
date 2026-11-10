@@ -438,7 +438,9 @@ def android_gradle(root, a, ffi_lib_name):
             return f'    implementation(platform("{d[len("platform:"):]}"))'
         return f'    implementation("{d}")'
 
-    kotlin_dirs = [f'"{TO_APP}/native/android/main"'] + (['"generated"', f'"{TO_REPO}/ui/kotlin/src"', '"$arkLib/kotlin"'] if ark else [])
+    # ArkUI's screenshot mode and ready signal (ui/kotlin/shots) in every app,
+    # one that draws nothing of ArkUI's too.
+    kotlin_dirs = [f'"{TO_APP}/native/android/main"', f'"{TO_REPO}/ui/kotlin/shots"'] + (['"generated"', f'"{TO_REPO}/ui/kotlin/src"', '"$arkLib/kotlin"'] if ark else [])
     for name, _ in modules_of(root, a):
         if os.path.isdir(os.path.join(root, "modules", name, "kotlin")):
             kotlin_dirs.append(f'"{TO_REPO}/modules/{name}/kotlin"')

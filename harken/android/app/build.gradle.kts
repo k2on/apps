@@ -117,6 +117,7 @@ android {
             // arkui, the look every Ark app on Android shares (ui/kotlin), compiled from its
             // sources as part of this app.
             kotlin.srcDir(rootProject.file("../../ui/kotlin/src"))
+            kotlin.srcDir(rootProject.file("../../ui/kotlin/shots"))
         }
     }
 }

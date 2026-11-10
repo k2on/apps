@@ -17,7 +17,14 @@
 //   generation, then shoots: no sleep, no "the same picture twice".
 //
 // Off (every other launch) none of it exists.
+//
+// Its own source directory (ui/kotlin/shots), Android's framework alone, so
+// an app that draws nothing of ArkUI's (revelation) has it too: every app's
+// project compiles it ([watchForShots] is what such an app calls; an ArkUI
+// app's [keepMotion] calls it).
 package dev.arkui
+
+import androidx.activity.ComponentActivity
 
 import android.content.Intent
 import android.os.Handler
@@ -125,7 +132,7 @@ public object Ready {
 
     /**
      * The signal's view on `window` (on its decor, beside the content, which `setContent`
-     * replaces), and every touch on it said: [keepMotion]'s.
+     * replaces), and every touch on it said: [watchForShots]'s.
      */
     internal fun attach(window: Window) {
         if (!Shots.on) return
@@ -144,4 +151,13 @@ public object Ready {
             }
         changed()
     }
+}
+
+/**
+ * This activity, in a screenshot's launch (`-shots 1`): [Shots.on] read from its intent and the
+ * ready signal on its window. Called before `setContent`; nothing at all on any other launch.
+ */
+public fun ComponentActivity.watchForShots() {
+    Shots.read(intent)
+    Ready.attach(window)
 }
