@@ -667,25 +667,6 @@ jobs:
         name: The pinned Xcode
         run: bash .github/xcode-pinned.sh src
 
-      # The simulator, booting under everything after: as soon as the
-      # Xcode is selected (its boot is the longest wait of a warm run).
-      # The newest iPhone Pro, or the newest iPad Pro 13-inch (else an iPad
-      # Air 13-inch, else the newest iPad); none for the Mac's window.
-      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
-        name: Start booting a simulator
-        run: |
-          bash .github/screens/meanwhile.sh start boot bash -c '
-            if [ "$DEVICE" = ipad ]; then kinds="[\"^iPad Pro 13-inch\", \"^iPad Air 13-inch\", \"^iPad\"]"; else kinds="[\"^iPhone [0-9]+ Pro$\"]"; fi
-            read -r udid name < <(xcrun simctl list devices available -j | jq -r --argjson k "$kinds" "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value as \$d
-              | \$k | map(. as \$p | \$d | map(select(.name | test(\$p))) | sort_by(.name) | last) | map(select(. != null)) | first
-              | \"\(.udid) \(.name)\"")
-            echo "Booting $name ($udid)"
-            echo "$name" > "$RUNNER_TEMP/device"
-            start=$(date +%s)
-            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b > /dev/null
-            echo "booted in $(( $(date +%s) - start ))s"'
-
       # Relaxed: every build is sandboxed but the one that says __noChroot
       # (the app's own xcodebuild, flake.nix says why). Its build users
       # are set up before the servers' and the apps' builds start.
@@ -739,6 +720,28 @@ jobs:
             done
             echo "evaluated the apps in $(( $(date +%s) - start ))s"
           fi
+
+      # The simulator, booting under the servers', the driver's and the
+      # app's fetch: only once nix is installed and the packages evaluated,
+      # which a booting simulator (CoreSimulator coming up) slowed from
+      # seconds to minutes (nix's install 0.5 -> 1.6, cachix's 0.1 -> 4.8,
+      # the evaluation 0.6 -> 2.2, app-screens 42820636768).
+      # The newest iPhone Pro, or the newest iPad Pro 13-inch (else an iPad
+      # Air 13-inch, else the newest iPad); none for the Mac's window.
+      - if: steps.open.outputs.open == 'true' && matrix.device != 'mac'
+        name: Start booting a simulator
+        run: |
+          bash .github/screens/meanwhile.sh start boot bash -c '
+            if [ "$DEVICE" = ipad ]; then kinds="[\"^iPad Pro 13-inch\", \"^iPad Air 13-inch\", \"^iPad\"]"; else kinds="[\"^iPhone [0-9]+ Pro$\"]"; fi
+            read -r udid name < <(xcrun simctl list devices available -j | jq -r --argjson k "$kinds" "
+              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value as \$d
+              | \$k | map(. as \$p | \$d | map(select(.name | test(\$p))) | sort_by(.name) | last) | map(select(. != null)) | first
+              | \"\(.udid) \(.name)\"")
+            echo "Booting $name ($udid)"
+            echo "$name" > "$RUNNER_TEMP/device"
+            start=$(date +%s)
+            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b > /dev/null
+            echo "booted in $(( $(date +%s) - start ))s"'
 
       # The app's server, as nix builds it (its server.sh): the cache's
       # once main's run has pushed it, or else built, under the app's build.
