@@ -194,15 +194,19 @@ which nix builds at the commit (see below).
 ## When it runs
 
 On Android and the desktop each app is a job of its own, so the apps are
-taken at once. On the Macs each app and device is a job of its own too,
-at once (`which`'s `ios-matrix`): an app's iPhone; its iPad when its
-project's `TARGETED_DEVICE_FAMILY` has 2; its Mac window when the commit
-has `<app>-macos`. Each selects the Xcode, installs nix, evaluates, then
-boots its simulator under the server's start and the app's and the
-driver's fetch (both nix's builds, from the cache; the driver is
-`screens-drive-ios`, built once per change to drive-ios/). One that
-fails is red, the others still taken; `ios-inputs` keeps an app's hash
-only when every job of it took its shots whole. Each job
+taken at once. On the Macs each device is a job of its own, at once
+(`which`'s `ios-matrix`), taking its apps in turn: every app's iPhone;
+the iPad of each whose project's `TARGETED_DEVICE_FAMILY` has 2; the Mac
+window of each whose commit has `<app>-macos`. Not a job per app: Macs
+are five an account at once and their queue is long; nor several
+simulators on one Mac, which ran at half speed and failed (app-screens
+42832522218). Each selects the Xcode, installs nix, evaluates, then
+boots its simulator under the servers' start and the apps' and the
+driver's fetch (nix's builds, from the cache; the driver is
+`screens-drive-ios`, built once per change to drive-ios/). One app that
+fails is said, the others still taken, and the job fails at its end;
+`ios-inputs` keeps an app's hash only when every job took its shots
+whole. Each job
 starts its apps' servers first, in the background (each `server.sh`,
 nix's build of the server: the cache's, or built while the rest goes on),
 under whatever is slow anyway: the apps' build on the iPhone and the
@@ -314,17 +318,17 @@ build, the same driver, the same shots.json, light and dark.
   can stay at the foot. A Fold whose screen does not change at all is
   said, and its folded shots are not taken. device.json is from what was
   drawn: a tablet's is wider than tall.
-- **The iPad**: a Mac job of its own, for an app whose project says it
-  may take the iPad. Once the app is built, `ios-family.sh` reads its
-  `UIDeviceFamily`; when it does not take the iPad, nothing is taken.
-  Else the iPad booted under the build is taken upright and then on its side
+- **The iPad**: a Mac job of its own, for the apps whose project says
+  they may take the iPad. Once they are built, `ios-family.sh` reads each
+  one's `UIDeviceFamily`; one that does not take the iPad is passed over.
+  Each that does is taken on the iPad booted under the build, upright and then on its side
   (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
   XCUITest gives in the screen's portrait frame is turned a quarter
   counter-clockwise), signed in once. An app whose iPad shots fail keeps
   no hash (`<app>/ios/inputs`), so it is taken whole again.
-- **The Mac**: a Mac job of its own, for an app whose commit has
+- **The Mac**: a Mac job of its own, for the apps whose commit has
   `<app>-macos` (`which` lists the Mac packages by name, nothing
-  evaluated); it is
+  evaluated); each is
   built by `nix-xcode.sh` as the iPhone's are, opened with `--server
   <URL> --user <name>` (what the desktop window is given; an app that takes
   them opens signed in to the same sample-data server), and its window
@@ -339,11 +343,11 @@ build, the same driver, the same shots.json, light and dark.
   once with the phone's. Together, one job after the other, they were 5
   (revelation), 12 (money) and 17 to 18 (harken) minutes; apart, the
   longest is the Fold's (two postures). The
-  Macs: a job per app and device, each a few minutes of its own setup
-  (nix, the evaluation, the boot) before its shots, at once rather than
-  one after the other; an iPad's shots are twice an iPhone's (money's
-  were eight minutes, both ways up, light and dark). GitHub runs at most
-  five Macs of an account at once.
+  Macs: a job per device, each a few minutes of its own setup (nix, the
+  evaluation, the boot) before its apps' shots in turn; the iPad's beside
+  the iPhone's rather than after them (an iPad's shots are twice an
+  iPhone's: money's were eight minutes, both ways up, light and dark).
+  GitHub runs at most five Macs of an account at once.
 
 ## The desktop
 
