@@ -153,6 +153,12 @@ pub fn send<M: 'static>(m: M) {
     }
     BUSY.with(|b| b.set(false));
     redraw();
+    // A screenshot's ready signal: what is drawn may have moved.
+    if shots() {
+        if let (Some(w), Ok(e)) = (web_sys::window(), web_sys::Event::new("ark-changed")) {
+            let _ = w.dispatch_event(&e);
+        }
+    }
 }
 
 /// The page drawn again.
@@ -228,6 +234,49 @@ pub fn query(name: &str) -> Option<String> {
     web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name)
 }
 
+/// Whether this page is a screenshot's (`?shots=1`, ui/docs/shots.md):
+/// then nothing on it moves (`data-motion="shots"`: every animation and
+/// transition none, the caret clear), and it says when it is ready
+/// ([`SHOTS_JS`]).
+pub fn shots() -> bool {
+    query("shots").as_deref() == Some("1")
+}
+
+/// A screenshot's ready signal, for Playwright (.github/screens/web-shots.js):
+/// `window.__ark.after(g)` is a promise of the first moment, after
+/// generation `g`, when the page is ready — nothing fetched still to come,
+/// every image decoded, the fonts loaded, no animation running that has an
+/// end, and two frames drawn since — with `{generation, route}`. Anything
+/// that may change what is drawn (a pointer, a key, the address, a message
+/// taken: [`send`]'s `ark-changed`) grows the generation. No time is waited
+/// for anywhere.
+pub const SHOTS_JS: &str = r#"(() => {
+  const ark = window.__ark = { generation: 0, isReady: false, probes: [] };
+  let resolve, pending = 0, checking = false, frames = 0;
+  const fresh = () => { ark.ready = new Promise(r => resolve = r); };
+  fresh();
+  const raw = window.fetch.bind(window);
+  window.fetch = (...a) => { pending++; ark.changed(); return raw(...a).finally(() => { pending--; ark.changed(); }); };
+  const moving = () => document.getAnimations().some(a => a.playState === 'running' && a.effect && a.effect.getComputedTiming().iterations !== Infinity);
+  const quiet = () => pending === 0 && [...document.images].every(i => i.complete) && !moving() && ark.probes.every(p => p());
+  const check = async () => {
+    await document.fonts.ready;
+    if (!quiet()) { frames = 0; requestAnimationFrame(check); return; }
+    if (++frames < 2) { requestAnimationFrame(check); return; }
+    checking = false; frames = 0; ark.isReady = true;
+    resolve({ generation: ark.generation, route: location.hash.replace(/^#/, '') });
+  };
+  ark.changed = () => {
+    ark.generation++;
+    frames = 0;
+    if (ark.isReady) { ark.isReady = false; fresh(); }
+    if (!checking) { checking = true; requestAnimationFrame(check); }
+  };
+  ark.after = async g => { for (;;) { const r = await ark.ready; if (r.generation > g) return r; await new Promise(f => requestAnimationFrame(f)); } };
+  for (const e of ['pointerdown', 'pointerup', 'keydown', 'keyup', 'hashchange', 'popstate', 'ark-changed']) addEventListener(e, () => ark.changed(), true);
+  ark.changed();
+})();"#;
+
 /// Whether motion takes its gentle path (ui/docs/motion.md): the address
 /// says (`?reduce-motion=1` or `0`), else the system, only when
 /// [`ALWAYS_ANIMATE`] is off.
@@ -257,7 +306,14 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         if let Some(t) = query("theme").filter(|t| t == "light" || t == "dark") {
             let _ = root.set_attribute("data-theme", &t);
         }
-        let _ = root.set_attribute("data-motion", if reduced() { "reduced" } else { "full" });
+        let motion = if shots() { "shots" } else if reduced() { "reduced" } else { "full" };
+        let _ = root.set_attribute("data-motion", motion);
+    }
+    if shots() {
+        if let (Some(head), Ok(script)) = (doc.head(), doc.create_element("script")) {
+            script.set_text_content(Some(SHOTS_JS));
+            let _ = head.append_child(&script);
+        }
     }
     if let (Some(head), Ok(style)) = (doc.head(), doc.create_element("style")) {
         style.set_text_content(Some(&format!("{THEME_CSS}\n{ARKUI_CSS}\n{css}")));

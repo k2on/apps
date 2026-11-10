@@ -85,11 +85,14 @@ public enum Springs {
     public static let stiffness: Double = MotionTokens.stiffness
     public static let response: Double = MotionTokens.response
     /// Where a thing is. No overshoot: nothing threw it.
-    public static let move = Animation.spring(response: response, dampingFraction: MotionTokens.move)
+    public static var move: Animation { Shots.on ? instant : .spring(response: response, dampingFraction: MotionTokens.move) }
     /// How large a thing is: a scale, a clip, a dim. No overshoot.
-    public static let size = Animation.spring(response: response, dampingFraction: MotionTokens.size)
+    public static var size: Animation { Shots.on ? instant : .spring(response: response, dampingFraction: MotionTokens.size) }
     /// Something going, quickly: critically damped at the fade's stiffness, about 150 ms.
-    public static let fade = Animation.spring(response: MotionTokens.fadeResponse, dampingFraction: 1)
+    public static var fade: Animation { Shots.on ? instant : .spring(response: MotionTokens.fadeResponse, dampingFraction: 1) }
+    /// What every spring is in a screenshot (`Shots.on`): at its end at once,
+    /// so what is drawn never depends on when (ui/docs/shots.md).
+    public static let instant = Animation.linear(duration: 0)
     /// What a thrown thing lands on: a whisper of overshoot, the throw's.
     public static let momentum: Double = MotionTokens.momentum
     /// Let go faster than this, in points a second, a thing was thrown:
@@ -98,7 +101,7 @@ public enum Springs {
     /// What stands in for a move under Reduce Motion: `fade`, Android's
     /// `Springs.fade()` — short, critically damped, so it never passes
     /// where it goes, and a spring, so it turns where it is if sent again.
-    public static let calm = fade
+    public static var calm: Animation { fade }
     /// The most a settle may take, in seconds (`MotionTokens.capMs`). SwiftUI
     /// springs are not cut short; it is here so a caller that waits on a
     /// settle waits no longer than Android's `Capped` would.
@@ -114,6 +117,7 @@ public enum Springs {
     /// thrown (`thrown`), it lands on the momentum's damping, otherwise
     /// critically damped as any move.
     public static func released(velocity: Double, from: Double, to: Double) -> Animation {
+        if Shots.on { return instant }
         let damping = abs(velocity) > thrown ? momentum : 1
         return .interpolatingSpring(Spring(response: response, dampingRatio: damping),
                                     initialVelocity: Momentum.relative(velocity, from: from, to: to))
@@ -123,7 +127,7 @@ public enum Springs {
 extension Animation {
     /// This one, or under Reduce Motion (`\.reducesMotion`, read by the
     /// view that animates) the short fade that stands in for it (`Springs.calm`).
-    public func reduced(_ still: Bool) -> Animation { still ? Springs.calm : self }
+    public func reduced(_ still: Bool) -> Animation { Shots.on ? Springs.instant : still ? Springs.calm : self }
 }
 
 private struct SquaresKey: EnvironmentKey {

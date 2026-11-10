@@ -188,19 +188,28 @@ which nix builds at the commit (see below).
   theme is set with the app stopped, and the app opened only once the
   night mode says it back and the launcher, which the change re-creates,
   is in front again.
-- **`app-ios.sh`** and the UI test in **`drive-ios/`**: an XCUITest bundle
-  of its own, which drives the installed app by its bundle id (the apps'
-  projects are untouched). It signs in through `ASWebAuthenticationSession`
-  (the system's "wants to use … to sign in", then the page) and writes each
-  shot's PNG.
+- **`apps-ios.sh`**, **`driver-ios.sh`** and the UI test in
+  **`drive-ios/`**: an XCUITest bundle of its own, built once for any
+  simulator, which drives the installed apps by their bundle ids (the
+  apps' projects are untouched). One run of it per device takes every app
+  in both themes (the simulator's appearance set from the test), from a
+  plan apps-ios.sh writes, so xcodebuild's first-run cost is paid once per
+  device. Each app is launched with `-shots YES` (ArkUI's `Shots`: no
+  motion, and the ready signal, ui/docs/shots.md): after every launch,
+  link and step the driver waits for the app's `ark.ready` at a newer
+  generation, then takes the screen. Nothing waits for a time. It signs in
+  through `ASWebAuthenticationSession` (the system's "wants to use … to
+  sign in", then the page) and writes each shot's PNG. A shot with a
+  `route` is opened as a link in the running app; one without, afresh.
 - **`app-desktop.sh`**: runs the window nix built with `ARK_SHOTS` set,
   in a home of its own, given `--server` and `--user`; it signs in, does
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
-- **`apps-android.sh`**, **`apps-ios.sh`**, **`apps-desktop.sh`**,
-  **`apps-mac.sh`**: each app in turn, so one that fails does not stop the
+- **`apps-android.sh`**, **`apps-desktop.sh`**, **`apps-mac.sh`**: each
+  app in turn, so one that fails does not stop the
   others, and the step fails at the end if any did (Android's too: a job
-  whose shots failed is red, not only its log); `apps-android.sh` on the emulator profile `DEVICE` says,
-  `apps-ios.sh` on the iPhone or (`FAMILY=ipad`) the iPad.
+  whose shots failed is red, not only its log); `apps-android.sh` on the emulator profile `DEVICE` says.
+  `apps-ios.sh` takes every app at once, on the iPhone or (`FAMILY=ipad`)
+  the iPad, and fails at its end the same way.
 - **`ios-family.sh`**: of the apps built, those whose build takes the iPad
   (the built `.app`'s `UIDeviceFamily`, which `TARGETED_DEVICE_FAMILY`
   writes, has 2).

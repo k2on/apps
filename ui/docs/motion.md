@@ -550,6 +550,16 @@ provides true` (as `ReducedMotionTests` does for the card and the
 settle), `ARK_REDUCE_MOTION=1` on the desktop, or a SwiftUI preview with
 the view's `still` forced.
 
+**Screenshots move nothing** (ui/docs/shots.md). Launched for one
+(`-shots YES`, `-shots 1`, `ARK_SHOTS=1`, `?shots=1`), every shared spring
+and transition is at its end at once — `Springs.instant` (SwiftUI, with
+`.arkShots()` on the root), a Compose duration scale of 0
+(`ReducedMotion.scale`), `motion::INSTANT` for every `Slide` (iced),
+`data-motion="shots"` (the browser) — and the app says when its screen is
+ready (`Ready`). It is not reduced motion, which still fades, and it leaves
+`ALWAYS_ANIMATE`/`alwaysAnimate` alone. A new motion needs nothing for it:
+it goes through the tokens, which already answer it.
+
 Reduce Transparency and Increase Contrast are separate settings, followed
 as the system has them (`Surfaces.swift`); they are not covered by the
 motion override.

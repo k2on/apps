@@ -145,6 +145,12 @@ impl AccountsApp {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
     }
 
+    /// Whether it has nothing left to do ([`ark_app::Runtime::idle`]): what
+    /// the phone's ready signal asks (ui/docs/shots.md).
+    pub fn idle(&self) -> bool {
+        self.inbox.is_empty() && self.runtime.lock().unwrap_or_else(|e| e.into_inner()).idle()
+    }
+
     /// The phone's modules, the ones money opts into (money/app.toml),
     /// registered once at startup; any may be none.
     pub fn use_modules(&self, haptics: Option<Arc<dyn Haptics>>, clipboard: Option<Arc<dyn Clipboard>>, share: Option<Arc<dyn Share>>) {
@@ -224,6 +230,11 @@ impl ShellApp {
     /// A number that grows with every message taken.
     pub fn version(&self) -> u64 {
         self.runtime.lock().unwrap_or_else(|e| e.into_inner()).version()
+    }
+
+    /// Whether it has nothing left to do ([`ark_app::Runtime::idle`]).
+    pub fn idle(&self) -> bool {
+        self.runtime.lock().unwrap_or_else(|e| e.into_inner()).idle()
     }
 }
 

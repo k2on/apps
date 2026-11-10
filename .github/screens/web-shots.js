@@ -39,22 +39,27 @@ async function main() {
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', e => errors.push(e.message));
-        const q = [`today=${web.today}`, `theme=${theme}`, 'reduce-motion=1', shot.query || ''].filter(Boolean).join('&');
+        // `shots=1`: nothing on the page moves, and it says when it is ready
+        // (arkui-web's SHOTS_JS, ui/docs/shots.md). Each step is done, then the
+        // page's next ready moment after it awaited: no time waited for
+        // anywhere; the timeouts are only how long a page may fail to say so.
+        const q = [`today=${web.today}`, `theme=${theme}`, 'shots=1', shot.query || ''].filter(Boolean).join('&');
+        const generation = () => page.evaluate(() => window.__ark.generation);
+        const settled = g => page.evaluate(g => window.__ark.after(g), g);
         try {
           await page.goto(`${base}/?${q}`);
-          await page.waitForSelector('.ark-window', { timeout: 20000 });
-          await page.waitForTimeout(300);
+          await page.waitForFunction(() => window.__ark, null, { timeout: 20000 });
+          await settled(0);
           for (const step of shot.steps || []) {
+            const g = await generation();
             if (step.click) await page.getByText(step.click, { exact: true }).first().click({ button: step.button || 'left' });
             if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
             if (step.hover) await page.getByText(step.hover, { exact: true }).last().hover();
             if (step.key) await page.keyboard.press(step.key);
             if (step.type) await page.keyboard.type(step.type);
             if (step.await) await page.getByText(step.await).first().waitFor({ timeout: 10000 });
-            if (step.wait) await page.waitForTimeout(step.wait * 1000);
-            await page.waitForTimeout(80);
+            await settled(g);
           }
-          await page.waitForTimeout(250);
           const dir = path.join(out, size, theme);
           fs.mkdirSync(dir, { recursive: true });
           await page.screenshot({ path: path.join(dir, `${shot.id}.png`) });

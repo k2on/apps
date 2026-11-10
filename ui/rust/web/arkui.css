@@ -360,4 +360,12 @@ h1, h2, h3, p { margin: 0; font: inherit; }
 [data-motion="grow"] { animation: ark-grow var(--ark-move-ms) var(--ark-move); }
 [data-motion="rise"] { animation: ark-rise var(--ark-move-ms) var(--ark-move); }
 [data-motion="none"] { animation: none; }
+/* A screenshot's page (`?shots=1`, ui/docs/shots.md): nothing moves at
+   all, a fade included, and the caret is clear, so what is drawn never
+   depends on when. */
+:root[data-motion="shots"] *, :root[data-motion="shots"] *::before, :root[data-motion="shots"] *::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}
 :root[data-motion="reduced"] [data-motion="rise"] { animation-name: ark-fade; }

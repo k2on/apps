@@ -254,6 +254,15 @@ impl<A: App> Runtime<A> {
         self.waiting.contains_key(&ticket)
     }
 
+    /// Whether the app has nothing left to do of its own: no message being
+    /// taken and no module's answer awaited or waiting to be taken. With the
+    /// store's peer settled and the platform's own work done (an image
+    /// decoded, a move at its end), the screen is what it will stay: what
+    /// a screenshot waits for (ui/docs/shots.md), never a time.
+    pub fn idle(&self) -> bool {
+        !self.running && self.waiting.is_empty() && self.answers.is_empty()
+    }
+
     fn carry(&mut self, c: Command<A>, host: &mut impl Host<A>, queue: &mut VecDeque<A::Msg>) {
         match c {
             Command::Send { change, then } => {
@@ -299,6 +308,11 @@ impl Inbox {
     pub fn ask(&self, modules: &Modules, ticket: Ticket, call: ModuleCall) {
         let answers = self.answers.clone();
         modules.call(call, move |a| answers.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, a)));
+    }
+
+    /// Whether no answer is waiting to be taken.
+    pub fn is_empty(&self) -> bool {
+        self.answers.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
     /// The answers that came, oldest first, taken.

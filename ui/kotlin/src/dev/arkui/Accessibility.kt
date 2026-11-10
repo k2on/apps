@@ -67,6 +67,8 @@ public object ReducedMotion {
      * the app decides what "removed" looks like, rather than every animation jumping to its end.
      */
     public fun scale(): Float {
+        // A screenshot's: every animation at its end the frame it starts (Shots.kt).
+        if (Shots.on) return 0f
         val s = ValueAnimator.getDurationScale()
         return if (s > 0f) s else 1f
     }
@@ -96,7 +98,10 @@ public fun reducedMotion(): Boolean = LocalReducedMotion.current ?: ReducedMotio
  */
 @OptIn(ExperimentalComposeUiApi::class)
 public fun ComponentActivity.keepMotion() {
+    // A screenshot's launch (`-shots 1`): no motion, and the ready signal on the window (Shots.kt).
+    Shots.read(intent)
     val root = window.decorView.findViewById<ViewGroup>(android.R.id.content) ?: return
+    Ready.attach(window)
     val scale =
         object : MotionDurationScale {
             override val scaleFactor: Float

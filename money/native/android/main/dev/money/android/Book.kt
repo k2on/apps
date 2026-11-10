@@ -366,6 +366,9 @@ private constructor(
                 photos = if (fresh(MoneyView.Photos)) session.photos() else was.photos,
                 receipts = if (fresh(MoneyView.Receipts)) session.receipts() else was.receipts,
             )
+        // A screenshot waits while the peer has anything on its way, and again for what this drew.
+        dev.arkui.Ready.still("peer", !peer.settled())
+        dev.arkui.Ready.changed()
     }
 
     // Whether `v` moved since it was last read here; it counts as read from now.

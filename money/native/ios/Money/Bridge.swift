@@ -54,6 +54,10 @@ struct Snapshot {
     var status: Status? = nil
     /// How many changes the peer has reported.
     var moved = 0
+    /// Nothing the phone asked for still on its way: the peer settled
+    /// (`Peer.settled`) and no file still to come. What a screenshot waits
+    /// for (ArkUI's `Ready`).
+    var settled = false
 
     func line(_ id: Id?) -> BudgetLine? { id.flatMap { i in lines.first { $0.categoryId == i } } }
     func account(_ id: Id?) -> AccountLine? { id.flatMap { i in accounts.first { $0.id == i } } }
@@ -225,6 +229,7 @@ final class Bridge {
         fetch()
         let st = p.status()
         snap.status = st
+        snap.settled = p.settled() && wanted.isEmpty
         if let d = st.denied, !deniedSaid {
             deniedSaid = true
             main { self.denied(d) }

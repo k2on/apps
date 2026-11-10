@@ -618,7 +618,7 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver, built once for the iPhone and the iPad (app-ios.sh);
+          # The driver, built once for the iPhone and the iPad (driver-ios.sh);
           # and each app any of whose shots failed (apps-ios.sh,
           # apps-mac.sh), for which no hash is kept.
           { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"

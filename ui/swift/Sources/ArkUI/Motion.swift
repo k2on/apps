@@ -80,7 +80,8 @@ private struct MotionTransition: ViewModifier {
     @Environment(\.reducesMotion) private var still
 
     func body(content: Content) -> some View {
-        content.transition(still ? .opacity : transition)
+        // In a screenshot nothing comes or goes on its way (`Shots.on`).
+        content.transition(Shots.on ? .identity : still ? .opacity : transition)
     }
 }
 

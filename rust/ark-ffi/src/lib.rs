@@ -614,6 +614,17 @@ impl Peer {
         live.store.rows(&table).map(|r| text(s.peer.row_json(&table, r))).collect()
     }
 
+    /// Whether nothing this device has asked for is still on its way: alone,
+    /// or linked with no intent of its own unconfirmed and no call's answer
+    /// waiting to be taken. A screenshot is taken only once it is (and the
+    /// app's own runtime is idle: ui/docs/shots.md), so it never shows a
+    /// replica half caught up.
+    pub fn settled(&self) -> bool {
+        let s = self.shared.lock();
+        let st = s.peer.status();
+        (st.alone || st.linked) && st.pending == 0 && s.peer.replies_waiting() == 0
+    }
+
     pub fn status(&self) -> Status {
         let s = self.shared.lock();
         let st = s.peer.status();

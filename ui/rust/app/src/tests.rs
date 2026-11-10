@@ -175,6 +175,28 @@ fn a_later_answer_runs_its_message_then_what_it_asks() {
     assert_eq!(rt.state().said, vec!["Text { value: Some(\"code\") }"]);
 }
 
+/// Idle only once nothing is awaited: a scan asked is work in flight until
+/// its answer is taken, and a screenshot waits for it (ui/docs/shots.md).
+/// Falsified by an `idle` that read only `running`: true while the camera's
+/// answer was still to come.
+#[test]
+fn idle_waits_for_every_answer() {
+    let mut rt = Runtime::<Counter>::new();
+    let mut h = Here::new();
+    assert!(rt.idle());
+    rt.dispatch(Msg::Add, &mut h);
+    assert!(rt.idle(), "an answer given at once is taken in the same dispatch");
+    rt.dispatch(Msg::Scan, &mut h);
+    assert!(!rt.idle(), "the scan's answer is awaited");
+    h.camera.scanned(Some("code".into()));
+    assert!(!h.inbox.is_empty());
+    for (t, a) in h.inbox.take() {
+        rt.answer(t, a, &mut h);
+    }
+    // Its message ran, and asked the haptics again, whose answer nobody awaits.
+    assert!(rt.idle());
+}
+
 #[test]
 fn commands_debug_as_what_they_ask() {
     let c: Command<Counter> = Command::Send {
