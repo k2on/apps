@@ -344,7 +344,7 @@ pub(crate) fn overlay() -> AnyView {
             Some((px, pw, row_top, _)) => {
                 let mut sx = px + pw - PADDING;
                 if sx + w > ww - EDGE {
-                    sx = px - w + PADDING;
+                    sx = (px - w + PADDING).max(EDGE);
                 }
                 let sy = (row_top - PADDING).min(wh - EDGE - h).max(EDGE);
                 (sx, sy, String::new())

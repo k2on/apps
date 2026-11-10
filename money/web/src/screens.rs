@@ -560,7 +560,7 @@ fn txn_inspector(app: &MoneyWeb) -> AnyView {
                     arkui_web::shell::bar_button("Close", "x", true, Msg::Txn(None)),
                 ))
                 .into_any(),
-            html::div().class("ark-headline").child(amount(t.amount, false)).into_any(),
+            html::div().class("ark-headline").child(arkui_web::signed(t.amount)).into_any(),
             card(
                 None,
                 vec![
