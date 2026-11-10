@@ -84,7 +84,7 @@ tap() {
   done
   [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; return 0; }
   echo "::error::$app: nothing on the screen says '$text'"
-  adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
+  adb exec-out screencap -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
   return 1
 }
@@ -94,7 +94,7 @@ tap() {
 still() {
   local prev="" now
   for _ in $(seq 1 10); do
-    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$1.next"
+    adb exec-out screencap -p > "$1.next"
     now=$(md5sum < "$1.next")
     [ "$now" = "$prev" ] && break
     prev=$now
@@ -190,7 +190,7 @@ open_app() {
   if ! front "$pkg" 30; then
     echo "::error::$app: not in front 30 seconds after it was opened (am start: $(grep -E '^(Status|LaunchState|Error|Warning)' <<< "$said" | tr '\n' ' '))"
     why > "$out/stuck.why.txt" 2>&1 || true
-    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
+    adb exec-out screencap -p > "$out/stuck.png" || true
     return 1
   fi
   # What it shows first (a list, a cover) a moment to draw.
@@ -335,7 +335,7 @@ for theme in ${THEMES:-light dark}; do
       tree
     else
       tree
-      adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/$theme/$id.png"
+      adb exec-out screencap -p > "$out/$theme/$id.png"
     fi
   done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
 done

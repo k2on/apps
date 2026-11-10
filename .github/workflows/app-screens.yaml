@@ -744,12 +744,8 @@ jobs:
 
       # Each app in turn on the one simulator (apps-ios.sh); one that fails
       # is said, and the others still taken.
-      # Each capture step has its own limit, so one that hangs fails in
-      # minutes and the steps after (`always()`) still keep what was taken
-      # before it: the hashes, and the one artifact of every device's shots.
       - if: steps.open.outputs.open == 'true'
         name: Capture
-        timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
@@ -762,7 +758,6 @@ jobs:
       # (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
-        timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
@@ -786,9 +781,6 @@ jobs:
       # server. None has one yet, and each is passed over in seconds.
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
         name: Capture (Mac)
-        # Its build included: the Mac's kernel, when the Rust moved, is
-        # most of twenty minutes (app-screens 42869626745).
-        timeout-minutes: 45
         run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
 
       # Beside each app's shots, taken whole, the hash of what they were

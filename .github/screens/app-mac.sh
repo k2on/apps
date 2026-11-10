@@ -69,20 +69,8 @@ shoot() {
   sleep 8
   mkdir -p "$out/$theme"
   screencapture -x -o -l "$wid" "$out/$theme/$name.png"
-  stop "$pid"
-}
-
-# The app at `$1` asked to quit, then made to if it is still there after
-# ten seconds: `wait` on one that ignores the asking would never return.
-stop() {
-  kill "$1" 2> /dev/null || return 0
-  for _ in $(seq 1 10); do
-    kill -0 "$1" 2> /dev/null || { wait "$1" 2> /dev/null || true; return 0; }
-    sleep 1
-  done
-  echo "  pid $1 still there after ten seconds: killed"
-  kill -9 "$1" 2> /dev/null || true
-  wait "$1" 2> /dev/null || true
+  kill "$pid" 2> /dev/null || true
+  wait "$pid" 2> /dev/null || true
 }
 
 failed=0
