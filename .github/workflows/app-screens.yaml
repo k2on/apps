@@ -565,8 +565,48 @@ jobs:
   # or to be taken is said, the others still taken and kept, and the job
   # fails at its end. Each app's shots are its own <app>/ios/ in the
   # artifact, as a job each had them.
-  ios:
+  # What of the Mac's builds is built on Linux (each app's kernel: flake.nix,
+  # `appleKernel`), built at the run's commit and pushed before the Mac is
+  # asked for: the Mac only fetches it. After ios.yaml (a workflow_run) it
+  # is that run's already, and this is a minute of finding it so; by hand
+  # (a dry run, a PR's number) it is built here.
+  kernels:
     needs: which
+    if: >-
+      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      APPS: ${{ needs.which.outputs.ios }}
+      SOURCE: ${{ needs.which.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE }}
+          path: src
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "macOS-SDK"
+      - name: Build the kernels
+        run: |
+          attrs=()
+          for a in $APPS; do attrs+=("$a-ios-simulator" "$a-macos"); done
+          bash .github/apple-ahead.sh "git+file://$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
+
+  ios:
+    needs: [which, kernels]
     # Built from the run's own commit, so only a run of this repository's.
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
