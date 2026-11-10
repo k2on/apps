@@ -484,6 +484,47 @@ public struct ArkSettings<Content: View>: Scene {
     }
 }
 
+extension View {
+    /// The app's Settings shown while `shown` is: the Mac's Settings window
+    /// (opened, and `shown` put back), a sheet on the iPhone and the iPad,
+    /// as the HIG has Settings in an app that has no window for it.
+    public func settingsShown<Content: View>(_ shown: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
+        modifier(SettingsShown(shown: shown, content: content))
+    }
+}
+
+private struct SettingsShown<Panes: View>: ViewModifier {
+    @Binding var shown: Bool
+    let content: () -> Panes
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
+
+    func body(content view: Content) -> some View {
+        #if os(macOS)
+        view.onChange(of: shown) {
+            if shown {
+                openSettings()
+                shown = false
+            }
+        }
+        #else
+        view.sheet(isPresented: $shown) {
+            NavigationStack { content() }
+        }
+        #endif
+    }
+}
+
+extension Scene {
+    /// The window's first size, as its launch's `-window 1440x900` says
+    /// (the screenshots'), else the system's; the iPhone has none to set.
+    public func launchWindowSize() -> some Scene {
+        let said = UserDefaults.standard.string(forKey: "window")?.split(separator: "x").compactMap { Double($0) } ?? []
+        return defaultSize(width: said.count == 2 ? said[0] : 1180, height: said.count == 2 ? said[1] : 760)
+    }
+}
+
 // MARK: commands
 
 /// Where a menu of commands goes in the menu bar.

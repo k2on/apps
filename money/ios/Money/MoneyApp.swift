@@ -44,6 +44,8 @@ struct MoneyApp: App {
                 .environment(\.squares, .green)
                 .onOpenURL { model.open(url: $0) }
         }
+        // The size the launch asks for (the Mac's screenshots: 1440×900).
+        .launchWindowSize()
         .onChange(of: phase) { _, now in
             if now == .background { wasAway = true }
             if now == .active && wasAway {

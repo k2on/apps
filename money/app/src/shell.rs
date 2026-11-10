@@ -18,6 +18,7 @@
 //! goes to the platform's shell as `Command::Native` with the command's
 //! name.
 
+use ark_app::shell::Launch;
 use ark_app::{App, Command, Data};
 use money_domain::routes::Route;
 use money_domain::*;
@@ -54,6 +55,10 @@ pub struct ShellState {
     pub month: String,
     /// The pane Settings shows, by its title.
     pub pane: String,
+    /// An account asked for by name before the accounts were there (a
+    /// launch's `-screen account:checking`): shown as soon as one answers
+    /// to it, until another place is chosen.
+    pub wanted: Option<String>,
 }
 
 impl Default for ShellState {
@@ -64,6 +69,7 @@ impl Default for ShellState {
             search: String::new(),
             month: String::new(),
             pane: PANES[0].into(),
+            wanted: None,
         }
     }
 }
@@ -90,6 +96,9 @@ pub enum ShellMsg {
     /// A command by name ([`view::commands`]): the shell's own, or the
     /// hosted screen's, which the platform carries out.
     Run { command: String },
+    /// The window's launch arguments (`ark_app::shell::Launch`): the place
+    /// it opens on, so any screen is opened with no steps.
+    Launch { args: Vec<String> },
 }
 
 /// One account's place in the sidebar.
@@ -172,6 +181,7 @@ impl App for MoneyShell {
                 }
                 vec![]
             }
+            ShellMsg::Launch { args } => launch(s, Launch::parse(&args), data),
             ShellMsg::Run { command } => match command.strip_prefix("go-") {
                 Some(tag) => {
                     select(s, tag.into(), data);
@@ -192,9 +202,12 @@ impl App for MoneyShell {
             tag: account_tag(&a.id.hex()),
             badge: (a.unapproved > 0).then_some(a.unapproved),
         };
-        let shown = tagged_account(&s.section).and_then(|id| open.iter().find(|a| a.id.hex() == id));
+        let shown = match &s.wanted {
+            Some(name) if s.section == SECTIONS[1] => named(&open, name),
+            _ => tagged_account(&s.section).and_then(|id| open.iter().find(|a| a.id.hex() == id).copied()),
+        };
         ShellPage {
-            section: s.section.clone(),
+            section: shown.map(|a| account_tag(&a.id.hex())).unwrap_or_else(|| s.section.clone()),
             inspector: s.inspector,
             search: s.search.clone(),
             showing: shown.is_some(),
@@ -211,6 +224,7 @@ impl App for MoneyShell {
 /// Show the section tagged `tag`, or the open account it is the place of:
 /// a new place starts with nothing searched.
 fn select(s: &mut ShellState, tag: String, data: &Data<'_, MoneyView>) {
+    s.wanted = None;
     let known = match tagged_account(&tag) {
         Some(id) => data
             .rows::<AccountLine>(&MoneyView::Accounts)
@@ -222,6 +236,79 @@ fn select(s: &mut ShellState, tag: String, data: &Data<'_, MoneyView>) {
         s.section = tag;
         s.search.clear();
     }
+}
+
+/// The open account `name` names: its id, its name in any case, or a
+/// word of its name (`checking`, `Everyday Checking`).
+fn named<'a>(open: &[&'a AccountLine], name: &str) -> Option<&'a AccountLine> {
+    let n = name.to_lowercase();
+    open.iter()
+        .find(|a| a.id.hex() == name || a.name.to_lowercase() == n)
+        .or_else(|| open.iter().find(|a| a.name.to_lowercase().split_whitespace().any(|w| w == n)))
+        .or_else(|| open.iter().find(|a| a.name.to_lowercase().contains(&n)))
+        .copied()
+}
+
+/// Settings' pane a launch's word names (`general`, `household`,
+/// `banks`), by its title.
+fn pane_named(word: &str) -> Option<&'static str> {
+    let w = word.to_lowercase();
+    PANES
+        .iter()
+        .copied()
+        .find(|p| p.to_lowercase() == w || p.to_lowercase().split_whitespace().any(|x| x == w))
+}
+
+/// Where the launch arguments open: the shell's own places here, and what
+/// only the platform's hosted screens can show yet (a category, a
+/// transaction, the review, a sheet, Settings, the appearance) handed to it
+/// by name: `open-category <name>`, `open-transaction <key>`, `review`,
+/// `new-transaction`, `settings <pane>`, `appearance <light|dark>`.
+fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Command<MoneyShell>> {
+    let mut out = Vec::new();
+    if let Some(a) = &l.appearance {
+        out.push(Command::Native(format!("appearance {a}")));
+    }
+    if let Some(shown) = l.inspector {
+        s.inspector = shown;
+    }
+    if let Some(p) = l.pane.as_deref().and_then(pane_named) {
+        s.pane = p.into();
+    }
+    let item = l.item.clone().unwrap_or_default();
+    match l.screen.as_deref() {
+        Some(tag @ ("budget" | "accounts" | "transactions" | "insights")) => select(s, tag.into(), data),
+        Some("account") => {
+            let accounts: &[AccountLine] = data.rows(&MoneyView::Accounts);
+            let open: Vec<&AccountLine> = accounts.iter().filter(|a| !a.closed).collect();
+            match named(&open, &item) {
+                Some(a) => select(s, account_tag(&a.id.hex()), data),
+                None => {
+                    select(s, SECTIONS[1].into(), data);
+                    s.wanted = Some(item);
+                }
+            }
+        }
+        Some("category") => {
+            select(s, SECTIONS[0].into(), data);
+            out.push(Command::Native(format!("open-category {item}")));
+        }
+        Some("transaction") => {
+            select(s, SECTIONS[2].into(), data);
+            out.push(Command::Native(format!("open-transaction {item}")));
+        }
+        Some("review") => {
+            select(s, SECTIONS[2].into(), data);
+            out.push(Command::Native("review".into()));
+        }
+        Some("add-transaction") => {
+            select(s, SECTIONS[2].into(), data);
+            out.push(Command::Native("new-transaction".into()));
+        }
+        Some("settings") => out.push(Command::Native(format!("settings {}", s.pane))),
+        _ => {}
+    }
+    out
 }
 
 #[cfg(test)]

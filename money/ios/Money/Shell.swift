@@ -69,6 +69,17 @@ struct Shell: View {
     @State private var autoAssigning = false
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
+    /// What the inspector shows: a category or a transaction, by its id.
+    @State private var inspecting: Inspecting? = nil
+    /// What the launch asked for that the household had not yet synced:
+    /// tried again as the snapshot moves.
+    @State private var pending: [String] = []
+    /// The launch's `-appearance`, over the system's.
+    @State private var appearance: ColorScheme? = nil
+    /// Settings asked for by the launch: the Mac's window, a sheet elsewhere.
+    @State private var settings = false
+
+    enum Inspecting: Equatable { case category(Id), transaction(Id) }
 
     private func path(_ tag: String) -> Binding<NavigationPath> {
         Binding(get: { paths[tag] ?? NavigationPath() }, set: { paths[tag] = $0 })
@@ -89,6 +100,24 @@ struct Shell: View {
             .onAppear {
                 model.shell.native = { name in run(name) }
                 model.shell.send(.month(month: model.month))
+                // Where the window opens (ark_app::shell::Launch): once, for the process.
+                if !Launched.done {
+                    Launched.done = true
+                    model.shell.send(.launch(args: ProcessInfo.processInfo.arguments))
+                }
+            }
+            .onChange(of: model.snapshot.moved) {
+                let waiting = pending
+                pending = []
+                for name in waiting { run(name) }
+            }
+            .preferredColorScheme(appearance)
+            .settingsShown($settings) {
+                MoneySettingsView()
+                    .environmentObject(model.shell)
+                    .environmentObject(model)
+                    .environmentObject(watched)
+                    .environment(\.hostedScreens) { name in AnyView(SettingsHosted(name: name)) }
             }
             // The budget's title is its month: the shell is told as it moves.
             .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
@@ -148,7 +177,13 @@ struct Shell: View {
                 } else {
                     ContentUnavailableView("No Account Selected", systemImage: "building.columns")
                 }
-            case "budget.inspector", "transactions.inspector":
+            case "budget.inspector":
+                if case let .category(id)? = inspecting { CategoryView(id: id) } else { nothingSelected }
+            case "transactions.inspector":
+                if case let .transaction(id)? = inspecting, let t = model.register(nil)?.first(where: { $0.id == id }) {
+                    TransactionDetail(txn: t)
+                } else { nothingSelected }
+            case "budget.inspector.none":
                 ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
             case "household": AccountButton()
             case "settings.general": SettingsView()
@@ -161,8 +196,30 @@ struct Shell: View {
         .environment(\.open) { r in push(section, r) }
     }
 
+    private var nothingSelected: some View {
+        ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
+    }
+
     /// A command the shell hands back by name: what only money's own screens do yet.
     private func run(_ name: String) {
+        let (verb, rest) = name.firstIndex(of: " ").map { (String(name[..<$0]), String(name[name.index(after: $0)...])) } ?? (name, "")
+        switch verb {
+        case "appearance":
+            appearance = rest == "dark" ? .dark : rest == "light" ? .light : nil
+            return
+        case "open-category":
+            guard let l = categoryNamed(rest) else { pending.append(name); return }
+            if model.shell.page.inspector { inspecting = .category(l.categoryId) } else { push("budget", .category(id: l.categoryId.hex, name: l.name)) }
+            return
+        case "open-transaction":
+            guard let t = transactionNamed(rest) else { pending.append(name); return }
+            if model.shell.page.inspector { inspecting = .transaction(t.id) } else { present(.transaction(TxnForm(t))) }
+            return
+        case "settings":
+            settings = true
+            return
+        default: break
+        }
         switch name {
         case "new-transaction":
             let a = usualAccount(accounts: model.snapshot.accounts)
@@ -174,6 +231,29 @@ struct Shell: View {
         case "auto-assign": autoAssigning = true
         case "refresh": Task { await model.refresh() }
         default: break
+        }
+    }
+
+    /// The category a launch names: by its name in any case, or a word of it.
+    private func categoryNamed(_ n: String) -> BudgetLine? {
+        let w = n.lowercased()
+        let lines = model.snapshot.lines
+        return lines.first { $0.name.lowercased() == w } ?? lines.first { $0.name.lowercased().contains(w) }
+    }
+
+    /// The transaction a launch names (SCREENS.md's keys): `receipt`, the
+    /// newest with a receipt; `review`, the newest waiting for a look; a
+    /// number, the n-th oldest; else a payee.
+    private func transactionNamed(_ key: String) -> TxnLine? {
+        guard let all = model.register(nil), !all.isEmpty else { return nil }
+        let k = key.lowercased()
+        switch k {
+        case "receipt": return all.first { !$0.receipt.isEmpty } ?? all.first { $0.photos > 0 }
+        case "review": return all.first { !$0.approved }
+        case "transfer": return all.first { $0.transfer }
+        default:
+            if let n = Int(k), n >= 1, n <= all.count { return all.reversed()[n - 1] }
+            return all.first { $0.payee.lowercased().contains(k) }
         }
     }
 
@@ -214,6 +294,38 @@ struct Shell: View {
         case let .categorize(ids, approve): CategorizeSheet(ids: ids, approve: approve).presentationDetents([.medium, .large])
         case let .newCategory(group): NewCategorySheet(group: group).presentationDetents([.height(320)])
         }
+    }
+}
+
+/// The launch arguments are read once a process.
+@MainActor private enum Launched { static var done = false }
+
+/// A transaction's details in the inspector: its payee and amount, then
+/// where and when, and what it was for.
+struct TransactionDetail: View {
+    let txn: TxnLine
+    @Environment(\.present) private var present
+
+    var body: some View {
+        Form {
+            Section {
+                VStack(spacing: 6) {
+                    Text(txn.payee).font(.headline)
+                    CentsText(txn.amount, signed: txn.amount > 0).font(.system(.largeTitle, design: .rounded, weight: .bold))
+                        .foregroundStyle(txn.amount > 0 ? Color.positive : Color.ink)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            Section {
+                LabeledContent("Account", value: txn.account)
+                LabeledContent("Date", value: txn.date)
+                LabeledContent("Category", value: txn.category)
+                LabeledContent("Status", value: txn.approved ? "Approved" : "Needs Review")
+                if !txn.memo.isEmpty { LabeledContent("Memo", value: txn.memo) }
+            }
+            Section { Button("Edit Transaction") { present(.transaction(TxnForm(txn))) } }
+        }
+        .formStyle(.grouped)
     }
 }
 

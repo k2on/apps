@@ -442,3 +442,59 @@ pub fn command_for<'a, M>(menus: &'a [CommandMenu<M>], key: &str, shift: bool, o
             .is_some_and(|s| s.key.eq_ignore_ascii_case(key) && s.shift == shift && s.option == option)
     })
 }
+
+/// Where a window opens, as its launch arguments say (every Ark app's, so
+/// a screenshot or a test opens any screen with no steps): `-screen
+/// <place>` (`budget`, `account:checking`, `transaction:receipt`, `settings`
+/// …, the app's own words), `-inspector 1`, `-appearance light|dark`,
+/// `-pane <title or word>`. Read as `-key value` pairs, as the Mac's and the
+/// iPhone's argument domain reads them (`--key` too, the desktop's way);
+/// anything else in the arguments is left to whoever asked for it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Launch {
+    /// The place, its word before the colon (`account`), lower case.
+    pub screen: Option<String>,
+    /// What follows the colon (`checking`), as written.
+    pub item: Option<String>,
+    pub inspector: Option<bool>,
+    pub appearance: Option<String>,
+    pub pane: Option<String>,
+}
+
+impl Launch {
+    /// The launch arguments of `args` (a process's, the program's own name
+    /// first or not).
+    pub fn parse<S: AsRef<str>>(args: &[S]) -> Launch {
+        let mut l = Launch::default();
+        let mut i = 0;
+        while i < args.len() {
+            let key = args[i].as_ref().trim_start_matches('-');
+            let flag = args[i].as_ref().starts_with('-');
+            let value = args.get(i + 1).map(|v| v.as_ref().to_string());
+            let taken = flag && value.is_some();
+            match (flag, key, value) {
+                (true, "screen", Some(v)) => match v.split_once(':') {
+                    Some((place, item)) => {
+                        l.screen = Some(place.to_lowercase());
+                        l.item = Some(item.trim_matches('"').to_string());
+                    }
+                    None => l.screen = Some(v.to_lowercase()),
+                },
+                (true, "inspector", Some(v)) => l.inspector = Some(matches!(v.as_str(), "1" | "true" | "YES" | "yes")),
+                (true, "appearance", Some(v)) => l.appearance = Some(v.to_lowercase()),
+                (true, "pane" | "settingsTab", Some(v)) => l.pane = Some(v),
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            }
+            i += if taken { 2 } else { 1 };
+        }
+        l
+    }
+
+    /// Whether anything was asked for.
+    pub fn is_empty(&self) -> bool {
+        *self == Launch::default()
+    }
+}

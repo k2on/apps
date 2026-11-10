@@ -183,3 +183,27 @@ fn commands_debug_as_what_they_ask() {
     };
     assert_eq!(format!("{c:?}"), "Send(3, then)");
 }
+
+#[test]
+fn launch_arguments_are_read_as_pairs() {
+    use crate::shell::Launch;
+    let l = Launch::parse(&[
+        "Money",
+        "-screen",
+        "account:Rewards Visa",
+        "-inspector",
+        "1",
+        "--appearance",
+        "Dark",
+        "-NSDocumentRevisionsDebugMode",
+        "YES",
+    ]);
+    assert_eq!(l.screen.as_deref(), Some("account"));
+    assert_eq!(l.item.as_deref(), Some("Rewards Visa"));
+    assert_eq!(l.inspector, Some(true));
+    assert_eq!(l.appearance.as_deref(), Some("dark"));
+    assert_eq!(l.pane, None);
+    assert!(Launch::parse(&["money-iced", "--server", "http://x", "--user", "alex"]).is_empty());
+    let s = Launch::parse(&["-screen", "settings", "-settingsTab", "banks"]);
+    assert_eq!((s.screen.as_deref(), s.pane.as_deref()), (Some("settings"), Some("banks")));
+}

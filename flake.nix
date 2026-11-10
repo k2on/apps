@@ -758,9 +758,11 @@
               # COSMIC's iced and its dependencies from GitHub are in the
               # lockfile (rust/Cargo.toml); the phones link none of them, but
               # the lockfile is vendored whole, each one fetched at the
-              # revision it pins.
-              cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; allowBuiltinFetchGit = true; };
-              nativeBuildInputs = [ iosRust pkgs.rustPlatform.cargoSetupHook ];
+              # revision it pins. By the workspace's own toolchain's cargo
+              # (`rustPlatform`): their manifests are edition 2024, which
+              # nixpkgs' cargo (1.82) cannot read.
+              cargoDeps = rustPlatform.importCargoLock { lockFile = ./rust/Cargo.lock; allowBuiltinFetchGit = true; };
+              nativeBuildInputs = [ iosRust rustPlatform.cargoSetupHook ];
               # xcodebuild and the iPhoneOS and simulator SDKs: the builder's
               # Xcode, outside the store. Pinned, only its directory is read,
               # from inside the sandbox (`__impureHostDeps`, which the builder's

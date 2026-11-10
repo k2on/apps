@@ -179,3 +179,37 @@ fn settings_has_three_panes() {
     rt.dispatch(ShellMsg::Pane { title: "Nowhere".into() }, &mut demo);
     assert_eq!(rt.screen(&demo).pane, "Connected Banks");
 }
+
+/// The launch arguments open any place with no steps: an account by a
+/// word of its name, the inspector, and what only the platform's screens
+/// show yet handed to it by name. An account asked for before the
+/// accounts are there is shown once they are, until another is chosen.
+/// Falsified by resolving the name only when the arguments arrive.
+#[test]
+fn launch_arguments_open_a_place() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    let args = |a: &[&str]| ShellMsg::Launch {
+        args: a.iter().map(|s| s.to_string()).collect(),
+    };
+    rt.dispatch(args(&["Money", "-screen", "account:checking", "-inspector", "1"]), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.account_title.as_str(), page.showing, page.inspector), ("Checking", true, true));
+    rt.dispatch(args(&["-screen", "transaction:receipt", "-appearance", "dark"]), &mut demo);
+    assert_eq!(rt.screen(&demo).section, "transactions");
+    assert_eq!(demo.native, vec!["appearance dark", "open-transaction receipt"]);
+    rt.dispatch(args(&["-screen", "settings", "-settingsTab", "banks"]), &mut demo);
+    assert_eq!(rt.screen(&demo).pane, "Connected Banks");
+    assert_eq!(demo.native.last().map(String::as_str), Some("settings Connected Banks"));
+
+    // Before the accounts have come: wanted, then shown once they have.
+    let mut s = ShellState::default();
+    let empty = Store::<MoneyView>::new();
+    let data = Data { store: &empty, now_ms: NOW };
+    MoneyShell::update(&mut s, args(&["-screen", "account:sapphire"]), &data);
+    assert_eq!((s.section.as_str(), s.wanted.as_deref()), ("accounts", Some("sapphire")));
+    let page = demo.read(|store| MoneyShell::screen(&s, &Data { store, now_ms: NOW }));
+    assert_eq!((page.account_title.as_str(), page.showing), ("Chase Sapphire", true));
+    MoneyShell::update(&mut s, ShellMsg::Back, &data);
+    assert_eq!(s.wanted, None, "back is back to Accounts");
+}
