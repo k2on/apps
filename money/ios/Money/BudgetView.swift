@@ -88,7 +88,7 @@ struct BudgetView: View {
             if let a = ahead, Arranging.shape(a) == now { ahead = nil }
         }
         .groupedList()
-        .listSectionSpacing(.compact)
+        .compactSections()
         .refreshable { await model.refresh() }
         .toolbar {
             ToolbarItem(placement: .secondaryAction) {

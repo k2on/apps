@@ -70,6 +70,16 @@ extension View {
         #endif
     }
 
+    /// A grouped list's sections close together (the iPhone's and the
+    /// iPad's compact spacing); the Mac's are already.
+    public func compactSections() -> some View {
+        #if os(iOS)
+        listSectionSpacing(.compact)
+        #else
+        self
+        #endif
+    }
+
     /// A list in its edit mode (the grabbers, the system's reordering) while
     /// `on`, on the iPhone and the iPad; the Mac's lists reorder by drag
     /// whatever their mode, and have none.
