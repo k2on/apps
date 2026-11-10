@@ -284,16 +284,16 @@ fn section<M: Clone + 'static>(s: Section<M>) -> AnyView {
             let cell = |title: &'static str, figure: Option<AnyView>, class: &'static str| {
                 html::span()
                     .class(class)
-                    .child((html::span().class("ark-column-title").child(title), figure))
+                    .child((html::span().class("ark-figure-col-title").child(title), figure))
                     .into_any()
             };
             Some(
                 html::span()
-                    .class("ark-columns")
+                    .class("ark-figure-cols")
                     .child((
-                        cell(k.titles[0], Some(amount(k.first.get(), true)), "ark-column ark-unless-compact"),
-                        cell(k.titles[1], Some(amount(k.second.get(), true)), "ark-column ark-unless-compact"),
-                        cell(k.titles[2], total, "ark-column"),
+                        cell(k.titles[0], Some(amount(k.first.get(), true)), "ark-figure-col ark-unless-compact"),
+                        cell(k.titles[1], Some(amount(k.second.get(), true)), "ark-figure-col ark-unless-compact"),
+                        cell(k.titles[2], total, "ark-figure-col"),
                     ))
                     .into_any(),
             )
@@ -476,11 +476,11 @@ pub fn meter_row<M: Clone + 'static>(r: MeterRow<M>) -> AnyView {
     ));
     let columns = r.columns.map(|(a, b)| {
         (
-            html::span().class("ark-column ark-unless-compact").child(amount(a.get(), false)),
-            html::span().class("ark-column ark-unless-compact").child(amount(b.get(), true)),
+            html::span().class("ark-figure-col ark-unless-compact").child(amount(a.get(), false)),
+            html::span().class("ark-figure-col ark-unless-compact").child(amount(b.get(), true)),
         )
     });
-    let badge = html::span().class("ark-column").child(crate::figures::status_badge(
+    let badge = html::span().class("ark-figure-col").child(crate::figures::status_badge(
         r.status.get(),
         crate::figures::Tint::named(&r.status_tint.get()),
     ));
