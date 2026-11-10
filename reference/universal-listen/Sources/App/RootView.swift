@@ -18,6 +18,8 @@ struct RootView: View {
             Tab("Home", systemImage: "house", value: TabID.home) {
                 stack(.home) { HomeView() }
             }
+            #if os(iOS)
+            // Compact width only: the sidebar lists their contents itself.
             Tab("Library", systemImage: "square.stack.fill", value: TabID.library) {
                 stack(.library) { LibraryView() }
             }
@@ -26,6 +28,7 @@ struct RootView: View {
                 stack(.podcasts) { ShowsView() }
             }
             .defaultVisibility(.hidden, for: .sidebar)
+            #endif
             Tab("Household", systemImage: "person.2", value: TabID.household) {
                 stack(.household) { HouseholdView() }
             }
