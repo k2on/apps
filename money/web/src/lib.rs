@@ -1,9 +1,9 @@
 //! money in the browser: the shell every platform runs
-//! (`money_app::shell::MoneyShell`) and the Accounts slice
-//! (`money_app::accounts`), run by ark-app here as on the phones and the
-//! desktop, drawn by arkui-web (Leptos over the DOM); the screens the
-//! shell hosts that are not in Rust's vocabulary yet are this crate's
-//! (`screens`), as money/iced has its own.
+//! (`money_app::shell::MoneyShell`) and its screens — Budget, Accounts,
+//! Transactions, a register, the sheets — run by ark-app here as on the
+//! phones and the desktop, drawn by arkui-web (Leptos over the DOM); the
+//! screens the shell hosts that are not in Rust's vocabulary yet are this
+//! crate's (`screens`), as money/iced has its own.
 //!
 //! The household is the server's that served the page (`live`): the page
 //! signs in through it as the phones do, holds a replica of the budget
@@ -30,8 +30,11 @@ use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
+use money_app::register::{Register, RegisterMsg};
+use money_app::sheets::{Sheets, SheetsMsg};
 use money_app::shell::view::{commands, money_shell};
 use money_app::shell::{MoneyShell, ShellMsg};
+use money_app::transactions::{Transactions, TransactionsMsg};
 use money_app::MoneyRequest;
 use money_core::dates::{add_months, days_from_civil, parse_day};
 use money_core::*;
@@ -46,27 +49,18 @@ pub enum Msg {
     Accounts(AccountsMsg),
     /// The Budget page's (`money_app::budget`).
     Budget(BudgetMsg),
+    /// The Transactions tab's (`money_app::transactions`).
+    Transactions(TransactionsMsg),
+    /// The register's (`money_app::register`).
+    Register(RegisterMsg),
+    /// The sheets' (`money_app::sheets`).
+    Sheets(SheetsMsg),
     /// A category chosen in the budget (its inspector shows it), or none.
     Category(Option<Id<Category>>),
-    /// A transaction chosen in a register, or none.
-    Txn(Option<Id<Txn>>),
     Month(i64),
     ThisMonth,
     Auto(Auto),
     Assign(Id<Category>, i64),
-    /// Approve All asked: the question raised.
-    AskApprove,
-    Approve(Vec<Id<Txn>>),
-    /// A question or a sheet put away.
-    Dismiss,
-    Cleared(Id<Txn>, bool),
-    Categorize(Id<Txn>, Option<Id<Category>>),
-    /// The register only what waits for a look, or all of it.
-    Review(bool),
-    /// New Transaction's sheet raised.
-    NewTxn,
-    Draft(DraftMsg),
-    SaveDraft,
     /// Settings shown, or put away.
     Settings(bool),
     /// Where the address says the page is besides the shell's launch
@@ -82,35 +76,6 @@ pub enum Msg {
     Welcome(ark_app::welcome::WelcomeMsg),
 }
 
-/// A change to the new transaction being written.
-#[derive(Clone, Debug)]
-pub enum DraftMsg {
-    Payee(String),
-    Amount(String),
-    Date(String),
-    Category(Option<Id<Category>>),
-    Account(Id<Account>),
-    Memo(String),
-}
-
-/// A transaction being written.
-#[derive(Clone, Debug, Default)]
-pub struct Draft {
-    pub payee: String,
-    pub amount: String,
-    pub date: String,
-    pub category: Option<Id<Category>>,
-    pub account: Option<Id<Account>>,
-    pub memo: String,
-    pub problem: Option<String>,
-}
-
-/// A question asked over the page.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Asking {
-    ApproveAll(usize),
-}
-
 pub struct MoneyWeb {
     pub peer: Replica,
     pub store: Store<MoneyView>,
@@ -119,12 +84,14 @@ pub struct MoneyWeb {
     pub shell: Runtime<MoneyShell>,
     pub accounts: Runtime<Accounts>,
     pub budget: Runtime<Budget>,
+    pub transactions: Runtime<Transactions>,
+    /// The register the shell shows: the shown account's.
+    pub register: Runtime<Register>,
+    pub sheets: Runtime<Sheets>,
+    /// The views the runtimes name (`App::holds`), held for them.
+    pub wanted: Vec<MoneyView>,
     pub category: Option<Id<Category>>,
-    pub txn: Option<Id<Txn>>,
     pub search: String,
-    pub review: bool,
-    pub draft: Option<Draft>,
-    pub asking: Option<Asking>,
     pub settings: bool,
     /// How many changes this page has sent the household.
     pub changes: u64,
@@ -189,18 +156,19 @@ impl MoneyWeb {
             shell: Runtime::new(),
             accounts: Runtime::new(),
             budget: Runtime::new(),
+            transactions: Runtime::new(),
+            register: Runtime::new(),
+            sheets: Runtime::new(),
+            wanted: vec![],
             category: None,
-            txn: None,
             search: String::new(),
-            review: false,
-            draft: None,
-            asking: None,
             settings: false,
             changes: 0,
             dry: false,
             live: None,
         };
         app.shell_step(ShellMsg::Month { month });
+        app.follow();
         app
     }
 
@@ -259,22 +227,93 @@ impl MoneyWeb {
     /// What the shell chose to inspect, taken as this page's choice: a
     /// launch's `-screen category:dining -inspector 1` names it to the
     /// shell alone. A category is the shell's Category Details
-    /// (`category_inspector`, drawn from `ShellPage::category`); a
-    /// transaction is this page's own inspector (`screens::txn_inspector`,
-    /// which approves), so it is taken from the shell and the shell's let go.
+    /// (`category_inspector`, drawn from `ShellPage::category`), a
+    /// transaction its Transaction Details.
     fn follow_shell(&mut self) {
-        let s = self.shell.state();
-        let (category, transaction) = (s.category.clone(), s.transaction.clone());
-        if let Some(key) = category {
+        if let Some(key) = self.shell.state().category.clone() {
             self.category = money_app::shell::inspect::category_named(screens::lines(self), &key).map(|l| l.category_id);
         }
-        if let Some(key) = transaction {
-            self.txn = money_app::shell::inspect::transaction_named(screens::all_txns(self), &key).map(|t| t.id);
-            let mut rt = std::mem::take(&mut self.shell);
-            let mut desk = Desk::new(self);
-            rt.dispatch(ShellMsg::InspectTransaction { id: None }, &mut desk);
-            self.shell = rt;
+    }
+
+    /// `msg` taken by the runtime `at` names, what it asked carried out after.
+    fn step<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>>(
+        &mut self,
+        at: fn(&mut MoneyWeb) -> &mut Runtime<A>,
+        msg: A::Msg,
+    ) {
+        let mut rt = std::mem::take(at(self));
+        let mut desk = Desk::new(self);
+        rt.dispatch(msg, &mut desk);
+        desk.answer(&mut rt);
+        let natives = std::mem::take(&mut desk.natives);
+        *at(self) = rt;
+        for n in natives {
+            self.carry(n);
         }
+    }
+
+    /// The screens told what the shell and the page say now, when it moved:
+    /// the register the shown account's, the search the shell's, the month.
+    fn follow(&mut self) {
+        let s = self.shell.state();
+        let account = money_app::shell::tagged_account(&s.section).map(String::from);
+        let selected = s.transaction.clone();
+        let search = s.search.clone();
+        let (month, today) = (self.month.clone(), self.today.clone());
+        if self.register.state().account != account {
+            self.step(|a| &mut a.register, RegisterMsg::Show { account });
+        }
+        if self.register.state().search != search {
+            self.step(|a| &mut a.register, RegisterMsg::Search { text: search.clone() });
+        }
+        if self.register.state().selected != selected {
+            self.step(|a| &mut a.register, RegisterMsg::Select { id: selected });
+        }
+        if self.transactions.state().search != search {
+            self.step(|a| &mut a.transactions, TransactionsMsg::Search { text: search });
+        }
+        if self.transactions.state().month != month {
+            self.step(|a| &mut a.transactions, TransactionsMsg::Month { month: month.clone() });
+        }
+        if self.sheets.state().month != month || self.sheets.state().today != today {
+            self.step(|a| &mut a.sheets, SheetsMsg::Month { month, today });
+        }
+        self.hold_wanted();
+    }
+
+    /// Every view a runtime names held, and those none names now let go.
+    fn hold_wanted(&mut self) {
+        let mut want: Vec<MoneyView> = vec![];
+        for k in [
+            self.shell.holds(),
+            self.budget.holds(),
+            self.accounts.holds(),
+            self.transactions.holds(),
+            self.register.holds(),
+            self.sheets.holds(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !want.contains(&k) {
+                want.push(k);
+            }
+        }
+        if want == self.wanted {
+            return;
+        }
+        for k in &want {
+            if !self.wanted.contains(k) {
+                self.store.hold(&mut self.peer, k.clone());
+            }
+        }
+        for k in std::mem::take(&mut self.wanted) {
+            if !want.contains(&k) {
+                self.store.release(&mut self.peer, &k);
+            }
+        }
+        self.wanted = want;
+        self.store.settle(&mut self.peer);
     }
 
     fn budget_step(&mut self, msg: BudgetMsg) {
@@ -317,7 +356,10 @@ impl MoneyWeb {
             Pending::Request(r) => r,
         };
         match r {
-            MoneyRequest::NewTransaction => self.update(Msg::NewTxn),
+            MoneyRequest::Sheet { msg } => {
+                self.follow();
+                self.step(|a| &mut a.sheets, msg)
+            }
             MoneyRequest::Accounts { msg } => self.accounts_step(msg),
             MoneyRequest::Budget { msg } => self.budget_step(msg),
             MoneyRequest::StepMonth { by } => self.update(Msg::Month(by.into())),
@@ -325,10 +367,12 @@ impl MoneyWeb {
             MoneyRequest::Refresh => {
                 let _ = self.change(MoneyChange::Sync);
             }
-            MoneyRequest::Filter => self.review = !self.review,
-            MoneyRequest::Review => self.review = true,
-            // The browser's reconcile and receipt import are still to come.
-            MoneyRequest::Reconcile { .. } | MoneyRequest::ImportReceipt | MoneyRequest::KeepPhoto { .. } => {}
+            MoneyRequest::Review => {
+                self.shell_step(ShellMsg::Select { tag: "transactions".into() });
+                self.step(|a| &mut a.transactions, TransactionsMsg::Show { review: true })
+            }
+            // The browser's filter bar and receipt import are still to come.
+            MoneyRequest::Filter | MoneyRequest::ImportReceipt | MoneyRequest::KeepPhoto { .. } => {}
             MoneyRequest::OpenCategory { key } => {
                 let n = key.to_lowercase();
                 let found = screens::lines(self)
@@ -337,19 +381,14 @@ impl MoneyWeb {
                     .map(|l| l.category_id);
                 self.category = found;
             }
-            MoneyRequest::OpenTransaction { key } => {
-                // `receipt`: the first with a receipt (the reference's word);
-                // else by its payee or its id.
-                let n = key.to_lowercase();
-                let found = screens::all_txns(self)
-                    .iter()
-                    .find(|t| match n.as_str() {
-                        "receipt" => !t.receipt.is_empty() || t.photos > 0,
-                        _ => t.payee.to_lowercase().contains(&n) || t.id.hex() == key,
-                    })
-                    .map(|t| t.id);
-                self.txn = found;
-            }
+            // Transaction Details in the inspector while it shows; its form otherwise.
+            MoneyRequest::OpenTransaction { key } => match self.shell.state().inspector {
+                true => self.shell_step(ShellMsg::InspectTransaction { id: Some(key) }),
+                false => {
+                    self.follow();
+                    self.step(|a| &mut a.sheets, SheetsMsg::Open { key })
+                }
+            },
             MoneyRequest::Settings { pane } => {
                 self.settings = true;
                 if !pane.is_empty() {
@@ -364,12 +403,23 @@ impl MoneyWeb {
     /// (`Runtime::is_idle`); with [`MoneyWeb::version`] unchanged, what a
     /// screenshot driver waits for.
     pub fn is_idle(&self) -> bool {
-        self.shell.is_idle(&self.store) && self.budget.is_idle(&self.store) && self.accounts.is_idle(&self.store)
+        let st = &self.store;
+        self.shell.is_idle(st)
+            && self.budget.is_idle(st)
+            && self.accounts.is_idle(st)
+            && self.transactions.is_idle(st)
+            && self.register.is_idle(st)
+            && self.sheets.is_idle(st)
     }
 
     /// The runtimes' versions summed: grows with every message any took.
     pub fn version(&self) -> u64 {
-        self.shell.version() + self.budget.version() + self.accounts.version()
+        self.shell.version()
+            + self.budget.version()
+            + self.accounts.version()
+            + self.transactions.version()
+            + self.register.version()
+            + self.sheets.version()
     }
 
     /// The ready signal on the page's root, read by the screenshot
@@ -410,19 +460,7 @@ enum Pending {
 const PATH_KEYS: [&str; 3] = ["category", "txn", "settings"];
 
 /// What its query says: the UI's state over it, in the order read back.
-const QUERY_KEYS: [&str; 11] = [
-    "review",
-    "search",
-    "ask",
-    "sheet",
-    "payee",
-    "amount",
-    "date",
-    "draft-category",
-    "account",
-    "memo",
-    "month",
-];
+const QUERY_KEYS: [&str; 2] = ["search", "month"];
 
 impl MoneyWeb {
     /// Where the page is, as its address (ui/docs/app.md, "The Browser's
@@ -430,8 +468,7 @@ impl MoneyWeb {
     /// (`budget`, `accounts/<id>`), the month when it is not this one, the
     /// category or the transaction chosen, Settings and its pane —
     /// `/budget/2026-10/category/<id>/`. The query is the UI over it: the
-    /// inspector, the review, the search, the question, the sheet and what
-    /// is written in it. `arrive` reads it back.
+    /// inspector and the search. `arrive` reads it back.
     pub fn route(&self) -> arkui_web::Address {
         let s = self.shell.state();
         let mut path: Vec<String> = s.section.split('/').filter(|p| !p.is_empty()).map(String::from).collect();
@@ -441,8 +478,8 @@ impl MoneyWeb {
         if let Some(c) = self.category {
             path.extend(["category".into(), c.hex()]);
         }
-        if let Some(t) = self.txn {
-            path.extend(["txn".into(), t.hex()]);
+        if let Some(t) = &s.transaction {
+            path.extend(["txn".into(), t.clone()]);
         }
         if self.settings {
             path.extend(["settings".into(), s.pane.clone()]);
@@ -451,28 +488,8 @@ impl MoneyWeb {
         if s.inspector {
             r = r.with("inspector", "1");
         }
-        if self.review {
-            r = r.with("review", "1");
-        }
         if !self.search.is_empty() {
             r = r.with("search", self.search.clone());
-        }
-        if let Some(Asking::ApproveAll(_)) = self.asking {
-            r = r.with("ask", "approve-all");
-        }
-        if let Some(d) = &self.draft {
-            r = r.with("sheet", "add-transaction");
-            for (k, v) in [("payee", &d.payee), ("amount", &d.amount), ("date", &d.date), ("memo", &d.memo)] {
-                if !v.is_empty() {
-                    r = r.with(k, v.clone());
-                }
-            }
-            if let Some(c) = d.category {
-                r = r.with("draft-category", c.hex());
-            }
-            if let Some(a) = d.account {
-                r = r.with("account", a.hex());
-            }
         }
         r
     }
@@ -487,41 +504,12 @@ impl MoneyWeb {
                 self.category = c;
                 self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
             }
-            "draft-category" => {
-                let c = category(self);
-                if let Some(d) = &mut self.draft {
-                    d.category = c;
-                }
-            }
-            "txn" => self.txn = screens::all_txns(self).iter().find(|t| t.id.hex() == v).map(|t| t.id),
-            "review" => self.review = v == "1",
-            "search" => self.search = v,
+            "txn" => self.shell_step(ShellMsg::InspectTransaction { id: Some(v) }),
+            "search" => self.shell_step(ShellMsg::Search { text: v }),
             "settings" => {
                 self.settings = true;
                 if !v.is_empty() {
                     self.shell_step(ShellMsg::Pane { title: v });
-                }
-            }
-            "ask" if v == "approve-all" => self.update(Msg::AskApprove),
-            "sheet" if v == "add-transaction" => {
-                if self.draft.is_none() {
-                    self.update(Msg::NewTxn);
-                }
-            }
-            "account" => {
-                let a = screens::open_accounts(self).into_iter().find(|a| a.id.hex() == v).map(|a| a.id);
-                if let (Some(d), Some(a)) = (&mut self.draft, a) {
-                    d.account = Some(a);
-                }
-            }
-            k @ ("payee" | "amount" | "date" | "memo") => {
-                if let Some(d) = &mut self.draft {
-                    match k {
-                        "payee" => d.payee = v,
-                        "amount" => d.amount = v,
-                        "date" => d.date = v,
-                        _ => d.memo = v,
-                    }
                 }
             }
             _ => {}
@@ -636,24 +624,17 @@ impl WebApp for MoneyWeb {
 
     fn update(&mut self, msg: Msg) {
         match msg {
-            Msg::Shell(ShellMsg::Select { tag }) => {
-                self.txn = None;
-                self.shell_step(ShellMsg::Select { tag });
-            }
             Msg::Shell(m) => self.shell_step(m),
             Msg::Accounts(m) => self.accounts_step(m),
             Msg::Budget(m) => self.budget_step(m),
+            Msg::Transactions(m) => self.step(|a| &mut a.transactions, m),
+            Msg::Register(m) => self.step(|a| &mut a.register, m),
+            Msg::Sheets(m) => self.step(|a| &mut a.sheets, m),
             Msg::Category(c) => {
                 self.category = c;
                 // The shell's Category Details shows it (`follow_shell`).
                 self.shell_step(ShellMsg::InspectCategory { id: c.map(|c| c.hex()) });
                 if c.is_some() && !self.shell.state().inspector {
-                    self.shell_step(ShellMsg::Inspector { shown: true });
-                }
-            }
-            Msg::Txn(t) => {
-                self.txn = t;
-                if t.is_some() && !self.shell.state().inspector {
                     self.shell_step(ShellMsg::Inspector { shown: true });
                 }
             }
@@ -673,92 +654,13 @@ impl WebApp for MoneyWeb {
                     amount,
                 }));
             }
-            Msg::AskApprove => {
-                let n = screens::all_txns(self).iter().filter(|t| !t.approved).count();
-                self.asking = Some(Asking::ApproveAll(n));
-            }
-            Msg::Approve(ids) => {
-                self.asking = None;
-                let _ = self.change(MoneyChange::Approve(Txns { ids }));
-            }
-            Msg::Dismiss => {
-                self.asking = None;
-                self.draft = None;
-            }
-            Msg::Cleared(id, cleared) => {
-                let _ = self.change(MoneyChange::SetCleared(SetCleared { id, cleared }));
-            }
-            Msg::Categorize(id, category_id) => {
-                let _ = self.change(MoneyChange::Categorize(Categorize { ids: vec![id], category_id }));
-            }
-            Msg::Review(on) => self.review = on,
-            Msg::NewTxn => {
-                let account = screens::open_accounts(self).first().map(|a| a.id);
-                self.draft = Some(Draft {
-                    date: self.today.clone(),
-                    account,
-                    ..Draft::default()
-                });
-            }
-            Msg::Draft(d) => {
-                if let Some(f) = &mut self.draft {
-                    match d {
-                        DraftMsg::Payee(p) => {
-                            // A payee known, its usual category with it.
-                            let usual = self
-                                .store
-                                .rows::<PayeeLine>(&MoneyView::Payees)
-                                .iter()
-                                .find(|l| l.name == p)
-                                .and_then(|l| l.category_id);
-                            if f.category.is_none() {
-                                f.category = usual;
-                            }
-                            f.payee = p;
-                        }
-                        DraftMsg::Amount(a) => f.amount = a,
-                        DraftMsg::Date(d) => f.date = d,
-                        DraftMsg::Category(c) => f.category = c,
-                        DraftMsg::Account(a) => f.account = Some(a),
-                        DraftMsg::Memo(m) => f.memo = m,
-                    }
-                    f.problem = None;
-                }
-            }
-            Msg::SaveDraft => {
-                let Some(f) = self.draft.clone() else { return };
-                let cents = ark_format::parse_amount(&f.amount, &ark_format::NumberStyle::us());
-                let (Some(account_id), Some(cents)) = (f.account, cents) else {
-                    if let Some(d) = &mut self.draft {
-                        d.problem = Some("An amount, as 12.50".into());
-                    }
-                    return;
-                };
-                let r = self.change(MoneyChange::AddTransaction(AddTransaction {
-                    account_id,
-                    date: f.date,
-                    payee: f.payee,
-                    category_id: f.category,
-                    memo: f.memo,
-                    amount: -cents.abs(),
-                    cleared: false,
-                    transfer_to: None,
-                }));
-                match r {
-                    Ok(()) => self.draft = None,
-                    Err(why) => {
-                        if let Some(d) = &mut self.draft {
-                            d.problem = Some(why);
-                        }
-                    }
-                }
-            }
             Msg::Settings(on) => self.settings = on,
             Msg::At(k, v) => self.at(&k, v),
             Msg::Wake => self.wake(),
             Msg::Onboard(e) => self.onboard(e),
             Msg::Welcome(m) => self.first_run(m),
         }
+        self.follow();
     }
 
     fn commands(&self) -> Vec<ark_app::shell::CommandMenu<Msg>> {
@@ -841,12 +743,16 @@ impl WebApp for MoneyWeb {
     fn rewind(&mut self) -> bool {
         self.set_month(self.today[..7].to_string());
         self.shell = Runtime::new();
-        (self.category, self.txn, self.draft, self.asking) = (None, None, None, None);
-        (self.search, self.review, self.settings) = (String::new(), false, false);
+        self.category = None;
+        (self.search, self.settings) = (String::new(), false);
         self.accounts = Runtime::new();
         self.budget = Runtime::new();
+        self.transactions = Runtime::new();
+        self.register = Runtime::new();
+        self.sheets = Runtime::new();
         let month = self.month.clone();
         self.shell_step(ShellMsg::Month { month });
+        self.follow();
         true
     }
 }

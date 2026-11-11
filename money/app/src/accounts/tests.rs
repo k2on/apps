@@ -243,7 +243,12 @@ fn reconcile_asks_the_shell_for_an_open_account() {
     let mut rt = Runtime::<Accounts>::new();
     let a = d.accounts().iter().find(|a| !a.closed).unwrap().id.hex();
     run(&mut rt, &mut d, [AccountsMsg::Reconcile { id: a.clone() }]);
-    assert_eq!(d.requests, vec![crate::MoneyRequest::Reconcile { account: a.clone() }]);
+    assert_eq!(
+        d.requests,
+        vec![crate::MoneyRequest::Sheet {
+            msg: crate::sheets::SheetsMsg::Reconcile { account: a.clone() }
+        }]
+    );
     let p = rt.screen(&d);
     let row = p.shelves.iter().flat_map(|s| &s.accounts).find(|r| r.id == a).unwrap();
     assert!(row.is_open);

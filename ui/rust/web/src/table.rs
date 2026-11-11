@@ -24,7 +24,7 @@ pub enum Align {
 #[derive(Clone, Debug)]
 pub struct Column {
     pub heading: &'static str,
-    pub width: &'static str,
+    pub width: std::borrow::Cow<'static, str>,
     pub align: Align,
     /// Dropped from a compact table's row.
     pub wide_only: bool,
@@ -43,10 +43,10 @@ pub enum Slot {
     TrailingSub,
 }
 
-pub fn column(heading: &'static str, width: &'static str, align: Align) -> Column {
+pub fn column(heading: &'static str, width: impl Into<std::borrow::Cow<'static, str>>, align: Align) -> Column {
     Column {
         heading,
-        width,
+        width: width.into(),
         align,
         wide_only: false,
         slot: None,
@@ -101,7 +101,7 @@ pub fn table(columns: &[Column], rows: Vec<TableRow>) -> AnyView {
 /// The table, its rows striped or not, and what sits over its headings
 /// inside its scroll (a page's headline).
 pub fn table_with(columns: &[Column], rows: Vec<TableRow>, zebra: bool, top: Option<AnyView>) -> AnyView {
-    let tracks: Vec<&str> = columns.iter().map(|c| c.width).collect();
+    let tracks: Vec<&str> = columns.iter().map(|c| c.width.as_ref()).collect();
     let style = format!("grid-template-columns:{}", tracks.join(" "));
     let align = |c: &Column| match c.align {
         Align::Start => "ark-cell",
@@ -178,7 +178,7 @@ pub fn table_with(columns: &[Column], rows: Vec<TableRow>, zebra: bool, top: Opt
     let style = if listed {
         "grid-template-columns:minmax(0,1fr) auto".to_string()
     } else if compact {
-        let kept: Vec<&str> = columns.iter().filter(|c| !c.wide_only).map(|c| c.width).collect();
+        let kept: Vec<&str> = columns.iter().filter(|c| !c.wide_only).map(|c| c.width.as_ref()).collect();
         format!("grid-template-columns:{}", kept.join(" "))
     } else {
         style

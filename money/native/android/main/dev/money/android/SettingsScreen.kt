@@ -19,6 +19,11 @@
 // step with it, and the way out.
 package dev.money.android
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.items
+import dev.arkui.AmountText
+import uniffi.money_bridge.kindTitle
+import uniffi.money_bridge.AccountLine
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -389,5 +394,28 @@ private fun AccountCard(ledger: Ledger) {
             colors = ButtonDefaults.outlinedButtonColors(contentColor = c.error),
             modifier = Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, bottom = Space.l),
         ) { Text(if (ledger.demo) "Leave the demo" else "Sign out") }
+    }
+}
+
+/** The open accounts to choose from, budget ones first. */
+@Composable
+internal fun AccountPicker(accounts: List<AccountLine>, title: String, onPick: (AccountLine) -> Unit, skip: Id? = null) {
+    Column {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s).semantics { heading() })
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+            items(accounts.filter { !it.closed && it.id != skip }.sortedWith(compareBy({ !it.onBudget }, { it.pos })), key = { it.id.hex }) { a ->
+                ListItem(
+                    headlineContent = { Text(a.name) },
+                    supportingContent = { Text(kindTitle(a.kind)) },
+                    leadingContent = { Icon(Glyphs.account(a.kind), contentDescription = null) },
+                    trailingContent = { AmountText(a.balance, style = MaterialTheme.typography.labelLarge) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.pressable(onClick = { onPick(a) }, press = Press.Highlight),
+                )
+            }
+        }
     }
 }

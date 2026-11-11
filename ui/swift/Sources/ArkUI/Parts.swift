@@ -505,6 +505,8 @@ public enum ArkGlyphs {
         case "arrow-up": return "arrow.up"
         case "arrow-down": return "arrow.down"
         case "trash": return "trash"
+        case "lock": return "lock.fill"
+        case "receipt": return "receipt"
         case "crosshair": return "scope"
         case "folder": return "folder"
         case "refresh-cw": return "arrow.triangle.2.circlepath"

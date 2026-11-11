@@ -300,6 +300,9 @@ pub const ARROW_DOWN: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewB
 /// `trash`
 pub const TRASH: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>"##;
 
+/// `lock`
+pub const LOCK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>"##;
+
 /// `crosshair`
 pub const CROSSHAIR: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"><path d="M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z"/><path d="M22 12h-4"/><path d="M6 12H2"/><path d="M12 6V2"/><path d="M12 22v-4"/></svg>"##;
 
@@ -380,6 +383,8 @@ pub fn named(name: &str) -> Option<&'static [u8]> {
         "arrow-up" => ARROW_UP,
         "arrow-down" => ARROW_DOWN,
         "trash" => TRASH,
+        "lock" => LOCK,
+        "receipt" => RECEIPT,
         "crosshair" => CROSSHAIR,
         "folder" => FOLDER,
         _ => return None,
@@ -415,6 +420,8 @@ mod named_tests {
             "arrow-up",
             "arrow-down",
             "trash",
+            "lock",
+            "receipt",
             "crosshair",
             "folder",
         ] {

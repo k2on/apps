@@ -364,6 +364,9 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-text-negative { color: var(--ark-error); }
 .ark-text-caution { color: var(--ark-caution); }
 .ark-text-positive { color: var(--ark-positive); }
+.ark-text-accent { color: var(--ark-accent); }
+.ark-cell-words { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ark-marked { display: inline-flex; align-items: center; min-width: 0; }
 .ark-text-quiet { color: var(--ark-quiet); }
 .ark-search.ark-plain .ark-input { width: 100%; }
 

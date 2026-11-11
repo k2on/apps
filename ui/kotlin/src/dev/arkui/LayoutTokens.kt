@@ -21,6 +21,8 @@ public object LayoutTokens {
     public const val SEARCH_WIDTH: Float = 320.0f
     /** A column of figures in a table or a budget's row. */
     public const val AMOUNT_COLUMN_WIDTH: Float = 112.0f
+    /** A table's column of one mark: a row's cleared mark, a receipt's. */
+    public const val MARK_COLUMN_WIDTH: Float = 28.0f
     /** The bar under a row's name that fills toward its goal, beside columns. */
     public const val PROGRESS_WIDTH: Float = 220.0f
     /** A line of text as tall as this many times its size (the desktop's: iced's). */

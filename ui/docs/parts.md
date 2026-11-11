@@ -71,7 +71,7 @@ Material's own, and an app that imports both could not say which.
 `chevron-right`, `chevron-down`, `ellipsis-vertical`, `x`, `plus`, `minus`,
 `check`, `circle-check`, `circle`, `search`, `wifi-off`, `volume-2`,
 `volume-x`, `log-out`, and for a row's menu `pencil`, `copy`, `archive`,
-`undo-2`, `badge-check`, `circle-plus`; for the shell and the figures
+`undo-2`, `badge-check`, `circle-plus`, `trash`, `folder`, `lock`, `receipt`; for the shell and the figures
 `panel-right` (the inspector's toggle), `wand-sparkles`, `refresh-cw`,
 `list-filter`, `mail`, `chart-column`, `list`, `settings`, `inbox`,
 `triangle-alert`, `clock`, `dollar-sign`, `banknote`, `cloud`, `target`,
@@ -104,6 +104,27 @@ by the generated views by these names.
 | WideButton | title, prominent, enabled, busy, onTap | `Button` / `OutlinedButton`, a spinner while busy | `.glassProminent` in the accent / `.glass`, a `ProgressView` while busy | `style::action` / `style::quiet`; the browser's `.ark-push` (`.ark-default`) |
 | StatusLine | text?, busy, problem? | a polite / assertive live region | the footnote quiet, the problem in `Color.error` | dim words, the problem in the danger colour; `role=status` / `alert` |
 | CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
+
+## Tables
+
+A table of rows (a register, a list of transactions) is laid out once
+(`data_table`, `table_column`, `table_row`, `table_heading` in
+`ark_app::view`): its columns, each a heading, a width (points, or a share
+of what is left), an alignment and where its cell goes when compact; its
+rows, each its cells' words with their tints and glyphs beside them (three
+lists of strings, `ark_app::view::Cells`), a dot while `marked`, lit while
+`selected`, its tap and its menu; headings among them (a day). From a
+regular width it is rows of cells under the headings; compact, each row is
+a list's two lines — the title and the words under it at the leading end,
+the figure and the words under it at the trailing end, by the columns'
+slots, the rest left out. The parts decide which, never the app.
+
+| Part | Inputs | Compose | SwiftUI | iced | Browser |
+|---|---|---|---|---|---|
+| DataTable | columns (`DataColumn`: heading, width, share, align, slot), rows | a `GroupCard`, its headings a row, compact below `COMPACT_WIDTH` (`TableParts.kt`) | a list's `Section` with the headings as its header, compact by the size class (`TableParts.swift`) | `arkui::table`'s headings and rows | `arkui_web::table` (`.ark-table`, `.ark-listed` when compact) |
+| DataTableRow | cells, tints, glyphs, marked, selected, said, menu, onTap | a `Press.Highlight` row, a `DropdownMenu` held | a button row, `.contextMenu` | a full-width row, its menu at the pointer | a grid row, its menu on right click |
+| DataTableHeading | title | a quiet label | a footnote header row | `table::section` | a heading row |
+| DateField | label, day (`2026-11-11`), onChange | a row, Material's `DatePickerDialog` | `DatePicker(.date)` | a text field | `fields::date_field` |
 
 ## A page about somebody
 

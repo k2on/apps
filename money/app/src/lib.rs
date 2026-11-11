@@ -15,7 +15,9 @@ pub mod accounts;
 pub mod budget;
 pub mod look;
 pub mod receipts;
+pub mod register;
 pub mod routes;
+pub mod sheets;
 pub mod shell;
 pub mod transactions;
 pub mod welcome;
@@ -38,8 +40,9 @@ pub use routes::Route;
 pub enum MoneyRequest {
     /// Ask the banks for anything new (pulled down, Sync with Banks).
     Refresh,
-    /// The reconcile sheet for the account of this hex id.
-    Reconcile { account: String },
+    /// A sheet over the app: a transaction's form, a category chosen, an
+    /// account reconciled (the sheets' runtime's).
+    Sheet { msg: sheets::SheetsMsg },
     /// A message for the Budget's runtime.
     Budget { msg: budget::BudgetMsg },
     /// A message for the Accounts' runtime.
@@ -48,8 +51,6 @@ pub enum MoneyRequest {
     StepMonth { by: i32 },
     /// The budget on this month.
     ThisMonth,
-    /// The transaction form, for a new one.
-    NewTransaction,
     /// A receipt imported from a file.
     ImportReceipt,
     /// A receipt's photo (a page scanned) kept: put on the device and sent
@@ -61,8 +62,9 @@ pub enum MoneyRequest {
     /// A category's month, named by a launch (its name or a word of it):
     /// in the inspector while it shows, pushed otherwise.
     OpenCategory { key: String },
-    /// A transaction a launch names (ui/docs/app.md's keys: `receipt`,
-    /// `review`, a number, a payee): its details, or its form.
+    /// A transaction a row or a launch names (its id, or ui/docs/app.md's
+    /// keys: `receipt`, `review`, a number, a payee): Transaction Details in
+    /// the inspector while it shows, its form otherwise.
     OpenTransaction { key: String },
     /// What the bank imported, to look over.
     Review,

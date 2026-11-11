@@ -417,6 +417,31 @@ pub enum Part<M> {
         enabled: Val<bool>,
         tap: M,
     },
+    /// A day chosen (`2026-11-11`): the system's date picker in a form's
+    /// row on the phones, a date field on the desktop and in the browser.
+    DateField {
+        label: &'static str,
+        day: Val<String>,
+        typed: Input<String, M>,
+    },
+
+    // A table (ui/docs/parts.md, Tables): rows of cells under column
+    // headings on a regular width, each row a list's two lines (its cells
+    // by their columns' slots) when compact. The parts decide which.
+    /// A table: its columns, then its rows ([`Part::TableRow`]s and
+    /// [`Part::TableHeading`]s).
+    Table {
+        columns: Vec<TableColumn>,
+        rows: Box<View<M>>,
+    },
+    /// One row of a table: a cell per column, marked (a dot before it: new,
+    /// unread) while `marked`, lit while `selected`; tapped, `tap`; held or
+    /// right-clicked, its menu.
+    TableRow(Box<TableRow<M>>),
+    /// A heading among a table's rows (a day): no cells, no press.
+    TableHeading {
+        title: Val<String>,
+    },
 
     // An app's first run (`crate::welcome`): any app's pages before it
     // has a server, and its sign-in, each the app's own words and mark.
@@ -1507,6 +1532,314 @@ pub fn form_button<M>(title: &'static str, enabled: impl Into<Val<bool>>, tap: M
     .into()
 }
 
+/// A day chosen, as `2026-11-11` ([`Part::DateField`]).
+pub fn date_field<M: 'static>(label: &'static str, day: impl Into<Val<String>>, typed: fn(String) -> M) -> View<M> {
+    Part::DateField {
+        label,
+        day: day.into(),
+        typed: Input::new(typed),
+    }
+    .into()
+}
+
+// * A table's parts
+
+/// How wide a table's column is: one of the theme's widths
+/// (`ui/theme.toml`'s `[layout]`), or a share of what is left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnWidth {
+    /// A column of figures (`amount-column-width`).
+    Figure,
+    /// A column of one mark (`mark-column-width`).
+    Mark,
+    /// A share of what is left after the others (a payee: 3, a memo: 2).
+    Share(u16),
+}
+
+impl ColumnWidth {
+    /// As the parts' enum spells it in Swift and Kotlin (`ColumnWidth`).
+    pub fn case(self) -> &'static str {
+        match self {
+            ColumnWidth::Figure => "figure",
+            ColumnWidth::Mark => "mark",
+            ColumnWidth::Share(_) => "share",
+        }
+    }
+}
+
+/// Where a column's cells sit in their column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnAlign {
+    Start,
+    /// Figures: at the end, their digits in columns.
+    End,
+    Center,
+}
+
+impl ColumnAlign {
+    /// As the parts' enum spells it in Swift and Kotlin (`ColumnAlign`).
+    pub fn case(self) -> &'static str {
+        match self {
+            ColumnAlign::Start => "start",
+            ColumnAlign::End => "end",
+            ColumnAlign::Center => "center",
+        }
+    }
+}
+
+/// Where a column's cell goes when a compact table is a list, as the
+/// iPhone's `List` row has them: the title and the words under it at the
+/// leading end, a figure and the words under it at the trailing end. A
+/// column with none is left out of a compact row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnSlot {
+    None,
+    Title,
+    Subtitle,
+    Trailing,
+    TrailingSub,
+}
+
+impl ColumnSlot {
+    /// As the parts' enum spells it in Swift and Kotlin (`ColumnSlot`).
+    pub fn case(self) -> &'static str {
+        match self {
+            ColumnSlot::None => "none",
+            ColumnSlot::Title => "title",
+            ColumnSlot::Subtitle => "subtitle",
+            ColumnSlot::Trailing => "trailing",
+            ColumnSlot::TrailingSub => "trailingSub",
+        }
+    }
+}
+
+/// A table's column: its heading, its width, how its cells line up and
+/// where they go when the table is compact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableColumn {
+    pub heading: &'static str,
+    pub width: ColumnWidth,
+    pub align: ColumnAlign,
+    pub slot: ColumnSlot,
+}
+
+/// A column `heading`, `width` wide, its cells at the start, left out when
+/// compact (see [`TableColumn::slot`]).
+pub fn table_column(heading: &'static str, width: ColumnWidth) -> TableColumn {
+    TableColumn {
+        heading,
+        width,
+        align: ColumnAlign::Start,
+        slot: ColumnSlot::None,
+    }
+}
+
+impl TableColumn {
+    /// Its cells at the end, figures in columns.
+    pub fn end(mut self) -> Self {
+        self.align = ColumnAlign::End;
+        self
+    }
+    pub fn center(mut self) -> Self {
+        self.align = ColumnAlign::Center;
+        self
+    }
+    /// Where its cell goes in a compact table's row.
+    pub fn slot(mut self, slot: ColumnSlot) -> Self {
+        self.slot = slot;
+        self
+    }
+}
+
+/// One cell of a table's row: its words, their tint (`""` the ink;
+/// `quiet`, `positive`, `caution`, `negative`, `accent`), and a glyph
+/// before them (a Lucide name, `""` for none). A cell with a glyph and no
+/// words is the glyph alone, said by the row's `said`. A record holds a
+/// row's cells as three lists ([`Cells`]), which every toolkit reads as
+/// plain strings.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct TableCell {
+    pub text: String,
+    pub tint: String,
+    pub glyph: String,
+}
+
+impl TableCell {
+    /// Words in the ink.
+    pub fn plain(text: impl Into<String>) -> TableCell {
+        TableCell {
+            text: text.into(),
+            ..TableCell::default()
+        }
+    }
+    /// Words in `tint`.
+    pub fn tinted(text: impl Into<String>, tint: &str) -> TableCell {
+        TableCell {
+            text: text.into(),
+            tint: tint.into(),
+            glyph: String::new(),
+        }
+    }
+    /// A glyph alone, in `tint`.
+    pub fn glyph(glyph: &str, tint: &str) -> TableCell {
+        TableCell {
+            text: String::new(),
+            tint: tint.into(),
+            glyph: glyph.into(),
+        }
+    }
+}
+
+/// A row's cells as a record holds them: their words, tints and glyphs,
+/// one of each a column ([`TableCell`]).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Cells {
+    pub text: Vec<String>,
+    pub tint: Vec<String>,
+    pub glyph: Vec<String>,
+}
+
+impl Cells {
+    pub fn of(cells: Vec<TableCell>) -> Cells {
+        let mut c = Cells::default();
+        for t in cells {
+            c.text.push(t.text);
+            c.tint.push(t.tint);
+            c.glyph.push(t.glyph);
+        }
+        c
+    }
+
+    /// The cells again, one a column (a list cut short is the ink, no glyph).
+    pub fn cells(text: Vec<String>, tint: Vec<String>, glyph: Vec<String>) -> Vec<TableCell> {
+        text.into_iter()
+            .enumerate()
+            .map(|(i, text)| TableCell {
+                text,
+                tint: tint.get(i).cloned().unwrap_or_default(),
+                glyph: glyph.get(i).cloned().unwrap_or_default(),
+            })
+            .collect()
+    }
+}
+
+/// A table of `columns` over `rows` ([`table_row`]s, [`table_heading`]s).
+pub fn data_table<M, const N: usize>(columns: [TableColumn; N], rows: impl Into<View<M>>) -> View<M> {
+    Part::Table {
+        columns: columns.to_vec(),
+        rows: Box::new(rows.into()),
+    }
+    .into()
+}
+
+/// A heading among a table's rows.
+pub fn table_heading<M>(title: impl Into<Val<String>>) -> View<M> {
+    Part::TableHeading { title: title.into() }.into()
+}
+
+/// ArkUI's `DataTableRow` ([`Part::TableRow`]).
+#[derive(Clone, Debug)]
+pub struct TableRow<M> {
+    /// A cell's words for each column, in their order; their tints and
+    /// glyphs beside them ([`TableCell`]).
+    pub cells: Val<Vec<String>>,
+    pub tints: Option<Val<Vec<String>>>,
+    pub glyphs: Option<Val<Vec<String>>>,
+    pub marked: Option<Val<bool>>,
+    pub selected: Option<Val<bool>>,
+    pub said: Option<Val<String>>,
+    pub tap: Option<M>,
+    pub menu: Vec<MenuItem<M>>,
+}
+
+/// A table's row of `cells`' words, one per column.
+pub fn table_row<M>(cells: impl Into<Val<Vec<String>>>) -> TableRow<M> {
+    TableRow {
+        cells: cells.into(),
+        tints: None,
+        glyphs: None,
+        marked: None,
+        selected: None,
+        said: None,
+        tap: None,
+        menu: vec![],
+    }
+}
+
+impl<M> TableRow<M> {
+    /// Each cell's tint ([`TableCell::tint`]).
+    pub fn tints(mut self, t: impl Into<Val<Vec<String>>>) -> Self {
+        self.tints = Some(t.into());
+        self
+    }
+    /// Each cell's glyph ([`TableCell::glyph`]).
+    pub fn glyphs(mut self, g: impl Into<Val<Vec<String>>>) -> Self {
+        self.glyphs = Some(g.into());
+        self
+    }
+    /// Its cells, as the toolkits draw them.
+    pub fn table_cells(&self) -> Vec<TableCell> {
+        Cells::cells(
+            self.cells.get(),
+            self.tints.as_ref().map(|t| t.get()).unwrap_or_default(),
+            self.glyphs.as_ref().map(|g| g.get()).unwrap_or_default(),
+        )
+    }
+    /// A dot before it while `b` holds: new, not yet looked at.
+    pub fn marked(mut self, b: impl Into<Val<bool>>) -> Self {
+        self.marked = Some(b.into());
+        self
+    }
+    /// Lit while `b` holds: what the inspector is about.
+    pub fn selected(mut self, b: impl Into<Val<bool>>) -> Self {
+        self.selected = Some(b.into());
+        self
+    }
+    pub fn said(mut self, s: impl Into<Val<String>>) -> Self {
+        self.said = Some(s.into());
+        self
+    }
+    pub fn on_tap(mut self, m: M) -> Self {
+        self.tap = Some(m);
+        self
+    }
+    /// `title` in what holding the row offers, while `shown` holds.
+    pub fn menu_if(
+        mut self,
+        title: impl Into<Val<String>>,
+        glyph: impl Into<Val<String>>,
+        tap: M,
+        destructive: bool,
+        shown: impl Into<Val<bool>>,
+    ) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(destructive),
+            shown: Some(shown.into()),
+        });
+        self
+    }
+    /// `title` in what holding the row offers, always.
+    pub fn menu(mut self, title: impl Into<Val<String>>, glyph: impl Into<Val<String>>, tap: M, destructive: bool) -> Self {
+        self.menu.push(MenuItem {
+            title: title.into(),
+            glyph: glyph.into(),
+            tap,
+            destructive: Val::Is(destructive),
+            shown: None,
+        });
+        self
+    }
+}
+
+impl<M> From<TableRow<M>> for View<M> {
+    fn from(r: TableRow<M>) -> View<M> {
+        Part::TableRow(Box::new(r)).into()
+    }
+}
+
 // * A first run's parts
 
 /// A first run's page: the app's mark, its title and sentence, then `content`.
@@ -2014,6 +2347,80 @@ impl<M> Part<M> {
                 vec![],
             ),
             Part::CodeImage { size, dark } => c("CodeImage", Some(G::Val(lit(size))), vec![("dark", G::Val(lit(dark)))], vec![]),
+            Part::DateField { label, day, typed } => c(
+                "DateField",
+                Some(G::Text(label)),
+                vec![("day", G::Val(lit(day))), ("onChange", G::Typed(typed))],
+                vec![],
+            ),
+            Part::Table { columns, rows } => c(
+                "DataTable",
+                None,
+                vec![(
+                    "columns",
+                    G::Items(
+                        columns
+                            .iter()
+                            .map(|k| {
+                                let share = match k.width {
+                                    ColumnWidth::Share(n) => n,
+                                    _ => 0,
+                                };
+                                Call {
+                                    name: "DataColumn",
+                                    first: Some(G::Text(k.heading)),
+                                    args: vec![
+                                        ("width", G::Case { of: "ColumnWidth", case: k.width.case() }),
+                                        ("share", G::Val(share.to_string())),
+                                        (
+                                            "align",
+                                            G::Case {
+                                                of: "ColumnAlign",
+                                                case: k.align.case(),
+                                            },
+                                        ),
+                                        (
+                                            "slot",
+                                            G::Case {
+                                                of: "ColumnSlot",
+                                                case: k.slot.case(),
+                                            },
+                                        ),
+                                    ],
+                                    slots: vec![],
+                                }
+                            })
+                            .collect(),
+                    ),
+                )],
+                vec![("", &**rows)],
+            ),
+            Part::TableRow(r) => {
+                let mut args = vec![];
+                if let Some(t) = &r.tints {
+                    args.push(("tints", G::Val(lit(t))));
+                }
+                if let Some(g) = &r.glyphs {
+                    args.push(("glyphs", G::Val(lit(g))));
+                }
+                if let Some(m) = &r.marked {
+                    args.push(("marked", G::Val(lit(m))));
+                }
+                if let Some(s) = &r.selected {
+                    args.push(("selected", G::Val(lit(s))));
+                }
+                if let Some(s) = &r.said {
+                    args.push(("said", G::Val(lit(s))));
+                }
+                if !r.menu.is_empty() {
+                    args.push(("menu", menu_items(&r.menu)));
+                }
+                if let Some(t) = &r.tap {
+                    args.push(("onTap", G::Act(t)));
+                }
+                c("DataTableRow", Some(G::Val(lit(&r.cells))), args, vec![])
+            }
+            Part::TableHeading { title } => c("DataTableHeading", Some(G::Val(lit(title))), vec![], vec![]),
             Part::Button { title, enabled, tap } => c(
                 "FormButton",
                 Some(G::Text(title)),
@@ -2463,6 +2870,26 @@ impl<M: 'static> Part<M> {
             },
             Part::StatusLine { text, busy, problem } => Part::StatusLine { text, busy, problem },
             Part::CodeImage { size, dark } => Part::CodeImage { size, dark },
+            Part::DateField { label, day, typed } => Part::DateField {
+                label,
+                day,
+                typed: input(typed, f),
+            },
+            Part::Table { columns, rows } => Part::Table { columns, rows: b(rows) },
+            Part::TableRow(r) => {
+                let r = *r;
+                Part::TableRow(Box::new(TableRow {
+                    cells: r.cells,
+                    tints: r.tints,
+                    glyphs: r.glyphs,
+                    marked: r.marked,
+                    selected: r.selected,
+                    said: r.said,
+                    tap: r.tap.map(|m| f(m)),
+                    menu: map_menu(r.menu, f),
+                }))
+            }
+            Part::TableHeading { title } => Part::TableHeading { title },
             Part::Button { title, enabled, tap } => Part::Button { title, enabled, tap: f(tap) },
             Part::Tabs {
                 selected,

@@ -246,6 +246,12 @@ public object ArkGlyphs {
     /** `trash`, Lucide's. */
     public val Trash: ImageVector = glyph("trash", "M3 6h18", "M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6", "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2")
 
+    /** `lock`, Lucide's. */
+    public val Lock: ImageVector = glyph("lock", "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z", "M7 11V7a5 5 0 0 1 10 0v4")
+
+    /** `receipt`, Lucide's. */
+    public val Receipt: ImageVector = glyph("receipt", "M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z", "M16 8h-6", "M16 12h-6", "M13 16h-3")
+
     /** `crosshair`, Lucide's. */
     public val Crosshair: ImageVector = glyph("crosshair", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M22 12h-4", "M6 12H2", "M12 6V2", "M12 22v-4")
 
@@ -258,7 +264,7 @@ public object ArkGlyphs {
             More, Back, Chevron, Volume, Muted, Settings, SignOut, Linked, Unlinked, Attention, Search, Close, Plus, Minus, Tick, Ticked,
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
-            Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Crosshair, Folder,
+            Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

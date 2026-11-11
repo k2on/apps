@@ -40,7 +40,7 @@ class Screens {
     @After fun close() = book.close()
 
     private fun shot(name: String, content: @Composable () -> Unit) {
-        val shell = Shell(book, SnackbarHostState(), {}, {}, {}, {}, {}, {})
+        val shell = Shell(book, SnackbarHostState(), {}, {}, {}, {}, {})
         for (dark in listOf(false, true)) {
             paparazzi.snapshot(if (dark) "$name-dark" else "$name-light") {
                 MoneyTheme(dark = dark, dynamic = false) {
@@ -103,8 +103,8 @@ class Screens {
 
     @Test fun register() {
         val card = book.state.value.accounts.first { it.kind == "credit" }
-        book.holdRegister(card.id)
-        shot("register") { RegisterScreen(book.state.value, card.id, onBack = none) }
+        val holder = RegisterHolder(book.session, {}, { book.state.value.today }, null, card.id.hex)
+        shot("register") { ScreenFrame { RegisterScreen(holder) } }
     }
 
     @Test fun settings() = shot("settings") { SettingsScreen(book.state.value, onBack = none) }

@@ -20,6 +20,8 @@ pub const TOOLBAR_HEIGHT: f32 = 52.0;
 pub const SEARCH_WIDTH: f32 = 320.0;
 /// A column of figures in a table or a budget's row.
 pub const AMOUNT_COLUMN_WIDTH: f32 = 112.0;
+/// A table's column of one mark: a row's cleared mark, a receipt's.
+pub const MARK_COLUMN_WIDTH: f32 = 28.0;
 /// The bar under a row's name that fills toward its goal, beside columns.
 pub const PROGRESS_WIDTH: f32 = 220.0;
 /// A line of text as tall as this many times its size (the desktop's: iced's).

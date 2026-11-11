@@ -155,8 +155,8 @@ pub enum AccountsMsg {
     CopyBalance {
         id: String,
     },
-    /// An account agreed with its bank: the shell's own sheet for it
-    /// (`MoneyRequest::Reconcile`) until reconciling moves here.
+    /// An account agreed with its bank: the sheets' Reconcile
+    /// (`money_app::sheets`).
     Reconcile {
         id: String,
     },
@@ -448,7 +448,9 @@ impl App for Accounts {
                 None => vec![],
             },
             M::Reconcile { id } => match find(accounts, &id) {
-                Some(a) if !a.closed => vec![Command::Request(crate::MoneyRequest::Reconcile { account: id })],
+                Some(a) if !a.closed => vec![Command::Request(crate::MoneyRequest::Sheet {
+                    msg: crate::sheets::SheetsMsg::Reconcile { account: id },
+                })],
                 _ => vec![],
             },
             M::CopyBalance { id } => match find(accounts, &id) {

@@ -294,7 +294,9 @@ impl App for MoneyShell {
                 vec![]
             }
             ShellMsg::Reconcile => match tagged_account(&s.section) {
-                Some(id) => vec![Command::Request(MoneyRequest::Reconcile { account: id.into() })],
+                Some(id) => vec![Command::Request(MoneyRequest::Sheet {
+                    msg: crate::sheets::SheetsMsg::Reconcile { account: id.into() },
+                })],
                 None => vec![],
             },
             ShellMsg::NewAccount => vec![Command::Request(MoneyRequest::Accounts {
@@ -304,7 +306,11 @@ impl App for MoneyShell {
             ShellMsg::NewCategory => budget(BudgetMsg::NewCategory { group: String::new() }),
             ShellMsg::NewGroup => budget(BudgetMsg::NewGroup),
             ShellMsg::ToggleHidden => budget(BudgetMsg::ToggleHidden),
-            ShellMsg::NewTransaction => vec![Command::Request(MoneyRequest::NewTransaction)],
+            ShellMsg::NewTransaction => vec![Command::Request(MoneyRequest::Sheet {
+                msg: crate::sheets::SheetsMsg::New {
+                    account: tagged_account(&s.section).map(String::from),
+                },
+            })],
             ShellMsg::ImportReceipt => vec![Command::Request(MoneyRequest::ImportReceipt)],
             ShellMsg::PreviousMonth => vec![Command::Request(MoneyRequest::StepMonth { by: -1 })],
             ShellMsg::NextMonth => vec![Command::Request(MoneyRequest::StepMonth { by: 1 })],
@@ -473,7 +479,9 @@ fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Comm
         }
         Some("add-transaction") => {
             select(s, SECTIONS[2].into(), data);
-            out.push(Command::Request(MoneyRequest::NewTransaction));
+            out.push(Command::Request(MoneyRequest::Sheet {
+                msg: crate::sheets::SheetsMsg::New { account: None },
+            }));
         }
         Some("settings") => out.push(Command::Request(MoneyRequest::Settings { pane: s.pane.clone() })),
         _ => {}

@@ -11,50 +11,11 @@
 import ArkUI
 import SwiftUI
 
-/// The sheets a screen can raise.
-enum Sheet: Identifiable {
-    /// The transaction form: a new one or one corrected.
-    case transaction(TxnForm)
-    /// A category's assigned amount, typed.
-    case assign(Id)
-    /// Money moved out of a category, or into an overspent one; none is from Ready to Assign.
-    case move(Id?)
-    case target(Id)
-    case addAccount
-    case reconcile(Id)
-    /// Transactions given a category, and approved with it when `approve`.
-    case categorize([Id], approve: Bool)
-    case newCategory(group: Id?)
-
-    var id: String {
-        switch self {
-        case let .transaction(d): return "txn-\(d.editing?.hex ?? "new")"
-        case let .assign(i): return "assign-\(i.hex)"
-        case let .move(i): return "move-\(i?.hex ?? "rta")"
-        case let .target(i): return "target-\(i.hex)"
-        case .addAccount: return "add-account"
-        case let .reconcile(i): return "reconcile-\(i.hex)"
-        case let .categorize(ids, a): return "categorize-\(a)-\(ids.map(\.hex).joined())"
-        case let .newCategory(g): return "new-\(g?.hex ?? "group")"
-        }
-    }
-}
-
-private struct PresentKey: EnvironmentKey {
-    static let defaultValue: (Sheet) -> Void = { _ in }
-}
-
 private struct OpenKey: EnvironmentKey {
     static let defaultValue: (Route) -> Void = { _ in }
 }
 
 extension EnvironmentValues {
-    /// Raise a sheet over the app.
-    var present: (Sheet) -> Void {
-        get { self[PresentKey.self] }
-        set { self[PresentKey.self] = newValue }
-    }
-
     /// Navigate to a route on the tab's own back stack: what the account sheet's rows open, once it has gone.
     var open: (Route) -> Void {
         get { self[OpenKey.self] }
@@ -65,19 +26,13 @@ extension EnvironmentValues {
 struct Shell: View {
     @EnvironmentObject private var model: Model
     @EnvironmentObject private var watched: Watched<MoneyView>
-    @State private var sheet: Sheet? = nil
     /// Each section's back stack, by its tag, of money's routes.
     @State private var paths: [String: NavigationPath] = [:]
-    /// What the inspector shows of a transaction, by its id (a category's
-    /// is the shell's own Category Details, written from Rust).
-    @State private var inspecting: Inspecting? = nil
     /// What the launch asked for that the household had not yet synced:
     /// tried again as the snapshot moves.
     @State private var pending: [MoneyRequest] = []
     /// Settings asked for by the launch: the Mac's window, a sheet elsewhere.
     @State private var settings = false
-
-    enum Inspecting: Equatable { case transaction(Id) }
 
     private func path(_ tag: String) -> Binding<NavigationPath> {
         Binding(get: { paths[tag] ?? NavigationPath() }, set: { paths[tag] = $0 })
@@ -105,7 +60,10 @@ struct Shell: View {
             .environmentObject(model.shell)
             .environment(\.hostedScreens) { name in AnyView(hosted(name)) }
             .environment(\.sectionPath) { tag in path(tag) }
-            .environment(\.present) { s in present(s) }
+            // The sheets any screen raises, written from Rust (Generated/SheetsView.swift).
+            .background {
+                if let s = model.sheets { SheetsView().environmentObject(s) }
+            }
             .onAppear {
                 model.shell.request = { r in run(r) }
                 model.shell.send(.month(month: model.month))
@@ -131,12 +89,6 @@ struct Shell: View {
             }
             // The budget's title is its month: the shell is told as it moves.
             .onChange(of: model.month) { model.shell.send(.month(month: model.month)) }
-            .sheet(item: $sheet) { s in
-                sheetView(s)
-                    .environmentObject(model)
-                    .environmentObject(watched)
-                    .environment(\.present) { next in present(next) }
-            }
             .toast($model.notice)
             // A link for the app, kept by the first run until the app showed:
             // taken as the shell appears, and as another comes.
@@ -156,9 +108,8 @@ struct Shell: View {
         guard let url = model.takeLink() else { return }
         Ready.shared.changed()
         if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
-            sheet = nil
+            model.sheets?.send(.dismiss)
             paths = [:]
-            inspecting = nil
             settings = false
             pending = []
             model.shell.send(.launch(args: args))
@@ -198,7 +149,7 @@ struct Shell: View {
                         .environment(\.choiceSymbol) { kind, _ in Accounts.symbol(kind) }
                         .onAppear {
                             a.open = { r in push("accounts", r) }
-                            a.reconcile = { id in present(.reconcile(id)) }
+                            a.request = { r in run(r) }
                         }
                 }
             case "transactions":
@@ -211,19 +162,16 @@ struct Shell: View {
                 }
             case "insights": InsightsView()
             case "accounts.register":
-                // The account the shell shows (its place's tag, `accounts/<id>`).
-                if let id = model.snapshot.accounts.first(where: { "accounts/\($0.id.hex)" == model.shell.page.section })?.id {
-                    // Under the shell's own search field (WithSearch).
-                    RegisterView(account: id, shellSearch: model.shell.page.search)
+                // The account the shell shows (its place's tag, `accounts/<id>`), under its search field.
+                if model.shell.page.section.hasPrefix("accounts/") {
+                    register(String(model.shell.page.section.dropFirst("accounts/".count)), search: model.shell.page.search)
                 } else {
                     ContentUnavailableView("No Account Selected", systemImage: "building.columns")
                 }
             case "budget.inspector":
                 nothingSelected
             case "transactions.inspector":
-                if case let .transaction(id)? = inspecting, let t = model.register(nil)?.first(where: { $0.id == id }) {
-                    TransactionDetail(txn: t)
-                } else { nothingSelected }
+                nothingSelected
             case "budget.inspector.none":
                 ContentUnavailableView("Nothing Selected", systemImage: "sidebar.trailing", description: Text("Select a row to see its details here."))
             case "household": AccountButton()
@@ -249,20 +197,37 @@ struct Shell: View {
             guard let l = categoryNamed(key) else { pending.append(r); return }
             inspect(category: l.categoryId.hex)
         case let .openTransaction(key):
-            guard let t = transactionNamed(key) else { pending.append(r); return }
-            if model.shell.page.inspector { inspecting = .transaction(t.id) } else { present(.transaction(TxnForm(t))) }
+            // Transaction Details in the inspector while it shows; its form otherwise.
+            if model.shell.page.inspector { return model.shell.send(.inspectTransaction(id: key)) }
+            guard let sheets = model.sheets else { pending.append(r); return }
+            sheets.send(.open(key: key))
+            // Not synced yet: tried again as the household arrives.
+            if sheets.page.transaction == nil { pending.append(r) }
+        case let .sheet(msg): model.sheets?.send(msg)
         case .settings: settings = true
-        case .newTransaction:
-            let a = usualAccount(accounts: model.snapshot.accounts)
-            present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
         case let .accounts(msg):
-            if case .add = msg { present(.addAccount) } else { model.accounts?.send(msg) }
+            model.shell.send(.select(tag: "accounts"))
+            model.accounts?.send(msg)
         case let .stepMonth(by): model.stepMonth(Int64(by))
         case .thisMonth: model.showThisMonth()
         case let .budget(msg): model.budget?.send(msg)
         case .refresh: Task { await model.refresh() }
-        case let .reconcile(account): present(.reconcile(Id(account)))
-        case .review, .filter, .importReceipt, .keepPhoto: break
+        // What the bank brought, to look over: Transactions' To Review.
+        case .review:
+            model.shell.send(.select(tag: "transactions"))
+            model.transactions?.send(.show(review: true))
+        case .filter, .importReceipt, .keepPhoto: break
+        }
+    }
+
+    /// A register, written from Rust (Generated/RegisterView.swift): the
+    /// account of this hex id's, or every account's for none.
+    @ViewBuilder private func register(_ account: String?, search: String) -> some View {
+        if let s = model.session {
+            let m = model
+            RegisterHost(session: s, devices: m.devices, account: account, search: search,
+                         refresh: { Task { await m.refresh() } }, today: { m.today }, run: { r in run(r) })
+                .id(account ?? "all")
         }
     }
 
@@ -273,92 +238,24 @@ struct Shell: View {
         return lines.first { $0.name.lowercased() == w } ?? lines.first { $0.name.lowercased().contains(w) }
     }
 
-    /// The transaction a launch names (SCREENS.md's keys): `receipt`, the
-    /// newest with a receipt; `review`, the newest waiting for a look; a
-    /// number, the n-th oldest; else a payee.
-    private func transactionNamed(_ key: String) -> TxnLine? {
-        guard let all = model.register(nil), !all.isEmpty else { return nil }
-        let k = key.lowercased()
-        switch k {
-        case "receipt": return all.first { !$0.receipt.isEmpty } ?? all.first { $0.photos > 0 }
-        case "review": return all.first { !$0.approved }
-        case "transfer": return all.first { $0.transfer }
-        default:
-            if let t = all.first(where: { $0.id.hex == k }) { return t }
-            if let n = Int(k), n >= 1, n <= all.count { return all.reversed()[n - 1] }
-            return all.first { $0.payee.lowercased().contains(k) }
-        }
-    }
-
-    private func present(_ s: Sheet) {
-        if sheet == nil {
-            sheet = s
-            return
-        }
-        sheet = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { sheet = s }
-    }
-
     /// What a route on the back stack draws. An account and a category are
     /// found by the route's id (an older link's by its name, `names`), so a
     /// renamed one keeps its page; a bank by its name, its key. An account
     /// that is gone is the route's fallback, All Accounts.
     @ViewBuilder private func destination(_ r: Route) -> some View {
         switch r {
-        case .accounts: RegisterView(account: nil)
-        case .account: RegisterView(account: model.snapshot.accounts.first { r.names(id: $0.id.hex, name: $0.name) }?.id)
+        case .accounts: register(nil, search: "")
+        case let .account(id, _): register(id, search: "")
         case .banks: BanksView()
         case let .bank(name): BankView(name: name)
         case .settings: SettingsView()
         default: EmptyView()
         }
     }
-
-    @ViewBuilder private func sheetView(_ s: Sheet) -> some View {
-        switch s {
-        case let .transaction(d): TransactionSheet(draft: d).presentationDetents([.large])
-        case let .assign(id): AssignSheet(id: id).presentationDetents([.medium])
-        case let .move(id): MoveSheet(id: id).presentationDetents([.medium, .large])
-        case let .target(id): TargetSheet(id: id).presentationDetents([.medium])
-        case .addAccount: AddAccountSheet().presentationDetents([.large])
-        case let .reconcile(id): ReconcileSheet(id: id).presentationDetents([.medium])
-        case let .categorize(ids, approve): CategorizeSheet(ids: ids, approve: approve).presentationDetents([.medium, .large])
-        case let .newCategory(group): NewCategorySheet(group: group).presentationDetents([.height(320)])
-        }
-    }
 }
 
 /// The launch arguments are read once a process.
 @MainActor private enum Launched { static var done = false }
-
-/// A transaction's details in the inspector: its payee and amount, then
-/// where and when, and what it was for.
-struct TransactionDetail: View {
-    let txn: TxnLine
-    @Environment(\.present) private var present
-
-    var body: some View {
-        Form {
-            Section {
-                VStack(spacing: 6) {
-                    Text(txn.payee).font(.headline)
-                    CentsText(txn.amount, signed: txn.amount > 0).font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .foregroundStyle(txn.amount > 0 ? Color.positive : Color.ink)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            Section {
-                LabeledContent("Account", value: txn.account)
-                LabeledContent("Date", value: txn.date)
-                LabeledContent("Category", value: txn.category)
-                LabeledContent("Status", value: txn.approved ? "Approved" : "Needs Review")
-                if !txn.memo.isEmpty { LabeledContent("Memo", value: txn.memo) }
-            }
-            Section { Button("Edit Transaction") { present(.transaction(TxnForm(txn))) } }
-        }
-        .formStyle(.grouped)
-    }
-}
 
 /// The account at the end of every tab's large title (ArkUI's `AccountFace`,
 /// on the title's own line by `largeTitleBar`): who is using the budget, as
@@ -424,20 +321,28 @@ struct AccountButton: View {
     }
 }
 
-/// The toolbar's add button: a new transaction in `account`, or the usual one.
-struct AddTransactionButton: View {
-    var account: Id? = nil
+/// A register over its runtime: its own for as long as it shows, read
+/// again as the household moves, searched by the shell's field.
+struct RegisterHost: View {
+    @StateObject private var screen: RegisterScreen
     @EnvironmentObject private var model: Model
-    @Environment(\.present) private var present
+    let search: String
+    let run: (MoneyRequest) -> Void
+
+    init(session: Session, devices: Devices?, account: String?, search: String,
+         refresh: @escaping () -> Void, today: @escaping () -> String, run: @escaping (MoneyRequest) -> Void) {
+        _screen = StateObject(wrappedValue: RegisterScreen(session: session, devices: devices, account: account, refresh: refresh, today: today))
+        self.search = search
+        self.run = run
+    }
 
     var body: some View {
-        Button {
-            let a = account ?? usualAccount(accounts: model.snapshot.accounts)
-            present(.transaction(TxnForm(account: a, accounts: model.snapshot.accounts, date: model.today)))
-        } label: {
-            Image(systemName: "plus")
-        }
-        .accessibilityLabel("Add Transaction")
+        RegisterView()
+            .environmentObject(screen)
+            .onAppear { screen.request = run }
+            .onChange(of: model.moves) { screen.reload() }
+            .onChange(of: search, initial: true) { _, q in screen.send(.search(text: q)) }
+            .onChange(of: model.shell.page.transaction?.id, initial: true) { _, id in screen.send(.select(id: id)) }
     }
 }
 

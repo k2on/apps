@@ -22,7 +22,9 @@ use ark_share::phone::Share;
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
 use money_app::receipts::{Receipts, ReceiptsMsg};
+use money_app::register::{Register, RegisterMsg};
 use money_app::routes::Route;
+use money_app::sheets::{Sheets, SheetsMsg};
 use money_app::shell::{MoneyShell, ShellMsg};
 use money_app::transactions::{Transactions, TransactionsMsg};
 use money_core::{self as domain, MoneyChange};
@@ -264,6 +266,16 @@ screen!(
     /// The Transactions tab, running (money/app/src/transactions): To
     /// Review and All, approving and categorizing.
     TransactionsApp, Transactions, TransactionsMsg, TransactionsMsgFfi, TransactionsPageFfi
+);
+screen!(
+    /// A register, running (money/app/src/register): an account's
+    /// transactions, or every account's, as a table.
+    RegisterApp, Register, RegisterMsg, RegisterMsgFfi, RegisterPageFfi
+);
+screen!(
+    /// The sheets over the app, running (money/app/src/sheets): a
+    /// transaction's form, a category given, an account reconciled.
+    SheetsApp, Sheets, SheetsMsg, SheetsMsgFfi, SheetsPageFfi
 );
 screen!(
     /// A transaction's receipt, being given (money/app/src/receipts): a

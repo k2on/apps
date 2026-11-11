@@ -12,6 +12,10 @@ fn every_screen_is_written_with_the_first_run_among_them() {
         "BudgetScreen.kt",
         "TransactionsView.swift",
         "TransactionsScreen.kt",
+        "RegisterView.swift",
+        "RegisterScreen.kt",
+        "SheetsView.swift",
+        "SheetsScreen.kt",
     ] {
         assert!(names.contains(&n), "{n} in {names:?}");
     }
@@ -24,6 +28,10 @@ fn every_screen_is_written_with_the_first_run_among_them() {
             }
         }
     }
+    let register = &files.iter().find(|(n, _)| n == "RegisterView.swift").unwrap().1;
+    assert!(register.contains("DataTable(columns: [DataColumn(\"Payee\"") && register.contains("DataTableRow("));
+    let register_kt = &files.iter().find(|(n, _)| n == "RegisterScreen.kt").unwrap().1;
+    assert!(register_kt.contains("ColumnSlot.TrailingSub") && register_kt.contains("ColumnAlign.End"));
     assert!(swift.contains("FirstRunPage(") && swift.contains("screen.send(.check)"));
     assert!(kotlin.contains("import uniffi.money_bridge.WelcomeMsg") && kotlin.contains("WelcomeMsg.Typed("));
 }

@@ -245,10 +245,12 @@ Foundation only — type-checked on Linux, tested there and on the simulator:
 - **`Banks`** — the asks followed (open Plaid's page once, the newest ask
   only), what each ask and bank says, and what a bank's account may feed.
 
-Apple's — compiled by CI: `MoneyApp`, `Shell` (tabs, routes, sheets),
-`BudgetView`, `CategoryView`, `AccountsView` (and Bank Connections),
-`RegisterView`, `TransactionsView`, `InsightsView`, `Sheets`,
-`SettingsView`, `OnboardingViews`, `Theme`.
+Apple's — compiled by CI: `MoneyApp`, `Shell` (the shell's host: routes,
+the generated screens hosted, a register's own runtime per register shown,
+the generated sheets over it), `InsightsView`, `SettingsView`, `BanksView`,
+the receipts' views, `Theme`. Budget, Accounts, Transactions, a register and
+the sheets (a transaction's form, Categorize, Reconcile) are generated from
+money/app.
 
 **From ArkUI** (`ui/swift`, any Ark app's, harken's use of it unchanged):
 in ArkUICore, `Cents` (amounts as typed, the keypad's digits), `Order`

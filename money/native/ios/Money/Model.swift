@@ -60,6 +60,8 @@ final class Model: ObservableObject {
     private(set) var receipts: ReceiptsScreen? = nil
     /// The Transactions tab, running in Rust (money/app/src/transactions).
     @Published private(set) var transactions: TransactionsScreen? = nil
+    /// The sheets over the app, running in Rust (money/app/src/sheets).
+    @Published private(set) var sheets: SheetsScreen? = nil
     /// Told which views moved, on the main queue: the app's `Watched`.
     var onMoved: ([MoneyView]) -> Void = { _ in }
 
@@ -232,6 +234,7 @@ final class Model: ObservableObject {
                             self?.accounts?.reload()
                             self?.budget?.reload()
                             self?.transactions?.reload()
+                            self?.sheets?.reload()
                             self?.shell.reload()
                             self?.onMoved(views)
                         })
@@ -254,6 +257,9 @@ final class Model: ObservableObject {
         transactions = TransactionsScreen(session: s, devices: devices, month: month,
                                           refresh: { [weak self] in Task { await self?.refresh() } },
                                           today: { [weak self] in self?.today ?? moneyToday() })
+        sheets = SheetsScreen(session: s, devices: devices, month: month,
+                              refresh: { [weak self] in Task { await self?.refresh() } },
+                              today: { [weak self] in self?.today ?? moneyToday() })
         shell.connect(session: s,
                       refresh: { [weak self] in Task { await self?.refresh() } },
                       today: { [weak self] in self?.today ?? moneyToday() })
@@ -265,6 +271,7 @@ final class Model: ObservableObject {
         accounts = nil
         budget = nil
         transactions = nil
+        sheets = nil
         receipts = nil
         shell.disconnect()
         session = nil
@@ -328,6 +335,7 @@ final class Model: ObservableObject {
         bridge?.show(month: m)
         budget?.send(.month(month: m))
         transactions?.send(.month(month: m))
+        sheets?.send(.month(month: m, today: today))
     }
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }
@@ -350,14 +358,6 @@ final class Model: ObservableObject {
         return f(s)
     }
 
-    /// `account`'s register (none: every account's), while a screen holds it.
-    func register(_ account: Id?) -> [TxnLine]? { read(.register(account: account)) { $0.register(account: account) } }
-
-    /// What a search finds in `account`'s register (none: every account's), while a screen holds it.
-    func search(_ account: Id?, _ text: String) -> [TxnLine]? {
-        read(.search(account: account, text: text)) { $0.search(account: account, text: text) }
-    }
-
     /// What paid for `txn`, while a screen holds it.
     func paid(_ txn: Id) -> [ReceiptLine] {
         read(.paid(txn: txn)) { $0.paid(txn: txn) } ?? []
@@ -368,58 +368,12 @@ final class Model: ObservableObject {
         read(.items(receipt: receipt)) { $0.items(receipt: receipt) } ?? []
     }
 
-    // MARK: the budget's buttons
+    // MARK: what is written
 
     private func write(_ what: String, _ change: MoneyChange, done: @escaping (Bool) -> Void = { _ in }) {
         guard let b = bridge else { return done(false) }
         b.write(what, change, done: done)
     }
-
-    /// Give a category exactly `cents` this month.
-    func assign(_ id: Id, _ cents: Int64, done: @escaping (Bool) -> Void = { _ in }) {
-        let m = month
-        write("assign it", .assign(value: Assign(month: m, categoryId: id, amount: cents)), done: done)
-    }
-
-    /// Money moved between `line` and `other` (either none for Ready to Assign), as [Moves] says.
-    func move(_ line: BudgetLine?, _ other: Id?, _ cents: Int64, done: @escaping (Bool) -> Void = { _ in }) {
-        let mm = Moves.of(month: month, line: line, other: other, cents: cents)
-        write("move the money", .moveMoney(value: mm), done: done)
-    }
-
-    /// The whole month (or `only` these) assigned at once.
-    func autoAssign(_ how: Auto, only: [Id] = []) {
-        let m = month
-        write("auto-assign", .autoAssign(value: AutoAssign(month: m, how: how, only: only)))
-    }
-
-    func setTarget(_ id: Id, _ cents: Int64) { write("set the target", .setTarget(value: SetTarget(id: id, target: cents))) }
-    func addGroup(_ name: String) { write("add the group", .addGroup(value: AddGroup(name: name))) }
-    func addCategory(_ group: Id, _ name: String) { write("add the category", .addCategory(value: AddCategory(groupId: group, name: name))) }
-    func rename(category id: Id, _ name: String) { write("rename it", .renameCategory(value: RenameCategory(id: id, name: name))) }
-    func rename(group id: Id, _ name: String) { write("rename it", .renameGroup(value: RenameGroup(id: id, name: name))) }
-    func hide(category id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", .hideCategory(value: HideCategory(id: id, hidden: hidden))) }
-    func hide(group id: Id, _ hidden: Bool) { write(hidden ? "hide it" : "show it", .hideGroup(value: HideGroup(id: id, hidden: hidden))) }
-    func delete(category id: Id, moveTo: Id?) { write("delete it", .deleteCategory(value: DeleteCategory(id: id, moveTo: moveTo))) }
-    func delete(group id: Id, moveTo: Id?) { write("delete it", .deleteGroup(value: DeleteGroup(id: id, moveTo: moveTo))) }
-
-    // MARK: transactions
-
-    /// The form saved: a new transaction, or the one corrected.
-    func save(_ f: TxnForm, done: @escaping (Bool) -> Void = { _ in }) {
-        let d = f.sent
-        guard let change = d.toChange() else {
-            notice = d.problem() ?? "Couldn't save it."
-            return done(false)
-        }
-        write(d.editing == nil ? "add it" : "save it", change, done: done)
-    }
-
-    func delete(_ ids: [Id]) { write("delete it", .deleteTransactions(value: Txns(ids: ids))) }
-    func approve(_ ids: [Id]) { write("approve it", .approve(value: Txns(ids: ids))) }
-    /// Given a category, which is looking at them: they are approved with it.
-    func categorize(_ ids: [Id], _ category: Id?) { write("categorize it", .categorize(value: Categorize(ids: ids, categoryId: category))) }
-    func setCleared(_ id: Id, _ cleared: Bool) { write("mark it", .setCleared(value: SetCleared(id: id, cleared: cleared))) }
 
     // MARK: receipts
 
@@ -448,22 +402,6 @@ final class Model: ObservableObject {
     /// A receipt said to be what paid for `txn`; none, for nothing.
     func pay(receipt: String, with txn: Id?) {
         write(txn == nil ? "take the receipt off" : "match the receipt", .pay(value: MatchReceipt(receiptId: receipt, txnId: txn)))
-    }
-
-    // MARK: accounts
-
-    func openAccount(name: String, kind: AccountKind, onBudget: Bool, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {
-        let input = OpenAccount(name: name, kind: kind, onBudget: onBudget, balance: balance, date: today)
-        write("add the account", .openAccount(value: input), done: done)
-    }
-
-    func rename(account id: Id, _ name: String) { write("rename it", .renameAccount(value: RenameAccount(id: id, name: name))) }
-    func close(account id: Id, _ closed: Bool) { write(closed ? "close it" : "reopen it", .closeAccount(value: CloseAccount(id: id, closed: closed))) }
-
-    /// The account agreed with the bank at `balance`: an adjustment for any difference, and what was cleared locked.
-    func reconcile(_ id: Id, balance: Int64, done: @escaping (Bool) -> Void = { _ in }) {
-        let d = today
-        write("reconcile it", .reconcile(value: Reconcile(accountId: id, balance: balance, date: d)), done: done)
     }
 
     // MARK: the bank

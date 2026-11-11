@@ -51,6 +51,28 @@ pub fn screens() -> ark_ui_gen::app::App {
                     msg: "TransactionsMsg",
                 },
             ),
+            Generated::view(
+                money_app::register::view::register::record,
+                Names {
+                    swift: "RegisterView",
+                    swift_holder: "RegisterScreen",
+                    kotlin: "RegisterScreen",
+                    kotlin_holder: "RegisterHolder",
+                    source: "money/app/src/register/view.rs",
+                    msg: "RegisterMsg",
+                },
+            ),
+            Generated::view(
+                money_app::sheets::view::sheets::record,
+                Names {
+                    swift: "SheetsView",
+                    swift_holder: "SheetsScreen",
+                    kotlin: "SheetsScreen",
+                    kotlin_holder: "SheetsHolder",
+                    source: "money/app/src/sheets/view.rs",
+                    msg: "SheetsMsg",
+                },
+            ),
             Generated::view(money_app::shell::view::money_shell::record, shell),
             // The first run's pages, every Ark app's (ark_app::welcome),
             // over the model's FirstRunApp.

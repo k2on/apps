@@ -42,6 +42,7 @@ LAYOUT = {
     "toolbar-height": "A window's toolbar row.",
     "search-width": "The search field at a toolbar's trailing end.",
     "amount-column-width": "A column of figures in a table or a budget's row.",
+    "mark-column-width": "A table's column of one mark: a row's cleared mark, a receipt's.",
     "progress-width": "The bar under a row's name that fills toward its goal, beside columns.",
     "line-height": "A line of text as tall as this many times its size (the desktop's: iced's).",
 }

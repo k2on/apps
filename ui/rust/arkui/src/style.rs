@@ -22,7 +22,7 @@ use crate::theme::of;
 
 /// How much of the text colour secondary text is: the least that still reads
 /// at 4.5:1 on either page (ui/README.md), 0.6 being a shade under it on white.
-const DIM: f32 = 0.65;
+pub const DIM: f32 = 0.65;
 
 /// Secondary text: a clock, a count, a hint.
 ///

@@ -9,6 +9,8 @@
 // TalkBack in a sentence.
 package dev.money.android
 
+import androidx.compose.ui.graphics.luminance
+import dev.arkui.Tokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -230,3 +232,7 @@ private fun Bar(fraction: Float, color: Color, value: String) {
             modifier = Modifier.widthIn(min = 80.dp))
     }
 }
+
+/** What came in, in the theme's positive green: the iPhone's `.positive`. */
+@Composable
+private fun positiveColor(): Color = Tokens.of(dark = MaterialTheme.colorScheme.background.luminance() < 0.5f).positive

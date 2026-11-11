@@ -1,6 +1,6 @@
 // The session over the demo's household, as the screens use it: the
 // accounts in their sections, a register held and let go, the inbox
-// approved, a transaction typed into the form and saved, the bank's syncs,
+// approved, the bank's syncs,
 // and a refusal said in the domain's words.
 @testable import Money
 import Foundation
@@ -31,23 +31,6 @@ final class SessionTests: XCTestCase {
         let rows = s.register(checking.id) ?? []
         XCTAssertFalse(rows.isEmpty)
         XCTAssertTrue(rows.allSatisfy { $0.accountId == checking.id })
-        // Newest first, a day at a time.
-        let days = Registers.days(rows)
-        XCTAssertEqual(days.map { $0.day }, days.map { $0.day }.sorted(by: >))
-        XCTAssertEqual(days.reduce(0) { $0 + $1.rows.count }, rows.count)
-
-        var d = TxnForm(account: checking.id, accounts: s.snap.accounts, date: Fx.today)
-        d.payee = "Corner Bakery"
-        d.cents = 1_250
-        d.choose(category: s.line("Dining Out")?.categoryId)
-        guard let add = d.sent.toChange() else { return XCTFail("a new transaction's change") }
-        XCTAssertEqual(d.sent.amount, -1_250)
-        s.write(add)
-        let after = s.register(checking.id) ?? []
-        XCTAssertEqual(after.count, rows.count + 1)
-        XCTAssertEqual(after.first?.payee, "Corner Bakery")
-        XCTAssertEqual(after.first?.category, "Dining Out")
-
         s.release(.register(account: checking.id))
         XCTAssertNil(s.register(checking.id))
     }
@@ -85,8 +68,7 @@ final class SessionTests: XCTestCase {
         // What the bank brought is opened with what the bank called it.
         guard let t = s.snap.inbox.first(where: { $0.imported }) else { return XCTFail("an imported line") }
         XCTAssertFalse(t.importedPayee.isEmpty)
-        XCTAssertEqual(TxnForm(t).bank, t.bankSaid())
-        XCTAssertNotNil(TxnForm(t).bank, "\(t.payee) / \(t.importedPayee)")
+        XCTAssertNotNil(t.bankSaid(), "\(t.payee) / \(t.importedPayee)")
     }
 
     /// A refusal is the domain's sentence, said once.

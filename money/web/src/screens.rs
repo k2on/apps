@@ -1,15 +1,13 @@
-//! The screens money's shell hosts by name that are not in Rust's view
-//! vocabulary yet (ui/docs/app.md, "Escape Hatches"), drawn in arkui-web's
-//! parts as money/iced draws its own in arkui's: the budget and its
-//! inspector, a register and a transaction's inspector, Insights, the
-//! sidebar's foot, Settings' panes; and what goes over the page — New
-//! Transaction's sheet, the question before Approve All, Settings.
+//! The screens money's shell hosts by name: the ones written once in Rust
+//! (Budget, Accounts, Transactions, a register, the sheets over the page)
+//! drawn from their views, and those not in Rust's view vocabulary yet
+//! (ui/docs/app.md, "Escape Hatches") drawn in arkui-web's parts as
+//! money/iced draws its own in arkui's: the budget's inspector with nothing
+//! chosen, Insights, the sidebar's foot, Settings' panes.
 
 use std::rc::Rc;
 
 use arkui_web::figures::{self, Bar, Series};
-use arkui_web::menu::Entry;
-use arkui_web::table::{self, column, Align, Slot, TableRow};
 use arkui_web::{amount, fields, glyph, money, parts, quiet, send, AnyView};
 use leptos::html;
 use leptos::prelude::*;
@@ -19,7 +17,7 @@ use money_core::budget::ready_to_assign;
 use money_core::dates::add_months;
 use money_core::*;
 
-use crate::{Asking, DraftMsg, MoneyWeb, Msg};
+use crate::{MoneyWeb, Msg};
 
 pub fn lines(app: &MoneyWeb) -> &[BudgetLine] {
     app.store.rows(&MoneyView::Lines { month: app.month.clone() })
@@ -34,10 +32,6 @@ pub fn summary(app: &MoneyWeb) -> Summary {
 
 pub fn all_txns(app: &MoneyWeb) -> &[TxnLine] {
     app.store.rows(&MoneyView::Register { account: None })
-}
-
-pub fn open_accounts(app: &MoneyWeb) -> Vec<&AccountLine> {
-    app.store.rows::<AccountLine>(&MoneyView::Accounts).iter().filter(|a| !a.closed).collect()
 }
 
 /// A screen the shell hosts, by name.
@@ -63,11 +57,15 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
             &app.accounts.screen_of(&app.store, app.now_ms()),
         )),
         "accounts.register" => match tagged_account(&section) {
-            Some(hex) => register(app, Some(hex.to_string())),
+            Some(_) => {
+                arkui_web::render(money_app::register::view::register::view(&app.register.screen_of(&app.store, app.now_ms())).map(Msg::Register))
+            }
             None => quiet("Select an Account"),
         },
-        "transactions" => register(app, None),
-        "transactions.inspector" => txn_inspector(app),
+        "transactions" => arkui_web::render(
+            money_app::transactions::view::transactions::view(&app.transactions.screen_of(&app.store, app.now_ms())).map(Msg::Transactions),
+        ),
+        "transactions.inspector" => quiet("No Transaction Selected"),
         "insights" => insights(app),
         "household" => household(),
         "settings.general" => settings_general(),
@@ -133,190 +131,6 @@ fn quiet_button(label: &str, m: Msg) -> AnyView {
         .class("ark-link")
         .on(leptos::ev::click, move |_| send(m.clone()))
         .child(label.to_string())
-        .into_any()
-}
-
-// * Registers
-
-fn date_cell(d: &str) -> String {
-    ark_format::day_long(d)
-}
-
-/// A register: every account's, or one's (`account`, its hex id); what is
-/// searched for kept, what waits for a look over it.
-fn register(app: &MoneyWeb, account: Option<String>) -> AnyView {
-    let q = app.search.to_lowercase();
-    let all = all_txns(app);
-    let shown: Vec<&TxnLine> = all
-        .iter()
-        .filter(|t| account.as_ref().is_none_or(|a| t.account_id.hex() == *a))
-        .filter(|t| !app.review || !t.approved || (t.category_id.is_none() && !t.transfer))
-        .filter(|t| {
-            q.is_empty()
-                || t.payee.to_lowercase().contains(&q)
-                || t.category.to_lowercase().contains(&q)
-                || t.memo.to_lowercase().contains(&q)
-                || money(t.amount).contains(&q)
-        })
-        .collect();
-    let waiting: Vec<Id<Txn>> = all
-        .iter()
-        .filter(|t| account.as_ref().is_none_or(|a| t.account_id.hex() == *a))
-        .filter(|t| !t.approved)
-        .map(|t| t.id)
-        .collect();
-    let notice = (!waiting.is_empty()).then(|| {
-        let n = waiting.len();
-        figures::notice_bar(
-            "inbox",
-            &format!("{n} new transaction{} from your banks", if n == 1 { "" } else { "s" }),
-            vec![
-                figures::capsule_button(None, if app.review { "Show All" } else { "Review" }, false, Msg::Review(!app.review)),
-                figures::capsule_button(None, "Approve All", true, Msg::AskApprove),
-            ],
-        )
-    });
-    let one = account.is_some();
-    let mut columns = vec![
-        column("Date", "112px", Align::Start).slot(Slot::TrailingSub),
-        column("Payee", "minmax(140px,1.3fr)", Align::Start).slot(Slot::Title),
-        column("Category", "minmax(120px,1fr)", Align::Start).slot(Slot::Subtitle),
-    ];
-    if !one {
-        columns.push(column("Account", "minmax(110px,1fr)", Align::Start).wide_only().slot(Slot::Subtitle));
-    }
-    columns.push(column("Memo", "minmax(80px,1fr)", Align::Start).wide_only());
-    columns.push(column("Amount", "var(--ark-amount-column-width)", Align::End).slot(Slot::Trailing));
-    columns.push(column("Cleared", "60px", Align::Center).wide_only());
-    let categories: Vec<(Id<Category>, String, String)> = {
-        let mut ls: Vec<&BudgetLine> = lines(app).iter().filter(|l| !l.hidden).collect();
-        ls.sort_by_key(|l| (l.group_pos, l.pos));
-        ls.into_iter().map(|l| (l.category_id, l.group.clone(), l.name.clone())).collect()
-    };
-    let rows: Vec<TableRow> = shown
-        .into_iter()
-        .map(|t| {
-            let id = t.id;
-            let cleared = t.cleared != Cleared::Uncleared;
-            let mut cells = vec![
-                html::span().child(date_cell(&t.date)).into_any(),
-                html::span()
-                    .class("money-payee")
-                    .child((
-                        (!t.approved).then(|| html::span().class("ark-unread-dot")),
-                        html::span().child(t.payee.clone()),
-                    ))
-                    .into_any(),
-                match (&t.category_id, t.category.is_empty()) {
-                    _ if t.transfer => html::span().class("ark-quiet").child("Transfer").into_any(),
-                    (None, _) | (_, true) => html::span().class("money-needs").child("Needs Category").into_any(),
-                    _ => html::span().child(t.category.clone()).into_any(),
-                },
-            ];
-            if !one {
-                cells.push(html::span().class("ark-quiet").child(t.account.clone()).into_any());
-            }
-            cells.push(html::span().class("ark-quiet").child(t.memo.clone()).into_any());
-            cells.push(arkui_web::signed(t.amount));
-            let said = if cleared { "Cleared" } else { "Uncleared" };
-            cells.push(
-                arkui_web::wired!(html::button(), arkui_web::tapped(said, &Msg::Cleared(id, !cleared)))
-                    .class(if cleared { "ark-check-button ark-on" } else { "ark-check-button" })
-                    .attr("aria-label", if cleared { "Cleared" } else { "Uncleared" })
-                    .on(leptos::ev::click, move |e: web_sys::MouseEvent| {
-                        e.stop_propagation();
-                        send(Msg::Cleared(id, !cleared))
-                    })
-                    .child(glyph(if cleared { "circle-check" } else { "circle" }, 14))
-                    .into_any(),
-            );
-            // A category by its group: a submenu each, as a Mac's menu nests.
-            let mut by_group: Vec<(String, Vec<Entry>)> = vec![];
-            for (c, g, n) in &categories {
-                let e = Entry::run(None, n.clone(), Msg::Categorize(id, Some(*c))).checked(t.category_id == Some(*c));
-                match by_group.last_mut() {
-                    Some((last, es)) if last == g => es.push(e),
-                    _ => by_group.push((g.clone(), vec![e])),
-                }
-            }
-            let mut menu = vec![Entry::run(Some("panel-right"), "Show Details", Msg::Txn(Some(id)))];
-            if !t.approved {
-                menu.push(Entry::run(Some("check"), "Approve", Msg::Approve(vec![id])));
-            }
-            menu.push(Entry::run(
-                Some(if cleared { "circle" } else { "circle-check" }),
-                if cleared { "Mark Uncleared" } else { "Mark Cleared" },
-                Msg::Cleared(id, !cleared),
-            ));
-            menu.push(Entry::sub(
-                Some("tag"),
-                "Categorize",
-                by_group.into_iter().map(|(g, es)| Entry::sub(None, g, es)).collect(),
-            ));
-            menu.push(Entry::Separator);
-            menu.push(Entry::run(Some("copy"), "Copy Amount", Msg::Dismiss));
-            let mut r = TableRow::new(t.payee.clone(), cells);
-            r.open = Some(Rc::new(move || send(Msg::Txn(Some(id)))));
-            r.menu = menu;
-            r.selected = app.txn == Some(id);
-            r
-        })
-        .collect();
-    html::div()
-        .class("ark-column ark-fill money-register")
-        .child((notice, table::table(&columns, rows)))
-        .into_any()
-}
-
-fn txn_inspector(app: &MoneyWeb) -> AnyView {
-    let Some(t) = app.txn.and_then(|id| all_txns(app).iter().find(|t| t.id == id)) else {
-        return quiet("No Transaction Selected");
-    };
-    let id = t.id;
-    let fact = |label: &str, value: String| {
-        html::div()
-            .class("ark-figure-row")
-            .child((html::span().class("ark-caption").child(label.to_string()), html::span().child(value)))
-            .into_any()
-    };
-    let cleared = match t.cleared {
-        Cleared::Uncleared => "Uncleared",
-        Cleared::Cleared => "Cleared",
-        Cleared::Reconciled => "Reconciled",
-    };
-    html::div()
-        .class("ark-inspector-body")
-        .child((
-            html::div()
-                .class("ark-inspector-head")
-                .child((
-                    html::div().child((
-                        html::h2().class("ark-inspector-title").child(t.payee.clone()),
-                        html::div().class("ark-caption").child(date_cell(&t.date)),
-                    )),
-                    arkui_web::shell::bar_button("Close", "x", true, Msg::Txn(None)),
-                ))
-                .into_any(),
-            html::div().class("ark-headline").child(arkui_web::signed(t.amount)).into_any(),
-            card(
-                None,
-                vec![
-                    fact("Account", t.account.clone()),
-                    fact(
-                        "Category",
-                        if t.category.is_empty() {
-                            "Needs Category".into()
-                        } else {
-                            t.category.clone()
-                        },
-                    ),
-                    fact("Memo", t.memo.clone()),
-                    fact("Cleared", cleared.into()),
-                    fact("Imported As", t.imported_payee.clone()),
-                ],
-            ),
-            (!t.approved).then(|| figures::capsule_button(Some("check"), "Approve", true, Msg::Approve(vec![id]))),
-        ))
         .into_any()
 }
 
@@ -520,7 +334,7 @@ fn settings_banks(app: &MoneyWeb) -> AnyView {
 
 // * Over the page
 
-/// What goes over the window: Settings, New Transaction's sheet, a question.
+/// What goes over the window: Settings, and the sheets (`money_app::sheets`).
 pub fn over(app: &MoneyWeb, page: &ShellPage) -> AnyView {
     let settings = app.settings.then(|| {
         let hosts = |name: &'static str| hosted(app, name);
@@ -532,97 +346,8 @@ pub fn over(app: &MoneyWeb, page: &ShellPage) -> AnyView {
             Rc::new(|| send(Msg::Settings(false))),
         )
     });
-    let draft = app.draft.as_ref().map(|f| draft_sheet(app, f));
-    let asking = app.asking.as_ref().map(|a| match a {
-        Asking::ApproveAll(n) => {
-            let ids: Vec<Id<Txn>> = all_txns(app).iter().filter(|t| !t.approved).map(|t| t.id).collect();
-            parts::modal(
-                format!("Approve {n} Transactions?"),
-                vec![html::p()
-                    .class("ark-dialog-message")
-                    .child("They are imported from your banks and have not been looked at yet.")
-                    .into_any()],
-                vec![
-                    parts::push_button("Cancel", true, false, Msg::Dismiss),
-                    parts::push_button("Approve All", true, true, Msg::Approve(ids)),
-                ],
-                Rc::new(|| send(Msg::Dismiss)),
-            )
-        }
-    });
-    (settings, draft, asking).into_any()
-}
-
-fn draft_sheet(app: &MoneyWeb, f: &crate::Draft) -> AnyView {
-    let mut groups: Vec<(String, Vec<Entry>)> = vec![];
-    let mut ls: Vec<&BudgetLine> = lines(app).iter().filter(|l| !l.hidden).collect();
-    ls.sort_by_key(|l| (l.group_pos, l.pos));
-    let mut chosen_name = "Needs Category".to_string();
-    for l in ls {
-        if f.category == Some(l.category_id) {
-            chosen_name = l.name.clone();
-        }
-        let e = Entry::run(None, l.name.clone(), Msg::Draft(DraftMsg::Category(Some(l.category_id)))).checked(f.category == Some(l.category_id));
-        match groups.last_mut() {
-            Some((g, es)) if *g == l.group => es.push(e),
-            _ => groups.push((l.group.clone(), vec![e])),
-        }
-    }
-    let category_entries: Vec<Entry> =
-        std::iter::once(Entry::run(None, "Needs Category", Msg::Draft(DraftMsg::Category(None))).checked(f.category.is_none()))
-            .chain(std::iter::once(Entry::Separator))
-            .chain(groups.into_iter().map(|(g, es)| Entry::sub(None, g, es)))
-            .collect();
-    let accounts: Vec<(String, arkui_web::Action)> = open_accounts(app)
-        .into_iter()
-        .map(|a| {
-            let id = a.id;
-            (
-                a.name.clone(),
-                Rc::new(move || send(Msg::Draft(DraftMsg::Account(id)))) as arkui_web::Action,
-            )
-        })
-        .collect();
-    let account_name = f
-        .account
-        .and_then(|id| open_accounts(app).into_iter().find(|a| a.id == id).map(|a| a.name.clone()))
-        .unwrap_or_default();
-    let category_face = html::span()
-        .class("ark-picker-face")
-        .child((html::span().child(chosen_name), glyph("chevron-down", 12)))
-        .into_any();
-    let entries = Rc::new(move || category_entries.clone());
-    let body = vec![
-        fields::suggest_field("payee", "Payee", f.payee.clone(), Rc::new(|s| send(Msg::Draft(DraftMsg::Payee(s))))),
-        html::div()
-            .class("ark-form-row")
-            .child((
-                fields::text_field("Amount", f.amount.clone(), Rc::new(|s| send(Msg::Draft(DraftMsg::Amount(s))))),
-                fields::date_field("date", "Date", f.date.clone(), Rc::new(|s| send(Msg::Draft(DraftMsg::Date(s))))),
-            ))
-            .into_any(),
-        html::div()
-            .class("ark-form-row")
-            .child((
-                html::div().class("ark-field").child((
-                    html::span().class("ark-caption").child("Category"),
-                    arkui_web::menu::button("category", "Category", category_face, "ark-picker", entries),
-                )),
-                fields::picker("account", "Account", account_name, accounts),
-            ))
-            .into_any(),
-        fields::text_field("Memo", f.memo.clone(), Rc::new(|s| send(Msg::Draft(DraftMsg::Memo(s))))),
-        f.problem.clone().map(|p| html::span().class("ark-problem").child(p)).into_any(),
-    ];
-    parts::modal(
-        "New Transaction".into(),
-        body,
-        vec![
-            parts::push_button("Cancel", true, false, Msg::Dismiss),
-            parts::push_button("Add Transaction", true, true, Msg::SaveDraft),
-        ],
-        Rc::new(|| send(Msg::Dismiss)),
-    )
+    let sheets = arkui_web::render(money_app::sheets::view::sheets::view(&app.sheets.screen_of(&app.store, app.now_ms())).map(Msg::Sheets));
+    (settings, sheets).into_any()
 }
 
 impl MoneyWeb {

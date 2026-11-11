@@ -301,6 +301,10 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
             ..
         } => crate::shell::bar_button(title, g, enabled.get(), tap),
         Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
+        Part::DateField { label, day, typed } => crate::fields::date_field(label, label, day.get(), Rc::new(move |s| send(typed.call(s)))),
+        Part::Table { columns, rows } => data_table(columns, *rows),
+        Part::TableRow(r) => data_table(vec![], View::Part(Part::TableRow(r))),
+        Part::TableHeading { title } => html::div().class("ark-caption").child(title.get()).into_any(),
         p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => dialog(p),
         // The shell's are `shell`'s.
         _ => return None,
@@ -783,4 +787,100 @@ pub fn target_element(e: &web_sys::Event) -> Option<web_sys::Element> {
 /// An amount's words, for a part that writes its own.
 pub fn words(cents: i64) -> String {
     money(cents)
+}
+
+// * A table
+
+/// A table's columns as `arkui_web::table` takes them.
+fn table_columns(columns: &[ark_app::view::TableColumn]) -> Vec<crate::table::Column> {
+    use crate::table::{Align, Slot};
+    use ark_app::view::{ColumnAlign, ColumnSlot, ColumnWidth};
+    columns
+        .iter()
+        .map(|c| {
+            // A track's width as CSS writes it.
+            let width = match c.width {
+                ColumnWidth::Figure => "var(--ark-amount-column-width)".into(),
+                ColumnWidth::Mark => "var(--ark-mark-column-width)".into(),
+                ColumnWidth::Share(n) => format!("minmax(80px,{n}fr)"),
+            };
+            let align = match c.align {
+                ColumnAlign::Start => Align::Start,
+                ColumnAlign::End => Align::End,
+                ColumnAlign::Center => Align::Center,
+            };
+            let slot = match c.slot {
+                ColumnSlot::None => None,
+                ColumnSlot::Title => Some(Slot::Title),
+                ColumnSlot::Subtitle => Some(Slot::Subtitle),
+                ColumnSlot::Trailing => Some(Slot::Trailing),
+                ColumnSlot::TrailingSub => Some(Slot::TrailingSub),
+            };
+            crate::table::Column {
+                heading: c.heading,
+                width: width.into(),
+                align,
+                wide_only: slot.is_none(),
+                slot,
+            }
+        })
+        .collect()
+}
+
+/// A cell's words and glyph, in its tint.
+fn table_cell(c: ark_app::view::TableCell) -> AnyView {
+    let class = match c.tint.as_str() {
+        "" => "ark-cell-words".to_string(),
+        "quiet" => "ark-cell-words ark-quiet".to_string(),
+        "negative" => "ark-cell-words ark-negative".to_string(),
+        "accent" => "ark-cell-words ark-text-accent".to_string(),
+        t => format!("ark-cell-words ark-text-{t}"),
+    };
+    html::span()
+        .class(class)
+        .child((
+            (!c.glyph.is_empty()).then(|| glyph(&c.glyph, 13)),
+            (!c.text.is_empty()).then(|| html::span().child(c.text)),
+        ))
+        .into_any()
+}
+
+/// A table ([`crate::table::table`]) of the view's columns and rows.
+fn data_table<M: Clone + 'static>(columns: Vec<ark_app::view::TableColumn>, rows: View<M>) -> AnyView {
+    let columns = table_columns(&columns);
+    let n = columns.len();
+    let rows: Vec<crate::table::TableRow> = flatten(rows)
+        .into_iter()
+        .filter_map(|v| match v {
+            View::Part(Part::TableRow(r)) => {
+                let cells = r.table_cells();
+                let title = cells.first().map(|c| c.text.clone()).unwrap_or_default();
+                let marked = r.marked.as_ref().is_some_and(|m| m.get());
+                let mut views: Vec<AnyView> = cells.into_iter().map(table_cell).collect();
+                if marked {
+                    if let Some(first) = views.get_mut(0) {
+                        let was = std::mem::replace(first, ().into_any());
+                        *first = html::span()
+                            .class("ark-marked")
+                            .child((html::span().class("ark-unread-dot"), was))
+                            .into_any();
+                    }
+                }
+                let mut t = crate::table::TableRow::new(title, views);
+                t.open = r.tap.clone().map(|m| Rc::new(move || send(m.clone())) as crate::Action);
+                t.menu = menu::of_row(&r.menu);
+                t.selected = r.selected.as_ref().is_some_and(|s| s.get());
+                Some(t)
+            }
+            View::Part(Part::TableHeading { title }) => {
+                let mut cells = vec![html::span().child(title.get()).into_any()];
+                cells.extend((1..n).map(|_| ().into_any()));
+                let mut t = crate::table::TableRow::new(title.get(), cells);
+                t.heading = true;
+                Some(t)
+            }
+            _ => None,
+        })
+        .collect();
+    crate::table::table(&columns, rows)
 }

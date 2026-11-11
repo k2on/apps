@@ -137,7 +137,14 @@ impl App {
     pub(crate) fn requested(&self, r: MoneyRequest) -> Option<Message> {
         match r {
             MoneyRequest::Refresh => Some(Message::Sync),
-            MoneyRequest::Reconcile { account } => money_app::accounts::account_id(&account).map(Message::Reconcile),
+            // The window's own dialogs for what the sheets do, until the
+            // desktop draws money_app::sheets too.
+            MoneyRequest::Sheet { msg } => match msg {
+                money_app::sheets::SheetsMsg::New { .. } => Some(Message::AddTxn),
+                money_app::sheets::SheetsMsg::Open { key } => self.txn_named(&key).map(Message::EditTxn),
+                money_app::sheets::SheetsMsg::Reconcile { account } => money_app::accounts::account_id(&account).map(Message::Reconcile),
+                _ => None,
+            },
             // The desktop's Auto-Assign is its menu of ways to.
             MoneyRequest::Budget {
                 msg: money_app::budget::BudgetMsg::AutoAssign,
@@ -146,7 +153,6 @@ impl App {
             MoneyRequest::Accounts { msg } => Some(Message::Accounts(msg)),
             MoneyRequest::StepMonth { by } => Some(Message::Month(by.into())),
             MoneyRequest::ThisMonth => Some(Message::ThisMonth),
-            MoneyRequest::NewTransaction => Some(Message::AddTxn),
             MoneyRequest::ImportReceipt => None,
             MoneyRequest::KeepPhoto { jpeg, txn } => Some(Message::KeepPhoto(jpeg, txn)),
             MoneyRequest::Filter => Some(Message::ShowFilter(!self.show_filter)),

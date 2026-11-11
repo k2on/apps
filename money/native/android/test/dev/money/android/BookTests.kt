@@ -134,31 +134,6 @@ class BookTests {
         assertEquals("Chase: nothing new at the bank", book.said.last())
     }
 
-    @Test fun aTransactionIsAddedEditedClearedAndDeleted() {
-        val acc = l.accounts.first { it.onBudget && !it.closed }
-        book.holdRegister(acc.id)
-        val c = l.lines.first()
-        val form = newForm(l, acc.id).draft.copy(payee = "Corner Shop", category = c.categoryId, amount = -1_234)
-        book.save(form)
-        val t = book.register(acc.id).first { it.payee == "Corner Shop" }
-        assertEquals(-1_234L, t.amount)
-        assertEquals(Cleared.UNCLEARED, t.cleared)
-        assertEquals(acc.balance - 1_234, l.account(acc.id)!!.balance)
-
-        book.save(TxnForm.of(t).draft.copy(amount = -2_000, memo = "and milk"))
-        val edited = book.register(acc.id).first { it.id == t.id }
-        assertEquals(-2_000L, edited.amount)
-        assertEquals("and milk", edited.memo)
-
-        book.setCleared(t.id, true)
-        assertEquals(Cleared.CLEARED, book.register(acc.id).first { it.id == t.id }.cleared)
-
-        book.delete(listOf(t.id))
-        assertNull(book.register(acc.id).firstOrNull { it.id == t.id })
-        book.releaseRegister(acc.id)
-        assertTrue("let go: nothing holds it", book.register(acc.id).isEmpty())
-    }
-
     @Test fun aTransferMovesMoneyBetweenAccounts() {
         val (from, to) = l.accounts.filter { it.onBudget && !it.closed }.take(2)
         book.save(Draft(editing = null, account = from.id, date = TODAY, payee = "", category = null, transferTo = to.id, memo = "", amount = -5_000, cleared = false))
@@ -234,23 +209,11 @@ class BookTests {
         book = demoBook()
     }
 
-    @Test fun theFormRemembersWhatItCorrects() {
-        book.holdRegister(null)
-        val t = book.register(null).first { !it.transfer && it.categoryId != null }
-        val f = TxnForm.of(t).draft
-        assertEquals(t.id, f.editing)
-        assertEquals(t.amount, f.amount)
-        assertEquals(t.categoryId, f.category)
-        val n = newForm(l, null).draft
-        assertEquals(TODAY, n.date)
-        assertEquals(l.accounts.first { it.onBudget && !it.closed }.id, n.account)
-    }
-
     @Test fun theBanksOwnWordsAreShownWhenTheySayMore() {
         book.holdRegister(null)
         val t = book.register(null).first { !it.transfer }
         val chipotle = t.copy(payee = "Chipotle", imported = true, importedPayee = "CHIPOTLE 1234 SAN FRANCISCO CA ")
-        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", TxnForm.of(chipotle).bankSaid)
+        assertEquals("CHIPOTLE 1234 SAN FRANCISCO CA", chipotle.bankSaid())
     }
 
 }

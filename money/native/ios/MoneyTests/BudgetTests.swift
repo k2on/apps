@@ -1,7 +1,6 @@
 // The budget's rules as the screens draw them, over the demo's household:
-// its month under its groups — the cards' payments first — what an
-// amount's tone says, which way Move Money goes, and what assigning does
-// to Ready to Assign.
+// its month under its groups — the cards' payments first — and what
+// assigning does to Ready to Assign.
 @testable import Money
 import Foundation
 import XCTest
@@ -25,38 +24,6 @@ final class BudgetTests: XCTestCase {
         XCTAssertEqual(everyday?.available, everyday?.lines.reduce(0) { $0 + $1.available })
         // Ready to Assign is the budget's own, never a line of it.
         XCTAssertFalse(s.snap.lines.contains { $0.categoryId == readyToAssignId() })
-    }
-
-    /// The seed overspends Dining Out, all of it on the card: its tone is
-    /// the card's amber, not cash's red — it is debt — and Move Money on it
-    /// covers it all the same, the money coming from the category chosen.
-    func testAnOverspentCategoryIsCoveredFromAnother() {
-        let s = Seen()
-        guard let dining = s.line("Dining Out"), let groceries = s.line("Groceries") else { return XCTFail("the seed's categories") }
-        XCTAssertTrue(dining.available < 0)
-        XCTAssertEqual(dining.creditOverspent, -dining.available, "the seed's dining out goes on the card")
-        XCTAssertEqual(dining.tone(), .onCard)
-        let short = Int64(dining.available.magnitude)
-        XCTAssertEqual(Moves.suggested(dining), short)
-        let m = Moves.of(month: Fx.month, line: dining, other: groceries.categoryId, cents: short)
-        XCTAssertEqual(m.from, groceries.categoryId)
-        XCTAssertEqual(m.to, dining.categoryId)
-        s.write(.moveMoney(value: m))
-        XCTAssertEqual(s.line("Dining Out")?.available, 0)
-        XCTAssertEqual(s.line("Groceries")?.available, groceries.available - short)
-        XCTAssertEqual(s.notices, [])
-    }
-
-    /// A category with money moves it out; none is Ready to Assign.
-    func testMoneyMovesOutOfAFundedCategory() {
-        let s = Seen()
-        guard let rent = s.line("Rent") else { return XCTFail("Rent") }
-        let m = Moves.of(month: Fx.month, line: rent, other: nil, cents: 100)
-        XCTAssertEqual(m.from, rent.categoryId)
-        XCTAssertNil(m.to)
-        let fromReady = Moves.of(month: Fx.month, line: nil, other: rent.categoryId, cents: 100)
-        XCTAssertNil(fromReady.from)
-        XCTAssertEqual(fromReady.to, rent.categoryId)
     }
 
     /// Assigning takes from Ready to Assign, to the cent. Falsified by

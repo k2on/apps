@@ -326,10 +326,12 @@ the type is still known. A module that is not registered answers
 
 **A request is the app's own port.** What only the host can do yet is an
 enum of the app's (`money_app::MoneyRequest`): the bank sync, whose demo
-differs per shell; a sheet still drawn by hand on a platform (`NewTransaction`,
-`OpenTransaction { key }`, `Reconcile { account }`); a message for
-another of the app's runtimes beside it (`Budget { msg: BudgetMsg::AutoAssign }`
-from the shell's toolbar). Each shell matches on it — the phones'
+differs per shell; what the host decides between (`OpenTransaction { key }`:
+Transaction Details in the inspector while it shows, the transaction's sheet
+otherwise); a message for another of the app's runtimes beside it (`Budget {
+msg: BudgetMsg::AutoAssign }` from the shell's toolbar, `Sheet { msg:
+SheetsMsg::Reconcile { account } }` from a register's Reconcile…, the sheets
+any screen raises being one runtime of their own). Each shell matches on it — the phones'
 `AppShell.request(request:)`, iced's `App::requested`, the browser's
 `MoneyWeb::carry` — and a variant goes when what it asks moves into
 Rust. There is no call into a shell by name, and `ShellMsg` has a case
@@ -557,9 +559,8 @@ the debug key. Nothing there is a project file.
 
 - **`Command::Request(MoneyRequest)`** — something only the host can do
   yet, typed: the bank sync (`Refresh`, whose demo differs per shell), a
-  row's Reconcile… raising the shell's own reconcile sheet or dialog
-  (`Reconcile { account }`) until reconciling moves into Rust, a message
-  for another of money's runtimes (`Budget { msg }`). There is no call
+  message for another of money's runtimes (`Budget { msg }`, `Sheet { msg
+  }`). There is no call
   into a shell by name.
 - **App-provided pieces of a part** — a part that wears something of the
   app's takes it from the environment, set once at the root: the face at

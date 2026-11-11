@@ -189,22 +189,6 @@ data class Ledger(
         get() = banksWanting(banks).toInt()
 }
 
-/**
- * A transaction being entered or corrected: the core's [Draft], and what the form shows beside it —
- * who entered the one corrected, what the bank called it, the receipt its line says paid for it.
- */
-data class TxnForm(
-    val draft: Draft,
-    val by: String = "",
-    val bankSaid: String = "",
-    val receipt: String = "",
-) {
-    companion object {
-        /** The form over a transaction already in a register. */
-        fun of(t: TxnLine): TxnForm = TxnForm(t.draft(), t.userId, t.bankSaid().orEmpty(), t.receipt)
-    }
-}
-
 class Book
 private constructor(
     private val peer: Peer,

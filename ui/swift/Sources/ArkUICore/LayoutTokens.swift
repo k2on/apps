@@ -21,6 +21,8 @@ public enum LayoutTokens {
     public static let searchWidth: Double = 320.0
     /// A column of figures in a table or a budget's row.
     public static let amountColumnWidth: Double = 112.0
+    /// A table's column of one mark: a row's cleared mark, a receipt's.
+    public static let markColumnWidth: Double = 28.0
     /// The bar under a row's name that fills toward its goal, beside columns.
     public static let progressWidth: Double = 220.0
     /// A line of text as tall as this many times its size (the desktop's: iced's).

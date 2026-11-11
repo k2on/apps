@@ -54,7 +54,8 @@ impl Figure {
         }
     }
 
-    fn of(cents: i64, style: &NumberStyle) -> Figure {
+    /// `cents` as a field shows it to be corrected.
+    pub fn of(cents: i64, style: &NumberStyle) -> Figure {
         Figure {
             typed: match cents {
                 0 => String::new(),

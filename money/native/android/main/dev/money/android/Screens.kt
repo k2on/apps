@@ -28,6 +28,12 @@ import uniffi.money_bridge.Devices
 import uniffi.money_bridge.ReceiptsApp
 import uniffi.money_bridge.ReceiptsMsg
 import uniffi.money_bridge.ReceiptsPage
+import uniffi.money_bridge.RegisterApp
+import uniffi.money_bridge.RegisterMsg
+import uniffi.money_bridge.RegisterPage
+import uniffi.money_bridge.SheetsApp
+import uniffi.money_bridge.SheetsMsg
+import uniffi.money_bridge.SheetsPage
 import uniffi.money_bridge.TransactionsApp
 import uniffi.money_bridge.TransactionsMsg
 import uniffi.money_bridge.TransactionsPage
@@ -42,8 +48,8 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
     /** Opens a route: the app's navigator. */
     var opened: (Route) -> Unit = {}
 
-    /** Raises the reconcile dialog for an account: the register's own, until reconciling moves to Rust. */
-    var reconciling: (Id) -> Unit = {}
+    /** What only the app does: a sheet (Reconcile), a message for another screen. */
+    var requested: (MoneyRequest) -> Unit = {}
 
     private val shell =
         object : AppShell {
@@ -52,8 +58,7 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
             override fun request(request: MoneyRequest) {
                 when (request) {
                     is MoneyRequest.Refresh -> refresh()
-                    is MoneyRequest.Reconcile -> reconciling(Id(request.account))
-                    else -> {}
+                    else -> requested(request)
                 }
             }
 
@@ -170,8 +175,8 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, d
 
 /** The Transactions tab, running in Rust (money/app/src/transactions): To Review and All. */
 class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
-    /** What only the app's own screens do: a transaction's form, by its hex id. */
-    var opened: (String) -> Unit = {}
+    /** What only the app does: a transaction's details or its form. */
+    var requested: (MoneyRequest) -> Unit = {}
 
     private val shell =
         object : AppShell {
@@ -180,8 +185,7 @@ class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> Str
             override fun request(request: MoneyRequest) {
                 when (request) {
                     is MoneyRequest.Refresh -> refresh()
-                    is MoneyRequest.OpenTransaction -> opened(request.key)
-                    else -> {}
+                    else -> requested(request)
                 }
             }
 
@@ -211,6 +215,92 @@ class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> Str
     }
 
     fun send(msg: TransactionsMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/** A register, running in Rust (money/app/src/register): an account's transactions or every account's. */
+class RegisterHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?, account: String?) {
+    /** What only the app does: a transaction's details, a sheet. */
+    var requested: (MoneyRequest) -> Unit = {}
+
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun request(request: MoneyRequest) {
+                when (request) {
+                    is MoneyRequest.Refresh -> refresh()
+                    else -> requested(request)
+                }
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = RegisterApp(session, shell)
+    private val _page: MutableStateFlow<RegisterPage>
+    val page: StateFlow<RegisterPage>
+
+    init {
+        devices?.let { app.useDevices(it) }
+        app.send(RegisterMsg.Show(account = account))
+        _page = MutableStateFlow(app.page())
+        page = _page
+    }
+
+    fun send(msg: RegisterMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/** The sheets over the app, running in Rust (money/app/src/sheets): a transaction's form, a category given, an account reconciled. */
+class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun request(request: MoneyRequest) {
+                if (request is MoneyRequest.Refresh) refresh()
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = SheetsApp(session, shell)
+    private val _page = MutableStateFlow(app.page())
+    val page: StateFlow<SheetsPage> = _page
+
+    private var seen = ULong.MAX_VALUE
+
+    private fun quiet(): Boolean {
+        val v = app.version()
+        if (v != seen) {
+            seen = v
+            dev.arkui.Ready.changed()
+            return false
+        }
+        return app.isIdle()
+    }
+
+    init {
+        dev.arkui.Ready.probe("sheets") { quiet() }
+        devices?.let { app.useDevices(it) }
+    }
+
+    fun send(msg: SheetsMsg) {
         app.send(msg)
         _page.value = app.page()
     }
@@ -336,12 +426,13 @@ class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> Strin
  * transaction is the shell toolbar's), its marks and its glyphs.
  */
 @Composable
-fun ScreenFrame(content: @Composable () -> Unit) {
+fun ScreenFrame(title: String? = null, onBack: (() -> Unit)? = null, content: @Composable () -> Unit) {
     CompositionLocalProvider(
-        LocalTabFrame provides { title, _, inner ->
+        LocalTabFrame provides { tab, _, inner ->
             // No floating button over the rows: a new transaction is the
             // shell's toolbar's (money/app/src/shell/view.rs), as on every client.
-            Page(title = title) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } }
+            // A page pushed over a tab (All Accounts) has its own title and the way back.
+            Page(title = title ?: tab, onBack = onBack) { pad, _ -> Box(Modifier.padding(top = pad.calculateTopPadding())) { inner() } }
         },
         LocalRowMark provides { kind -> KindTile(kind) },
         LocalGlyphs provides Glyphs::shared,

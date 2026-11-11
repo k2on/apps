@@ -11,7 +11,9 @@
 use crate::text::{self, text};
 use crate::text_input::text_input;
 use ark_app::shell::compact_tag;
-use ark_app::view::{Confirm, Input, ListRow, MeterRow, Part, Picture, Placement, Section, Val, View};
+use ark_app::view::{
+    ColumnAlign, ColumnWidth, Confirm, Input, ListRow, MeterRow, Part, Picture, Placement, Section, TableCell, TableColumn, TableRow, Val, View,
+};
 use iced::widget::{button, checkbox, column, container, row, rule, scrollable, stack, tooltip, Column, Space};
 use iced::{Alignment, Length, Padding};
 
@@ -44,6 +46,8 @@ pub fn element<M: Clone + 'static>(view: View<M>) -> Element<'static, M> {
 fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'static, M> {
     let mut body = vec![];
     let mut over = vec![];
+    // A table takes the window's width; cards and forms a readable column.
+    let wide = flatten_ref(&content).iter().any(|v| matches!(v, View::Part(Part::Table { .. })));
     for v in flatten(content) {
         match v {
             View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => over.push(v),
@@ -52,7 +56,7 @@ fn page<M: Clone + 'static>(title: Val<String>, content: View<M>) -> Element<'st
     }
     // Its title is the toolbar's (`shell`), inline or large: not said twice.
     let _ = title;
-    let list = column(body).spacing(10).padding(PAD).max_width(720);
+    let list = column(body).spacing(10).padding(PAD).max_width(if wide { f32::INFINITY } else { 720.0 });
     let mut layers = stack![scrollable(container(list).center_x(Length::Fill)).height(Length::Fill)];
     for v in over {
         let asked = match v {
@@ -289,6 +293,19 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         }
         Part::CodeImage { size, dark } => crate::qr::qr_code(size.get().max(0) as usize, dark.get(), 220.0),
         Part::Button { title, enabled, tap } => button(text(title)).on_press_maybe(enabled.get().then_some(tap)).into(),
+        Part::DateField { label, day, typed } => column![
+            text(label).size(12).style(style::dim),
+            text_input("2026-11-11", &day.get())
+                .on_input(move |s| typed.call(s))
+                .style(style::field)
+                .padding([6, 8]),
+        ]
+        .spacing(4)
+        .into(),
+        Part::Table { columns, rows } => data_table(columns, *rows),
+        // A table's rows are its own (`data_table`): alone, as a list's.
+        Part::TableRow(r) => table_row(&[], *r, 0),
+        Part::TableHeading { title } => crate::table::section(title.get(), 0.0),
         Part::BarItem {
             title,
             glyph,
@@ -1283,4 +1300,128 @@ fn shape(name: &str) -> &'static [u8] {
 #[allow(dead_code)]
 fn is<T: Clone + Default>(v: &Val<T>) -> T {
     v.get()
+}
+
+// * A table
+
+/// A column's width as iced lays it out.
+fn column_width(c: &TableColumn) -> Length {
+    match c.width {
+        ColumnWidth::Figure => Length::Fixed(crate::layout_tokens::AMOUNT_COLUMN_WIDTH),
+        ColumnWidth::Mark => Length::Fixed(crate::layout_tokens::MARK_COLUMN_WIDTH),
+        ColumnWidth::Share(n) => Length::FillPortion(n.max(1)),
+    }
+}
+
+/// A table: its headings in a row of their own, then its rows, each the
+/// whole width, the cursor's lit (`arkui::table`).
+fn data_table<M: Clone + 'static>(columns: Vec<TableColumn>, rows: View<M>) -> Element<'static, M> {
+    let mut head = row![crate::table::gutter()];
+    for c in &columns {
+        head = head.push(crate::table::heading(c.heading, column_width(c)));
+    }
+    let mut list = Column::new().push(crate::table::row(head, false, false, false));
+    let mut odd = 0;
+    for v in flatten(rows) {
+        match v {
+            View::Part(Part::TableRow(r)) => {
+                odd += 1;
+                list = list.push(table_row(&columns, *r, odd));
+            }
+            View::Part(Part::TableHeading { title }) => {
+                odd = 0;
+                list = list.push(crate::table::section(title.get(), crate::table::GUTTER));
+            }
+            v => list = list.extend(nodes(v)),
+        }
+    }
+    list.width(Length::Fill).into()
+}
+
+/// A cell's tint, from the palette: the ink, the quiet ink, or a signal.
+fn cell_colour(p: &iced::theme::palette::Extended, tint: &str) -> iced::Color {
+    match tint {
+        "quiet" => p.background.base.text.scale_alpha(style::DIM),
+        "positive" => p.success.base.color,
+        "caution" => p.warning.base.color,
+        "negative" => p.danger.base.color,
+        "accent" => p.primary.base.color,
+        _ => p.background.base.text,
+    }
+}
+
+/// One cell's words in its column, in its tint.
+fn table_cell<M: 'static>(c: TableCell, column: Option<&TableColumn>) -> Element<'static, M> {
+    let width = column.map(column_width).unwrap_or(Length::Shrink);
+    let align = column.map(|c| c.align).unwrap_or(ColumnAlign::Start);
+    let mut line = row![].spacing(4).align_y(Alignment::Center);
+    if !c.glyph.is_empty() {
+        let tint = c.tint.clone();
+        line = line.push(icon::tinted(shape(&c.glyph), 13.0, move |p| cell_colour(p, &tint)));
+    }
+    if !c.text.is_empty() {
+        let tint = c.tint.clone();
+        line = line.push(
+            text(c.text)
+                .size(crate::table::CELL_SIZE)
+                .wrapping(text::Wrapping::None)
+                .style(move |t| text::Style {
+                    color: Some(cell_colour(crate::theme::of(t), &tint)),
+                    ..Default::default()
+                }),
+        );
+    }
+    let x = match align {
+        ColumnAlign::Start => Alignment::Start,
+        ColumnAlign::End => Alignment::End,
+        ColumnAlign::Center => Alignment::Center,
+    };
+    container(line)
+        .width(width)
+        .align_x(x)
+        .padding(Padding {
+            right: crate::table::SPACING,
+            ..Padding::ZERO
+        })
+        .clip(true)
+        .into()
+}
+
+/// A table's row: its mark in the gutter, a cell for each column; pressed,
+/// its tap; right-clicked, its menu.
+fn table_row<M: Clone + 'static>(columns: &[TableColumn], r: TableRow<M>, odd: usize) -> Element<'static, M> {
+    let selected = r.selected.as_ref().is_some_and(|s| s.get());
+    let marked = r.marked.as_ref().is_some_and(|m| m.get());
+    let mut line = row![].align_y(Alignment::Center);
+    line = line.push(match marked {
+        true => container(text("\u{25cf}").size(8).style(|t| text::Style {
+            color: Some(crate::theme::of(t).primary.base.color),
+            ..Default::default()
+        }))
+        .center_x(Length::Fixed(crate::table::GUTTER))
+        .into(),
+        false => crate::table::gutter(),
+    });
+    let cells = r.table_cells();
+    let title = cells.first().map(|c| c.text.clone()).unwrap_or_default();
+    for (i, c) in cells.into_iter().enumerate() {
+        line = line.push(table_cell(c, columns.get(i)));
+    }
+    let body = crate::table::row(line, selected, true, odd % 2 == 1);
+    let b = button(body).width(Length::Fill).padding(0).style(style::bare).on_press_maybe(r.tap);
+    let items: Vec<context_menu::Item<M>> = r
+        .menu
+        .into_iter()
+        .filter(|m| m.offered())
+        .map(|m| context_menu::Item {
+            glyph: glyphs::named(&m.glyph.get()),
+            label: m.title.get(),
+            destructive: m.destructive.get(),
+            message: m.tap,
+        })
+        .collect();
+    match items.is_empty() {
+        true => b.into(),
+        false => context_menu::context_menu(b, title, items),
+    }
 }

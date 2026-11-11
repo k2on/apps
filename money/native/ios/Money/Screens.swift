@@ -26,9 +26,8 @@ final class AccountsScreen: ObservableObject {
     @Published private(set) var page: AccountsPage
     /// Opens a route on the tab's back stack: the shell's navigator.
     var open: (Route) -> Void = { _ in }
-    /// Raises the reconcile sheet for an account: the shell's own, until
-    /// reconciling moves into Rust.
-    var reconcile: (Id) -> Void = { _ in }
+    /// What only the shell does: a sheet (Reconcile).
+    var request: (MoneyRequest) -> Void = { _ in }
 
     private let app: AccountsApp
     private let shell: ScreenShell
@@ -42,7 +41,7 @@ final class AccountsScreen: ObservableObject {
         if let devices { app.useDevices(devices: devices) }
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
-        shell.requested = { [weak self] r in if case let .reconcile(account) = r { self?.reconcile(Id(account)) } }
+        shell.requested = { [weak self] r in self?.request(r) }
     }
 
     /// `msg` taken by the app; the page read again.
@@ -122,6 +121,73 @@ final class TransactionsScreen: ObservableObject {
     }
 
     func send(_ msg: TransactionsMsg) {
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
+
+    func reload() {
+        page = app.page()
+    }
+}
+
+/// A register, running in Rust (money/app/src/register): an account's
+/// transactions or every account's, its search the shell's. One for each
+/// register shown: the shell's account, All Accounts pushed.
+@MainActor
+final class RegisterScreen: ObservableObject {
+    @Published private(set) var page: RegisterPage
+    /// What only the shell does: a transaction's details, a sheet.
+    var request: (MoneyRequest) -> Void = { _ in }
+
+    private let app: RegisterApp
+    private let shell: ScreenShell
+
+    init(session: Session, devices: Devices?, account: String?, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = RegisterApp(session: session, shell: shell)
+        if let devices { app.useDevices(devices: devices) }
+        app.send(msg: .show(account: account))
+        page = app.page()
+        shell.requested = { [weak self] r in self?.request(r) }
+    }
+
+    func send(_ msg: RegisterMsg) {
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
+
+    func reload() {
+        page = app.page()
+    }
+}
+
+/// The sheets over the app, running in Rust (money/app/src/sheets): a
+/// transaction's form, a category given, an account reconciled — whoever
+/// raised it (`MoneyRequest.sheet`).
+@MainActor
+final class SheetsScreen: ObservableObject {
+    @Published private(set) var page: SheetsPage
+
+    private let app: SheetsApp
+    private let shell: ScreenShell
+
+    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = SheetsApp(session: session, shell: shell)
+        if let devices { app.useDevices(devices: devices) }
+        app.send(msg: .month(month: month, today: today()))
+        page = app.page()
+    }
+
+    func send(_ msg: SheetsMsg) {
         app.send(msg: msg)
         page = app.page()
     }
