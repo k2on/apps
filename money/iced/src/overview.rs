@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use ark_app::{Ask, Host, Inbox, Modules, Ticket};
 use ark_clipboard::{Clipboard, Queued};
-use ark_peer::store::Store;
 use iced::{Element, Task};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
@@ -54,7 +53,7 @@ pub fn now_ms(today: &str) -> i64 {
 }
 
 impl Host<Accounts> for Desk<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
         f(&self.app.peer.store)
     }
     fn now_ms(&self) -> i64 {
@@ -83,7 +82,7 @@ impl Host<Accounts> for Desk<'_> {
 }
 
 impl Host<Budget> for Desk<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
         f(&self.app.peer.store)
     }
     fn now_ms(&self) -> i64 {

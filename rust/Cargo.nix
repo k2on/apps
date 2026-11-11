@@ -1156,13 +1156,12 @@ rec {
         libName = "ark_app";
         dependencies = [
           {
-            name = "ark-module";
-            packageId = "ark-module";
+            name = "ark";
+            packageId = "ark";
           }
           {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
+            name = "ark-module";
+            packageId = "ark-module";
           }
           {
             name = "arkui-macros";
@@ -1177,6 +1176,11 @@ rec {
           {
             name = "ark-haptics";
             packageId = "ark-haptics";
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
           }
         ];
 
@@ -8840,11 +8844,6 @@ rec {
             optional = true;
           }
           {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "ark-router";
             packageId = "ark-router";
           }
@@ -8866,6 +8865,11 @@ rec {
           }
         ];
         devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
           {
             name = "arkdb";
             packageId = "arkdb";

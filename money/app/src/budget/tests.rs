@@ -57,7 +57,7 @@ impl Demo {
 }
 
 impl Host<Budget> for Demo {
-    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
         f(&self.store)
     }
     fn now_ms(&self) -> i64 {

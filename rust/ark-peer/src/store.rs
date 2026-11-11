@@ -4,12 +4,10 @@
 //! after the last one leaves, and a change sent with its refusal kept.
 //!
 //! An app names every view it opens as one value of its own key type
-//! ([`ViewKey`]): money's `MoneyView`, harken's `HarkenView`. A key is one
-//! view of the domain ([`ViewKey::open`]: its function, its input and the
-//! type its rows decode as), or a page made of several ([`ViewKey::parts`]):
-//! money's budget for a month is its lines, its summary, its spending and
-//! its formulas, wherever it is drawn. The core says what a page needs, so
-//! every shell opens the same views for it.
+//! (`ark::views::ViewKey`, the kernel's, so a domain names its views
+//! without this crate): money's `MoneyView`, harken's `HarkenView`. A key
+//! is one view of the domain or a page made of several, and how a view is
+//! opened is an `ark::views::Opening`.
 //!
 //! [`Store::hold`] holds a key once more (each of its parts opened the
 //! first time, read whole), [`Store::release`] once less (each closed when
@@ -18,123 +16,60 @@
 //! and each page held that is made of one — and [`Store::version`] is a
 //! number that grows whenever a key's rows moved, which a UI compares to
 //! know what to read again. The rows are the app's own type, decoded once
-//! as they arrive ([`Store::rows`]).
+//! as they arrive ([`Store::rows`]). An app reads them through the
+//! kernel's port, `ark::views::Views`, which a store is.
 //!
 //! It is UI-free: the iced windows hold one directly, and the phones' one
 //! behind the bridge (`ark_ffi::Session`), settled by the bridge's thread.
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 
 use ark::format::Encode;
 use ark::hash::StateHash;
 use ark::log::EntryId;
 
+pub use ark::views::{Opening, Rows, ViewKey, Views};
+
 use crate::{Peer, Update, Watched};
 
-/// A key of an app's views: one view of the domain, or a page made of
-/// several.
-pub trait ViewKey: Clone + Ord + Debug + Send + 'static {
-    /// The views this key is made of: itself when it is one view, or every
-    /// view a page needs — each of them a key whose [`ViewKey::open`] says
-    /// how it is opened.
-    fn parts(&self) -> Vec<Self> {
-        vec![self.clone()]
-    }
-
-    /// How the view this key names is opened; none for a page, which is
-    /// only its parts.
-    fn open(&self) -> Option<Opening>;
+/// One view held: the peer's view of it, and its rows as the app's type.
+struct Part {
+    /// The view and whose it is; its own rows are nothing (`()`), as the
+    /// rows are `rows`.
+    watch: Watched<()>,
+    rows: Box<dyn Rows>,
 }
 
-/// How a view is made, once: its rows read as some type.
-type Make = Box<dyn FnOnce(&mut Peer, &str, Vec<u8>) -> Box<dyn Part>>;
-
-/// How one view is opened: its function by name, its input's bytes, and
-/// the type its rows are read as.
-pub struct Opening {
-    name: String,
-    input: Vec<u8>,
-    make: Make,
-}
-
-impl Opening {
-    /// The view of `name` on `input`, its rows read as `T` (a row that does
-    /// not decode is a domain this build does not match: not a state to
-    /// draw).
-    pub fn of<T: Encode + Send + 'static>(name: &str, input: Vec<u8>) -> Opening {
-        Opening {
-            name: name.into(),
-            input,
-            make: Box::new(|peer, name, input| Box::new(Watched::open(peer, name, input, decode::<T>))),
-        }
+impl Part {
+    fn open(peer: &mut Peer, o: Opening) -> Part {
+        let (name, input, mut rows) = o.into_parts();
+        let watch = Watched::open(peer, &name, input, |_| ());
+        rows.fill(&watch.view().map(|v| peer.rows(v)).unwrap_or_default());
+        Part { watch, rows }
     }
 
-    /// The view of `name` on `input`, its rows read by `read`: an app's own
-    /// type, or the bytes themselves (`<[u8]>::to_vec`) for a host that
-    /// reads them another way.
-    pub fn read<T: Send + 'static>(name: &str, input: Vec<u8>, read: fn(&[u8]) -> T) -> Opening {
-        Opening {
-            name: name.into(),
-            input,
-            make: Box::new(move |peer, name, input| Box::new(Watched::open(peer, name, input, read))),
-        }
-    }
-
-    /// The function the view is of.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Its input's bytes.
-    pub fn input(&self) -> &[u8] {
-        &self.input
-    }
-}
-
-fn decode<T: Encode>(b: &[u8]) -> T {
-    T::from_bytes(b).unwrap_or_else(|e| panic!("a view's row: {e}"))
-}
-
-/// One view held, its rows of whatever type it was opened as.
-trait Part: Send {
-    fn settle(&mut self, peer: &mut Peer, moved: bool) -> Update;
-    fn close(self: Box<Self>, peer: &mut Peer);
-    fn rows(&self) -> &dyn Any;
-    fn rows_mut(&mut self) -> &mut dyn Any;
-    fn name(&self) -> &str;
-    fn view(&self) -> Option<usize>;
-}
-
-impl<T: Send + 'static> Part for Watched<T> {
     fn settle(&mut self, peer: &mut Peer, moved: bool) -> Update {
-        Watched::settle(self, peer, moved)
+        let update = self.watch.take(peer, moved);
+        match &update {
+            Update::Unchanged => {}
+            Update::Patched(ps) => self.rows.patch(ps),
+            Update::Reset => self.rows.fill(&self.watch.view().map(|v| peer.rows(v)).unwrap_or_default()),
+        }
+        update
     }
 
-    fn close(self: Box<Self>, peer: &mut Peer) {
-        Watched::close(*self, peer)
-    }
-
-    fn rows(&self) -> &dyn Any {
-        &self.rows
-    }
-
-    fn rows_mut(&mut self) -> &mut dyn Any {
-        &mut self.rows
-    }
-
-    fn name(&self) -> &str {
-        Watched::name(self)
+    fn close(self, peer: &mut Peer) {
+        self.watch.close(peer)
     }
 
     fn view(&self) -> Option<usize> {
-        Watched::view(self)
+        self.watch.view()
     }
 }
 
 struct Held {
-    part: Box<dyn Part>,
+    part: Part,
     holds: usize,
     /// The store's tick when its rows last moved.
     version: u64,
@@ -185,7 +120,7 @@ impl<K: ViewKey> Store<K> {
                 continue;
             }
             let Some(o) = p.open() else { continue };
-            let part = (o.make)(peer, &o.name, o.input);
+            let part = Part::open(peer, o);
             // What the first read had is not news.
             if let Some(v) = part.view() {
                 peer.update(v);
@@ -238,7 +173,7 @@ impl<K: ViewKey> Store<K> {
     pub fn rows<T: 'static>(&self, key: &K) -> &[T] {
         self.views
             .get(key)
-            .and_then(|h| h.part.rows().downcast_ref::<Vec<T>>())
+            .and_then(|h| h.part.rows.as_any().downcast_ref::<Vec<T>>())
             .map_or(&[], |r| &r[..])
     }
 
@@ -246,7 +181,7 @@ impl<K: ViewKey> Store<K> {
     pub fn rows_mut<T: 'static>(&mut self, key: &K) -> &mut [T] {
         self.views
             .get_mut(key)
-            .and_then(|h| h.part.rows_mut().downcast_mut::<Vec<T>>())
+            .and_then(|h| h.part.rows.as_any_mut().downcast_mut::<Vec<T>>())
             .map_or(&mut [], |r| &mut r[..])
     }
 
@@ -272,7 +207,7 @@ impl<K: ViewKey> Store<K> {
 
     /// The function the view `key` is of, while it is held.
     pub fn name(&self, key: &K) -> Option<&str> {
-        self.views.get(key).map(|h| h.part.name())
+        self.views.get(key).map(|h| h.part.watch.name())
     }
 
     /// What the peer did since the last settle, taken into every view held:
@@ -325,5 +260,23 @@ impl<K: ViewKey> Store<K> {
     /// Why the last change sent was refused, while it is the last.
     pub fn refusal(&self) -> Option<&str> {
         self.refused.as_deref()
+    }
+}
+
+impl<K: ViewKey> Views<K> for Store<K> {
+    fn rows_of(&self, key: &K) -> Option<&dyn Any> {
+        self.views.get(key).map(|h| h.part.rows.as_any())
+    }
+
+    fn holds(&self, key: &K) -> bool {
+        Store::holds(self, key)
+    }
+
+    fn version(&self, key: &K) -> u64 {
+        Store::version(self, key)
+    }
+
+    fn refusal(&self) -> Option<&str> {
+        Store::refusal(self)
     }
 }

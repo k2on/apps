@@ -39,6 +39,7 @@ pub mod plan;
 pub mod row;
 pub mod schema;
 pub mod store;
+pub mod views;
 
 /// Why something was not done, as a sentence: a parse that failed, a write
 /// a constraint refused, an intent its function refused. What a form shows

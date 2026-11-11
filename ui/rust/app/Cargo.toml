@@ -7,8 +7,8 @@ license.workspace = true
 description = "An Ark app's runtime: its state, its messages and its update in Rust, the loop that runs them over the views the store keeps, and the number a native shell watches. UI-free and wasm-friendly."
 
 [dependencies]
-# The views an app reads (`ark_peer::store`), as every shell holds them.
-ark-peer = { path = "../../../rust/ark-peer", default-features = false }
+# The views an app reads, through the kernel's port (`ark::views`).
+ark = { path = "../../../rust/ark" }
 # What an update asks of the device: the calls, answers and registry every
 # module shares (each module is a crate of its own, modules/<name>).
 ark-module = { path = "../module" }
@@ -16,6 +16,8 @@ ark-module = { path = "../module" }
 arkui-macros = { path = "../arkui-macros" }
 
 [dev-dependencies]
+# The tests' store, a peer's.
+ark-peer = { path = "../../../rust/ark-peer", default-features = false }
 # The tests' counter asks for a haptic and a scan.
 ark-haptics = { path = "../../../modules/haptics" }
 ark-camera = { path = "../../../modules/camera" }

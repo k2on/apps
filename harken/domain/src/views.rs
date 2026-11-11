@@ -1,4 +1,4 @@
-//! Every view an app of harken opens, named once (`ark_peer::store`): the
+//! Every view an app of harken opens, named once (`ark::views`): the
 //! window and the phones hold these keys, and what a page is made of is
 //! said here, so that every one of them opens the same views for it — a
 //! show's page is its episodes, how far everybody has got in each and what
@@ -8,7 +8,7 @@
 //! reads them as types of its own opens them so ([`HarkenView::query`]).
 
 use ark::format::Encode;
-use ark_peer::store::{Opening, ViewKey};
+use ark::views::{Opening, ViewKey};
 
 use crate::types::*;
 use crate::Id;

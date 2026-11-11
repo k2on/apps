@@ -13,7 +13,6 @@
 //! (`sync_shell`).
 
 use ark_app::{Ask, Host, Modules, Ticket};
-use ark_peer::store::Store;
 use arkui::shell::{Frame, Pane, SizeClass};
 use arkui::text::text;
 use iced::keyboard::{Key, Modifiers};
@@ -35,7 +34,7 @@ struct Desk<'a> {
 }
 
 impl Host<MoneyShell> for Desk<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
         f(&self.app.peer.store)
     }
     fn now_ms(&self) -> i64 {

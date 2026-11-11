@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-# The views an app holds (`views`), as `ark_peer::store` keys them.
+# The demo's peer (`demo`: `seeded_disk`, `open`), until it moves to money/seed.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # What the rows say, in words: amounts and days as every client writes them.
 ark-format = { path = "../../rust/ark-format" }

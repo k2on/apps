@@ -1,5 +1,5 @@
 use super::*;
-use ark_peer::store::Opening;
+use ark_peer::store::{Opening, Store};
 
 /// A counter: the smallest app with every kind of command.
 struct Counter;
@@ -101,7 +101,7 @@ impl Here {
 }
 
 impl Host<Counter> for Here {
-    fn read<R>(&self, f: impl FnOnce(&Store<NoView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn Views<NoView>) -> R) -> R {
         f(&self.store)
     }
     fn now_ms(&self) -> i64 {

@@ -1,11 +1,11 @@
-//! Every view an app of money opens, named once (`ark_peer::store`): the
+//! Every view an app of money opens, named once (`ark::views`): the
 //! window and the phones hold these keys, and what a page is made of is
 //! said here, so that every one of them opens the same views for it — the
 //! budget for a month is its lines, its summary, its spending and its
 //! formulas wherever it is drawn.
 
 use ark::format::Encode;
-use ark_peer::store::{Opening, ViewKey};
+use ark::views::{Opening, ViewKey};
 
 use crate::schema::{Account, Category, Txn};
 use crate::types::*;

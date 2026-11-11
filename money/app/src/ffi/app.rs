@@ -18,7 +18,6 @@ use ark_app::{Ask, Host, Inbox, Modules, Runtime, Ticket};
 use ark_clipboard::Clipboard;
 use ark_ffi::Refusal;
 use ark_haptics::Haptics;
-use ark_peer::store::Store;
 use ark_share::Share;
 use money_core::{self as domain, MoneyChange};
 
@@ -72,7 +71,7 @@ struct Phone<'a> {
 }
 
 impl Host<Accounts> for Phone<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<domain::MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<domain::MoneyView>) -> R) -> R {
         self.app.session.read(|st, _| f(st))
     }
     fn now_ms(&self) -> i64 {
@@ -166,7 +165,7 @@ struct Tab<'a> {
 }
 
 impl Host<Budget> for Tab<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<domain::MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<domain::MoneyView>) -> R) -> R {
         self.app.session.read(|st, _| f(st))
     }
     fn now_ms(&self) -> i64 {
@@ -268,7 +267,7 @@ struct Window<'a> {
 }
 
 impl Host<MoneyShell> for Window<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<domain::MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<domain::MoneyView>) -> R) -> R {
         self.app.session.read(|st, _| f(st))
     }
     fn now_ms(&self) -> i64 {

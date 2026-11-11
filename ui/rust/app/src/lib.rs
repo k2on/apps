@@ -11,9 +11,10 @@
 //!
 //! It is built on what the shells already share, not beside it:
 //!
-//! - **data** is the store's ([`ark_peer::store::Store`]): an app says
-//!   which views its screen needs ([`App::holds`]) and reads their rows; it
-//!   never copies them into its state.
+//! - **data** is the views held for it, read through the kernel's port
+//!   ([`ark::views::Views`]; a peer's `ark_peer::store::Store` is one): an
+//!   app says which views its screen needs ([`App::holds`]) and reads their
+//!   rows; it never copies them into its state.
 //! - **writes** are the domain's typed changes (`MoneyChange`), sent by
 //!   the host ([`Host::send`]) — what became of one comes back as a
 //!   message when the update asked ([`Command::Send`]'s `then`).
@@ -43,7 +44,7 @@ use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex};
 
 pub use ark_module::{self as modules, Answer, ModuleError, Modules, Op, Reply};
-use ark_peer::store::{Store, ViewKey};
+pub use ark::views::{ViewKey, Views};
 
 /// An app: its state, its messages, how one changes the other, and what
 /// its screen shows.
@@ -80,7 +81,7 @@ pub trait App: 'static {
 /// holds, and the time the host says it is (the browser has no clock
 /// `std` can read).
 pub struct Data<'a, K: ViewKey> {
-    pub store: &'a Store<K>,
+    pub store: &'a dyn Views<K>,
     pub now_ms: i64,
 }
 
@@ -289,7 +290,7 @@ pub type Ticket = u64;
 /// browser.
 pub trait Host<A: App + ?Sized> {
     /// `f` of the store, as it is now.
-    fn read<R>(&self, f: impl FnOnce(&Store<A::Key>) -> R) -> R;
+    fn read<R>(&self, f: impl FnOnce(&dyn Views<A::Key>) -> R) -> R;
     /// The time, in milliseconds since the epoch.
     fn now_ms(&self) -> i64;
     /// `change` sent to the peer: taken, or the domain's sentence for why not.
@@ -357,7 +358,7 @@ impl<A: App> Runtime<A> {
     /// message queued, and every view the screen needs held in `store`.
     /// What a screenshot driver waits for, with [`Runtime::version`]
     /// unchanged since it last looked (ui/docs/app.md, Effects and Ports).
-    pub fn is_idle(&self, store: &Store<A::Key>) -> bool {
+    pub fn is_idle(&self, store: &dyn Views<A::Key>) -> bool {
         !self.running && self.waiting.is_empty() && self.answers.is_empty() && self.holds().iter().all(|k| store.holds(k))
     }
 
@@ -369,7 +370,7 @@ impl<A: App> Runtime<A> {
 
     /// What the screen shows of `store` at `now_ms`: for a host that
     /// draws from a shared borrow (iced's `view`).
-    pub fn screen_of(&self, store: &Store<A::Key>, now_ms: i64) -> A::Screen {
+    pub fn screen_of(&self, store: &dyn Views<A::Key>, now_ms: i64) -> A::Screen {
         A::screen(&self.state, &Data { store, now_ms })
     }
 

@@ -254,6 +254,7 @@ dependencies = [
 name = "ark-app"
 version = "0.1.0"
 dependencies = [
+ "ark",
  "ark-camera",
  "ark-haptics",
  "ark-module",

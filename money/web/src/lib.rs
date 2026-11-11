@@ -572,7 +572,7 @@ impl<'a> Desk<'a> {
 }
 
 impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>> Host<A> for Desk<'_> {
-    fn read<R>(&self, f: impl FnOnce(&Store<MoneyView>) -> R) -> R {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
         f(&self.app.store)
     }
     fn now_ms(&self) -> i64 {

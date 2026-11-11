@@ -38,8 +38,10 @@ An app is a state, its messages and one update over them (`ark_app::App`):
 
 - `State` — what the screen is in the middle of (a form being filled, a
   row being renamed). The domain's rows are **not** copied into it: they
-  stay in the view store (`ark_peer::store::Store`), which every shell
-  already holds, and the app names the views it needs (`App::holds`).
+  stay in the views the shell holds, which the app reads through the
+  kernel's port (`ark::views::Views`; a peer's `ark_peer::store::Store` is
+  one), and the app names the views it needs (`App::holds`), as keys of
+  the domain's (`ark::views::ViewKey`).
 - `Msg` — everything the screen can be told. Ids travel as `Id::hex`, as
   routes carry them.
 - `update(&mut State, Msg, &Data) -> Vec<Command>` — decides everything.

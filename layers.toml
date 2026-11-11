@@ -54,16 +54,14 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"money-core -> ark-peer" = "the view keys (ark_peer::store::ViewKey) move to the kernel, or the keys to money-app"
+"money-core -> ark-peer" = "the demo's peer (demo.rs: seeded_disk, open, log) moves to money/seed once the phones' bridge leaves money-app"
 "money-core -> ark-format" = "display text moves to money-app"
 "money-core -> ark-ffi" = "the FFI records are generated in the adapter"
 "money-core -> uniffi" = "the FFI records are generated in the adapter"
-"harken-domain -> ark-peer" = "the view keys move to the kernel, or the keys to the adapter"
 "harken-domain -> ark-router" = "routes move to the adapter that draws them"
 "harken-domain -> ark-ffi" = "the FFI records are generated in the adapter"
 "harken-domain -> uniffi" = "the FFI records are generated in the adapter"
 "ark-format -> uniffi" = "the FFI records are generated in the adapter"
-"ark-app -> ark-peer" = "the store an app reads (ark_peer::store) is behind a port of the runtime's"
 "ark-app -> ark-module" = "the operations' plumbing (ark-module) is the runtime's own"
 "money-app -> ark-peer" = "the store is read through ark-app's Data"
 "money-app -> ark-haptics" = "the modules' operations are ports of the runtime's layer"
