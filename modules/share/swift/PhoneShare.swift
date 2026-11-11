@@ -1,6 +1,12 @@
 // ark-share on the iPhone and the Mac (modules/share/README.md): the
 // `Share` protocol UniFFI writes, over the system's share sheet.
 import Foundation
+// The app's bindings, where nix compiles this as a module of its own over
+// them (flake.nix, `iosApp`); an app's own Xcode project compiles it beside
+// them, and there is no such module. Public for the app it is linked into.
+#if canImport(ArkBindings)
+import ArkBindings
+#endif
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -8,8 +14,10 @@ import AppKit
 #endif
 
 /// The system's share sheet, over whatever is in front.
-final class PhoneShare: Share, @unchecked Sendable {
-    func share(text: String, url: String?) {
+public final class PhoneShare: Share, @unchecked Sendable {
+    public init() {}
+
+    public func share(text: String, url: String?) {
         DispatchQueue.main.async {
             var items: [Any] = [text]
             if let u = url.flatMap(URL.init(string:)) { items.append(u) }

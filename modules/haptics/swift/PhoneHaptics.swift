@@ -3,6 +3,12 @@
 // the system's feedback generators. An app that lists `haptics` in its
 // modules.toml compiles this file in and registers one at launch.
 import Foundation
+// The app's bindings, where nix compiles this as a module of its own over
+// them (flake.nix, `iosApp`); an app's own Xcode project compiles it beside
+// them, and there is no such module. Public for the app it is linked into.
+#if canImport(ArkBindings)
+import ArkBindings
+#endif
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -10,8 +16,10 @@ import AppKit
 #endif
 
 /// `ui/docs/motion.md`'s haptics: a success, a selection step, a warning.
-final class PhoneHaptics: Haptics, @unchecked Sendable {
-    func perform(haptic: Haptic) {
+public final class PhoneHaptics: Haptics, @unchecked Sendable {
+    public init() {}
+
+    public func perform(haptic: Haptic) {
         DispatchQueue.main.async {
             #if canImport(UIKit)
             switch haptic {
