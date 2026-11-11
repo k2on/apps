@@ -1314,6 +1314,11 @@ rec {
             target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "getrandom";
             packageId = "getrandom 0.2.17";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -1437,6 +1442,11 @@ rec {
           {
             name = "hmac";
             packageId = "hmac";
+          }
+          {
+            name = "p256";
+            packageId = "p256";
+            features = [ "ecdsa" ];
           }
           {
             name = "serde_json";

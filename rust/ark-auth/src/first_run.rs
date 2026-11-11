@@ -9,6 +9,7 @@
 
 use ark_app::welcome::{AddDevicePage, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeCopy, WelcomeMsg, WelcomePage};
 
+use crate::device_accounts::DeviceAccount;
 use crate::onboarding::{display, join_of, AppInfo, Effect, Event, Onboarding, Phase, Qr, Step};
 
 /// What a press asks of the shell.
@@ -40,6 +41,11 @@ pub struct FirstRun {
     /// A link for the app itself that came while its first run showed:
     /// handed to the app once the app shows ([`FirstRun::take_link`]).
     link: Option<String>,
+    /// The accounts signed in on this device, as the shell read them
+    /// (`crate::device_accounts`): today only this app's own, and no page
+    /// shows them yet — the seam for continuing as one of them later
+    /// (ui/docs/app.md, "Signing In").
+    device_accounts: Vec<DeviceAccount>,
 }
 
 impl FirstRun {
@@ -51,7 +57,19 @@ impl FirstRun {
             intro: 0,
             asked: false,
             link: None,
+            device_accounts: vec![],
         }
+    }
+
+    /// The accounts signed in on this device, as the shell read them at
+    /// launch. None, and nothing changes: every page is as it was.
+    pub fn set_device_accounts(&mut self, accounts: Vec<DeviceAccount>) {
+        self.device_accounts = accounts;
+    }
+
+    /// The accounts signed in on this device, as last set.
+    pub fn device_accounts(&self) -> &[DeviceAccount] {
+        &self.device_accounts
     }
 
     /// A link for the app itself (a page, a launch) taken, wherever the
@@ -328,6 +346,28 @@ mod tests {
             code: None,
             returned: false,
         })
+    }
+
+    /// The device's accounts are kept and change no page: none, as every
+    /// app has today, and one, show the same Welcome — the seam waits for
+    /// its page.
+    #[test]
+    fn the_device_accounts_are_kept_and_change_no_page() {
+        let mut f = FirstRun::new(app(), copy(0));
+        launched(&mut f, Remembered::default());
+        let before = f.page();
+        f.set_device_accounts(vec![]);
+        assert_eq!(f.page(), before);
+        let ann = DeviceAccount {
+            provider: "https://money.example.invalid".into(),
+            subject: "ann".into(),
+            name: "Ann".into(),
+            picture: String::new(),
+            app: "money".into(),
+        };
+        f.set_device_accounts(vec![ann.clone()]);
+        assert_eq!(f.device_accounts(), [ann]);
+        assert_eq!(f.page(), before);
     }
 
     /// The first page is the server's, Welcome to the app; the app's pages

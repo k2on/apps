@@ -104,6 +104,21 @@ struct Issued {
     issued_ms: i64,
 }
 
+/// What a client brings `/auth/exchange` (or a page `/auth/session`) to
+/// be signed in with, as JSON: `{"code": "…"}`. One way today. Another
+/// comes in beside it as a variant, not a route — an ID token issued to
+/// another of the provider's clients, checked against the clients this
+/// server trusts ([`crate::oidc::Provider::trusted`]) and its groups rule
+/// ([`crate::oidc::Groups`]) — and the session it is answered with is
+/// this server's own, as every login's is.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Proof {
+    /// The one-minute, single-use code this server's own callback sent
+    /// back to the client's redirect.
+    Code { code: String },
+}
+
 /// A login has a minute to go from the provider to the exchange, and a
 /// person ten minutes to sign in at the provider.
 const CODE_TTL_MS: i64 = 60 * 1000;
@@ -509,6 +524,14 @@ impl Auth {
         codes.retain(|_, c| now - c.issued_ms < CODE_TTL_MS);
         codes.insert(code.clone(), Issued { login, issued_ms: now });
         Ok(code)
+    }
+
+    /// The login `proof` stands for, once: what `/auth/exchange` and a
+    /// page's `/auth/session` answer.
+    pub fn prove(&self, proof: &Proof) -> Option<Login> {
+        match proof {
+            Proof::Code { code } => self.redeem(code),
+        }
     }
 
     /// The login a code stands for, once.

@@ -154,14 +154,15 @@ async fn callback(State(auth): State<Arc<Auth>>, Query(q): Query<CallbackQuery>)
     }
 }
 
+/// Another device's code, at `/auth/redeem`.
 #[derive(Debug, Deserialize)]
-struct Exchange {
+struct Redeem {
     code: String,
 }
 
-/// The code, for the login it stands for. Once.
-async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> Response {
-    match auth.redeem(&body.code) {
+/// The proof (the code), for the login it stands for. Once.
+async fn exchange(State(auth): State<Arc<Auth>>, Json(proof): Json<Proof>) -> Response {
+    match auth.prove(&proof) {
         Some(login) => Json(login).into_response(),
         None => (StatusCode::BAD_REQUEST, "that code has been used, or has expired").into_response(),
     }
@@ -170,8 +171,8 @@ async fn exchange(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> 
 /// The code, for a browser's session: the token kept in the session
 /// cookie ([`Auth::session_cookie`]), where no script reads it, and the
 /// login answered without it. Once, as `/auth/exchange`.
-async fn session(State(auth): State<Arc<Auth>>, Json(body): Json<Exchange>) -> Response {
-    match auth.redeem(&body.code) {
+async fn session(State(auth): State<Arc<Auth>>, Json(proof): Json<Proof>) -> Response {
+    match auth.prove(&proof) {
         Some(login) => {
             let cookie = auth.session_cookie(&login);
             let login = Login {
@@ -205,7 +206,7 @@ async fn device_code(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Respo
 }
 
 /// A device code, for a login of the new device's own. Once.
-async fn redeem(State(auth): State<Arc<Auth>>, headers: HeaderMap, Json(body): Json<Exchange>) -> Response {
+async fn redeem(State(auth): State<Arc<Auth>>, headers: HeaderMap, Json(body): Json<Redeem>) -> Response {
     let device = device(&headers);
     match tokio::task::spawn_blocking(move || auth.redeem_device_code(&body.code, &device)).await {
         Ok(Ok(login)) => Json(login).into_response(),

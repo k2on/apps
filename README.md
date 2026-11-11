@@ -77,6 +77,40 @@ import ArkOS's `money-sync` did for Actual Budget, as a mutator) and
 server's OpenID provider lets in shares one budget. `money/README.md`
 says what is built and what is not.
 
+## Signing in through Kanidm
+
+Each server is a confidential OpenID Connect client of the household's
+provider (ui/docs/app.md, "Signing In"). With Kanidm on NixOS, both are
+declared in `services.kanidm.provision`. The names below are placeholders,
+and each secret is a file outside the store:
+
+```nix
+services.kanidm.provision = {
+  enable = true;
+  groups.money_users.members = [ "ann" ];
+  groups.harken_users.members = [ "ann" ];
+  systems.oauth2.money = {
+    displayName = "Money";
+    originUrl = "https://money.example.com/auth/callback";
+    originLanding = "https://money.example.com/";
+    basicSecretFile = "/run/secrets/money-oidc";   # kanidmWithSecretProvisioning
+    preferShortUsername = true;
+    scopeMaps.money_users = [ "openid" "profile" "email" ];
+  };
+  # systems.oauth2.harken: the same, at harken's address, for harken_users.
+};
+services.money.oidc = {
+  issuer = "https://idm.example.com/oauth2/openid/money";   # Kanidm's issuer is per client
+  clientId = "money";
+  clientSecretFile = "/run/secrets/money-oidc";
+};
+```
+
+Kanidm signs ID tokens with ES256, needs PKCE (which the servers send),
+and matches `originUrl` exactly. Its scope map is the allow-list: someone
+outside `money_users` gets no token for money. `checks.oidc-kanidm` runs
+this setup in a VM.
+
 ## The rest
 
 Each app's demo data is beside its code, not in it: money's core's `demo`

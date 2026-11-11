@@ -580,6 +580,8 @@ mod tests {
                 client_id: "harken".into(),
                 secret_file: "/run/credentials/harken/oidc-secret".into(),
                 scopes: vec!["openid".into(), "profile".into(), "email".into()],
+                trusted_clients: vec!["harken".into()],
+                groups: vec![],
             }
         );
         assert_eq!(c.redirects, ["https://a/", "https://b/"]);

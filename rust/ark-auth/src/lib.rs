@@ -58,6 +58,7 @@ uniffi::setup_scaffolding!();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
+pub mod device_accounts;
 pub mod first_run;
 pub mod keep;
 #[cfg(not(target_arch = "wasm32"))]

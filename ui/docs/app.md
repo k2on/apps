@@ -302,6 +302,67 @@ offered by the first run. A link that comes while a page shows is kept for
 the app (`open_link`, `take_link`). harken's bridge exports it; its phones still draw their own
 first run until harken is ported.
 
+### Signing In
+
+Each app's server is its provider's one OpenID Connect client, a
+confidential one (`ark_auth::oidc`, `ark_auth::server`). It holds the
+secret, runs the Authorization Code flow with PKCE (S256), state and a
+nonce, and checks the ID token whole: the signature against the
+provider's key set (fetched at every exchange, so a rotated key is
+followed), the issuer, the audience, the expiry and the nonce. It accepts
+whatever algorithms discovery names, so Kanidm's ES256 works. It then
+hands the device a session of its own (`/auth/login` → the provider →
+`/auth/callback` → `/auth/exchange`). No device holds a provider token, and
+the browser keeps its session as an `HttpOnly` cookie. The audience is
+per server: money's session token is refused by harken's server, and
+harken's by money's.
+
+What makes the second app one tap is the provider's own session, which
+lives in the browser. So every client opens `/auth/login` in a browser
+that keeps it:
+
+| Platform | Opens the sign-in in |
+|---|---|
+| iPhone, iPad, Mac | `ASWebAuthenticationSession` (SwiftUI's `webAuthenticationSession`), `preferredBrowserSession: .shared`, never ephemeral |
+| Android | Custom Tabs, never a WebView |
+| Desktop | the system browser, back on a loopback port (`ark_auth::client`) |
+| Browser | the same tab |
+
+A server is configured under its prefix (`ark_peer::settings`):
+`_OIDC_ISSUER`, `_OIDC_CLIENT_ID`, `_OIDC_CLIENT_SECRET_FILE` (a file,
+for a systemd credential), `_OIDC_SCOPES` (`openid profile email`), and
+two optional settings. `_OIDC_GROUPS` lets in only those whose `groups`
+claim names one of the groups (`ark_auth::oidc::Groups`, which matches a
+name or Kanidm's `name@domain`; the provider has to send the claim).
+`_OIDC_TRUSTED_CLIENTS` names other client ids whose ID tokens are
+accepted; the server's own client id is always trusted. The provider's
+certificate is checked against the public roots and the machine's own, so
+a household CA works. `checks.oidc-kanidm` (nix/oidc-kanidm.nix) signs in
+to money and then to harken through a Kanidm VM with one browser session,
+and fails if harken asks for the password again or if a server accepts
+the other's token.
+
+**Later: one sign-in per device.** Opening money after harken will offer
+"Sign in as Ann" with no browser. A device-wide `ark` public client at
+the provider is refreshed, and its ID token is exchanged at money's
+server, which checks the token's audience and groups. The seams are in
+place now:
+
+- **`ark_auth::device_accounts::DeviceAccounts`** (list, save, forget:
+  name, picture, provider, the app it came from). The one implementation
+  today is `Secured::app_private`, in the secure store's `Scope::Private`,
+  so it lists only that app's own account. The same implementation over
+  `Scope::Shared` comes once a platform has a shared store, and the
+  refresh token goes beside it, kept apart from the list.
+- **`ark_auth::server::Proof`**, which `/auth/exchange` dispatches on.
+  `Proof::Code` is the only variant today; an ID-token variant comes in
+  beside it, checked against `Provider::trusted` (`_OIDC_TRUSTED_CLIENTS`
+  names `ark`) and `Groups`.
+- **`FirstRun::set_device_accounts`**, which the shell fills at launch.
+  It is empty everywhere today and changes no page. The page that offers
+  an account, and the field on its record (`SignInPage`), come with that
+  screen.
+
 ## Effects and Ports
 
 An update decides; it never does. Everything it wants done leaves it as

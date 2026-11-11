@@ -36,6 +36,8 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # The relying party: discovery, the code exchange and the ID token's checks,
 # over the ureq agent above (its `SyncHttpClient`), never reqwest.
 openidconnect = { version = "4.0.1", default-features = false, features = ["ureq"] }
+# An ID token's payload, read once verified, for the groups claim.
+base64 = "0.22"
 # The provider's certificate, on a server: the public roots ureq carries
 # and the machine's own (`oidc::tls`), with ureq's TLS stack. Not on a
 # phone, which never speaks to the provider.
@@ -65,3 +67,5 @@ hmac = "0.12"
 sha2 = { workspace = true }
 base64 = "0.22"
 serde_json = { workspace = true }
+# The provider's ES256 key in `tests/oidc.rs`, as Kanidm signs.
+p256 = { version = "0.13", features = ["ecdsa"] }

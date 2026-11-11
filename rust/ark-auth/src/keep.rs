@@ -225,7 +225,7 @@ impl ServerLogins {
 
 /// `op` carried out by `modules`, and what came of it: the secure store
 /// answers at once; one that answers later is taken as a failure.
-fn ask(modules: &Modules, op: SecureStoreOp) -> Answer<Option<String>> {
+pub(crate) fn ask(modules: &Modules, op: SecureStoreOp) -> Answer<Option<String>> {
     let got = Arc::new(Mutex::new(None));
     let g = got.clone();
     modules.run(&op, move |a| *g.lock().unwrap_or_else(|e| e.into_inner()) = Some(a));
