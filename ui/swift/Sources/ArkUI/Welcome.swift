@@ -23,10 +23,21 @@ public struct WelcomePage<Content: View>: View {
         self.content = content()
     }
 
+    /// The name that is the app's own mark, not a symbol.
+    public static var appMark: String { "app" }
+
     public var body: some View {
         ScrollView {
             VStack(spacing: Space.s) {
-                Image(systemName: symbol)
+                // `app`: the app's own mark (icon.svg's, its asset catalog's
+                // `Mark`), as Android's FirstRunPage draws it; a symbol otherwise.
+                Group {
+                    if symbol == WelcomePage.appMark {
+                        Image("Mark").renderingMode(.template).resizable().scaledToFit().frame(width: mark / 2, height: mark / 2)
+                    } else {
+                        Image(systemName: symbol)
+                    }
+                }
                     .font(.system(size: mark / 2, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: mark, height: mark)

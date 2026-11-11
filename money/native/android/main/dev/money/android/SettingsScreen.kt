@@ -393,7 +393,7 @@ private fun AccountCard(ledger: Ledger) {
             onClick = shell.onSignOut,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = c.error),
             modifier = Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, bottom = Space.l),
-        ) { Text(if (ledger.demo) "Leave the demo" else "Sign out") }
+        ) { Text(if (ledger.demo) "Leave the Demo" else "Sign Out") }
     }
 }
 

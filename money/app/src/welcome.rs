@@ -1,7 +1,8 @@
 //! money's first run: what it says of itself on every client's shared
 //! first-run pages (`ark_app::welcome`, drawn by every toolkit, walked by
 //! the sign-in machine every Ark app shares). Only the words and the mark
-//! are money's.
+//! are money's: its mark is `app`, its own icon's (icon.svg, the phones'
+//! generated `mark`, the desktop's and the browser's `arkui_glyphs::set_app`).
 
 use ark_app::welcome::{IntroCopy, WelcomeCopy};
 
@@ -12,7 +13,7 @@ pub fn copy(scan: bool, demo: bool) -> WelcomeCopy {
     let sentence = "Your household's budget, every dollar given a job, on your own server.";
     WelcomeCopy {
         name: "Money".into(),
-        glyph: "wallet".into(),
+        glyph: "app".into(),
         sentence: sentence.into(),
         placeholder: "money.example.com".into(),
         server_note: "Where your household's budget is kept.".into(),
@@ -25,7 +26,7 @@ pub fn copy(scan: bool, demo: bool) -> WelcomeCopy {
         // browser's server is theirs): the phones' first page is the
         // server's, which says the same over its field.
         pages: vec![IntroCopy {
-            glyph: "wallet".into(),
+            glyph: "app".into(),
             title: "Welcome to Money".into(),
             text: sentence.into(),
         }],
@@ -45,7 +46,7 @@ mod tests {
         assert!(c.demo.is_none() && c.scan);
         assert!(copy(false, true).demo.is_none());
         assert_eq!(c.pages.len(), 1);
-        assert_eq!((c.pages[0].title.as_str(), c.pages[0].glyph.as_str()), ("Welcome to Money", "wallet"));
+        assert_eq!((c.pages[0].title.as_str(), c.pages[0].glyph.as_str()), ("Welcome to Money", "app"));
         for p in &c.pages {
             assert!(
                 p.title

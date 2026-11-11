@@ -58,7 +58,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
-        .confirmationDialog(model.isDemo ? "Leave the demo?" : "Sign out?", isPresented: $leaving, titleVisibility: .visible) {
+        .confirmationDialog(model.isDemo ? "Leave the Demo?" : "Sign Out?", isPresented: $leaving, titleVisibility: .visible) {
             Button(model.isDemo ? "Leave the Demo" : "Sign Out", role: .destructive) { model.signOut() }
         }
     }

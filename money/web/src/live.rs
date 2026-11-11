@@ -160,6 +160,12 @@ impl MoneyWeb {
         // covered what the sign-in said of it), and their own path,
         // /welcome/, shows them whatever was seen (`arrive`).
         let straight = returned || brought_code || !at_root();
+        // Back from signing in is past the first run: this browser has been
+        // through it, so a reload of the signed-in page is the app, not
+        // Welcome over it (money-web-sync's reload, build 43105468847).
+        if returned || brought_code {
+            remember_intro();
+        }
         if let Some(live) = &mut app.live {
             live.first_run.launch(intro_seen(), straight);
         }

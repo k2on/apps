@@ -178,6 +178,9 @@ def run(args, server, out):
 
         # 5. The first run's Welcome, the first page on every platform: at
         # the root until this browser has seen it, then not; its path shows it.
+        # Signing in counted as seeing it (a reload of the signed-in page is
+        # the app): forgotten here, as a browser that has never been through.
+        page.evaluate("localStorage.removeItem('money.intro-seen')")
         page.goto(server.base + "/")
         expect(page.get_by_text("Welcome to Money", exact=True)).to_be_visible()
         assert page.get_by_text("Try the Demo", exact=True).count() == 0, "the demo is a launch's"

@@ -57,7 +57,7 @@ fn the_menu_says_what_the_account_can_do() {
     if let Some(l) = &mut app.login {
         l.token.clear();
     }
-    assert_eq!(labels(&app), ["Sign out"]);
+    assert_eq!(labels(&app), ["Sign Out"]);
     let a = app.account().unwrap();
     assert!(a.header.contains("signed out by the server"), "{}", a.header);
 
@@ -93,7 +93,7 @@ fn the_button_is_the_persons_picture_through_the_server() {
     assert!(app.account_picture().is_none(), "not arrived yet: the initials are drawn");
 }
 
-/// Choosing "Sign out" from the menu does what the button did: the session
+/// Choosing "Sign Out" from the menu does what the button did: the session
 /// is revoked through the domain and the login is gone. The menu hangs off
 /// the button's bottom right, has the keys while it is up, and closes when
 /// its entry has run.

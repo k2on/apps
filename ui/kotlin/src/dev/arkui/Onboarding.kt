@@ -221,7 +221,7 @@ public fun PermissionScreen(
     OnboardingPage(mark, title = title, sentence = why) {
         Button(onClick = onAllow, modifier = Modifier.fillMaxWidth()) { Text("Allow") }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth()) { Text("Not now") }
+        TextButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth()) { Text("Not Now") }
         Text(
             "You can change this later in the phone's settings.",
             style = MaterialTheme.typography.bodySmall,

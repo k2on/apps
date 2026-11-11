@@ -324,7 +324,48 @@ pub const FOLDER: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="
 /// The glyph Lucide calls `name`, of the ones every toolkit has under the
 /// same name (ui/docs/parts.md, "Glyphs"): Compose's `ArkGlyphs.named`
 /// and SwiftUI's `ArkGlyphs.symbol` (an SF Symbol) answer the same names.
+/// The app's own mark (`app`), set once at start from its icon ([`set_app`]).
+static APP: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
+
+/// The app's own mark, from its icon.svg (app.toml's `[icon]`): the
+/// canvas-wide ground taken out and every fill the glyphs' `currentColor`,
+/// so `named("app")` draws it as any glyph is drawn, in the tint asked.
+/// What a first run's page shows (the phones' generated `mark`). Once; a
+/// second call is passed over.
+pub fn set_app(icon_svg: &str) {
+    let _ = APP.set(Box::leak(app_mark(icon_svg).into_bytes().into_boxed_slice()));
+}
+
+/// An icon's mark alone: its first `<rect>` (the ground) dropped and its
+/// fills `currentColor`.
+pub fn app_mark(icon_svg: &str) -> String {
+    let mut svg = icon_svg.to_string();
+    if let Some(start) = svg.find("<rect") {
+        if let Some(end) = svg[start..].find("/>") {
+            svg.replace_range(start..start + end + 2, "");
+        }
+    }
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg.as_str();
+    while let Some(i) = rest.find("fill=\"") {
+        out.push_str(&rest[..i]);
+        rest = &rest[i + 6..];
+        let end = rest.find('"').unwrap_or(0);
+        out.push_str(if &rest[..end] == "none" {
+            "fill=\"none\""
+        } else {
+            "fill=\"currentColor\""
+        });
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn named(name: &str) -> Option<&'static [u8]> {
+    if name == "app" {
+        return APP.get().copied();
+    }
     Some(match name {
         "chevron-left" => BACK,
         "chevron-right" => CHEVRON,
@@ -448,6 +489,13 @@ mod named_tests {
             assert!(named(n).is_some(), "{n}");
         }
         assert_eq!(named("search"), Some(SEARCH));
+        let mark = app_mark(
+            r##"<svg viewBox="0 0 108 108"><rect width="108" height="108" fill="#1B6B4A"/><g fill="#FFFFFF"><path d="M5 5h1z"/></g></svg>"##,
+        );
+        assert_eq!(
+            mark,
+            r##"<svg viewBox="0 0 108 108"><g fill="currentColor"><path d="M5 5h1z"/></g></svg>"##
+        );
         assert!(named("disc-3").is_none());
     }
 }

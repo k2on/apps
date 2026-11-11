@@ -7,6 +7,8 @@ use money_core::dates::{day_of_ms, parse_day};
 use money_web::MoneyWeb;
 
 fn main() {
+    // money's mark, from its icon: what its first run's pages show.
+    arkui_web::set_app_mark(include_str!("../../icon.svg"));
     let now = day_of_ms(ark_peer::now_ms());
     let app = match arkui_web::query("demo") {
         Some(_) => MoneyWeb::open(arkui_web::query("today").filter(|d| parse_day(d).is_some()).unwrap_or(now)),

@@ -381,10 +381,34 @@ def asset_catalog(a, out, icon_png):
                        {"filename": "icon-1024.png", "idiom": "mac", "scale": "1x", "size": "512x512"}],
             "info": {"author": "xcode", "version": 1}}, indent=2) + "\n",
     }
+    # The mark alone, as the app draws it (a first run's page, `app`): a
+    # vector template the page tints, Android's drawable/mark.
+    svg = os.path.join(REPO, a["dir"], a.get("icon", {}).get("svg", "icon.svg"))
+    if os.path.exists(svg):
+        viewport, _, shapes = svg_shapes(svg)
+        files["Mark.imageset/Contents.json"] = json.dumps({
+            "images": [{"filename": "mark.svg", "idiom": "universal"}],
+            "info": {"author": "xcode", "version": 1},
+            "properties": {"preserves-vector-representation": True, "template-rendering-intent": "template"}}, indent=2) + "\n"
+        files["Mark.imageset/mark.svg"] = mark_svg(*mark_of(viewport, shapes))
     for p, text in files.items():
         write_file(os.path.join(out, p), text)
     if icon_png:
         shutil.copyfile(icon_png, os.path.join(out, "AppIcon.appiconset", "icon-1024.png"))
+
+
+def mark_svg(viewport, shapes):
+    """icon.svg's mark alone as an SVG, every shape black: a template an
+    asset catalog tints."""
+    w, h = viewport
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{num(w)}" height="{num(h)}" viewBox="0 0 {num(w)} {num(h)}">']
+    for d, _, transforms, opacity in shapes:
+        t = " ".join(transforms)
+        o = f' fill-opacity="{opacity}"' if opacity else ""
+        path = f'<path d="{d}" fill="#000000"{o}/>'
+        out.append(f'<g transform="{t}">{path}</g>' if t else path)
+    out.append("</svg>")
+    return "\n".join(out) + "\n"
 
 
 # ------------------------------------------------------------- Android

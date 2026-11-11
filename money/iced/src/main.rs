@@ -2624,6 +2624,8 @@ pub fn main() -> iced::Result {
     // on stderr (`arkui::renderer`): iced would fall back to the CPU silently.
     arkui::renderer::choose();
     arkui::theme::install(palette::MONEY);
+    // money's mark, from its icon: what its first run's pages show.
+    arkui::glyphs::set_app(include_str!("../../icon.svg"));
     // Whether to move, asked of the system now rather than in a frame.
     arkui::motion::reduced();
     // The app's boot, and what every arkui window starts with (a trackpad's

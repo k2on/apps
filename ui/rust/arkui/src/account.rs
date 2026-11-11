@@ -91,7 +91,7 @@ impl<M> Account<M> {
         Account {
             who: Some(who.clone()),
             header: format!("Signed in as {}", who.full()),
-            entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign out", sign_out)],
+            entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign Out", sign_out)],
         }
     }
 
@@ -100,7 +100,7 @@ impl<M> Account<M> {
         Account {
             who: Some(who.clone()),
             header: format!("{} \u{2014} signed out by the server", who.full()),
-            entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign out", sign_out)],
+            entries: vec![Entry::run(glyphs::SIGN_OUT, "Sign Out", sign_out)],
         }
     }
 
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn the_menu_offers_what_the_account_can_do() {
         let on = Account::signed_in(&ada(), Msg::SignOut);
-        assert_eq!(labels(&on), ["Sign out"]);
+        assert_eq!(labels(&on), ["Sign Out"]);
         assert_eq!(on.header, "Signed in as Ada");
         assert_eq!(on.who.as_ref(), Some(&ada()));
         let messages: Vec<&Msg> = on.entries.iter().map(|e| e.message()).collect();
@@ -239,7 +239,7 @@ mod tests {
         assert!(on.entries.iter().all(|e| !e.opens_submenu()));
 
         let away = Account::turned_away(&ada(), Msg::SignOut);
-        assert_eq!(labels(&away), ["Sign out"]);
+        assert_eq!(labels(&away), ["Sign Out"]);
         assert!(away.header.contains("signed out by the server"), "{}", away.header);
 
         let alone: Account<Msg> = Account::alone("Alone, on this device");

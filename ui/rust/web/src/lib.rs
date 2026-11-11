@@ -31,6 +31,8 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 pub use ark_router::Address;
+/// The app's own mark, from its icon (`arkui_glyphs::set_app`): set once at start.
+pub use arkui_glyphs::set_app as set_app_mark;
 pub use leptos::prelude::AnyView;
 
 pub mod fields;

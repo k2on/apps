@@ -286,7 +286,7 @@ struct AccountButton: View {
                              server: model.isDemo ? nil : Probe.display(model.server),
                              linked: model.snapshot.status.map { $0.linked },
                              signOut: model.isDemo ? "Leave the Demo" : "Sign Out",
-                             confirm: model.isDemo ? "Leave the demo?" : "Sign out?",
+                             confirm: model.isDemo ? "Leave the Demo?" : "Sign Out?",
                              onSettings: { leave(.page(.settings)) },
                              onSignOut: { leave(.signOut) }) {
                     if wanting > 0 {

@@ -26,6 +26,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -41,8 +43,14 @@ import androidx.compose.ui.unit.dp
 /** A first run's page: the app's mark in the theme's primary, a title, a sentence, and what to do. */
 @Composable
 public fun FirstRunPage(glyph: String, title: String, sentence: String, content: @Composable () -> Unit) {
-    val mark = LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron
-    OnboardingPage(rememberVectorPainter(mark), title = title, sentence = sentence) {
+    // `app`: the app's own mark (icon.svg's, its generated drawable/mark), as the iPhone's page draws
+    // it; a glyph by its name otherwise.
+    val context = LocalContext.current
+    val own = if (glyph == "app") context.resources.getIdentifier("mark", "drawable", context.packageName) else 0
+    val painter =
+        if (own != 0) painterResource(own)
+        else rememberVectorPainter(LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron)
+    OnboardingPage(painter, title = title, sentence = sentence) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.m)) { content() }
     }
 }

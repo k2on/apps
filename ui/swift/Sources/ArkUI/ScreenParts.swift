@@ -780,7 +780,7 @@ public struct FirstRunPage<Content: View>: View {
     }
 
     public var body: some View {
-        WelcomePage(symbol: ArkGlyphs.sf(glyph), tint: Color.accent, title: title, sentence: sentence) {
+        WelcomePage(symbol: glyph == "app" ? glyph : ArkGlyphs.sf(glyph), tint: Color.accent, title: title, sentence: sentence) {
             VStack(spacing: Space.m) { content }
         }
     }
