@@ -78,23 +78,37 @@ its tree kept beside it. It is never how long a shot waits when all is well.
   before the app is installed; each iOS device pass on a server of its own
   (the iPad's not left what the iPhone's played).
 
-Not held still yet, and so different between two runs' Android shots
-(dry runs 42971809544 and 42977527249, 37 of 81 byte-identical): the
-launcher's taskbar on the tablet and the open Fold (the apps it predicts,
-in its own order), one to three levels of antialiasing at rounded edges
-(faces, the gesture handle's ends, the status bar's icons: the emulator's
-GPU), harken's player backdrop, and harken's server crediting an album to
-different performers from one run to the next (its desktop library too).
-Hiding the navigation bars in shots mode took the taskbar and the handle
-away but brought up the system's "Viewing full screen" confirmation over
-the first launch (dry run 42984084410); the setting
-`immersive_mode_confirmations` is what would be tried next.
+Held still since dry runs 42971809544 and 42977527249 (37 of 81 Android
+shots byte-identical between them): the navigation bars hidden in shots
+mode (ui/kotlin/shots: the gesture handle, and the launcher's taskbar with
+the apps it predicts in its own order on the tablet and the open Fold),
+with the system's "Viewing full screen" told as seen already
+(`immersive_mode_confirmations`, which had come up over the first launch,
+dry run 42984084410); harken's album credits in the order the album plays,
+not the order a scan added its tracks (`browse::albums`: a tie between
+three soloists went to a different one each run, on every phone and the
+desktop); and a cover decoded for each size it is drawn at (harken's
+`Covers`, ArkUI's `CoverLoader.cached(url, side)`: the full player drew
+whichever size of its cover was decoded first, the mini player's blurred
+or its own sharp one). Not held still: one to three levels of antialiasing
+at rounded edges and in the status bar's icons, the emulator's GPU.
 - The caret: clear in shots mode.
 - Where a list is scrolled: where a shot's steps put it, or its top.
 
 ## Navigation
 
-A shot opened by a `route` is opened as a link (`<scheme>://<route>`) in
-the running app; one opened by launch arguments, or with neither, is opened
-afresh, as before. Taps remain for what only a finger reaches (a menu, a
-gesture), and each is followed by the ready signal too.
+Every driver opens the app once for each device and theme and walks its
+shots in order in that one launch (`.github/screens/apps.md`). A shot is
+reached in the running app: by its launch arguments as a **launch link**
+(`<scheme>://?screen=…&inspector=1`, the browser's spelling of them, read by
+`Navigator.launchArgs` / `Navigator.launchArgsOf`), which an app's shell
+takes as a launch — everything it showed put back where a launch leaves it
+(ark_app's `Launch` puts back the shell's own state; the platform puts away
+its sheets and pages), then that screen; by its `route` as a link
+(`<scheme>://<route>`); or by its steps from where the last shot left it.
+Only a shot marked `fresh`, or one whose launch-time arguments change, has
+the app launched again. In the browser the same is the address moved in
+place (`history.pushState` and `popstate`): arkui-web puts the app back
+(`WebApp::rewind`) and its own menus, popovers, command box and focus with
+it, then arrives at the new address. Taps remain for what only a finger
+reaches (a menu, a gesture), and each is followed by the ready signal too.

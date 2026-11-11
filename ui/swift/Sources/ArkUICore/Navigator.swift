@@ -50,6 +50,20 @@ public struct Navigator<Route: Hashable>: Equatable {
         return true
     }
 
+    /// A launch link's arguments (`money://?screen=category%3Adining&inspector=1`
+    /// is `-screen category:dining -inspector 1`): a link of `scheme` with
+    /// no path, only a query, which says the launch arguments as the
+    /// browser's address does (ark_app::shell::Launch). The app's shell
+    /// takes it as a launch while it runs: what it showed put back, then
+    /// that screen opened (ui/docs/shots.md). Nil for any other link.
+    public static func launchArgs(of url: URL, scheme: String) -> [String]? {
+        let prefix = scheme + "://?"
+        guard url.scheme == scheme, url.absoluteString.hasPrefix(prefix),
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems, !items.isEmpty
+        else { return nil }
+        return items.flatMap { ["-\($0.name)", $0.value ?? ""] }
+    }
+
     /// The route a link of `scheme` names: its path is everything after
     /// `scheme://`, query and all.
     public static func route(of url: URL, scheme: String, parse: (String) -> Route?) -> Route? {

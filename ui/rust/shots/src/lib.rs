@@ -38,8 +38,11 @@
 //! (ui/docs/shots.md); one that hands none, once nothing has happened for
 //! two seconds.
 //!
-//! **Each shot** is the app opened afresh at the window's size, its steps
-//! done in order, and the screen drawn in light and in dark. The steps
+//! **Every shot in one window**, in order: the app opened once at the
+//! window's size, then each shot's steps done from where the last left it,
+//! and the screen drawn in light and in dark. A shot that needs a clean
+//! start (`"fresh": true`: what the one before left open would be in its
+//! way) has the window closed and opened again first. The steps
 //! (`desktop.shots[].steps` in shots.json) name what to press by what it
 //! says, as the phones' do, from the text the window lays out:
 //!
@@ -188,13 +191,27 @@ impl Asked {
         std::fs::write(self.out.join("device.json"), format!("{device}\n")).map_err(|e| e.to_string())?;
 
         let mut failed = Vec::new();
+        // The one window every shot is taken in, opened for the first and
+        // again for a `fresh` one (or after one that failed: it is wherever
+        // its step stuck).
+        let mut open: Option<Window<'_, P>> = None;
         for shot in shots {
             let id = shot["id"].as_str().ok_or("a shot with no id")?;
             if self.only.as_deref().is_some_and(|only| only != id) {
                 continue;
             }
-            eprintln!("shots: {id}");
-            let mut window = Window::open(program, size, scale);
+            let began = Instant::now();
+            let fresh = shot["fresh"].as_bool() == Some(true);
+            let mut window = match open.take() {
+                Some(w) if !fresh => w,
+                // The one open goes first, as a window closed does: its
+                // replica's files and socket let go before the next opens.
+                was => {
+                    drop(was);
+                    Window::open(program, size, scale)
+                }
+            };
+            eprintln!("shots: {id}{}", if fresh { " (fresh)" } else { "" });
             let mut done = Ok(());
             for step in shot["steps"].as_array().map(Vec::as_slice).unwrap_or_default() {
                 if step["relaunch"].as_bool() == Some(true) {
@@ -223,6 +240,8 @@ impl Asked {
                         window.write(&theme, &self.out.join(name).join(format!("{id}.png")))?;
                         std::fs::write(self.out.join(name).join(format!("{id}.tree.txt")), &tree).map_err(|e| e.to_string())?;
                     }
+                    eprintln!("shots: {id} taken in {:.1}s", began.elapsed().as_secs_f64());
+                    open = Some(window);
                 }
                 Err(why) => {
                     eprintln!("shots: {id}: {why}");
@@ -232,6 +251,7 @@ impl Asked {
                 }
             }
         }
+        drop(open);
         match failed.is_empty() {
             true => Ok(()),
             false => Err(format!("not taken: {}", failed.join(", "))),

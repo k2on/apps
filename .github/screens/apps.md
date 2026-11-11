@@ -41,8 +41,16 @@ All of it is in `<app>/screens/`:
   ```
 
   `server` (optional): the port its `server.sh`
-  listens on, and the name the server's dev sign-in is given. Each shot is
-  the app opened afresh, its `steps` done in order, and the screen taken:
+  listens on, and the name the server's dev sign-in is given. **The app is
+  opened once for each device and theme, and its shots are taken in that
+  one launch, in order**: each shot's `steps` done from where the last shot
+  left the app, and the screen taken. `"fresh": true` on a shot opens the
+  app again for it, for one that what came before would get in the way of
+  (harken's `player`, which plays from Home's Recently added and needs the
+  mini player there from the start; the desktop's `keys` after `search`,
+  which leaves the command box open); a shot whose steps change what a
+  later one shows goes after it. So the shots are written in the order
+  they are taken, and a tab's tap is a tab switched in the running app:
   `{"tap": "<label>"}` taps the element whose accessibility label (what it
   says) or identifier is `<label>` (an iOS `accessibilityIdentifier`, an
   Android resource id or exposed Compose `testTag`), and `"role"`
@@ -60,8 +68,14 @@ All of it is in `<app>/screens/`:
 
   **A screen opened by its launch arguments** rather than by steps: a
   shot's `"args"` (`["-screen", "category:dining", "-menu", "sort"]`)
-  are given to the app every time it is opened for that shot (signing
-  in opens it with none). On the iPhone and the iPad they are the
+  are given to the app when it is opened for that shot (signing in opens
+  it with none). An app whose shell takes them by a link while it runs says
+  so, `"links": true` (money's): then a shot's `args` are a **launch link**
+  in the running app, `<scheme>://?screen=category%3Adining&inspector=1`,
+  the browser's spelling of them, which the shell takes as a launch — what
+  it showed put back first (its sheets, pages, inspector, search, Settings),
+  then that screen — and the app is opened again only when the launch
+  arguments that must be there from the start change (`launch.ios`'s demo). On the iPhone and the iPad they are the
   process's launch arguments, which an app reads from UserDefaults'
   argument domain (`UserDefaults.standard.string(forKey: "screen")`); on
   Android each `-<key> <value>` pair is a string extra of the launch
@@ -199,8 +213,12 @@ which nix builds at the commit (see below).
   link and step the driver waits for the app's `ark.ready` at a newer
   generation, then takes the screen. Nothing waits for a time. It signs in
   through `ASWebAuthenticationSession` (the system's "wants to use … to
-  sign in", then the page) and writes each shot's PNG. A shot with a
-  `route` is opened as a link in the running app; one without, afresh.
+  sign in", then the page) and writes each shot's PNG. Each app is
+  launched once a theme; a shot's launch link, `route` link and steps are
+  all in the running app, and only a `fresh` shot, or one whose launch
+  arguments change, launches it again. The log says, for each shot, how it
+  was reached and what its parts took (`Drive: …`); Android's says the same
+  under each shot's name.
 - **`app-desktop.sh`**: runs the window nix built with `ARK_SHOTS` set,
   in a home of its own, given `--server` and `--user`; it signs in, does
   each shot's steps and writes its PNGs ([the desktop](#the-desktop)).
@@ -418,8 +436,9 @@ draws is different, and the hook only captures.
   `ARK_DEV_USER` set answers at once with a redirect to that loopback
   carrying the code; `ark_auth::client::login` takes the code from the
   redirect itself, so no browser is opened. The login is remembered in the
-  run's own home, so each shot after opens signed in, its replica synced
-  from the server.
+  run's own home. Every shot is taken in that one window, in order, each
+  shot's steps from where the last left it; a `fresh` one closes it and
+  opens another, signed in already, its replica synced from the server.
 - **Drawn the same everywhere.** No window and no GPU: wgpu, the renderer a
   person's window draws with, on Mesa's lavapipe (Vulkan on the CPU), and
   DejaVu for the window's default sans-serif in place of the runner's

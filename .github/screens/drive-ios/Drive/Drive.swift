@@ -4,20 +4,31 @@
 //
 //   [{"bundle": …, "server"?: …, "user"?: …, "scheme"?: …, "out": <dir>,
 //     "orientation"?: "portrait"|"landscape", "signedIn"?: true,
-//     "shots": [{"id": …, "args"?: [launch arguments], "route"?: <path>,
+//     "links"?: true,
+//     "shots": [{"id": …, "launch"?: [launch arguments], "args"?: [a screen's],
+//                "route"?: <path>, "fresh"?: true,
 //                "steps": [{"tap": label, "role"?: …} | {"type": text} | {"await": label} | …]}]}]
 //
 // For each theme (the simulator's own appearance, set from here), each
-// app in turn: launched with `-shots YES` (ArkUI's `Shots`: no motion, and
-// the ready signal), signed in through arkui's onboarding to the server CI
-// started, if it is not already, then each shot. **Nothing waits for a
-// time.** The app says when its screen is ready (`ark.ready`, labelled
-// `ready <generation> <route>`, ui/docs/shots.md); after anything the driver
-// does it waits for a newer generation, then takes the screen. A shot is
-// opened by its `route` as a link (`<scheme>://<route>`) in the running app
-// where it has one, by its launch arguments with a fresh launch where it
-// has those, and otherwise from where the last left it; `relaunch` starts
-// it again. Every wait has a limit, which only fails the shot.
+// app in turn: launched once with `-shots YES` (ArkUI's `Shots`: no
+// motion, and the ready signal), signed in through arkui's onboarding to
+// the server CI started, if it is not already, then its shots one after
+// another **in that one launch**, each from where the last left the app.
+// **Nothing waits for a time.** The app says when its screen is ready
+// (`ark.ready`, labelled `ready <generation> <route>`, ui/docs/shots.md);
+// after anything the driver does it waits for a newer generation, then
+// takes the screen.
+//
+// A shot is reached, in the running app, by its `args` (a screen's launch
+// arguments) as a launch link (`<scheme>://?screen=…`, the browser's
+// spelling, which the app's shell takes as a launch: everything it showed
+// put back first, ui/docs/shots.md) where the app says it takes them
+// (`links`), by its `route` as a link (`<scheme>://<route>`), and by its
+// steps. The app is launched again only for a shot that says it needs a
+// clean start (`fresh`), whose `launch` arguments are not the running
+// app's (money's demo household, `-demo <day>`), or whose `args` the app
+// takes only at launch; `relaunch` in a step starts it again. Every wait
+// has a limit, which only fails the shot.
 //
 // A tap's label is what the element says or its accessibility identifier;
 // `role` ("tab", "button", "field", "text") says which kind when several
@@ -28,6 +39,7 @@
 //
 // Writes <out>/<theme>/<id>.png, and beside each the app's accessibility
 // tree as it was taken (<id>.tree.txt), which is what a step can name.
+// Says how long each shot took, and how it was reached (`Drive: …`).
 import UIKit
 import XCTest
 
@@ -40,6 +52,8 @@ struct Entry: Decodable {
     var out: String
     var orientation: String?
     var signedIn: Bool?
+    /// The app opens a screen's launch arguments by a link as it runs.
+    var links: Bool?
     var shots: [Shot]
 }
 
@@ -70,19 +84,29 @@ struct Shot: Decodable {
 
     var id: String
     var steps: [Step] = []
-    /// The app's launch arguments for this shot (shots.json's `screens`).
+    /// What the app must be launched with for this shot (shots.json's
+    /// `launch.ios`, before each of its `screens`): another launch when the
+    /// running app's differ.
+    var launch: [String] = []
+    /// The screen's own launch arguments (shots.json's `screens`): a link
+    /// in the running app where the app takes them so (`links`).
     var args: [String] = []
     /// Where it is, as the app's router spells it: opened as a link.
     var route: String?
+    /// The app launched afresh for it: what an earlier shot left (a song
+    /// playing, a sheet) would not do.
+    var fresh = false
 
-    enum CodingKeys: String, CodingKey { case id, steps, args, route }
+    enum CodingKeys: String, CodingKey { case id, steps, launch, args, route, fresh }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         steps = try c.decodeIfPresent([Step].self, forKey: .steps) ?? []
+        launch = try c.decodeIfPresent([String].self, forKey: .launch) ?? []
         args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
         route = try c.decodeIfPresent(String.self, forKey: .route)
+        fresh = try c.decodeIfPresent(Bool.self, forKey: .fresh) ?? false
     }
 }
 
@@ -94,6 +118,12 @@ final class Drive: XCTestCase {
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     /// The launch arguments each running app was launched with.
     private var launched: [String: [String]] = [:]
+    /// The screen arguments each running app was last brought to (at its
+    /// launch, or by a link since).
+    private var screen: [String: [String]] = [:]
+    /// How the shot being taken was reached, and what it took: said once
+    /// it is taken.
+    private var reached = ""
 
     func testShots() throws {
         let plan = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: URL(fileURLWithPath: try value("APP_PLAN"))))
@@ -123,15 +153,24 @@ final class Drive: XCTestCase {
         }
         // Signed in once, in the first theme, from a launch with no arguments.
         if theme == "light", entry.signedIn != true, let server = entry.server, !server.isEmpty {
-            launch(app, entry, args: [])
+            launch(app, entry, launch: [], args: [])
             try signedIn(app, server: server, user: entry.user ?? "", out: out)
         }
+        // Launched once for this theme: its first shot opens it afresh, as
+        // the theme was set with the app wherever another left it.
+        launched[entry.bundle] = nil
         for shot in entry.shots {
             do {
+                let start = Date()
                 try open(shot, in: app, entry: entry, out: out)
+                let opened = Date()
                 try ready(app)
+                let isReady = Date()
                 try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
+                let pictured = Date()
                 try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
+                let s = { (a: Date, b: Date) in String(format: "%.1fs", b.timeIntervalSince(a)) }
+                print("Drive: \(entry.bundle) \(URL(fileURLWithPath: entry.out).lastPathComponent) \(theme) \(shot.id): \(reached), \(shot.steps.count) steps; open \(s(start, opened)), ready \(s(opened, isReady)), picture \(s(isReady, pictured)), tree \(s(pictured, Date())), all \(s(start, Date()))")
             } catch {
                 try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
                 try? app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("stuck.png"))
@@ -140,19 +179,36 @@ final class Drive: XCTestCase {
         }
     }
 
-    /// The app at `shot`: by its launch arguments (a fresh launch), by its
-    /// route (a link, in the running app), or from where it is; then each
-    /// step, each followed by the app's next ready moment.
+    /// The app at `shot`, in the app as it runs where it can be: launched
+    /// afresh only for the theme's first shot, a `fresh` one, one whose
+    /// `launch` arguments are not the running app's, or one whose screen
+    /// arguments the app takes only at launch; else its screen arguments
+    /// as a launch link (`links`), its route as a link, or from where the
+    /// last shot left it. Then each step, each followed by the app's next
+    /// ready moment.
     private func open(_ shot: Shot, in app: XCUIApplication, entry: Entry, out: URL) throws {
-        if let route = shot.route, let url = link(route, scheme: entry.scheme) {
-            // Where the router can take it: in the app as it runs, no relaunch.
-            if launched[entry.bundle] != shot.args || app.state != .runningForeground { launch(app, entry, args: shot.args) }
+        let links = entry.links == true && entry.scheme?.isEmpty == false
+        let relaunch = shot.fresh || launched[entry.bundle] != shot.launch || app.state != .runningForeground
+            || (!links && !shot.args.isEmpty && screen[entry.bundle] != shot.args)
+        if relaunch {
+            launch(app, entry, launch: shot.launch, args: shot.args)
+            reached = shot.fresh ? "launched (fresh)" : "launched"
+        } else if !shot.args.isEmpty, links, let url = link(query(shot.args), scheme: entry.scheme) {
+            // Its screen as a launch link: what the last shot showed put back first.
             let g = try ready(app)
             app.open(url)
             try ready(app, after: g)
+            screen[entry.bundle] = shot.args
+            reached = "linked \(url.absoluteString)"
         } else {
-            // Opened afresh, as every shot is that names no route: a clean start.
-            launch(app, entry, args: shot.args)
+            reached = "continued"
+        }
+        if let route = shot.route, let url = link(route, scheme: entry.scheme) {
+            // Where the router can take it: in the app as it runs, no relaunch.
+            let g = try ready(app)
+            app.open(url)
+            try ready(app, after: g)
+            reached += ", routed \(route)"
         }
         for step in shot.steps {
             let g = try ready(app)
@@ -171,7 +227,7 @@ final class Drive: XCTestCase {
                 try ready(app, after: g)
             }
             if step.relaunch == true {
-                launch(app, entry, args: launched[entry.bundle] ?? [])
+                launch(app, entry, launch: launched[entry.bundle] ?? [], args: screen[entry.bundle] ?? [])
             }
             if let text = step.type {
                 app.typeText(text)
@@ -186,16 +242,36 @@ final class Drive: XCTestCase {
     /// is; a path is the app's scheme's.
     private func link(_ route: String, scheme: String?) -> URL? {
         if route.contains("://") { return URL(string: route) }
+        // A launch link's query alone: the scheme's, with no path (`money://?screen=…`).
         guard let scheme, !scheme.isEmpty else { return nil }
         return URL(string: "\(scheme)://\(route)")
     }
 
-    /// `app` launched afresh with `args`, in screenshot mode, and ready.
-    private func launch(_ app: XCUIApplication, _ entry: Entry, args: [String]) {
+    /// A screen's launch arguments as a link's query, the browser's
+    /// spelling (`-screen category:dining -inspector 1` is
+    /// `?screen=category%3Adining&inspector=1`), which ArkUI reads back
+    /// (`Navigator.launchArgs`).
+    private func query(_ args: [String]) -> String {
+        var items: [URLQueryItem] = []
+        var i = 0
+        while i + 1 < args.count {
+            items.append(URLQueryItem(name: String(args[i].drop { $0 == "-" }), value: args[i + 1]))
+            i += 2
+        }
+        var c = URLComponents()
+        c.queryItems = items
+        // A colon is a URL's own; written out, so every reader reads one spelling.
+        return "?" + (c.percentEncodedQuery ?? "").replacingOccurrences(of: ":", with: "%3A")
+    }
+
+    /// `app` launched afresh with `launch` and then `args`, in screenshot
+    /// mode, and ready.
+    private func launch(_ app: XCUIApplication, _ entry: Entry, launch: [String], args: [String]) {
         app.terminate()
-        app.launchArguments = ["-shots", "YES"] + args
+        app.launchArguments = ["-shots", "YES"] + launch + args
         app.launch()
-        launched[entry.bundle] = args
+        launched[entry.bundle] = launch
+        screen[entry.bundle] = args
         _ = try? ready(app)
     }
 

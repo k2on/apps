@@ -9,6 +9,9 @@
 //! the state after it, and every view's answer at every fiftieth step. The
 //! values became JSON after the text went (N1, step e), which moved every
 //! pin: these are the JSON run's, the scripts and the code as they were.
+//! Albums credited in the order they play rather than the song table's
+//! (`browse::albums`, so a tie no longer goes to whichever track a scan
+//! added first) moved every transcript pin again, the states' none.
 //! Falsified by numbering a playlist "Favorites [1]"
 //! (`playlists::numbered`): seed 1's pins moved.
 // A test reads its fixtures and times itself: the kernel's and the core's
@@ -340,62 +343,62 @@ const PINS: [(u64, &str, &str); 12] = [
     (
         1,
         "ddb40130e6bb64f67f83ed19045e1ae429bc1be6adacb4522d8f1934ac868957",
-        "2907fdbead575b073f87426059f587beafbefa0d09f25fccda38318c7cd1b026",
+        "c39435227a435e82df402c4419101c403ba86efec3f39bc9a185a834da925e03",
     ),
     (
         2,
         "fb0cae3eb3e23fbe05e24a665b926715a63a2ac71bc13c60d44d9d49816c710d",
-        "1963c053e77ddcc4189edb975f3015a995d678e2376040153624ae9e4b7b83c4",
+        "009a29a6e832cca82e8712ae16c7b369b871df41d541b7555f87cabaaf85093c",
     ),
     (
         3,
         "9ab57014d03333c09065ee49f231afa429df6683bb283d1fa186fe25d035c9fb",
-        "3be6f080d70f49fbc0c66b8a1258b9ed8fa4ff8d2dc5e72fdb95466ae5b56601",
+        "f9c4028ef2e24e57f7ccc8229642bcd9ab287cbac2978265573432054e3f88df",
     ),
     (
         4,
         "7b974edfa92fe1ba475526e8489ee00ff1230005dd873f4eff8325bd9800d459",
-        "a361cb2dfbbfd70c18f219e3a49be522815ab1950067fb5faac1a206d0729fa8",
+        "475d8345d0458376d682662e80c3118b3ebd941da4573700a9e0236943aca606",
     ),
     (
         5,
         "4ec1962ff49c3e51c45811b951baf8c32cc7b647aa5cda9215c356bb480c5095",
-        "0e11d51af8ea74654b9d920dff67279ba8fa6e115323e5a2508abc4540735b2c",
+        "61dcae305906e9ae6f921dd419c4cb15657aeeea24f54bbc356dc8dc53ad246e",
     ),
     (
         6,
         "e9b1b2c28ef18e46fa67662962dc483242fcfd7571c952c4043d171aaa7d08e2",
-        "c53f1d2935e5bf2f1db6b007b83cb37665fa5af19dd5bbc44e5f1d202735b79e",
+        "2df93ce155369cb33501394944481951fa08185aedbc62d77a17e192bd1fff50",
     ),
     (
         7,
         "642b50a654b9468c232651f439ed9371ed24cfce82d8e84ffe9ed41f1ac478b4",
-        "5d79d8dd3f88d0e0ee51ad8c332a2ddc3fea079dfaef8b684ad1b451c265cfb4",
+        "9cae73812ef85b3b775f6930a1dedbab08325bfcf70c89e68cea27f33ac77df4",
     ),
     (
         8,
         "20971f16633bc12c5eeb2d78ee532b233162f3248eec3c2c8d469571d7d0a169",
-        "6efe31e50cf826f609eb41e84b98ace73768f9b48d9519c70ad4f94d812140b2",
+        "63bdfab94bc874022ad7468b92fb6dc81b3c21ce250d6b1b37621666ac771fbc",
     ),
     (
         9,
         "fc7289984c604b1f59fbc464175dcca0ac2bb389add8eb1c3a73232844ff6a5a",
-        "6e35fb12fb91754bfe4c29dffeb0a56a8747269253196394b3568f05552c36c0",
+        "a383e864fccef8601627999ad325499bc28ea988707966ac76b0ae25da5a3315",
     ),
     (
         10,
         "04d16261e621af38a4147036efedbd64f21f6dc1f9d4f492bc98fd974b86a9e4",
-        "d018705119a3e27ab7246bc7dd09044c1e112d0a1b525063fa9a2b49f12733bf",
+        "55045fd7d5b231c5605de927cca833e86923c3b9903777646c677ddadae748f0",
     ),
     (
         11,
         "eff14a7c62805b0df723d0cba7b01d483620f9278514cab79d1be4459d1c2b3d",
-        "0efa9dae108cfce666b740b3568e9a4f1c950314064de272f3e9d20db9804a06",
+        "3f972266ab9803c5fbd88b71704a6962089070ae9c3ead635114c4a1b26dcb80",
     ),
     (
         12,
         "dcd4714f86d627b57204d3b5c07a904ecbba6147340597c3219685a852407cd3",
-        "6e28e23af3d5dffd382d515b2f41e843d10cdf6f9902ca52144119fa6c88d0c6",
+        "fae2eb0a914c84a2f3211aadfc7f0628d12af9c7768ee5702b46d7a8dfaeebd2",
     ),
 ];
 

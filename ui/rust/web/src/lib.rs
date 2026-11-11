@@ -418,6 +418,51 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         }
     });
     // What the address asks for, after the first draw.
+    arrive_here(&app);
+    // And again whenever the address moves in place (the browser's back
+    // and forward, or a screenshot's driver walking its shots in one page,
+    // ui/docs/shots.md): the app put back where it opens and the page's own
+    // menus, popovers, command box and focus with it, then brought where
+    // the address says, as a fresh page would be. An app that cannot put
+    // itself back (`rewind`) is loaded afresh at that address.
+    if cfg!(target_arch = "wasm32") {
+        use wasm_bindgen::closure::Closure;
+        let app = app.clone();
+        let moved = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            let rewound = app.borrow_mut().rewind();
+            if !rewound {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.location().reload();
+                }
+                return;
+            }
+            if let Some(el) = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = el.blur();
+            }
+            UI.with(|u| *u.borrow_mut() = Ui::default());
+            QUEUE.with(|q| q.borrow_mut().clear());
+            if let Some(w) = web_sys::window() {
+                w.scroll_to_with_x_and_y(0.0, 0.0);
+            }
+            redraw();
+            arrive_here(&app);
+        });
+        if let Some(w) = web_sys::window() {
+            let _ = w.add_event_listener_with_callback("popstate", moved.as_ref().unchecked_ref());
+        }
+        moved.forget();
+    }
+}
+
+/// Where the page's address asks the app to be (its `arrive`), and what of
+/// the page's own it asks open: a row's menu (`context`), a control's
+/// (`menu`), a field's popover (`popover`), the command box (`command`),
+/// the keys panel (`keys`).
+fn arrive_here<A: WebApp>(app: &Rc<RefCell<A>>) {
     let arrive: Vec<A::Msg> = app.borrow_mut().arrive(&address());
     for m in arrive {
         send(m);
@@ -427,6 +472,9 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
     }
     if let Some(id) = query("menu") {
         after_draw(move || keys::open_menu(&id));
+    }
+    if let Some(id) = query("popover") {
+        after_draw(move || fields::open_popover(&id, 0));
     }
     if query("command").is_some() {
         ui_mut(|u| u.command = Some((query("command").unwrap_or_default(), 0)));

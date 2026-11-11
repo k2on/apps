@@ -159,7 +159,7 @@ public fun Cover(
             // A cover already decoded is drawn at once, and nothing is launched for it: a fling
             // brings several rows in a frame, and a coroutine each to find what was already there
             // was a cost per row.
-            val cached = remember(url) { covers.cached(url) }
+            val cached = remember(url, side) { covers.cached(url, side) }
             if (cached != null) {
                 Image(
                     cached,
@@ -193,8 +193,12 @@ public interface CoverLoader {
     /** Where the picture named `art` is, or null when there is none. */
     public fun urlOf(art: String): String?
 
-    /** The picture at `url` if it is already decoded, without waiting. */
-    public fun cached(url: String): ImageBitmap?
+    /**
+     * The picture at `url` if it is already decoded for `side` (as [load] decodes it for that
+     * side), without waiting: not one decoded for another size, which a full player's cover would
+     * draw blurred, or a row's at more pixels than it needs, whichever came first.
+     */
+    public fun cached(url: String, side: Dp): ImageBitmap?
 
     /** The picture at `url`, decoded to about `side` across, or null when there is none. */
     public suspend fun load(url: String, side: Dp): ImageBitmap?

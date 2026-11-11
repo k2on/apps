@@ -404,8 +404,28 @@ fn pane_named(word: &str) -> Option<&'static str> {
 /// appearance here, and what only the platform's hosted screens can show
 /// yet (a category, a transaction, the review, a sheet, Settings) asked
 /// of its host ([`MoneyRequest`]).
+///
+/// The same whether the process has just started or a launch link
+/// (`money://?screen=…`, ui/docs/shots.md) asks while it runs: what the
+/// shell showed is put back where a window opens first — the inspector put
+/// away, nothing searched or inspected, Settings' first pane, the system's
+/// appearance, and with a `-screen` the first section under it — so a
+/// screen opened in a running app is the one a fresh launch opens. The
+/// month is the platform's, and stays; so does the section when no screen
+/// is named (the browser's path names it, its query the rest).
 fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Command<MoneyShell>> {
     let mut out = Vec::new();
+    if !l.is_empty() {
+        let section = match l.screen {
+            Some(_) => ShellState::default().section,
+            None => std::mem::take(&mut s.section),
+        };
+        *s = ShellState {
+            month: std::mem::take(&mut s.month),
+            section,
+            ..ShellState::default()
+        };
+    }
     match l.appearance.as_deref() {
         Some("dark") => s.appearance = Some(Appearance::Dark),
         Some("light") => s.appearance = Some(Appearance::Light),

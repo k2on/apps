@@ -71,12 +71,15 @@ for a in "$@"; do
   for k in $kinds; do
     kind=${k%%:*} orientation=${k#*:}
     # The shots, then each of the `screens` that is `on` this device:
-    # opened by its launch arguments alone, after shots.json's `launch.ios`
-    # (a demo on a fixed day).
-    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, args: ($l + (.args // [])), steps: (.steps // []), route}] | map(with_entries(select(.value != null)))' "$a/screens/shots.json")
+    # opened by its launch arguments alone, the app launched with
+    # shots.json's `launch.ios` (a demo on a fixed day), in one launch where
+    # the app takes a screen's arguments by a link (`links`).
+    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/screens/shots.json")
+    links=$(jq '.links == true' "$a/screens/shots.json")
     jq --arg b "$bundle" --arg s "$server" --arg u "$user" --arg sc "$scheme" --arg o "$out/$a/$kind" \
       --arg or "$orientation" --argjson signed "$([ "$first" = true ] && echo false || echo true)" --argjson shots "$shots" \
-      '. + [{bundle: $b, server: $s, user: $u, scheme: $sc, out: $o, orientation: $or, signedIn: $signed, shots: $shots}]' \
+      --argjson links "$links" \
+      '. + [{bundle: $b, server: $s, user: $u, scheme: $sc, out: $o, orientation: $or, signedIn: $signed, links: $links, shots: $shots}]' \
       "$plan" > "$plan.next" && mv "$plan.next" "$plan"
     first=false
     taken+=("$a:$kind:$orientation")
@@ -105,7 +108,7 @@ if [ "$status" != 0 ] && grep -q "Timed out attempting to launch" "$results/$fam
   drive "$family-again" || status=$?
   cp "$results/$family-again.log" "$results/$family.log"
 fi
-grep -E "error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family.log" || true
+grep -E "^Drive: |error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family.log" || true
 echo "the driver ran for $(( $(date +%s) - start ))s (status $status)"
 
 # Each shot's size, as it was drawn.

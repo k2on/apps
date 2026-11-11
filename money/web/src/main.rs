@@ -13,9 +13,6 @@ fn main() {
         None => MoneyWeb::on_server(origin(), now),
     };
     arkui_web::run(app, "green", money_web::CSS);
-    if let Some(id) = arkui_web::query("popover") {
-        arkui_web::after_draw(move || arkui_web::fields::open_popover(&id, 0));
-    }
 }
 
 /// Whoever served the page: money-server serves it beside its socket and

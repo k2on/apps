@@ -169,7 +169,17 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
 
     // A link the app was opened with (`money://account/Checking`): its route, navigated to. The
     // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
+    // A launch link (`money://?screen=…`, ui/docs/shots.md) is a launch as the app runs: the
+    // sheets put away and the pages popped, then the shell told as a launch tells it, which puts
+    // back what it showed itself.
     Links("money") { link ->
+        Navigator.launchArgsOf(link, "money")?.let { args ->
+            form = null
+            account = false
+            nav.popBackStack("shell", inclusive = false)
+            sections.send(ShellMsg.Launch(args = args))
+            return@Links
+        }
         Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
             when (r) {
                 is Route.Join -> true

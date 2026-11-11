@@ -27,6 +27,7 @@ package dev.arkui
 import androidx.activity.ComponentActivity
 
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Choreographer
@@ -34,6 +35,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.widget.FrameLayout
 
 public object Shots {
@@ -175,6 +178,11 @@ public object Ready {
         decor.addView(v, FrameLayout.LayoutParams(1, 1))
         view = v
         decor.viewTreeObserver.addOnDrawListener { drawn = true }
+        // The system's navigation hidden (the gesture handle; on a tablet or an open Fold, the
+        // launcher's taskbar): neither is the app's, and both differed between two runs' shots,
+        // the handle's shade sampled from what is under it and the taskbar holding whatever apps
+        // the launcher predicted, in its own order. The status bar stays (demo mode holds it).
+        if (Build.VERSION.SDK_INT >= 30) decor.post { hideNavigation(window) }
         val inner = window.callback
         window.callback =
             object : Window.Callback by inner {
@@ -185,6 +193,15 @@ public object Ready {
                 }
             }
         changed()
+    }
+}
+
+/** [window]'s navigation bars hidden until swiped back (Android 11's insets controller). */
+@android.annotation.TargetApi(30)
+private fun hideNavigation(window: Window) {
+    window.insetsController?.let {
+        it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        it.hide(WindowInsets.Type.navigationBars())
     }
 }
 

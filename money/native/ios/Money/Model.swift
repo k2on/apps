@@ -138,6 +138,10 @@ final class Model: ObservableObject {
     /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
+        if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
+            launchLink = args
+            return
+        }
         if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }) {
             if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
             link = url
@@ -150,6 +154,11 @@ final class Model: ObservableObject {
     /// (`money://…`), for the shell to navigate to (`Navigator.handle`);
     /// nil again once it has.
     @Published var link: URL? = nil
+
+    /// A launch link's arguments (`money://?screen=…`, ui/docs/shots.md),
+    /// for the shell to take as a launch while the app runs; nil again once
+    /// it has.
+    @Published var launchLink: [String]? = nil
 
     /// What a link names that is not a page: a sign-in link (`money://join?…`)
     /// is the sign-in machine's ([open(url:)]), and is not navigated to.

@@ -56,6 +56,24 @@ class Navigator<R>(private val nav: NavHostController, private val destination: 
     }
 
     companion object {
+        /**
+         * A launch link's arguments (`money://?screen=category%3Adining&inspector=1` is `-screen
+         * category:dining -inspector 1`): a link of `scheme` with no path, only a query, which says
+         * the launch arguments as the browser's address does (ark_app::shell::Launch). The app's
+         * shell takes it as a launch while it runs: what it showed put back, then that screen opened
+         * (ui/docs/shots.md). Null for any other link.
+         */
+        fun launchArgsOf(link: String, scheme: String): List<String>? {
+            val prefix = "$scheme://?"
+            if (!link.startsWith(prefix)) return null
+            val args =
+                link.removePrefix(prefix).split('&').filter { it.isNotEmpty() }.flatMap { pair ->
+                    val (k, v) = pair.split('=', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+                    listOf("-" + java.net.URLDecoder.decode(k, "UTF-8"), java.net.URLDecoder.decode(v, "UTF-8"))
+                }
+            return args.ifEmpty { null }
+        }
+
         /** The route a link of `scheme` names: its path is everything after `scheme://`, query and all. */
         fun <R> routeOf(link: String, scheme: String, parse: (String) -> R?): R? {
             val prefix = "$scheme://"
@@ -79,6 +97,8 @@ fun Links(scheme: String, onLink: (String) -> Unit) {
             if (data.scheme != scheme || data.host == "auth" || data.host == "join") return
             // Once: the launch intent is still the activity's when it is recreated.
             i.data = null
+            // What is drawn may change: a screenshot's driver waits for the screen after it.
+            Ready.changed()
             latest.value(data.toString())
         }
         heard(activity.intent)

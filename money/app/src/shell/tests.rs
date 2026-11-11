@@ -201,7 +201,10 @@ fn launch_arguments_open_a_place() {
     rt.dispatch(args(&["Money", "-screen", "account:checking", "-inspector", "1"]), &mut demo);
     let page = rt.screen(&demo);
     assert_eq!((page.account_title.as_str(), page.showing, page.inspector), ("Checking", true, true));
-    rt.dispatch(args(&["-screen", "transaction:receipt", "-appearance", "dark"]), &mut demo);
+    rt.dispatch(
+        args(&["-screen", "transaction:receipt", "-inspector", "1", "-appearance", "dark"]),
+        &mut demo,
+    );
     let page = rt.screen(&demo);
     assert_eq!(page.section, "transactions");
     assert!(
@@ -218,6 +221,21 @@ fn launch_arguments_open_a_place() {
         Some(&MoneyRequest::Settings {
             pane: "Connected Banks".into()
         })
+    );
+
+    // Another launch (a launch link, as the app runs): what the last one
+    // showed put back first, as a fresh launch has it.
+    rt.dispatch(args(&["-screen", "insights"]), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!(
+        (
+            page.section.as_str(),
+            page.inspector,
+            page.transaction.is_none(),
+            page.appearance,
+            page.pane.as_str()
+        ),
+        ("insights", false, true, None, PANES[0])
     );
 
     // Before the accounts have come: wanted, then shown once they have.

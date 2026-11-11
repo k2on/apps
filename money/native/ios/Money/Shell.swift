@@ -138,6 +138,20 @@ struct Shell: View {
                     .environment(\.present) { next in present(next) }
             }
             .toast($model.notice)
+            // A launch link (`money://?screen=…`): a launch as the app runs. What
+            // this shows of its own put away (a sheet, a section's pages, a
+            // transaction inspected, Settings), then the shell told as a launch
+            // tells it, which puts back what it showed itself (ark_app's Launch).
+            .onChange(of: model.launchLink) {
+                guard let args = model.launchLink else { return }
+                model.launchLink = nil
+                sheet = nil
+                paths = [:]
+                inspecting = nil
+                settings = false
+                pending = []
+                model.shell.send(.launch(args: args))
+            }
             // A link the app was opened with: its route, pushed on the section shown.
             .onChange(of: model.link) {
                 guard let url = model.link else { return }

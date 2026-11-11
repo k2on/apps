@@ -5,7 +5,8 @@
 // `?popover=`, `?command=`, `?keys=`) and then its steps — the desktop's
 // vocabulary: `click` a text on the page, `key` a key, `type` text,
 // `await` a text, `wait` seconds — at each size in light and in dark, in
-// Playwright's Chromium.
+// Playwright's Chromium: one page for each size and theme, every shot's
+// address taken in it in turn (a `fresh` shot, a page of its own).
 //
 //   node web-shots.js <shots.json> <base URL> <out>
 //
@@ -86,14 +87,28 @@ async function main() {
   for (const [size, [width, height]] of Object.entries(sizes)) {
     for (const theme of ['light', 'dark']) {
       const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: web.scale || 1, colorScheme: theme, reducedMotion: 'reduce', javaScriptEnabled: js });
-      for (const shot of shots) {
-        if (shot.sizes && !shot.sizes.includes(size)) continue;
-        const page = await context.newPage();
-        const errors = [];
+      // One page for every shot at this size and theme (the SPA's): each
+      // shot's address taken in place (`history.pushState` and its
+      // `popstate`, which arkui-web answers by putting the app back where it
+      // opens, its menus and popovers closed, and bringing it where the
+      // address says); a page of its own only for a shot that says it needs
+      // a clean start (`fresh`), and for every page of a static site.
+      let page = null;
+      let errors = [];
+      const open = async () => {
+        if (page) await page.close();
+        page = await context.newPage();
         page.on('pageerror', e => errors.push(e.message));
         page.on('console', m => {
           if (mode !== 'spa' && (m.type() === 'error' || /hydrat/i.test(m.text()))) errors.push(`console ${m.type()}: ${m.text()}`);
         });
+      };
+      for (const shot of shots) {
+        if (shot.sizes && !shot.sizes.includes(size)) continue;
+        errors = [];
+        const began = Date.now();
+        const inPlace = mode === 'spa' && page && !shot.fresh;
+        if (!inPlace) await open();
         // `web.query`: what every shot's address says first, the app's own
         // (money's `demo`: the household in the page, no server).
         // `shots=1`: nothing on the page moves, a fade included, and the
@@ -103,7 +118,17 @@ async function main() {
         // it (a router's URL is its fragment, as the address bar shows it).
         const at = route => (route ? `#${route.replace(/^[a-z]+:\/\//, '')}` : '');
         try {
-          await page.goto(mode === 'spa' ? `${base}/?${q}${at(shot.route)}` : `${base}${shot.path}`);
+          const url = mode === 'spa' ? `${base}/?${q}${at(shot.route)}` : `${base}${shot.path}`;
+          if (inPlace) {
+            await page.evaluate(u => {
+              history.pushState(null, '', u);
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }, url);
+            // An app that cannot put itself back loads the address afresh.
+            await page.waitForLoadState('load');
+          } else {
+            await page.goto(url);
+          }
           // The written page is the browser's once its module has run.
           if (mode !== 'spa' && js) await page.waitForSelector('html[data-ark-js]', { timeout: 20000 });
           await page.waitForSelector('.ark-window', { timeout: 20000 });
@@ -123,7 +148,7 @@ async function main() {
           await page.screenshot({ path: path.join(dir, `${shot.id}.png`) });
           // The texts on the page, as the desktop's tree.txt has them: what a step can name.
           fs.writeFileSync(path.join(dir, `${shot.id}.tree.txt`), await page.evaluate(() => document.body.innerText));
-          console.log(`${size} ${theme} ${shot.id}${errors.length ? ' (errors: ' + errors.join('; ') + ')' : ''}`);
+          console.log(`${size} ${theme} ${shot.id}: ${inPlace ? 'in place' : 'loaded'}, ${((Date.now() - began) / 1000).toFixed(1)}s${errors.length ? ' (errors: ' + errors.join('; ') + ')' : ''}`);
           if (mode !== 'spa' && errors.length) {
             failed++;
             console.log(`::error::${size} ${theme} ${shot.id}: ${errors.join('; ')}`);
@@ -131,9 +156,12 @@ async function main() {
         } catch (e) {
           failed++;
           console.log(`::error::${size} ${theme} ${shot.id}: ${e.message}`);
+          // Wherever it stuck is no place for the next: a page of its own.
+          await page.close();
+          page = null;
         }
-        await page.close();
       }
+      if (page) await page.close();
       await context.close();
     }
   }

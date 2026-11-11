@@ -1,5 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; each shot is the app opened, its steps done, the screen taken. The player is paused and put halfway before it is taken, so that what it shows is the same each run. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says. It has no player shot: nothing on the desktop can play.",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order, each its steps done from where the last left it. `player` is `fresh`: it plays a song (from Home's Recently added, which the shot before it is not on), and the app is opened again for it; it is paused and put halfway before it is taken, so that what it shows is the same each run. `devices` goes on from it, the player open, and opens its device picker. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says, in one window; `keys` is `fresh`, as `search` leaves the command box open. It has no player shot: nothing on the desktop can play.",
   "server": {
     "port": 8787,
     "user": "alex",
@@ -35,6 +35,7 @@
     },
     {
       "id": "player",
+      "fresh": true,
       "steps": [
         {
           "tap": "Für Elise",
@@ -69,31 +70,6 @@
     {
       "id": "devices",
       "steps": [
-        {
-          "tap": "Für Elise",
-          "where": "bottom"
-        },
-        {
-          "await": "Pause|Close the player"
-        },
-        {
-          "relaunch": true
-        },
-        {
-          "tap": "Für Elise",
-          "where": "bottom"
-        },
-        {
-          "await": "Close the player"
-        },
-        {
-          "tap": "Pause",
-          "optional": true
-        },
-        {
-          "tap": "Position",
-          "optional": true
-        },
         {
           "tap": "Playing on|iPhone 17 Pro|iPad Pro 13-inch (M5)"
         },
@@ -142,6 +118,7 @@
       },
       {
         "id": "keys",
+        "fresh": true,
         "steps": [
           {
             "click": "Songs"

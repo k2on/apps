@@ -132,7 +132,7 @@ step() {
   skip=$(jq -r '.unless // ""' <<< "$s")
   if [ -n "$skip" ] && says "$skip"; then return 0; fi
   if jq -e 'has("relaunch")' <<< "$s" > /dev/null; then
-    open_app
+    open_app "${at_args:-}"
   elif jq -e 'has("await")' <<< "$s" > /dev/null; then
     local label one
     label=$(jq -r '.await' <<< "$s")
@@ -228,6 +228,8 @@ open_app() {
 # router's own spelling (a whole URL) is a change here alone. A link to the
 # running app (VIEW, its package), no relaunch, then its ready signal.
 scheme=$(jq -r '.scheme // empty' "$shots")
+# Whether the app opens a screen's launch arguments by a link as it runs.
+links=$(jq -r '.links == true' "$shots")
 open_route() {
   local url=$1
   case $url in *://*) ;; *) url="${scheme:-$app}://$url" ;; esac
@@ -298,6 +300,11 @@ fi
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1
+# The system's "Viewing full screen" told as seen already, for every app: in
+# shots mode the app's window hides the navigation bars (ui/kotlin/shots),
+# and a first hiding brought that confirmation up over the first launch
+# (dry run 42984084410).
+adb shell settings put secure immersive_mode_confirmations confirmed
 # The system's own motion off too (the app's is, in shots mode): the status
 # bar's icons recoloured for a new theme and the gesture bar's shade, each
 # eased in by SystemUI, were drawn part way in a dark run's shots and not in
@@ -371,6 +378,7 @@ for theme in ${THEMES:-light dark}; do
   theme_set "$theme"
   # Stopped by the theme: the next shot launches it.
   running=
+  at_args=
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
@@ -385,14 +393,29 @@ for theme in ${THEMES:-light dark}; do
       [ -n "$k" ] && extras+=(--es "'${k#-}'" "'$v'")
     done < <(jq -r '(.args // []) as $a | range(0; $a | length; 2) as $i | "\($a[$i]) \($a[$i + 1] // "")"' <<< "$shot")
     route=$(jq -r '.route // empty' <<< "$shot")
-    if [ -n "$route" ] && [ -n "${running:-}" ]; then
-      # Where the router can take it: in the app as it runs, no relaunch.
-      open_route "$route" || exit 1
-    else
-      open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+    args=$(jq -r '.args // [] | join(",")' <<< "$shot")
+    began=$(date +%s.%N)
+    # In the app as it runs, one shot after another: launched afresh only
+    # for the theme's first shot, one that says it needs a clean start
+    # (`fresh`), or one whose launch arguments the app takes only at
+    # launch; a screen's arguments otherwise as a launch link (`links`:
+    # the app's shell puts back what it showed, then opens that screen),
+    # its route as a link, or its steps from where the last left it.
+    if [ -z "${running:-}" ] || jq -e '.fresh == true' <<< "$shot" > /dev/null ||
+      { [ -n "$args" ] && [ "$links" != true ] && [ "$args" != "$at_args" ]; }; then
+      open_app "$args" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
       running=1
-      [ -z "$route" ] || open_route "$route" || exit 1
+      at_args=$args
+      how=launched
+    elif [ -n "$args" ]; then
+      open_route "$(jq -r '.args as $a | [range(0; $a | length; 2) as $i | "\($a[$i] | sub("^-+"; ""))=\($a[$i + 1] // "" | @uri)"] | "?" + join("&")' <<< "$shot")" || exit 1
+      at_args=$args
+      how=linked
+    else
+      how=continued
     fi
+    # Where the router can take it: in the app as it runs.
+    [ -z "$route" ] || open_route "$route" || exit 1
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of
@@ -421,6 +444,7 @@ for theme in ${THEMES:-light dark}; do
       echo "::error::$app $(basename "$out") $theme $id: the screenshot is not a PNG ($(head -c 60 "$out/$theme/$id.png" | tr -cd '[:print:]'))"
       exit 1
     fi
+    echo "  $id: $how, $(( $(jq -r '.steps // [] | length' <<< "$shot") )) steps, $(awk -v a="$began" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')s"
   done 3< <(jq -c --arg k "$(basename "$out")" '.shots[], (.screens // [] | .[] | select((.on // []) | index($k)))' "$shots")
 done
 
