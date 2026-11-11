@@ -146,6 +146,20 @@ class Start(app: Application) : AndroidViewModel(app) {
         moved()
     }
 
+    private val _links = MutableStateFlow(0)
+    /** Grows as a link for the app itself is kept: the app takes it ([takeLink]) once it shows. */
+    val links: StateFlow<Int> = _links.asStateFlow()
+
+    /** A link for the app itself (a page, a launch), kept until the app shows: money's pages put away. */
+    fun openLink(url: String) {
+        machine.openLink(url)
+        moved()
+        _links.value += 1
+    }
+
+    /** The link kept, once the app itself shows; once. */
+    fun takeLink(): String? = machine.takeLink()
+
     /** An event from a screen, the browser, a link or the app's phase. */
     fun send(event: Event) {
         if (event is Event.Foreground) _book.value?.dialNow()

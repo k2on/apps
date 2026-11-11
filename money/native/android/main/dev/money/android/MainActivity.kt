@@ -49,10 +49,10 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        eventOf(intent)?.let {
-            intent = Intent(intent).setData(null)
-            start.send(it)
-        }
+        val launched = intent?.data != null
+        eventOf(intent)?.let { start.send(it) }
+        // Once: the launch intent is still the activity's when it is recreated.
+        if (launched) intent = Intent(intent).setData(null)
         addOnNewIntentListener { i -> eventOf(i)?.let { start.send(it) } }
         // Compose on arkui's duration scale: "Remove animations" is the app's to interpret
         // (`dev.arkui.ReducedMotion`), not a jump to every animation's end.
@@ -68,8 +68,9 @@ class MainActivity : ComponentActivity() {
 
     /**
      * What a link the app was opened with means: `money://auth?code=…` a sign-in coming back,
-     * `money://join?…` a server (and a code) to join, asked about first; null for any other. The
-     * join is read as the domain's route (`Route.Join`), as every shell reads it.
+     * `money://join?…` a server (and a code) to join, asked about first; `money://welcome/` money's
+     * pages; any other a page or a launch of the app's, kept by the first run until the app shows
+     * (`Start.openLink`). The join is read as the domain's route (`Route.Join`), as every shell reads it.
      */
     private fun eventOf(i: Intent?): Event? {
         val data = i?.data ?: return null
@@ -77,9 +78,11 @@ class MainActivity : ComponentActivity() {
         if (data.host == "auth") return data.getQueryParameter("code")?.takeIf { it.isNotEmpty() }?.let { Event.Code(it) }
         val route = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_bridge.routeFromUrl(it) })
         // money's pages, by their route; any other link goes straight where it says, past them.
-        if (route is uniffi.money_bridge.Route.Welcome) start.showIntro() else start.skipIntro()
-        val join = route as? uniffi.money_bridge.Route.Join
-        return join?.let { Event.Joined(it.server, it.code) }
+        return when (route) {
+            is uniffi.money_bridge.Route.Welcome -> null.also { start.showIntro() }
+            is uniffi.money_bridge.Route.Join -> Event.Joined(route.server, route.code).also { start.skipIntro() }
+            else -> null.also { start.openLink(data.toString()) }
+        }
     }
 }
 
@@ -105,7 +108,7 @@ private fun Root(start: Start) {
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { book?.dialNow() }
-    StartScreens(step, start.holder, book, start::send, onSignOut = start::signOut, addDevice = start::deviceLink)
+    StartScreens(step, start.holder, book, start::send, onSignOut = start::signOut, addDevice = start::deviceLink, links = start.links, takeLink = start::takeLink)
 }
 
 /**

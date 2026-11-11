@@ -138,33 +138,37 @@ struct Shell: View {
                     .environment(\.present) { next in present(next) }
             }
             .toast($model.notice)
-            // A launch link (`money://?screen=…`): a launch as the app runs. What
-            // this shows of its own put away (a sheet, a section's pages, a
-            // transaction inspected, Settings), then the shell told as a launch
-            // tells it, which puts back what it showed itself (ark_app's Launch).
-            .onChange(of: model.launchLink) {
-                guard let args = model.launchLink else { return }
-                model.launchLink = nil
-                sheet = nil
-                paths = [:]
-                inspecting = nil
-                settings = false
-                pending = []
-                model.shell.send(.launch(args: args))
-            }
-            // A link the app was opened with: its route, pushed on the section shown.
-            .onChange(of: model.link) {
-                guard let url = model.link else { return }
-                model.link = nil
-                let tag = model.shell.page.section
-                var nav = Navigator<Route>()
-                if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }, take: model.takes) {
-                    for r in nav.path { push(tag, r) }
-                }
-            }
+            // A link for the app, kept by the first run until the app showed:
+            // taken as the shell appears, and as another comes.
+            .onAppear { takeLink() }
+            .onChange(of: model.links) { takeLink() }
             // Plaid's page, as soon as the server answers with it, wherever the
             // person is; closed by its Done, or once the server is finished.
             .safari(model.bankPage, tint: Color.accent) { model.bankPageClosed() }
+    }
+
+    /// The link the first run kept, taken. A launch link (`money://?screen=…`)
+    /// is a launch as the app runs: what this shows of its own put away (a
+    /// sheet, a section's pages, a transaction inspected, Settings), then the
+    /// shell told as a launch tells it, which puts back what it showed itself
+    /// (ark_app's Launch). Any other is its route, pushed on the section shown.
+    private func takeLink() {
+        guard let url = model.takeLink() else { return }
+        Ready.shared.changed()
+        if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
+            sheet = nil
+            paths = [:]
+            inspecting = nil
+            settings = false
+            pending = []
+            model.shell.send(.launch(args: args))
+            return
+        }
+        let tag = model.shell.page.section
+        var nav = Navigator<Route>()
+        if nav.handle(url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }, take: model.takes) {
+            for r in nav.path { push(tag, r) }
+        }
     }
 
     /// A screen the shell hosts (ark_app::shell::hosted): money's own,

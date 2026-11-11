@@ -32,6 +32,9 @@ pub struct FirstRun {
     /// Its pages asked for by their route (`/welcome/`): shown over
     /// wherever the machine stands, until they are walked or skipped.
     asked: bool,
+    /// A link for the app itself that came while its first run showed:
+    /// handed to the app once the app shows ([`FirstRun::take_link`]).
+    link: Option<String>,
 }
 
 impl FirstRun {
@@ -42,6 +45,27 @@ impl FirstRun {
             copy,
             intro: 0,
             asked: false,
+            link: None,
+        }
+    }
+
+    /// A link for the app itself (a page, a launch) taken, wherever the
+    /// first run stands: the app's pages put away, as any link but their
+    /// own puts them away, and the link kept until the app shows — so one
+    /// that came while the pages or the sign-in showed is not lost. The
+    /// newest kept; a sign-in's or a join's link is the machine's, not this.
+    pub fn open_link(&mut self, url: String) {
+        self.skip_intro();
+        self.link = Some(url);
+    }
+
+    /// The link kept for the app, once the app itself shows (signed in, or
+    /// the demo, no page over it); once. None before: the app asks again as
+    /// it comes to show.
+    pub fn take_link(&mut self) -> Option<String> {
+        match self.page().shows() {
+            true => None,
+            false => self.link.take(),
         }
     }
 
@@ -387,6 +411,28 @@ mod tests {
         f.show_intro();
         f.send(WelcomeMsg::Skip);
         assert!(!f.page().shows());
+    }
+
+    /// A link that comes while the pages show puts them away and waits for
+    /// the app: none while the server's address or the sign-in shows, then
+    /// the link, once, as the app shows. Falsified by handing it over at
+    /// once: the app was not there to take it, and it was lost.
+    #[test]
+    fn a_link_that_comes_during_the_first_run_waits_for_the_app() {
+        let mut f = FirstRun::new(app(), copy(2));
+        launched(&mut f, Remembered::default());
+        assert!(f.page().intro.is_some(), "the pages show");
+        f.open_link("money://budget/".into());
+        assert!(f.page().intro.is_none() && f.page().server.is_some(), "the pages put away");
+        assert_eq!(f.take_link(), None, "the app is not there yet");
+        f.send(WelcomeMsg::TryDemo);
+        assert_eq!(f.take_link().as_deref(), Some("money://budget/"), "the app shows: the link");
+        assert_eq!(f.take_link(), None, "once");
+        // Over the app: their route shows the pages; a link replaces them.
+        f.show_intro();
+        f.open_link("money://insights/".into());
+        assert!(!f.page().shows());
+        assert_eq!(f.take_link().as_deref(), Some("money://insights/"));
     }
 
     #[test]

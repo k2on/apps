@@ -173,7 +173,7 @@ final class Model: ObservableObject {
     /// `money://auth?code=…` is a sign-in coming back. Any other link of this
     /// app's is a route (the domain's `Route`): `money://join?…`, a server and
     /// a code to join with, goes to the sign-in machine (`Event.joined`,
-    /// asked about first); the rest is the shell's to navigate to ([link]).
+    /// asked about first); the rest is the shell's to navigate to ([takeLink]).
     /// A join link of another scheme (a page's `https://…/join?…`) joins too.
     func open(url: URL) {
         if let code = Probe.code(url, scheme: AppInfo.money.scheme) { return send(.code(code: code)) }
@@ -181,30 +181,33 @@ final class Model: ObservableObject {
             machine.showIntro()
             return moved()
         }
-        // Any other link goes straight where it says: past money's pages.
-        machine.skipIntro()
-        moved()
-        if let args = Navigator<Route>.launchArgs(of: url, scheme: AppInfo.money.scheme) {
-            launchLink = args
+        if case let .join(server, code)? = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }) {
+            machine.skipIntro()
+            moved()
+            return send(.joined(server: server, code: code))
+        }
+        if url.scheme == AppInfo.money.scheme {
+            // A page or a launch (`money://?screen=…`) of the app's: past money's
+            // pages, kept by the first run until the app shows (`FirstRun::open_link`),
+            // so one that came while the pages or the sign-in showed is not lost.
+            machine.openLink(url: url.absoluteString)
+            moved()
+            links += 1
             return
         }
-        if let route = Navigator<Route>.route(of: url, scheme: AppInfo.money.scheme, parse: { routeFromUrl(url: $0) }) {
-            if case let .join(server, code) = route { return send(.joined(server: server, code: code)) }
-            link = url
-            return
+        if let j = joinOf(link: url.absoluteString) {
+            machine.skipIntro()
+            moved()
+            send(.joined(server: j.server, code: j.code))
         }
-        if let j = joinOf(link: url.absoluteString) { send(.joined(server: j.server, code: j.code)) }
     }
 
-    /// A link the system opened the app with that names a page
-    /// (`money://…`), for the shell to navigate to (`Navigator.handle`);
-    /// nil again once it has.
-    @Published var link: URL? = nil
+    /// Grows as a link for the app itself is kept: the shell takes it
+    /// ([takeLink]) as it shows, and as this grows while it does.
+    @Published private(set) var links = 0
 
-    /// A launch link's arguments (`money://?screen=…`, ui/docs/shots.md),
-    /// for the shell to take as a launch while the app runs; nil again once
-    /// it has.
-    @Published var launchLink: [String]? = nil
+    /// The link kept for the app, once the app itself shows; once.
+    func takeLink() -> URL? { machine.takeLink().flatMap { URL(string: $0) } }
 
     /// What a link names that is not a page: a sign-in link (`money://join?…`)
     /// is the sign-in machine's ([open(url:)]), and is not navigated to.

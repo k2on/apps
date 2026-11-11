@@ -86,7 +86,6 @@ import dev.arkui.AccountSheet
 import dev.arkui.ArkGlyphs
 import dev.arkui.TabTitle
 import dev.arkui.LargeTitles
-import dev.arkui.Links
 import dev.arkui.Navigator
 import dev.arkui.RouteArg
 import dev.arkui.SensoryFeedback
@@ -136,7 +135,13 @@ val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
 
 /** The budget, its tabs and its pages; `onSignOut` leaves it. */
 @Composable
-fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") }) {
+fun MoneyApp(
+    book: Book,
+    onSignOut: () -> Unit,
+    addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
+    links: kotlinx.coroutines.flow.StateFlow<Int> = kotlinx.coroutines.flow.MutableStateFlow(0),
+    takeLink: () -> String? = { null },
+) {
     val nav = rememberNavController()
     val ledger by book.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -186,14 +191,18 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     // tabs' own routes switch to the tab; a sign-in link (`money://join?…`) is the onboarding's.
     // A launch link (`money://?screen=…`, ui/docs/shots.md) is a launch as the app runs: the
     // sheets put away and the pages popped, then the shell told as a launch tells it, which puts
-    // back what it showed itself.
-    Links("money") { link ->
+    // back what it showed itself. The first run keeps every link (`FirstRun::open_link`), so one
+    // that came while its pages or the sign-in showed is taken here, once the app shows.
+    val linked by links.collectAsStateWithLifecycle()
+    LaunchedEffect(linked) {
+        val link = takeLink() ?: return@LaunchedEffect
+        dev.arkui.Ready.changed()
         Navigator.launchArgsOf(link, "money")?.let { args ->
             form = null
             account = false
             nav.popBackStack("shell", inclusive = false)
             sections.send(ShellMsg.Launch(args = args))
-            return@Links
+            return@LaunchedEffect
         }
         Navigator(nav, ::destination).handle(link, "money", ::routeFromUrl) { r ->
             when (r) {

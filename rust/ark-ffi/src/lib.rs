@@ -936,6 +936,17 @@ macro_rules! first_run_app {
                 self.run().show_intro()
             }
 
+            /// A link for the app itself, kept until the app shows
+            /// (`FirstRun::open_link`): its pages put away.
+            pub fn open_link(&self, url: String) {
+                self.run().open_link(url)
+            }
+
+            /// The link kept, once the app itself shows; once.
+            pub fn take_link(&self) -> Option<String> {
+                self.run().take_link()
+            }
+
             pub fn step(&self) -> $crate::ark_auth::onboarding::Step {
                 self.run().machine().step()
             }
