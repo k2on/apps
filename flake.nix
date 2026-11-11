@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/app" "money/iced" "money/server" "harken/seed" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/seed" "money/app" "money/iced" "money/server" "harken/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
