@@ -424,10 +424,13 @@ impl MediaSound {
                 at,
                 position_ms,
                 from,
+                shuffled,
             } => {
                 if !queue.is_empty() {
                     let at = (*at).clamp(0, queue.len() as i64 - 1) as usize;
-                    self.load(queue, at, *position_ms, true, from)
+                    self.load(queue, at, *position_ms, true, from);
+                    // Shuffle is the queue's: lit for a list started shuffled, out for any other.
+                    self.s.local().shuffled = *shuffled;
                 }
             }
             Press::Next { tracks } | Press::Append { tracks } => {
@@ -444,7 +447,8 @@ impl MediaSound {
                     }
                 };
                 if empty && !tracks.is_empty() {
-                    self.load(tracks, 0, 0, true, "")
+                    self.load(tracks, 0, 0, true, "");
+                    self.s.local().shuffled = false;
                 }
             }
             Press::Remove { index } => {

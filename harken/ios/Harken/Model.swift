@@ -439,7 +439,7 @@ final class Model: ObservableObject {
         let from = page?.from(playlists) ?? ""
         // An episode begun picks up where its listener left it.
         let ms = positionMs ?? (shuffled ? 0 : list.indices.contains(at) ? mine(list[at].id)?.resumeMs ?? 0 : 0)
-        press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from))
+        press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from, shuffled: shuffled))
     }
 
     func markPlayed(_ t: LibraryEntry, _ finished: Bool) { bridge?.markPlayed(t, finished) }

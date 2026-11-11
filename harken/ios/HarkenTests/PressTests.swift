@@ -24,6 +24,9 @@ final class PressTests: XCTestCase {
         // The queue is the generated `Track`'s own JSON.
         XCTAssertEqual(start, "{\"Start\":{\"queue\":[\(t.json)],\"at\":0,\"position_ms\":0,\"from\":\"#album/Water%20Music\"}}")
         XCTAssertNotNil(J.parse(start) as? [String: Any])
+        // Started shuffled: the flag, which only the player alone reads.
+        let shuffled = Press.start(queue: [t], at: 0, positionMs: 0, from: "", shuffled: true).json
+        XCTAssertEqual(shuffled, "{\"Start\":{\"queue\":[\(t.json)],\"at\":0,\"position_ms\":0,\"from\":\"\",\"shuffled\":true}}")
     }
 
     /// Up-next rows swiped away: one `remove` each, last first, every place

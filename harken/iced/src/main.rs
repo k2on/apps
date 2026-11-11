@@ -2669,6 +2669,7 @@ impl App {
                 at: at as i64,
                 position_ms,
                 from: self.from(),
+                shuffled: false,
             },
         };
         if self.listening.session(&self.peer.client.lock()).is_none() {

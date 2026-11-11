@@ -1118,7 +1118,7 @@ class Playback(
         val start = at.coerceIn(0, queue.size - 1)
         val list = if (shuffled) listOf(queue[start]) + (queue.take(start) + queue.drop(start + 1)).shuffled() else queue
         val first = if (shuffled) 0 else start
-        press(Press.Start(list.map { queued(it, albumOf) }, first, positionMs, from))
+        press(Press.Start(list.map { queued(it, albumOf) }, first, positionMs, from, shuffled))
     }
 
     /** Put `track` right after what is playing; or play it, when nothing is. */

@@ -304,6 +304,7 @@ fn alone_a_press_is_done_to_the_queue() {
         at: 1,
         position_ms: 0,
         from: "album/kind-of-blue".into(),
+        shuffled: false,
     }));
     assert_eq!(rig.fake.take(), [format!("load {} 0", url(1)), "play".into()]);
     rig.fake.hear(MediaEvent::Loaded { duration_ms: 60_000 });
@@ -363,6 +364,7 @@ fn repeat_one_plays_the_track_again() {
         at: 0,
         position_ms: 0,
         from: String::new(),
+        shuffled: false,
     });
     rig.fake.take();
     rig.sound.cycle_repeat();
@@ -381,6 +383,7 @@ fn shuffle_reorders_what_is_to_come() {
         at: 1,
         position_ms: 0,
         from: String::new(),
+        shuffled: false,
     });
     rig.sound.shuffle(|n| (0..n).rev().collect());
     let ids: Vec<String> = rig.sound.tracks().iter().map(|t| t.title.clone()).collect();

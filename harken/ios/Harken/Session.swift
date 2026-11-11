@@ -205,8 +205,10 @@ enum Press: Equatable {
     case seek(Int64)
     /// A track of the queue, from its start.
     case jump(Int)
-    /// A track pressed: this queue, from here.
-    case start(queue: [Track], at: Int, positionMs: Int64, from: String)
+    /// A track pressed: this queue, from here. `shuffled`, a list in an
+    /// order of its own (Shuffle pressed): the session has no shuffle, so it
+    /// is the player's alone, which draws Shuffle lit.
+    case start(queue: [Track], at: Int, positionMs: Int64, from: String, shuffled: Bool = false)
     /// Put these after what is playing, the track playing playing on.
     case next([Track])
     /// Put these at the end of the queue.
@@ -241,8 +243,9 @@ enum Press: Equatable {
         case let .skip(by): return tagged("Skip", [field("by", String(by))])
         case let .seek(ms): return tagged("Seek", [field("ms", String(ms))])
         case let .jump(i): return tagged("Jump", [field("index", String(i))])
-        case let .start(q, at, ms, from):
-            return tagged("Start", [field("queue", tracks(q)), field("at", String(at)), field("position_ms", String(ms)), field("from", J.q(from))])
+        case let .start(q, at, ms, from, shuffled):
+            let flag = shuffled ? [field("shuffled", "true")] : []
+            return tagged("Start", [field("queue", tracks(q)), field("at", String(at)), field("position_ms", String(ms)), field("from", J.q(from))] + flag)
         case let .next(ts): return tagged("Next", [field("tracks", tracks(ts))])
         case let .append(ts): return tagged("Append", [field("tracks", tracks(ts))])
         case let .remove(i): return tagged("Remove", [field("index", String(i))])

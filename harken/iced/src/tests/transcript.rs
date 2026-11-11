@@ -91,6 +91,7 @@ fn playing_on_the_phone(hub: &ark_peer::Handle) -> (App, Option<Replica>) {
         at: 0,
         position_ms: 0,
         from: String::new(),
+        shuffled: false,
     };
     let mut player = harken_player::Player::new("phone", None);
     assert_eq!(player.press(phone.as_mut().unwrap(), &start, None), None);

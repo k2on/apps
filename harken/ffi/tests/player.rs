@@ -664,6 +664,7 @@ fn a_press_is_a_transition() {
         at: 1,
         position_ms: 0,
         from: "#library".into(),
+        shuffled: false,
     });
     phone.press(Press::Pause);
     relink(&phone);
@@ -723,6 +724,7 @@ fn the_lock_screens_buttons_are_presses() {
         at: 0,
         position_ms: 0,
         from: String::new(),
+        shuffled: false,
     });
     phone.sound.remote(RemoteCommand::Next);
     phone.reconcile();
@@ -947,6 +949,7 @@ fn a_wake_told_during_a_step_waits_for_its_end() {
                 at: 0,
                 position_ms: 0,
                 from: String::new(),
+                shuffled: false,
             })
             .unwrap(),
         );
@@ -962,4 +965,37 @@ fn a_wake_told_during_a_step_waits_for_its_end() {
     assert_eq!(why, None);
     assert!(playing, "it plays");
     assert!(woken > 0, "and the phone was told, after");
+}
+
+/// A list started shuffled while the phone plays alone lights its Shuffle:
+/// the queue it plays says so, as the phone draws it (`local.shuffle`); a
+/// list started in its order puts it out again.
+///
+/// Falsified by a start that leaves the queue's shuffle as it was (the
+/// `shuffled` the press carries not read): Shuffle stayed out.
+#[test]
+fn a_list_started_shuffled_alone_lights_shuffle() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    drop_link(&phone);
+    let started = |shuffled: bool| {
+        let mut p = serde_json::to_value(Press::Start {
+            queue: queue(),
+            at: 0,
+            position_ms: 0,
+            from: "#album/Water%20Music".into(),
+            shuffled: false,
+        })
+        .unwrap();
+        // As the phones say it: the flag only when it is on.
+        if shuffled {
+            p["Start"]["shuffled"] = json!(true);
+        }
+        assert_eq!(phone.player.press(p.to_string()), None);
+        phone.reconcile();
+        phone.view()["local"]["shuffle"].as_bool()
+    };
+    assert_eq!(started(true), Some(true), "started shuffled: Shuffle is lit");
+    assert_eq!(phone.sound.title().as_deref(), Some("a"), "and what it pressed plays");
+    assert_eq!(started(false), Some(false), "started in order: it is out");
 }
