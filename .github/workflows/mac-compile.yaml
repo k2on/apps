@@ -40,7 +40,7 @@ jobs:
           # Both of money's slices and the Mac's (the iPhone's simulator and the Mac's).
           nix build --no-link --print-out-paths -L "git+file://$PWD#packages.aarch64-darwin.money-ios-kernel-simulator" > "$RUNNER_TEMP/k-sim"
           drv=$(nix eval --raw "git+file://$PWD#packages.aarch64-darwin.money-macos.drvPath")
-          mac=$(nix-store -q --references "$drv" | grep -- '-ios-xcframework.*\.drv$')
+          mac=$(nix-store -q --references "$drv" | grep -- '-ios-\(xcframework\|kernel\).*\.drv$' || true)
           echo "$mac"
           for d in $mac; do nix build --no-link --print-out-paths -L "$d^out" >> "$RUNNER_TEMP/k-mac" || true; done
           cat "$RUNNER_TEMP/k-sim" "$RUNNER_TEMP/k-mac"
