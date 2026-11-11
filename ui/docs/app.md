@@ -265,6 +265,32 @@ One app's own native capability that no other would share is a local
 module, `<app>/modules/<name>/` in the same shape, which ui/prebuild.py
 compiles in as it does the shared ones.
 
+### The First Run: `ark_app::welcome`
+
+Every app's first run is one shared part: its pages of what the app is,
+the server's address (with the demo and Scan a Code where the app has
+them), signing in on the server's own page, a server from a link or a
+scanned code asked about first, and what the server has on its way; and,
+signed in, "Add a Device" (`add_device`), the code another device joins
+with. The records (`WelcomePage`, `AddDevicePage`), the messages
+(`WelcomeMsg`, `AddDeviceMsg`) and the views (`#[view] welcome`,
+`add_device`) are ark-app's, over five parts of their own (FirstRunPage,
+AddressField, WideButton, StatusLine, CodeImage; ui/docs/parts.md). The
+state is the sign-in machine every app already shares
+(`ark_auth::onboarding`), and `ark_auth::first_run::FirstRun` works out
+its page from where it stands and takes a press back as its events; its
+effects are the machine's, data the shell carries out as before ("Scan
+a Code" asks the shell's camera, whose text comes back through
+`FirstRun::scanned`). An app gives only its words and mark, a
+`WelcomeCopy` (`money_app::welcome::copy`, `harken_app::welcome::copy`).
+On the phones a bridge writes `FirstRunApp` with `ark_ffi::first_run_app!`
+after twinning the records; money's iPhone, iPad, Mac and Android draw the
+generated `WelcomeView` / `WelcomeScreen` over it, the browser
+`arkui_web::render(welcome::view(..))`, the desktop walks the same machine
+under its window (the window is the app from the start, over its replica:
+what the machine says is its note). harken's bridge exports it; its phones
+still draw their own first run until harken is ported.
+
 ## Effects and Ports
 
 An update decides; it never does. Everything it wants done leaves it as

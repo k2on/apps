@@ -58,6 +58,7 @@ uniffi::setup_scaffolding!();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
+pub mod first_run;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod oidc;
 pub mod onboarding;

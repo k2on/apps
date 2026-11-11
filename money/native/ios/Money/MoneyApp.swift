@@ -32,7 +32,7 @@ struct MoneyApp: App {
         // iPhone's and the iPad's reference screens, on the reference's day).
         let demo = UserDefaults.standard.string(forKey: "demo")
         let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
-                          demoLaunch: demo != nil)
+                          demoLaunch: demo != nil, scan: QrScanner.available)
         let camera = PhoneCamera()
         camera.answered = { [weak model] in model?.receipts?.answered() }
         model.devices = Devices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
@@ -103,12 +103,14 @@ struct Root: View {
     var body: some View {
         SwiftUI.Group {
             switch model.step {
-            case let .server(typed, checking, error): ServerScreen(typed: typed, checking: checking, error: error)
-            case let .signIn(server, phase, error): SignInScreen(server: server, phase: phase, error: error)
-            case let .opening(server, _): OpeningScreen(server: server)
-            case let .confirm(_, _, error): ConfirmScreen(error: error)
             case .running, .demo: Shell()
+            // The first run's pages every Ark app shares (generated from ark_app::welcome).
+            default: WelcomeView().environmentObject(model.first)
             }
+        }
+        // "Scan a Code": another device's join code, asked about before it is used.
+        .sheet(isPresented: $model.scanning, onDismiss: { if model.scanning { model.scanned(nil) } }) {
+            QrScanner { text in model.scanned(text) }.ignoresSafeArea()
         }
         .animation(Springs.fade, value: stepKind)
         .toast(model.step.isRunning ? .constant(nil) : $model.notice)

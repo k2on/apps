@@ -41,12 +41,10 @@ pub mod page;
 pub mod parts;
 pub mod shell;
 pub mod table;
-pub mod welcome;
 pub mod writing;
 
 pub use parts::render;
 pub use shell::shell;
-pub use welcome::{welcome, Welcome};
 
 /// The theme's variables, generated (ui/theme.py): `nix run .#update-theme`.
 pub const THEME_CSS: &str = include_str!("../theme.css");

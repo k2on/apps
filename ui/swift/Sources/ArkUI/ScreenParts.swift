@@ -726,4 +726,156 @@ public struct FormButton: View {
         Button(title, action: onTap).disabled(!enabled)
     }
 }
+
+// MARK: A first run's parts (ark_app::welcome)
+
+/// A first run's page: the app's mark on glass in its accent, a large
+/// title, a sentence, and what to do (`WelcomePage`'s look).
+@available(iOS 26.0, *)
+public struct FirstRunPage<Content: View>: View {
+    let glyph: String
+    let title: String
+    let sentence: String
+    let content: Content
+
+    public init(_ glyph: String, title: String, sentence: String, @ViewBuilder content: () -> Content) {
+        self.glyph = glyph
+        self.title = title
+        self.sentence = sentence
+        self.content = content()
+    }
+
+    public var body: some View {
+        WelcomePage(symbol: ArkGlyphs.sf(glyph), tint: Color.accent, title: title, sentence: sentence) {
+            VStack(spacing: Space.m) { content }
+        }
+    }
+}
+
+/// A server's address: the keyboard for a URL, no capitals or corrections,
+/// Go to go on; its note under it until there is a problem.
+public struct AddressField: View {
+    let label: String
+    let prompt: String
+    let text: String
+    let note: String
+    let problem: String?
+    let enabled: Bool
+    let onChange: (String) -> Void
+    let onSubmit: () -> Void
+
+    public init(_ label: String, prompt: String, text: String, note: String, problem: String?, enabled: Bool,
+                onChange: @escaping (String) -> Void, onSubmit: @escaping () -> Void) {
+        self.label = label
+        self.prompt = prompt
+        self.text = text
+        self.note = note
+        self.problem = problem
+        self.enabled = enabled
+        self.onChange = onChange
+        self.onSubmit = onSubmit
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            TextField(prompt, text: Binding(get: { text }, set: onChange))
+                .textContentType(.URL)
+                .keypad(.url)
+                .capitals(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .onSubmit(onSubmit)
+                .disabled(!enabled)
+                .padding(Space.l)
+                .surface(in: RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
+                .accessibilityLabel(label)
+            Text(problem ?? note)
+                .font(.footnote)
+                .foregroundStyle(problem == nil ? Color.quiet : Color.error)
+                .padding(.horizontal, Space.xs)
+        }
+    }
+}
+
+/// A button the width of its page: the accent filled on glass, or glass;
+/// while busy, a spinner before its title and no press.
+@available(iOS 26.0, *)
+public struct WideButton: View {
+    let title: String
+    let prominent: Bool
+    let enabled: Bool
+    let busy: Bool
+    let onTap: () -> Void
+
+    public init(_ title: String, prominent: Bool, enabled: Bool, busy: Bool, onTap: @escaping () -> Void) {
+        self.title = title
+        self.prominent = prominent
+        self.enabled = enabled
+        self.busy = busy
+        self.onTap = onTap
+    }
+
+    public var body: some View {
+        let b = Button(action: onTap) {
+            HStack {
+                if busy { ProgressView() }
+                Text(title)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .disabled(!enabled || busy)
+        if prominent {
+            b.buttonStyle(.glassProminent).tint(Color.accent)
+        } else {
+            b.buttonStyle(.glass)
+        }
+    }
+}
+
+/// What a page waits on, quietly, a spinner beside it while busy; what
+/// went wrong in the error colour.
+public struct StatusLine: View {
+    let text: String?
+    let busy: Bool
+    let problem: String?
+
+    public init(_ text: String?, busy: Bool, problem: String?) {
+        self.text = text
+        self.busy = busy
+        self.problem = problem
+    }
+
+    public var body: some View {
+        VStack(spacing: Space.s) {
+            if let problem {
+                Text(problem).font(.callout).foregroundStyle(Color.error).multilineTextAlignment(.center)
+            }
+            if text != nil || busy {
+                HStack(spacing: Space.m) {
+                    if busy { ProgressView() }
+                    if let text { Text(text) }
+                }
+                .font(.footnote)
+                .foregroundStyle(.quiet)
+                .multilineTextAlignment(.center)
+            }
+        }
+    }
+}
+
+/// A QR code (`QrCode`), no wider than a phone's hand can hold up to another.
+public struct CodeImage: View {
+    let size: Int64
+    let dark: [Bool]
+
+    public init(_ size: Int64, dark: [Bool]) {
+        self.size = size
+        self.dark = dark
+    }
+
+    public var body: some View {
+        QrCode(size: Int(size), dark: dark).frame(maxWidth: 260)
+    }
+}
 #endif

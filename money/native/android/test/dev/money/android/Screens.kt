@@ -21,9 +21,13 @@ import uniffi.money_bridge.StoreItem
 import uniffi.money_bridge.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import dev.arkdb.auth.Phase
-import dev.arkdb.auth.Said
+import dev.arkdb.auth.Event
+import dev.arkdb.auth.Found
+import dev.arkdb.auth.Remembered
 import dev.arkdb.auth.Step
+import kotlinx.coroutines.flow.MutableStateFlow
+import uniffi.money_bridge.FirstRunApp
+import uniffi.money_bridge.WelcomeMsg
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -49,17 +53,36 @@ class Screens {
     }
 
     private val none: () -> Unit = {}
-    private val said = Said(null, null, null)
 
-    @Test fun welcome() = shot("welcome") { StartScreens(Step.Server("", false, null), said, null, {}, none) }
+    /** The first run walked to a page by `steps`, as its generated page draws it. */
+    private fun first(steps: (FirstRunApp) -> Unit): FirstRunHolder {
+        val run = FirstRunApp(MONEY, false, true)
+        run.event(Event.Launched(Remembered(null, null, false), null, false))
+        steps(run)
+        return FirstRunHolder(MutableStateFlow(run.page())) {}
+    }
+
+    @Test fun welcome() = shot("welcome") { StartScreens(Step.Server("", false, null), first {}, null, {}, none) }
+
+    @Test fun welcomeServer() =
+        shot("welcome-server") { StartScreens(Step.Server("", false, null), first { it.send(WelcomeMsg.Skip) }, null, {}, none) }
 
     @Test fun welcomeRefused() =
         shot("welcome-refused") {
-            StartScreens(Step.Server("example.com", false, "example.com answered, but it isn't an Ark server: it has no health page."), said, null, {}, none)
+            val page = first {
+                it.send(WelcomeMsg.Skip)
+                it.send(WelcomeMsg.Typed("example.com"))
+                it.send(WelcomeMsg.Check)
+                it.event(Event.Checked(Found.Failed("example.com answered, but it isn't an Ark server: it has no health page.")))
+            }
+            StartScreens(Step.Server("example.com", false, null), page, null, {}, none)
         }
 
     @Test fun signIn() =
-        shot("sign-in") { StartScreens(Step.SignIn("https://money.koon.us", Phase.BROWSER, null), said, null, {}, none) }
+        shot("sign-in") {
+            val page = first { it.event(Event.Launched(Remembered("https://money.example.com", null, false), null, false)) }
+            StartScreens(Step.Server("", false, null), page, null, {}, none)
+        }
 
     @Test fun budget() {
         val holder = BudgetHolder(book.session, {}, { book.state.value.today }, null)

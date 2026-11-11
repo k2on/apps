@@ -267,6 +267,7 @@ name = "ark-auth"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "axum",
  "base64 0.22.1",
  "getrandom 0.2.17",
@@ -309,6 +310,7 @@ name = "ark-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-auth",
  "ark-peer",
  "arkdb",
@@ -2755,6 +2757,7 @@ name = "harken-app"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-router",
 ]
 
@@ -2774,6 +2777,7 @@ name = "harken-ffi"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-app",
  "ark-ffi",
  "ark-format",
  "ark-format-ffi",
@@ -4463,6 +4467,7 @@ dependencies = [
 name = "money-views"
 version = "0.1.0"
 dependencies = [
+ "ark-app",
  "ark-ui-gen",
  "money-app",
 ]

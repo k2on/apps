@@ -13,9 +13,6 @@ extension AppInfo {
     static let money = AppInfo(name: "Money", scheme: "money", demo: true, what: "your budget")
 }
 
-/// The server the empty field suggests, as its placeholder: the household's.
-let usualServer = "money.koon.us"
-
 /// What the first run remembers, on a shelf (`UserDefaults`), under the keys
 /// it always had: the server, the login kept whole as `ark_auth::Login`'s
 /// JSON (one that no longer reads is forgotten rather than trusted), and

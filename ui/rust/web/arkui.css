@@ -323,7 +323,16 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-welcome-title { font-size: 28px; font-weight: 700; }
 .ark-welcome-status:empty { display: none; }
 .ark-welcome-error { font-size: 13px; }
-.ark-welcome-actions { display: flex; gap: 8px; margin-top: 6px; }
+.ark-welcome-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 18px; width: 100%; }
+.ark-welcome-mark { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border-radius: 20px; color: var(--ark-accent); background: color-mix(in srgb, var(--ark-accent) 15%, transparent); margin-bottom: 12px; }
+.ark-welcome-sentence { font-size: 15px; }
+.ark-wide { width: 100%; }
+.ark-status { display: flex; flex-direction: column; gap: 4px; text-align: center; }
+.ark-status:empty { display: none; }
+.ark-code { width: 220px; height: 220px; align-self: center; }
+/* A code is dark on light in every theme: a scanner reads no other. */
+.ark-code-ground { fill: #ffffff; }
+.ark-code-ink { fill: #000000; }
 
 /* An inspector's page of cards (`detail_page`) and the card at its top (`header_card`), as iced draws them */
 .ark-detail { gap: 14px; }

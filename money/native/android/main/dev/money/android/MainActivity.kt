@@ -19,14 +19,10 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,18 +30,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.arkdb.auth.Event
-import dev.arkdb.auth.Phase
-import dev.arkdb.auth.Said
 import dev.arkdb.auth.Step
-import dev.arkui.ConfirmScreen
 import dev.arkui.DeviceLinkShown
-import dev.arkui.OpeningScreen
-import dev.arkui.ServerScreen
-import dev.arkui.SignInPhase
-import dev.arkui.SignInScreen
 import dev.arkui.holdSplashUntil
 import dev.arkui.keepMotion
-import dev.arkui.server.Probe
 
 class MainActivity : ComponentActivity() {
     private val start: Start by viewModels()
@@ -93,7 +81,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Root(start: Start) {
     val step by start.step.collectAsStateWithLifecycle()
-    val said by start.said.collectAsStateWithLifecycle()
     val book by start.book.collectAsStateWithLifecycle()
     val browse by start.browse.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -113,78 +100,40 @@ private fun Root(start: Start) {
         }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { book?.dialNow() }
-    StartScreens(step, said, book, start::send, onSignOut = start::signOut, addDevice = start::deviceLink)
+    StartScreens(step, start.holder, book, start::send, onSignOut = start::signOut, addDevice = start::deviceLink)
 }
 
-/** Each step drawn: arkui's onboarding pages with money's words, or the budget. */
+/**
+ * Each step drawn: the first run's pages every Ark app shares (generated/WelcomeScreen.kt, from
+ * ark_app::welcome, money's words), or the budget.
+ */
 @Composable
 fun StartScreens(
     step: Step,
-    said: Said,
+    first: FirstRunHolder,
     book: Book?,
     send: (Event) -> Unit,
     onSignOut: () -> Unit,
     addDevice: suspend () -> DeviceLinkShown = { DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
 ) {
-    val mark = painterResource(R.drawable.mark)
     when (step) {
-        is Step.Server ->
-            ServerScreen(
-                name = "money",
-                mark = mark,
-                typed = step.typed,
-                error = step.error,
-                checking = step.checking,
-                onType = { send(Event.Typed(it)) },
-                onContinue = { send(Event.Check) },
-                sentence = "A budget the household shares, kept on your own server. Where is it?",
-                placeholder = DEFAULT_SERVER,
-            ) {
-                TextButton(onClick = { send(Event.TryDemo) }, enabled = !step.checking, modifier = Modifier.fillMaxWidth()) {
-                    Text("Try the demo")
-                }
-            }
-        is Step.SignIn ->
-            SignInScreen(
-                mark = mark,
-                host = Probe.display(step.server),
-                error = step.error,
-                phase = step.phase.screen(),
-                onSignIn = { send(Event.OpenSignIn) },
-                onChangeServer = { send(Event.ChangeServer) },
-            )
-        is Step.Confirm ->
-            ConfirmScreen(
-                mark = mark,
-                question = said.question,
-                sentence = step.error ?: said.status ?: "",
-                canJoin = step.error == null,
-                onJoin = { send(Event.Accept) },
-                onCancel = { send(Event.Decline) },
-            )
-        is Step.Opening -> {
-            OpeningScreen(name = "money", mark = mark, host = Probe.display(step.server), what = "your budget")
-            // Signed in just now: opening, until the replica has what the server had — or the
-            // server cannot be reached, and there is nothing more to wait for.
-            val b = book ?: return
-            val ledger by b.state.collectAsStateWithLifecycle()
-            val synced = ledger.ready && (ledger.link.linked || ledger.link.word == "waiting" || ledger.link.word == "offline")
-            LaunchedEffect(synced) { if (synced) send(Event.Synced) }
-            LaunchedEffect(ledger.denied) { ledger.denied?.let { send(Event.Denied(it)) } }
-        }
         is Step.Running, is Step.Demo -> {
             val b = book ?: return
             val ledger by b.state.collectAsStateWithLifecycle()
             LaunchedEffect(ledger.denied) { ledger.denied?.let { send(Event.Denied(it)) } }
             MoneyApp(b, onSignOut = onSignOut, addDevice = addDevice)
         }
+        else -> {
+            WelcomeScreen(first)
+            // Signed in just now: opening, until the replica has what the server had — or the
+            // server cannot be reached, and there is nothing more to wait for.
+            if (step is Step.Opening) {
+                val b = book ?: return
+                val ledger by b.state.collectAsStateWithLifecycle()
+                val synced = ledger.ready && (ledger.link.linked || ledger.link.word == "waiting" || ledger.link.word == "offline")
+                LaunchedEffect(synced) { if (synced) send(Event.Synced) }
+                LaunchedEffect(ledger.denied) { ledger.denied?.let { send(Event.Denied(it)) } }
+            }
+        }
     }
 }
-
-/** A sign-in's phase, as arkui's page draws it. */
-fun Phase.screen(): SignInPhase =
-    when (this) {
-        Phase.IDLE -> SignInPhase.Idle
-        Phase.BROWSER -> SignInPhase.Browser
-        Phase.EXCHANGING -> SignInPhase.Exchanging
-    }

@@ -44,7 +44,7 @@ mod view;
 #[cfg(test)]
 mod tests;
 
-use ark_auth::onboarding::{Effect, Event, Onboarding};
+use ark_auth::onboarding::{Effect, Event};
 use arkui::outline::{self, Grab, Shift};
 use arkui::{glyphs, menu, vim};
 use iced::keyboard::{Key, Modifiers};
@@ -621,7 +621,8 @@ impl App {
             login,
             logins: None,
             user: None,
-            onboarding: Onboarding::new(live::app()),
+            // The window's server is its configuration's: no other is offered here.
+            first_run: ark_auth::first_run::FirstRun::new(live::app(), money_app::welcome::copy(false, false)),
             bell,
             device: None,
         });
@@ -631,9 +632,9 @@ impl App {
     /// An event for the sign-in machine (`ark_auth::onboarding`), and its
     /// effects carried out: what it says said in the note.
     pub fn onboard(&mut self, event: Event) -> Task<Message> {
-        let Some(s) = &self.server else { return Task::none() };
-        let effects = s.onboarding.next(event);
-        let said = s.onboarding.said();
+        let Some(s) = &mut self.server else { return Task::none() };
+        let effects = s.first_run.event(event);
+        let said = s.first_run.machine().said();
         if let Some(t) = said.error.or(said.status) {
             self.note = t;
         }

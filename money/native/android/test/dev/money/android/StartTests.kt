@@ -6,13 +6,13 @@ package dev.money.android
 
 import dev.arkdb.auth.Event
 import dev.arkdb.auth.Login
-import dev.arkdb.auth.Onboarding
 import dev.arkdb.auth.Remembered
 import dev.arkdb.auth.Step
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uniffi.money_bridge.FirstRunApp
 
 class StartTests {
     private val shelf = MemoryShelf()
@@ -20,7 +20,7 @@ class StartTests {
     private fun login(user: String = "sam") = Login("t", "s1", user, "Sam", "sam@example.com", emptyList(), 0, "")
 
     @Test fun whatIsRememberedIsKeptWhole() {
-        val r = Remembered("https://money.koon.us", login(), demo = true)
+        val r = Remembered("https://money.example.com", login(), demo = true)
         Kept(shelf).remembered = r
         assertEquals(r, Kept(shelf).remembered)
         assertEquals("1", shelf.get("money.demo"))
@@ -30,11 +30,11 @@ class StartTests {
 
     /** The bridge's machine, as money is to it: a server with nobody signed in goes to sign in by itself. */
     @Test fun aServerAloneGoesToSignIn() {
-        val m = Onboarding(MONEY)
-        val fx = m.next(Event.Launched(Remembered("https://money.koon.us", null, false), null, false))
+        val m = FirstRunApp(MONEY, false, true)
+        val fx = m.event(Event.Launched(Remembered("https://money.example.com", null, false), null, false))
         assertTrue(m.step() is Step.SignIn)
         assertTrue(fx.toString(), fx.single().toString().contains("money%3A%2F%2Fauth"))
-        m.next(Event.TryDemo)
+        m.event(Event.TryDemo)
         assertTrue(m.step() is Step.SignIn)
     }
 

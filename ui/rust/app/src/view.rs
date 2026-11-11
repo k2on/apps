@@ -418,6 +418,53 @@ pub enum Part<M> {
         tap: M,
     },
 
+    // An app's first run (`crate::welcome`): any app's pages before it
+    // has a server, and its sign-in, each the app's own words and mark.
+    /// A first run's page: the app's mark (a glyph on glass in its
+    /// accent), a large title, a sentence, and what to do under them,
+    /// centred and no wider than a phone.
+    FirstRunPage {
+        glyph: Val<String>,
+        title: Val<String>,
+        sentence: Val<String>,
+        content: Box<View<M>>,
+    },
+    /// A server's address: the keyboard for a URL, no capitals or
+    /// corrections; `prompt` its placeholder, `note` under it until there
+    /// is a `problem`; Go sends `submit`.
+    AddressField {
+        label: &'static str,
+        prompt: Val<String>,
+        text: Val<String>,
+        note: Val<String>,
+        problem: Val<Option<String>>,
+        enabled: Val<bool>,
+        typed: Input<String, M>,
+        submit: M,
+    },
+    /// A button the width of its page: the accent filled (`prominent`) or
+    /// glass; while `busy`, a spinner before its title and no press.
+    WideButton {
+        title: Val<String>,
+        prominent: bool,
+        enabled: Val<bool>,
+        busy: Val<bool>,
+        tap: M,
+    },
+    /// What a page waits on, quietly (a spinner beside it while `busy`),
+    /// and what went wrong, in the error colour; either may be none.
+    StatusLine {
+        text: Val<Option<String>>,
+        busy: Val<bool>,
+        problem: Val<Option<String>>,
+    },
+    /// A QR code: `size` modules a side, row by row from the top left,
+    /// each dark or not; drawn with the quiet zone a scanner needs.
+    CodeImage {
+        size: Val<i64>,
+        dark: Val<Vec<bool>>,
+    },
+
     // The shell (ui/docs/design.md): what a standard Mac app is made of,
     // each part adapting to the size class inside itself.
     /// The app's sections: a sidebar on a regular width and the Mac, a tab
@@ -1460,6 +1507,80 @@ pub fn form_button<M>(title: &'static str, enabled: impl Into<Val<bool>>, tap: M
     .into()
 }
 
+// * A first run's parts
+
+/// A first run's page: the app's mark, its title and sentence, then `content`.
+pub fn first_run_page<M>(
+    glyph: impl Into<Val<String>>,
+    title: impl Into<Val<String>>,
+    sentence: impl Into<Val<String>>,
+    content: impl Into<View<M>>,
+) -> View<M> {
+    Part::FirstRunPage {
+        glyph: glyph.into(),
+        title: title.into(),
+        sentence: sentence.into(),
+        content: Box::new(content.into()),
+    }
+    .into()
+}
+
+/// A server's address field.
+#[allow(clippy::too_many_arguments)]
+pub fn address_field<M: 'static>(
+    label: &'static str,
+    prompt: impl Into<Val<String>>,
+    text: impl Into<Val<String>>,
+    note: impl Into<Val<String>>,
+    problem: impl Into<Val<Option<String>>>,
+    enabled: impl Into<Val<bool>>,
+    typed: fn(String) -> M,
+    submit: M,
+) -> View<M> {
+    Part::AddressField {
+        label,
+        prompt: prompt.into(),
+        text: text.into(),
+        note: note.into(),
+        problem: problem.into(),
+        enabled: enabled.into(),
+        typed: Input::new(typed),
+        submit,
+    }
+    .into()
+}
+
+/// A page-wide button: `prominent` the accent filled, glass otherwise.
+pub fn wide_button<M>(title: impl Into<Val<String>>, prominent: bool, enabled: impl Into<Val<bool>>, busy: impl Into<Val<bool>>, tap: M) -> View<M> {
+    Part::WideButton {
+        title: title.into(),
+        prominent,
+        enabled: enabled.into(),
+        busy: busy.into(),
+        tap,
+    }
+    .into()
+}
+
+/// What a page waits on and what went wrong.
+pub fn status_line<M>(text: impl Into<Val<Option<String>>>, busy: impl Into<Val<bool>>, problem: impl Into<Val<Option<String>>>) -> View<M> {
+    Part::StatusLine {
+        text: text.into(),
+        busy: busy.into(),
+        problem: problem.into(),
+    }
+    .into()
+}
+
+/// A QR code of `size` modules a side.
+pub fn code_image<M>(size: impl Into<Val<i64>>, dark: impl Into<Val<Vec<bool>>>) -> View<M> {
+    Part::CodeImage {
+        size: size.into(),
+        dark: dark.into(),
+    }
+    .into()
+}
+
 // * Each part's call, by rule
 
 /// What a part is handed, as the phones' code spells it.
@@ -1835,6 +1956,64 @@ impl<M> Part<M> {
                 args.push(("onChange", G::Switched(change)));
                 c("SwitchRow", Some(G::Text(title)), args, vec![])
             }
+            Part::FirstRunPage {
+                glyph,
+                title,
+                sentence,
+                content,
+            } => c(
+                "FirstRunPage",
+                Some(G::Val(lit(glyph))),
+                vec![("title", G::Val(lit(title))), ("sentence", G::Val(lit(sentence)))],
+                vec![("", &**content)],
+            ),
+            Part::AddressField {
+                label,
+                prompt,
+                text,
+                note,
+                problem,
+                enabled,
+                typed,
+                submit,
+            } => c(
+                "AddressField",
+                Some(G::Text(label)),
+                vec![
+                    ("prompt", G::Val(lit(prompt))),
+                    ("text", G::Val(lit(text))),
+                    ("note", G::Val(lit(note))),
+                    ("problem", G::Val(lit(problem))),
+                    ("enabled", G::Val(lit(enabled))),
+                    ("onChange", G::Typed(typed)),
+                    ("onSubmit", G::Act(submit)),
+                ],
+                vec![],
+            ),
+            Part::WideButton {
+                title,
+                prominent,
+                enabled,
+                busy,
+                tap,
+            } => c(
+                "WideButton",
+                Some(G::Val(lit(title))),
+                vec![
+                    ("prominent", G::Val(prominent.to_string())),
+                    ("enabled", G::Val(lit(enabled))),
+                    ("busy", G::Val(lit(busy))),
+                    ("onTap", G::Act(tap)),
+                ],
+                vec![],
+            ),
+            Part::StatusLine { text, busy, problem } => c(
+                "StatusLine",
+                Some(G::Val(lit(text))),
+                vec![("busy", G::Val(lit(busy))), ("problem", G::Val(lit(problem)))],
+                vec![],
+            ),
+            Part::CodeImage { size, dark } => c("CodeImage", Some(G::Val(lit(size))), vec![("dark", G::Val(lit(dark)))], vec![]),
             Part::Button { title, enabled, tap } => c(
                 "FormButton",
                 Some(G::Text(title)),
@@ -2239,6 +2418,51 @@ impl<M: 'static> Part<M> {
                 on,
                 change: input(change, f),
             },
+            Part::FirstRunPage {
+                glyph,
+                title,
+                sentence,
+                content,
+            } => Part::FirstRunPage {
+                glyph,
+                title,
+                sentence,
+                content: b(content),
+            },
+            Part::AddressField {
+                label,
+                prompt,
+                text,
+                note,
+                problem,
+                enabled,
+                typed,
+                submit,
+            } => Part::AddressField {
+                label,
+                prompt,
+                text,
+                note,
+                problem,
+                enabled,
+                typed: input(typed, f),
+                submit: f(submit),
+            },
+            Part::WideButton {
+                title,
+                prominent,
+                enabled,
+                busy,
+                tap,
+            } => Part::WideButton {
+                title,
+                prominent,
+                enabled,
+                busy,
+                tap: f(tap),
+            },
+            Part::StatusLine { text, busy, problem } => Part::StatusLine { text, busy, problem },
+            Part::CodeImage { size, dark } => Part::CodeImage { size, dark },
             Part::Button { title, enabled, tap } => Part::Button { title, enabled, tap: f(tap) },
             Part::Tabs {
                 selected,

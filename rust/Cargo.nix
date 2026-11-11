@@ -1247,6 +1247,10 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "axum";
             packageId = "axum";
             optional = true;
@@ -1452,6 +1456,10 @@ rec {
           {
             name = "ark";
             packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
           }
           {
             name = "ark-auth";
@@ -8952,6 +8960,10 @@ rec {
             packageId = "ark";
           }
           {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
             name = "ark-router";
             packageId = "ark-router";
           }
@@ -9003,6 +9015,10 @@ rec {
           {
             name = "ark";
             packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
           }
           {
             name = "ark-ffi";
@@ -14583,6 +14599,10 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/views; };
         libName = "money_views";
         dependencies = [
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
           {
             name = "ark-ui-gen";
             packageId = "ark-ui-gen";

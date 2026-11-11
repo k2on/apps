@@ -41,6 +41,19 @@ pub fn screens() -> ark_ui_gen::app::App {
             Generated::view(money_app::accounts::view::accounts::record, accounts),
             Generated::view(money_app::budget::view::budget::record, budget),
             Generated::view(money_app::shell::view::money_shell::record, shell),
+            // The first run's pages, every Ark app's (ark_app::welcome),
+            // over the model's FirstRunApp.
+            Generated::view(
+                ark_app::welcome::welcome::record,
+                Names {
+                    swift: "WelcomeView",
+                    swift_holder: "FirstRunScreen",
+                    kotlin: "WelcomeScreen",
+                    kotlin_holder: "FirstRunHolder",
+                    source: "ui/rust/app/src/welcome.rs",
+                    msg: "WelcomeMsg",
+                },
+            ),
             Generated::view(
                 money_app::shell::view::money_settings::record,
                 Names {

@@ -8,9 +8,11 @@
 // is remembered is kept on the phone so it is asked once: the server, the
 // login, and whether this phone runs the demo.
 //
-// `Start` is the ViewModel that holds the machine and the book it opened,
-// and outlives a rotation; the activity only opens the browser it asks for
-// and hands it the redirect.
+// `Start` is the ViewModel that holds the machine — under the first run's
+// pages every Ark app shares (`FirstRunApp`: ark_auth::first_run over
+// ark_app::welcome, money's words money_app::welcome's) — and the book it
+// opened, and outlives a rotation; the activity only opens the browser it
+// asks for and hands it the redirect.
 package dev.money.android
 
 import android.app.Application
@@ -22,7 +24,6 @@ import dev.arkdb.auth.Effect
 import dev.arkdb.auth.Event
 import dev.arkdb.auth.Found
 import dev.arkdb.auth.Login
-import dev.arkdb.auth.Onboarding
 import dev.arkdb.auth.Remembered
 import dev.arkdb.auth.Said
 import dev.arkdb.auth.Step
@@ -34,6 +35,9 @@ import dev.arkdb.ffi.redeem
 import dev.arkdb.ffi.socketUrl
 import dev.arkui.DeviceLinkShown
 import dev.arkui.server.Probe
+import uniffi.money_bridge.FirstRunApp
+import uniffi.money_bridge.WelcomeMsg
+import uniffi.money_bridge.WelcomePage
 import uniffi.money_bridge.moneyDemo
 import uniffi.money_bridge.moneyDomain
 import uniffi.money_bridge.moneyOpen
@@ -45,9 +49,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** The household's server, unless somebody says another. */
-const val DEFAULT_SERVER: String = "money.koon.us"
 
 /** money, to the sign-in machine. */
 val MONEY: AppInfo = AppInfo(name = "Money", scheme = "money", demo = true, what = "your budget")
@@ -100,7 +101,8 @@ class PrefsShelf(context: Context) : Shelf {
 
 /** The start for the activity: the machine, its effects carried out, and the book it opened. */
 class Start(app: Application) : AndroidViewModel(app) {
-    private val machine = Onboarding(MONEY)
+    // No code is scanned here yet: ark-camera has no QR decoder on Android.
+    private val machine = FirstRunApp(MONEY, scan = false, demo = true)
     private val kept = Kept(PrefsShelf(app))
 
     private val _step = MutableStateFlow(machine.step())
@@ -109,6 +111,13 @@ class Start(app: Application) : AndroidViewModel(app) {
     private val _said = MutableStateFlow(machine.said())
     /** What the page says now: its question, what it waits on, its error. */
     val said: StateFlow<Said> = _said.asStateFlow()
+
+    private val _page = MutableStateFlow(machine.page())
+    /** The first run's page (generated/WelcomeScreen.kt draws it); none of them once the budget shows. */
+    val page: StateFlow<WelcomePage> = _page.asStateFlow()
+
+    /** What the generated first run reads and sends to. */
+    val holder = FirstRunHolder(page) { press(it) }
 
     private val _book = MutableStateFlow<Book?>(null)
     /** The budget open now: the server's, or the demo's. */
@@ -125,10 +134,22 @@ class Start(app: Application) : AndroidViewModel(app) {
     /** An event from a screen, the browser, a link or the app's phase. */
     fun send(event: Event) {
         if (event is Event.Foreground) _book.value?.dialNow()
-        val effects = machine.next(event)
+        val effects = machine.event(event)
+        moved()
+        for (e in effects) run(e)
+    }
+
+    /** A press on the first run's page. */
+    fun press(msg: WelcomeMsg) {
+        val asked = machine.send(msg)
+        moved()
+        for (e in asked.effects) run(e)
+    }
+
+    private fun moved() {
         _step.value = machine.step()
         _said.value = machine.said()
-        for (e in effects) run(e)
+        _page.value = machine.page()
     }
 
     fun browsed() {
@@ -223,3 +244,8 @@ fun dev.arkui.server.Found.machine(): Found =
         is dev.arkui.server.Found.Server -> Found.Server(url, newer)
         is dev.arkui.server.Found.Failed -> Found.Failed(why)
     }
+
+/** The first run as its generated page reads it: the page, and where a press goes. */
+class FirstRunHolder(val page: StateFlow<WelcomePage>, private val press: (WelcomeMsg) -> Unit) {
+    fun send(msg: WelcomeMsg) = press(msg)
+}

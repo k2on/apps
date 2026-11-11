@@ -21,6 +21,8 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 harken-domain = { path = "../domain" }
 # Where harken can be (its routes), as the phones read them.
 harken-app = { path = "../app" }
+# The first run's records, twinned here (`ark_ffi::first_run_app!`).
+ark-app = { path = "../../ui/rust/app" }
 harken-player = { path = "../player" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }

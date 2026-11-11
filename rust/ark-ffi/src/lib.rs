@@ -851,3 +851,103 @@ pub struct DeviceLink {
 pub fn exchange(server: String, code: String) -> Result<Login, Refusal> {
     Ok(ark_auth::client::exchange(&server, &code)?.into())
 }
+
+/// The sign-in machine and the first run's pages, for an app's bridge
+/// (`first_run_app!`'s), which names them by these paths.
+pub use ark_app;
+pub use ark_auth;
+
+/// An app's first run over UniFFI: the shared pages (`ark_app::welcome`)
+/// over the sign-in machine (`ark_auth::first_run`), as one object the
+/// phone's holder reads and sends to. Written in the app's bridge, after
+/// its twins of `ark_app::welcome`'s records (`WelcomePageFfi`,
+/// `WelcomeMsgFfi`, `AddDevicePageFfi`), which UniFFI exports in the app's
+/// own namespace: `ark_ffi::first_run_app!(money_app::welcome::copy)`.
+/// `$copy` is the app's words, `fn(scan, demo) -> WelcomeCopy`.
+#[macro_export]
+macro_rules! first_run_app {
+    ($copy:path) => {
+        /// What a press on the first run asks of the phone: the machine's
+        /// effects, and whether to scan another device's code.
+        #[derive(uniffi::Record)]
+        pub struct FirstRunAsked {
+            pub effects: Vec<$crate::ark_auth::onboarding::Effect>,
+            pub scan: bool,
+        }
+
+        /// The app's first run: its pages, over the sign-in machine.
+        #[derive(uniffi::Object)]
+        pub struct FirstRunApp(std::sync::Mutex<$crate::ark_auth::first_run::FirstRun>);
+
+        impl FirstRunApp {
+            fn run(&self) -> std::sync::MutexGuard<'_, $crate::ark_auth::first_run::FirstRun> {
+                self.0.lock().unwrap_or_else(|e| e.into_inner())
+            }
+        }
+
+        #[uniffi::export]
+        impl FirstRunApp {
+            /// The first run of `app`; `scan` where a camera reads another
+            /// device's code, `demo` where the demo household runs.
+            #[uniffi::constructor]
+            pub fn new(app: $crate::ark_auth::onboarding::AppInfo, scan: bool, demo: bool) -> std::sync::Arc<FirstRunApp> {
+                std::sync::Arc::new(FirstRunApp(std::sync::Mutex::new($crate::ark_auth::first_run::FirstRun::new(
+                    app,
+                    $copy(scan, demo),
+                ))))
+            }
+
+            /// The page that shows; none of them while the app does.
+            pub fn page(&self) -> WelcomePageFfi {
+                use $crate::Twin;
+                self.run().page().ffi()
+            }
+
+            /// A press on a page.
+            pub fn send(&self, msg: WelcomeMsgFfi) -> FirstRunAsked {
+                use $crate::Twin;
+                let a = self.run().send($crate::ark_app::welcome::WelcomeMsg::from_ffi(msg));
+                FirstRunAsked {
+                    effects: a.effects,
+                    scan: a.scan,
+                }
+            }
+
+            /// One of the machine's events: what an effect came to, a link
+            /// opened, the app back in front.
+            pub fn event(&self, event: $crate::ark_auth::onboarding::Event) -> Vec<$crate::ark_auth::onboarding::Effect> {
+                self.run().event(event)
+            }
+
+            /// What the camera read for "Scan a Code".
+            pub fn scanned(&self, text: Option<String>) -> Vec<$crate::ark_auth::onboarding::Effect> {
+                self.run().scanned(text)
+            }
+
+            pub fn step(&self) -> $crate::ark_auth::onboarding::Step {
+                self.run().machine().step()
+            }
+
+            pub fn said(&self) -> $crate::ark_auth::onboarding::Said {
+                self.run().machine().said()
+            }
+
+            pub fn remembered(&self) -> $crate::ark_auth::onboarding::Remembered {
+                self.run().machine().remembered()
+            }
+        }
+
+        /// "Add a Device" as it stands: none while the code is made, the
+        /// link made, or why not.
+        #[uniffi::export]
+        pub fn add_device_page(link: Option<$crate::DeviceLink>, failed: Option<String>) -> AddDevicePageFfi {
+            use $crate::Twin;
+            let made = match (link, failed) {
+                (Some(l), _) => Some(Ok((l.link, l.qr))),
+                (None, Some(why)) => Some(Err(why)),
+                (None, None) => None,
+            };
+            $crate::ark_auth::first_run::add_device_page(made).ffi()
+        }
+    };
+}

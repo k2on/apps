@@ -20,7 +20,19 @@ uniffi::setup_scaffolding!();
 
 // What crosses, written here from the domain's and the app's types (the
 // domain and the app know nothing of UniFFI: ui/docs/app.md, Layers).
-ark::twins!(harken_domain::{schema::Playlist, types::LibraryEntry}, harken_app::routes::Route);
+ark::twins!(
+    harken_domain::{schema::Playlist, types::LibraryEntry},
+    harken_app::routes::Route,
+    ark_app::welcome::{
+        AddDevicePage, AddDeviceMsg, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage,
+    },
+);
+
+// harken's first run on the pages every Ark app shares (ark_app::welcome),
+// its words harken_app::welcome's. Its phones still draw their own
+// (ios/Harken/OnboardingViews.swift, android/…/OnboardingScreens.kt):
+// moving them onto `FirstRunApp` is harken's port.
+ark_ffi::first_run_app!(harken_app::welcome::copy);
 
 mod routes;
 pub use routes::route_from_url;

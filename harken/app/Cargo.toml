@@ -14,3 +14,5 @@ path = "src/lib.rs"
 ark = { path = "../../rust/ark" }
 # Its routes, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
+# Its first run's words, on the pages every app shares (`src/welcome.rs`).
+ark-app = { path = "../../ui/rust/app" }

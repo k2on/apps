@@ -9,6 +9,8 @@ description = "ArkDB's peer for an app in another language (docs/plan-v5.md §1.
 ark = { path = "../ark" }
 ark-peer = { path = "../ark-peer", default-features = false }
 ark-auth = { path = "../ark-auth", default-features = false, features = ["ffi"] }
+# The first run's pages (`first_run_app!`): ark-app's records.
+ark-app = { path = "../../ui/rust/app" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }

@@ -10,6 +10,16 @@ import ArkUICore
 import Combine
 import Foundation
 
+/// The first run's page every Ark app shares, as its generated WelcomeView
+/// reads it: the model's (`FirstRunApp`), a press sent back to it.
+@MainActor
+final class FirstRunScreen: ObservableObject {
+    @Published var page = WelcomePage(intro: nil, server: nil, signIn: nil, opening: nil, confirm: nil)
+    var press: (WelcomeMsg) -> Void = { _ in }
+
+    func send(_ m: WelcomeMsg) { press(m) }
+}
+
 /// The Accounts tab, running in Rust.
 @MainActor
 final class AccountsScreen: ObservableObject {

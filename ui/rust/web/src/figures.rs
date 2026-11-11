@@ -298,6 +298,34 @@ pub fn line_svg(points: &[i64], area: bool) -> String {
     format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" preserveAspectRatio="none" width="100%" height="100%">{body}</svg>"#)
 }
 
+/// A QR code as inline SVG: `size` modules a side, each dark one a square
+/// in the ink's colour, the quiet zone of four modules round it on the
+/// page's ground (iced's `arkui::qr`).
+pub fn qr_svg(size: usize, dark: &[bool]) -> AnyView {
+    const QUIET: usize = 4;
+    let side = size + 2 * QUIET;
+    let mut d = String::new();
+    for (i, _) in dark.iter().enumerate().filter(|(_, on)| **on).take(size * size) {
+        let (x, y) = (i % size.max(1) + QUIET, i / size.max(1) + QUIET);
+        d.push_str(&format!("M{x} {y}h1v1h-1z"));
+    }
+    leptos::svg::svg()
+        .attr("class", "ark-code")
+        .attr("viewBox", format!("0 0 {side} {side}"))
+        .attr("role", "img")
+        .attr("aria-label", "QR Code")
+        .attr("shape-rendering", "crispEdges")
+        .child((
+            leptos::svg::rect()
+                .attr("width", side)
+                .attr("height", side)
+                .attr("class", "ark-code-ground"),
+            leptos::svg::path().attr("d", d).attr("class", "ark-code-ink"),
+        ))
+        .into_any()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

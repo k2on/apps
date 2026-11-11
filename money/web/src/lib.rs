@@ -78,6 +78,8 @@ pub enum Msg {
     /// What came of one of the sign-in machine's effects, or a press on
     /// the sign-in page (`live`).
     Onboard(ark_auth::onboarding::Event),
+    /// A press on the first run's page.
+    Welcome(ark_app::welcome::WelcomeMsg),
 }
 
 /// A change to the new transaction being written.
@@ -755,6 +757,7 @@ impl WebApp for MoneyWeb {
             Msg::At(k, v) => self.at(&k, v),
             Msg::Wake => self.wake(),
             Msg::Onboard(e) => self.onboard(e),
+            Msg::Welcome(m) => self.first_run(m),
         }
     }
 

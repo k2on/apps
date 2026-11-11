@@ -38,6 +38,9 @@
 //! thread of its own, so the same runtime runs behind the phones' bridge,
 //! in the iced window and in the browser's wasm.
 
+// `#[view]`'s paths are `ark_app::…`, here too (`welcome`).
+extern crate self as ark_app;
+
 use std::any::Any;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::{self, Debug};
@@ -500,6 +503,7 @@ impl<M: Send + 'static> Inbox<M> {
 
 pub mod shell;
 pub mod view;
+pub mod welcome;
 pub mod writing;
 
 /// `#[view]`: a function of a screen's record laid out once for every

@@ -1,0 +1,122 @@
+// A first run's parts (ark_app::welcome, ui/docs/app.md): what the generated first run of any Ark
+// app calls — its page, the server's address, a page-wide button, what it waits on, and a QR code —
+// over the onboarding's own page (Onboarding.kt's `OnboardingPage`). Every colour is the theme's.
+package dev.arkui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+
+/** A first run's page: the app's mark in the theme's primary, a title, a sentence, and what to do. */
+@Composable
+public fun FirstRunPage(glyph: String, title: String, sentence: String, content: @Composable () -> Unit) {
+    val mark = LocalGlyphs.current(glyph) ?: ArkGlyphs.named(glyph) ?: ArkGlyphs.Chevron
+    OnboardingPage(rememberVectorPainter(mark), title = title, sentence = sentence) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.m)) { content() }
+    }
+}
+
+/** A server's address: the keyboard for a URL, no corrections, Go to go on; its note under it until there is a problem. */
+@Composable
+public fun AddressField(
+    label: String,
+    prompt: String,
+    text: String,
+    note: String,
+    problem: String?,
+    enabled: Boolean,
+    onChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    OutlinedTextField(
+        value = text,
+        onValueChange = onChange,
+        label = { Text(label) },
+        placeholder = { Text(prompt) },
+        isError = problem != null,
+        supportingText = { Text(problem ?: note) },
+        enabled = enabled,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
+        keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** A button the width of its page: filled in the primary, or outlined; while busy, a spinner before its title and no press. */
+@Composable
+public fun WideButton(title: String, prominent: Boolean, enabled: Boolean, busy: Boolean, onTap: () -> Unit) {
+    val label: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+                Spacer(Modifier.width(12.dp))
+            }
+            Text(title)
+        }
+    }
+    if (prominent) {
+        Button(onClick = onTap, enabled = enabled && !busy, modifier = Modifier.fillMaxWidth()) { label() }
+    } else {
+        OutlinedButton(onClick = onTap, enabled = enabled && !busy, modifier = Modifier.fillMaxWidth()) { label() }
+    }
+}
+
+/** What a page waits on, quietly (a spinner beside it while busy), and what went wrong, in the error colour. */
+@Composable
+public fun StatusLine(text: String?, busy: Boolean, problem: String?) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        if (problem != null) {
+            Text(
+                problem,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+        }
+        if (text != null || busy) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    if (text != null) Spacer(Modifier.width(Space.s))
+                }
+                if (text != null) {
+                    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+            }
+        }
+    }
+}
+
+/** A QR code (`QrCode`), no wider than another phone's camera wants. */
+@Composable
+public fun CodeImage(size: Long, dark: List<Boolean>) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        QrCode(size.toInt(), dark, Modifier.widthIn(max = 260.dp))
+    }
+}

@@ -1,5 +1,7 @@
-// The app's one model, on the main actor: the sign-in machine run
-// (`ark_auth::onboarding`, Onboarding.swift) — its effects carried out, the probe and the exchange
+// The app's one model, on the main actor: the sign-in machine run under
+// the first run every Ark app shares (`FirstRunApp`: ark_auth::first_run
+// over ark_app::welcome, money's words money_app::welcome's; the pages the
+// generated WelcomeView) — its effects carried out, the probe and the exchange
 // off the main thread — the session it opens ([Bridge]) and the snapshot it
 // publishes, the month the budget shows, and every button the screens have,
 // each one function of the domain. Nothing of SwiftUI but
@@ -20,6 +22,10 @@ final class Model: ObservableObject {
     @Published private(set) var step: Step
     /// What the first run's page says now: its question, what it waits on, its error.
     @Published private(set) var said = Said(question: nil, status: nil, error: nil)
+    /// The first run's page, as the generated WelcomeView reads it.
+    let first = FirstRunScreen()
+    /// "Scan a Code" asked: the camera's code scanner up, its text to [scanned].
+    @Published var scanning = false
     @Published private(set) var snapshot = Snapshot()
     /// The month the budget, the spending and the month's figures are of: `2026-10`.
     @Published private(set) var month: String
@@ -55,7 +61,7 @@ final class Model: ObservableObject {
 
     // MARK: what it holds
 
-    private let machine = Onboarding(app: .money)
+    private let machine: FirstRunApp
     private let kept: Kept
     private let root: URL
     /// The demo's day when it is a fixed one (previews, tests, screenshots); today when none.
@@ -72,8 +78,9 @@ final class Model: ObservableObject {
 
     /// The model over `shelf` (the app's `UserDefaults`), replicas under
     /// `root`; on the demo for this launch alone when `demoLaunch`.
-    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false,
+    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false, scan: Bool = false,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
+        machine = FirstRunApp(app: .money, scan: scan, demo: true)
         kept = Kept(shelf)
         self.root = root
         self.demoDay = demoDay
@@ -82,6 +89,7 @@ final class Model: ObservableObject {
         step = machine.step()
         month = Months.of(demoDay ?? moneyToday())
         let remembered = demoLaunch ? Remembered(server: nil, login: nil, demo: true) : kept.remembered
+        first.press = { [weak self] m in self?.press(m) }
         send(.launched(remembered: remembered, code: nil, returned: false))
     }
 
@@ -90,10 +98,31 @@ final class Model: ObservableObject {
     /// An event from a screen, the browser sheet, a link or the app's phase.
     func send(_ e: Event) {
         if case .foreground = e { bridge?.dialNow() }
-        let effects = machine.next(event: e)
+        let effects = machine.event(event: e)
+        moved()
+        for e in effects { carry(e) }
+    }
+
+    /// A press on the first run's page.
+    func press(_ m: WelcomeMsg) {
+        let asked = machine.send(msg: m)
+        moved()
+        if asked.scan { scanning = true }
+        for e in asked.effects { carry(e) }
+    }
+
+    /// What the code scanner read (none: closed).
+    func scanned(_ text: String?) {
+        scanning = false
+        let effects = machine.scanned(text: text)
+        moved()
+        for e in effects { carry(e) }
+    }
+
+    private func moved() {
         step = machine.step()
         said = machine.said()
-        for e in effects { carry(e) }
+        first.page = machine.page()
     }
 
     private func carry(_ e: Effect) {

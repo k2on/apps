@@ -37,7 +37,8 @@
 #[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
 
-use ark_auth::onboarding::{AppInfo, Effect, Event, Onboarding, Phase, Remembered, Step};
+use ark_auth::first_run::FirstRun;
+use ark_auth::onboarding::{AppInfo, Effect, Event, Remembered, Step};
 use ark_peer::{Config, Logins, Memory, Peer};
 
 use crate::{MoneyWeb, Msg};
@@ -56,7 +57,8 @@ pub fn app() -> AppInfo {
 pub struct Live {
     /// The server's base URL: the page's own origin.
     pub server: String,
-    pub onboarding: Onboarding,
+    /// The sign-in machine under the first run's pages, every app's.
+    pub first_run: FirstRun,
     /// The logins this browser remembers, the token not among them.
     pub logins: Logins,
     /// Who is signed in, once the session is open.
@@ -70,7 +72,7 @@ impl Live {
     /// Whether the app is shown: the session open, or on its way and the
     /// replica already holding a budget.
     pub fn running(&self) -> bool {
-        matches!(self.onboarding.step(), Step::Running { .. })
+        matches!(self.first_run.machine().step(), Step::Running { .. })
     }
 }
 
@@ -96,7 +98,8 @@ impl MoneyWeb {
         let login = logins.recall(&server).filter(|l| l.expires_ms > ark_peer::now_ms());
         app.live = Some(Live {
             server: server.clone(),
-            onboarding: Onboarding::new(self::app()),
+            // The server is the page's own: no demo, no camera to scan with.
+            first_run: FirstRun::new(self::app(), money_app::welcome::copy(false, false)),
             logins,
             login: None,
             timer: None,
@@ -118,8 +121,16 @@ impl MoneyWeb {
 
     /// An event for the sign-in machine, and its effects carried out.
     pub fn onboard(&mut self, event: Event) {
-        let Some(live) = &self.live else { return };
-        for effect in live.onboarding.next(event) {
+        let Some(live) = &mut self.live else { return };
+        for effect in live.first_run.event(event) {
+            self.effect(effect);
+        }
+    }
+
+    /// A press on the first run's page, and the machine's effects carried out.
+    pub fn first_run(&mut self, msg: ark_app::welcome::WelcomeMsg) {
+        let Some(live) = &mut self.live else { return };
+        for effect in live.first_run.send(msg).effects {
             self.effect(effect);
         }
     }
@@ -203,7 +214,10 @@ impl MoneyWeb {
         if let Some(reason) = p.denied {
             self.onboard(Event::Denied { reason });
         }
-        let opening = self.live.as_ref().is_some_and(|l| matches!(l.onboarding.step(), Step::Opening { .. }));
+        let opening = self
+            .live
+            .as_ref()
+            .is_some_and(|l| matches!(l.first_run.machine().step(), Step::Opening { .. }));
         let filling = self.peer.machine(ark::schema::Space::Durable).is_some_and(|m| m.fill.is_some());
         let here = self.peer.linked && !filling && self.peer.backlog() == 0 && self.peer.cursor() > 0;
         if opening && (here || !p.closed.is_empty()) {
@@ -232,19 +246,9 @@ impl MoneyWeb {
         let _ = &live.timer;
     }
 
-    /// The sign-in page, while the app is not shown: what the machine says,
-    /// and Sign In where a sign-in waits for the person.
+    /// The first run's page, while the app is not shown: every app's
+    /// (`ark_app::welcome`), what the machine says on it.
     pub fn welcome(&self, live: &Live) -> arkui_web::AnyView {
-        let said = live.onboarding.said();
-        let actions = match live.onboarding.step() {
-            Step::SignIn { phase: Phase::Idle, .. } => vec![("Sign In", true, Msg::Onboard(Event::OpenSignIn))],
-            _ => vec![],
-        };
-        arkui_web::welcome(arkui_web::Welcome {
-            title: self::app().name,
-            status: said.status,
-            error: said.error,
-            actions,
-        })
+        arkui_web::render(ark_app::welcome::welcome::view(&live.first_run.page()).map(Msg::Welcome))
     }
 }

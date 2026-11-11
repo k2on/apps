@@ -42,8 +42,10 @@ pub struct Server {
     pub user: Option<String>,
     /// Signing in, as every app's shell walks it: this load goes to sign in
     /// once by itself, and a sign-in that came back empty is said, not
-    /// tried again (`ark_auth::onboarding`).
-    pub onboarding: ark_auth::onboarding::Onboarding,
+    /// tried again (`ark_auth::onboarding`, under the first run every app
+    /// shares, `ark_auth::first_run`). The window is the app from the
+    /// start, over its replica: what the machine says is the note's.
+    pub first_run: ark_auth::first_run::FirstRun,
     /// What the socket rings.
     pub bell: arkui::wake::Bell,
     /// "Add a Device": the join link another device signs in with, once it

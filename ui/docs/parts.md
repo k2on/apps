@@ -99,6 +99,11 @@ by the generated views by these names.
 | AmountEntry | label, prompt, text, cents, problem, onType, onCents | `AmountField` (typed) | ArkUI's `AmountEntry` (the figure over the keypad, in cents) | a text field (typed) |
 | SwitchRow | title, note?, isOn, onChange | `ListItem` with a `Switch` | `Toggle` | `checkbox` |
 | Prompt, NameField, AmountField, ChipRow, Chip, FormButton, HeroFigure | as they read | | | |
+| FirstRunPage | glyph, title, sentence, content | `OnboardingPage` (the mark in the primary, centred, scrolling over the keyboard) | `WelcomePage` (the mark on glass in the accent) | a centred column under the mark's tile; the browser's `.ark-welcome` card |
+| AddressField | label, prompt, text, note, problem, enabled, onChange, onSubmit | `OutlinedTextField` (the URI keyboard, Go) | a `TextField` on glass (`.URL`, no capitals or corrections, Go) | a `text_input`, Enter submits; the browser's `<input type=url>` |
+| WideButton | title, prominent, enabled, busy, onTap | `Button` / `OutlinedButton`, a spinner while busy | `.glassProminent` in the accent / `.glass`, a `ProgressView` while busy | `style::action` / `style::quiet`; the browser's `.ark-push` (`.ark-default`) |
+| StatusLine | text?, busy, problem? | a polite / assertive live region | the footnote quiet, the problem in `Color.error` | dim words, the problem in the danger colour; `role=status` / `alert` |
+| CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
 
 ## A page about somebody
 

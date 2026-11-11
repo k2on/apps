@@ -65,7 +65,13 @@ ark::twins!(
         shell::inspect::{CategoryInspector, DetailLine, TransactionInspector},
         words::{BankStatus, Captions},
     },
+    ark_app::welcome::{
+        AddDevicePage, AddDeviceMsg, ConfirmPage, IntroPage, OpeningPage, ServerPage, SignInPage, WelcomeMsg, WelcomePage,
+    },
 );
+
+// money's first run: the shared pages, money's words (money/app/src/welcome.rs).
+ark_ffi::first_run_app!(money_app::welcome::copy);
 
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)

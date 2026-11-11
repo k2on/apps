@@ -198,6 +198,101 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
                 .child(title)
                 .into_any()
         }
+        // A first run's page (welcome.rs's look): centred, its mark on a
+        // tile in the accent, the title large, the sentence quiet.
+        Part::FirstRunPage {
+            glyph: g,
+            title,
+            sentence,
+            content,
+        } => html::div()
+            .class("ark-welcome")
+            .child(html::div().class("ark-welcome-card").child((
+                html::span().class("ark-welcome-mark").child(glyph(&g.get(), 36)),
+                html::h1().class("ark-welcome-title").child(title.get()),
+                html::p().class("ark-caption ark-welcome-sentence").child(sentence.get()),
+                html::div().class("ark-welcome-actions").child(nodes(*content)),
+            )))
+            .into_any(),
+        Part::AddressField {
+            label,
+            prompt,
+            text,
+            note,
+            problem,
+            enabled,
+            typed,
+            submit,
+        } => {
+            let value = text.get();
+            let problem = problem.get();
+            html::label()
+                .class("ark-field")
+                .child((
+                    html::span().class("ark-caption").child(label),
+                    crate::wired!(html::input(), {
+                        let typed = typed.clone();
+                        crate::page::text(label, &value, Rc::new(move |s| send(typed.call(s))))
+                    })
+                    .class("ark-input")
+                    .attr("type", "url")
+                    .attr("inputmode", "url")
+                    .attr("autocapitalize", "none")
+                    .attr("autocorrect", "off")
+                    .attr("spellcheck", "false")
+                    .attr("placeholder", prompt.get())
+                    .prop("disabled", !enabled.get())
+                    .prop("value", value)
+                    .on(leptos::ev::input, move |e| send(typed.call(event_target_value(&e))))
+                    .on(leptos::ev::keydown, move |e: web_sys::KeyboardEvent| {
+                        if e.key() == "Enter" {
+                            send(submit.clone())
+                        }
+                    }),
+                    match problem {
+                        Some(p) => html::span().class("ark-problem").attr("role", "alert").child(p).into_any(),
+                        None => html::span().class("ark-caption").child(note.get()).into_any(),
+                    },
+                ))
+                .into_any()
+        }
+        Part::WideButton {
+            title,
+            prominent,
+            enabled,
+            busy,
+            tap,
+        } => {
+            let title = title.get();
+            let busy = busy.get();
+            crate::wired!(html::button(), crate::tapped(&title, &tap))
+                .class(if prominent {
+                    "ark-push ark-default ark-wide"
+                } else {
+                    "ark-push ark-wide"
+                })
+                .prop("disabled", !enabled.get() || busy)
+                .attr("aria-busy", busy.then_some("true"))
+                .on(leptos::ev::click, move |_| send(tap.clone()))
+                .child(title)
+                .into_any()
+        }
+        Part::StatusLine { text, busy, problem } => html::div()
+            .class("ark-status")
+            .child((
+                text.get().map(|t| {
+                    html::p()
+                        .class("ark-caption ark-welcome-status")
+                        .attr("role", "status")
+                        .attr("aria-busy", busy.get().then_some("true"))
+                        .child(t)
+                }),
+                problem
+                    .get()
+                    .map(|p| html::p().class("ark-problem ark-welcome-error").attr("role", "alert").child(p)),
+            ))
+            .into_any(),
+        Part::CodeImage { size, dark } => crate::figures::qr_svg(size.get().max(0) as usize, &dark.get()),
         Part::BarItem {
             title,
             glyph: g,

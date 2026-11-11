@@ -195,6 +195,99 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             }
             c.into()
         }
+        // A first run's page: centred, no wider than a dialog; its mark on
+        // a tile in the accent, the title large, the sentence dim.
+        Part::FirstRunPage {
+            glyph,
+            title,
+            sentence,
+            content,
+        } => {
+            let head = column![
+                parts::tile(shape(&glyph.get()), |t| crate::theme::of(t).primary.base.color, 72.0),
+                text(title.get()).size(LARGE_TITLE).font(crate::hero::BOLD),
+                text(sentence.get()).size(14).style(style::dim).align_x(Alignment::Center),
+            ]
+            .spacing(8)
+            .align_x(Alignment::Center);
+            let body = column![head, Space::new().height(18)]
+                .extend(nodes(*content))
+                .spacing(10)
+                .align_x(Alignment::Center)
+                .max_width(DIALOG);
+            scrollable(container(body).width(Length::Fill).center_x(Length::Fill).padding([48.0, PAD]))
+                .height(Length::Fill)
+                .into()
+        }
+        Part::AddressField {
+            label,
+            prompt,
+            text: typed,
+            note,
+            problem,
+            enabled,
+            typed: on,
+            submit,
+        } => {
+            let mut input = text_input(&prompt.get(), &typed.get()).style(style::field);
+            if enabled.get() {
+                input = input.on_input(move |s| on.call(s)).on_submit(submit);
+            }
+            let under: Element<'static, M> = match problem.get() {
+                Some(p) => text(p)
+                    .size(12)
+                    .style(|t| iced::widget::text::Style {
+                        color: Some(crate::theme::of(t).danger.base.color),
+                        ..Default::default()
+                    })
+                    .into(),
+                None => text(note.get()).size(12).style(style::dim).into(),
+            };
+            column![text(label).size(12).style(style::dim), input, under]
+                .spacing(4)
+                .width(Length::Fill)
+                .into()
+        }
+        Part::WideButton {
+            title,
+            prominent,
+            enabled,
+            busy,
+            tap,
+        } => {
+            let busy = busy.get();
+            let label = row![]
+                .push_maybe(busy.then(|| icon::plain(shape("refresh-cw"), true)))
+                .push(text(title.get()))
+                .spacing(6)
+                .align_y(Alignment::Center);
+            button(container(label).center_x(Length::Fill))
+                .width(Length::Fill)
+                .padding([8, 14])
+                .style(if prominent { style::action } else { style::quiet })
+                .on_press_maybe((enabled.get() && !busy).then_some(tap))
+                .into()
+        }
+        Part::StatusLine { text: said, busy, problem } => {
+            let mut c = column![].spacing(4).align_x(Alignment::Center);
+            if let Some(t) = said.get() {
+                let busy = busy.get();
+                c = c.push(
+                    row![]
+                        .push_maybe(busy.then(|| icon::plain(shape("refresh-cw"), true)))
+                        .push(text(t).size(13).style(style::dim))
+                        .spacing(6),
+                );
+            }
+            if let Some(p) = problem.get() {
+                c = c.push(text(p).size(13).style(|t| iced::widget::text::Style {
+                    color: Some(crate::theme::of(t).danger.base.color),
+                    ..Default::default()
+                }));
+            }
+            c.into()
+        }
+        Part::CodeImage { size, dark } => crate::qr::qr_code(size.get().max(0) as usize, dark.get(), 220.0),
         Part::Button { title, enabled, tap } => button(text(title)).on_press_maybe(enabled.get().then_some(tap)).into(),
         Part::BarItem {
             title,
