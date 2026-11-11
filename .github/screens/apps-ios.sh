@@ -59,6 +59,11 @@ for a in "$@"; do
   fi
   xcrun simctl install "$udid" "$app" || { echo "::error::$a did not install"; echo "$a" >> "$partial"; continue; }
   bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+  # Opened once and closed: a simulator just booted took longer than the
+  # driver's 90 seconds to launch an app the first time (the iPad on
+  # macos-26, app-screens 42959400546: "Timed out attempting to launch").
+  xcrun simctl launch "$udid" "$bundle" > /dev/null 2>&1 || true
+  xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
   scheme=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Info.plist" 2> /dev/null || true)
   server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/screens/shots.json")
   user=$(jq -r '.server.user // empty' "$a/screens/shots.json")
@@ -86,10 +91,20 @@ done
 echo "the $family's plan: $(jq -c 'map({bundle, out, shots: (.shots | length)})' "$plan")"
 status=0
 start=$(date +%s)
-TEST_RUNNER_APP_PLAN="$plan" \
-  xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
-    -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$family.xcresult" \
-    > "$results/$family.log" 2>&1 || status=$?
+drive() {
+  TEST_RUNNER_APP_PLAN="$plan" \
+    xcodebuild test-without-building -project "$here/drive-ios/Drive.xcodeproj" -scheme Drive \
+      -destination "id=$udid" -derivedDataPath "$derived" -resultBundlePath "$results/$1.xcresult" \
+      > "$results/$1.log" 2>&1
+}
+drive "$family" || status=$?
+# An app the simulator would not launch in time, once: run again, once.
+if [ "$status" != 0 ] && grep -q "Timed out attempting to launch" "$results/$family.log"; then
+  echo "an app did not launch in time; the driver run again"
+  status=0
+  drive "$family-again" || status=$?
+  cp "$results/$family-again.log" "$results/$family.log"
+fi
 grep -E "error:|failed|passed|Test Case|XCTAssert|\*\* TEST" "$results/$family.log" || true
 echo "the driver ran for $(( $(date +%s) - start ))s (status $status)"
 

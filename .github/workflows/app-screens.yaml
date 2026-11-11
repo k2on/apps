@@ -783,10 +783,16 @@ jobs:
           # warm-up: what fails here is said again by the build after.
           if [ ${#refs[@]} -gt 0 ]; then nix build --dry-run "${refs[@]}" 2> /dev/null || echo "::warning::the servers' packages did not all evaluate"; fi
           echo "evaluated ${refs[*]} in $(( $(date +%s) - start ))s"
-          # An app the commit has none of is said by ios-build.sh.
+          # An app the commit has none of is said by ios-build.sh. Each the
+          # very expression nix-xcode.sh evaluates (its `.drvPath`), the Mac's
+          # too, so that one is the evaluation cache's: money's, asked after
+          # a warm-up of the package alone, took 196 seconds under the
+          # servers' build and the simulator's boot (app-screens 42959400546).
           start=$(date +%s)
           for a in $APPS; do
-            nix build --dry-run "git+file://$PWD/src#packages.aarch64-darwin.$a-ios-simulator" 2> /dev/null || true
+            for p in "$a-ios-simulator" "$a-macos"; do
+              nix eval --raw "git+file://$PWD/src#packages.aarch64-darwin.$p.drvPath" > /dev/null 2>&1 || true
+            done
           done
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
