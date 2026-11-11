@@ -1347,7 +1347,8 @@
           # ArkBindings.Found`), for an app that compiled these sources as its
           # own: its own declarations shadowed any imported module's of the
           # same name (ArkUICore's `Found`, SwiftUI's), and the aliases, its
-          # own again, keep every such name meaning what it did.
+          # own again (public, as the types were: an app may say one in a public
+          # member), keep every such name meaning what it did.
           swiftModule = { name, module, kind, src, sources, deps ? [ ], headers ? null, aliases ? false }:
             let
               p = {
@@ -1393,7 +1394,7 @@
                   while read -r t; do
                     case $t in
                       *:*) echo "warning: ${module}: no alias for $t" >&2 ;;
-                      *) echo "typealias $t = ${module}.$t" ;;
+                      *) echo "public typealias $t = ${module}.$t" ;;
                     esac
                   done > out/aliases.swift
                   echo "${module}: $(wc -l < out/aliases.swift) aliases"
