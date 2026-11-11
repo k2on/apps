@@ -9,14 +9,16 @@
 //!
 //! The lock screen, a headset and the notification are the media player's
 //! too: what they ask comes back here and is pressed the same way, and
-//! what plays is shown to them from the view each step.
+//! what plays is shown to them from the view each step. What a car or a
+//! watch adds to the queue is pressed too: its tracks, by their ids, read
+//! from the replica.
 
 use std::sync::{Arc, Mutex};
 
 use ark_ffi::Peer;
 use ark_media_player::phone::NativeMediaPlayer;
-use ark_media_player::{MediaControls, NowPlaying};
-use harken_domain::{Active, Output};
+use ark_media_player::{MediaControls, MediaEvent, NowPlaying};
+use harken_domain::{Active, Id, Media, Output, Track};
 use harken_player::{remote_press, MediaSound, Press, Repeat, Sound, NOT_PART};
 use serde_json::{json, Value};
 
@@ -130,8 +132,22 @@ impl Player {
         self.peer.with(|p| match sound.as_mut() {
             Some(s) => {
                 drop(inner.step(p, s));
-                // A car's browsing is the app's own (Android's library service); here, nothing.
-                drop(s.take_asks());
+                // A car's browsing is the app's own (Android's library service); what a car or a
+                // watch adds is a press, of the session or alone of this queue, as a screen's.
+                for ask in s.take_asks() {
+                    let MediaEvent::Add { ids, next } = ask else { continue };
+                    let tracks = Player::tracks(p, &ids);
+                    if tracks.is_empty() {
+                        continue;
+                    }
+                    let press = match next {
+                        true => Press::Next { tracks },
+                        false => Press::Append { tracks },
+                    };
+                    if inner.press(p, &press, Some(&*s as &dyn Sound)).as_deref() == Some(NOT_PART) {
+                        s.alone(&press);
+                    }
+                }
                 for c in s.take_remote() {
                     let at = Player::shown_active(&inner, p, s).map_or(0, |a| a.position(ark_peer::now_ms()));
                     if let Some(press) = remote_press(c, at) {
@@ -276,6 +292,34 @@ impl Player {
         self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// The tracks of the media `ids` (hex) as a queue carries them, in order, from the replica:
+    /// each with its album's name, a song's (none for an episode). One it does not have is left out.
+    fn tracks(p: &ark_peer::Peer, ids: &[String]) -> Vec<Track> {
+        ark::db::read::<harken_domain::Harken, _>(&p.log.store, |db| {
+            ids.iter()
+                .filter_map(|hex| {
+                    let id: Id<Media> = serde_json::from_value(Value::String(hex.clone())).ok()?;
+                    let m = db.media.get(id)?;
+                    let album = db
+                        .song
+                        .get(id)
+                        .and_then(|s| s.album_id)
+                        .and_then(|a| db.album.get(&a))
+                        .map(|a| a.name)
+                        .unwrap_or_default();
+                    Some(Track {
+                        album,
+                        creator: m.creator,
+                        duration_ms: m.duration_ms,
+                        file: m.file,
+                        id,
+                        title: m.title,
+                    })
+                })
+                .collect()
+        })
+    }
+
     /// What plays: the session's while joined, this phone's own alone.
     fn shown_active(inner: &harken_player::Player, p: &ark_peer::Peer, s: &MediaSound) -> Option<Active> {
         let v = inner.view(p, Some(s as &dyn Sound));
@@ -348,6 +392,7 @@ impl Player {
             skip_back_s: if episode { JOG_BACK_S } else { 0 },
             can_seek: t.duration_ms > 0,
             can_rate: false,
+            can_add: true,
         };
         s.show(Some(info), controls);
     }

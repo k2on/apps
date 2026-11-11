@@ -65,6 +65,7 @@ pub mod phone {
         pub skip_back_s: u32,
         pub can_seek: bool,
         pub can_rate: bool,
+        pub can_add: bool,
     }
 
     #[uniffi::remote(Enum)]
@@ -113,6 +114,7 @@ pub mod phone {
         Route { change: RouteChange },
         Browse { parent: String },
         PlayItem { id: String },
+        Add { ids: Vec<String>, next: bool },
     }
 
     /// Where Swift and Kotlin tell what the player did: the app's listener.

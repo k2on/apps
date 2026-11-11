@@ -446,17 +446,23 @@ fn what_the_system_shows_is_told_when_it_changes() {
     assert_eq!(rig.fake.controls(), c);
 }
 
-/// A car's browse and its choice are kept for the shell.
+/// A car's browse and its choice, and what a watch adds, are kept for the shell.
 #[test]
 fn a_car_s_asks_are_kept_for_the_shell() {
     let rig = Rig::new();
     rig.fake.hear(MediaEvent::Browse { parent: String::new() });
     rig.fake.hear(MediaEvent::PlayItem { id: "album/1".into() });
+    let add = MediaEvent::Add {
+        ids: vec!["00000000000000000000000000000003".into()],
+        next: false,
+    };
+    rig.fake.hear(add.clone());
     assert_eq!(
         rig.sound.take_asks(),
         [
             MediaEvent::Browse { parent: String::new() },
-            MediaEvent::PlayItem { id: "album/1".into() }
+            MediaEvent::PlayItem { id: "album/1".into() },
+            add
         ]
     );
 }

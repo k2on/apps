@@ -1036,3 +1036,91 @@ fn a_track_with_no_cover_is_shown_its_square() {
         "and the album's, should its cover not come"
     );
 }
+
+/// What a watch or a car adds to the queue while the phone plays alone
+/// reaches the phone's own queue, as it did when the media session's
+/// player was the phone's own: the tracks it names, read from the replica
+/// with their album, at the end — or, for a "play next", after what plays.
+///
+/// Falsified by the asks a step takes being dropped (as before this fix):
+/// the queue stayed as it was started.
+#[test]
+fn a_watch_adds_to_the_queue_the_phone_plays_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let login = ark_ffi::Login {
+        token: String::new(),
+        session: "phone".into(),
+        user: "alice".into(),
+        name: String::new(),
+        email: String::new(),
+        roles: vec![harken_domain::LIBRARY.into()],
+        expires_ms: 0,
+        picture: String::new(),
+    };
+    let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+    let peer = harken_ffi::harken_open(dir.path().to_str().unwrap().into(), Some(login), said).unwrap();
+    peer.alone();
+    let song = |title: &str, file: &str| {
+        json!({ "title": title, "artist": "Bach", "album": "Suites", "duration_ms": 90_000, "file": file, "track": 1,
+                "part": "", "catalogue": "", "performer": "", "bpm": 0, "album_art": "", "artist_art": "", "disc": 1,
+                "work_title": "", "movement_no": 0, "artist_banner": "", "released": 0, "folder": "" })
+        .to_string()
+    };
+    peer.mutate("library.add_song".into(), song("Air", "music/Air.mp3")).unwrap();
+    peer.mutate("library.add_song".into(), song("Gigue", "music/Gigue.mp3")).unwrap();
+    let id_of = |file: &str| {
+        let file = file.to_string();
+        peer.with(|p| {
+            ark::db::read::<harken_domain::Harken, _>(&p.log.store, |db| {
+                db.media.by(harken_domain::Media::FILE).from(&file).first().map(|m| m.id)
+            })
+        })
+        .map(|id| serde_json::to_value(id).unwrap().as_str().unwrap().to_string())
+        .unwrap()
+    };
+    let (air, gigue) = (id_of("music/Air.mp3"), id_of("music/Gigue.mp3"));
+
+    let player = Player::new(peer.clone(), "phone".into(), None);
+    let sound = Fake::new();
+    player.attach(Some(sound.clone()), SERVER.into(), Some(Arc::new(Shell::default())));
+    let start = Press::Start {
+        queue: queue(),
+        at: 0,
+        position_ms: 0,
+        from: String::new(),
+        shuffled: false,
+    };
+    assert_eq!(player.press(serde_json::to_string(&start).unwrap()), None);
+    player.step();
+    assert!(sound.s().controls.unwrap().can_add, "a controller is offered adding");
+    let titles = || -> Vec<String> {
+        let v: Value = serde_json::from_str(&player.view()).unwrap();
+        let a: Active = serde_json::from_value(v["active"].clone()).unwrap();
+        a.queue.iter().map(|t| t.title.clone()).collect()
+    };
+
+    sound.tell(MediaEvent::Add {
+        ids: vec![air.clone()],
+        next: false,
+    });
+    player.step();
+    assert_eq!(titles(), ["a", "b", "Air"], "added at the end");
+    sound.tell(MediaEvent::Add {
+        ids: vec![gigue, "not a track".into()],
+        next: true,
+    });
+    player.step();
+    assert_eq!(
+        titles(),
+        ["a", "Gigue", "b", "Air"],
+        "played next: after what plays, and what the replica has not, left out"
+    );
+    let v: Value = serde_json::from_str(&player.view()).unwrap();
+    let a: Active = serde_json::from_value(v["active"].clone()).unwrap();
+    let added = a.queue.iter().find(|t| t.title == "Air").unwrap();
+    assert_eq!(
+        (added.album.as_str(), added.creator.as_str(), added.file.as_str()),
+        ("Suites", "Bach", "music/Air.mp3")
+    );
+    assert_eq!(sound.title().as_deref(), Some("a"), "and what plays plays on");
+}

@@ -240,7 +240,7 @@ impl MediaListener for Hears {
                         l.events.push_back(Event::Resumed);
                     }
                 }
-                e @ (MediaEvent::Browse { .. } | MediaEvent::PlayItem { .. }) => l.asks.push_back(e),
+                e @ (MediaEvent::Browse { .. } | MediaEvent::PlayItem { .. } | MediaEvent::Add { .. }) => l.asks.push_back(e),
             }
         }
         (s.wake)(0);
@@ -300,8 +300,8 @@ impl MediaSound {
         self.s.local().remote.drain(..).collect()
     }
 
-    /// What a car or a watch asked since the last take: a [`MediaEvent::Browse`]
-    /// or a [`MediaEvent::PlayItem`].
+    /// What a car or a watch asked since the last take: a [`MediaEvent::Browse`],
+    /// a [`MediaEvent::PlayItem`] or a [`MediaEvent::Add`].
     pub fn take_asks(&self) -> Vec<MediaEvent> {
         self.s.local().asks.drain(..).collect()
     }

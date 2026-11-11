@@ -133,7 +133,7 @@ object ArkMedia {
 
     var listener: MediaListener? = null
     internal var info: NowPlaying? = null
-    internal var controls = MediaControls(false, false, 0u, 0u, false, false)
+    internal var controls = MediaControls(false, false, 0u, 0u, false, false, false)
 
     /**
      * The derived square's gradients the placeholder is drawn in: the app's, for the dark side, as
@@ -324,7 +324,7 @@ object ArkMedia {
  * The player the media session shows: the ExoPlayer's sound with the app's words, or — nothing
  * loaded — the app's [NowPlaying] alone, a sound made elsewhere; and the controls the app offers.
  * Nothing it is asked is done: each command is said to the app as a `Remote`, a car's choice as a
- * `PlayItem`.
+ * `PlayItem`, what a car or a watch adds to the queue (while the app offers it) as an `Add`.
  */
 @OptIn(UnstableApi::class)
 class ShownPlayer(looper: Looper) : SimpleBasePlayer(looper) {
@@ -351,6 +351,7 @@ class ShownPlayer(looper: Looper) : SimpleBasePlayer(looper) {
                     if (c.skipForwardS > 0u) add(Player.COMMAND_SEEK_FORWARD)
                     if (c.skipBackS > 0u) add(Player.COMMAND_SEEK_BACK)
                     if (c.canRate) add(Player.COMMAND_SET_SPEED_AND_PITCH)
+                    if (c.canAdd) add(Player.COMMAND_CHANGE_MEDIA_ITEMS)
                 }
                 .build()
         val b = State.Builder().setAvailableCommands(commands)
@@ -416,6 +417,21 @@ class ShownPlayer(looper: Looper) : SimpleBasePlayer(looper) {
         if (!id.isNullOrEmpty()) ArkMedia.tell(MediaEvent.PlayItem(id))
         return Futures.immediateVoidFuture()
     }
+
+    // A car's or a watch's additions, by the app's ids: before the one item shown is after what
+    // plays, anywhere past it the end — as a controller asks for "play next" and "add to queue".
+    override fun handleAddMediaItems(index: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> {
+        val ids = mediaItems.map { it.mediaId }.filter { it.isNotEmpty() }
+        if (ids.isNotEmpty()) ArkMedia.tell(MediaEvent.Add(ids, index < mediaItemCount))
+        return Futures.immediateVoidFuture()
+    }
+
+    // The queue is the app's: one item shown, nothing of it taken out, moved or replaced here.
+    override fun handleRemoveMediaItems(fromIndex: Int, toIndex: Int): ListenableFuture<*> = Futures.immediateVoidFuture()
+
+    override fun handleMoveMediaItems(fromIndex: Int, toIndex: Int, newIndex: Int): ListenableFuture<*> = Futures.immediateVoidFuture()
+
+    override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: MutableList<MediaItem>): ListenableFuture<*> = Futures.immediateVoidFuture()
 
     override fun handlePrepare(): ListenableFuture<*> = Futures.immediateVoidFuture()
 

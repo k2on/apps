@@ -40,7 +40,7 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
     private let player = AVPlayer()
     private var listener: MediaListener?
     private var info: NowPlaying?
-    private var controls = MediaControls(hasNext: false, hasPrevious: false, skipForwardS: 0, skipBackS: 0, canSeek: false, canRate: false)
+    private var controls = MediaControls(hasNext: false, hasPrevious: false, skipForwardS: 0, skipBackS: 0, canSeek: false, canRate: false, canAdd: false)
     /// The rate it plays at when it plays.
     private var rate: Float = 1
     /// Asked to play: `AVPlayer`'s rate is 0 while it waits for its buffer.

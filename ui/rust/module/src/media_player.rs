@@ -50,7 +50,7 @@ pub struct NowPlaying {
 
 /// Which of the system's controls are offered: the queue's hint (whether
 /// there is a next and a previous), skipping by seconds (an episode's), a
-/// scrubber, and the rate.
+/// scrubber, the rate, and adding to the queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct MediaControls {
     pub has_next: bool,
@@ -62,6 +62,9 @@ pub struct MediaControls {
     /// The system's scrubber moves the position.
     pub can_seek: bool,
     pub can_rate: bool,
+    /// A car's or a watch's controller may add to the queue: each addition
+    /// said as a [`MediaEvent::Add`], for the app to do.
+    pub can_add: bool,
 }
 
 /// What the system's controls ask (the lock screen, a headset, a car, a
@@ -163,6 +166,13 @@ pub enum MediaEvent {
     /// A car or a watch chose `id` to play.
     PlayItem {
         id: String,
+    },
+    /// A car or a watch added `ids` (the app's ids, as it handed them) to
+    /// the queue: right after what plays (`next`), or at its end. Offered
+    /// only while the controls say [`MediaControls::can_add`].
+    Add {
+        ids: Vec<String>,
+        next: bool,
     },
 }
 

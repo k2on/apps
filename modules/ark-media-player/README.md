@@ -21,7 +21,7 @@ The port is the runtime's (`ark_module::media_player`), re-exported here:
 // The calls, each a MediaOp whose output is ():
 load(url, at_ms)  play()  pause()  seek(at_ms)  set_rate(rate)  set_volume(0.0..=1.0)  stop()
 set_now_playing(Option<NowPlaying>)   // title, artist, album, artwork URL, placeholder seed, duration, position, rate
-set_controls(MediaControls)                // has_next, has_previous, skip_forward_s, skip_back_s, can_seek, can_rate
+set_controls(MediaControls)                // has_next, has_previous, skip_forward_s, skip_back_s, can_seek, can_rate, can_add
 set_children(parent, Vec<BrowseItem>) // the browse tree, answering MediaEvent::Browse
 
 trait MediaPlayer  { fn load(..); fn play(&self); …; fn set_listener(&self, Option<Arc<dyn MediaListener>>); }
@@ -31,7 +31,7 @@ enum MediaEvent {
     Loaded { duration_ms }, Position { at_ms }, Playing, Waiting, Paused, Ended,
     Remote { command: RemoteCommand }, Failed { why }, Interrupted, Resumed,
     Route { change: RouteChange },             // Unplugged (it paused itself), Plugged, Other
-    Browse { parent }, PlayItem { id },  // a car or a watch
+    Browse { parent }, PlayItem { id }, Add { ids, next },  // a car or a watch
 }
 enum RemoteCommand { Play, Pause, Toggle, Stop, Next, Previous, SkipForward { seconds },
                      SkipBack { seconds }, SeekTo { at_ms }, Rate { rate } }
@@ -79,7 +79,9 @@ system does to it, each said: an interruption (`Interrupted`, and
   as the picture's bytes), or — nothing
   loaded — the app's `NowPlaying` alone (a remote for a sound made
   elsewhere), the buttons the controls offer; every command a `Remote`, a
-  car's or a watch's choice a `PlayItem`. The service is a media library:
+  car's or a watch's choice a `PlayItem`, and — while the controls say
+  `can_add` — what one adds to the queue an `Add` of its items' ids (before
+  the one item shown is `next`, past it the end). The service is a media library:
   the tree is asked for a parent at a time (`Browse`, answered by
   `set_children`; an app that does not answer in five seconds is an empty
   list). It is open: an app with more to say to the media session (harken's

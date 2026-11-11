@@ -137,7 +137,9 @@ impl MediaListener for Hears {
                     change: RouteChange::Unplugged,
                 } => s.stall(),
                 MediaEvent::Remote { command } => s.remote.push(command),
-                MediaEvent::Resumed | MediaEvent::Route { .. } | MediaEvent::Browse { .. } | MediaEvent::PlayItem { .. } => return,
+                MediaEvent::Resumed | MediaEvent::Route { .. } | MediaEvent::Browse { .. } | MediaEvent::PlayItem { .. } | MediaEvent::Add { .. } => {
+                    return
+                }
             }
         }
         self.bell.ring();

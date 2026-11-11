@@ -2863,6 +2863,7 @@ impl App {
                 skip_back_s: if jogs { JOG_BACK as u32 } else { 0 },
                 can_seek: n.duration > 0.0,
                 can_rate: false,
+                can_add: false,
             };
             (info, controls)
         });
