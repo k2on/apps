@@ -18,7 +18,7 @@
 # - its Mac build's, `<app>-macos`, when the commit has one (the iPad's
 #   shots are of the same simulator build);
 # - of the scripts' checkout (main's, which a workflow_run runs), what the
-#   shots are taken by: each package its <app>/screens/server.sh builds
+#   shots are taken by: each package its <app>/demo/server.sh builds
 #   (`.#<name>`, the server and its seed), its screens/ (shots.json and the
 #   server's script), the picture its sign-in wears, and the iPhone's, the
 #   iPad's and the Mac's own scripts here. Not the workflow, nor Android's or the desktop's scripts:
@@ -62,12 +62,12 @@ for a in "$@"; do
   mac=$(out "$src" "$a-macos" 2> /dev/null)
   if [ "$mac" != none ]; then said="${said}mac $mac"$'\n'; fi
   said="$said$a/screens $(object "$a/screens")"$'\n'
-  picture=$(jq -r '.server.picture // empty' "$scripts/$a/screens/shots.json" 2>/dev/null)
+  picture=$(jq -r '.server.picture // empty' "$scripts/$a/demo/shots.json" 2>/dev/null)
   if [ -n "$picture" ]; then said="$said$picture $(object "$picture")"$'\n'; fi
-  if [ -f "$scripts/$a/screens/server.sh" ]; then
+  if [ -f "$scripts/$a/demo/server.sh" ]; then
     while read -r p; do
       said="$said$p $(out "$scripts" "$p")"$'\n'
-    done < <(grep -o '\.#[A-Za-z0-9_-]*' "$scripts/$a/screens/server.sh" | cut -c3- | sort -u)
+    done < <(grep -o '\.#[A-Za-z0-9_-]*' "$scripts/$a/demo/server.sh" | cut -c3- | sort -u)
   fi
   # What it is made of, in the log: what to read when an app is taken, or
   # not, against expectation.

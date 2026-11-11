@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's screenshots from a booted emulator (apps.md), the same for every
-# app: what is the app's is its <app>/screens/shots.json. The APK installed
+# app: what is the app's is its <app>/demo/shots.json. The APK installed
 # as it is; signed in, if the app has a server, as a person signs in through
 # arkui's onboarding — the address typed, Continue, Sign in, the server's
 # dev sign-in page in the browser given the name shots.json says, a
@@ -38,7 +38,7 @@ apk=$2
 app=$3
 server=${4:-}
 here=$(dirname "$0")
-shots="$app/screens/shots.json"
+shots="$app/demo/shots.json"
 # The package, as the APK itself says (aapt2, the SDK's newest build tools).
 aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
 pkg=$("$aapt2" dump packagename "$apk")

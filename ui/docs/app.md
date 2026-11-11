@@ -24,7 +24,7 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
  money/core           the domain: its rows, rules and views' keys; no UniFFI, no peer
  money/app            the app: State, Msg, update, screen records, #[view] layouts
  money/bridge         the phones' bridge: the UniFFI twins of the core's and the app's types
- money/seed           the demo's household on a peer and a disk, and `money-seed`
+ money/demo           the demo's household on a peer and a disk, and `money-seed`
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
    └ ark-<name>       a device module each: modules/ark-haptics, clipboard, share, camera, …
@@ -362,7 +362,7 @@ what such a crate needs of the world it is handed (the time is `Data::now_ms`'s,
 a file's bytes are its caller's). Their integration tests read fixtures
 and are allowed to (an `#![allow]` at each test's top); no library code
 is. `money-seed`'s command line, which writes the demo's household to
-disk, is a crate of its own (money/seed), an adapter.
+disk, is a crate of its own (money/demo), an adapter.
 
 **Who is signed in is the kernel's.** A domain's schema embeds two
 tables, `sign_in` and `role`, and registers the functions over them
@@ -398,7 +398,7 @@ fixes one deletes its line, or the check fails. In order:
 Done: who is signed in (`ark::auth`), the view keys and what an app
 reads of them (`ark::views`), harken's routes (harken/app), the phones'
 records (generated in the bridges), the phones' bridge (money/bridge) and
-the demo's peer (money/seed) are out of the core and the app; display
+the demo's peer (money/demo) are out of the core and the app; display
 text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
 `ark_format`); ark-module is the runtime's, and the modules money asks
@@ -420,7 +420,7 @@ Nothing native of an app is committed. An app is
 ├── views/        `screens()`: its #[view]s recorded for the phones' generator
 ├── bridge/       the phones' bridge: the UniFFI twins, the exports
 ├── server/       when it has one
-├── screens/      shots.json, server.sh
+├── demo/         the demo's household (its seed crate), shots.json, server.sh
 └── native/       what is not written in Rust yet (shrinking: see below)
 ```
 

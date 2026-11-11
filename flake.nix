@@ -10,7 +10,7 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     # The classical catalogue (github.com/k2on/classical): what the demo's
-    # library is made of (harken/seed/catalogue.json, the copy
+    # library is made of (harken/demo/catalogue.json, the copy
     # `nix run .#update-catalogue` writes and checks.catalogue holds to
     # this). Over git for the reason above; plain files, built by its
     # catalogue.nix.
@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/seed" "money/app" "money/bridge" "money/views" "money/iced" "money/server" "harken/seed" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/demo" "money/app" "money/bridge" "money/views" "money/iced" "money/server" "harken/demo" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -296,21 +296,21 @@
             makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${if pkgs.stdenv.hostPlatform.isDarwin then outputs.x86_64-linux.packages.money-web else money-web}
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
-          # that app's server boots seeded from; money's is money/seed.
+          # that app's server boots seeded from; money's is money/demo.
           money-seed = crate { packageId = "money-seed"; features = [ "cli" ]; };
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.
           arkOf = lib.genAttrs arkApps (arkApp.packages { inherit pkgs only bundlePrefix; build = crate; });
           harken-seed = crate { packageId = "harken-seed"; };
-          # The catalogue's covers, kept in the repository (harken/seed/covers,
+          # The catalogue's covers, kept in the repository (harken/demo/covers,
           # each 600 pixels at most, named as harken-seed's `media::key` names
           # them: the first sixteen hex digits of the address's SHA-256), so
           # seeding fetches nothing (`harken-seed --covers`) and every run has
           # the same bytes: a host's thumbnails are not the same bytes from
           # one fetch to the next, which a hash pinned against them failed on.
-          harken-covers = builtins.path { path = ./harken/seed/covers; name = "harken-covers"; };
-          # `nix run .#update-covers`: harken/seed/covers from the catalogue,
+          harken-covers = builtins.path { path = ./harken/demo/covers; name = "harken-covers"; };
+          # `nix run .#update-covers`: harken/demo/covers from the catalogue,
           # each fetched and made small, after the catalogue moves.
           update-covers = pkgs.writeShellApplication {
             name = "update-covers";
@@ -1780,9 +1780,9 @@
           # embeds made from it.
           classical = pkgs.writeText "catalogue.json" (import "${inputs.classical}/catalogue.nix");
           update-catalogue = pkgs.writeShellScriptBin "update-catalogue" ''
-            cp ${classical} harken/seed/catalogue.json
-            chmod 644 harken/seed/catalogue.json
-            echo "harken/seed/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
+            cp ${classical} harken/demo/catalogue.json
+            chmod 644 harken/demo/catalogue.json
+            echo "harken/demo/catalogue.json is the catalogue at ${inputs.classical.shortRev or "?"}"
           '';
         in
         {
@@ -1883,8 +1883,8 @@
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''
-              cmp ${classical} ${./harken/seed/catalogue.json} || {
-                echo "harken/seed/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
+              cmp ${classical} ${./harken/demo/catalogue.json} || {
+                echo "harken/demo/catalogue.json is not the classical input's: nix run .#update-catalogue" >&2
                 exit 1
               }
               touch $out
@@ -2109,7 +2109,7 @@
           # the apps: a page goes up at k2on.github.io/apps/<name>/, an APK
           # into the F-Droid repository (and onto a tag's release), an
           # iPhone app to TestFlight (ios.yaml); and each app with
-          # <name>/screens/shots.json is photographed on the phones and the
+          # <name>/demo/shots.json is photographed on the phones and the
           # desktop it is listed for (app-screens.yaml). Adding one is adding it here; the
           # workflow builds each in a job of its own.
           #

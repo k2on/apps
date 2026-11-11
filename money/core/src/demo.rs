@@ -9,7 +9,7 @@
 //! peer runs — accounts opened, a budget laid out, paydays, bills, a card
 //! the bank feeds through Plaid ([`Bank`]) — applied once each over one
 //! store and kept as the snapshot a peer alone opens on, which is what
-//! harken's demo does with its library (`harken/seed`). The dates are
+//! harken's demo does with its library (`harken/demo`). The dates are
 //! today's, so the month on screen is this one; the amounts are drawn from
 //! a fixed sequence, so every load is the same household.
 //!
@@ -385,7 +385,7 @@ fn plaid_txn(id: &str, date: &str, payee: &str, cents: i64, pending: bool, repla
 
 /// The household as the first record of a log: its snapshot's rows, as a
 /// server's data directory (`<data>/log`) is seeded with before it starts
-/// (money/seed writes it, with the schema, onto a disk).
+/// (money/demo writes it, with the schema, onto a disk).
 pub fn snapshot(today: &str, now: i64) -> (Vec<u8>, std::sync::Arc<ark::schema::Schema>) {
     let store = household(today, now);
     let snapshot = Snapshot {

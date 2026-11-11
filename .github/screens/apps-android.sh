@@ -136,7 +136,7 @@ for a in "$@"; do
   apk=$(find "$apks/apk-$a" -name '*.apk' 2>/dev/null | head -1)
   # Nothing published for it yet: said where it was fetched, and its shots kept.
   [ -n "$apk" ] || { echo "$a: no APK to take; skipped"; continue; }
-  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/screens/shots.json")
+  server=$(jq -r '.server.port // empty | "http://10.0.2.2:\(.)"' "$a/demo/shots.json")
   case $device in
     phone)
       bash "$here/app-android.sh" "$out/$a/android" "$apk" "$a" "$server" ||

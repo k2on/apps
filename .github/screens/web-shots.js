@@ -1,4 +1,4 @@
-// An app's browser screenshots (app-web.sh): its <app>/screens/shots.json
+// An app's browser screenshots (app-web.sh): its <app>/demo/shots.json
 // `screens` (each by its launch arguments, the address's parameters here)
 // and `web`, each shot opened by its address (`query`: the launch arguments
 // every shell reads, `?screen=…`, and arkui-web's `?context=`, `?menu=`,

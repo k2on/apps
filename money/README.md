@@ -374,7 +374,7 @@ authors through the domain's mutators like every device, and keeps what
 was authored while the server was away to push when it is back (until
 the page is closed: no durable replica yet). `?demo` is the demo
 household in the page instead, with no server — the screenshots', and
-the public demo's (`money/screens/shots.json`'s `web.query`).
+the public demo's (`money/demo/shots.json`'s `web.query`).
 
 `money-peer SERVER USER wait PAYEE | add PAYEE AMOUNT`
 (`server/src/peer.rs`, beside the server's binary) is another device with

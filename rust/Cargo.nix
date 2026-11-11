@@ -9198,7 +9198,7 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/seed; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/demo; };
         libName = "harken_seed";
         dependencies = [
           {
@@ -14455,7 +14455,7 @@ rec {
             requiredFeatures = [ "cli" ];
           }
         ];
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/demo; };
         libName = "money_seed";
         dependencies = [
           {

@@ -11,7 +11,7 @@
 //! ([`views`]). Who is signed in is the kernel's two tables and functions (`ark::auth`), and
 //! [`feed`]. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
-//! the phones' library), and the demo's household ([`demo`], `demo`; money/seed's
+//! the phones' library), and the demo's household ([`demo`], `demo`; money/demo's
 //! `money-seed` writes it into a server's data directory), which an app or a server carries only when it asks for it.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the

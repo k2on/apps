@@ -30,7 +30,7 @@ ark-camera = { path = "../../modules/ark-camera", features = ["ffi"] }
 ark-scanner = { path = "../../modules/ark-scanner" }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (`money_demo`).
-money-seed = { path = "../seed" }
+money-seed = { path = "../demo" }
 money-app = { path = "../app" }
 uniffi = { version = "0.32.2", default-features = false }
 serde_json = { workspace = true }

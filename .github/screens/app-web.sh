@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's browser screenshots (apps.md), the same for every app: what is
-# the app's is its <app>/screens/shots.json, its `web`. The page nix built
+# the app's is its <app>/demo/shots.json, its `web`. The page nix built
 # at the commit (`nix build .#<app>-web`: index.html beside pkg/), served
 # here on the loopback, photographed by Playwright's Chromium
 # (web-shots.js): each shot opened by its address — the launch arguments
@@ -58,4 +58,4 @@ done
 
 mkdir -p "$out"
 echo "$app web"
-FONTCONFIG_FILE=$conf/fonts.conf timeout 900 node "$here/web-shots.js" "${ARK_WEB_SHOTS:-$PWD/$app/screens/shots.json}" "http://127.0.0.1:$port" "$out"
+FONTCONFIG_FILE=$conf/fonts.conf timeout 900 node "$here/web-shots.js" "${ARK_WEB_SHOTS:-$PWD/$app/demo/shots.json}" "http://127.0.0.1:$port" "$out"

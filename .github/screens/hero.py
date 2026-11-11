@@ -2,7 +2,7 @@
 screenshots, the desktop window in a laptop and the phones' in phones,
 one picture for a light page and one for a dark.
 
-    hero.py <app>/screens/shots.json <branch>/apps/<app> <font.ttc>
+    hero.py <app>/demo/shots.json <branch>/apps/<app> <font.ttc>
 
 Reads the app's `hero` in shots.json: its name, a line under it, its
 logo (a path from the repository's root) and the screen to show, the

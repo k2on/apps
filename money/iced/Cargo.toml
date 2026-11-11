@@ -16,8 +16,8 @@ demo = []
 ark = { path = "../../rust/ark" }
 # The domain, and (`demo`) the demo's household and the bank its "Sync" asks.
 money-core = { path = "../core", features = ["demo"] }
-# The demo's household on a peer (money/seed).
-money-seed = { path = "../seed" }
+# The demo's household on a peer (money/demo).
+money-seed = { path = "../demo" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the system's browser; and the logins
 # a device remembers.

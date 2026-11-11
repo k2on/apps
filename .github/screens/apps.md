@@ -20,13 +20,13 @@ scripts here, names an app.
 ## An app's part
 
 The apps are the flake's one list (`flake.nix`, `publish`: its `apks`, its
-`ios` and its `desktop`); an app on it with `<app>/screens/shots.json` is
+`ios` and its `desktop`); an app on it with `<app>/demo/shots.json` is
 photographed on each phone it is listed for, and on the desktop when its
 shots.json has `desktop`. Every app's id, its Android applicationId
 and its iPhone bundle id, is `bundlePrefix` (`us.koon`) and its name, so
 neither driver is told it: Android reads it from the APK, iOS from the app.
 
-All of it is in `<app>/screens/`:
+All of it is in `<app>/demo/`:
 
 - **`shots.json`**: the app's server, and its shots.
 

@@ -7,8 +7,8 @@
 #
 # **Nothing here names an app.** The apps are the flake's one list
 # (`publish`: its APKs, its iPhone apps), and of those an app is taken when
-# it has <app>/screens/shots.json — each shot as the steps that open it —
-# and, if it signs in to a server, <app>/screens/server.sh, which starts
+# it has <app>/demo/shots.json — each shot as the steps that open it —
+# and, if it signs in to a server, <app>/demo/server.sh, which starts
 # that server with something in it. Its builds are the
 # artifacts `apk-<app>` (build.yaml), for the iPhone `nix build
 # .#<app>-ios-simulator` at the commit (flake.nix, `iosSimulator`), and for
@@ -98,9 +98,8 @@ on:
     branches: [main]
     paths:
       - ".github/screens/**"
-      - "*/screens/**"
-      # What the servers are seeded with.
-      - "*/seed/**"
+      # The shots and what the servers are seeded with.
+      - "*/demo/**"
       - ".github/workflows/app-screens.yaml"
   # By hand: every app again, from what was published. Or, given a pull
   # request's number, that PR's iPhone shots, at its head, of each app whose
@@ -181,7 +180,7 @@ jobs:
         with:
           persist-credentials: false
       # The apps, as the flake lists them (`publish`): each phone's, of those
-      # with <app>/screens/shots.json, and the desktop's, of those whose
+      # with <app>/demo/shots.json, and the desktop's, of those whose
       # shots.json has `desktop`.
       - uses: DeterminateSystems/nix-installer-action@main
       - name: The apps
@@ -220,9 +219,9 @@ jobs:
               lists
             } | tee -a "$GITHUB_OUTPUT"
           }
-          shots() { [ -f "$1/screens/shots.json" ]; }
+          shots() { [ -f "$1/demo/shots.json" ]; }
           # An app whose shots.json has the desktop's shots.
-          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/screens/shots.json" > /dev/null; }
+          desktop() { shots "$1" && jq -e '.desktop.shots | length > 0' "$1/demo/shots.json" > /dev/null; }
           iphones() { for a in $(jq -r '.ios[]' "$RUNNER_TEMP/apps.json"); do if shots "$a"; then echo "$a"; fi; done; }
           # The hash kept beside an app's iPhone shots on a branch
           # (<dir>/ios/inputs), or nothing: none kept, or no such branch.
@@ -486,7 +485,7 @@ jobs:
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # As screens.yaml, with its retries.
@@ -642,8 +641,8 @@ jobs:
           attrs=()
           for a in $APPS; do
             attrs+=("$a-ios-simulator" "$a-macos")
-            if [ -f "src/$a/screens/server.sh" ]; then
-              while read -r p; do attrs+=("$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "src/$a/screens/server.sh" | cut -c3- | sort -u)
+            if [ -f "src/$a/demo/server.sh" ]; then
+              while read -r p; do attrs+=("$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "src/$a/demo/server.sh" | cut -c3- | sort -u)
             fi
           done
           bash .github/apple-ahead.sh "$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
@@ -777,8 +776,8 @@ jobs:
         run: |
           refs=()
           for a in $APPS; do
-            if [ -f "$a/screens/server.sh" ]; then
-              while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$a/screens/server.sh" | cut -c3- | sort -u)
+            if [ -f "$a/demo/server.sh" ]; then
+              while read -r p; do refs+=(".#$p"); done < <(grep -o '\.#[A-Za-z0-9_-]*' "$a/demo/server.sh" | cut -c3- | sort -u)
             fi
           done
           start=$(date +%s)
@@ -840,15 +839,15 @@ jobs:
           bash .github/screens/meanwhile.sh start servers bash -c '
             refs=()
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then
-                while read -r p; do refs+=(".#$p"); done < <(grep -o "\.#[A-Za-z0-9_-]*" "$a/screens/server.sh" | cut -c3- | sort -u)
+              if [ -f "$a/demo/server.sh" ]; then
+                while read -r p; do refs+=(".#$p"); done < <(grep -o "\.#[A-Za-z0-9_-]*" "$a/demo/server.sh" | cut -c3- | sort -u)
               fi
             done
             start=$(date +%s)
             if [ ${#refs[@]} -gt 0 ]; then nix build --no-link --keep-going "${refs[@]}" || true; fi
             echo "the servers built or fetched in $(( $(date +%s) - start ))s"
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # Each app as nix has it at the commit (ios-build.sh): the cache's
@@ -917,7 +916,7 @@ jobs:
           if [ -n "${mac// /}" ]; then
             BUILT="$RUNNER_TEMP/apps" PORT_OFFSET=100 bash .github/screens/meanwhile.sh start mac bash -c '
               for a in "$@"; do
-                [ -f "$a/screens/server.sh" ] && PORT_OFFSET=100 bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/mac-$a"
+                [ -f "$a/demo/server.sh" ] && PORT_OFFSET=100 bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/mac-$a"
               done
               start=$(date +%s)
               bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src "$@"
@@ -964,7 +963,7 @@ jobs:
           # held by the iPhone just shut down: its iPad's devices shot said
           # "iPhone 17 Pro (not answering)"). The iPhone's log kept beside.
           for a in $IPAD_APPS; do
-            [ -f "$a/screens/server.sh" ] || continue
+            [ -f "$a/demo/server.sh" ] || continue
             d=$RUNNER_TEMP/server/$a
             pid=$(cat "$d/pid" 2> /dev/null || true)
             if [ -n "$pid" ]; then
@@ -1109,7 +1108,7 @@ jobs:
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
             for a in $APPS; do
-              if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
+              if [ -f "$a/demo/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
 
       # Each window as nix has it at the commit (desktop-build.sh): the
@@ -1178,7 +1177,7 @@ jobs:
           inter=$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#inter)
           # An Ark app's logo is its icon.svg, which hero.py draws with it.
           PATH="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#librsvg.out)/bin:$PATH"
-          for shots in */screens/shots.json; do
+          for shots in */demo/shots.json; do
             app=${shots%%/*}
             [ -d "$branch/apps/$app" ] || continue
             "$py/bin/python3" -I .github/screens/hero.py "$shots" "$branch/apps/$app" "$inter/share/fonts/truetype/Inter.ttc"

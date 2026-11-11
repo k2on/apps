@@ -3,7 +3,7 @@
 # app installed, then one run of the driver (drive-ios/) for all of them and
 # both themes, so xcodebuild's first run is paid once for the device, not
 # once for each app and theme. What is each app's is its
-# <app>/screens/shots.json; nothing in the app knows, but for `-shots YES`,
+# <app>/demo/shots.json; nothing in the app knows, but for `-shots YES`,
 # which ArkUI reads (ui/docs/shots.md): no motion, and the ready signal the
 # driver waits on instead of any time. Fails, once all are taken, if any
 # app's were not.
@@ -65,8 +65,8 @@ for a in "$@"; do
   xcrun simctl launch "$udid" "$bundle" > /dev/null 2>&1 || true
   xcrun simctl terminate "$udid" "$bundle" > /dev/null 2>&1 || true
   scheme=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Info.plist" 2> /dev/null || true)
-  server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/screens/shots.json")
-  user=$(jq -r '.server.user // empty' "$a/screens/shots.json")
+  server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/demo/shots.json")
+  user=$(jq -r '.server.user // empty' "$a/demo/shots.json")
   first=true
   for k in $kinds; do
     kind=${k%%:*} orientation=${k#*:}
@@ -74,8 +74,8 @@ for a in "$@"; do
     # opened by its launch arguments alone, the app launched with
     # shots.json's `launch.ios` (a demo on a fixed day), in one launch where
     # the app takes a screen's arguments by a link (`links`).
-    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/screens/shots.json")
-    links=$(jq '.links == true' "$a/screens/shots.json")
+    shots=$(jq -c --arg k "$kind" '(.launch.ios // []) as $l | .shots + [.screens // [] | .[] | select((.on // []) | index($k)) | {id, launch: $l, args: (.args // []), steps: (.steps // []), route, fresh}] | map(with_entries(select(.value != null)))' "$a/demo/shots.json")
+    links=$(jq '.links == true' "$a/demo/shots.json")
     jq --arg b "$bundle" --arg s "$server" --arg u "$user" --arg sc "$scheme" --arg o "$out/$a/$kind" \
       --arg or "$orientation" --argjson signed "$([ "$first" = true ] && echo false || echo true)" --argjson shots "$shots" \
       --argjson links "$links" \

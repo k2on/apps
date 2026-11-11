@@ -28,4 +28,4 @@ ark-scanner = { path = "../../modules/ark-scanner" }
 # The tests' store, a peer's, over the demo's household.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }
-money-seed = { path = "../seed" }
+money-seed = { path = "../demo" }

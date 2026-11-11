@@ -249,7 +249,7 @@ jobs:
   # job has built downloads them rather than compiling them on the host.
   # No browser client yet: iced is the desktop's alone, and the web client
   # (Leptos, ui/docs/app.md) is not written, so a server serves the socket.
-  # With the seeds the screenshots' servers start on (<app>/screens/server.sh):
+  # With the seeds the screenshots' servers start on (<app>/demo/server.sh):
   # each of app-screens' Linux jobs, a dozen at once, then fetches them
   # rather than every one compiling the same seed and its crates.
   server:

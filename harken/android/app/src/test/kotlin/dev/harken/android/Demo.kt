@@ -1,5 +1,5 @@
 // The library the screenshots are drawn from: rows taken from harken's demo
-// seed (`harken/seed`) — six of its records, their titles,
+// seed (`harken/demo`) — six of its records, their titles,
 // composers, parts, track numbers, performers and lengths as the seed has
 // them — laid out as the module's queries answer them: `library` in the
 // order added, `albums` and `artists` by name, `track_details` per song.

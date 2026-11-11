@@ -15,7 +15,7 @@
 //! hears. Nothing in the app knows; nothing it draws is different.
 //!
 //! **Asked for by the environment, and only then.** `ARK_SHOTS` names the
-//! app's `screens/shots.json` and `ARK_SHOTS_OUT` the directory the shots go
+//! app's `demo/shots.json` and `ARK_SHOTS_OUT` the directory the shots go
 //! to ([`asked`]); with `ARK_SHOTS` unset an app runs its window as it always
 //! does. `ARK_SHOTS_ONLY=<id>` takes one shot, for writing its steps.
 //!

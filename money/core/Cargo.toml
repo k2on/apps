@@ -3,7 +3,7 @@ name = "money-core"
 version = "0.1.0"
 workspace = "../../rust"
 edition = "2021"
-description = "money's core in plain Rust (docs/plan-v5.md §1.16): the domain of a household's budget — accounts, categories, the month's assignments, transactions and the Plaid import — its tests, and behind `demo` the demo's household (money/seed writes it to disk)."
+description = "money's core in plain Rust (docs/plan-v5.md §1.16): the domain of a household's budget — accounts, categories, the month's assignments, transactions and the Plaid import — its tests, and behind `demo` the demo's household (money/demo writes it to disk)."
 
 [lib]
 name = "money_core"

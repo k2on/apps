@@ -40,7 +40,7 @@ pub struct Written {
 ///
 /// `covers`, when given, is a folder of the catalogue's covers fetched
 /// already (the flake's `harken-covers`, kept in the repository as
-/// harken/seed/covers), each named
+/// harken/demo/covers), each named
 /// [`key`] of its address and the kind it is: an album's is taken from
 /// there, and fetched only when it is not.
 pub fn write(catalogue: &Catalogue, root: &Path, covers: Option<&Path>, mut done: impl FnMut(&Written)) -> io::Result<()> {

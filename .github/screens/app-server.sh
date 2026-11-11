@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # An app's own server on this runner, for its screenshots (apps.md): the
-# app's <app>/screens/server.sh, which starts it with dev auth and
+# app's <app>/demo/server.sh, which starts it with dev auth and
 # something in it, on the port its shots.json names. Then waits until it
 # answers /healthz, and until its log's head has stood still for five
 # seconds (a scanner done adding). Nothing here is any one app's.
@@ -15,18 +15,18 @@ dir=$2
 # PORT_OFFSET: on the port shots.json names plus that, a second server of
 # the app's beside the first (the Mac window's, taken while the iPhone's
 # shots are, each signed in to a server of its own).
-port=$(( $(jq -r '.server.port' "$app/screens/shots.json") + ${PORT_OFFSET:-0} ))
+port=$(( $(jq -r '.server.port' "$app/demo/shots.json") + ${PORT_OFFSET:-0} ))
 mkdir -p "$dir"
 # Who its dev sign-in signs in when a login names nobody (ark-auth): the
 # phone's sign-in sheet then opens and comes straight back, with no page
 # to fill in.
-ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/screens/shots.json")
+ARK_DEV_USER=$(jq -r '.server.user // empty' "$app/demo/shots.json")
 export ARK_DEV_USER
 # …and the picture they wear (a file, from the repository's root): the
 # screens show a face, not only initials (nix/demo/README.md).
-picture=$(jq -r '.server.picture // empty' "$app/screens/shots.json")
+picture=$(jq -r '.server.picture // empty' "$app/demo/shots.json")
 if [ -n "$picture" ]; then ARK_DEV_PICTURE=$(realpath "$picture"); export ARK_DEV_PICTURE; fi
-bash "$app/screens/server.sh" "$dir" "127.0.0.1:$port"
+bash "$app/demo/server.sh" "$dir" "127.0.0.1:$port"
 
 health() { curl -sf "http://127.0.0.1:$port/healthz" || true; }
 for _ in $(seq 1 60); do

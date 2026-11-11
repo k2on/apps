@@ -20,7 +20,7 @@ bundle_app=$2
 app=$3
 server=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
-user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
+user=$(jq -r '.server.user // empty' "$app/demo/shots.json")
 # A Mac app's Info.plist is under Contents/ (an iPhone app's at its root).
 exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Contents/Info.plist")"
 tmp=$(mktemp -d)
@@ -46,8 +46,8 @@ args=()
 if [ -n "$server" ]; then args=(--server "$server" --user "$user"); fi
 # The Mac's own launch arguments, then each screen's id and arguments.
 base=()
-while IFS= read -r a; do base+=("$a"); done < <(jq -r '.launch.mac // [] | .[]' "$app/screens/shots.json")
-screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$app/screens/shots.json")
+while IFS= read -r a; do base+=("$a"); done < <(jq -r '.launch.mac // [] | .[]' "$app/demo/shots.json")
+screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$app/demo/shots.json")
 
 # The app opened with `$@`, its window taken as <out>/<theme>/<name>.png.
 shoot() {
