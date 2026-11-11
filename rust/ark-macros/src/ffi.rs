@@ -119,6 +119,10 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
         return err(name.span(), "a twin is of a type with no parameters");
     }
     let (label, tw) = (name.to_string(), format_ident!("{}Ffi", name));
+    // A twin that compares and hashes is declared under the type's own name
+    // (UniFFI's `export(Eq, Hash)` names it by its Rust name), in a module
+    // of its own, and taken out as `<Type>Ffi`.
+    let dn = if eq { name.clone() } else { tw.clone() };
     let p = path();
     let mut fields = vec![];
     let (kind, decl, out, back) = match &input.data {
@@ -148,7 +152,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
             };
             (
                 quote!(::uniffi::Record),
-                quote!(struct #tw { #(#defaults pub #ns: #tys,)* }),
+                quote!(struct #dn { #(#defaults pub #ns: #tys,)* }),
                 quote!(#tw { #(#ns: #tos,)* }),
                 quote!(#p { #(#ns: #froms,)* }),
             )
@@ -181,7 +185,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
             }
             (
                 quote!(::uniffi::Enum),
-                quote!(enum #tw { #(#decl,)* }),
+                quote!(enum #dn { #(#decl,)* }),
                 quote!(match self { #(#out,)* }),
                 quote!(match t { #(#back,)* }),
             )
@@ -189,9 +193,27 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
         Data::Union(_) => return err(name.span(), "a union has no twin"),
     };
     let view = if view { view_object(name) } else { quote!() };
-    let (eq_derive, eq_export) = match eq {
-        true => (quote!(Eq, Hash,), quote!(#[uniffi::export(Eq, Hash)])),
-        false => (quote!(), quote!()),
+    let declared = match eq {
+        true => {
+            let m = format_ident!("__ark_twin_{}", name);
+            quote! {
+                #[doc(hidden)]
+                #[allow(non_snake_case, unused_imports)]
+                pub mod #m {
+                    use super::*;
+
+                    #[derive(Clone, Debug, PartialEq, Eq, Hash, #kind)]
+                    #[uniffi::export(Eq, Hash)]
+                    pub #decl
+                }
+                pub use #m::#name as #tw;
+            }
+        }
+        false => quote! {
+            #[derive(Clone, Debug, PartialEq, #kind)]
+            #[uniffi(name = #label)]
+            pub #decl
+        },
     };
     let mac = format_ident!("__ark_twin_{}", name);
     let doc = format!("`{name}`'s UniFFI twin, written where it is called: `ark::twins!`.");
@@ -205,10 +227,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
         #[allow(clippy::crate_in_macro_def)]
         macro_rules! #mac {
             ($($p:ident)::+) => {
-                #[derive(Clone, Debug, PartialEq, #eq_derive #kind)]
-                #eq_export
-                #[uniffi(name = #label)]
-                pub #decl
+                #declared
 
                 impl ::ark_ffi::Twin<crate::UniFfiTag> for #p {
                     type Ffi = #tw;

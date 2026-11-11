@@ -18,7 +18,7 @@ pub fn route_from_url(url: String) -> Option<RouteFfi> {
     Route::from_url(&url).map(Route::ffi)
 }
 
-#[uniffi::export]
+#[uniffi::export(name = "Route")]
 impl RouteFfi {
     /// The URL (`Route::url`): `/account/<id>/checking/`.
     #[uniffi::method(name = "url")]
