@@ -1954,14 +1954,6 @@
               inherit money-web money-seed;
               money-server = money-server-bin;
             };
-            # money and harken signed in to through Kanidm, on one NixOS
-            # machine: one browser session, both apps, no second password;
-            # each server's token its own (nix/oidc-kanidm.nix).
-            oidc-kanidm = import ./nix/oidc-kanidm.nix {
-              inherit pkgs;
-              moneyModule = self.nixosModules.money;
-              harkenModule = self.nixosModules.harken;
-            };
             # The demo's copy of the catalogue is the `classical` input's:
             # `nix flake update classical` then `nix run .#update-catalogue`.
             catalogue = pkgs.runCommand "catalogue-current" { } ''

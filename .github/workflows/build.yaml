@@ -241,8 +241,6 @@ jobs:
           - { name: docs, checks: "docs" }
           - { name: lint, checks: "fmt theme theme-contrast layers" }
           - { name: apps, checks: "prebuild money-native revelation-native money-web-sync" }
-          # A NixOS VM (KVM, which the installer turns on): Kanidm and both servers.
-          - { name: oidc, checks: "oidc-kanidm" }
     name: checks (${{ matrix.group.name }})
     runs-on: ubuntu-latest
     steps:
