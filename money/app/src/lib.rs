@@ -59,4 +59,3 @@ pub enum MoneyRequest {
     /// Settings, on the pane of this title.
     Settings { pane: String },
 }
-

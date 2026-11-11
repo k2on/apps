@@ -193,6 +193,13 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
         Data::Union(_) => return err(name.span(), "a union has no twin"),
     };
     let view = if view { view_object(name) } else { quote!() };
+    // A flat enum is an enum class in Kotlin, which compares already and
+    // whose UniFFI bindings take no exported Eq or Hash.
+    let flat = matches!(&input.data, Data::Enum(e) if e.variants.iter().all(|v| matches!(v.fields, Fields::Unit)));
+    let export = match flat {
+        true => quote!(),
+        false => quote!(#[uniffi::export(Eq, Hash)]),
+    };
     let declared = match eq {
         true => {
             let m = format_ident!("__ark_twin_{}", name);
@@ -203,7 +210,7 @@ fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> 
                     use super::*;
 
                     #[derive(Clone, Debug, PartialEq, Eq, Hash, #kind)]
-                    #[uniffi::export(Eq, Hash)]
+                    #export
                     pub #decl
                 }
                 pub use #m::#name as #tw;

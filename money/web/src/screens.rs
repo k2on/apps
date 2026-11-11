@@ -59,7 +59,9 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
             )
         }
         "budget.inspector" => budget_inspector(app),
-        "accounts" => arkui_web::render(money_app::accounts::view::accounts::view(&app.accounts.screen_of(&app.store, app.now_ms()))),
+        "accounts" => arkui_web::render(money_app::accounts::view::accounts::view(
+            &app.accounts.screen_of(&app.store, app.now_ms()),
+        )),
         "accounts.register" => match tagged_account(&section) {
             Some(hex) => register(app, Some(hex.to_string())),
             None => quiet("Select an Account"),

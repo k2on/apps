@@ -427,6 +427,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "money-views" = rec {
+      packageId = "money-views";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-views";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "money-web" = rec {
       packageId = "money-web";
       build = internal.buildRustCrateWithFeatures {
@@ -14111,22 +14121,6 @@ rec {
             packageId = "ark-router";
           }
           {
-            name = "ark-ui-gen";
-            packageId = "ark-ui-gen";
-            optional = true;
-          }
-          {
-            name = "arkui";
-            packageId = "arkui";
-            optional = true;
-          }
-          {
-            name = "arkui-web";
-            packageId = "arkui-web";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
-          {
             name = "money-core";
             packageId = "money-core";
           }
@@ -14159,12 +14153,7 @@ rec {
             packageId = "money-seed";
           }
         ];
-        features = {
-          "gen" = [ "dep:ark-ui-gen" ];
-          "iced" = [ "dep:arkui" "arkui/app" ];
-          "web" = [ "dep:arkui-web" ];
-        };
-        resolvedDefaultFeatures = [ "gen" "iced" "web" ];
+
       };
       "money-bridge" = rec {
         crateName = "money-bridge";
@@ -14328,6 +14317,7 @@ rec {
           {
             name = "arkui";
             packageId = "arkui";
+            features = [ "app" ];
           }
           {
             name = "arkui-shots";
@@ -14342,7 +14332,6 @@ rec {
           {
             name = "money-app";
             packageId = "money-app";
-            features = [ "iced" ];
           }
           {
             name = "money-core";
@@ -14507,6 +14496,24 @@ rec {
         ];
 
       };
+      "money-views" = rec {
+        crateName = "money-views";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/views; };
+        libName = "money_views";
+        dependencies = [
+          {
+            name = "ark-ui-gen";
+            packageId = "ark-ui-gen";
+          }
+          {
+            name = "money-app";
+            packageId = "money-app";
+          }
+        ];
+
+      };
       "money-web" = rec {
         crateName = "money-web";
         version = "0.1.0";
@@ -14556,7 +14563,6 @@ rec {
           {
             name = "money-app";
             packageId = "money-app";
-            features = [ "web" ];
           }
           {
             name = "money-core";
