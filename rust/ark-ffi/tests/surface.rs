@@ -379,3 +379,42 @@ fn a_views_rows_are_its_base_and_take_says_what_came_after() {
     };
     assert_eq!(patches.len(), 1, "only what came after: {patches:?}");
 }
+
+/// The process's one runtime: two UIs attached share one peer, opened
+/// once; detaching both leaves it running; a sign-out puts it away and the
+/// next open makes it again. Falsified by opening a peer per attachment, or
+/// closing it when the last UI detaches.
+#[test]
+fn two_attaches_share_one_runtime_and_detaching_leaves_it_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let process = ark_ffi::ArkProcess::apart();
+    let open = || Peer::open(config(), dir.path().to_str().unwrap(), None);
+    let first = process.clone().attach();
+    let a = process.open("one", open).unwrap();
+    let second = process.clone().attach();
+    let b = process.open("one", || panic!("opened twice")).unwrap();
+    assert!(Arc::ptr_eq(&a, &b), "one peer for both");
+    assert_eq!((process.attached(), process.opened()), (2, 1));
+    let part = process.part("player", || 7_u32);
+    assert!(Arc::ptr_eq(&part, &process.part("player", || 8_u32)), "a part made once");
+    first.detach();
+    first.detach();
+    drop(second);
+    assert_eq!(process.attached(), 0);
+    assert!(process.running(), "the runtime outlives its UI");
+    assert!(Arc::ptr_eq(&process.peer().unwrap(), &a));
+    process.close();
+    assert!(!process.running());
+    process.open("one", open).unwrap();
+    assert_eq!(process.opened(), 2, "made again after a sign-out");
+    let other = tempfile::tempdir().unwrap();
+    let c = process
+        .open("two", || Peer::open(config(), other.path().to_str().unwrap(), None))
+        .unwrap();
+    assert_eq!(process.opened(), 3, "another server is another runtime");
+    assert!(Arc::ptr_eq(&process.peer().unwrap(), &c));
+    assert!(
+        Arc::ptr_eq(&ark_ffi::ArkProcess::shared(), &ark_ffi::ArkProcess::shared()),
+        "one a process"
+    );
+}

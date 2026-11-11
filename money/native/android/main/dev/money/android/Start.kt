@@ -42,7 +42,7 @@ import uniffi.money_bridge.WelcomeMsg
 import uniffi.money_bridge.WelcomePage
 import uniffi.money_bridge.moneyDemo
 import uniffi.money_bridge.moneyDomain
-import uniffi.money_bridge.moneyOpen
+import uniffi.money_bridge.moneyProcessOpen
 import uniffi.money_bridge.moneyToday
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -262,6 +262,8 @@ class Start(app: Application) : AndroidViewModel(app) {
     /** Sign out, or leave the demo: the session revoked first, then the machine told. */
     fun signOut() {
         _book.value?.logout()
+        // The process's runtime put away with the login: the next sign-in opens it again.
+        dev.arkdb.ffi.ArkProcess.shared().close()
         send(Event.SignOut)
     }
 
@@ -273,7 +275,8 @@ class Start(app: Application) : AndroidViewModel(app) {
         /** The server's replica on this phone: one directory per server, kept across sign-ins. */
         fun openServer(app: Application, server: String, login: Login): Book {
             val dir = File(app.filesDir, "money/server-" + server.replace(Regex("[^A-Za-z0-9]"), "_") + "/replica").apply { mkdirs() }
-            val peer = moneyOpen(dir.path, login)
+            // The process's one runtime: the same peer for every Activity, running while none shows.
+            val peer = moneyProcessOpen(dir.path, login)
             peer.connect(socketUrl(server))
             return Book.open(peer, moneyToday(), demo = false, server = server)
         }

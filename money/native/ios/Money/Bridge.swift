@@ -142,7 +142,8 @@ final class Bridge {
             case let .server(server, login, root):
                 let dir = Bridge.directory(root, server)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                peer = try moneyOpen(dir: dir.path, login: login)
+                // The process's one runtime: the same peer for every scene, running while none shows.
+                peer = try moneyProcessOpen(dir: dir.path, login: login)
                 peer.connect(url: socketUrl(server: server))
             case let .demo(today):
                 peer = try moneyDemo(today: today)
@@ -315,7 +316,13 @@ final class Bridge {
 
     /// Signed out: the session revoked (pushed while linked, pending
     /// otherwise), nothing dialled after it, what is pending kept.
-    func signOut() { onPeer { p, _ in p.logout() } }
+    func signOut() {
+        onPeer { p, _ in
+            p.logout()
+            // The process's runtime put away with the login: the next sign-in opens it again.
+            ArkProcess.shared().close()
+        }
+    }
 
     /// Wait for everything asked of the session so far: what a test does
     /// before it reads what was published.

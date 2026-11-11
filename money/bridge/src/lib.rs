@@ -108,6 +108,16 @@ pub fn money_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusa
     Peer::open(config(), &dir, login)
 }
 
+/// money's peer on the disk at `dir`, as the process's one runtime
+/// (`ark_ffi::ArkProcess::shared`): opened the first time, the same peer
+/// for every Activity, Scene or window after, and running while none
+/// shows; another `dir` (another server) lets the old one go. Signing out
+/// is `ArkProcess::shared().close()`.
+#[uniffi::export]
+pub fn money_process_open(dir: String, login: Option<Login>) -> Result<Arc<Peer>, Refusal> {
+    ark_ffi::ArkProcess::shared().open(&dir.clone(), || money_open(dir, login))
+}
+
 /// The domain this library carries as a server's `/healthz` names it: its
 /// schema's hash and its version (the server's `domain` line).
 #[uniffi::export]
