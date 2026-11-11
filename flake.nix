@@ -1653,7 +1653,11 @@
             # The Device): its app.toml says what it must, each module it
             # lists exists, and its crate depends on each listed module's.
             prebuild = pkgs.runCommand "prebuild-check" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" ] ++ lib.concatMap (d: [ "${d}/app.toml" "${d}/app/Cargo.toml" "${d}/icon.svg" ]) arkApps)}
+              # The modules, their ports (ark-module's src), and each app's
+              # crates that name them (its bridge's, when it has one).
+              cd ${only ([ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" "ui/rust/module/src" ]
+                ++ lib.filter (p: builtins.pathExists (./. + "/${p}"))
+                  (lib.concatMap (d: [ "${d}/app.toml" "${d}/app/Cargo.toml" "${d}/bridge/Cargo.toml" "${d}/icon.svg" ]) arkApps))}
               python3 ui/prebuild.py check
               touch $out
             '';
