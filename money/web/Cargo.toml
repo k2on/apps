@@ -26,7 +26,7 @@ money-app = { path = "../app" }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (money/demo).
 money-seed = { path = "../demo" }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location", "Storage"] }
 # Signing in (the machine every shell walks, and the page's half of the
 # sign-in routes) and the replica's socket (ark-peer's, the page's own
 # WebSocket).

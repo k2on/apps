@@ -118,6 +118,11 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         // The shell (sections.rs): its sections, toolbars, search and
         // inspector, each section's page hosted in it; a swipe's arrow over it.
+        // money's pages of what it is, while they show: the window's first run.
+        if let Some(p) = self.intro() {
+            let pages = arkui::view::element(ark_app::welcome::welcome::view(&p)).map(Message::Welcome);
+            return container(pages).center(Length::Fill).style(style::page).into();
+        }
         let page = self.history.view(self.view_shell(), iced::time::Instant::now());
         // Nothing under the page: it runs to the window's foot. What the
         // last thing done came to, and a search or a count as it is typed,

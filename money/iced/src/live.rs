@@ -97,6 +97,25 @@ fn disk(server: &str) -> Result<Box<dyn Disk>, String> {
     }
 }
 
+/// Where this desktop keeps that money's pages were seen: its app data.
+fn seen_file() -> std::path::PathBuf {
+    data_dir("x").with_file_name("intro-seen")
+}
+
+/// Whether this desktop has seen money's pages.
+pub fn intro_seen() -> bool {
+    seen_file().exists()
+}
+
+/// That money's pages were seen, kept for the next launch.
+pub fn remember_intro() {
+    let f = seen_file();
+    if let Some(dir) = f.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(f, "1\n");
+}
+
 /// `$XDG_DATA_HOME/money/<server>`, or `~/.local/share/…`, or the temp
 /// directory on a machine with neither.
 pub fn data_dir(server: &str) -> std::path::PathBuf {

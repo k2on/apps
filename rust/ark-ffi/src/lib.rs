@@ -873,6 +873,8 @@ macro_rules! first_run_app {
         pub struct FirstRunAsked {
             pub effects: Vec<$crate::ark_auth::onboarding::Effect>,
             pub scan: bool,
+            /// The app's pages walked to their end or skipped just now.
+            pub seen: bool,
         }
 
         /// The app's first run: its pages, over the sign-in machine.
@@ -910,6 +912,7 @@ macro_rules! first_run_app {
                 FirstRunAsked {
                     effects: a.effects,
                     scan: a.scan,
+                    seen: a.seen,
                 }
             }
 
@@ -934,6 +937,11 @@ macro_rules! first_run_app {
             /// their route (`/welcome/`).
             pub fn show_intro(&self) {
                 self.run().show_intro()
+            }
+
+            /// Where a launch starts with the app's pages (`FirstRun::launch`).
+            pub fn launch(&self, seen: bool, straight: bool) {
+                self.run().launch(seen, straight)
             }
 
             /// A link for the app itself, kept until the app shows

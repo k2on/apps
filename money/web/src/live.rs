@@ -76,6 +76,40 @@ impl Live {
     }
 }
 
+/// Where this browser keeps that money's pages were seen.
+const SEEN: &str = "money.intro-seen";
+
+/// Whether this browser has seen money's pages (its local storage; off the
+/// browser, as the prerenderer and the tests run, it has).
+fn intro_seen() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(SEEN).ok().flatten())
+        .is_some();
+    #[cfg(not(target_arch = "wasm32"))]
+    true
+}
+
+fn remember_intro() {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.set_item(SEEN, "1");
+    }
+    let _ = SEEN;
+}
+
+/// Whether the page was loaded at its root, with no query: no link that
+/// goes straight somewhere.
+fn at_root() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return web_sys::window()
+        .map(|w| w.location())
+        .is_some_and(|l| l.pathname().is_ok_and(|p| p == "/" || p.is_empty()) && l.search().is_ok_and(|q| q.is_empty()));
+    #[cfg(not(target_arch = "wasm32"))]
+    true
+}
+
 /// A replica of money's domain in memory, dialling `server`'s socket once
 /// it has a login.
 pub fn replica(server: &str) -> Peer {
@@ -116,6 +150,14 @@ impl MoneyWeb {
             demo: false,
         };
         app.onboard(Event::Launched { remembered, code, returned });
+        // money's pages from the first, as on every platform, until this
+        // browser has seen them; not on a load that goes straight somewhere
+        // (a link's path or query, a sign-in coming back), and their own
+        // path, /welcome/, shows them whatever was seen (`arrive`).
+        let straight = returned || !at_root();
+        if let Some(live) = &mut app.live {
+            live.first_run.launch(intro_seen(), straight);
+        }
         app
     }
 
@@ -127,11 +169,23 @@ impl MoneyWeb {
         }
     }
 
-    /// A press on the first run's page, and the machine's effects carried out.
+    /// A press on the first run's page, and the machine's effects carried
+    /// out; the pages walked or skipped remembered by this browser.
     pub fn first_run(&mut self, msg: ark_app::welcome::WelcomeMsg) {
         let Some(live) = &mut self.live else { return };
-        for effect in live.first_run.send(msg).effects {
+        let asked = live.first_run.send(msg);
+        if asked.seen {
+            remember_intro();
+        }
+        for effect in asked.effects {
             self.effect(effect);
+        }
+    }
+
+    /// money's pages from the first, over the app: their path, /welcome/.
+    pub fn show_intro(&mut self) {
+        if let Some(live) = &mut self.live {
+            live.first_run.show_intro();
         }
     }
 

@@ -623,7 +623,9 @@ impl WebApp for MoneyWeb {
 
     fn view(&self) -> AnyView {
         self.say_idle();
-        if let Some(live) = self.live.as_ref().filter(|l| !l.running()) {
+        // The first run's pages while the app is not running yet, and its
+        // pages of what money is over the app while they show.
+        if let Some(live) = self.live.as_ref().filter(|l| !l.running() || l.first_run.page().intro.is_some()) {
             return self.welcome(live);
         }
         let page = self.shell_page();
@@ -714,6 +716,10 @@ impl WebApp for MoneyWeb {
         let mut out = vec![];
         // The path: the section's tag, then what it shows.
         let mut segs = route.path.iter().map(String::as_str).peekable();
+        // money's pages, by their path (`Route::Welcome`), over the app.
+        if route.path.first().map(String::as_str) == Some("welcome") {
+            self.show_intro();
+        }
         let section = match segs.next() {
             Some("accounts") if segs.peek().is_some_and(|s| !PATH_KEYS.contains(s)) => segs.next().map(money_app::shell::account_tag),
             Some(s) => Some(s.to_string()),

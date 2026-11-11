@@ -19,6 +19,11 @@ pub struct Asked {
     /// Scan another device's code with the camera; its text to
     /// [`FirstRun::scanned`].
     pub scan: bool,
+    /// The app's pages walked to their end or skipped just now: the shell
+    /// remembers they were seen (its own way: the phone's, the desktop's
+    /// app data, the browser's storage) and says so at the next launch
+    /// ([`FirstRun::launch`]).
+    pub seen: bool,
 }
 
 /// An app's first run: the machine, the app's copy, and how far through
@@ -69,6 +74,19 @@ impl FirstRun {
         }
     }
 
+    /// Where a launch starts with the app's pages, on every platform: from
+    /// the first, over wherever the machine stands, unless they were seen
+    /// before (`seen`, what the shell remembered of [`Asked::seen`]) or the
+    /// launch goes straight somewhere (`straight`: a screenshot's, the
+    /// demo's, a link's). A link that comes later is [`FirstRun::open_link`];
+    /// the pages' own route is [`FirstRun::show_intro`].
+    pub fn launch(&mut self, seen: bool, straight: bool) {
+        match seen || straight {
+            true => self.skip_intro(),
+            false => self.show_intro(),
+        }
+    }
+
     /// The app's pages passed over: a launch that goes straight to a
     /// route, a link or a screenshot's, as a returning person's would.
     pub fn skip_intro(&mut self) {
@@ -108,13 +126,24 @@ impl FirstRun {
             WelcomeMsg::Next => {
                 self.intro = (self.intro + 1).min(self.copy.pages.len());
                 self.asked &= self.intro < self.copy.pages.len();
-                return Asked::default();
+                return Asked {
+                    seen: self.intro == self.copy.pages.len(),
+                    ..Asked::default()
+                };
             }
             WelcomeMsg::Skip => {
                 self.skip_intro();
-                return Asked::default();
+                return Asked {
+                    seen: true,
+                    ..Asked::default()
+                };
             }
-            WelcomeMsg::ScanCode => return Asked { effects: vec![], scan: true },
+            WelcomeMsg::ScanCode => {
+                return Asked {
+                    scan: true,
+                    ..Asked::default()
+                }
+            }
             WelcomeMsg::Typed { text } => Event::Typed { text },
             WelcomeMsg::Check => Event::Check,
             WelcomeMsg::TryDemo => Event::TryDemo,
@@ -126,7 +155,7 @@ impl FirstRun {
         };
         Asked {
             effects: self.event(event),
-            scan: false,
+            ..Asked::default()
         }
     }
 
@@ -433,6 +462,29 @@ mod tests {
         f.open_link("money://insights/".into());
         assert!(!f.page().shows());
         assert_eq!(f.take_link().as_deref(), Some("money://insights/"));
+    }
+
+    /// Every platform's launch: the pages from the first over the app until
+    /// they are walked or skipped, which says they were seen; a launch that
+    /// remembers they were, or goes straight somewhere, has none. Falsified
+    /// by a launch over a remembered sign-in showing nothing: the desktop's
+    /// and the browser's first launch had no pages.
+    #[test]
+    fn a_launch_shows_the_pages_until_they_are_seen() {
+        let mut f = FirstRun::new(app(), copy(2));
+        launched(&mut f, Remembered::default());
+        f.send(WelcomeMsg::TryDemo);
+        f.launch(false, false);
+        assert_eq!(f.page().intro.unwrap().title, "Page 0", "over the app itself");
+        assert!(!f.send(WelcomeMsg::Next).seen);
+        assert!(f.send(WelcomeMsg::Next).seen, "walked to the end: seen");
+        assert!(!f.page().shows());
+        f.launch(false, false);
+        assert!(f.send(WelcomeMsg::Skip).seen, "skipped: seen");
+        f.launch(true, false);
+        assert!(!f.page().shows(), "seen before: none");
+        f.launch(false, true);
+        assert!(!f.page().shows(), "a screenshot's, the demo's or a link's launch: none");
     }
 
     #[test]

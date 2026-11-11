@@ -17,6 +17,8 @@ over the socket as the phones and the desktop are).
    the server starts again on the same data, the page dials it again and
    the other device sees what was added offline.
 4. A reload is still signed in (no sign-in page) and holds all three.
+5. money's pages of what it is: shown at the page's root until skipped,
+   not again after, and by their own path, /welcome/, over the household.
 
 Screenshots of each step go to --out.
 """
@@ -173,6 +175,20 @@ def run(args, server, out):
         assert page.locator("input[name=user]").count() == 0
         shot("5-reloaded")
         say("a reload is still signed in, from the cookie")
+
+        # 5. The first run's pages, as on the phones: at the root until
+        # this browser has seen them, then not; their path shows them.
+        page.goto(server.base + "/")
+        expect(page.get_by_text("Every Dollar a Job", exact=True)).to_be_visible()
+        shot("6-intro")
+        page.get_by_role("button", name="Skip").click()
+        expect(page.get_by_text("Ready to Assign").first).to_be_visible()
+        page.goto(server.base + "/")
+        expect(page.get_by_text("Ready to Assign").first).to_be_visible()
+        assert page.get_by_text("Every Dollar a Job", exact=True).count() == 0, "seen: not again"
+        page.goto(server.base + "/welcome/")
+        expect(page.get_by_text("Every Dollar a Job", exact=True)).to_be_visible()
+        say("the pages show at the root until skipped, then not; /welcome/ shows them")
         browser.close()
     if failures:
         raise SystemExit("\n".join(failures))

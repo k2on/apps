@@ -203,6 +203,8 @@ pub enum Message {
     Budget(money_app::budget::BudgetMsg),
     /// Insights' (`money_app::insights`).
     Insights(money_app::insights::InsightsMsg),
+    /// A press on the first run's pages (`ark_app::welcome`).
+    Welcome(ark_app::welcome::WelcomeMsg),
     /// A message of the shell's: a section, the inspector, the search, a command.
     Shell(ShellMsg),
     /// A month earlier or later; zero is this one.
@@ -609,6 +611,14 @@ impl App {
             demo: false,
         };
         let task = app.onboard(Event::Launched { remembered, code, returned });
+        // money's pages from the first, as on every platform, until this
+        // desktop has seen them (its app data); not on a launch that goes
+        // straight somewhere: a screenshot's, a link's, launch arguments'.
+        // A link to them, money://welcome/, shows them (`main`).
+        let straight = arkui_shots::asked().is_some() || arkui::navigator::link_arg("money").is_some() || std::env::args().any(|a| a == "-screen");
+        if let Some(s) = &mut app.server {
+            s.first_run.launch(live::intro_seen(), straight);
+        }
         if !note.is_empty() {
             app.note = note;
         }
@@ -632,6 +642,24 @@ impl App {
             device: None,
         });
         app
+    }
+
+    /// A press on the first run's pages (money's pages of what it is, over
+    /// the window), the machine's effects carried out; walked or skipped,
+    /// remembered in the desktop's app data.
+    pub fn welcome(&mut self, msg: ark_app::welcome::WelcomeMsg) -> Task<Message> {
+        let Some(s) = &mut self.server else { return Task::none() };
+        let asked = s.first_run.send(msg);
+        if asked.seen {
+            live::remember_intro();
+        }
+        Task::batch(asked.effects.into_iter().map(|e| self.effect(e)).collect::<Vec<_>>())
+    }
+
+    /// money's pages over the window, while they show.
+    pub fn intro(&self) -> Option<ark_app::welcome::WelcomePage> {
+        let p = self.server.as_ref()?.first_run.page();
+        p.intro.is_some().then_some(p)
     }
 
     /// An event for the sign-in machine (`ark_auth::onboarding`), and its
@@ -873,6 +901,7 @@ impl App {
             Message::Accounts(m) => return self.accounts_step(m),
             Message::Budget(m) => return self.budget_step(m),
             Message::Insights(m) => return self.insights_step(m),
+            Message::Welcome(m) => return self.welcome(m),
             Message::Shell(m) => return self.shell_step(m),
             Message::Go(page) => {
                 self.page = page;
@@ -2616,6 +2645,13 @@ pub fn main() -> iced::Result {
                         server: server.clone(),
                         code: code.clone(),
                     });
+                    true
+                }
+                // money's pages, by their route, over the window.
+                Route::Welcome => {
+                    if let Some(s) = &mut app.server {
+                        s.first_run.show_intro();
+                    }
                     true
                 }
                 _ => false,
