@@ -10,6 +10,9 @@
 // its root.
 #if canImport(SwiftUI)
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: what the app provides
 
@@ -134,14 +137,28 @@ public func SectionTab<Content: View>(
 
 /// Sections under a heading, in the sidebar alone (Mail's mailboxes): a
 /// `TabSection` hidden from the tab bar, each of its tabs only the
-/// sidebar's, so a compact tab bar has no More tab for them.
+/// sidebar's. On the iPhone, which never shows the sidebar, the section
+/// is not there at all: its tabs, hidden from the bar only, still counted
+/// toward the five a bar shows, and made a More tab of the rest (the
+/// iPhone's tabs are then Android's: the sections alone, each child
+/// pushed by its parent).
+@MainActor
 public func SectionGroup<Tabs: TabContent<String>>(_ title: String, @TabContentBuilder<String> _ tabs: () -> Tabs) -> some TabContent<String> {
     TabSection(title) { tabs() }
         .defaultVisibility(.hidden, for: .tabBar)
         #if os(iOS)
         .tabPlacement(.sidebarOnly)
+        .hidden(SidebarOnly.phone)
         #endif
 }
+
+#if os(iOS)
+/// Whether this is an iPhone: where a sidebar-only section is not there.
+@MainActor
+enum SidebarOnly {
+    static var phone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+}
+#endif
 
 // MARK: columns
 
