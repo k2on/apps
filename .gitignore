@@ -8,3 +8,4 @@ docs/perf/
 # The same for money (`.#money-ios-xcframework -o money/ffi/ios`).
 /money/ffi/ios
 /money/ffi/android
+__pycache__/
