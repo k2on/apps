@@ -1130,7 +1130,16 @@
           # machine.
           appleKernel = { name, crate, so, framework, targets, ... }:
             let llvm = pkgs.llvmPackages.bintools-unwrapped; in
-            pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" { } ''
+            # The static libraries carry the paths of the SDK and the clang
+            # they were compiled against (debug info, a C file's name), only
+            # as text: taken out, so a Mac that fetches the kernel is not
+            # made to fetch Linux's clang and nixpkgs' macOS SDK with it
+            # (3.1 GB unpacked, four and a half minutes of each run's Mac in
+            # app-screens 42949637068). Held to by disallowedReferences.
+            pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" {
+              nativeBuildInputs = [ pkgs.removeReferencesTo ];
+              disallowedReferences = [ appleSdk pkgs.llvmPackages.clang ];
+            } ''
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
               mkdir -p headers
               cp $TMPDIR/bindings/swift/*.h headers/
@@ -1177,6 +1186,7 @@
               mkdir -p $out/swift
               cp $TMPDIR/bindings/swift/*.swift $out/swift/
               cp ${./rust/ark-ffi/swift/Typed.swift} $out/swift/Typed.swift
+              find $out -name '*.a' -exec remove-references-to -t ${appleSdk} -t ${pkgs.llvmPackages.clang} {} +
             '';
 
           # **The iPhone apps, built by nix** (what app-screens.yaml takes
