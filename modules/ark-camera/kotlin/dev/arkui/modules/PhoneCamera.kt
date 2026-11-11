@@ -56,8 +56,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialThemeButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -326,7 +325,9 @@ private class FrameCamera(
     /** Quarters clockwise the sensor's frames turn to stand upright, the phone held upright. */
     @Volatile private var turns: Int = 1
 
-    private fun failed(why: String) = main.post { onFailed(why) }
+    private fun failed(why: String) {
+        main.post { onFailed(why) }
+    }
 
     @SuppressLint("MissingPermission")
     fun start(texture: SurfaceTexture) {
@@ -435,7 +436,10 @@ private class FrameCamera(
             val d = device
             val cs = session
             val s = still
-            if (d == null || cs == null || s == null) return@post main.post { done(null) }
+            if (d == null || cs == null || s == null) {
+                main.post { done(null) }
+                return@post
+            }
             s.setOnImageAvailableListener(
                 { r ->
                     val image = r.acquireNextImage()
