@@ -50,6 +50,35 @@ extension ArkGlyphs {
     }
 }
 
+// MARK: a sheet's bar
+
+extension View {
+    /// A sheet's form under its bar: the hard scroll edge at its top.
+    @ViewBuilder func sheetBarEdge() -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            scrollEdgeEffectStyle(.hard, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: a list's row as a button
+
+extension View {
+    /// A list's row that is a button, as the platform draws one: the list's
+    /// own highlight on the iPhone and the iPad; on the Mac, where a bare
+    /// `Button` is a bordered push button, a plain row darkening under the
+    /// pointer (`.pressRow`), so every row is not drawn as a pressed capsule.
+    @ViewBuilder public func listRowButton() -> some View {
+        #if os(macOS)
+        buttonStyle(.pressRow)
+        #else
+        self
+        #endif
+    }
+}
+
 // MARK: the page
 
 /// A tab's page: an inset grouped list, `top` first, then `content`;
@@ -318,7 +347,8 @@ public struct MeterRow: View {
     }
 
     public var body: some View {
-        Button { onTap?() } label: { line }
+        Button { onTap?() } label: { line.contentShape(Rectangle()) }
+            .listRowButton()
             .foregroundStyle(Color.ink)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(said ?? title)
@@ -429,7 +459,8 @@ public struct ListRow: View {
     }
 
     public var body: some View {
-        Button { onTap?() } label: { line }
+        Button { onTap?() } label: { line.contentShape(Rectangle()) }
+            .listRowButton()
             .foregroundStyle(accent ? Color.accent : Color.ink)
             .accessibilityLabel(said ?? title)
             .accessibilityHint(pushes ? "Opens" : "")
@@ -506,6 +537,9 @@ public struct FormSheet<Content: View>: View {
             .sheet(isPresented: Binding(get: { true }, set: { if !$0 { onDismiss() } })) {
                 NavigationStack {
                     Form { content }
+                        // What scrolls under the sheet's bar is cut off there, not blurred
+                        // through it: a large figure under the title read as a smudge.
+                        .sheetBarEdge()
                         .navigationTitle(title)
                         .inlineTitle()
                         .toolbar {

@@ -178,7 +178,8 @@ public struct DataTableRow: View {
     }
 
     public var body: some View {
-        Button { onTap?() } label: { line }
+        Button { onTap?() } label: { line.contentShape(Rectangle()) }
+            .listRowButton()
             .foregroundStyle(Color.ink)
             .listRowBackground(selected ? Color.accent.opacity(0.18) : nil)
             .accessibilityElement(children: .ignore)
