@@ -53,9 +53,9 @@ struct Inner {
 
 /// Background work that keeps the runtime online while it runs, with no
 /// UI attached: the media service playing, a woken task. Ended with
-/// [`Work::end`], or when it is dropped.
+/// [`BackgroundWork::end`], or when it is dropped.
 #[derive(uniffi::Object)]
-pub struct Work {
+pub struct BackgroundWork {
     process: Arc<ArkProcess>,
     done: Mutex<bool>,
 }
@@ -171,10 +171,10 @@ impl ArkProcess {
 
     /// Background work begun (the media service playing, a woken task):
     /// online while it runs, whether or not a UI is attached.
-    pub fn work(self: Arc<Self>) -> Arc<Work> {
+    pub fn work(self: Arc<Self>) -> Arc<BackgroundWork> {
         self.lock().working += 1;
         self.follow();
-        Arc::new(Work {
+        Arc::new(BackgroundWork {
             process: self,
             done: Mutex::new(false),
         })
@@ -245,7 +245,7 @@ impl Drop for Attached {
 }
 
 #[uniffi::export]
-impl Work {
+impl BackgroundWork {
     /// The work done: offline again if no UI is attached and nothing else
     /// runs. Twice is once.
     pub fn end(&self) {
@@ -260,7 +260,7 @@ impl Work {
     }
 }
 
-impl Drop for Work {
+impl Drop for BackgroundWork {
     fn drop(&mut self) {
         self.end()
     }

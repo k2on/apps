@@ -40,7 +40,7 @@ pub mod session;
 pub mod typed;
 pub mod wake;
 pub use keep::{LoginKeep, OldShelf};
-pub use process::{ArkProcess, Attached, Work};
+pub use process::{ArkProcess, Attached, BackgroundWork};
 pub use session::{Hold, Session};
 pub use typed::{FileRefFfi, Op, RowId, Taken, Twin, Typed};
 pub use wake::{WakeDone, WakeReason, Wakeful};
