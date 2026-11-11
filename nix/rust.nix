@@ -91,6 +91,17 @@ let
   # The features of every crate the root reaches, by graph ("target" or
   # "build"): cargo's resolution, a crate's features the union of what each
   # of its dependents in that graph asks of it.
+  # `src` without the top-level swift/ and kotlin/ directories a device
+  # module (modules/ark-*) keeps beside its Rust.
+  nativeLess = src:
+    let root = toString (src.origSrc or src); in
+    lib.cleanSourceWith {
+      inherit src;
+      filter = path: type:
+        !(type == "directory" && dirOf (toString path) == root
+          && lib.elem (baseNameOf (toString path)) [ "swift" "kotlin" ]);
+    };
+
   resolve = { packageId, features, tests, split, targets }:
     let
       visit = cache: graph: id: wanted:
@@ -192,7 +203,10 @@ let
             (lib.groupBy (dep: dep.name) (lib.filter (dep: dep ? rename) (buildDeps ++ deps)));
         in
         builders.${graph} (config // {
-          src = config.src or (fetch pkgsOf.${graph} config);
+          # A crate of this tree is compiled from its directory less what
+          # is not Rust's: a device module's swift/ and kotlin/ (built by
+          # their own derivations), so an edit there recompiles no crate.
+          src = if config ? src then nativeLess config.src else fetch pkgsOf.${graph} config;
           features = sortedUnique features;
           dependencies = map drvOf deps;
           buildDependencies = map (dep: built.${buildGraph}.${dep.packageId}) buildDeps;
