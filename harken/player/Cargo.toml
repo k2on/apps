@@ -10,7 +10,12 @@ description = "harken's players (docs/plan-v5.md §1.9, S3b): one reconciler tha
 ark = { path = "../../rust/ark" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 harken-domain = { path = "../domain" }
+# This device's own player (`media.rs`): the media player's port, which
+# ark-media-player implements on each platform.
+ark-module = { path = "../../ui/rust/module" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# The media player's fake (tests/media.rs).
+ark-media-player = { path = "../../modules/ark-media-player" }

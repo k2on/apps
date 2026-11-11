@@ -4,12 +4,29 @@ workspace = "../../rust"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "One sound at a time, as an Ark module (harken's PhoneSound generalised): the trait, its calls, its events and its fake; no native implementation yet."
+description = "One sound at a time, as an Ark module: its port's fake, the phones' foreign trait, the browser's <audio> with the Media Session API (feature `web`) and the Linux desktop's decoder with MPRIS (feature `desktop`); the iPhone's, the Mac's and Android's beside it (swift/, kotlin/)."
 
 [dependencies]
 ark-module = { path = "../../ui/rust/module" }
 uniffi = { version = "0.32.2", default-features = false, optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Document", "Navigator", "HtmlAudioElement", "HtmlMediaElement", "Event", "EventTarget", "MediaError"] }
+
+# The Linux desktop's: rodio (cpal, so ALSA) over symphonia's decoders, a
+# stream read by range requests (ureq, as the desktop's other fetches), and
+# MPRIS on the session bus (zbus, already the desktop's for accessibility).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rodio = { version = "0.20", default-features = false, optional = true, features = ["symphonia-all"] }
+ureq = { version = "2", default-features = false, optional = true, features = ["tls"] }
+zbus = { version = "5", default-features = false, optional = true, features = ["blocking-api", "async-io"] }
+
 [features]
 # The trait as a UniFFI foreign trait, for the phones.
 ffi = ["dep:uniffi"]
+# `Browser`: an <audio> element and navigator.mediaSession; wasm32 only.
+web = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+# `Desktop`: the sound card and MPRIS, for an iced window on Linux.
+desktop = ["dep:rodio", "dep:ureq", "dep:zbus"]

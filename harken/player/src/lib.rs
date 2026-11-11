@@ -30,6 +30,7 @@
 //! alone or joined.
 
 pub mod config;
+pub mod media;
 pub mod memory;
 pub mod player;
 pub mod press;
@@ -39,6 +40,7 @@ pub use harken_domain::host::{Listening, SYNC_MS};
 use harken_domain::{Id, Media, Track};
 use serde::{Deserialize, Serialize};
 
+pub use media::{remote_press, MediaSound, Repeat};
 pub use memory::Mind;
 pub use player::{Player, Stats};
 pub use press::{Change, Level, Press, NOT_PART};

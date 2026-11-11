@@ -1,217 +1,201 @@
-//! The media player: one sound at a time, loaded from a URL at a position,
-//! played and paused, sought, at a rate and a volume, with the lock
-//! screen's now-playing record. harken's `PhoneSound` and
-//! `harken_player::Sound`, generalised. An update drives it with calls
-//! ([`load`], [`play`], …, each answered `Done`); what the player did comes
-//! back through the [`MediaListener`] the app's shell registers, which
-//! turns each [`MediaEvent`] into the app's message.
+//! The media player: one sound at a time, with what the system shows of it
+//! and the tree a car or a watch browses. Its port — the [`MediaPlayer`]
+//! and [`MediaListener`] traits, the calls ([`load`], [`play`], …, each a
+//! [`MediaOp`] whose output is `()`), the [`MediaEvent`]s and the browse
+//! tree's [`BrowseItem`] — is the runtime's (`ark_module::media_player`),
+//! which an update asks through; here is what implements it:
 //!
-//! No native implementation yet (README.md).
+//! - iPhone, iPad and Mac: `PhoneMediaPlayer` (swift/: AVPlayer, the
+//!   playback audio session, `MPNowPlayingInfoCenter` and
+//!   `MPRemoteCommandCenter`), through [`phone`].
+//! - Android: `PhoneMediaPlayer` (kotlin/: Media3's ExoPlayer in
+//!   `ArkMediaService`, a `MediaLibraryService`), through [`phone`].
+//! - The browser (feature `web`, wasm32): `Browser`, an `<audio>` element
+//!   and the Media Session API.
+//! - The Linux desktop (feature `desktop`): `Desktop`, a decoder and the
+//!   sound card (rodio over symphonia), the stream fetched by range, and
+//!   MPRIS on the session bus for the media keys and the desktop's widgets.
+//! - Tests: [`fake::Fake`], which keeps what it was asked and tells its
+//!   listener what a test says.
 
-use std::sync::{Arc, Mutex};
-
-use ark_module::{Modules, Op, Reply};
+pub use ark_module::media_player::*;
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!();
 
-/// What the lock screen and the system's controls show of what plays.
-#[derive(Clone, Debug, PartialEq, Default)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct NowPlayingInfo {
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    /// The artwork's address, when there is one.
-    pub artwork: Option<String>,
-    pub duration_ms: i64,
-}
+pub mod fake;
+pub use fake::Fake;
 
-/// What a player did: what the app's update hears from it.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum MediaEvent {
-    /// It has the sound and knows how long it is.
-    Loaded {
-        duration_ms: i64,
-    },
-    /// Where it is, now and then while it plays.
-    Position {
-        at_ms: i64,
-    },
-    Playing,
-    Paused,
-    /// It reached the end.
-    Ended,
-    /// The system's controls asked (the lock screen, a headset).
-    Remote {
-        command: RemoteCommand,
-    },
-    Failed {
-        why: String,
-    },
-}
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use web::Browser;
 
-/// What the system's controls can ask of a player.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
-pub enum RemoteCommand {
-    Play,
-    Pause,
-    Next,
-    Previous,
-    SkipForward,
-    SkipBack,
-}
+#[cfg(feature = "desktop")]
+mod desktop;
+#[cfg(feature = "desktop")]
+pub use desktop::Desktop;
 
-/// Where a player tells what it did.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait MediaListener: Send + Sync {
-    fn heard(&self, event: MediaEvent);
-}
+/// The phones' player, through UniFFI (`ffi`): the foreign trait Swift's
+/// and Kotlin's `PhoneMediaPlayer` implement, the listener they tell, and
+/// it registered as the port.
+#[cfg(feature = "ffi")]
+pub mod phone {
+    use std::sync::Arc;
 
-/// A player of one sound at a time.
-#[cfg_attr(feature = "ffi", uniffi::export(with_foreign))]
-pub trait MediaPlayer: Send + Sync {
-    /// The sound at `url` (a file or a stream), from `at_ms`, paused.
-    fn load(&self, url: String, at_ms: i64);
-    fn play(&self);
-    fn pause(&self);
-    fn seek(&self, at_ms: i64);
-    /// 1.0 is as recorded.
-    fn set_rate(&self, rate: f32);
-    /// 0.0 to 1.0.
-    fn set_volume(&self, volume: f32);
-    fn set_now_playing(&self, info: Option<NowPlayingInfo>);
-    fn set_listener(&self, listener: Option<Arc<dyn MediaListener>>);
-}
+    use super::{BrowseItem, Controls, MediaEvent, NowPlaying, RemoteCommand, Route};
 
-/// What an update asks of the player.
-#[derive(Clone, Debug, PartialEq)]
-pub enum MediaOp {
-    Load { url: String, at_ms: i64 },
-    Play,
-    Pause,
-    Seek { at_ms: i64 },
-    Rate(f32),
-    Volume(f32),
-    NowPlaying(Option<NowPlayingInfo>),
-}
-
-impl Op for MediaOp {
-    type Module = dyn MediaPlayer;
-    type Output = ();
-    const MODULE: &'static str = "ark-media-player";
-    fn run(&self, m: &dyn MediaPlayer, reply: Reply<()>) {
-        match self {
-            MediaOp::Load { url, at_ms } => m.load(url.clone(), *at_ms),
-            MediaOp::Play => m.play(),
-            MediaOp::Pause => m.pause(),
-            MediaOp::Seek { at_ms } => m.seek(*at_ms),
-            MediaOp::Rate(r) => m.set_rate(*r),
-            MediaOp::Volume(v) => m.set_volume(*v),
-            MediaOp::NowPlaying(i) => m.set_now_playing(i.clone()),
-        }
-        reply.done(())
-    }
-}
-
-pub fn load(url: impl Into<String>, at_ms: i64) -> MediaOp {
-    MediaOp::Load { url: url.into(), at_ms }
-}
-pub fn play() -> MediaOp {
-    MediaOp::Play
-}
-pub fn pause() -> MediaOp {
-    MediaOp::Pause
-}
-pub fn seek(at_ms: i64) -> MediaOp {
-    MediaOp::Seek { at_ms }
-}
-pub fn set_rate(rate: f32) -> MediaOp {
-    MediaOp::Rate(rate)
-}
-pub fn set_volume(volume: f32) -> MediaOp {
-    MediaOp::Volume(volume)
-}
-pub fn set_now_playing(info: Option<NowPlayingInfo>) -> MediaOp {
-    MediaOp::NowPlaying(info)
-}
-
-#[derive(Default)]
-struct Seen {
-    asked: Vec<String>,
-    listener: Option<Arc<dyn MediaListener>>,
-}
-
-/// The player, faked for tests: what it was asked, as words, and events
-/// told to its listener when the test says.
-#[derive(Clone, Default)]
-pub struct Fake {
-    seen: Arc<Mutex<Seen>>,
-}
-
-impl Fake {
-    pub fn new() -> Fake {
-        Fake::default()
+    #[uniffi::remote(Record)]
+    pub struct NowPlaying {
+        pub title: String,
+        pub artist: String,
+        pub album: String,
+        pub artwork: Option<String>,
+        pub duration_ms: i64,
+        pub position_ms: i64,
+        pub rate: f32,
     }
 
-    fn seen(&self) -> std::sync::MutexGuard<'_, Seen> {
-        self.seen.lock().unwrap_or_else(|e| e.into_inner())
+    #[uniffi::remote(Record)]
+    pub struct Controls {
+        pub has_next: bool,
+        pub has_previous: bool,
+        pub skip_forward_s: u32,
+        pub skip_back_s: u32,
+        pub can_seek: bool,
+        pub can_rate: bool,
     }
 
-    /// This fake registered as the player.
-    pub fn register(&self, modules: &mut Modules) {
-        modules.register::<dyn MediaPlayer>(Arc::new(self.clone()));
+    #[uniffi::remote(Enum)]
+    pub enum RemoteCommand {
+        Play,
+        Pause,
+        Toggle,
+        Stop,
+        Next,
+        Previous,
+        SkipForward { seconds: u32 },
+        SkipBack { seconds: u32 },
+        SeekTo { at_ms: i64 },
+        Rate { rate: f32 },
     }
 
-    /// What the player was asked, as words (`load url 0`, `play`, …).
-    pub fn asked(&self) -> Vec<String> {
-        self.seen().asked.clone()
+    #[uniffi::remote(Enum)]
+    pub enum Route {
+        Unplugged,
+        Plugged,
+        Other,
     }
 
-    /// `event`, as the player would tell it.
-    pub fn hear(&self, event: MediaEvent) {
-        let l = self.seen().listener.clone();
-        if let Some(l) = l {
-            l.heard(event)
+    #[uniffi::remote(Record)]
+    pub struct BrowseItem {
+        pub id: String,
+        pub title: String,
+        pub subtitle: String,
+        pub artwork: Option<String>,
+        pub playable: bool,
+        pub browsable: bool,
+    }
+
+    #[uniffi::remote(Enum)]
+    pub enum MediaEvent {
+        Loaded { duration_ms: i64 },
+        Position { at_ms: i64 },
+        Playing,
+        Waiting,
+        Paused,
+        Ended,
+        Remote { command: RemoteCommand },
+        Failed { why: String },
+        Interrupted,
+        Resumed,
+        Route { change: Route },
+        Browse { parent: String },
+        PlayItem { id: String },
+    }
+
+    /// Where Swift and Kotlin tell what the player did: the app's listener.
+    #[uniffi::export(with_foreign)]
+    pub trait MediaListener: Send + Sync {
+        fn heard(&self, event: MediaEvent);
+    }
+
+    /// The phone's player, as Swift and Kotlin implement it. Every call
+    /// returns at once; the implementation does it on its own thread.
+    #[uniffi::export(with_foreign)]
+    pub trait MediaPlayer: Send + Sync {
+        fn load(&self, url: String, at_ms: i64);
+        fn play(&self);
+        fn pause(&self);
+        fn seek(&self, at_ms: i64);
+        fn set_rate(&self, rate: f32);
+        fn set_volume(&self, volume: f32);
+        fn stop(&self);
+        fn set_now_playing(&self, info: Option<NowPlaying>);
+        fn set_controls(&self, controls: Controls);
+        fn set_children(&self, parent: String, items: Vec<BrowseItem>);
+        fn set_listener(&self, listener: Option<Arc<dyn MediaListener>>);
+    }
+
+    struct Phone(Arc<dyn MediaPlayer>);
+
+    /// The port's listener, as the phone's.
+    struct Tell(Arc<dyn super::MediaListener>);
+
+    impl MediaListener for Tell {
+        fn heard(&self, event: MediaEvent) {
+            self.0.heard(event)
         }
     }
 
-    fn note(&self, s: String) {
-        self.seen().asked.push(s)
+    impl super::MediaPlayer for Phone {
+        fn load(&self, url: String, at_ms: i64) {
+            self.0.load(url, at_ms)
+        }
+        fn play(&self) {
+            self.0.play()
+        }
+        fn pause(&self) {
+            self.0.pause()
+        }
+        fn seek(&self, at_ms: i64) {
+            self.0.seek(at_ms)
+        }
+        fn set_rate(&self, rate: f32) {
+            self.0.set_rate(rate)
+        }
+        fn set_volume(&self, volume: f32) {
+            self.0.set_volume(volume)
+        }
+        fn stop(&self) {
+            self.0.stop()
+        }
+        fn set_now_playing(&self, info: Option<NowPlaying>) {
+            self.0.set_now_playing(info)
+        }
+        fn set_controls(&self, controls: Controls) {
+            self.0.set_controls(controls)
+        }
+        fn set_children(&self, parent: String, items: Vec<BrowseItem>) {
+            self.0.set_children(parent, items)
+        }
+        fn set_listener(&self, listener: Option<Arc<dyn super::MediaListener>>) {
+            self.0.set_listener(listener.map(|l| Arc::new(Tell(l)) as Arc<dyn MediaListener>))
+        }
     }
-}
 
-impl MediaPlayer for Fake {
-    fn load(&self, url: String, at_ms: i64) {
-        self.note(format!("load {url} {at_ms}"))
-    }
-    fn play(&self) {
-        self.note("play".into())
-    }
-    fn pause(&self) {
-        self.note("pause".into())
-    }
-    fn seek(&self, at_ms: i64) {
-        self.note(format!("seek {at_ms}"))
-    }
-    fn set_rate(&self, rate: f32) {
-        self.note(format!("rate {rate}"))
-    }
-    fn set_volume(&self, volume: f32) {
-        self.note(format!("volume {volume}"))
-    }
-    fn set_now_playing(&self, info: Option<NowPlayingInfo>) {
-        self.note(format!("now playing {}", info.map(|i| i.title).unwrap_or_default()))
-    }
-    fn set_listener(&self, listener: Option<Arc<dyn MediaListener>>) {
-        self.seen().listener = listener
+    /// The phone's player as the port an update asks through.
+    pub fn port(m: Arc<dyn MediaPlayer>) -> Arc<dyn super::MediaPlayer> {
+        Arc::new(Phone(m))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use ark_module::Modules;
+
     use super::*;
 
     struct Log(Mutex<Vec<MediaEvent>>);
@@ -226,12 +210,85 @@ mod tests {
         let fake = Fake::new();
         let mut m = Modules::new();
         fake.register(&mut m);
-        m.run(&load("file:///a.mp3", 5), |_| {});
+        m.run(&load("file:///a.mp3", 5), |a| assert_eq!(a, Ok(())));
         m.run(&play(), |_| {});
-        assert_eq!(fake.asked(), vec!["load file:///a.mp3 5", "play"]);
+        m.run(&set_rate(1.5), |_| {});
+        m.run(&stop(), |_| {});
+        assert_eq!(fake.asked(), vec!["load file:///a.mp3 5", "play", "rate 1.5", "stop"]);
         let log = Arc::new(Log(Mutex::new(vec![])));
         fake.set_listener(Some(log.clone()));
         fake.hear(MediaEvent::Ended);
-        assert_eq!(*log.0.lock().unwrap(), vec![MediaEvent::Ended]);
+        fake.hear(MediaEvent::Remote {
+            command: RemoteCommand::SkipForward { seconds: 30 },
+        });
+        assert_eq!(
+            *log.0.lock().unwrap(),
+            vec![
+                MediaEvent::Ended,
+                MediaEvent::Remote {
+                    command: RemoteCommand::SkipForward { seconds: 30 }
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn what_the_system_shows_is_kept() {
+        let fake = Fake::new();
+        let mut m = Modules::new();
+        fake.register(&mut m);
+        let info = NowPlaying {
+            title: "So What".into(),
+            artist: "Miles Davis".into(),
+            duration_ms: 545_000,
+            rate: 1.0,
+            ..NowPlaying::default()
+        };
+        m.run(&set_now_playing(Some(info.clone())), |_| {});
+        let c = Controls {
+            has_next: true,
+            can_seek: true,
+            ..Controls::default()
+        };
+        m.run(&set_controls(c), |_| {});
+        assert_eq!(fake.now_playing(), Some(info));
+        assert_eq!(fake.controls(), c);
+        m.run(&set_now_playing(None), |_| {});
+        assert_eq!(fake.now_playing(), None);
+    }
+
+    #[test]
+    fn a_browse_is_answered_with_children() {
+        let fake = Fake::new();
+        let mut m = Modules::new();
+        fake.register(&mut m);
+        // The app hears a car open the root, and answers what it holds.
+        let asked = Arc::new(Mutex::new(vec![]));
+        let a = asked.clone();
+        struct Opened(Arc<Mutex<Vec<String>>>);
+        impl MediaListener for Opened {
+            fn heard(&self, e: MediaEvent) {
+                if let MediaEvent::Browse { parent } = e {
+                    self.0.lock().unwrap().push(parent)
+                }
+            }
+        }
+        fake.set_listener(Some(Arc::new(Opened(a))));
+        assert_eq!(fake.browse(ROOT), None);
+        assert_eq!(*asked.lock().unwrap(), vec![ROOT.to_string()]);
+        let albums = BrowseItem {
+            id: "albums".into(),
+            title: "Albums".into(),
+            browsable: true,
+            ..BrowseItem::default()
+        };
+        m.run(&set_children(ROOT, vec![albums.clone()]), |_| {});
+        assert_eq!(fake.browse(ROOT), Some(vec![albums]));
+    }
+
+    #[test]
+    fn a_missing_player_is_unavailable() {
+        let m = Modules::new();
+        m.run(&play(), |a| assert_eq!(a, Err(ark_module::ModuleError::Unavailable)));
     }
 }

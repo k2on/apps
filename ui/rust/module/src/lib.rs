@@ -26,7 +26,7 @@
 //!   [`ModuleError::Unavailable`].
 //!
 //! - The ports an app's update asks through ([`haptics`], [`clipboard`],
-//!   [`share`], [`scanner`]): each module's trait, its operations and their outputs,
+//!   [`share`], [`scanner`], [`media_player`]): each module's trait, its operations and their outputs,
 //!   here in the runtime, so an app reaches a module only through these
 //!   typed operations and never depends on the module's crate (layers.toml).
 //!   The module's crate implements the port (its fake, the desktop's, the
@@ -42,7 +42,7 @@
 //! its own (the camera's `ScanReply` and `PhotoReply`), so what Swift and
 //! Kotlin answer is the operation's output, not a shape shared by all.
 //! Events a module sends on its own (a player's position) go through a
-//! listener trait of the module's (ark-media-player's `MediaListener`).
+//! listener trait of its port's ([`media_player::MediaListener`]).
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -51,6 +51,7 @@ use std::sync::{Arc, Mutex};
 
 pub mod clipboard;
 pub mod haptics;
+pub mod media_player;
 pub mod scanner;
 pub mod share;
 
