@@ -84,7 +84,7 @@ class KeptTests {
         val session = app.session
         val kept = Kept.of(session, "Phone")
         assertSame("one library and one listening, whoever asks", kept, Kept.of(session, "Phone"))
-        val sound = FakeSound()
+        val sound = FakeMedia()
         kept.listen.attach(sound)
 
         // The screens, as the activity has them: composed over the session, then gone with it.

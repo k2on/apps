@@ -2928,6 +2928,7 @@ dependencies = [
  "ark-ffi",
  "ark-format",
  "ark-format-ffi",
+ "ark-media-player",
  "ark-peer",
  "arkdb",
  "harken-app",
@@ -2944,6 +2945,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-auth",
+ "ark-media-player",
  "ark-peer",
  "arkui",
  "arkui-shots",

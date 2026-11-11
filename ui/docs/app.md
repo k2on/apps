@@ -206,7 +206,8 @@ registers each module's fake
 
 Under each crate's `ffi` feature it declares a UniFFI foreign trait of
 the port's name (`ark_haptics::phone::Haptics`,
-`#[uniffi::export(with_foreign)]`, harken's `PhoneSound` pattern) and
+`#[uniffi::export(with_foreign)]`; the media player's is
+`NativeMediaPlayer`, apart from Apple's MediaPlayer framework) and
 registers what the phone gives as the port (`ark_haptics::phone::port`);
 `ark-module` itself has no UniFFI. A
 module that answers later hands its implementation a typed reply object
@@ -225,13 +226,14 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-share | `ark-share` | `PhoneShare` (UIActivityViewController; NSSharingServicePicker) | not yet | Unavailable | Unavailable |
 | ark-camera | `ark-camera` | `PhoneCamera` (a QR code by VisionKit's data scanner, a photo, a watched photo by AVFoundation; the Mac fails, said) | `PhoneCamera` (a watched photo by Camera2, its page `CameraPage`; no QR decoder yet) | Unavailable | Unavailable |
 | ark-scanner | `ark-scanner` | over the camera (`over_camera`: the eyes, the warp in Rust) | over the camera, with the corner model (`model`) | `Chosen` (feature `desktop`): a file the window's chooser gives | `Browser` (feature `web`): the page's file input |
-| ark-media-player | `ark-media-player` | not yet | not yet | not yet (`harken_player`) | — |
+| ark-media-player | `ark-media-player` | `PhoneMediaPlayer` (AVPlayer, the playback audio session, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`) | `PhoneMediaPlayer` in `ArkMediaService` (Media3's ExoPlayer in a `MediaLibraryService`) | `Desktop` (feature `desktop`: rodio and MPRIS) | `Browser` (feature `web`: `<audio>` and the Media Session API) |
 | ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
 | ark-secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
 
-**MediaPlayer** generalises harken's `PhoneSound` and
-`harken_player::Sound` (modules/ark-media-player/README.md says how harken
-moves onto it).
+**MediaPlayer** is one sound at a time, what the system shows of it, its
+controls as events (`Remote`) the app decides, and a browse tree for a car
+or a watch (modules/ark-media-player/README.md); harken's player is a queue
+over it (harken-player's `MediaSound`).
 
 #### How an App Opts In
 

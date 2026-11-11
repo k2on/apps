@@ -348,6 +348,13 @@ struct Heard: Equatable {
     var refused: String? = nil
     /// What plays: the session's, while joined; this phone's own player's, alone.
     var active: Active? = nil
+    /// What only this phone's own player has: filling its buffer, shuffled,
+    /// repeating, and its own volume (its gain).
+    var buffering = false
+    var shuffle = false
+    var repeatMode = Repeat.off
+    var localLevel: Int64 = 100
+    var localMuted = false
 
     /// The sound is on another device, here or not: this phone is a controller of it.
     var elsewhere: Bool { joined && (listening?.active?.output.deviceId).map { $0 != me } == true }
@@ -367,6 +374,19 @@ struct Heard: Equatable {
         h.stats = RemoteStats.of(o["stats"])
         h.refused = o["refused"] as? String
         if let a = o["active"], !(a is NSNull) { h.active = Active(json: a) }
+        if let l = o["local"] as? [String: Any] {
+            h.buffering = l["buffering"] as? Bool ?? false
+            h.shuffle = l["shuffle"] as? Bool ?? false
+            switch l["repeat"] as? String {
+            case "all": h.repeatMode = .all
+            case "one": h.repeatMode = .one
+            default: h.repeatMode = .off
+            }
+            if let v = l["volume"] as? [String: Any] {
+                h.localLevel = v["level"].map { J.int($0) } ?? 100
+                h.localMuted = v["muted"] as? Bool ?? false
+            }
+        }
         return h
     }
 }

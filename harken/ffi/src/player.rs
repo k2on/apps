@@ -1,134 +1,38 @@
 //! A phone's player (S3b): harken's one reconciler (`harken-player`) run
-//! here, over the phone's own peer, against a player the phone implements
-//! ([`PhoneSound`], a UniFFI callback interface: ExoPlayer on Android). The
-//! phone tells [`Player::step`] whenever its peer or its player moved, and
-//! draws the view it answers; a press is [`Player::press`].
+//! here, over the phone's own peer, against this phone's own player — a
+//! queue over the phone's media player (`harken_player::MediaSound` over
+//! `ark-media-player`'s `NativeMediaPlayer`: AVPlayer on an iPhone, Media3
+//! on Android). The phone attaches its media player ([`Player::attach`])
+//! and steps whenever it is told to ([`PlayerShell::wake`]), and draws the
+//! view a step answers; a press is [`Player::press`] — of the session while
+//! the phone is part of it, of its own queue alone.
+//!
+//! The lock screen, a headset and the notification are the media player's
+//! too: what they ask comes back here and is pressed the same way, and
+//! what plays is shown to them from the view each step.
 
 use std::sync::{Arc, Mutex};
 
 use ark_ffi::Peer;
-use harken_domain::{Id, Media, Track};
-use harken_player::{Event, Heard, Place, Sound, Vol};
+use ark_media_player::phone::NativeMediaPlayer;
+use ark_media_player::{MediaControls, NowPlaying};
+use harken_domain::{Active, Output};
+use harken_player::{remote_press, MediaSound, Press, Repeat, Sound, NOT_PART};
+use serde_json::{json, Value};
 
-/// A volume, 0 to 100, and its mute.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct Loudness {
-    pub level: i64,
-    pub muted: bool,
-}
+/// How far an episode's skips go, in seconds: back a little, on a little more.
+pub const JOG_BACK_S: u32 = 15;
+pub const JOG_FORWARD_S: u32 = 30;
 
-/// What a phone's player says of itself.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct SoundState {
-    /// The queue loaded, each track's id (hex).
-    pub queue: Vec<String>,
-    /// Where in it, or -1 with nothing loaded.
-    pub index: i64,
-    /// Asked to play (`playWhenReady`), whether or not a buffer is filling.
-    pub playing: bool,
-    /// Filling a buffer: where it is cannot be said.
-    pub buffering: bool,
-    pub position_ms: i64,
-    /// At the end of the last track of its queue.
-    pub ended: bool,
-    /// Where the queue was taken from, as whoever loaded it said.
-    pub from: String,
-}
-
-/// The phone's player, as the reconciler drives it.
+/// What the phone does for its player: steps again, and finds a cover.
 #[uniffi::export(with_foreign)]
-pub trait PhoneSound: Send + Sync {
-    fn state(&self) -> SoundState;
-    /// Whether it stopped by itself since the last ask: said once.
-    fn take_stalled(&self) -> bool;
-    /// The queue loaded, as JSON: a list of `Track`.
-    fn tracks(&self) -> String;
-    /// Load `queue` (a list of `Track`, JSON), at this track and point.
-    fn load(&self, queue: String, at: i64, position_ms: i64, playing: bool, from: String);
-    fn jump(&self, at: i64, position_ms: i64);
-    fn resume(&self);
-    fn pause(&self);
-    fn seek(&self, ms: i64);
-    /// Step again in `ms`: the moment a play would count.
-    fn wake_in(&self, ms: i64);
-    /// Its media stream's volume; none where it has none.
-    fn volume(&self) -> Option<Loudness>;
-    fn set_volume(&self, level: i64, muted: bool);
-}
-
-/// A [`PhoneSound`] as a [`Sound`].
-struct Phone<'a>(&'a dyn PhoneSound);
-
-impl Sound for Phone<'_> {
-    fn heard(&self) -> Heard {
-        let s = self.0.state();
-        let at = usize::try_from(s.index).ok().filter(|i| *i < s.queue.len());
-        Heard {
-            queue: s
-                .queue
-                .into_iter()
-                .map(|q| serde_json::from_value::<Id<Media>>(q.into()).unwrap_or_default())
-                .collect(),
-            at,
-            playing: s.playing,
-            ready: at.is_some(),
-            place: match s.buffering {
-                true => Place::Believed(s.position_ms),
-                false => Place::Measured {
-                    ms: s.position_ms,
-                    at: ark_peer::now_ms(),
-                },
-            },
-            ended: s.ended,
-            from: s.from,
-        }
-    }
-
-    fn take(&mut self) -> Option<Event> {
-        self.0.take_stalled().then(|| Event::Stalled {
-            at_ms: self.0.state().position_ms,
-        })
-    }
-
-    fn tracks(&self) -> Vec<Track> {
-        serde_json::from_str(&self.0.tracks()).unwrap_or_default()
-    }
-
-    fn load(&mut self, queue: &[Track], at: usize, position_ms: i64, playing: bool, from: &str) {
-        let q = serde_json::to_string(queue).unwrap_or_else(|_| "[]".into());
-        self.0.load(q, at as i64, position_ms, playing, from.into());
-    }
-
-    fn jump(&mut self, at: usize, position_ms: i64) {
-        self.0.jump(at as i64, position_ms);
-    }
-
-    fn resume(&mut self) {
-        self.0.resume();
-    }
-
-    fn pause(&mut self) {
-        self.0.pause();
-    }
-
-    fn seek(&mut self, ms: i64) {
-        self.0.seek(ms);
-    }
-
-    fn wake_in(&mut self, ms: i64) {
-        self.0.wake_in(ms);
-    }
-
-    fn volume(&self) -> Option<Vol> {
-        self.0.volume().map(|v| Vol {
-            level: v.level,
-            muted: v.muted,
-        })
-    }
-
-    fn set_volume(&mut self, v: Vol) {
-        self.0.set_volume(v.level, v.muted);
-    }
+pub trait PlayerShell: Send + Sync {
+    /// Step again in `in_ms` milliseconds (0: now): the player moved, or a
+    /// play will count then.
+    fn wake(&self, in_ms: i64);
+    /// A track's cover by its album and its creator (a show's, for an
+    /// episode), as an address the system can fetch; none for none.
+    fn cover(&self, album: String, creator: String) -> Option<String>;
 }
 
 /// A phone's end of the account's listening session.
@@ -141,7 +45,8 @@ impl Sound for Phone<'_> {
 pub struct Player {
     peer: Arc<Peer>,
     inner: Mutex<harken_player::Player>,
-    sound: Mutex<Option<Arc<dyn PhoneSound>>>,
+    sound: Mutex<Option<MediaSound>>,
+    shell: Mutex<Option<Arc<dyn PlayerShell>>>,
     last: Mutex<String>,
 }
 
@@ -159,48 +64,120 @@ impl Player {
             peer,
             inner: Mutex::new(harken_player::Player::new(&me, Some(counts))),
             sound: Mutex::default(),
+            shell: Mutex::default(),
             last: Mutex::new("{}".into()),
         })
     }
 
-    /// The player reconciled from now on; none, nothing is.
-    pub fn attach(&self, sound: Option<Arc<dyn PhoneSound>>) {
-        *self.sound.lock().unwrap_or_else(|e| e.into_inner()) = sound;
+    /// The phone's media player, playing the tracks of `server`, reconciled
+    /// from now on, `shell` told when to step; none, nothing is.
+    pub fn attach(&self, media: Option<Arc<dyn NativeMediaPlayer>>, server: String, shell: Option<Arc<dyn PlayerShell>>) {
+        *self.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
+        let sound = media.map(|m| {
+            MediaSound::new(
+                ark_media_player::phone::port(m),
+                &server,
+                move |ms| {
+                    if let Some(s) = &shell {
+                        s.wake(ms)
+                    }
+                },
+                ark_peer::now_ms,
+            )
+        });
+        let old = std::mem::replace(&mut *self.sound.lock().unwrap_or_else(|e| e.into_inner()), sound);
+        // The system shows nothing of a player let go.
+        if let Some(old) = old {
+            old.show(None, MediaControls::default());
+        }
     }
 
     /// Make the player agree with the session and say what happened to it;
-    /// what plays, as [`Player::view`] says it.
+    /// what the system's controls asked, pressed; what plays, as
+    /// [`Player::view`] says it, shown to the system too.
     pub fn step(&self) -> String {
-        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(mut inner) = self.busy() else { return self.last() };
-        self.peer.with(|p| match &sound {
-            Some(s) => drop(inner.step(p, &mut Phone(&**s))),
+        let mut sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
+        self.peer.with(|p| match sound.as_mut() {
+            Some(s) => {
+                drop(inner.step(p, s));
+                // A car's browsing is the app's own (Android's library service); here, nothing.
+                drop(s.take_asks());
+                for c in s.take_remote() {
+                    let at = Player::shown_active(&inner, p, s).map_or(0, |a| a.position(ark_peer::now_ms()));
+                    if let Some(press) = remote_press(c, at) {
+                        if inner.press(p, &press, Some(&*s as &dyn Sound)).as_deref() == Some(NOT_PART) {
+                            s.alone(&press);
+                        }
+                    }
+                }
+            }
             None => drop(inner.refusals(p)),
         });
-        self.view_of(&inner, sound.as_deref())
+        let v = self.view_of(&inner, sound.as_ref());
+        if let Some(s) = sound.as_ref() {
+            self.show(s, &v);
+        }
+        v.to_string()
     }
 
     /// A press (`harken_player::Press`, JSON): none when it was taken, else
-    /// why not — "not part of the session" while the phone is its own, when
-    /// the caller does it to the player.
+    /// why not. While the phone is its own session the press is done to its
+    /// own queue.
     pub fn press(&self, press: String) -> Option<String> {
-        let press: harken_player::Press = match serde_json::from_str(&press) {
+        let press: Press = match serde_json::from_str(&press) {
             Ok(p) => p,
             Err(e) => return Some(format!("a press: {e}")),
         };
-        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let local = sound.as_deref().map(Phone);
-        self.peer.with(|p| inner.press(p, &press, local.as_ref().map(|l| l as &dyn Sound)))
+        let mut sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
+        let why = self.peer.with(|p| inner.press(p, &press, sound.as_ref().map(|s| s as &dyn Sound)));
+        match (why.as_deref(), sound.as_mut()) {
+            (Some(NOT_PART), Some(s)) => match s.alone(&press) {
+                true => None,
+                false => why,
+            },
+            _ => why,
+        }
+    }
+
+    /// Alone: what is still to come shuffled, or not.
+    pub fn shuffle(&self) {
+        if let Some(s) = self.sound.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            s.shuffle(shuffled);
+        }
+    }
+
+    /// Alone: off, all, one, off.
+    pub fn cycle_repeat(&self) {
+        if let Some(s) = self.sound.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            s.cycle_repeat();
+        }
     }
 
     /// What plays, as JSON: `{me, joined, linked, epoch, listening, active,
-    /// stats, refused}` (`harken_player::Player::view`).
+    /// stats, refused}` (`harken_player::Player::view`) and `local`, what
+    /// only this phone's own player has: `{buffering, shuffle, repeat,
+    /// failed, volume}`, repeat `"off"`, `"all"` or `"one"`, the volume
+    /// `{level, muted}` (its gain).
     pub fn view(&self) -> String {
-        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(inner) = self.busy() else { return self.last() };
-        self.view_of(&inner, sound.as_deref())
+        let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
+        self.view_of(&inner, sound.as_ref()).to_string()
     }
+}
+
+/// A permutation of `n`, from the clock's low bits: a shuffle needs no more.
+fn shuffled(n: usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut x = (ark_peer::now_ms() as u64) | 1;
+    for i in (1..n).rev() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        order.swap(i, (x % (i as u64 + 1)) as usize);
+    }
+    order
 }
 
 impl Player {
@@ -217,10 +194,77 @@ impl Player {
         self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn view_of(&self, inner: &harken_player::Player, sound: Option<&dyn PhoneSound>) -> String {
-        let local = sound.map(Phone);
-        let v = self.peer.with(|p| inner.view(p, local.as_ref().map(|l| l as &dyn Sound))).to_string();
-        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = v.clone();
+    /// What plays: the session's while joined, this phone's own alone.
+    fn shown_active(inner: &harken_player::Player, p: &ark_peer::Peer, s: &MediaSound) -> Option<Active> {
+        let v = inner.view(p, Some(s as &dyn Sound));
+        serde_json::from_value(v["active"].clone()).ok()
+    }
+
+    fn view_of(&self, inner: &harken_player::Player, sound: Option<&MediaSound>) -> Value {
+        let mut v = self.peer.with(|p| inner.view(p, sound.map(|s| s as &dyn Sound)));
+        if let Some(s) = sound {
+            v["local"] = json!({
+                "buffering": s.buffering(),
+                "shuffle": s.shuffled(),
+                "repeat": match s.repeat() { Repeat::Off => "off", Repeat::All => "all", Repeat::One => "one" },
+                "failed": s.failed(),
+                "volume": s.volume().map(|v| json!({ "level": v.level, "muted": v.muted })),
+            });
+        }
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = v.to_string();
         v
+    }
+
+    /// What plays, shown to the system — the lock screen, the notification,
+    /// a headset, a watch — with the controls it offers: an episode's skips
+    /// of seconds, a track's next and previous. While the sound is on
+    /// another device, the artist says where ("Handel · Playing on Laptop").
+    fn show(&self, s: &MediaSound, v: &Value) {
+        let a = match serde_json::from_value::<Active>(v["active"].clone()) {
+            Ok(a) if !a.queue.is_empty() => a,
+            _ => return s.show(None, MediaControls::default()),
+        };
+        let t = a.now().clone();
+        let episode = self
+            .peer
+            .with(|p| ark::db::read::<harken_domain::Harken, _>(&p.log.store, |db| db.episode.has(t.id)));
+        let me = v["me"].as_str().unwrap_or_default();
+        let elsewhere = match &a.output {
+            Output::Device { id, .. } if id != me => Some(
+                v["listening"]["devices"]
+                    .as_array()
+                    .and_then(|ds| ds.iter().find(|d| d["id"] == id.as_str()))
+                    .and_then(|d| d["name"].as_str())
+                    .unwrap_or(id)
+                    .to_string(),
+            ),
+            Output::Away { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+        let counting = matches!(a.clock, harken_domain::Clock::Playing { .. }) && !matches!(a.output, Output::Device { moving: true, .. });
+        let shell = self.shell.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let cover = shell.and_then(|sh| sh.cover(t.album.clone(), t.creator.clone()));
+        let at = a.at.max(0) as usize;
+        let info = NowPlaying {
+            title: t.title.clone(),
+            artist: match elsewhere {
+                Some(on) => format!("{} · Playing on {on}", t.creator),
+                None => t.creator.clone(),
+            },
+            album: t.album.clone(),
+            artwork: cover,
+            duration_ms: t.duration_ms,
+            position_ms: a.position(ark_peer::now_ms()),
+            rate: if counting { 1.0 } else { 0.0 },
+        };
+        let controls = MediaControls {
+            has_next: at + 1 < a.queue.len(),
+            has_previous: true,
+            skip_forward_s: if episode { JOG_FORWARD_S } else { 0 },
+            skip_back_s: if episode { JOG_BACK_S } else { 0 },
+            can_seek: t.duration_ms > 0,
+            can_rate: false,
+        };
+        s.show(Some(info), controls);
     }
 }

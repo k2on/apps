@@ -43,7 +43,7 @@ pub use desktop::Desktop;
 pub mod phone {
     use std::sync::Arc;
 
-    use super::{BrowseItem, Controls, MediaEvent, NowPlaying, RemoteCommand, Route};
+    use super::{BrowseItem, MediaControls, MediaEvent, NowPlaying, RemoteCommand, RouteChange};
 
     #[uniffi::remote(Record)]
     pub struct NowPlaying {
@@ -57,7 +57,7 @@ pub mod phone {
     }
 
     #[uniffi::remote(Record)]
-    pub struct Controls {
+    pub struct MediaControls {
         pub has_next: bool,
         pub has_previous: bool,
         pub skip_forward_s: u32,
@@ -81,7 +81,7 @@ pub mod phone {
     }
 
     #[uniffi::remote(Enum)]
-    pub enum Route {
+    pub enum RouteChange {
         Unplugged,
         Plugged,
         Other,
@@ -109,7 +109,7 @@ pub mod phone {
         Failed { why: String },
         Interrupted,
         Resumed,
-        Route { change: Route },
+        Route { change: RouteChange },
         Browse { parent: String },
         PlayItem { id: String },
     }
@@ -120,10 +120,11 @@ pub mod phone {
         fn heard(&self, event: MediaEvent);
     }
 
-    /// The phone's player, as Swift and Kotlin implement it. Every call
-    /// returns at once; the implementation does it on its own thread.
+    /// The phone's player, as Swift and Kotlin implement it (named apart
+    /// from Apple's MediaPlayer framework). Every call returns at once; the
+    /// implementation does it on its own thread.
     #[uniffi::export(with_foreign)]
-    pub trait MediaPlayer: Send + Sync {
+    pub trait NativeMediaPlayer: Send + Sync {
         fn load(&self, url: String, at_ms: i64);
         fn play(&self);
         fn pause(&self);
@@ -132,12 +133,12 @@ pub mod phone {
         fn set_volume(&self, volume: f32);
         fn stop(&self);
         fn set_now_playing(&self, info: Option<NowPlaying>);
-        fn set_controls(&self, controls: Controls);
+        fn set_controls(&self, controls: MediaControls);
         fn set_children(&self, parent: String, items: Vec<BrowseItem>);
         fn set_listener(&self, listener: Option<Arc<dyn MediaListener>>);
     }
 
-    struct Phone(Arc<dyn MediaPlayer>);
+    struct Phone(Arc<dyn NativeMediaPlayer>);
 
     /// The port's listener, as the phone's.
     struct Tell(Arc<dyn super::MediaListener>);
@@ -173,7 +174,7 @@ pub mod phone {
         fn set_now_playing(&self, info: Option<NowPlaying>) {
             self.0.set_now_playing(info)
         }
-        fn set_controls(&self, controls: Controls) {
+        fn set_controls(&self, controls: MediaControls) {
             self.0.set_controls(controls)
         }
         fn set_children(&self, parent: String, items: Vec<BrowseItem>) {
@@ -185,7 +186,7 @@ pub mod phone {
     }
 
     /// The phone's player as the port an update asks through.
-    pub fn port(m: Arc<dyn MediaPlayer>) -> Arc<dyn super::MediaPlayer> {
+    pub fn port(m: Arc<dyn NativeMediaPlayer>) -> Arc<dyn super::MediaPlayer> {
         Arc::new(Phone(m))
     }
 }
@@ -245,10 +246,10 @@ mod tests {
             ..NowPlaying::default()
         };
         m.run(&set_now_playing(Some(info.clone())), |_| {});
-        let c = Controls {
+        let c = MediaControls {
             has_next: true,
             can_seek: true,
-            ..Controls::default()
+            ..MediaControls::default()
         };
         m.run(&set_controls(c), |_| {});
         assert_eq!(fake.now_playing(), Some(info));

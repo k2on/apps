@@ -1005,6 +1005,12 @@ impl App {
 
     fn boot() -> (App, Task<Message>) {
         let (mut app, task) = App::open();
+        // The sound card and MPRIS (ark-media-player's desktop player); none
+        // for the screenshots' run, which sounds nothing.
+        if player::sounds() {
+            let desktop = ark_media_player::Desktop::new("harken", "Harken", "harken");
+            app.player.attach(std::sync::Arc::new(desktop), app.bell.clone());
+        }
         let joined = app.link();
         app.arrive();
         (app, Task::batch([task, joined]))
@@ -2189,7 +2195,7 @@ impl App {
     /// output, a desktop alone.
     pub fn volumed(&self, level: &Level) -> Option<Volumed> {
         let Some(s) = &self.session else {
-            return (*level == Level::Output && Player::AUDIBLE).then_some(Volumed::Local);
+            return (*level == Level::Output && self.player.audible()).then_some(Volumed::Local);
         };
         let device = |id: &str| s.device(id).filter(|d| d.can_volume).map(|_| Volumed::Device(id.to_string()));
         match level {
@@ -2812,6 +2818,57 @@ impl App {
         }
     }
 
+    /// A media key or the desktop's widget (MPRIS), as the press it is:
+    /// a skip of seconds a seek from where what plays is.
+    fn remote(&mut self, c: ark_media_player::RemoteCommand) -> Task<Message> {
+        use ark_media_player::RemoteCommand as R;
+        let at_ms = self.now().map_or(0, |n| (n.position * 1000.0) as i64);
+        let press = match c {
+            R::Play => Press::Play,
+            R::Pause | R::Stop => Press::Pause,
+            R::Toggle => Press::PlayPause,
+            R::Next => Press::Skip(1),
+            R::Previous => Press::Skip(-1),
+            R::SkipForward { seconds } => Press::Seek(at_ms + seconds as i64 * 1000),
+            R::SkipBack { seconds } => Press::Seek((at_ms - seconds as i64 * 1000).max(0)),
+            R::SeekTo { at_ms } => Press::Seek(at_ms.max(0)),
+            R::Rate { .. } => return Task::none(),
+        };
+        self.press(press)
+    }
+
+    /// What plays, as the desktop's widgets show it (MPRIS): the track, its
+    /// cover, where it is and whether it moves; and the controls it has —
+    /// an episode's skips of seconds, a track's next and previous.
+    fn show_playing(&mut self) {
+        let shown = self.now().map(|n| {
+            let t = n.track();
+            let info = ark_media_player::NowPlaying {
+                title: t.title.clone(),
+                artist: t.creator.clone(),
+                album: t.album.clone(),
+                artwork: Some(self.art_url(self.art_of(t))).filter(|u| !u.is_empty()),
+                duration_ms: (n.duration * 1000.0) as i64,
+                position_ms: (n.position * 1000.0) as i64,
+                rate: if n.playing { 1.0 } else { 0.0 },
+            };
+            let jogs = self.jogs();
+            let controls = ark_media_player::MediaControls {
+                has_next: n.at + 1 < n.queue.len() && !jogs,
+                has_previous: !jogs,
+                skip_forward_s: if jogs { JOG_FORWARD as u32 } else { 0 },
+                skip_back_s: if jogs { JOG_BACK as u32 } else { 0 },
+                can_seek: n.duration > 0.0,
+                can_rate: false,
+            };
+            (info, controls)
+        });
+        match shown {
+            Some((info, controls)) => self.player.show(Some(info), controls),
+            None => self.player.show(None, ark_media_player::MediaControls::default()),
+        }
+    }
+
     /// Do the thing, then whatever follows from it ([`App::react`]), then make
     /// the address bar agree with what is on screen — here, after every
     /// message, rather than at the places that change what is shown: a rule
@@ -2819,6 +2876,7 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
         let reacted = self.react();
+        self.show_playing();
         self.history.sync(&self.peer.source);
         // Whatever the message came to is said for a moment over the page
         // (`arkui::toast`), heard here once rather than wherever a note is
@@ -3489,8 +3547,11 @@ impl App {
     fn react(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         tasks.push(self.pump());
-        // A lock-screen button leaves a note and rings; it goes where every
-        // transport button goes.
+        // A media key, the desktop's widget (MPRIS), rings; it goes where
+        // every transport button goes.
+        for c in self.player.take_remote() {
+            tasks.push(self.remote(c));
+        }
         // The listening session. A track that ran out moves on through the
         // queue, as a phone's player does — its own session, or the output,
         // whose move the reconciler says — and never on a silent device.

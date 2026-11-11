@@ -9565,6 +9565,11 @@ rec {
             packageId = "ark-format-ffi";
           }
           {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
@@ -9630,6 +9635,11 @@ rec {
             name = "ark-auth";
             packageId = "ark-auth";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-media-player";
+            packageId = "ark-media-player";
+            features = [ "desktop" ];
           }
           {
             name = "ark-peer";

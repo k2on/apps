@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ark_media_player::{Controls, Fake, MediaEvent, MediaPlayer, NowPlaying, RemoteCommand, Route};
+use ark_media_player::{Fake, MediaControls, MediaEvent, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::host::{Kind, Listening};
 use harken_domain::*;
 use harken_player::{remote_press, MediaSound, Press, Reconciler, Repeat, Say, Sound, View};
@@ -240,9 +240,13 @@ fn an_interruption_or_the_headphones_out_is_a_stall() {
 
     let mut rig = Rig::new();
     let s = rig.sounding(1, 0);
-    rig.fake.hear(MediaEvent::Route { change: Route::Unplugged });
+    rig.fake.hear(MediaEvent::Route {
+        change: RouteChange::Unplugged,
+    });
     assert_eq!(rig.look(&s), ["stalled"]);
-    rig.fake.hear(MediaEvent::Route { change: Route::Plugged });
+    rig.fake.hear(MediaEvent::Route {
+        change: RouteChange::Plugged,
+    });
     assert!(rig.look(&session(1, 0, Clock::Paused { at_ms: 0 })).is_empty(), "plugged in is nothing");
 
     let mut rig = Rig::new();
@@ -391,6 +395,18 @@ fn a_volume_is_the_player_s_gain() {
     rig.sound.set_volume(harken_player::Vol { level: 40, muted: false });
     rig.sound.set_volume(harken_player::Vol { level: 40, muted: true });
     assert_eq!(rig.fake.take(), ["volume 0.4", "volume 0"]);
+    // Alone, a volume pressed for this device is the same gain.
+    use harken_player::{Change, Level};
+    rig.sound.alone(&Press::Loud {
+        level: Level::Here,
+        change: Change::To { level: 70 },
+    });
+    rig.sound.alone(&Press::Loud {
+        level: Level::Here,
+        change: Change::By { delta: -20 },
+    });
+    assert_eq!(rig.fake.take(), ["volume 0.7", "volume 0.5"]);
+    assert_eq!(rig.sound.volume(), Some(harken_player::Vol { level: 50, muted: false }));
 }
 
 /// What the system shows is told when it changes, not at every step: a
@@ -407,10 +423,10 @@ fn what_the_system_shows_is_told_when_it_changes() {
         position_ms: ms,
         rate,
     };
-    let c = Controls {
+    let c = MediaControls {
         has_next: true,
         can_seek: true,
-        ..Controls::default()
+        ..MediaControls::default()
     };
     rig.sound.show(Some(info(0, 1.0)), c);
     assert_eq!(rig.fake.now_playing(), Some(info(0, 1.0)));

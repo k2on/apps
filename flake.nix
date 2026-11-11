@@ -811,6 +811,8 @@
             appid = "dev.harken.android";
             # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
             flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
+            # The media player's Kotlin (modules/ark-media-player), compiled with the app.
+            shared = [ "modules/ark-media-player/kotlin" ];
             title = "Harken";
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
@@ -1461,7 +1463,7 @@
           # project.yml's.
           # An Ark app (`ark`) builds its generated project
           # (`<name>/.native/ios`) over its own Swift (`<name>/native/ios`).
-          iosApp = { name, App, ffi, framework, kind, ark ? null }:
+          iosApp = { name, App, ffi, framework, kind, ark ? null, shared ? [ ] }:
             let
               bundle = "${bundlePrefix}.${name}";
               # Only the slice it links: the simulator's for the screenshots'
@@ -1507,7 +1509,9 @@
               # What the app links prebuilt: ArkUI (`arkuiSwift`), and an Ark
               # app's bindings and modules.
               linked = arkuiSwift kind ++ lib.optionals (ark != null) ([ bindings ] ++ deviceModules);
-              modules = lib.optionals (ark != null) [ "${name}/modules" ];
+              # `shared`: the repository's directories a non-Ark app
+              # compiles into itself (harken's media player's Swift).
+              modules = lib.optionals (ark != null) [ "${name}/modules" ] ++ shared;
               common = ''
                 -project ${App}.xcodeproj -scheme ${App} -configuration Release \
                 -derivedDataPath $TMPDIR/derived \
@@ -1628,7 +1632,7 @@
           # would otherwise compile the generator's Rust (money-gen and
           # its crates) itself, which nothing builds ahead on Linux.
           moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = outputs.x86_64-linux.arkOf.money; };
-          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; shared = [ "modules/ark-media-player/swift" ]; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
           # derivation, so built once.

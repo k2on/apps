@@ -24,6 +24,9 @@ harken-app = { path = "../app" }
 # The first run's records, twinned here (`ark_ffi::first_run_app!`).
 ark-app = { path = "../../ui/rust/app" }
 harken-player = { path = "../player" }
+# The phone's media player (AVPlayer, Media3) as the port harken-player's
+# MediaSound plays on: its UniFFI types and foreign trait in this library.
+ark-media-player = { path = "../../modules/ark-media-player", features = ["ffi"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 

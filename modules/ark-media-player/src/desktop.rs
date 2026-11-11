@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use crate::{BrowseItem, Controls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand};
+use crate::{BrowseItem, MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand};
 
 /// How often a playing sound says where it is.
 const TICK: Duration = Duration::from_millis(250);
@@ -35,7 +35,7 @@ enum Cmd {
 struct State {
     listener: Option<Arc<dyn MediaListener>>,
     info: Option<NowPlaying>,
-    controls: Controls,
+    controls: MediaControls,
     /// "Playing", "Paused" or "Stopped", as MPRIS says it.
     status: &'static str,
     position_ms: i64,
@@ -122,7 +122,7 @@ impl MediaPlayer for Desktop {
         self.shared.state().info = info;
         mpris::changed(&self.shared, &["Metadata", "PlaybackStatus", "Rate"]);
     }
-    fn set_controls(&self, controls: Controls) {
+    fn set_controls(&self, controls: MediaControls) {
         self.shared.state().controls = controls;
         mpris::changed(&self.shared, &["CanGoNext", "CanGoPrevious", "CanSeek"]);
     }
@@ -497,7 +497,7 @@ mod mpris {
         rate: f64,
         volume: f64,
         position_us: i64,
-        controls: Controls,
+        controls: MediaControls,
         loaded: bool,
     }
 

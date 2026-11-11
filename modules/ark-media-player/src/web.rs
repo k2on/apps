@@ -18,7 +18,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::HtmlAudioElement;
 
-use crate::{BrowseItem, Controls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand};
+use crate::{BrowseItem, MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand};
 
 /// A listener or a handler the page calls.
 type Callback = Closure<dyn FnMut(JsValue)>;
@@ -26,7 +26,7 @@ type Callback = Closure<dyn FnMut(JsValue)>;
 struct Inner {
     audio: HtmlAudioElement,
     listener: RefCell<Option<Arc<dyn MediaListener>>>,
-    controls: RefCell<Controls>,
+    controls: RefCell<MediaControls>,
     loaded: RefCell<bool>,
     /// The element's listeners, kept alive as long as the player is.
     held: RefCell<Vec<Callback>>,
@@ -80,7 +80,7 @@ impl Browser {
         let inner = Rc::new(Inner {
             audio,
             listener: RefCell::new(None),
-            controls: RefCell::new(Controls::default()),
+            controls: RefCell::new(MediaControls::default()),
             loaded: RefCell::new(false),
             held: RefCell::new(vec![]),
             actions: RefCell::new(vec![]),
@@ -309,7 +309,7 @@ impl MediaPlayer for Browser {
         }
     }
 
-    fn set_controls(&self, controls: Controls) {
+    fn set_controls(&self, controls: MediaControls) {
         if *self.inner.controls.borrow() == controls {
             return;
         }

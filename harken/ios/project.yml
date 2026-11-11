@@ -12,7 +12,7 @@
 # Swift 5 language mode, not 6: the bridge's typed half (`Typed.swift`,
 # shared with Android's and not this project's) declares `Id.none` a static
 # of a public type that is not `Sendable`, which Swift 6 refuses; and the
-# kernel calls back on its own threads (`Listener`, `PhoneSound`), which the
+# kernel calls back on its own threads (`Listener`, `PlayerShell`), which the
 # app meets with queues rather than actors. The compiler is Xcode 26's.
 name: Harken
 options:
@@ -39,6 +39,9 @@ targets:
     sources:
       - path: Harken
       - path: ../ffi/ios/swift
+      # The media player (modules/ark-media-player): AVPlayer, the audio
+      # session, the lock screen's now playing and its commands.
+      - path: ../../modules/ark-media-player/swift
     dependencies:
       - package: ArkUI
         product: ArkUI

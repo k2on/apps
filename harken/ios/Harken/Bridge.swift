@@ -187,7 +187,7 @@ final class Bridge {
     private let queue = DispatchQueue(label: "harken-session")
     private let root: URL
     private let name: String
-    private let sound: SoundCore
+    private let media: NativeMediaPlayer
     /// Told on the main queue.
     private let publish: (Snapshot) -> Void
     private let notice: (String) -> Void
@@ -224,15 +224,16 @@ final class Bridge {
     private let appearances = Holds<LibraryEntry>({ .appearances(playlist: Phone.noPlaylist, name: $0) }, tracks)
 
     /// The session for `login` at `server`, its replica under `root`; this
-    /// phone named `name` in the listening session, playing through `sound`.
-    init(server: String, login: Login, root: URL, name: String, sound: SoundCore,
+    /// phone named `name` in the listening session, playing through `media`
+    /// (ark-media-player's `PhoneMediaPlayer`).
+    init(server: String, login: Login, root: URL, name: String, media: NativeMediaPlayer,
          publish: @escaping (Snapshot) -> Void, notice: @escaping (String) -> Void,
          denied: @escaping (String) -> Void, failed: @escaping (String) -> Void) {
         self.server = server
         self.login = login
         self.root = root
         self.name = name
-        self.sound = sound
+        self.media = media
         self.publish = publish
         self.notice = notice
         self.denied = denied
@@ -277,7 +278,7 @@ final class Bridge {
         harken = h
         // What it counted is kept beside the replica.
         let p = Player(peer: h.peer, me: login.session, dir: dir.path)
-        p.attach(sound: sound)
+        p.attach(media: media, server: server, shell: Shell(self))
         player = p
         h.peer.setListener(listener: Told { [weak self] in self?.drainSoon() })
         let v = HarkenSession(peer: h.peer)
@@ -423,7 +424,7 @@ final class Bridge {
     /// A press — a transition while this phone is part of the session —
     /// previewed on the session's queue, so what is published next already
     /// shows it; then `done` on the main queue with the refusal, if any.
-    /// Unlinked it is refused ([notPart]), and the caller does it to the player itself.
+    /// Alone it is done to this phone's own player's queue.
     func press(_ p: Press, done: @escaping (String?) -> Void = { _ in }) {
         queue.async {
             guard let player = self.player else { return self.main { done(notPart) } }
@@ -432,6 +433,33 @@ final class Bridge {
             self.show()
             self.main { done(w) }
         }
+    }
+
+    /// Alone: what is still to come shuffled, or not.
+    func shuffle() { alone { $0.shuffle() } }
+
+    /// Alone: off, all, one, off.
+    func cycleRepeat() { alone { $0.cycleRepeat() } }
+
+    private func alone(_ f: @escaping (Player) -> Void) {
+        queue.async {
+            guard let p = self.player else { return }
+            f(p)
+            self.step()
+            self.show()
+        }
+    }
+
+    /// A track's cover by its album, else its show's (an episode names its show as its creator),
+    /// as the lock screen fetches it. On `queue`, where the player asks.
+    fileprivate func cover(_ album: String, _ creator: String) -> String? {
+        let art = snap.albums.first(where: { $0.name == album })?.art ?? snap.shows.first(where: { $0.title == creator })?.art ?? ""
+        return art.isEmpty ? nil : Files.url(server, art)
+    }
+
+    /// Step again in `ms`: a play will count then.
+    fileprivate func pokeIn(_ ms: Int64) {
+        queue.asyncAfter(deadline: .now() + .milliseconds(Int(ms))) { self.poke() }
     }
 
     /// The player said something happened to it: reconcile.
@@ -683,7 +711,7 @@ final class Bridge {
         queue.async {
             self.closed = true
             self.harken?.peer.setListener(listener: nil)
-            self.player?.attach(sound: nil)
+            self.player?.attach(media: nil, server: self.server, shell: nil)
             self.player = nil
             self.pages = [:]
             self.works.clear()
@@ -697,4 +725,18 @@ final class Bridge {
             self.harken = nil
         }
     }
+}
+
+/// What the player asks of the phone: a step now or later, and a track's cover. Told on the
+/// session's queue, or the player's (the main queue); each goes to the session's queue.
+private final class Shell: PlayerShell, @unchecked Sendable {
+    private weak var bridge: Bridge?
+
+    init(_ b: Bridge) { bridge = b }
+
+    func wake(inMs: Int64) {
+        if inMs <= 0 { bridge?.poke() } else { bridge?.pokeIn(inMs) }
+    }
+
+    func cover(album: String, creator: String) -> String? { bridge?.cover(album, creator) }
 }

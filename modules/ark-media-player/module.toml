@@ -7,8 +7,33 @@ crate = "ark-media-player"
 [ops]
 MediaOp = "()"
 
+# Playing on with the screen locked and the app in the background.
 [ios.info]
 UIBackgroundModes = ["audio"]
 
 [android]
-permissions = ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"]
+# The service in the foreground while it plays, its kind, and the wake lock
+# that keeps a stream from stopping with the screen (ExoPlayer's network
+# wake mode).
+permissions = [
+  "android.permission.FOREGROUND_SERVICE",
+  "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+  "android.permission.WAKE_LOCK",
+]
+dependencies = [
+  "androidx.media3:media3-exoplayer:1.5.1",
+  "androidx.media3:media3-session:1.5.1",
+]
+
+# The media session service (kotlin/.../ArkMediaService.kt): what the
+# notification, the lock screen, a headset, a car and a watch reach. A car
+# finds it by the library actions, the platform's and Media3's.
+[[android.services]]
+name = "dev.arkui.modules.ArkMediaService"
+exported = true
+foreground = "mediaPlayback"
+actions = [
+  "androidx.media3.session.MediaLibraryService",
+  "android.media.browse.MediaBrowserService",
+  "androidx.media3.session.MediaSessionService",
+]

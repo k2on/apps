@@ -122,6 +122,9 @@ android {
             // The kernel, per ABI, and the Kotlin over it.
             jniLibs.srcDir("$harkenLib/jniLibs")
             kotlin.srcDir("$harkenLib/kotlin")
+            // The media player, ark-media-player's Kotlin (modules/ark-media-player): the ExoPlayer,
+            // its media session service and what the system shows, over the port in the library.
+            kotlin.srcDir(rootProject.file("../../modules/ark-media-player/kotlin"))
             // arkui from its sources, where it is not linked prebuilt (`arkuiLib`).
             if (arkuiLib == null) {
                 kotlin.srcDir(rootProject.file("../../ui/kotlin/src"))

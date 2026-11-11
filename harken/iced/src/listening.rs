@@ -14,9 +14,11 @@
 //!
 //! **A device is a login**: its id is the login's session id, what a
 //! volatile `Hello` declares with an empty id and the server fills in.
-//! **The desktop has no audio device** (`Player::AUDIBLE` is false), so it
-//! declares itself one that cannot play: never the output, every button a
-//! remote control, no volume to say.
+//! **The desktop plays** through its media player (`player.rs`,
+//! ark-media-player's sound card and MPRIS), so it declares itself one that
+//! can; the tests' and the screenshots' runs sound nothing (`player::sounds`)
+//! and declare one that cannot: never the output, every button a remote
+//! control, no volume to say.
 
 use crate::client::Replica as Peer;
 use harken_player::{Press, Sound, Stats};
@@ -41,7 +43,7 @@ impl Default for Remote {
 /// The device this build declares at its volatile `Hello`: its login's
 /// session (an empty id), a computer, and whether it can make a sound at all.
 pub fn device() -> Vec<u8> {
-    crate::client::device(crate::Player::AUDIBLE, &device_name())
+    crate::client::device(crate::player::sounds(), &device_name())
 }
 
 impl Remote {

@@ -25,10 +25,10 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ark_module::media_player::{Controls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand, Route};
+use ark_module::media_player::{MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying, RemoteCommand, RouteChange};
 use harken_domain::{Id, Media, Track};
 
-use crate::{Event, Heard, Place, Press, Sound, Vol};
+use crate::{Change, Event, Heard, Level, Place, Press, Sound, Vol};
 
 /// What alone repeats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -78,7 +78,7 @@ struct Local {
     shuffled: bool,
     failed: Option<String>,
     /// What the system was last shown, so a step that changes nothing tells it nothing.
-    shown: Option<(Option<NowPlaying>, Controls, i64)>,
+    shown: Option<(Option<NowPlaying>, MediaControls, i64)>,
 }
 
 impl Local {
@@ -204,7 +204,7 @@ impl MediaListener for Hears {
                     l.waiting = l.asked;
                 }
                 // A pause it was asked for, or one the system made, which
-                // the system says on its own (`Interrupted`, `Route`).
+                // the system says on its own (`Interrupted`, `RouteChange`).
                 MediaEvent::Paused => {
                     l.hold(now);
                     l.sounding = false;
@@ -220,7 +220,10 @@ impl MediaListener for Hears {
                     l.stalled(now);
                     l.failed = Some(why);
                 }
-                MediaEvent::Interrupted | MediaEvent::Route { change: Route::Unplugged } => l.stalled(now),
+                MediaEvent::Interrupted
+                | MediaEvent::Route {
+                    change: RouteChange::Unplugged,
+                } => l.stalled(now),
                 MediaEvent::Route { .. } => return,
                 MediaEvent::Resumed => {
                     if !l.asked && l.at.is_some() {
@@ -331,7 +334,7 @@ impl MediaSound {
     /// What the system shows, and which of its controls it offers: told
     /// only when they changed, or the position moved from where the shown
     /// rate would have it by now.
-    pub fn show(&self, info: Option<NowPlaying>, controls: Controls) {
+    pub fn show(&self, info: Option<NowPlaying>, controls: MediaControls) {
         let now = (self.s.clock)();
         let changed = {
             let mut l = self.s.local();
@@ -453,6 +456,21 @@ impl MediaSound {
                         at
                     });
                 }
+            }
+            // Its own gain, alone: the volume this device sounds at.
+            Press::Loud { level: Level::Here, change } => {
+                let v = self.s.local().vol;
+                self.set_volume(match change {
+                    Change::To { level } => Vol { level: *level, muted: false },
+                    Change::By { delta } => Vol {
+                        level: v.level + delta,
+                        muted: false,
+                    },
+                    Change::Mute { muted } => Vol {
+                        level: v.level,
+                        muted: *muted,
+                    },
+                })
             }
             _ => return false,
         }

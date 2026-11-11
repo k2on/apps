@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ark_module::Modules;
 
-use crate::{BrowseItem, Controls, MediaEvent, MediaListener, MediaPlayer, NowPlaying};
+use crate::{BrowseItem, MediaControls, MediaEvent, MediaListener, MediaPlayer, NowPlaying};
 
 #[derive(Default)]
 struct Seen {
     asked: Vec<String>,
     now_playing: Option<NowPlaying>,
-    controls: Controls,
+    controls: MediaControls,
     children: HashMap<String, Vec<BrowseItem>>,
     listener: Option<Arc<dyn MediaListener>>,
 }
@@ -53,7 +53,7 @@ impl Fake {
         self.seen().now_playing.clone()
     }
 
-    pub fn controls(&self) -> Controls {
+    pub fn controls(&self) -> MediaControls {
         self.seen().controls
     }
 
@@ -111,7 +111,7 @@ impl MediaPlayer for Fake {
     fn set_now_playing(&self, info: Option<NowPlaying>) {
         self.seen().now_playing = info
     }
-    fn set_controls(&self, controls: Controls) {
+    fn set_controls(&self, controls: MediaControls) {
         self.seen().controls = controls
     }
     fn set_children(&self, parent: String, items: Vec<BrowseItem>) {

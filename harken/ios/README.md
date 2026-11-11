@@ -63,11 +63,14 @@ Foundation only — type-checked and tested on Linux:
 - **`Session`**, **`Playing`**, **`Rows`** — the session read, every press as
   harken_player's JSON, the queue edits, the picker, volumes and the
   throttle; what plays and Home's last played; the rows, pages, places.
-- **`SoundCore`** — the reconciler's `PhoneSound` over an `Engine`.
 
-Apple's — written, not compiled here: **`AVEngine`** (AVPlayer, the
-audio session, interruptions, route changes), **`NowPlaying`** (lock
-screen, Control Center, headset), **`Covers`** (disk and memory caches,
+The player itself is ark-media-player's `PhoneMediaPlayer`
+(modules/ark-media-player/swift, compiled into the app: AVPlayer, the
+audio session, interruptions and route changes, the lock screen, Control
+Center and a headset), which the FFI's `Player` plays this phone's own
+queue on (harken-player's `MediaSound`, in Rust) and shows what plays to.
+
+Apple's — written, not compiled here: **`Covers`** (disk and memory caches,
 ImageIO), and the screens: `Shell` (tabs, accessory, sheets, zoom),
 `HomeView`, `SearchView`, `LibraryView`, `Pages`, `PlayerViews`, `Sheets`,
 `SettingsView`, `OnboardingViews`, `Components`, `Theme`, `HarkenApp`.
@@ -109,8 +112,8 @@ most likely to want a fix, most likely first:
 3. **`web.authenticate(using:callbackURLScheme:)`** (HarkenApp.swift): if the
    SDK has only the iOS 17.4 form, it is
    `authenticate(using: url, callback: .customScheme("harken"), preferredBrowserSession: nil, additionalHeaderFields: [:])`.
-4. **Isolation in Swift 5 mode**: `AVEngine` and `NowPlaying` assume the main
-   thread (`MainActor.assumeIsolated` in the remote commands); `Model`'s
+4. **Isolation in Swift 5 mode**: the module's `PhoneMediaPlayer` does
+   everything on the main queue; `Model`'s
    closures handed to `Bridge` are formed on the main actor and called on
    the main queue. A warning is expected; an error means a
    `@MainActor`/`nonisolated` to add where it points.

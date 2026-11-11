@@ -1,8 +1,9 @@
 // The app's one model, on the main actor: the sign-in machine run
 // (`ark_auth::onboarding`, Onboarding.swift) — its effects carried out, the probe and the exchange
 // off the main thread — the session it opens ([Bridge]) and the snapshot it
-// publishes, this phone's player ([SoundCore]) and what the screens draw of
-// what plays ([PlayerState]), and every button the screens have. Nothing of
+// publishes, this phone's media player (ark-media-player's `PhoneMediaPlayer`,
+// which the session's reconciler plays its own queue on) and what the screens
+// draw of what plays ([PlayerState]), and every button the screens have. Nothing of
 // SwiftUI but `ObservableObject` and `@Published`, which are Combine's: the
 // views are SwiftUI's and read this; it is type-checked on Linux against a
 // stand-in for Combine. The twin of Android's `ArkHost`, the wiring half of
@@ -47,16 +48,13 @@ final class Model: ObservableObject {
     @Published private(set) var recent: [String]
     @Published var diagnosticsUnlocked: Bool
 
-    /// Told whenever what plays moved: the lock screen's and Control Center's (NowPlaying.swift).
-    var onPlayer: ((PlayerState) -> Void)? = nil
-
     // MARK: what it holds
 
     private let machine = Onboarding(app: .harken)
     private let remembered: Kept
     private let root: URL
     let deviceName: String
-    let sound: SoundCore
+    let media: NativeMediaPlayer
     private var bridge: Bridge? = nil
     private var albumsById = [String: AlbumsEntry]()
     // What plays carries its album's name and no more: its cover is found by that.
@@ -70,16 +68,15 @@ final class Model: ObservableObject {
     }) { [weak self] of, level in self?.bridge?.press(.loud(of, .to(level))) }
 
     /// The model over `shelf` (the app's `UserDefaults`), replicas under
-    /// `root`, this phone called `deviceName`, playing through `engine`.
-    init(shelf: Shelf, root: URL, deviceName: String, engine: Engine) {
+    /// `root`, this phone called `deviceName`, playing through `media`.
+    init(shelf: Shelf, root: URL, deviceName: String, media: NativeMediaPlayer) {
         remembered = Kept(shelf)
         self.root = root
         self.deviceName = deviceName
-        sound = SoundCore(engine: engine)
+        self.media = media
         recent = remembered.searches
         diagnosticsUnlocked = remembered.diagnostics
         step = machine.step()
-        sound.moved = { [weak self] in self?.redraw() }
         send(.launched(remembered: remembered.remembered, code: nil, returned: false))
     }
 
@@ -169,20 +166,17 @@ final class Model: ObservableObject {
 
     private func open(_ server: String, _ login: Login) {
         close()
-        sound.urlOf = { URL(string: Files.url(server, $0.file)) }
-        let b = Bridge(server: server, login: login, root: root, name: deviceName, sound: sound,
+        let b = Bridge(server: server, login: login, root: root, name: deviceName, media: media,
                        publish: { [weak self] s in self?.took(s) },
                        notice: { [weak self] n in self?.notice = n },
                        denied: { [weak self] d in self?.send(.denied(reason: d)) },
                        failed: { [weak self] w in self?.failed(server, w) })
-        sound.poke = { [weak b] in b?.poke() }
         bridge = b
     }
 
     private func close() {
         bridge?.close()
         bridge = nil
-        sound.poke = {}
         snapshot = Snapshot()
         results = nil
         redraw()
@@ -230,18 +224,15 @@ final class Model: ObservableObject {
     // — and the position where this phone's hand put it, while the clock has not caught up (Sought).
     private func redraw() {
         let h = snapshot.heard
-        let local = sound.volume().map { Volume(of: .here, level: Int($0.level), muted: $0.muted, remote: false) }
+        let local = Volume(of: .here, level: Int(h.localLevel), muted: h.localMuted, remote: false)
         let now = nowMs()
         var next = PlayerState.of(h, server: server, name: deviceName, art: cover, local: local,
-                                  shuffle: sound.shuffled, repeatMode: sound.repeatMode, buffering: sound.state().buffering, now: now)
+                                  shuffle: h.shuffle, repeatMode: h.repeatMode, buffering: h.buffering, now: now)
         if let n = next.now {
             let shown = sought.shown(clock: next.clockMs, track: n.id, counting: next.counting, now: now)
             if shown != next.clockMs { (next.clockMs, next.clockAt) = (shown, now) }
         }
-        if next != player {
-            player = next
-            onPlayer?(next)
-        }
+        if next != player { player = next }
     }
 
     // MARK: reading
@@ -437,12 +428,8 @@ final class Model: ObservableObject {
 
     private var joined: Bool { bridge != nil && snapshot.heard.joined }
 
-    // A press of the session while this phone is part of it, or — alone, or
-    // refused because the link went since — `alone`, to the player.
-    private func press(_ p: Press, alone: @escaping () -> Void) {
-        guard let b = bridge, snapshot.heard.joined else { return alone() }
-        b.press(p) { why in if why == notPart { alone() } }
-    }
+    // A press: of the session while this phone is part of it, of its own player's queue alone.
+    private func press(_ p: Press) { bridge?.press(p) }
 
     private func albumName(_ t: LibraryEntry) -> String { album(of: t)?.name ?? "" }
 
@@ -452,7 +439,7 @@ final class Model: ObservableObject {
         let from = page?.from(playlists) ?? ""
         // An episode begun picks up where its listener left it.
         let ms = positionMs ?? (shuffled ? 0 : list.indices.contains(at) ? mine(list[at].id)?.resumeMs ?? 0 : 0)
-        press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from)) { [sound] in sound.start(q.queue, at: q.at, from: from, shuffled: shuffled, positionMs: ms) }
+        press(.start(queue: q.queue, at: q.at, positionMs: ms, from: from))
     }
 
     func markPlayed(_ t: LibraryEntry, _ finished: Bool) { bridge?.markPlayed(t, finished) }
@@ -479,20 +466,20 @@ final class Model: ObservableObject {
     /// Put `t` right after what is playing; or play it, when nothing is.
     func playNext(_ t: LibraryEntry) {
         let q = t.queued(album: albumName(t))
-        press(.next([q])) { [sound] in sound.insert([q], next: true, from: "") }
+        press(.next([q]))
     }
 
     /// Put `t` at the end of the queue; or play it, when nothing is.
     func addToQueue(_ t: LibraryEntry) {
         let q = t.queued(album: albumName(t))
-        press(.append([q])) { [sound] in sound.insert([q], next: false, from: "") }
+        press(.append([q]))
     }
 
-    func toggle() { press(.toggle) { [sound] in sound.toggle() } }
-    func resume() { press(.play) { [sound] in sound.resume() } }
-    func pause() { press(.pause) { [sound] in sound.pause() } }
-    func next() { press(.skip(1)) { [sound] in sound.next() } }
-    func previous() { press(.skip(-1)) { [sound] in sound.previous() } }
+    func toggle() { press(.toggle) }
+    func resume() { press(.play) }
+    func pause() { press(.pause) }
+    func next() { press(.skip(1)) }
+    func previous() { press(.skip(-1)) }
 
     /// How far an episode's skip goes back, and on, in seconds: what a podcast player's do.
     static let jogBack: Int64 = 15
@@ -518,7 +505,7 @@ final class Model: ObservableObject {
     func seek(_ ms: Int64) {
         // Shown where the finger left it at once, not after the press's round trip (Sought).
         if let n = player.now { sought.hold(ms, track: n.id, now: nowMs()) }
-        press(.seek(ms)) { [sound] in sound.seek(ms: ms) }
+        press(.seek(ms))
         if joined { bridge?.press(.scrub(nil)) }
         redraw()
     }
@@ -529,22 +516,22 @@ final class Model: ObservableObject {
     }
 
     /// Jump to the queue's `index`.
-    func jump(_ index: Int) { press(.jump(index)) { [sound] in sound.jumpTo(index) } }
+    func jump(_ index: Int) { press(.jump(index)) }
 
     /// Up-next rows taken out, or moved, as the queue sheet's list edits them.
     func removeUpNext(_ offsets: [Int]) {
         guard let at = player.now?.index else { return }
         for p in Queue.removing(offsets, at: at) {
-            guard case let .remove(i) = p else { continue }
-            press(p) { [sound] in sound.remove(i) }
+            guard case .remove = p else { continue }
+            press(p)
         }
     }
 
     func moveUpNext(_ offsets: [Int], to: Int) {
         guard let at = player.now?.index else { return }
         for p in Queue.moving(offsets, to: to, count: player.upNext.count, at: at) {
-            guard case let .move(from, to) = p else { continue }
-            press(p) { [sound] in sound.move(from: from, to: to) }
+            guard case .move = p else { continue }
+            press(p)
         }
     }
 
@@ -553,20 +540,17 @@ final class Model: ObservableObject {
     func moveUpNext(from: Int, to: Int) {
         guard let at = player.now?.index, from != to else { return }
         let (f, t) = (at + 1 + from, at + 1 + to)
-        press(.move(from: f, to: t)) { [sound] in sound.move(from: f, to: t) }
+        press(.move(from: f, to: t))
     }
 
     /// Alone, what is still to come shuffled; the session has no shuffle.
-    func toggleShuffle() { if !joined { sound.shuffle() } }
+    func toggleShuffle() { if !joined { bridge?.shuffle() } }
 
     /// Off, all, one, off; alone only.
-    func cycleRepeat() { if !joined { sound.cycleRepeat() } }
+    func cycleRepeat() { if !joined { bridge?.cycleRepeat() } }
 
     /// Hand the sound to another device of the account.
     func transfer(_ to: String) { if joined { bridge?.press(.transfer(to)) } }
-
-    /// The lock screen's seek: within the track, a seek.
-    func lockScreenSeek(_ ms: Int64) { seek(ms) }
 
     // MARK: volume
 
@@ -575,8 +559,7 @@ final class Model: ObservableObject {
     func volume(_ level: Int) {
         guard let v = player.volume else { return }
         if v.of != .here { return drag.to(v.of, level) }
-        sound.setVolume(level: Int64(level), muted: false)
-        redraw()
+        press(.loud(.here, .to(level)))
     }
 
     /// A volume slider let go: whatever the throttle held goes now.
@@ -585,9 +568,7 @@ final class Model: ObservableObject {
     /// What is playing's mute, the other way from how it is.
     func mute() {
         guard let v = player.volume else { return }
-        if v.of != .here { return press(.loud(v.of, .mute(!v.muted))) {} }
-        sound.setVolume(level: Int64(v.level), muted: !v.muted)
-        redraw()
+        press(.loud(v.of, .mute(!v.muted)))
     }
 
     // MARK: the picker

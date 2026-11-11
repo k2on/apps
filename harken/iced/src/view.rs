@@ -17,7 +17,6 @@ use iced::{Alignment, Element, Length, Padding};
 
 use crate::listening::{self, Clock, Output};
 use crate::nav::{Layout, Mark};
-use crate::player::Player;
 use crate::routes::{Focus, Glyph, Pane, Route};
 use crate::rows::{Item, Person};
 use crate::{licences, App, Level, Message, BAR_HEIGHT, DEVICES_WIDTH, GUTTER, PAGE_PADDING, QUEUE, SHELF, SIDEBAR, SIDEBAR_WIDTH, TRACKS};
@@ -2210,7 +2209,7 @@ impl App {
                     .unwrap_or_else(|| "none".into()),
             ),
             ("this device".into(), format!("{} \u{b7} {}", l.name(), l.me())),
-            ("can play".into(), yes(Player::AUDIBLE).into()),
+            ("can play".into(), yes(self.player.audible()).into()),
             (String::new(), String::new()),
             ("link".into(), status.link.clone()),
             (
@@ -2536,7 +2535,7 @@ impl App {
     /// sidebar is, rather than under a rule.
     fn view_bar(&self) -> Element<'_, Message> {
         let Some(bar) = self.now() else {
-            let idle = text(match Player::AUDIBLE {
+            let idle = text(match self.player.audible() {
                 true => "nothing playing \u{2014} pick a track",
                 false => "nothing playing \u{2014} pick a track (the desktop build has no audio device yet)",
             })
@@ -2558,9 +2557,9 @@ impl App {
         let position = self.scrubbing.map_or(bar.position, f64::from);
         let track = bar.track();
         // Enabled whenever there is a session to send it to: being a remote
-        // control is a use, and `AUDIBLE` only decides whether *this* device
+        // control is a use, and `audible` only decides whether *this* device
         // can be the one playing.
-        let workable = Player::AUDIBLE || self.session.is_some();
+        let workable = self.player.audible() || self.session.is_some();
         // Play/pause the size of the pair either side and a half again: the
         // one of the three anybody reaches for.
         let toggle = icon::tinted(if bar.playing { glyphs::PAUSE } else { glyphs::PLAY }, 22.0, |p| p.background.base.text);

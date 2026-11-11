@@ -16,15 +16,15 @@ struct HarkenApp: App {
     @StateObject private var model: Model
     @Environment(\.scenePhase) private var phase
     @State private var wasAway = false
-    private let nowPlaying: NowPlayingHolder
 
     init() {
         // harken's accent, the gold, before the first view draws it.
         Accent.use(.gold)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, engine: AVEngine())
+        // The phone's media player (modules/ark-media-player): AVPlayer, the audio session, and
+        // the lock screen's, Control Center's and a headset's, which the session's player drives.
+        let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, media: PhoneMediaPlayer())
         _model = StateObject(wrappedValue: m)
-        nowPlaying = NowPlayingHolder(NowPlaying(model: m))
     }
 
     var body: some Scene {
@@ -46,12 +46,6 @@ struct HarkenApp: App {
             }
         }
     }
-}
-
-/// The lock screen's end, kept for the app's life.
-final class NowPlayingHolder {
-    let held: NowPlaying
-    init(_ n: NowPlaying) { held = n }
 }
 
 /// The onboarding's step, drawn; the app once it is running.

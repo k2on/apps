@@ -47,7 +47,7 @@ pub struct NowPlaying {
 /// there is a next and a previous), skipping by seconds (an episode's), a
 /// scrubber, and the rate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Controls {
+pub struct MediaControls {
     pub has_next: bool,
     pub has_previous: bool,
     /// Seconds a skip forward moves; 0 offers none.
@@ -87,7 +87,7 @@ pub enum RemoteCommand {
 
 /// Why the audio's route changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Route {
+pub enum RouteChange {
     /// The device it played through went (the headphones out, a Bluetooth
     /// speaker gone): the player paused itself, as every phone does.
     Unplugged,
@@ -148,7 +148,7 @@ pub enum MediaEvent {
     Resumed,
     /// The audio's route changed.
     Route {
-        change: Route,
+        change: RouteChange,
     },
     /// A car or a watch opened `parent` ([`ROOT`] first): the app answers
     /// with [`set_children`].
@@ -181,7 +181,7 @@ pub trait MediaPlayer: Send + Sync {
     fn stop(&self);
     /// What the system shows; none, nothing is.
     fn set_now_playing(&self, info: Option<NowPlaying>);
-    fn set_controls(&self, controls: Controls);
+    fn set_controls(&self, controls: MediaControls);
     /// What `parent` holds, as a [`MediaEvent::Browse`] asked.
     fn set_children(&self, parent: String, items: Vec<BrowseItem>);
     fn set_listener(&self, listener: Option<std::sync::Arc<dyn MediaListener>>);
@@ -198,7 +198,7 @@ pub enum MediaOp {
     Volume(f32),
     Stop,
     NowPlaying(Option<NowPlaying>),
-    Controls(Controls),
+    Controls(MediaControls),
     Children { parent: String, items: Vec<BrowseItem> },
 }
 
@@ -255,7 +255,7 @@ pub fn stop() -> MediaOp {
 pub fn set_now_playing(info: Option<NowPlaying>) -> MediaOp {
     MediaOp::NowPlaying(info)
 }
-pub fn set_controls(controls: Controls) -> MediaOp {
+pub fn set_controls(controls: MediaControls) -> MediaOp {
     MediaOp::Controls(controls)
 }
 /// What `parent` holds, answering a [`MediaEvent::Browse`].

@@ -9,18 +9,23 @@
 //
 // It is kept with the session (Kept.kt), made by whichever end asks first —
 // the app's screens or the media service — and closed when the session is;
-// the media service finds it through [Listen.current] and attaches its
-// player ([attach]) — so the player is reconciled while there is a session
-// to reconcile against, however many screens are open on it. A press from
+// the media service finds it through [Listen.current] and attaches the
+// phone's media player ([attach]: ark-media-player's `PhoneMediaPlayer`,
+// the ExoPlayer) — so the player is reconciled while there is a session to
+// reconcile against, however many screens are open on it. A press from
 // anywhere — a button, a row, the lock screen, a headset — is [press], one
-// way in.
+// way in: of the session while the phone is part of it, of the player's own
+// queue alone (both decided in Rust, `harken/ffi`).
 package dev.harken.android
 
 import dev.harken.android.gen.Active
 import dev.harken.android.gen.Harken
 import dev.harken.android.onboarding.ArkSession
-import dev.harken.ffi.PhoneSound
+import android.os.Handler
+import android.os.Looper
 import dev.harken.ffi.Player as Reconciled
+import dev.harken.ffi.PlayerShell
+import uniffi.ark_media_player.NativeMediaPlayer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +47,10 @@ data class Heard(
     val refused: String? = null,
     /** What plays: the session's, while joined; this phone's own player's, alone. */
     val active: Active? = listening?.active,
+    /** What only this phone's own player has: filling its buffer, shuffled, repeating. */
+    val buffering: Boolean = false,
+    val shuffle: Boolean = false,
+    val repeat: Repeat = Repeat.Off,
 ) {
     /** The clock a position is counted against: this phone's own, as every entry carries its author's. */
     fun serverNow(): Long = System.currentTimeMillis()
@@ -60,6 +69,7 @@ data class Heard(
             val o = JSONObject(json)
             val l = o.optJSONObject("listening")?.let(Listening::of)
             val a = o.opt("active").takeIf { it != null && it != JSONObject.NULL }?.let(Active::of)
+            val local = o.optJSONObject("local")
             return Heard(
                 me = o.optString("me"),
                 joined = o.optBoolean("joined"),
@@ -69,6 +79,14 @@ data class Heard(
                 stats = RemoteStats.of(o.optJSONObject("stats")),
                 refused = o.optString("refused").takeIf { o.has("refused") && !o.isNull("refused") },
                 active = a,
+                buffering = local?.optBoolean("buffering") ?: false,
+                shuffle = local?.optBoolean("shuffle") ?: false,
+                repeat =
+                    when (local?.optString("repeat")) {
+                        "all" -> Repeat.All
+                        "one" -> Repeat.One
+                        else -> Repeat.Off
+                    },
             )
         }
     }
@@ -88,8 +106,25 @@ class Listen(private val session: ArkSession, val name: String) {
     private var player: Reconciled? = null
     private var unhook: () -> Unit = {}
 
-    @Volatile private var sound: PhoneSound? = null
+    @Volatile private var media: NativeMediaPlayer? = null
     @Volatile private var closed = false
+    private val main = Handler(Looper.getMainLooper())
+
+    /** What the player asks of the phone: a step now or later, and a track's cover as the system draws it. */
+    private val shell =
+        object : PlayerShell {
+            private val again = Runnable { poke() }
+
+            override fun wake(inMs: Long) {
+                if (inMs <= 0) return poke()
+                main.removeCallbacks(again)
+                main.postDelayed(again, inMs)
+            }
+
+            // A `content://` URI the app answers itself (CoverProvider.kt): what a car will load.
+            override fun cover(album: String, creator: String): String? =
+                CarArt.uri(art(album, creator).takeIf { it.isNotEmpty() }?.let { Media.url(server, it) }, album.ifEmpty { creator }, CarArt.PLAYING).toString()
+        }
 
     private val heardFlow = MutableStateFlow(Heard(me = me))
 
@@ -104,7 +139,7 @@ class Listen(private val session: ArkSession, val name: String) {
     // This phone's player, over the session's peer: what it counted kept beside the replica.
     private fun player(h: Harken): Reconciled =
         player ?: Reconciled(h.peer, me, session.dir).also {
-            it.attach(sound)
+            it.attach(media, server, shell)
             player = it
         }
 
@@ -115,20 +150,34 @@ class Listen(private val session: ArkSession, val name: String) {
         if (now != heardFlow.value) heardFlow.value = now
     }
 
-    /** The player the media service owns: reconciled from now on, until [detach]. */
-    fun attach(s: PhoneSound) {
-        sound = s
+    /** The phone's media player: reconciled from now on, until [detach]. */
+    fun attach(m: NativeMediaPlayer) {
+        media = m
         session.post { h ->
-            player(h).attach(s)
+            player(h).attach(m, server, shell)
             step(h)
         }
     }
 
-    fun detach(s: PhoneSound) {
-        if (sound !== s) return
-        sound = null
-        session.post { h -> player(h).attach(null) }
+    fun detach(m: NativeMediaPlayer) {
+        if (media !== m) return
+        media = null
+        session.post { h -> player(h).attach(null, server, null) }
     }
+
+    /** Alone: what is still to come shuffled, or not. */
+    fun shuffle() =
+        session.post { h ->
+            player(h).shuffle()
+            step(h)
+        }
+
+    /** Alone: off, all, one, off. */
+    fun cycleRepeat() =
+        session.post { h ->
+            player(h).cycleRepeat()
+            step(h)
+        }
 
     /** The player said something happened to it: reconcile. */
     fun poke() = session.post { step(it) }
@@ -136,7 +185,7 @@ class Listen(private val session: ArkSession, val name: String) {
     /**
      * A press — a transition while this phone is part of the session — previewed on the session's
      * thread, so that what is published next already shows it; then `done`, on that thread.
-     * Unlinked it is refused here ([NOT_PART]), and the caller does it to the player itself.
+     * Alone it is done to the player's own queue.
      */
     fun press(press: Press, done: (String?) -> Unit = {}) =
         session.post { h ->
@@ -150,7 +199,7 @@ class Listen(private val session: ArkSession, val name: String) {
         closed = true
         session.post {
             unhook()
-            player?.attach(null)
+            player?.attach(null, server, null)
         }
         if (current.value === this) current.value = null
     }
