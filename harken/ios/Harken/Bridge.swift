@@ -739,4 +739,10 @@ private final class PlayerHost: PlayerShell, @unchecked Sendable {
     }
 
     func cover(album: String, creator: String) -> String? { bridge?.cover(album, creator) }
+
+    /// An iPhone's system volume is the person's and no app may set it: the
+    /// player's own gain is this phone's volume in the session.
+    func volume() -> Loudness? { nil }
+
+    func setVolume(level: Int64, muted: Bool) {}
 }

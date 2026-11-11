@@ -107,7 +107,16 @@ impl Local {
     }
 }
 
+/// A volume of the device's own that is the session's for it, where it has
+/// one anybody may set: a phone's media stream, which its buttons move
+/// too. None of it (`volume` none), and the player's own gain is.
+pub trait Knob: Send + Sync {
+    fn volume(&self) -> Option<Vol>;
+    fn set(&self, v: Vol);
+}
+
 struct Shared {
+    knob: Mutex<Option<Arc<dyn Knob>>>,
     port: Arc<dyn MediaPlayer>,
     /// The server a track's file is under.
     server: String,
@@ -255,6 +264,7 @@ impl MediaSound {
         clock: impl Fn() -> i64 + Send + Sync + 'static,
     ) -> MediaSound {
         let s = Arc::new(Shared {
+            knob: Mutex::new(None),
             port,
             server: server.into(),
             local: Mutex::new(Local {
@@ -267,6 +277,17 @@ impl MediaSound {
         });
         s.port.set_listener(Some(Arc::new(Hears(s.clone()))));
         MediaSound { s }
+    }
+
+    /// The device's own volume, as the session's for it, in place of the
+    /// player's gain (a phone's media stream).
+    pub fn with_knob(self, knob: Arc<dyn Knob>) -> MediaSound {
+        *self.s.knob.lock().unwrap_or_else(|e| e.into_inner()) = Some(knob);
+        self
+    }
+
+    fn knob(&self) -> Option<Arc<dyn Knob>> {
+        self.s.knob.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// The media player it plays on.
@@ -459,7 +480,7 @@ impl MediaSound {
             }
             // Its own gain, alone: the volume this device sounds at.
             Press::Loud { level: Level::Here, change } => {
-                let v = self.s.local().vol;
+                let v = self.volume().unwrap_or_default();
                 self.set_volume(match change {
                     Change::To { level } => Vol { level: *level, muted: false },
                     Change::By { delta } => Vol {
@@ -603,8 +624,9 @@ impl Sound for MediaSound {
         (self.s.wake)(ms)
     }
 
+    /// The device's own volume where it has one, else the player's gain.
     fn volume(&self) -> Option<Vol> {
-        Some(self.s.local().vol)
+        self.knob().and_then(|k| k.volume()).or(Some(self.s.local().vol))
     }
 
     fn set_volume(&mut self, v: Vol) {
@@ -612,6 +634,9 @@ impl Sound for MediaSound {
             level: v.level.clamp(0, 100),
             muted: v.muted,
         };
+        if let Some(k) = self.knob().filter(|k| k.volume().is_some()) {
+            return k.set(v);
+        }
         self.s.local().vol = v;
         self.s.port.set_volume(if v.muted { 0.0 } else { v.level as f32 / 100.0 })
     }

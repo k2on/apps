@@ -44,7 +44,7 @@ pub use ark_format_ffi;
 
 mod player;
 mod session;
-pub use player::{Player, PlayerShell, JOG_BACK_S, JOG_FORWARD_S};
+pub use player::{Loudness, Player, PlayerShell, JOG_BACK_S, JOG_FORWARD_S};
 pub use session::{Changed, HarkenSession, HarkenView, Holding};
 
 /// harken's peer as a phone is made of it (`harken_player::config::peer`):
