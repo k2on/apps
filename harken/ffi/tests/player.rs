@@ -887,3 +887,79 @@ fn a_phone_with_a_stream_has_the_stream_s_level() {
     );
     assert_eq!(phone.sound.s().volume, None, "the gain never written");
 }
+
+/// A phone that steps as soon as it is told to — inline, reading the
+/// peer, as the apps' tests drain their sessions — is told only once the
+/// step or press that made the player answer is over: the player answers
+/// on the thread that asked it, inside that step, which holds the peer.
+///
+/// Falsified by telling the wake at once (no `Gate`): the press never
+/// returned, the inline step waiting on the peer its own press held.
+#[test]
+fn a_wake_told_during_a_step_waits_for_its_end() {
+    struct Inline {
+        player: Mutex<Option<Arc<Player>>>,
+        peer: Mutex<Option<Arc<Peer>>>,
+        woken: Mutex<u32>,
+    }
+    impl PlayerShell for Inline {
+        fn wake(&self, in_ms: i64) {
+            if in_ms > 0 {
+                return;
+            }
+            *self.woken.lock().unwrap() += 1;
+            let (player, peer) = (self.player.lock().unwrap().clone(), self.peer.lock().unwrap().clone());
+            if let (Some(player), Some(peer)) = (player, peer) {
+                player.step();
+                let _ = peer.status();
+            }
+        }
+        fn cover(&self, _: String, _: String) -> Option<String> {
+            None
+        }
+        fn volume(&self) -> Option<Loudness> {
+            None
+        }
+        fn set_volume(&self, _: i64, _: bool) {}
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let hall = Hall::new();
+        let dir = tempfile::tempdir().unwrap();
+        let said = json!({ "can_play": true, "id": "", "kind": "phone", "name": "phone", "user": "" }).to_string();
+        let peer = hall
+            .device(dir.path().to_str().unwrap().into(), "alice".into(), "phone".into(), said)
+            .unwrap();
+        let player = Player::new(peer.clone(), "phone".into(), None);
+        let shell = Arc::new(Inline {
+            player: Mutex::new(Some(player.clone())),
+            peer: Mutex::new(Some(peer.clone())),
+            woken: Mutex::new(0),
+        });
+        let sound = Fake::new();
+        player.attach(Some(sound.clone()), SERVER.into(), Some(shell.clone()));
+        hall.carry();
+        player.step();
+        hall.carry();
+        let why = player.press(
+            serde_json::to_string(&Press::Start {
+                queue: queue(),
+                at: 0,
+                position_ms: 0,
+                from: String::new(),
+            })
+            .unwrap(),
+        );
+        hall.carry();
+        player.step();
+        let woken = *shell.woken.lock().unwrap();
+        *shell.player.lock().unwrap() = None;
+        let _ = done.send((why, sound.s().playing, woken));
+    });
+    let (why, playing, woken) = finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("a wake waited on the step that asked for it");
+    assert_eq!(why, None);
+    assert!(playing, "it plays");
+    assert!(woken > 0, "and the phone was told, after");
+}

@@ -72,6 +72,7 @@ impl harken_player::Knob for Knob {
 #[derive(uniffi::Object)]
 pub struct Player {
     peer: Arc<Peer>,
+    gate: Arc<Gate>,
     inner: Mutex<harken_player::Player>,
     sound: Mutex<Option<MediaSound>>,
     shell: Mutex<Option<Arc<dyn PlayerShell>>>,
@@ -90,6 +91,7 @@ impl Player {
         };
         Arc::new(Player {
             peer,
+            gate: Arc::default(),
             inner: Mutex::new(harken_player::Player::new(&me, Some(counts))),
             sound: Mutex::default(),
             shell: Mutex::default(),
@@ -101,18 +103,11 @@ impl Player {
     /// from now on, `shell` told when to step; none, nothing is.
     pub fn attach(&self, media: Option<Arc<dyn NativeMediaPlayer>>, server: String, shell: Option<Arc<dyn PlayerShell>>) {
         *self.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
+        *self.gate.shell.lock().unwrap_or_else(|e| e.into_inner()) = shell.clone();
+        let gate = self.gate.clone();
         let knob = shell.clone().map(|sh| Arc::new(Knob(sh)) as Arc<dyn harken_player::Knob>);
         let sound = media.map(|m| {
-            let s = MediaSound::new(
-                ark_media_player::phone::port(m),
-                &server,
-                move |ms| {
-                    if let Some(s) = &shell {
-                        s.wake(ms)
-                    }
-                },
-                ark_peer::now_ms,
-            );
+            let s = MediaSound::new(ark_media_player::phone::port(m), &server, move |ms| gate.wake(ms), ark_peer::now_ms);
             match knob {
                 Some(k) => s.with_knob(k),
                 None => s,
@@ -129,6 +124,7 @@ impl Player {
     /// what the system's controls asked, pressed; what plays, as
     /// [`Player::view`] says it, shown to the system too.
     pub fn step(&self) -> String {
+        let _held = self.gate.hold();
         let Some(mut inner) = self.busy() else { return self.last() };
         let mut sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
         self.peer.with(|p| match sound.as_mut() {
@@ -162,6 +158,7 @@ impl Player {
             Ok(p) => p,
             Err(e) => return Some(format!("a press: {e}")),
         };
+        let _held = self.gate.hold();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let mut sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
         let why = self.peer.with(|p| inner.press(p, &press, sound.as_ref().map(|s| s as &dyn Sound)));
@@ -197,6 +194,58 @@ impl Player {
         let Some(inner) = self.busy() else { return self.last() };
         let sound = self.sound.lock().unwrap_or_else(|e| e.into_inner());
         self.view_of(&inner, sound.as_ref()).to_string()
+    }
+}
+
+/// When the phone is told to step. Not while a step or a press is under
+/// way: the player answers on the thread that asked it (a test's fake, a
+/// phone's at once), and a phone that steps when told — inline, as the
+/// apps' tests drain their sessions — would reach for the peer that step
+/// holds. A wake asked meanwhile is told once the last of them is over.
+#[derive(Default)]
+struct Gate {
+    shell: Mutex<Option<Arc<dyn PlayerShell>>>,
+    depth: std::sync::atomic::AtomicUsize,
+    /// Asked meanwhile: a step now, and the soonest of the later ones.
+    pending: Mutex<(bool, Option<i64>)>,
+}
+
+impl Gate {
+    fn wake(&self, ms: i64) {
+        if self.depth.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            let mut p = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            match ms <= 0 {
+                true => p.0 = true,
+                false => p.1 = Some(p.1.map_or(ms, |was| was.min(ms))),
+            }
+            return;
+        }
+        let shell = self.shell.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(s) = shell {
+            s.wake(ms)
+        }
+    }
+
+    fn hold(self: &Arc<Gate>) -> Held {
+        self.depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Held(self.clone())
+    }
+}
+
+/// A step or a press under way; its end tells a wake asked meanwhile.
+struct Held(Arc<Gate>);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if self.0.depth.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            let (now, later) = std::mem::take(&mut *self.0.pending.lock().unwrap_or_else(|e| e.into_inner()));
+            if let Some(ms) = later {
+                self.0.wake(ms)
+            }
+            if now {
+                self.0.wake(0)
+            }
+        }
     }
 }
 
