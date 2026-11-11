@@ -1292,7 +1292,7 @@
                   /usr/bin/xcrun --sdk ${p.sdk} swiftc \
                     -target ${p.triple} -sdk "$sdk" -swift-version 5 \
                     -O -whole-module-optimization -num-threads "''${NIX_BUILD_CORES:-1}" \
-                    -parse-as-library -no-serialize-debugging-options \
+                    -parse-as-library -Xfrontend -no-serialize-debugging-options \
                     -module-cache-path "$TMPDIR/module-cache" \
                     -module-name $m -I out/modules \
                     -emit-module -emit-module-path out/modules/$m.swiftmodule \
