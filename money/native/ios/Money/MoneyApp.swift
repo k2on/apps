@@ -123,7 +123,10 @@ struct Root: View {
         .task(id: model.browse) {
             guard let url = model.browse else { return }
             do {
-                let back = try await web.authenticate(using: url, callbackURLScheme: AppInfo.money.scheme)
+                // The shared session, never an ephemeral one: the provider's cookie is
+                // what makes signing in to the next app one tap.
+                let back = try await web.authenticate(
+                    using: url, callbackURLScheme: AppInfo.money.scheme, preferredBrowserSession: .shared)
                 model.signInReturned(back, error: nil)
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
                 model.signInReturned(nil, error: nil)
