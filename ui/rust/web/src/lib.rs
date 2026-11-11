@@ -350,6 +350,15 @@ pub fn page_base() -> String {
         .unwrap_or_else(|| "/".into())
 }
 
+/// Whether this page is a screenshot's (`?shots=1`, ui/docs/shots.md):
+/// then nothing on it moves (`data-motion="shots"`: every animation and
+/// transition none, the caret clear). When it is ready the app says itself
+/// (`data-ark-idle`, `data-ark-version`: its runtimes' `is_idle` and
+/// `version`), and the driver reads the page's own loading beside it.
+pub fn shots() -> bool {
+    query("shots").as_deref() == Some("1")
+}
+
 /// Whether motion takes its gentle path (ui/docs/motion.md): the address
 /// says (`?reduce-motion=1` or `0`), else the system, only when
 /// [`ALWAYS_ANIMATE`] is off.
@@ -385,7 +394,14 @@ pub fn run<A: WebApp>(app: A, accent: &str, css: &str) {
         if let Some(t) = query("theme").filter(|t| t == "light" || t == "dark") {
             let _ = root.set_attribute("data-theme", &t);
         }
-        let _ = root.set_attribute("data-motion", if reduced() { "reduced" } else { "full" });
+        let motion = if shots() {
+            "shots"
+        } else if reduced() {
+            "reduced"
+        } else {
+            "full"
+        };
+        let _ = root.set_attribute("data-motion", motion);
     }
     if let (Some(head), Ok(style)) = (doc.head(), doc.create_element("style")) {
         style.set_text_content(Some(&format!("{THEME_CSS}\n{ARKUI_CSS}\n{css}")));

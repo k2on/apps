@@ -764,6 +764,8 @@
             name = "revelation";
             appid = arkOf.revelation.a.android.package;
             ark = arkOf.revelation;
+            # ArkUI's screenshot mode and ready signal alone (ui/kotlin/shots).
+            shared = [ "ui/kotlin/shots" ];
             title = "Revelation";
             note = "Rendered on the JVM by Paparazzi through layoutlib; light beside dark.";
           };

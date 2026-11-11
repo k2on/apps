@@ -239,14 +239,15 @@ impl Slide {
         Slide::new(at, at, now, INSTANT)
     }
 
-    /// From `from` to `to`, from a standstill at `now`, on `spring`.
+    /// From `from` to `to`, from a standstill at `now`, on `spring` — or
+    /// there at once in a screenshot ([`shots`]).
     pub fn new(from: f32, to: f32, now: Instant, spring: Spring) -> Self {
         Slide {
             off: from - to,
             speed: 0.0,
             to,
             since: now,
-            spring,
+            spring: if shots() { INSTANT } else { spring },
             rest: REST,
         }
     }
@@ -425,6 +426,23 @@ pub const LAST_FRAME: Duration = Duration::from_millis(50);
 /// are being worked on. Once that is done this goes, or becomes false, and
 /// the system is listened to.
 pub const ALWAYS_ANIMATE: bool = true;
+
+/// Whether this is a screenshot or a test of one (`ARK_SHOTS` set, as
+/// app-desktop.sh sets it to the shots it takes; the phones' `-shots YES`): then every spring is
+/// [`INSTANT`], each move at its end the moment it starts, so what is drawn
+/// never depends on when it is drawn. Not reduced motion: a fade is a move
+/// too, and is at its end as well. Asked once, and kept.
+pub fn shots() -> bool {
+    static SHOTS: OnceLock<bool> = OnceLock::new();
+    // The capture sets it to its shots.json (app-desktop.sh); any value but
+    // none, an empty one or `0` is a screenshot's.
+    *SHOTS.get_or_init(|| {
+        !matches!(
+            std::env::var("ARK_SHOTS").ok().as_deref().map(str::trim),
+            None | Some("" | "0" | "false" | "no")
+        )
+    })
+}
 
 /// Whether to keep motion down: what slides or grows fades instead, and a
 /// row out of the way is there at once.

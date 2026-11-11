@@ -72,7 +72,16 @@ public fun Face(
         if (picture.isNotEmpty()) {
             val px = with(LocalDensity.current) { side.roundToPx() }
             var bitmap by remember(picture) { mutableStateOf(Faces.cached(picture)) }
-            if (bitmap == null) LaunchedEffect(picture, px) { bitmap = Faces.load(picture, px) }
+            if (bitmap == null)
+                LaunchedEffect(picture, px) {
+                    // A screenshot waits until it has come, or failed (Ready, ui/docs/shots.md).
+                    Ready.waiting("face", true)
+                    try {
+                        bitmap = Faces.load(picture, px)
+                    } finally {
+                        Ready.waiting("face", false)
+                    }
+                }
             bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         }
     }

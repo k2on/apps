@@ -34,7 +34,11 @@ public struct Face: View {
                 .font(.system(size: side * 0.4, weight: .semibold))
                 .foregroundStyle(Color.onAccent)
             if let url = URL(string: picture), !picture.isEmpty {
-                AsyncImage(url: url) { phase in phase.image?.resizable().scaledToFill() }
+                AsyncImage(url: url) { phase in
+                    ZStack { phase.image?.resizable().scaledToFill() }
+                        // Not ready for a screenshot until it has come, or failed.
+                        .readyWhile(phase.isLoading, "face \(picture)")
+                }
             }
         }
         .frame(width: side, height: side)
@@ -45,5 +49,13 @@ public struct Face: View {
     private var letters: String {
         let l = Pictures.initials(name)
         return l.isEmpty ? String(name.prefix(1)) : l
+    }
+}
+
+extension AsyncImagePhase {
+    /// Whether it is still on its way: neither come nor failed.
+    var isLoading: Bool {
+        if case .empty = self { return true }
+        return false
     }
 }

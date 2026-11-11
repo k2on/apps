@@ -35,6 +35,7 @@ android {
     sourceSets {
         getByName("main") {
             kotlin.srcDir(arkUi)
+            kotlin.srcDir(rootProject.file("../../ui/kotlin/shots"))
         }
     }
 }
