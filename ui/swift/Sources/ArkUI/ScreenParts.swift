@@ -859,6 +859,8 @@ public struct WideButton: View {
         }
         .controlSize(.large)
         .disabled(!enabled || busy)
+        // Its title is its name, whatever the spinner beside it says.
+        .accessibilityLabel(title)
         if prominent {
             b.buttonStyle(.glassProminent).tint(Color.accent)
         } else {

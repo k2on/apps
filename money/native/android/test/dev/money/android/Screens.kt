@@ -28,7 +28,15 @@ import dev.arkdb.auth.Step
 import kotlinx.coroutines.flow.MutableStateFlow
 import uniffi.money_bridge.FirstRunApp
 import uniffi.money_bridge.WelcomeMsg
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import dev.arkui.WideButton
 import org.junit.After
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -83,6 +91,25 @@ class Screens {
             val page = first { it.event(Event.Launched(Remembered("https://money.example.com", null, false), null, false)) }
             StartScreens(Step.Server("", false, null), page, null, {}, none)
         }
+
+    /**
+     * The first run's wide button says its title to a screen reader and a driver, on a phone and on
+     * a tablet's width: dry run 43105302139 found a tablet's and an open Fold's Continue with no text
+     * in the accessibility tree. Falsified by taking `contentDescription` off `WideButton`'s button
+     * while its label clears its own semantics.
+     */
+    @Test fun wideButtonIsNamed() {
+        for (config in listOf(DeviceConfig.PIXEL_5, DeviceConfig.NEXUS_10)) {
+            paparazzi.unsafeUpdateConfig(deviceConfig = config)
+            val view = ComposeView(paparazzi.context).apply { setContent { MoneyTheme(dark = false, dynamic = false) { WideButton("Continue", true, true, false) {} } } }
+            paparazzi.snapshot(view, "first-run-button-${config.screenWidth}")
+            val root = (view.getChildAt(0) as ViewRootForTest).semanticsOwner.rootSemanticsNode
+            fun all(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap(::all)
+            val button = all(root).firstOrNull { it.config.getOrNull(SemanticsProperties.Role) == Role.Button }
+            val said = button?.config?.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+            assertTrue("the button at ${config.screenWidth}px says ${said}", "Continue" in said)
+        }
+    }
 
     @Test fun budget() {
         val holder = BudgetHolder(book.session, {}, { book.state.value.today }, null)

@@ -27,7 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,7 +78,7 @@ public fun AddressField(
 @Composable
 public fun WideButton(title: String, prominent: Boolean, enabled: Boolean, busy: Boolean, onTap: () -> Unit) {
     val label: @Composable () -> Unit = {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.clearAndSetSemantics {}) {
             if (busy) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                 Spacer(Modifier.width(12.dp))
@@ -83,8 +87,15 @@ public fun WideButton(title: String, prominent: Boolean, enabled: Boolean, busy:
         }
     }
     // The iPhone's wide button: as tall (`wide-button-height`), its title the body's size, the
-    // other one filled quietly as its glass is, not outlined.
-    val wide = Modifier.fillMaxWidth().height(Space.button)
+    // other one filled quietly as its glass is, not outlined. Its title is its accessible name, said
+    // outright on the button itself, so whatever its label's layout does at a width (dry run
+    // 43105302139: a tablet's and an open Fold's Continue had no text in the tree) a screen reader
+    // and a driver read it; the label's own text is left out so it is not said twice.
+    val wide =
+        Modifier.fillMaxWidth().height(Space.button).semantics {
+            contentDescription = title
+            role = Role.Button
+        }
     if (prominent) {
         Button(onClick = onTap, enabled = enabled && !busy, modifier = wide) { ProvideTextStyle(MaterialTheme.typography.bodyLarge) { label() } }
     } else {
