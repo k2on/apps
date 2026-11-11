@@ -1244,6 +1244,72 @@
           # the app. It needs no Xcode, and a new Xcode builds no kernel.
           iosKernel = { ffi, framework, targets ? iosTargets }:
             outputs.x86_64-linux.appleKernel (ffi // { inherit framework targets; });
+          # **ArkUI for SwiftUI, compiled once** per Apple platform (`kind`, as
+          # `iosApp`'s): ui/swift's two modules, ArkUICore and then ArkUI
+          # over it, each a static library and its binary .swiftmodule, by
+          # the pinned Xcode's swiftc. Every app of that platform links it
+          # (`iosApp`) rather than compiling the package from source in its
+          # own xcodebuild, so it is compiled once a run, not once an app,
+          # and only ui/swift moves it: an edit to an app rebuilds that app
+          # alone. Whole-module and -O, as Release builds it; Swift 5's
+          # mode, as the package's tools version (5.9) gives it. A binary
+          # module is read only by the compiler that wrote it, which the pin
+          # (`xcode`) holds every build to.
+          #
+          # Xcode's compiler built it, so it is named for Xcode: the Mac's
+          # push filter (`[Xx]code([^Gg]|$)`) keeps it off the public cache,
+          # and each app copies it into its own build directory before
+          # linking, so no app's output refers to it. `__noChroot` as the
+          # app's own build, for xcrun and the SDKs.
+          arkuiSwift = kind:
+            let
+              p = {
+                simulator = { sdk = "iphonesimulator"; triple = "arm64-apple-ios26.0-simulator"; };
+                archive = { sdk = "iphoneos"; triple = "arm64-apple-ios26.0"; };
+                macos = { sdk = "macosx"; triple = "arm64-apple-macos26.0"; };
+              }.${kind};
+              dev = xcode.developer;
+            in
+            pkgs.stdenv.mkDerivation {
+              name = "arkui-swift-${kind}-xcode${xcode.version}";
+              src = only [ "ui/swift" ];
+              __noChroot = true;
+              dontConfigure = true;
+              buildPhase = ''
+                runHook preBuild
+                export DEVELOPER_DIR=${dev}
+                ${xcode.check}
+                export HOME=$TMPDIR/home CFFIXED_USER_HOME=$TMPDIR/home
+                mkdir -p "$HOME"
+                unset SDKROOT MACOSX_DEPLOYMENT_TARGET CC CXX LD AR AS RANLIB STRIP NM
+                for v in $(env | sed -n 's/^\(NIX_[A-Za-z0-9_]*\)=.*/\1/p'); do
+                  case $v in NIX_BUILD_TOP|NIX_BUILD_CORES|NIX_STORE) ;; *) unset "$v" ;; esac
+                done
+                sdk=$(/usr/bin/xcrun --sdk ${p.sdk} --show-sdk-path)
+                mkdir -p out/lib out/modules
+                for m in ArkUICore ArkUI; do
+                  start=$(date +%s)
+                  /usr/bin/xcrun --sdk ${p.sdk} swiftc \
+                    -target ${p.triple} -sdk "$sdk" -swift-version 5 \
+                    -O -whole-module-optimization -num-threads "''${NIX_BUILD_CORES:-1}" \
+                    -parse-as-library -no-serialize-debugging-options \
+                    -module-cache-path "$TMPDIR/module-cache" \
+                    -module-name $m -I out/modules \
+                    -emit-module -emit-module-path out/modules/$m.swiftmodule \
+                    -emit-library -static -o out/lib/lib$m.a \
+                    ui/swift/Sources/$m/*.swift
+                  echo "$m (${kind}): compiled in $(( $(date +%s) - start ))s"
+                done
+                runHook postBuild
+              '';
+              installPhase = "cp -R out $out";
+              dontStrip = true;
+              dontFixup = true;
+              meta.platforms = [ "aarch64-darwin" ];
+            };
+          arkui-swift-simulator = arkuiSwift "simulator";
+          arkui-swift-archive = arkuiSwift "archive";
+          arkui-swift-macos = arkuiSwift "macos";
           # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
           # `framework` its kernel's; `kind` "simulator" (the .app, for its
@@ -1265,6 +1331,15 @@
                 targets = { simulator = [ "aarch64-apple-ios-sim" ]; archive = [ "aarch64-apple-ios" ]; macos = [ "aarch64-apple-darwin" ]; }.${kind};
               };
               dev = xcode.developer;
+              # ArkUI, as this platform's apps all link it (`arkuiSwift`).
+              arkui = arkuiSwift kind;
+              # The device modules the app lists (its app.toml's `modules`),
+              # each its swift/ alone, and its own (<name>/modules); none
+              # for an app with no app.toml. They are compiled into the app:
+              # each implements a protocol UniFFI writes into the app's own
+              # bindings, so none can be compiled ahead of it.
+              modules = lib.optionals (ark != null)
+                (map (m: "modules/${m}/swift") (ark.a.modules or [ ]) ++ [ "${name}/modules" ]);
               common = ''
                 -project ${App}.xcodeproj -scheme ${App} -configuration Release \
                 -derivedDataPath $TMPDIR/derived \
@@ -1300,10 +1375,10 @@
             pkgs.stdenv.mkDerivation {
               pname = if kind == "macos" then "${name}-macos" else "${name}-ios-${kind}";
               version = "0.1.0";
-              # The app, ArkUI, and the device modules its modules.yml
-              # compiles in (modules/<name>/swift, ui/docs/app.md).
-              src = only ([ "ui/swift" "modules" ] ++ (if ark == null then [ "${name}/ios" ] else [ "${name}/native/ios" "${name}/app.toml" ]));
-              nativeBuildInputs = [ xcodegen ];
+              # The app, and the device modules it compiles in (`modules`):
+              # ArkUI is linked prebuilt (`arkui`), so ui/swift is not here.
+              src = only (modules ++ (if ark == null then [ "${name}/ios" ] else [ "${name}/native/ios" "${name}/app.toml" ]));
+              nativeBuildInputs = [ xcodegen pkgs.yq-go ];
               # xcodebuild, and nothing else here: see above.
               __noChroot = true;
               buildPhase = ''
@@ -1333,6 +1408,20 @@
                   chmod -R u+w ${name}/.native
                   cd ${name}/.native/ios
                 ''}
+                # ArkUI linked as built for this platform (`arkui`), not its
+                # package compiled again: the package and its product taken out
+                # of the project, and the library and its modules given to each
+                # target that had it. Copied here first, so the app refers to
+                # nothing of it in the store.
+                cp -R ${arkui} $TMPDIR/arkui
+                chmod -R u+w $TMPDIR/arkui
+                ARKUI=$TMPDIR/arkui yq -i '
+                  del(.packages.ArkUI)
+                  | (.targets[] | select((.dependencies // []) | any_c(.package == "ArkUI"))) |= (
+                      .dependencies |= map(select(.package != "ArkUI"))
+                      | .settings.base.SWIFT_INCLUDE_PATHS = "$(inherited) " + strenv(ARKUI) + "/modules"
+                      | .settings.base.LIBRARY_SEARCH_PATHS = "$(inherited) " + strenv(ARKUI) + "/lib"
+                      | .settings.base.OTHER_LDFLAGS = "$(inherited) -lArkUI -lArkUICore")' project.yml
                 xcodegen generate
                 # SwiftPM sandboxes the manifests and plugins it builds, which
                 # cannot be done inside nix's: told not to.
@@ -1345,7 +1434,7 @@
               '';
               dontStrip = true;
               dontFixup = true;
-              passthru = { inherit bundle; };
+              passthru = { inherit bundle arkui; };
               meta.platforms = [ "aarch64-darwin" ];
             };
           # money's generated project is Linux's (`arkOf` there): what the
@@ -1546,6 +1635,8 @@
             # screenshots), as the archive TestFlight is sent, and the kernel.
             inherit money-ios-simulator harken-ios-simulator money-ios-archive harken-ios-archive money-macos;
             inherit money-ios-kernel harken-ios-kernel money-ios-kernel-simulator harken-ios-kernel-simulator;
+            # ArkUI for SwiftUI, compiled once per platform for every app.
+            inherit arkui-swift-simulator arkui-swift-archive arkui-swift-macos;
             inherit harken-server arkdb;
             # `nix run .#update-catalogue`, from the repository's root: the
             # demo's copy of the catalogue made from the `classical` input.
