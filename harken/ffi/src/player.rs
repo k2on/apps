@@ -335,6 +335,8 @@ impl Player {
             },
             album: t.album.clone(),
             artwork: cover,
+            // With no cover, or none to be had, the derived square the screens draw for it.
+            placeholder: Some(if t.album.is_empty() { t.title.clone() } else { t.album.clone() }),
             duration_ms: t.duration_ms,
             position_ms: a.position(ark_peer::now_ms()),
             rate: if counting { 1.0 } else { 0.0 },

@@ -169,7 +169,8 @@ impl NativeMediaPlayer for Fake {
 }
 
 /// The phone's end of its player: the wake it was last asked for, a cover
-/// for anything, and (Android's) a media stream, or none (an iPhone's).
+/// for anything on an album, and (Android's) a media stream, or none (an
+/// iPhone's).
 #[derive(Default)]
 struct Shell(Mutex<Option<i64>>, Mutex<Option<Loudness>>);
 
@@ -181,7 +182,7 @@ impl PlayerShell for Shell {
     }
 
     fn cover(&self, album: String, _: String) -> Option<String> {
-        Some(format!("{SERVER}/art/{album}.jpg"))
+        (!album.is_empty()).then(|| format!("{SERVER}/art/{album}.jpg"))
     }
 
     fn volume(&self) -> Option<Loudness> {
@@ -998,4 +999,40 @@ fn a_list_started_shuffled_alone_lights_shuffle() {
     assert_eq!(started(true), Some(true), "started shuffled: Shuffle is lit");
     assert_eq!(phone.sound.title().as_deref(), Some("a"), "and what it pressed plays");
     assert_eq!(started(false), Some(false), "started in order: it is out");
+}
+
+/// A track with no cover is shown its derived square, as the screens draw
+/// it under a cover: the system is given the square's seed (the album's
+/// name, else the track's) beside the cover's address, or in its place —
+/// never an empty tile.
+///
+/// Falsified by showing no placeholder (`placeholder: None` in `show`): a
+/// track with no cover had nothing on the lock screen.
+#[test]
+fn a_track_with_no_cover_is_shown_its_square() {
+    let hall = Hall::new();
+    let phone = on(&hall, "phone", true, "phone");
+    drop_link(&phone);
+    let mut bare = track("a", 1, 100_000);
+    bare.album = String::new();
+    phone.press(Press::Start {
+        queue: vec![bare, track("b", 2, 100_000)],
+        at: 0,
+        position_ms: 0,
+        from: String::new(),
+        shuffled: false,
+    });
+    phone.reconcile();
+    let shown = phone.sound.s().shown.clone().expect("something shown");
+    assert_eq!(shown.artwork, None, "no cover to fetch");
+    assert_eq!(shown.placeholder.as_deref(), Some("a"), "the track's own square stands in");
+    phone.press(Press::Skip { by: 1 });
+    phone.reconcile();
+    let shown = phone.sound.s().shown.clone().expect("something shown");
+    assert_eq!(shown.artwork.as_deref(), Some("http://harken.test/art/Water Music.jpg"));
+    assert_eq!(
+        shown.placeholder.as_deref(),
+        Some("Water Music"),
+        "and the album's, should its cover not come"
+    );
 }

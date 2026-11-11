@@ -51,6 +51,7 @@ pub mod phone {
         pub artist: String,
         pub album: String,
         pub artwork: Option<String>,
+        pub placeholder: Option<String>,
         pub duration_ms: i64,
         pub position_ms: i64,
         pub rate: f32,

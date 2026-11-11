@@ -508,7 +508,16 @@ impl MediaSound {
 /// words and picture at the same rate, within a second of where that rate
 /// would have it.
 fn moved_on(was: &NowPlaying, at: i64, now: &NowPlaying, then: i64) -> bool {
-    let words = |n: &NowPlaying| (n.title.clone(), n.artist.clone(), n.album.clone(), n.artwork.clone(), n.duration_ms);
+    let words = |n: &NowPlaying| {
+        (
+            n.title.clone(),
+            n.artist.clone(),
+            n.album.clone(),
+            n.artwork.clone(),
+            n.placeholder.clone(),
+            n.duration_ms,
+        )
+    };
     let expected = was.position_ms + ((then - at).max(0) as f32 * was.rate) as i64;
     words(was) == words(now) && was.rate == now.rate && (now.position_ms - expected).abs() < 1_000
 }

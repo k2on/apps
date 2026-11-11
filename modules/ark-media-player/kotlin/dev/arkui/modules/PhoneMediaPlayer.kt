@@ -11,10 +11,15 @@
 // is asked — every command of the system's (play, pause, a skip, a seek, a speed) is said to the
 // app as a `Remote`, and the app decides. Every call returns at once and is done on the main
 // thread; every event is told from it.
+//
+// The picture is always one: the artwork from its URI, or — with none — ark-ui's derived square of
+// the app's `placeholder` seed, in the palette the app gave ([ArkMedia.squares]), handed to the
+// media session as the picture's bytes. Never an empty tile.
 package dev.arkui.modules
 
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -22,6 +27,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
+import androidx.compose.ui.graphics.Color
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -36,6 +42,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import dev.arkui.ArkTheme
+import dev.arkui.squareBitmap
+import java.io.ByteArrayOutputStream
 import uniffi.ark_media_player.BrowseItem
 import uniffi.ark_media_player.MediaControls
 import uniffi.ark_media_player.MediaEvent
@@ -126,6 +135,24 @@ object ArkMedia {
     internal var info: NowPlaying? = null
     internal var controls = MediaControls(false, false, 0u, 0u, false, false)
 
+    /**
+     * The derived square's gradients the placeholder is drawn in: the app's, for the dark side, as
+     * the notification and the lock screen draw it over a dark shade. Ark-ui's neutral ones until
+     * the app sets its own.
+     */
+    var squares: List<Pair<Color, Color>> = ArkTheme.NeutralDark
+
+    /** The placeholder last drawn, by its seed and palette: drawn once, not at every state. */
+    private var drawn: Triple<String, List<Pair<Color, Color>>, ByteArray>? = null
+
+    /** The derived square of `seed`, as the picture's bytes (PNG). */
+    private fun placeholder(seed: String): ByteArray {
+        drawn?.takeIf { it.first == seed && it.second == squares }?.let { return it.third }
+        val out = ByteArrayOutputStream()
+        squareBitmap(seed, squares, PLACEHOLDER_PX).compress(Bitmap.CompressFormat.PNG, 100, out)
+        return out.toByteArray().also { drawn = Triple(seed, squares, it) }
+    }
+
     /** Whether the ExoPlayer has a sound of the app's: else what is shown is the app's [info] alone. */
     internal var loaded = false
     private var told = false
@@ -196,9 +223,14 @@ object ArkMedia {
     internal fun metadata(i: NowPlaying?): MediaMetadata {
         val b = MediaMetadata.Builder().setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true).setIsBrowsable(false)
         if (i == null) return b.build()
-        return b.setTitle(i.title).setArtist(i.artist).setAlbumTitle(i.album).setArtworkUri(i.artwork?.let(Uri::parse))
-            .setDurationMs(i.durationMs.takeIf { it > 0 })
-            .build()
+        b.setTitle(i.title).setArtist(i.artist).setAlbumTitle(i.album).setDurationMs(i.durationMs.takeIf { it > 0 })
+        val art = i.artwork
+        val seed = i.placeholder
+        when {
+            art != null -> b.setArtworkUri(Uri.parse(art))
+            seed != null -> b.setArtworkData(placeholder(seed), MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        }
+        return b.build()
     }
 
     fun show(i: NowPlaying?) {
@@ -283,6 +315,9 @@ object ArkMedia {
     }
 
     private const val TICK_MS = 500L
+
+    /** How many pixels across the placeholder is drawn: a lock screen's cover. */
+    private const val PLACEHOLDER_PX = 512
 }
 
 /**

@@ -2849,6 +2849,8 @@ impl App {
                 artist: t.creator.clone(),
                 album: t.album.clone(),
                 artwork: Some(self.art_url(self.art_of(t))).filter(|u| !u.is_empty()),
+                // MPRIS has no picture but an address: none stands in.
+                placeholder: None,
                 duration_ms: (n.duration * 1000.0) as i64,
                 position_ms: (n.position * 1000.0) as i64,
                 rate: if n.playing { 1.0 } else { 0.0 },

@@ -20,7 +20,7 @@ The port is the runtime's (`ark_module::media_player`), re-exported here:
 ```rust
 // The calls, each a MediaOp whose output is ():
 load(url, at_ms)  play()  pause()  seek(at_ms)  set_rate(rate)  set_volume(0.0..=1.0)  stop()
-set_now_playing(Option<NowPlaying>)   // title, artist, album, artwork URL, duration, position, rate
+set_now_playing(Option<NowPlaying>)   // title, artist, album, artwork URL, placeholder seed, duration, position, rate
 set_controls(MediaControls)                // has_next, has_previous, skip_forward_s, skip_back_s, can_seek, can_rate
 set_children(parent, Vec<BrowseItem>) // the browse tree, answering MediaEvent::Browse
 
@@ -58,7 +58,9 @@ system does to it, each said: an interruption (`Interrupted`, and
   interruptions (`Interrupted`; `Resumed` when the system says to go on,
   and it goes on) and route changes (the headphones out pause it:
   `Route { Unplugged }`); `MPNowPlayingInfoCenter` (title, artist, album,
-  artwork fetched from its URL, duration, elapsed time, rate; the player's
+  artwork fetched from its URL — or, with none or none to be had, ArkUI's
+  derived square of the `placeholder` seed in the palette the app gives
+  `PhoneMediaPlayer(squares:)` — duration, elapsed time, rate; the player's
   own position while it has a sound, the app's otherwise) and
   `MPRemoteCommandCenter` (play, pause, toggle, stop, next, previous, skip
   forward and back by the controls' seconds, the scrubber, the rate), each
@@ -72,7 +74,9 @@ system does to it, each said: an interruption (`Interrupted`, and
   noisy (`Route { Unplugged }`), a network wake lock, inside `ArkMediaService`,
   a `MediaLibraryService` Media3 puts in the foreground with its media
   notification while the sound plays. The media session shows `ShownPlayer`:
-  the ExoPlayer's sound with the app's words and artwork, or — nothing
+  the ExoPlayer's sound with the app's words and artwork (with no artwork,
+  ark-ui's derived square of the `placeholder` seed, in `ArkMedia.squares`,
+  as the picture's bytes), or — nothing
   loaded — the app's `NowPlaying` alone (a remote for a sound made
   elsewhere), the buttons the controls offer; every command a `Remote`, a
   car's or a watch's choice a `PlayItem`. The service is a media library:
@@ -83,12 +87,14 @@ system does to it, each said: an interruption (`Interrupted`, and
 - **Browser** (feature `web`, wasm32): `Browser`, an `<audio>` element and
   the Media Session API (`navigator.mediaSession`: metadata, action
   handlers, `setPositionState`, `playbackState`), reached by name so a
-  browser without it plays all the same. No tree.
+  browser without it plays all the same. No tree, and no placeholder: the
+  Media Session takes a picture only by its address.
 - **Linux desktop** (feature `desktop`): `Desktop`, symphonia's decoders on
   the sound card through rodio (cpal, ALSA), a stream read by range
   requests, and MPRIS (`org.mpris.MediaPlayer2.<name>.instance<pid>`) on the
   session bus for the media keys, the desktop's widgets and `playerctl`.
-  No sound card is `Failed`, said; no session bus is no MPRIS. No tree.
+  No sound card is `Failed`, said; no session bus is no MPRIS. No tree, and
+  no placeholder: MPRIS's `mpris:artUrl` is an address.
 - **Tests**: `Fake` keeps what it was asked (`asked`, `take`), what it shows
   (`now_playing`, `controls`) and its tree (`browse`, which asks as the
   system would), and tells its listener what a test says (`hear`).

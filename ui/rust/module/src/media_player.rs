@@ -37,6 +37,11 @@ pub struct NowPlaying {
     pub album: String,
     /// The artwork's address (`https:`, `file:`, `content:`), when there is one.
     pub artwork: Option<String>,
+    /// What stands in for the artwork while there is none, or none to be
+    /// had (no address, or one that cannot be fetched): the seed of arkui's
+    /// derived square (`Art.pick` over the palette the app gave the player),
+    /// so the system never draws an empty tile. None, and nothing stands in.
+    pub placeholder: Option<String>,
     pub duration_ms: i64,
     pub position_ms: i64,
     /// 1.0 playing as recorded, 0.0 paused.

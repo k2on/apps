@@ -422,6 +422,7 @@ fn what_the_system_shows_is_told_when_it_changes() {
         artist: "Miles Davis".into(),
         album: "Kind of Blue".into(),
         artwork: None,
+        placeholder: None,
         duration_ms: 545_000,
         position_ms: ms,
         rate,

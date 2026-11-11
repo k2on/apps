@@ -13,6 +13,10 @@
 //   Dynamic Island, a paired Apple Watch's Now Playing and CarPlay's
 //   now-playing screen show; and `MPRemoteCommandCenter`, whose commands —
 //   theirs, and a headset's — are each said as a `Remote`, never done here.
+//   Its picture is always one: the artwork, or — with none, or none to be
+//   had — ArkUI's derived square of the app's `placeholder` seed, in the
+//   palette the app gave (`squares`), the dark side's, as the card is drawn
+//   over a dimmed wallpaper. Never an empty tile.
 //
 // Every call returns at once and is done on the main queue; every event is
 // told from it. An app that lists `media-player` in its modules.toml
@@ -22,8 +26,10 @@ import Foundation
 #if canImport(ArkBindings)
 import ArkBindings
 #endif
+import ArkUI
 import AVFoundation
 import MediaPlayer
+import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -45,12 +51,17 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
     private var itemNotes = [NSObjectProtocol]()
     private var ticker: Any?
     private var commands = [(MPRemoteCommand, Any)]()
-    private var artworkURL: String?
+    /// What the artwork shown was made of: its address and the placeholder's seed.
+    private var artworkOf: (url: String?, seed: String?)?
     private var artwork: MPMediaItemArtwork?
+    /// The derived square's palette, as the app's screens draw it.
+    private let squares: Squares
     /// What a car or a watch was given to browse, by parent: kept for CarPlay (README.md).
     private var children = [String: [BrowseItem]]()
 
-    public override init() {
+    /// A player whose placeholder artwork is drawn in `squares`, the app's palette.
+    public init(squares: Squares = .neutral) {
+        self.squares = squares
         super.init()
         player.automaticallyWaitsToMinimizeStalling = true
         DispatchQueue.main.async { self.setUp() }
@@ -255,30 +266,66 @@ public final class PhoneMediaPlayer: NSObject, NativeMediaPlayer, @unchecked Sen
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
-        if let a = artwork, artworkURL == i.artwork { d[MPMediaItemPropertyArtwork] = a }
+        let made = artworkOf.map { $0.url == i.artwork && $0.seed == i.placeholder } ?? false
+        if let a = artwork, made { d[MPMediaItemPropertyArtwork] = a }
         center.nowPlayingInfo = d
         #if os(macOS)
         center.playbackState = sounding ? .playing : .paused
         #endif
-        if artworkURL != i.artwork { fetchArtwork(i.artwork) }
+        if !made { fetchArtwork(i.artwork, seed: i.placeholder) }
     }
 
-    private func fetchArtwork(_ url: String?) {
-        artworkURL = url
+    // The artwork from its address, then the card again; with none, or none to be had, the
+    // placeholder at once.
+    private func fetchArtwork(_ url: String?, seed: String?) {
+        artworkOf = (url, seed)
         artwork = nil
-        guard let s = url, let u = URL(string: s) else { return }
+        guard let s = url, let u = URL(string: s) else {
+            if placeholder(seed) { showInfo() }
+            return
+        }
         URLSession.shared.dataTask(with: u) { [weak self] data, _, _ in
             DispatchQueue.main.async {
-                guard let self = self, self.artworkURL == s, let data = data else { return }
+                guard let self = self, let was = self.artworkOf, was.url == s, was.seed == seed else { return }
                 #if canImport(UIKit)
-                guard let image = UIImage(data: data) else { return }
+                let image = data.flatMap { UIImage(data: $0) }
                 #else
-                guard let image = NSImage(data: data) else { return }
+                let image = data.flatMap { NSImage(data: $0) }
                 #endif
-                self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                if let image = image {
+                    self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                } else if !self.placeholder(seed) {
+                    return
+                }
                 self.showInfo()
             }
         }.resume()
+    }
+
+    /// How many pixels across the placeholder is drawn: a lock screen's cover.
+    private static let placeholderPx: CGFloat = 512
+
+    /// ArkUI's derived square of `seed` made the artwork, on the main queue; false for no seed,
+    /// or one SwiftUI could not render.
+    private func placeholder(_ seed: String?) -> Bool {
+        guard let seed = seed else { return false }
+        return MainActor.assumeIsolated {
+            guard #available(iOS 16, macOS 13, *) else { return false }
+            let side = PhoneMediaPlayer.placeholderPx
+            let renderer = ImageRenderer(
+                content: Square(seed: seed)
+                    .frame(width: side, height: side)
+                    .environment(\.squares, squares)
+                    .environment(\.colorScheme, .dark))
+            renderer.scale = 1
+            #if canImport(UIKit)
+            guard let image = renderer.uiImage else { return false }
+            #else
+            guard let image = renderer.nsImage else { return false }
+            #endif
+            artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            return true
+        }
     }
 
     // MARK: the system's controls

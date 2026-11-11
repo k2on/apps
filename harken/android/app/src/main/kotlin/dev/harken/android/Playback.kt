@@ -163,6 +163,8 @@ class PlaybackService : ArkMediaService() {
         val made = session ?: return
         // This service is the module's: the player needs no controller of its own to keep it.
         media = PhoneMediaPlayer(this, service = null)
+        // A track with no cover stands in harken's own square, as the screens draw it.
+        ArkMedia.squares = Palette.DarkArt
         // The phone's own volume, a device's of the session: its media stream, which the
         // reconciler follows and reports — rung whenever a volume setting moves, since what moved
         // it is read from the stream itself.
