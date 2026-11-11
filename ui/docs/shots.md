@@ -74,7 +74,8 @@ its tree kept beside it. It is never how long a shot waits when all is well.
   1 hour ago" holds for the hour after (in the day's first hour, minutes
   still).
 - What the system shows that is not the app: Android's own animations
-  off, its status bar's icons all said, the launcher's home laid out
+  off, its status bar's icons all said, its navigation hidden in shots
+  mode (the gesture handle, the launcher's taskbar), the launcher's home laid out
   before the app is installed (its taskbar on the tablet); each iOS device
   pass on a server of its own (the iPad's not left what the iPhone's
   played).
