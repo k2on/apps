@@ -1,11 +1,10 @@
 #![cfg(feature = "page")]
-#![cfg(feature = "page")]
 //! Where a receipt is in a camera frame (src/page.rs): pages drawn on a
 //! table, a counter and clutter (as the scanner's bench drew them: a
 //! printed receipt warped into the scene), each found at the corners it was
 //! drawn at.
 
-use money_app::ffi::money_page_corners;
+use money_bridge::money_page_corners;
 
 /// Each scene, and the corners its receipt was drawn at, x then y from 0
 /// to 1, clockwise from the top left.

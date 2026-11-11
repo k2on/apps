@@ -23,9 +23,8 @@ use ark::format::Encode;
 use ark::log::{EntryId, Record, Snapshot};
 use ark::peer::Ctx;
 use ark::store::Store;
-use ark_peer::{Config, Disk, Memory, Peer as Replica};
 
-use crate::dates::{add_days, add_months, day_of_ms, month_of};
+use crate::dates::{add_days, add_months, month_of};
 use crate::plaid::{import_of, PlaidAccount, PlaidRemoved, PlaidTransaction, Pulled};
 use crate::*;
 
@@ -37,7 +36,8 @@ fn domain() -> std::sync::Arc<ark::domain::Domain> {
 pub const ME: &str = "alex";
 /// The household's other member.
 pub const PARTNER: &str = "sam";
-const LOCAL: &str = "local";
+/// The demo's own session: its entries' authority.
+pub const LOCAL: &str = "local";
 
 /// The bank the card is at, and its account there.
 pub const BANK_NAME: &str = "chase";
@@ -383,20 +383,10 @@ fn plaid_txn(id: &str, date: &str, payee: &str, cents: i64, pending: bool, repla
     }
 }
 
-/// The household, three months of it up to `today`: the demo's records,
-/// its own authority's, as the demo window and the phones' demo open them.
-pub fn seeded_disk(today: &str, now: i64) -> Memory {
-    let mut disk = Memory::default();
-    log(&mut disk, today, now).expect("memory takes it");
-    ark_peer::local::preset(&mut disk, |r| (r.actor, r.session) = (Some(ME.into()), LOCAL.into())).expect("memory takes it");
-    disk
-}
-
-/// The household written onto `disk` as a log starting from its snapshot:
-/// what a server's data directory (`<data>/log`) is seeded with before it
-/// starts, so a phone signed in as [`ME`] opens on it (`money-seed`, what
-/// the app screenshots run: .github/screens/apps.md).
-pub fn log(disk: &mut dyn Disk, today: &str, now: i64) -> std::io::Result<()> {
+/// The household as the first record of a log: its snapshot's rows, as a
+/// server's data directory (`<data>/log`) is seeded with before it starts
+/// (money/seed writes it, with the schema, onto a disk).
+pub fn snapshot(today: &str, now: i64) -> (Vec<u8>, std::sync::Arc<ark::schema::Schema>) {
     let store = household(today, now);
     let snapshot = Snapshot {
         seq: 0,
@@ -404,8 +394,7 @@ pub fn log(disk: &mut dyn Disk, today: &str, now: i64) -> std::io::Result<()> {
         state: store.state_hash(),
         rows: store.snapshot_rows(),
     };
-    disk.record(&Record::Rows(snapshot.kv_rows()).enc())?;
-    ark_peer::migrate::put_schema(disk, store.schema_arc())
+    (Record::Rows(snapshot.kv_rows()).enc(), store.schema_arc().clone())
 }
 
 /// The household's store, three months of it up to `today`.
@@ -738,22 +727,6 @@ fn household(today: &str, now: i64) -> Store {
     };
     s.run(ME, "add_charges", &charges);
     s.store
-}
-
-/// The demo's peer: the seeded household, its own authority, holding the
-/// bank importer's role so that "Sync" can run the import here as a
-/// server's importer would.
-pub fn open(disk: Memory) -> Replica {
-    let mut peer = Replica::open_as(Config::of(domain()), Box::new(disk), None);
-    peer.set_roles([BANK]);
-    peer.alone();
-    peer
-}
-
-/// The demo, seeded for today.
-pub fn seeded() -> Replica {
-    let now = ark_peer::now_ms();
-    open(seeded_disk(&day_of_ms(now), now))
 }
 
 /// The card's bank, standing in for Plaid when "Sync" is pressed: each sync

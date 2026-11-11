@@ -1,11 +1,11 @@
 //! Where the window can be: what the page shows, which is harken's
-//! [`Route`] (`harken_domain::routes`, spelled in the address bar by its
+//! [`Route`] (`harken_app::routes`, spelled in the address bar by its
 //! path), the drawing beside each ([`Glyph`]), which pane has the cursor
 //! ([`Pane`]), and which grid has the keyboard ([`Focus`]).
 use arkui::glyphs;
 use arkui::vim;
 
-pub use harken_domain::routes::Route;
+pub use harken_app::routes::Route;
 
 /// The drawing that goes beside a route — in the sidebar, and on a menu's
 /// "Go to" entry, which asks the route it goes to rather than naming a glyph

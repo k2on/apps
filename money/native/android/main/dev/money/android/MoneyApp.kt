@@ -72,8 +72,8 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import dev.arkui.LocalHostedScreens
 import dev.arkui.shellShortcuts
-import uniffi.money_app.MoneyRequest
-import uniffi.money_app.ShellMsg
+import uniffi.money_bridge.MoneyRequest
+import uniffi.money_bridge.ShellMsg
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -94,11 +94,11 @@ import dev.arkui.Transitions
 import dev.arkui.reducedMotion
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
-import uniffi.money_core.Auto
-import uniffi.money_app.Route
-import uniffi.money_core.TxnLine
-import uniffi.money_core.newDraft
-import uniffi.money_app.routeFromUrl
+import uniffi.money_bridge.Auto
+import uniffi.money_bridge.Route
+import uniffi.money_bridge.TxnLine
+import uniffi.money_bridge.newDraft
+import uniffi.money_bridge.routeFromUrl
 
 /** The four tabs. */
 enum class Tab(val route: String, val label: String, val icon: ImageVector, val selected: ImageVector, val section: String) {
@@ -199,12 +199,12 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     // Budget, written from Rust (generated/BudgetScreen.kt), over its runtime: its month the book's.
     val hapticView = androidx.compose.ui.platform.LocalView.current
     val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(hapticView)) }
-    LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_app.BudgetMsg.Month(month = ledger.month)) }
+    LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_bridge.BudgetMsg.Month(month = ledger.month)) }
     LaunchedEffect(ledger) { budget.reload() }
     sections.request = { r ->
         when (r) {
             is MoneyRequest.NewTransaction -> form = newForm(book.state.value, null)
-            is MoneyRequest.Accounts -> if (r.msg is uniffi.money_app.AccountsMsg.Add) shell.onAccountSheet()
+            is MoneyRequest.Accounts -> if (r.msg is uniffi.money_bridge.AccountsMsg.Add) shell.onAccountSheet()
             is MoneyRequest.StepMonth -> book.stepMonth(r.by)
             is MoneyRequest.ThisMonth -> book.stepMonth(0)
             is MoneyRequest.Budget -> budget.send(r.msg)
@@ -220,7 +220,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
         if (launchArgs != null) sections.send(ShellMsg.Launch(args = launchArgs.toList()))
     }
     // The month is the budget's title in the shell's top bar.
-    LaunchedEffect(ledger.month) { sections.send(uniffi.money_app.ShellMsg.Month(month = ledger.month)) }
+    LaunchedEffect(ledger.month) { sections.send(uniffi.money_bridge.ShellMsg.Month(month = ledger.month)) }
     val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
@@ -489,7 +489,7 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
             // The account the shell shows: its place's tag, `accounts/<id>`.
             val page by sections.page.collectAsStateWithLifecycle()
             val id = ledger.accounts.firstOrNull { "accounts/${it.id.hex}" == page.section }?.id
-            if (id != null) RegisterScreen(ledger, id, onBack = { sections.send(uniffi.money_app.ShellMsg.Back) }) else Text("No Account Selected", modifier = Modifier.padding(16.dp))
+            if (id != null) RegisterScreen(ledger, id, onBack = { sections.send(uniffi.money_bridge.ShellMsg.Back) }) else Text("No Account Selected", modifier = Modifier.padding(16.dp))
         }
         // Who is signed in: their face, as the tabs' own title rows draw it.
         "household" -> AccountFace(

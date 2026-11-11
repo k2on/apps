@@ -540,7 +540,7 @@ pub fn remembered(db: &Db<Money>, payee: &str) -> Option<Id<Category>> {
 /// payee and the memo are sent trimmed; a transfer's payee is its other
 /// account, and it is for no category.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub struct Draft {
     /// The one corrected; none for a new one.
     pub editing: Option<Id<Txn>>,

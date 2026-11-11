@@ -28,9 +28,9 @@ import dev.harken.android.gen.ProgressEntry
 import dev.harken.android.gen.FetchOlder
 import dev.harken.android.gen.Harken
 import dev.harken.android.gen.Library as LibraryInput
-import uniffi.harken_domain.LibraryEntry
+import dev.harken.ffi.LibraryEntry
 import dev.harken.android.gen.Play
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import dev.harken.android.gen.PlaylistInput
 import dev.harken.android.gen.PlaylistsOf
 import dev.harken.android.gen.RecordingInput

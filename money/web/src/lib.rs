@@ -161,13 +161,13 @@ impl MoneyWeb {
             match &*s {
                 Some((day, disk)) if *day == today => disk.clone(),
                 _ => {
-                    let disk = money_core::demo::seeded_disk(&today, now);
+                    let disk = money_seed::seeded_disk(&today, now);
                     *s = Some((today.clone(), disk.clone()));
                     disk
                 }
             }
         });
-        MoneyWeb::over(money_core::demo::open(disk), today)
+        MoneyWeb::over(money_seed::open(disk), today)
     }
 
     /// The page over `peer`: its views held, the shell on this month.

@@ -15,6 +15,8 @@ demo = ["dep:harken-seed"]
 [dependencies]
 ark = { path = "../../rust/ark" }
 harken-domain = { path = "../domain" }
+# Where harken can be: its routes.
+harken-app = { path = "../app" }
 # The demo's library (`harken/seed`), with the `demo` feature only.
 harken-seed = { path = "../seed", default-features = false, optional = true }
 # The one reconciler, the phones' and the speakers', over this window's player.

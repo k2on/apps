@@ -13,8 +13,7 @@ use money_core::words::Tone;
 use money_core::{BudgetLine, Cleared, TxnLine};
 
 /// One line of an inspector's list: a transaction, an item.
-#[derive(Clone, Debug, PartialEq, Default)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, Default, ark::twin::Twin)]
 pub struct DetailLine {
     pub title: String,
     pub subtitle: String,
@@ -22,8 +21,7 @@ pub struct DetailLine {
 }
 
 /// Category Details: the category's month and what to do about it.
-#[derive(Clone, Debug, PartialEq, Default)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, Default, ark::twin::Twin)]
 pub struct CategoryInspector {
     /// Its id, hex.
     pub id: String,
@@ -59,8 +57,7 @@ pub struct CategoryInspector {
 }
 
 /// Transaction Details: who, how much, where and when, what for.
-#[derive(Clone, Debug, PartialEq, Default)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, Default, ark::twin::Twin)]
 pub struct TransactionInspector {
     pub id: String,
     pub payee: String,

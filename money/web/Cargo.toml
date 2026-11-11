@@ -24,6 +24,8 @@ leptos = { version = "0.8", default-features = false }
 money-app = { path = "../app", features = ["web"] }
 # The domain, and (`demo`) its household: three months of a family's budget up to today.
 money-core = { path = "../core", features = ["demo"] }
+# The demo's household on a peer (money/seed).
+money-seed = { path = "../seed" }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location"] }
 # Signing in (the machine every shell walks, and the page's half of the
 # sign-in routes) and the replica's socket (ark-peer's, the page's own

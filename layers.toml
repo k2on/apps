@@ -30,8 +30,9 @@ uses = ["kernel", "core"]
 external = ["proc-macro2", "quote", "syn"]
 
 [layers.app]
-# An app: its screens' state, messages, update and page records.
-crates = ["money-app"]
+# An app: its screens' state, messages, update and page records; where it
+# can be (its routes).
+crates = ["money-app", "harken-app"]
 uses = ["kernel", "core", "runtime"]
 external = ["serde_json"]
 
@@ -44,7 +45,7 @@ crates = [
   "ark-module", "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
   "ark-media-player", "ark-notifications", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
-  "money-iced", "money-server", "money-web", "money-seed",
+  "money-iced", "money-server", "money-web", "money-seed", "money-bridge",
   "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",
 ]
 uses = ["kernel", "core", "runtime", "app"]
@@ -54,23 +55,12 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"money-core -> ark-peer" = "the demo's peer (demo.rs: seeded_disk, open, log) moves to money/seed once the phones' bridge leaves money-app"
 "money-core -> ark-format" = "display text moves to money-app"
-"money-core -> ark-ffi" = "the FFI records are generated in the adapter"
-"money-core -> uniffi" = "the FFI records are generated in the adapter"
-"harken-domain -> ark-router" = "routes move to the adapter that draws them"
-"harken-domain -> ark-ffi" = "the FFI records are generated in the adapter"
-"harken-domain -> uniffi" = "the FFI records are generated in the adapter"
 "ark-format -> uniffi" = "the FFI records are generated in the adapter"
 "ark-app -> ark-module" = "the operations' plumbing (ark-module) is the runtime's own"
-"money-app -> ark-peer" = "the store is read through ark-app's Data"
 "money-app -> ark-haptics" = "the modules' operations are ports of the runtime's layer"
 "money-app -> ark-clipboard" = "the modules' operations are ports of the runtime's layer"
 "money-app -> ark-share" = "the modules' operations are ports of the runtime's layer"
-"money-app -> ark-module" = "the phones' bridge (src/ffi) moves to an adapter crate"
-"money-app -> ark-ffi" = "the phones' bridge (src/ffi) moves to an adapter crate"
-"money-app -> uniffi" = "the phones' bridge (src/ffi) moves to an adapter crate"
-"money-app -> tract-onnx" = "the receipt's page finder (src/ffi/page.rs) moves to an adapter crate"
 "money-app -> ark-ui-gen" = "screens() (feature gen) moves to an adapter crate"
 "money-app -> arkui" = "the iced views (feature iced) move to an adapter crate"
 "money-app -> arkui-web" = "the browser's views (feature web) move to an adapter crate"

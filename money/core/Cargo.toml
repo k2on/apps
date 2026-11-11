@@ -11,19 +11,12 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-# The demo's peer (`demo`: `seeded_disk`, `open`), until it moves to money/seed.
-ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # What the rows say, in words: amounts and days as every client writes them.
 ark-format = { path = "../../rust/ark-format" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# Typed views for the phones (docs/plan-v5.md, Landed: typed views): the
-# rows of the views the phones read typed, as UniFFI records.
-uniffi = { version = "0.32.2", default-features = false, optional = true }
-ark-ffi = { path = "../../rust/ark-ffi", optional = true }
 
 [features]
-ffi = ["dep:uniffi", "dep:ark-ffi", "ark-format/ffi"]
 # The demo's household (`demo`, docs/seed.md): three months of a family's
 # budget up to a day, which the demo window, the phones' demo and a seeded
 # server's data directory open on. Off by default, so a client or a server

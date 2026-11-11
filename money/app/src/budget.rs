@@ -104,8 +104,7 @@ pub struct State {
 }
 
 /// Everything the Budget screen can be told. Ids are rows' `Id::hex`.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub enum BudgetMsg {
     /// The month the platform shows now (`2026-11`).
     Month {
@@ -222,8 +221,7 @@ pub enum BudgetMsg {
 }
 
 /// One category's row in the month.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct CategoryItem {
     pub id: String,
     /// Its emoji before its name, or its name alone (a card's payment).
@@ -266,8 +264,7 @@ pub struct CategoryItem {
 }
 
 /// One group of the month: its categories, its totals.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct GroupItem {
     pub id: String,
     pub title: String,
@@ -290,8 +287,7 @@ pub struct GroupItem {
 }
 
 /// A choice of a sheet's picker: a category, a group, Ready to Assign.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct BudgetChoice {
     pub key: String,
     pub title: String,
@@ -299,8 +295,7 @@ pub struct BudgetChoice {
 }
 
 /// A sheet's amount, as it stands.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AmountForm {
     /// What it is for: the category's name, or the move's way.
     pub subject: String,
@@ -314,8 +309,7 @@ pub struct AmountForm {
 }
 
 /// Move Money's sheet.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct MoveForm {
     pub from: String,
     pub to: String,
@@ -324,8 +318,7 @@ pub struct MoveForm {
 }
 
 /// New Category's sheet.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct CategoryForm {
     pub name: String,
     pub problem: Option<String>,
@@ -335,15 +328,13 @@ pub struct CategoryForm {
 }
 
 /// A name's alert.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct NameForm {
     pub name: String,
 }
 
 /// Everything the Budget screen shows.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct BudgetPage {
     /// The month, "November 2026": the page's large title.
     pub title: String,

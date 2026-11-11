@@ -50,9 +50,9 @@ use arkui::{glyphs, menu, vim};
 use iced::keyboard::{Key, Modifiers};
 use iced::{Point, Size, Subscription, Task};
 use money_core::dates::{add_months, day_of_ms, month_of};
-#[cfg(any(feature = "demo", test))]
-use money_core::demo as seed;
 use money_core::*;
+#[cfg(any(feature = "demo", test))]
+use money_seed as seed;
 
 use peer::{Ledger, Peer};
 

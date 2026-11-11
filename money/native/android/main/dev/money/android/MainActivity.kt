@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
         val data = i?.data ?: return null
         if (data.scheme != MONEY.scheme) return null
         if (data.host == "auth") return data.getQueryParameter("code")?.takeIf { it.isNotEmpty() }?.let { Event.Code(it) }
-        val join = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_app.routeFromUrl(it) }) as? uniffi.money_app.Route.Join
+        val join = dev.arkui.Navigator.routeOf(data.toString(), MONEY.scheme, { uniffi.money_bridge.routeFromUrl(it) }) as? uniffi.money_bridge.Route.Join
         return join?.let { Event.Joined(it.server, it.code) }
     }
 }

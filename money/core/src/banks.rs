@@ -57,7 +57,7 @@ fn ask(ctx: &Ctx, db: &mut Db<Money>, what: &str, bank: &Option<Bank>) -> Result
 
 /// What a client does about an ask it made, once the asks have moved.
 #[derive(Clone, Debug, PartialEq, Eq, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub enum Follow {
     /// The server has not answered with a page yet: keep watching.
     Wait,

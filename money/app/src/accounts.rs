@@ -95,8 +95,7 @@ impl Draft {
 
 /// Everything the Accounts screen can be told. Ids are rows' `Id::hex`,
 /// as routes carry them.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub enum AccountsMsg {
     /// Every account's register.
     OpenAll,
@@ -169,8 +168,7 @@ pub enum AccountsMsg {
 }
 
 /// One account's row.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AccountItem {
     pub id: String,
     pub name: String,
@@ -196,8 +194,7 @@ pub struct AccountItem {
 }
 
 /// A shelf of accounts under its heading.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AccountsShelf {
     pub title: String,
     pub total: i64,
@@ -209,8 +206,7 @@ pub struct AccountsShelf {
 }
 
 /// One kind the form offers.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct KindChoice {
     pub kind: AccountKind,
     /// Its key (`credit`): what choosing it sends.
@@ -221,8 +217,7 @@ pub struct KindChoice {
 }
 
 /// Add Account's form, as it stands.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AddForm {
     pub name: String,
     /// The domain's sentence for what is wrong with the name, once one is typed.
@@ -246,8 +241,7 @@ pub struct AddForm {
 }
 
 /// The rename alert, as it stands.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct RenameForm {
     pub id: String,
     pub name: String,
@@ -255,8 +249,7 @@ pub struct RenameForm {
 }
 
 /// Everything the Accounts screen shows.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AccountsPage {
     /// Every open account, less what's owed.
     pub net_worth: i64,

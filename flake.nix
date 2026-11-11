@@ -78,7 +78,7 @@
       arkApp = import ./nix/ark-app.nix { inherit lib self; };
       arkApps = [ "money" "revelation" ];
 
-      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/seed" "money/app" "money/iced" "money/server" "harken/seed" "money/web" ];
+      rustDirs = [ "rust" "ui/rust" "modules" "harken/domain" "harken/app" "harken/player" "harken/server" "harken/iced" "harken/ffi" "money/core" "money/seed" "money/app" "money/bridge" "money/iced" "money/server" "harken/seed" "money/web" ];
       # The typed Kotlin and Swift `arkdb gen` writes, which harken/ffi's
       # tests hold to its domain (`tests/gen.rs`).
       genDirs = [
@@ -893,7 +893,7 @@
           # The crates a phone's library is built from: an Ark app's crate's,
           # or the library crate's own.
           phoneSource = { crate, ark ? null }:
-            rustSource { real = phoneCrates (if ark == null then crate else ark.crate); inherit ark; };
+            rustSource { real = phoneCrates (if ark == null then crate else ark.ffi.crate); inherit ark; };
           # The environment each iOS cargo build is in, and its cargo build of
           # `crate` for each of `targets`.
           # An Ark app's shim is no member of the lockfile, which cargo then
@@ -1562,7 +1562,7 @@
             # harken's domain crate builds, and its schema's hash is the one
             # pinned (harken/domain/tests/port.rs).
             inherit harken-domain;
-            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/app (`ffi`) build
+            # The bridge (§1.16, N3): ark-ffi, harken/ffi and money/bridge build
             # natively, their tests drive the whole surface in the process (a
             # server in it, a mutate and its refusal, a view's patches, the
             # live space, alone and joining, a hall of devices, money's demo)
@@ -1581,7 +1581,7 @@
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
                   { packageId = "harken-ffi"; member = "harken/ffi"; }
-                  { packageId = "money-app"; member = "money/app"; features = [ "default" "page" ]; }
+                  { packageId = "money-bridge"; member = "money/bridge"; features = [ "default" "page" ]; }
                 ];
                 dirs = rustDirs ++ genDirs;
                 postCheck = ''
@@ -1590,9 +1590,9 @@
                   grep -q "class Peer" "$TMPDIR/bindings/kotlin/dev/arkdb/ffi/ark_ffi.kt"
                   grep -q "func harkenOpen" "$TMPDIR/bindings/swift/harken_ffi.swift"
                   ${bindings moneyFfi "$TMPDIR/money"}
-                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/uniffi/money_app/money_app.kt"
-                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_core/money_core.kt"
-                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_app.swift"
+                  grep -q 'fun `moneyOpen`' "$TMPDIR/money/kotlin/uniffi/money_bridge/money_bridge.kt"
+                  grep -q "class MoneyChange" "$TMPDIR/money/kotlin/uniffi/money_bridge/money_bridge.kt"
+                  grep -q "func moneyDemo" "$TMPDIR/money/swift/money_bridge.swift"
                   # Every client's formatting, linked into each library.
                   grep -q "func formatAmount" "$TMPDIR/money/swift/ark_format.swift"
                   grep -q "func formatLength" "$TMPDIR/bindings/swift/ark_format.swift"

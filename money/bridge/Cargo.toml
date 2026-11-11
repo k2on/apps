@@ -1,0 +1,46 @@
+[package]
+name = "money-bridge"
+version = "0.1.0"
+workspace = "../../rust"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "money for its phones: the bridge (ark-ffi) over money's domain and its screens' runtime, and every record and message that crosses it as a UniFFI twin written here (ark::twins!), so money-core and money-app stay free of UniFFI. nix's generated money-ffi links it into the phones' library."
+
+[lib]
+name = "money_bridge"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+ark-app = { path = "../../ui/rust/app" }
+ark-ffi = { path = "../../rust/ark-ffi" }
+ark-peer = { path = "../../rust/ark-peer", default-features = false }
+# Every number, day and length as the apps write them, in the library
+# (its bindings are `ark_format`'s).
+ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
+# The module plumbing, and the modules money lists (money/app.toml) as the
+# phones implement them.
+ark-module = { path = "../../ui/rust/module", features = ["ffi"] }
+ark-haptics = { path = "../../modules/haptics", features = ["ffi"] }
+ark-clipboard = { path = "../../modules/clipboard", features = ["ffi"] }
+ark-share = { path = "../../modules/share", features = ["ffi"] }
+money-core = { path = "../core", features = ["demo"] }
+# The demo's household on a peer (`money_demo`).
+money-seed = { path = "../seed" }
+money-app = { path = "../app" }
+uniffi = { version = "0.32.2", default-features = false }
+serde_json = { workspace = true }
+# Where a receipt is in a camera frame (`page`, src/page.rs).
+tract-onnx = { version = "0.22", optional = true }
+
+[features]
+# Where a receipt is in a camera frame: the corner model on a runtime in
+# Rust (src/page.rs), so the phone links none of its own. Android's
+# (money/app.toml's `[ffi]`): the iPhone's build leaves it out, as
+# VisionKit finds the page there.
+page = ["dep:tract-onnx"]
+
+[dev-dependencies]
+tempfile = "3"
+# The scanner's pages, read (tests/page.rs).
+image = { version = "0.25", default-features = false, features = ["png"] }

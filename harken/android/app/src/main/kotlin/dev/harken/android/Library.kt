@@ -48,9 +48,9 @@ import dev.harken.android.gen.WorkSummary
 import dev.harken.ffi.HarkenSession
 import dev.harken.ffi.HarkenView
 import dev.harken.ffi.Holding
-import uniffi.harken_domain.Playlist
-import uniffi.harken_domain.Route
-import uniffi.harken_domain.routeFromUrl
+import dev.harken.ffi.Playlist
+import dev.harken.ffi.Route
+import dev.harken.ffi.routeFromUrl
 import dev.harken.android.onboarding.ArkSession
 import dev.harken.android.onboarding.SessionStatus
 import java.util.concurrent.ConcurrentHashMap
@@ -304,7 +304,7 @@ class Library(private val session: ArkSession) {
 
     private fun <E> json(of: (Any?) -> E): (HarkenSession, HarkenView) -> List<E> = { s, v -> s.rows(v).map { of(J.parse(it)) } }
 
-    private val tracksOf: (HarkenSession, HarkenView) -> List<uniffi.harken_domain.LibraryEntry> = { s, v -> s.tracks(v) }
+    private val tracksOf: (HarkenSession, HarkenView) -> List<dev.harken.ffi.LibraryEntry> = { s, v -> s.tracks(v) }
 
     private val library = Held(HarkenView.Library(Phone.NO_PLAYLIST), tracksOf, Track::of) { tracksFlow.value = it }
     private val playlistsHeld = Held(HarkenView.Playlists, { s, v -> s.playlists(v) }, { p: Playlist -> p }) { playlistsFlow.value = it }

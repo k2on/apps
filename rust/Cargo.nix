@@ -287,6 +287,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "harken-app" = rec {
+      packageId = "harken-app";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "harken-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "harken-domain" = rec {
       packageId = "harken-domain";
       build = internal.buildRustCrateWithFeatures {
@@ -351,6 +361,16 @@ rec {
       packageId = "money-app";
       build = internal.buildRustCrateWithFeatures {
         packageId = "money-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "money-bridge" = rec {
+      packageId = "money-bridge";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-bridge";
       };
 
       # Debug support which might change between releases.
@@ -8827,6 +8847,24 @@ rec {
         };
         resolvedDefaultFeatures = [ "std" ];
       };
+      "harken-app" = rec {
+        crateName = "harken-app";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../harken/app; };
+        libName = "harken_app";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-router";
+            packageId = "ark-router";
+          }
+        ];
+
+      };
       "harken-domain" = rec {
         crateName = "harken-domain";
         version = "0.1.0";
@@ -8839,15 +8877,6 @@ rec {
             packageId = "ark";
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
-            name = "ark-router";
-            packageId = "ark-router";
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -8856,12 +8885,6 @@ rec {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];
-          }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
           }
         ];
         devDependencies = [
@@ -8875,10 +8898,7 @@ rec {
             packageId = "arkdb";
           }
         ];
-        features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "harken-ffi" = rec {
         crateName = "harken-ffi";
@@ -8906,9 +8926,12 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "harken-app";
+            packageId = "harken-app";
+          }
+          {
             name = "harken-domain";
             packageId = "harken-domain";
-            features = [ "ffi" ];
           }
           {
             name = "harken-player";
@@ -8976,6 +8999,10 @@ rec {
           {
             name = "arkui-shots";
             packageId = "arkui-shots";
+          }
+          {
+            name = "harken-app";
+            packageId = "harken-app";
           }
           {
             name = "harken-domain";
@@ -14070,27 +14097,12 @@ rec {
             packageId = "ark-clipboard";
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
             name = "ark-format";
             packageId = "ark-format";
           }
           {
             name = "ark-haptics";
             packageId = "ark-haptics";
-          }
-          {
-            name = "ark-module";
-            packageId = "ark-module";
-            optional = true;
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
           }
           {
             name = "ark-router";
@@ -14120,10 +14132,95 @@ rec {
             name = "money-core";
             packageId = "money-core";
           }
+        ];
+        devDependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+          }
+        ];
+        features = {
+          "gen" = [ "dep:ark-ui-gen" ];
+          "iced" = [ "dep:arkui" "arkui/app" ];
+          "web" = [ "dep:arkui-web" ];
+        };
+        resolvedDefaultFeatures = [ "gen" "iced" "web" ];
+      };
+      "money-bridge" = rec {
+        crateName = "money-bridge";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/bridge; };
+        libName = "money_bridge";
+        dependencies = [
+          {
+            name = "ark";
+            packageId = "ark";
+          }
+          {
+            name = "ark-app";
+            packageId = "ark-app";
+          }
+          {
+            name = "ark-clipboard";
+            packageId = "ark-clipboard";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-ffi";
+            packageId = "ark-ffi";
+          }
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-haptics";
+            packageId = "ark-haptics";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+            features = [ "ffi" ];
+          }
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-share";
+            packageId = "ark-share";
+            features = [ "ffi" ];
+          }
+          {
+            name = "money-app";
+            packageId = "money-app";
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+          }
           {
             name = "serde_json";
             packageId = "serde_json";
-            optional = true;
             features = [ "raw_value" ];
           }
           {
@@ -14134,16 +14231,10 @@ rec {
           {
             name = "uniffi";
             packageId = "uniffi";
-            optional = true;
             usesDefaultFeatures = false;
           }
         ];
         devDependencies = [
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
-          }
           {
             name = "image";
             packageId = "image";
@@ -14151,23 +14242,14 @@ rec {
             features = [ "png" ];
           }
           {
-            name = "money-core";
-            packageId = "money-core";
-            features = [ "demo" ];
-          }
-          {
             name = "tempfile";
             packageId = "tempfile";
           }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "dep:ark-module" "dep:serde_json" "money-core/ffi" "money-core/demo" "ark-format/ffi" "ark-module/ffi" "ark-haptics/ffi" "ark-clipboard/ffi" "ark-share/ffi" ];
-          "gen" = [ "dep:ark-ui-gen" ];
-          "iced" = [ "dep:arkui" "arkui/app" ];
-          "page" = [ "ffi" "dep:tract-onnx" ];
-          "web" = [ "dep:arkui-web" ];
+          "page" = [ "dep:tract-onnx" ];
         };
-        resolvedDefaultFeatures = [ "ffi" "gen" "iced" "page" "web" ];
+        resolvedDefaultFeatures = [ "page" ];
       };
       "money-core" = rec {
         crateName = "money-core";
@@ -14181,18 +14263,8 @@ rec {
             packageId = "ark";
           }
           {
-            name = "ark-ffi";
-            packageId = "ark-ffi";
-            optional = true;
-          }
-          {
             name = "ark-format";
             packageId = "ark-format";
-          }
-          {
-            name = "ark-peer";
-            packageId = "ark-peer";
-            usesDefaultFeatures = false;
           }
           {
             name = "serde";
@@ -14204,17 +14276,10 @@ rec {
             packageId = "serde_json";
             features = [ "raw_value" ];
           }
-          {
-            name = "uniffi";
-            packageId = "uniffi";
-            optional = true;
-            usesDefaultFeatures = false;
-          }
         ];
         features = {
-          "ffi" = [ "dep:uniffi" "dep:ark-ffi" "ark-format/ffi" ];
         };
-        resolvedDefaultFeatures = [ "demo" "ffi" ];
+        resolvedDefaultFeatures = [ "demo" ];
       };
       "money-iced" = rec {
         crateName = "money-iced";
@@ -14276,6 +14341,10 @@ rec {
             packageId = "money-core";
             features = [ "demo" ];
           }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
+          }
         ];
         devDependencies = [
           {
@@ -14312,6 +14381,7 @@ rec {
           }
         ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
+        libName = "money_seed";
         dependencies = [
           {
             name = "ark-peer";
@@ -14419,6 +14489,10 @@ rec {
             features = [ "demo" ];
           }
           {
+            name = "money-seed";
+            packageId = "money-seed";
+          }
+          {
             name = "tempfile";
             packageId = "tempfile";
           }
@@ -14480,6 +14554,10 @@ rec {
             name = "money-core";
             packageId = "money-core";
             features = [ "demo" ];
+          }
+          {
+            name = "money-seed";
+            packageId = "money-seed";
           }
           {
             name = "wasm-bindgen";

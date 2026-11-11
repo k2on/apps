@@ -17,9 +17,9 @@ use money_core::{
     ReceiptLine, SpendingLine, Summary, TxnLine,
 };
 
-use crate::ffi::Sent;
+use crate::Sent;
 
-type Tag = domain::UniFfiTag;
+type Tag = crate::UniFfiTag;
 type Ffi<T> = <T as Twin<Tag>>::Ffi;
 
 /// A view the phones hold: what a screen shows.

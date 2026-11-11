@@ -18,9 +18,12 @@ domain/    the domain, in plain Rust (spec/AUTHORING.md): src/schema.rs,
            household is beside the app, in seed/
 app/       money as an Ark app: the screens' state, messages, update and
            #[view]s, drawn by iced and the browser and generated as
-           SwiftUI and Compose (`screens()`); under `ffi`, what the
-           phones' library exports (src/ffi, FFI.md): the bridge with the
-           domain linked in, typed views, the demo, a server in the process
+           SwiftUI and Compose (`screens()`)
+bridge/    what the phones' library exports (FFI.md): the bridge with the
+           domain linked in, the UniFFI twins of the core's and the app's
+           records and messages, typed views, the demo, a server in the
+           process
+seed/      the demo's household on a peer and a disk, and `money-seed DATA`
 server/    money-server: the hub, sign-in, a web directory if given one, the
            bank importer (src/importer.rs, Plaid over src/plaid.rs);
            nix/module.nix is services.money

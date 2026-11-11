@@ -9,7 +9,7 @@
 // sentence, and nothing else.
 package dev.money.android
 
-import uniffi.money_app.MoneyView
+import uniffi.money_bridge.MoneyView
 import dev.arkui.watch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -64,7 +64,7 @@ import dev.arkui.SearchField
 import dev.arkui.ArkGlyphs
 import dev.arkui.Space
 import dev.arkui.reflowing
-import uniffi.money_core.TxnLine
+import uniffi.money_bridge.TxnLine
 import uniffi.ark_format.formatAmount
 import uniffi.ark_format.numberStyleUs
 

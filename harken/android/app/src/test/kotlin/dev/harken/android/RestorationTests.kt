@@ -41,7 +41,7 @@ import dev.harken.android.gen.Harken
 import dev.harken.android.gen.CreatePlaylist
 import dev.harken.android.gen.Recordings
 import dev.harken.android.gen.Works
-import uniffi.harken_domain.Route
+import dev.harken.ffi.Route
 import dev.arkdb.ffi.Id
 import android.view.MotionEvent
 import android.view.View

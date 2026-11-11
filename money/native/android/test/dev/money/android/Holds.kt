@@ -4,9 +4,9 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import uniffi.money_app.Holding
-import uniffi.money_app.MoneyView
-import uniffi.money_core.TxnLine
+import uniffi.money_bridge.Holding
+import uniffi.money_bridge.MoneyView
+import uniffi.money_bridge.TxnLine
 
 private val holds = HashMap<Pair<Book, MoneyView>, ArrayDeque<Holding>>()
 

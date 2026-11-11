@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import dev.arkui.Space
-import uniffi.money_core.StoreItem
-import uniffi.money_core.WriteReceipt
+import uniffi.money_bridge.StoreItem
+import uniffi.money_bridge.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import dev.arkdb.auth.Phase
@@ -63,7 +63,7 @@ class Screens {
 
     @Test fun budget() {
         val holder = BudgetHolder(book.session, {}, { book.state.value.today }, null)
-        holder.send(uniffi.money_app.BudgetMsg.Month(month = book.state.value.month))
+        holder.send(uniffi.money_bridge.BudgetMsg.Month(month = book.state.value.month))
         shot("budget") { ScreenFrame { BudgetScreen(holder) } }
     }
 

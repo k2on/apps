@@ -1,12 +1,15 @@
 //! The typed views of the bridge (`docs/plan-v5.md`, Landed: typed views):
-//! what `#[ark(ffi_view)]` on a view's row type adds for `ark_ffi`'s typed
-//! half — the type's **twin**, a UniFFI record (or enum) named as the type
-//! is, each field its own type's twin, with the conversions both ways
-//! (`ark_ffi::Twin`), and its view object `<T>View`. `#[ark(ffi)]` asks for
-//! the twin alone, for a type a row holds. What is written is in the
-//! domain's crate, whose UniFFI scaffolding (`crate::UniFfiTag`) and `uniffi`
-//! and `ark_ffi` dependencies are behind the feature that asks for any of it
-//! (`#[cfg_attr(feature = "ffi", ark(ffi_view))]`).
+//! a type's **twin**, a UniFFI record (or enum) named as the type is, each
+//! field its own type's twin, with the conversions both ways
+//! (`ark_ffi::Twin`), and for a view's row its view object `<T>View`.
+//!
+//! The twin is written in the adapter, never in the type's own crate: a
+//! domain or an app stays free of UniFFI and the bridge. What
+//! `#[ark(ffi)]` (or `#[ark(ffi_view)]`, or `#[derive(Twin)]`) writes beside
+//! the type is its shape, and nothing that needs either: each field's type
+//! by position (`ark::twin::Field<V, F>`), and a hidden macro,
+//! `__ark_twin_<Type>!`, that the adapter calls (through `ark::twins!`) to
+//! write the twin there, its `crate::UniFfiTag` the adapter's.
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
@@ -15,21 +18,38 @@ use syn::{Data, DeriveInput, Fields, Ident, Index, Type};
 use crate::domain::{err, items, Item};
 
 /// `<t as Twin>::Ffi`, the type `t` crosses as; `t` to it; `t` from it.
-fn ffi_ty(t: &Type) -> TokenStream {
+fn ffi_ty(t: &TokenStream) -> TokenStream {
     quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::Ffi)
 }
 
-fn to(t: &Type, e: TokenStream) -> TokenStream {
+fn to(t: &TokenStream, e: TokenStream) -> TokenStream {
     quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::ffi(#e))
 }
 
-fn from(t: &Type, e: TokenStream) -> TokenStream {
+fn from(t: &TokenStream, e: TokenStream) -> TokenStream {
     quote!(<#t as ::ark_ffi::Twin<crate::UniFfiTag>>::from_ffi(#e))
 }
 
+/// A position, unsuffixed: `Field<0, 1>`.
+fn n(i: usize) -> proc_macro2::Literal {
+    proc_macro2::Literal::usize_unsuffixed(i)
+}
+
+/// The type's path as the adapter names it, inside the macro.
+fn path() -> TokenStream {
+    quote!($($p)::+)
+}
+
+/// Field `f` of variant `v` (of the struct, `v` 0), by position.
+fn field(v: usize, f: usize) -> TokenStream {
+    let (p, v, f) = (path(), n(v), n(f));
+    quote!(<#p as ::ark::twin::Field<#v, #f>>::Ty)
+}
+
 /// Whether a type asks for its twin (`ffi`) and, as a view's row, its view
-/// object too (`ffi_view`).
-pub fn asked(attrs: &[syn::Attribute]) -> (bool, bool) {
+/// object too (`ffi_view`); and whether the twin compares and hashes
+/// (`ffi_eq`).
+pub fn asked(attrs: &[syn::Attribute]) -> (bool, bool, bool) {
     let flags: Vec<String> = items(attrs)
         .unwrap_or_default()
         .into_iter()
@@ -40,7 +60,8 @@ pub fn asked(attrs: &[syn::Attribute]) -> (bool, bool) {
         })
         .collect();
     let view = flags.iter().any(|f| f == "ffi_view");
-    (view || flags.iter().any(|f| f == "ffi"), view)
+    let eq = flags.iter().any(|f| f == "ffi_eq");
+    (view || eq || flags.iter().any(|f| f == "ffi"), view, eq)
 }
 
 type Field = (Ident, Type, Option<Index>);
@@ -78,21 +99,39 @@ fn named(fields: &Fields, span: Span) -> syn::Result<Vec<Field>> {
 /// The twin of a struct or an enum, and for a view's row its view object,
 /// when its attributes ask for them; nothing otherwise.
 pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
-    let (wanted, view) = asked(&input.attrs);
+    let (wanted, view, eq) = asked(&input.attrs);
     if !wanted {
         return Ok(quote!());
     }
+    shape(input, view, eq)
+}
+
+/// What `#[derive(Twin)]` writes: the shape whether or not `ffi` is said.
+pub fn twin_derive(input: &DeriveInput) -> syn::Result<TokenStream> {
+    let (_, view, eq) = asked(&input.attrs);
+    shape(input, view, eq)
+}
+
+/// Each field's type by position, and the macro that writes the twin.
+fn shape(input: &DeriveInput, view: bool, eq: bool) -> syn::Result<TokenStream> {
     let name = &input.ident;
     if !input.generics.params.is_empty() {
         return err(name.span(), "a twin is of a type with no parameters");
     }
     let (label, tw) = (name.to_string(), format_ident!("{}Ffi", name));
+    let p = path();
+    let mut fields = vec![];
     let (kind, decl, out, back) = match &input.data {
         Data::Struct(s) => {
             let fs = named(&s.fields, name.span())?;
             let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
-            let (tys, tos) = (fs.iter().map(|(_, t, _)| ffi_ty(t)), fs.iter().map(|(f, t, _)| to(t, quote!(self.#f))));
-            let froms = fs.iter().map(|(f, t, _)| from(t, quote!(t.#f)));
+            let ts: Vec<TokenStream> = (0..fs.len()).map(|i| field(0, i)).collect();
+            for (i, (_, t, _)) in fs.iter().enumerate() {
+                let i = n(i);
+                fields.push(quote!(impl ::ark::twin::Field<0, #i> for #name { type Ty = #t; }));
+            }
+            let (tys, tos) = (ts.iter().map(ffi_ty), fs.iter().zip(&ts).map(|((f, _, _), t)| to(t, quote!(self.#f))));
+            let froms = fs.iter().zip(&ts).map(|((f, _, _), t)| from(t, quote!(t.#f)));
             // A field added with a default (`#[serde(default)]`) has its
             // type's default in Swift's and Kotlin's constructors too, so
             // what built the record before still does.
@@ -111,27 +150,32 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
                 quote!(::uniffi::Record),
                 quote!(struct #tw { #(#defaults pub #ns: #tys,)* }),
                 quote!(#tw { #(#ns: #tos,)* }),
-                quote!(#name { #(#ns: #froms,)* }),
+                quote!(#p { #(#ns: #froms,)* }),
             )
         }
         Data::Enum(e) => {
             let (mut decl, mut out, mut back) = (vec![], vec![], vec![]);
-            for v in &e.variants {
+            for (vn, v) in e.variants.iter().enumerate() {
                 let vi = &v.ident;
                 let fs = named(&v.fields, vi.span())?;
                 let ns: Vec<&Ident> = fs.iter().map(|(f, _, _)| f).collect();
-                let tys = fs.iter().map(|(_, t, _)| ffi_ty(t));
-                let tos: Vec<_> = fs.iter().map(|(f, t, _)| to(t, quote!(#f))).collect();
-                let froms: Vec<_> = fs.iter().map(|(f, t, _)| from(t, quote!(#f))).collect();
+                let ts: Vec<TokenStream> = (0..fs.len()).map(|i| field(vn, i)).collect();
+                for (i, (_, t, _)) in fs.iter().enumerate() {
+                    let (vn, i) = (n(vn), n(i));
+                    fields.push(quote!(impl ::ark::twin::Field<#vn, #i> for #name { type Ty = #t; }));
+                }
+                let tys = ts.iter().map(ffi_ty);
+                let tos: Vec<_> = fs.iter().zip(&ts).map(|((f, _, _), t)| to(t, quote!(#f))).collect();
+                let froms: Vec<_> = fs.iter().zip(&ts).map(|((f, _, _), t)| from(t, quote!(#f))).collect();
                 decl.push(quote!(#vi { #(#ns: #tys),* }));
                 match fs.first() {
                     Some((_, _, Some(_))) => {
-                        out.push(quote!(#name::#vi(value) => #tw::#vi { #(#ns: #tos),* }));
-                        back.push(quote!(#tw::#vi { value } => #name::#vi(#(#froms),*)));
+                        out.push(quote!(#p::#vi(value) => #tw::#vi { #(#ns: #tos),* }));
+                        back.push(quote!(#tw::#vi { value } => #p::#vi(#(#froms),*)));
                     }
                     _ => {
-                        out.push(quote!(#name::#vi { #(#ns),* } => #tw::#vi { #(#ns: #tos),* }));
-                        back.push(quote!(#tw::#vi { #(#ns),* } => #name::#vi { #(#ns: #froms),* }));
+                        out.push(quote!(#p::#vi { #(#ns),* } => #tw::#vi { #(#ns: #tos),* }));
+                        back.push(quote!(#tw::#vi { #(#ns),* } => #p::#vi { #(#ns: #froms),* }));
                     }
                 }
             }
@@ -145,22 +189,40 @@ pub fn twin(input: &DeriveInput) -> syn::Result<TokenStream> {
         Data::Union(_) => return err(name.span(), "a union has no twin"),
     };
     let view = if view { view_object(name) } else { quote!() };
+    let (eq_derive, eq_export) = match eq {
+        true => (quote!(Eq, Hash,), quote!(#[uniffi::export(Eq, Hash)])),
+        false => (quote!(), quote!()),
+    };
+    let mac = format_ident!("__ark_twin_{}", name);
+    let doc = format!("`{name}`'s UniFFI twin, written where it is called: `ark::twins!`.");
     Ok(quote! {
-        #[derive(Clone, Debug, PartialEq, #kind)]
-        #[uniffi(name = #label)]
-        pub #decl
+        #(#fields)*
 
-        impl ::ark_ffi::Twin<crate::UniFfiTag> for #name {
-            type Ffi = #tw;
-            fn ffi(self) -> #tw {
-                #out
-            }
-            fn from_ffi(t: #tw) -> #name {
-                #back
-            }
+        #[doc = #doc]
+        #[doc(hidden)]
+        #[macro_export]
+        // `crate` is the caller's on purpose: its UniFFI tag, its twins.
+        #[allow(clippy::crate_in_macro_def)]
+        macro_rules! #mac {
+            ($($p:ident)::+) => {
+                #[derive(Clone, Debug, PartialEq, #eq_derive #kind)]
+                #eq_export
+                #[uniffi(name = #label)]
+                pub #decl
+
+                impl ::ark_ffi::Twin<crate::UniFfiTag> for #p {
+                    type Ffi = #tw;
+                    fn ffi(self) -> #tw {
+                        #out
+                    }
+                    fn from_ffi(t: #tw) -> #p {
+                        #back
+                    }
+                }
+
+                #view
+            };
         }
-
-        #view
     })
 }
 
@@ -174,11 +236,12 @@ fn view_object(name: &Ident) -> TokenStream {
         format_ident!("{}Taken", name),
     );
     let doc = format!("A view of `{name}` rows, read as they are: no JSON.");
-    let twin = quote!(<#name as ::ark_ffi::Twin<crate::UniFfiTag>>::ffi);
+    let p = path();
+    let twin = quote!(<#p as ::ark_ffi::Twin<crate::UniFfiTag>>::ffi);
     quote! {
         #[doc = #doc]
         #[derive(::uniffi::Object)]
-        pub struct #view(::ark_ffi::Typed<#name>);
+        pub struct #view(::ark_ffi::Typed<#p>);
 
         #[derive(Clone, Debug, PartialEq, ::uniffi::Record)]
         pub struct #taken {
@@ -208,4 +271,44 @@ fn view_object(name: &Ident) -> TokenStream {
             }
         }
     }
+}
+
+/// Each type's twin macro called on its path: `twins!(money_core::{AccountLine,
+/// accounts::{AccountKind, Shelving}})`, a `use`'s tree of the types.
+pub fn twins(input: TokenStream) -> syn::Result<TokenStream> {
+    use syn::parse::Parser;
+    use syn::punctuated::Punctuated;
+    use syn::UseTree;
+    fn flatten(prefix: &mut Vec<Ident>, tree: &UseTree, out: &mut Vec<(Vec<Ident>, Ident)>) -> syn::Result<()> {
+        match tree {
+            UseTree::Path(p) => {
+                prefix.push(p.ident.clone());
+                flatten(prefix, &p.tree, out)?;
+                prefix.pop();
+            }
+            UseTree::Name(n) => out.push((prefix.clone(), n.ident.clone())),
+            UseTree::Group(g) => {
+                for t in &g.items {
+                    flatten(prefix, t, out)?;
+                }
+            }
+            UseTree::Rename(r) => return err(r.rename.span(), "a twin is of the type as named"),
+            UseTree::Glob(g) => return err(g.star_token.span, "name each type: a twin is written for each"),
+        }
+        Ok(())
+    }
+    let trees = Punctuated::<UseTree, syn::Token![,]>::parse_terminated.parse2(input)?;
+    let mut tys = vec![];
+    for t in &trees {
+        flatten(&mut vec![], t, &mut tys)?;
+    }
+    let mut calls = vec![];
+    for (path, t) in &tys {
+        let Some(krate) = path.first() else {
+            return err(t.span(), "name the type by its crate: `money_core::AccountLine`");
+        };
+        let mac = format_ident!("__ark_twin_{}", t);
+        calls.push(quote!(#krate::#mac!(#(#path)::* :: #t);));
+    }
+    Ok(quote!(#(#calls)*))
 }

@@ -1,6 +1,7 @@
 //! money as an Ark app (ui/docs/app.md): a screen's state, the messages
 //! that change it and its update, in Rust, run by `ark_app::Runtime` on
-//! every platform — the phones behind their bridge (money/ffi), the iced
+//! every platform — the phones behind their bridge (money/bridge, which writes the
+//! UniFFI twins of these records and messages), the iced
 //! window (money/iced) and the browser (money/web).
 //!
 //! The screens moved here: Accounts ([`accounts`]) — the shelves of
@@ -10,13 +11,8 @@
 //! targets, new categories and groups. The rest of money is still each
 //! shell's own; ui/docs/app.md says what moving it takes.
 
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
-
 pub mod accounts;
 pub mod budget;
-#[cfg(feature = "ffi")]
-pub mod ffi;
 pub mod look;
 pub mod routes;
 pub mod shell;
@@ -31,8 +27,7 @@ pub use routes::Route;
 /// a platform until it moves here (ui/docs/app.md, What Is Left); a
 /// message for another of money's runtimes beside it (the shell's toolbar
 /// asks the Budget's to auto-assign).
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub enum MoneyRequest {
     /// Ask the banks for anything new (pulled down, Sync with Banks).
     Refresh,
@@ -97,7 +92,8 @@ pub fn screens() -> ark_ui_gen::app::App {
         msg: "ShellMsg",
     };
     App {
-        namespace: env!("CARGO_CRATE_NAME"),
+        // The bridge's (money/bridge), where the messages' twins are.
+        namespace: "money_bridge",
         screens: vec![
             Generated::view(accounts::view::accounts::record, accounts),
             Generated::view(budget::view::budget::record, budget),

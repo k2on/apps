@@ -10,19 +10,20 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::accounts::{Accounts, AccountsMsg, AccountsPage};
-use crate::budget::{Budget, BudgetMsg, BudgetPage};
-use crate::routes::Route;
-use crate::shell::{MoneyShell, ShellMsg, ShellPage};
 use ark_app::{Ask, Host, Inbox, Modules, Runtime, Ticket};
 use ark_clipboard::Clipboard;
 use ark_ffi::Refusal;
 use ark_haptics::Haptics;
 use ark_share::Share;
+use money_app::accounts::{Accounts, AccountsMsg};
+use money_app::budget::{Budget, BudgetMsg};
+use money_app::routes::Route;
+use money_app::shell::{MoneyShell, ShellMsg};
 use money_core::{self as domain, MoneyChange};
 
-use crate::ffi::Session;
-use crate::MoneyRequest;
+use crate::*;
+use ark_ffi::Twin;
+use money_app::MoneyRequest;
 
 /// What only the phone's shell can do for a screen: open a route on its
 /// navigator, carry out a typed request (the bank sync, a sheet still drawn
@@ -32,8 +33,8 @@ use crate::MoneyRequest;
 pub trait AppShell: Send + Sync {
     /// Not `open`: UniFFI writes a vtable field of that name quoted into its C
     /// header for Swift, which clang cannot read.
-    fn open_route(&self, route: Route);
-    fn request(&self, request: MoneyRequest);
+    fn open_route(&self, route: RouteFfi);
+    fn request(&self, request: MoneyRequestFfi);
     /// Milliseconds since the epoch, by the device's clock.
     fn now_ms(&self) -> i64;
     /// The session's day (`2026-10-26`): the demo's day in the demo, today
@@ -84,14 +85,14 @@ impl Host<Accounts> for Phone<'_> {
         }
     }
     fn open(&mut self, route: Route) {
-        self.app.shell.open_route(route)
+        self.app.shell.open_route(route.ffi())
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<AccountsMsg>) {
         let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
         self.app.inbox.ask(&modules, ticket, ask)
     }
     fn request(&mut self, r: MoneyRequest) {
-        self.app.shell.request(r)
+        self.app.shell.request(r.ffi())
     }
 }
 
@@ -114,16 +115,17 @@ impl AccountsApp {
     }
 
     /// `msg` taken: the state updated, its changes sent, its routes opened.
-    pub fn send(&self, msg: AccountsMsg) {
+    pub fn send(&self, msg: AccountsMsgFfi) {
+        let msg = AccountsMsg::from_ffi(msg);
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Phone { app: self });
         self.inbox.drain(&mut rt, &mut Phone { app: self });
     }
 
     /// What the screen shows now.
-    pub fn page(&self) -> AccountsPage {
+    pub fn page(&self) -> AccountsPageFfi {
         let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        rt.screen(&Phone { app: self })
+        rt.screen(&Phone { app: self }).ffi()
     }
 
     /// A number that grows with every message taken: with the session's
@@ -178,14 +180,14 @@ impl Host<Budget> for Tab<'_> {
         }
     }
     fn open(&mut self, route: Route) {
-        self.app.shell.open_route(route)
+        self.app.shell.open_route(route.ffi())
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<BudgetMsg>) {
         let modules = self.app.modules.lock().unwrap_or_else(|e| e.into_inner()).clone();
         self.app.inbox.ask(&modules, ticket, ask)
     }
     fn request(&mut self, r: MoneyRequest) {
-        self.app.shell.request(r)
+        self.app.shell.request(r.ffi())
     }
 }
 
@@ -218,16 +220,17 @@ impl BudgetApp {
     }
 
     /// `msg` taken; the views its state names held.
-    pub fn send(&self, msg: BudgetMsg) {
+    pub fn send(&self, msg: BudgetMsgFfi) {
+        let msg = BudgetMsg::from_ffi(msg);
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Tab { app: self });
         self.inbox.drain(&mut rt, &mut Tab { app: self });
         self.hold(&rt);
     }
 
-    pub fn page(&self) -> BudgetPage {
+    pub fn page(&self) -> BudgetPageFfi {
         let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        rt.screen(&Tab { app: self })
+        rt.screen(&Tab { app: self }).ffi()
     }
 
     pub fn version(&self) -> u64 {
@@ -280,14 +283,14 @@ impl Host<MoneyShell> for Window<'_> {
         }
     }
     fn open(&mut self, route: Route) {
-        self.app.shell.open_route(route)
+        self.app.shell.open_route(route.ffi())
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<ShellMsg>) {
         // The shell asks no module: answered Unavailable, so it is idle.
         self.app.inbox.ask(&Modules::new(), ticket, ask)
     }
     fn request(&mut self, r: MoneyRequest) {
-        self.app.shell.request(r)
+        self.app.shell.request(r.ffi())
     }
 }
 
@@ -309,16 +312,17 @@ impl ShellApp {
     }
 
     /// `msg` taken.
-    pub fn send(&self, msg: ShellMsg) {
+    pub fn send(&self, msg: ShellMsgFfi) {
+        let msg = ShellMsg::from_ffi(msg);
         let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.dispatch(msg, &mut Window { app: self });
         self.inbox.drain(&mut rt, &mut Window { app: self });
     }
 
     /// What the shell shows now.
-    pub fn page(&self) -> ShellPage {
+    pub fn page(&self) -> ShellPageFfi {
         let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
-        rt.screen(&Window { app: self })
+        rt.screen(&Window { app: self }).ffi()
     }
 
     /// A number that grows with every message taken.

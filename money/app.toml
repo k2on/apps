@@ -88,7 +88,12 @@ This is a release build signed with a key committed to that repository, so anyon
 """
 
 [ffi]
-# The features of money's crate each phone's library links: Android finds
+# The phones' bridge (an adapter crate: the UniFFI twins of money-core's
+# and money-app's types, and the exports over them), which nix's
+# generated money-ffi links.
+crate = "money-bridge"
+dir = "bridge"                 # beside app.toml
+# The features of the bridge each phone's library links: Android finds
 # a receipt's page in a frame with the corner model in Rust (`page`); the
 # iPhone and the Mac with VisionKit, so with none.
 android = ["page"]

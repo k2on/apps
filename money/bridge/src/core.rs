@@ -8,14 +8,13 @@
 use ark_ffi::{RowId, Twin};
 use ark_format::NumberStyle;
 
-use crate::accounts::AccountShelfFfi;
-use crate::accounts::{self, AccountKind};
-use crate::banks::FollowFfi;
-use crate::changes::{MoneyChange, MoneyChangeFfi};
-use crate::transactions::{Draft, DraftFfi};
-use crate::types::*;
-use crate::words::{self, BankStatusFfi, CaptionsFfi, MeterFfi, Tone, ToneFfi};
-use crate::Id;
+use crate::*;
+use money_core::accounts::{self, AccountKind};
+use money_core::changes::MoneyChange;
+use money_core::transactions::Draft;
+use money_core::types::*;
+use money_core::words::{self, Tone};
+use money_core::Id;
 
 type Tag = crate::UniFfiTag;
 
@@ -40,36 +39,36 @@ fn id<R>(r: Option<RowId>) -> Option<Id<R>> {
 
 // * Accounts
 
-#[uniffi::export]
-impl AccountKind {
+#[uniffi::export(name = "AccountKind")]
+impl AccountKindFfi {
     /// The key an account keeps: `checking`.
     #[uniffi::method(name = "key")]
     pub fn ffi_key(&self) -> String {
-        self.key().into()
+        of::<AccountKind>(self).key().into()
     }
 
     /// What a person calls it: "Credit Card".
     #[uniffi::method(name = "title")]
     pub fn ffi_title(&self) -> String {
-        self.title().into()
+        of::<AccountKind>(self).title().into()
     }
 
     #[uniffi::method(name = "on_budget_by_default")]
     pub fn ffi_on_budget_by_default(&self) -> bool {
-        self.on_budget_by_default()
+        of::<AccountKind>(self).on_budget_by_default()
     }
 
     /// Whether its balance is what is owed on it.
     #[uniffi::method(name = "owes")]
     pub fn ffi_owes(&self) -> bool {
-        AccountKind::owes(*self)
+        AccountKind::owes(of::<AccountKind>(self))
     }
 }
 
 /// Every kind of account, in the order a form offers them.
 #[uniffi::export]
-pub fn account_kinds() -> Vec<AccountKind> {
-    AccountKind::ALL.to_vec()
+pub fn account_kinds() -> Vec<AccountKindFfi> {
+    out(AccountKind::ALL.to_vec())
 }
 
 /// What a person calls a kind by its key; the key, capitalized, for none.
@@ -109,8 +108,8 @@ impl AccountLineFfi {
         of::<AccountLine>(self).subtitle()
     }
 
-    pub fn account_kind(&self) -> Option<AccountKind> {
-        of::<AccountLine>(self).account_kind()
+    pub fn account_kind(&self) -> Option<AccountKindFfi> {
+        of::<AccountLine>(self).account_kind().map(AccountKind::ffi)
     }
 }
 
@@ -257,7 +256,7 @@ impl DraftFfi {
 /// Who a payee field offers while `typed` is typed.
 #[uniffi::export]
 pub fn suggest_payees(typed: String, payees: Vec<PayeeLineFfi>, limit: u32) -> Vec<PayeeLineFfi> {
-    out(crate::transactions::suggest(&typed, &all::<PayeeLine>(payees), limit as usize))
+    out(money_core::transactions::suggest(&typed, &all::<PayeeLine>(payees), limit as usize))
 }
 
 #[uniffi::export(name = "MoneyChange")]
@@ -327,7 +326,7 @@ impl LinkedLineFfi {
 /// newest ask there was before it.
 #[uniffi::export]
 pub fn follow(asks: Vec<AskLineFfi>, since: Option<RowId>) -> FollowFfi {
-    crate::banks::follow(&all::<AskLine>(asks), id(since)).ffi()
+    money_core::banks::follow(&all::<AskLine>(asks), id(since)).ffi()
 }
 
 /// The ask to tell of, unless `dismissed`.
@@ -386,19 +385,19 @@ pub fn unmatched_receipts(receipts: Vec<ReceiptLineFfi>, amount: i64, day: Strin
 /// Ready to Assign's category: the same id on every peer.
 #[uniffi::export]
 pub fn ready_to_assign_id() -> RowId {
-    RowId(crate::budget::ready_to_assign().0)
+    RowId(money_core::budget::ready_to_assign().0)
 }
 
 /// The cards' own group, Credit Card Payments: the same id on every peer.
 #[uniffi::export]
 pub fn card_group_id() -> RowId {
-    RowId(crate::cards::card_group().0)
+    RowId(money_core::cards::card_group().0)
 }
 
 #[uniffi::export(name = "GroupLine")]
 impl GroupLineFfi {
     /// Whether it is the cards' own group, filled and emptied as the cards are.
     pub fn is_cards(&self) -> bool {
-        of::<GroupLine>(self).id == crate::cards::card_group()
+        of::<GroupLine>(self).id == money_core::cards::card_group()
     }
 }

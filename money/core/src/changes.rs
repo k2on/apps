@@ -16,7 +16,7 @@ macro_rules! changes {
     ($( $(#[$doc:meta])* $v:ident $(($t:ty))? = $name:literal, )*) => {
         /// A change of money's, by the function that makes it.
         #[derive(Clone, Debug, PartialEq, Eq, Describe)]
-        #[cfg_attr(feature = "ffi", ark(ffi))]
+        #[ark(ffi)]
         pub enum MoneyChange {
             $( $(#[$doc])* $v $(($t))?, )*
         }

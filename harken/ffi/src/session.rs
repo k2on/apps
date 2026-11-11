@@ -14,7 +14,9 @@ use std::sync::Arc;
 use ark::format::Encode;
 use ark_ffi::{Peer, Refusal, RowId, Twin};
 use harken_domain::views::{HarkenView as D, Key};
-use harken_domain::{LibraryEntry, Playlist, UniFfiTag};
+use harken_domain::{LibraryEntry, Playlist};
+
+use crate::UniFfiTag;
 
 /// A view the phones hold, or a page made of several: the domain's
 /// (`harken_domain::HarkenView`), each id its hex. A playlist given is the

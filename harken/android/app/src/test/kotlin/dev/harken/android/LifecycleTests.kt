@@ -122,7 +122,7 @@ class LifecycleTests {
         var landed: Lifecycle.State? = null
         Driver(paparazzi).run(5_000L) {
             val home = state(Destination.Home.pattern)!!
-            navs.getValue(Tab.Home).navigate(uniffi.harken_domain.Route.Album(Demo.key("Water Music"), "Water Music").destination())
+            navs.getValue(Tab.Home).navigate(dev.harken.ffi.Route.Album(Demo.key("Water Music"), "Water Music").destination())
             frames(700)
             val album = state(Destination.Album.pattern)!!
             back.dispatchOnBackStarted(start)

@@ -18,7 +18,7 @@ use crate::types::*;
 /// here for every client, each drawing it in its own tint (`Short` and
 /// `OnCard` amber, `Overspent` red, `Positive` green).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub enum Tone {
     /// Nothing, neither good nor bad.
     #[default]
@@ -61,7 +61,7 @@ impl Tone {
 /// whether the debt is covered and what the card owes. Blank where there
 /// is nothing to say.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub struct Captions {
     pub left: String,
     pub right: String,
@@ -70,7 +70,7 @@ pub struct Captions {
 /// How far along a category is, as its bar draws it: a share from 0 to
 /// 1000 (thousandths) and the tone it is drawn in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub struct Meter {
     pub thousandths: i64,
     pub tone: Tone,
@@ -393,7 +393,7 @@ pub fn ask_shown(asks: &[AskLine], dismissed: Option<Id<crate::schema::BankAsk>>
 /// How a connected bank is doing, in a sentence; `alarm` when it wants
 /// somebody.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub struct BankStatus {
     pub words: String,
     pub alarm: bool,

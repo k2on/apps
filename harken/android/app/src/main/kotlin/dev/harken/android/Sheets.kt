@@ -71,7 +71,7 @@ import dev.arkui.quiet
 import dev.arkui.rememberTransientListState
 import dev.arkui.rememberTransientScrollState
 import kotlinx.coroutines.delay
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import dev.arkui.Feedback
 import dev.arkui.SensoryFeedback
 import uniffi.ark_format.formatClock

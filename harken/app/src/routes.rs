@@ -21,8 +21,8 @@
 use ark_router::Routes;
 
 /// Somewhere harken can be.
-#[derive(Debug, Clone, Routes)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum), uniffi::export(Eq, Hash))]
+#[derive(Debug, Clone, Routes, ark::twin::Twin)]
+#[ark(ffi_eq)]
 pub enum Route {
     /// Every song, in library order: the library itself.
     #[home]
@@ -158,60 +158,6 @@ impl Route {
             }),
             _ => None,
         }
-    }
-}
-
-/// The route a URL names, or none: `Route::from_url`, for the phones'
-/// deep links and launch arguments (UniFFI writes no constructor on an
-/// enum): `/album/water-music/`, `harken://album/water-music/`.
-#[cfg_attr(feature = "ffi", uniffi::export)]
-pub fn route_from_url(url: String) -> Option<Route> {
-    Route::from_url(&url)
-}
-
-#[cfg(feature = "ffi")]
-#[uniffi::export]
-impl Route {
-    /// The URL (`Route::url`): `/album/Water%20Music/`.
-    #[uniffi::method(name = "url")]
-    pub fn ffi_url(&self) -> String {
-        self.url()
-    }
-
-    #[uniffi::method(name = "title")]
-    pub fn ffi_title(&self) -> String {
-        self.title()
-    }
-
-    #[uniffi::method(name = "kind")]
-    pub fn ffi_kind(&self) -> String {
-        self.kind().into()
-    }
-
-    #[uniffi::method(name = "heading")]
-    pub fn ffi_heading(&self) -> Option<String> {
-        self.heading().map(String::from)
-    }
-
-    #[uniffi::method(name = "is_root")]
-    pub fn ffi_is_root(&self) -> bool {
-        self.is_root()
-    }
-
-    #[uniffi::method(name = "fallback")]
-    pub fn ffi_fallback(&self) -> Route {
-        self.fallback()
-    }
-
-    #[uniffi::method(name = "work")]
-    pub fn ffi_work(&self) -> Option<Route> {
-        self.work()
-    }
-
-    /// Whether the route is this playlist's (`Route::names`).
-    #[uniffi::method(name = "names")]
-    pub fn ffi_names(&self, id: String, name: String) -> bool {
-        self.names(&id, &name)
     }
 }
 

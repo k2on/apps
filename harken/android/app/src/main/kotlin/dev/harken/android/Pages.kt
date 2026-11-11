@@ -10,7 +10,7 @@
 // (`Library.hold`, `Library.works` and the rest), spliced as the log moves.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box

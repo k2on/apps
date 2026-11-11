@@ -7,10 +7,10 @@ import dev.arkdb.ffi.J
 import dev.arkdb.ffi.Peer
 import dev.arkdb.ffi.View
 import org.json.JSONObject
-import uniffi.harken_domain.LibraryEntry
-import uniffi.harken_domain.Playlist
-import uniffi.harken_domain.LibraryEntryView
-import uniffi.harken_domain.PlaylistView
+import dev.harken.ffi.LibraryEntry
+import dev.harken.ffi.Playlist
+import dev.harken.ffi.LibraryEntryView
+import dev.harken.ffi.PlaylistView
 
 /** The record `Active`. */
 data class Active(val at: Long, val clock: Clock, val from: String, val output: Output, val queue: List<Track>) {

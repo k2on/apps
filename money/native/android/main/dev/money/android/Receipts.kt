@@ -7,7 +7,7 @@
 // (a reading put right), shown as its photo, or taken off.
 package dev.money.android
 
-import uniffi.money_app.MoneyView
+import uniffi.money_bridge.MoneyView
 import dev.arkui.watch
 import android.content.Context
 import android.graphics.Bitmap
@@ -88,13 +88,13 @@ import dev.arkui.LocalAmounts
 import dev.arkui.Space
 import dev.arkui.Tokens
 import dev.arkdb.ffi.FileRef
-import uniffi.money_core.ItemLine
-import uniffi.money_core.MoneyChange
-import uniffi.money_core.PhotoLine
-import uniffi.money_core.ReceiptLine
-import uniffi.money_core.StoreItem
-import uniffi.money_core.WriteReceipt
-import uniffi.money_core.storeName
+import uniffi.money_bridge.ItemLine
+import uniffi.money_bridge.MoneyChange
+import uniffi.money_bridge.PhotoLine
+import uniffi.money_bridge.ReceiptLine
+import uniffi.money_bridge.StoreItem
+import uniffi.money_bridge.WriteReceipt
+import uniffi.money_bridge.storeName
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import kotlin.math.max

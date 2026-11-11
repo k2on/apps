@@ -21,7 +21,10 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
 `web`, ark-format, ark-router, ark-app and the modules' `web` impls.
 
 ```
+ money/core           the domain: its rows, rules and views' keys; no UniFFI, no peer
  money/app            the app: State, Msg, update, screen records, #[view] layouts
+ money/bridge         the phones' bridge: the UniFFI twins of the core's and the app's types
+ money/seed           the demo's household on a peer and a disk, and `money-seed`
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
    └ ark-<name>       a device module each: modules/haptics, clipboard, share, camera, …
@@ -61,7 +64,7 @@ the store's. The runtime has no thread or clock of its own (the host says
 the time: the browser has no clock `std` can read), so the same code runs
 behind the phones' bridge, in the iced window and in wasm.
 
-A `Host` is each shell's: `money/app/src/ffi/app.rs` (the phones: the bridge's
+A `Host` is each shell's: `money/bridge/src/app.rs` (the phones: the bridge's
 `Session`, an `AppShell` foreign trait for routes and the time),
 `money/iced/src/overview.rs` (the window: its own store and changes, iced's
 clipboard), and the tests' (`money/app/src/accounts/tests.rs`, over the
@@ -201,7 +204,7 @@ module that answers later hands its implementation a typed reply object
 of its own (the camera's `ScanReply.scanned(code)`,
 `PhotoReply.taken(jpeg)`, either's `failed(why)`): the module's Swift
 class implements the protocol UniFFI writes (`Haptics`), its Kotlin class
-the interface (`uniffi.ark_haptics.Haptics`), and the app's ffi crate takes
+the interface (`uniffi.ark_haptics.Haptics`), and the app's bridge takes
 them (`AccountsApp.useModules(haptics:clipboard:share:)`) and registers
 them. Each module crate is its own UniFFI namespace in the app's one
 library, so its Kotlin package is `uniffi.ark_<name>`.
@@ -305,7 +308,7 @@ driver waits until a screen is idle and its version has not moved since
 it last looked. Each shell exposes them:
 
 - **The phones**: `AccountsApp`, `BudgetApp` and `ShellApp` each have
-  `isIdle()` and `version()` over UniFFI (money/app/src/ffi/app.rs).
+  `isIdle()` and `version()` over UniFFI (money/bridge/src/app.rs).
   The holders pass them on: Swift's `AccountsScreen`, `BudgetScreen` and
   `MoneyShellScreen` have `isIdle` and `version`, Kotlin's
   `AccountsHolder`, `BudgetHolder` and `MoneyShellHolder` `isIdle()` and
@@ -363,20 +366,37 @@ person comes to sign in. That part — the provider, the tokens, the
 browser's round trip, the server's routes — is `ark-auth`'s, an adapter,
 which re-exports the rows as `ark_auth::rows` for its own code.
 
+**What crosses to the phones is written in the adapter.** A domain's or
+an app's type that the phones read is a UniFFI record or enum, but not in
+its own crate: `#[ark(ffi)]` (on a row, an input or a `Describe` type)
+or `#[derive(ark::twin::Twin)]` (on a plain one; `#[ark(ffi_eq)]` for
+one that compares and hashes) writes beside it only its shape — each
+field's type by position (`ark::twin::Field<V, F>`) and a hidden macro.
+The bridge, an adapter, calls them (`ark::twins!(money_core::{…},
+money_app::{…})`, money/bridge/src/lib.rs; harken/ffi for harken) and
+the twins are written there: `AccountLineFfi`, named `AccountLine` in
+Swift and Kotlin, with the conversions both ways (`ark_ffi::Twin`) and
+the rules the phones call as its methods (money/bridge/src/core.rs). So
+money-core and money-app have no `ffi` feature and no UniFFI; their
+Kotlin package is the bridge's (`uniffi.money_bridge`, harken's
+`dev.harken.ffi`).
+
 **The allowlist.** `layers.toml`'s `[allow]` lists today's violations,
 each `"<crate> -> <dependency>"` with what removes it; a change that
 fixes one deletes its line, or the check fails. In order:
 
-1. money-core and harken-domain's `ark-router` (routes move to the app
-   crate), `ark-format` (display text moves to the app crate),
-   `ark-peer`'s view keys (the `ViewKey` trait inverted into the kernel,
-   or the keys moved out), `ark-auth`, and `uniffi`/`ark-ffi` (the
-   records the phones read are generated in the adapter).
-2. money-server's Plaid client behind a `BankFeed` port (a trait), its
-   Plaid adapter and an in-memory fake the importer's tests use.
-3. money-app's adapters — the phones' bridge (`src/ffi`), the iced and
-   browser views and `screens()` behind features — into crates of their
-   own, and the modules' operations treated as the runtime's ports.
+Done: who is signed in (`ark::auth`), the view keys and what an app
+reads of them (`ark::views`), harken's routes (harken/app), the phones'
+records (generated in the bridges), the phones' bridge (money/bridge) and
+the demo's peer (money/seed) are out of the core and the app. Left, in
+order:
+
+1. money-core's `ark-format` (display text moves to the app crate), and
+   ark-format's `uniffi` (its exports into an adapter of its own).
+2. ark-module into the runtime, and each module's operations ports of
+   it, so money-app depends on no module crate.
+3. money-app's views behind features — iced, the browser and
+   `screens()` — into adapter crates of their own.
 
 ## Generated, Not Committed
 
@@ -401,7 +421,7 @@ and nix generates the rest, from app.toml, each listed module's
 | XcodeGen's `project.yml` (one multiplatform target for the iPhone, the iPad and the Mac), its Info.plist keys, entitlements, the asset catalog (AccentColor from the theme, AppIcon rendered from icon.svg) | app.toml's `[apple]`, the modules' `[ios]` | `<app>-ios-simulator`, `<app>-ios-archive`, `<app>-macos` |
 | Gradle's project (settings, the app's `build.gradle.kts` with ArkUI's dependencies and the modules'), the AndroidManifest (permissions, the scheme's links, services, meta-data), the launcher's adaptive and themed icon and the mark (vectors from icon.svg), the splash | app.toml's `[android]`, the modules' `[android]` | `<app>-apk`, `<app>-android-tests`, `<app>-android-screens` |
 | The SwiftUI and Compose of every `#[view]` | the app's `screens()` | inside both |
-| The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <app crate>::*` as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `crate` and `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
+| The phones' library: a shim crate, `<id>-ffi` (lib `<id>_ffi`), `pub use <bridge>::*` over the app's bridge (app.toml's `[ffi] crate`, money/bridge) as a static library (the iPhone, the Mac) and a shared one (Android) | app.toml's `[ffi]` | `<app>-android-lib`, `<app>-ios-kernel*` |
 | The generator's main | the app's crate | `<app>-ui` |
 | F-Droid's metadata (`<bundle id>.yml`) | app.toml's `[store]` (`ui/prebuild.py fdroid`) | `apps-fdroid`, `fdroid-repo` |
 
@@ -448,7 +468,9 @@ hosts = ["auth", "join"]       # the scheme's hosts
 dependencies = []              # Maven coordinates its own Kotlin needs
 
 [ffi]
-android = ["page"]             # the app crate's features each phone's library links
+crate = "money-bridge"         # the phones' bridge: the UniFFI twins and the exports
+dir = "bridge"                 # where it is, beside app.toml
+android = ["page"]             # the bridge's features each phone's library links
 apple = []
 
 [store]                        # what a store lists: F-Droid's .yml is written from it
@@ -614,7 +636,7 @@ over by script (`ssr`, `hydrate`: "The Browser's Modes", below) — the way
 
 One route model for every app, on every shell (`ark-router`). An app
 declares where it can be once, as a `Route` enum in its domain or app
-crate — `harken_domain::routes`, `money_app::routes`, the docs'
+crate — `harken_app::routes`, `money_app::routes`, the docs'
 `docs/site/src/routes.rs` — with `#[derive(Routes)]`, a pattern per
 variant (`#[route("/album/:key")]`), and every shell reads that one enum:
 the browser's address bar (arkui-web, `Address::of_url`), the desktop's

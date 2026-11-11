@@ -1,14 +1,14 @@
-#![cfg(feature = "ffi")]
 //! money's peer through the bridge: opened alone on a disk, the budget set
 //! up and an account opened by name, seen in a typed view, and a refusal
 //! said as a value.
 
 use ark_ffi::Taken;
 use ark_ffi::Twin;
-use money_app::ffi::{money_domain, money_open, money_send, Sent};
+use money_bridge::AccountLineView;
+use money_bridge::UniFfiTag;
+use money_bridge::{money_domain, money_open, money_send, Sent};
 use money_core::accounts::AccountKind;
-use money_core::AccountLineView;
-use money_core::{MoneyChange, OpenAccount, UniFfiTag};
+use money_core::{MoneyChange, OpenAccount};
 
 /// Falsified by `config` registering the module alone (no domain): there
 /// was no function `open_account`; and by `money_send` throwing its

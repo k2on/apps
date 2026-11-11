@@ -1,0 +1,16 @@
+[package]
+name = "harken-app"
+version = "0.1.0"
+workspace = "../../rust"
+edition.workspace = true
+license.workspace = true
+description = "harken as an app over its domain: where it can be (its routes, one path each, on every shell). What its screens read moves here as they move into Rust."
+
+[lib]
+name = "harken_app"
+path = "src/lib.rs"
+
+[dependencies]
+ark = { path = "../../rust/ark" }
+# Its routes, spelled as paths (`src/routes.rs`).
+ark-router = { path = "../../ui/rust/router" }

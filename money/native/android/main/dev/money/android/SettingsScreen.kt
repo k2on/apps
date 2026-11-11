@@ -85,12 +85,12 @@ import dev.arkui.Space
 import dev.arkui.Tint
 import dev.arkui.tintColors
 import kotlinx.coroutines.delay
-import uniffi.money_core.AskLine
-import uniffi.money_core.AskState
-import uniffi.money_core.BankLine
-import uniffi.money_core.LinkedLine
-import uniffi.money_core.askShown
-import uniffi.money_core.linkableAccounts
+import uniffi.money_bridge.AskLine
+import uniffi.money_bridge.AskState
+import uniffi.money_bridge.BankLine
+import uniffi.money_bridge.LinkedLine
+import uniffi.money_bridge.askShown
+import uniffi.money_bridge.linkableAccounts
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

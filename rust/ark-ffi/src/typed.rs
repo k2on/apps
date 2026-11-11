@@ -41,7 +41,7 @@ macro_rules! itself {
         }
     )*};
 }
-itself!(i64, u64, i32, u32, u8, bool, String);
+itself!(i64, u64, i32, u32, u8, f64, bool, String);
 
 impl<UT, T: Twin<UT>> Twin<UT> for Option<T> {
     type Ffi = Option<T::Ffi>;

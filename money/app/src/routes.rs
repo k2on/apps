@@ -13,8 +13,8 @@
 use ark_router::Routes;
 
 /// Somewhere money can be.
-#[derive(Debug, Clone, Routes)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum), uniffi::export(Eq, Hash))]
+#[derive(Debug, Clone, Routes, ark::twin::Twin)]
+#[ark(ffi_eq)]
 pub enum Route {
     /// The month's budget.
     #[home]
@@ -112,56 +112,6 @@ impl Route {
             self,
             Route::Accounts | Route::Inbox | Route::Account { .. } | Route::Filter { .. } | Route::Filtered
         )
-    }
-}
-
-/// The route a URL names, or none: `Route::from_url`, for the phones'
-/// deep links and launch arguments (UniFFI writes no constructor on an
-/// enum): `/budget/`, `money://account/<id>/checking/`.
-#[cfg_attr(feature = "ffi", uniffi::export)]
-pub fn route_from_url(url: String) -> Option<Route> {
-    Route::from_url(&url)
-}
-
-#[cfg(feature = "ffi")]
-#[uniffi::export]
-impl Route {
-    /// The URL (`Route::url`): `/account/<id>/checking/`.
-    #[uniffi::method(name = "url")]
-    pub fn ffi_url(&self) -> String {
-        self.url()
-    }
-
-    #[uniffi::method(name = "title")]
-    pub fn ffi_title(&self) -> String {
-        self.title()
-    }
-
-    #[uniffi::method(name = "is_root")]
-    pub fn ffi_is_root(&self) -> bool {
-        self.is_root()
-    }
-
-    #[uniffi::method(name = "fallback")]
-    pub fn ffi_fallback(&self) -> Route {
-        self.fallback()
-    }
-
-    #[uniffi::method(name = "is_register")]
-    pub fn ffi_is_register(&self) -> bool {
-        self.is_register()
-    }
-
-    /// The row's id, or nil for a route that names no row (`Route::row_id`).
-    #[uniffi::method(name = "row_id")]
-    pub fn ffi_row_id(&self) -> Option<String> {
-        self.row_id()
-    }
-
-    /// Whether the route names this row (`Route::names`).
-    #[uniffi::method(name = "names")]
-    pub fn ffi_names(&self, id: String, name: String) -> bool {
-        self.names(&id, &name)
     }
 }
 

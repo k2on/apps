@@ -17,7 +17,9 @@ ark-ffi = { path = "../../rust/ark-ffi" }
 # (re-exported in lib.rs, so its functions are in this library).
 ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
-harken-domain = { path = "../domain", features = ["ffi"] }
+harken-domain = { path = "../domain" }
+# Where harken can be (its routes), as the phones read them.
+harken-app = { path = "../app" }
 harken-player = { path = "../player" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }

@@ -20,7 +20,7 @@ fn model() -> Option<&'static Model> {
     static MODEL: OnceLock<Option<Model>> = OnceLock::new();
     MODEL
         .get_or_init(|| {
-            let bytes: &[u8] = include_bytes!("../../models/corners.onnx");
+            let bytes: &[u8] = include_bytes!("../models/corners.onnx");
             tract_onnx::onnx()
                 .model_for_read(&mut &bytes[..])
                 .and_then(|m| m.with_input_fact(0, f32::fact([1, 3, SIDE, SIDE]).into()))

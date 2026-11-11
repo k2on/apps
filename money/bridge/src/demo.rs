@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use ark::format::Encode;
 use ark_ffi::{Peer, Refusal};
 use money_core::dates::{days_from_civil, parse_day};
-use money_core::demo as seed;
 use money_core::AccountLine;
+use money_seed as seed;
 
 /// Noon of `day` (UTC), in ms: when a demo seeded for that day says it is.
 fn noon(day: &str) -> Option<i64> {
@@ -66,7 +66,7 @@ impl DemoBank {
     /// The bank's next run, on `today` (`2026-10-26`; today when none),
     /// imported on the demo's `peer` as its importer authors it.
     pub fn sync(&self, peer: Arc<Peer>, today: Option<String>) -> Result<DemoSync, Refusal> {
-        let today = today.unwrap_or_else(crate::ffi::money_today);
+        let today = today.unwrap_or_else(crate::money_today);
         let mut bank = self.bank.lock().unwrap_or_else(|e| e.into_inner());
         let (intent, n, u) = peer.with(|p| -> Result<_, String> {
             let lines = Vec::<AccountLine>::from_bytes(&p.ask("accounts", &().to_bytes())?).map_err(|e| e.to_string())?;

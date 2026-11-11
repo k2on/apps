@@ -35,7 +35,7 @@ pub struct Hall {
 impl Hall {
     #[uniffi::constructor]
     pub fn new() -> Arc<Hall> {
-        let hub = Handle::spawn(ark_peer::Peer::serve(crate::ffi::config(), Box::new(Memory::default()), now_ms()));
+        let hub = Handle::spawn(ark_peer::Peer::serve(crate::config(), Box::new(Memory::default()), now_ms()));
         Arc::new(Hall {
             hub,
             devices: Mutex::default(),
@@ -56,7 +56,7 @@ impl Hall {
             expires_ms: 0,
             picture: String::new(),
         };
-        let p = Peer::open(crate::ffi::config(), &dir, Some(login))?;
+        let p = Peer::open(crate::config(), &dir, Some(login))?;
         p.by_hand();
         p.connect_with("hall", self.hub.dialer(Arc::new(token)));
         self.devices.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::downgrade(&p));

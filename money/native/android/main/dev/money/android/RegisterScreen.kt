@@ -7,7 +7,7 @@
 // cleared balance? Yes locks it; no asks what the bank says and adjusts.
 package dev.money.android
 
-import uniffi.money_app.MoneyView
+import uniffi.money_bridge.MoneyView
 import dev.arkui.watch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -74,8 +74,8 @@ import dev.arkui.Space
 import dev.arkui.reflowing
 import dev.arkui.Stat
 import dev.arkui.SwipeToAct
-import uniffi.money_core.Cleared
-import uniffi.money_core.TxnLine
+import uniffi.money_bridge.Cleared
+import uniffi.money_bridge.TxnLine
 import dev.arkui.pressable
 import dev.arkui.Press
 import uniffi.ark_format.formatDayHeading

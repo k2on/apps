@@ -1,4 +1,3 @@
-#![cfg(feature = "ffi")]
 //! money's views as the phones hold them (`Session`): what the shells did
 //! by hand before — a view held while a screen shows it, a month's page as
 //! its views, the rows spliced as changes land, the app told which moved,
@@ -7,10 +6,11 @@
 use std::sync::{Arc, Mutex};
 
 use ark_ffi::Twin;
-use money_app::ffi::{money_demo, Changed, MoneyView, Sent, Session};
+use money_bridge::MoneyChangeFfi;
+use money_bridge::UniFfiTag;
+use money_bridge::{money_demo, Changed, MoneyView, Sent, Session};
 use money_core::accounts::AccountKind;
-use money_core::changes::MoneyChangeFfi;
-use money_core::{Assign, MoneyChange, OpenAccount, UniFfiTag};
+use money_core::{Assign, MoneyChange, OpenAccount};
 
 const TODAY: &str = "2026-10-26";
 

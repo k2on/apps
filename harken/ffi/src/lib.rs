@@ -18,6 +18,13 @@ use serde_json::json;
 
 uniffi::setup_scaffolding!();
 
+// What crosses, written here from the domain's and the app's types (the
+// domain and the app know nothing of UniFFI: ui/docs/app.md, Layers).
+ark::twins!(harken_domain::{schema::Playlist, types::LibraryEntry}, harken_app::routes::Route);
+
+mod routes;
+pub use routes::route_from_url;
+
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
 /// come with the app's, and the phones print what the desktop prints.

@@ -10,7 +10,7 @@
 // offline. Nothing of it is kept on the phone.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer

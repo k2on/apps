@@ -16,8 +16,8 @@ pub const KINDS: [&str; 6] = ["checking", "savings", "cash", "credit", "loan", "
 /// A sort of account: what a form offers, in this order, and what an
 /// account's `kind` names by its key. It crosses the wire and the log as
 /// its key (`"checking"`), the text it always was.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, ark::twin::Twin)]
+#[ark(ffi_eq)]
 pub enum AccountKind {
     #[default]
     Checking,
@@ -108,17 +108,6 @@ impl ark::row::Describe for AccountKind {
     }
 }
 
-#[cfg(feature = "ffi")]
-impl<UT> ark_ffi::Twin<UT> for AccountKind {
-    type Ffi = AccountKind;
-    fn ffi(self) -> AccountKind {
-        self
-    }
-    fn from_ffi(f: AccountKind) -> AccountKind {
-        f
-    }
-}
-
 /// Whether an account of this sort belongs in the budget unless somebody
 /// says otherwise: what is spent from it is spent from the budget.
 pub fn on_budget_by_default(kind: &str) -> bool {
@@ -128,7 +117,7 @@ pub fn on_budget_by_default(kind: &str) -> bool {
 /// The sidebar's sections, as every client lists the accounts: open ones
 /// on the budget, open ones tracked beside it, and the closed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub enum Shelving {
     Budget,
     Tracking,
@@ -160,7 +149,7 @@ impl Shelving {
 /// One section of the accounts, its accounts in order and what they add
 /// up to.
 #[derive(Clone, Debug, PartialEq, Eq, Describe)]
-#[cfg_attr(feature = "ffi", ark(ffi))]
+#[ark(ffi)]
 pub struct AccountShelf {
     pub shelving: Shelving,
     pub title: String,

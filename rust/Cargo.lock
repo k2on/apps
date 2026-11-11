@@ -2735,17 +2735,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "harken-app"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-router",
+]
+
+[[package]]
 name = "harken-domain"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-ffi",
  "ark-peer",
- "ark-router",
  "arkdb",
  "serde",
  "serde_json",
- "uniffi",
 ]
 
 [[package]]
@@ -2757,6 +2762,7 @@ dependencies = [
  "ark-format",
  "ark-peer",
  "arkdb",
+ "harken-app",
  "harken-domain",
  "harken-player",
  "serde_json",
@@ -2773,6 +2779,7 @@ dependencies = [
  "ark-peer",
  "arkui",
  "arkui-shots",
+ "harken-app",
  "harken-domain",
  "harken-player",
  "harken-seed",
@@ -4341,18 +4348,35 @@ dependencies = [
  "ark",
  "ark-app",
  "ark-clipboard",
- "ark-ffi",
  "ark-format",
  "ark-haptics",
- "ark-module",
  "ark-peer",
  "ark-router",
  "ark-share",
  "ark-ui-gen",
  "arkui",
  "arkui-web",
- "image",
  "money-core",
+ "money-seed",
+]
+
+[[package]]
+name = "money-bridge"
+version = "0.1.0"
+dependencies = [
+ "ark",
+ "ark-app",
+ "ark-clipboard",
+ "ark-ffi",
+ "ark-format",
+ "ark-haptics",
+ "ark-module",
+ "ark-peer",
+ "ark-share",
+ "image",
+ "money-app",
+ "money-core",
+ "money-seed",
  "serde_json",
  "tempfile",
  "tract-onnx",
@@ -4364,12 +4388,9 @@ name = "money-core"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-ffi",
  "ark-format",
- "ark-peer",
  "serde",
  "serde_json",
- "uniffi",
 ]
 
 [[package]]
@@ -4387,6 +4408,7 @@ dependencies = [
  "iced_test",
  "money-app",
  "money-core",
+ "money-seed",
  "money-server",
  "tempfile",
  "tokio",
@@ -4413,6 +4435,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "money-core",
+ "money-seed",
  "serde",
  "serde_json",
  "tempfile",
@@ -4434,6 +4457,7 @@ dependencies = [
  "leptos",
  "money-app",
  "money-core",
+ "money-seed",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

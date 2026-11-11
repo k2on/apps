@@ -5,7 +5,7 @@
 package dev.money.android
 
 import android.media.Image
-import uniffi.money_app.moneyPageCorners
+import uniffi.money_bridge.moneyPageCorners
 
 object Model {
     /** The side of the square the model looks at. */

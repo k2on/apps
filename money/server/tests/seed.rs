@@ -7,8 +7,8 @@
 mod common;
 
 use common::*;
-use money_core::demo as seed;
 use money_core::*;
+use money_seed as seed;
 
 fn accounts(p: &Peer) -> Vec<AccountLine> {
     p.query("accounts", &()).unwrap_or_default()

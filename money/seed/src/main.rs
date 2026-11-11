@@ -17,7 +17,11 @@ use std::process::ExitCode;
 enum Failed {
     Usage,
     NotEmpty(PathBuf),
-    Io { doing: &'static str, path: PathBuf, error: std::io::Error },
+    Io {
+        doing: &'static str,
+        path: PathBuf,
+        error: std::io::Error,
+    },
 }
 
 impl fmt::Display for Failed {
@@ -31,7 +35,11 @@ impl fmt::Display for Failed {
 }
 
 fn io<'a>(doing: &'static str, path: &'a Path) -> impl FnOnce(std::io::Error) -> Failed + 'a {
-    move |error| Failed::Io { doing, path: path.into(), error }
+    move |error| Failed::Io {
+        doing,
+        path: path.into(),
+        error,
+    }
 }
 
 fn seed() -> Result<PathBuf, Failed> {
@@ -47,14 +55,14 @@ fn seed() -> Result<PathBuf, Failed> {
     let log = data.join("log");
     let mut disk = ark_peer::Files::new(&log).map_err(io("opening", &log))?;
     let now = ark_peer::now_ms();
-    money_core::demo::log(&mut disk, &money_core::dates::day_of_ms(now), now).map_err(io("writing", &log))?;
+    money_seed::log(&mut disk, &money_core::dates::day_of_ms(now), now).map_err(io("writing", &log))?;
     Ok(log)
 }
 
 fn main() -> ExitCode {
     match seed() {
         Ok(log) => {
-            eprintln!("money-seed: the demo's household in {}, as {}", log.display(), money_core::demo::ME);
+            eprintln!("money-seed: the demo's household in {}, as {}", log.display(), money_seed::ME);
             ExitCode::SUCCESS
         }
         Err(e) => {

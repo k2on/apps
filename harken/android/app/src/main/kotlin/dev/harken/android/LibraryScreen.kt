@@ -7,7 +7,7 @@
 // has the account's face alone: no +.
 package dev.harken.android
 
-import uniffi.harken_domain.Playlist
+import dev.harken.ffi.Playlist
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

@@ -8,7 +8,7 @@
 package dev.money.android
 
 import dev.arkdb.ffi.Id
-import uniffi.money_app.moneyDemo
+import uniffi.money_bridge.moneyDemo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,14 +17,14 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import uniffi.money_core.AccountKind
-import uniffi.money_core.Auto
-import uniffi.money_core.Cleared
-import uniffi.money_core.Draft
-import uniffi.money_core.MoneyChange
-import uniffi.money_core.OpenAccount
-import uniffi.money_core.cardGroupId
-import uniffi.money_core.readyToAssignId
+import uniffi.money_bridge.AccountKind
+import uniffi.money_bridge.Auto
+import uniffi.money_bridge.Cleared
+import uniffi.money_bridge.Draft
+import uniffi.money_bridge.MoneyChange
+import uniffi.money_bridge.OpenAccount
+import uniffi.money_bridge.cardGroupId
+import uniffi.money_bridge.readyToAssignId
 
 const val TODAY = "2026-10-26"
 

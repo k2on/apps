@@ -35,8 +35,6 @@ pub mod changes;
 pub mod dates;
 #[cfg(feature = "demo")]
 pub mod demo;
-#[cfg(feature = "ffi")]
-mod ffi;
 pub mod filters;
 pub mod formulas;
 pub mod migrations;
@@ -50,9 +48,6 @@ pub mod transfers;
 pub mod types;
 pub mod views;
 pub mod words;
-
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
 
 pub use ark::row::Id;
 pub use changes::MoneyChange;

@@ -14,23 +14,23 @@ import dev.arkui.LocalGlyphs
 import dev.arkui.LocalRowMark
 import dev.arkdb.ffi.Id
 import dev.arkui.LocalTabFrame
-import uniffi.money_app.AccountsApp
-import uniffi.money_app.BudgetApp
-import uniffi.money_app.BudgetMsg
-import uniffi.money_app.BudgetPage
-import uniffi.money_app.AppShell
-import uniffi.money_app.MoneyRequest
-import uniffi.money_app.Session
-import uniffi.money_app.ShellApp
+import uniffi.money_bridge.AccountsApp
+import uniffi.money_bridge.BudgetApp
+import uniffi.money_bridge.BudgetMsg
+import uniffi.money_bridge.BudgetPage
+import uniffi.money_bridge.AppShell
+import uniffi.money_bridge.MoneyRequest
+import uniffi.money_bridge.Session
+import uniffi.money_bridge.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import uniffi.ark_clipboard.Clipboard
 import uniffi.ark_haptics.Haptics
-import uniffi.money_app.AccountsMsg
-import uniffi.money_app.AccountsPage
-import uniffi.money_app.ShellMsg
-import uniffi.money_app.ShellPage
-import uniffi.money_app.Route
+import uniffi.money_bridge.AccountsMsg
+import uniffi.money_bridge.AccountsPage
+import uniffi.money_bridge.ShellMsg
+import uniffi.money_bridge.ShellPage
+import uniffi.money_bridge.Route
 
 /** The Accounts tab, running in Rust. */
 class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?, clipboard: Clipboard?) {

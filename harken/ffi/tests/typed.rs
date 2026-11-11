@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use ark_ffi::{Login, Op, Peer, Refusal, RowId, Taken, Twin};
-use harken_domain::{LibraryEntryView, PlaylistView};
 use harken_ffi::harken_open;
+use harken_ffi::{LibraryEntryView, PlaylistView};
 
 /// A peer alone whose person holds the library's role, so that it can add
 /// a song.
@@ -103,11 +103,16 @@ mod nested {
     }
 }
 
+// Their twins, written here as an adapter writes them (`ark::twins!`, by
+// the macros the derives wrote beside the types).
+__ark_twin_Inner!(nested::Inner);
+__ark_twin_Outer!(nested::Outer);
+
 /// Falsified by the enum twin's way back dropping a lone unnamed field
 /// (`unreachable!()` in its place): the round trip of `Wraps` panicked.
 #[test]
 fn nested_sums_options_lists_and_ids_have_twins() {
-    use nested::{Inner, InnerFfi, Outer, OuterFfi};
+    use nested::{Inner, Outer};
     let inner = Inner {
         at: Some(3),
         ids: vec![ark::row::Id::new([7; 16])],

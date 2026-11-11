@@ -73,8 +73,7 @@ pub struct ShellState {
 }
 
 /// Light or dark, over the system's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ark::twin::Twin)]
 pub enum Appearance {
     Light,
     Dark,
@@ -97,8 +96,7 @@ impl Default for ShellState {
 }
 
 /// Everything the shell can be told.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub enum ShellMsg {
     /// Show the section tagged `tag` (the sidebar, a tab, ⌘1…⌘4), or an
     /// account's place (`accounts/<id>`).
@@ -170,8 +168,7 @@ pub enum ShellMsg {
 }
 
 /// One account's place in the sidebar.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct AccountPlace {
     pub title: String,
     /// Its kind's glyph, by ArkUI's names.
@@ -183,8 +180,7 @@ pub struct AccountPlace {
 }
 
 /// What the shell shows.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[derive(Clone, Debug, PartialEq, ark::twin::Twin)]
 pub struct ShellPage {
     /// The shown section's tag, or the shown account's.
     pub section: String,

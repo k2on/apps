@@ -1,12 +1,11 @@
-#![cfg(feature = "ffi")]
 //! A hall: two people of one household dial a money server in the
 //! process, and what one enters is the other's register once carried; a
 //! bank import from anybody but the importer is refused, and the
 //! importer's is the server's.
 
 use ark_ffi::Standing;
-use money_app::ffi::Hall;
-use money_core::{AccountLineView, TxnLineView};
+use money_bridge::Hall;
+use money_bridge::{AccountLineView, TxnLineView};
 
 fn dir() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()

@@ -31,14 +31,10 @@ pub mod playlists;
 pub mod plays;
 pub mod progress;
 pub mod queue;
-pub mod routes;
 pub mod schema;
 pub mod shows;
 pub mod types;
 pub mod views;
-
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
 
 pub use ark::row::Id;
 pub use schema::*;

@@ -37,7 +37,7 @@ Kotlin. It crosses as its bytes, never JSON; `session.check(change)` is the
 domain's sentence for its first failed refinement, before it is sent.
 
 **Rows say what they mean.** The records carry their rules as methods
-(`money_core::words`, exported in its `ffi` feature): a budget line's
+(`money_core::words`, exported on their twins in src/core.rs): a budget line's
 `tone()`, `meter()`, `story(style)`, `captions(style)`, `isPayment()`,
 `toCover()`; a transaction's `needsCategory()`, `bankSaid()`,
 `transferAccountId` and `draft()`; the form's `Draft` with `problem()` and
@@ -59,7 +59,8 @@ which views moved (`moved(views)`, on that thread; the app hops to its
 main thread), and `session.version(view)` grows whenever one did. A view is
 read by name: `session.budget(month)` (`Budget`: lines, summary, spending),
 `session.register(account)`, … — UniFFI's own records
-(`uniffi.money_core` on Android; the same module on iOS), no JSON. ArkUI
+(`uniffi.money_bridge` on Android; the same module on iOS), each the
+twin this crate writes of the core's type (`ark::twins!`), no JSON. ArkUI
 draws them: `watched.watch(view) { read }` on Android, `.holding(view)` on
 iOS; the iced window holds `ark_peer::store::Store<MoneyView>` itself.
 `session.send(change)` is `moneySend` with its refusal kept
@@ -107,7 +108,7 @@ A server must allow `money://` as a redirect, as harken's allows
 ```
 nix build .#money-ios-xcframework       # on a Mac with Xcode: MoneyFFI.xcframework, swift/
 nix build .#money-android-lib           # jniLibs/<abi>/, kotlin/, host/
-cargo test -p money-ffi                 # rust/
+cargo test -p money-bridge              # rust/
 ```
 
 `money-android-lib` is harken's derivation for money's crate:
