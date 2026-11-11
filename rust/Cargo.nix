@@ -15308,7 +15308,7 @@ rec {
           {
             name = "web-sys";
             packageId = "web-sys";
-            features = [ "Window" "Document" "Element" "Location" ];
+            features = [ "Window" "Document" "Element" "Location" "Storage" ];
           }
         ];
         features = {
