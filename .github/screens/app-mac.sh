@@ -69,6 +69,10 @@ shoot() {
   fi
   # Signed in and synced (or the demo opened), then still.
   sleep 8
+  # Its front window now, not the first it opened: Settings is a window
+  # of its own, opened after the main one (08-settings-banks was the
+  # Budget's window in 42977527249 and 43083062235).
+  wid=$("$tmp/window" "$pid" 2> /dev/null || echo "$wid")
   mkdir -p "$out/$theme"
   screencapture -x -o -l "$wid" "$out/$theme/$name.png"
   kill "$pid" 2> /dev/null || true

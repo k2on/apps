@@ -127,14 +127,17 @@ for t in "${taken[@]}"; do
       failed=1
     fi
   done
-  # On its side: a screenshot XCUITest gives in the screen's own (portrait)
-  # frame is turned the way the device was, landscape left: a quarter turn
-  # counter-clockwise (seen on an iPad Pro 13-inch, Xcode 26.3).
+  # On its side: each picture turned upright by the driver (Drive.swift's
+  # `upright`), so wider than tall; one that is not fails the app.
   if [ "$orientation" = landscape ]; then
     for png in "$dir"/*/*.png; do
       [ -f "$png" ] || continue
       read -r w h < <(dims "$png")
-      if [ "$h" -gt "$w" ]; then sips -r 270 "$png" > /dev/null; fi
+      if [ "$h" -gt "$w" ]; then
+        echo "::error::$a's $kind: $(basename "$png") is ${w}x${h}, not on its side"
+        echo "$a" >> "$partial"
+        failed=1
+      fi
     done
   fi
   first=$(find "$dir" -mindepth 2 -maxdepth 2 -name '*.png' ! -name 'stuck.png' 2> /dev/null | sort | head -1)

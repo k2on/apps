@@ -167,7 +167,8 @@ final class Drive: XCTestCase {
                 try ready(app)
                 try noBanner(shot.id)
                 let isReady = Date()
-                try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
+                try upright(app.screenshot().pngRepresentation, landscape: entry.orientation == "landscape")
+                    .write(to: out.appendingPathComponent("\(shot.id).png"))
                 let pictured = Date()
                 try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
                 let s = { (a: Date, b: Date) in String(format: "%.1fs", b.timeIntervalSince(a)) }
@@ -235,6 +236,27 @@ final class Drive: XCTestCase {
                 try ready(app, after: g)
             }
         }
+    }
+
+    /// The picture the way the device is held: on its side (landscape
+    /// left), XCUITest gives the screen in its own portrait frame, the app
+    /// drawn a quarter turn round, and it is turned a quarter turn
+    /// counter-clockwise here. Not by `sips -r`, which swapped the canvas's
+    /// sides and left the pixels as they were (every iPad landscape PNG of
+    /// 42977527249 and 43083062235: the portrait picture in a landscape
+    /// canvas, cropped, its last 688 columns black).
+    private func upright(_ png: Data, landscape: Bool) -> Data {
+        guard landscape, let cg = UIImage(data: png)?.cgImage, cg.height > cg.width else { return png }
+        let (w, h) = (CGFloat(cg.width), CGFloat(cg.height))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let turned = UIGraphicsImageRenderer(size: CGSize(width: h, height: w), format: format).image { ctx in
+            // (x, y) to (y, w - x): the top edge to the left, read upward.
+            ctx.cgContext.translateBy(x: 0, y: w)
+            ctx.cgContext.rotate(by: -.pi / 2)
+            UIImage(cgImage: cg).draw(in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        return turned.pngData() ?? png
     }
 
     /// No system banner over the app when it is taken: a notification

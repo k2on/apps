@@ -225,7 +225,9 @@ public struct AmountEntry: View {
         }
         .onAppear {
             typed = cents == 0 ? "" : String(cents)
-            focused = true
+            // Not in a screenshot (ui/docs/shots.md): the keypad would cover
+            // half of what is taken; a shot that types taps the field first.
+            if !Shots.on { focused = true }
         }
         .sensoryFeedback(.selection, trigger: cents)
         .accessibilityElement(children: .ignore)

@@ -101,7 +101,10 @@ where SystemUI puts the status bar's clock (a few pixels to the side, one
 run to the next). Two runs are held to each other by
 `.github/screens/same.py`: byte-identical, the same within three levels
 (the antialiasing), or different, and where.
-- The caret: clear in shots mode.
+- The caret: clear in shots mode; and no field takes the keys by
+  itself (SwiftUI's `AmountEntry` and `NameField` focus as they appear
+  only outside shots mode), so no keyboard covers a sheet unless a shot's
+  step taps a field to type in it.
 - Where a list is scrolled: where a shot's steps put it, or its top.
 
 ## Navigation

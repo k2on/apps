@@ -367,7 +367,8 @@ public struct NameField: View {
                 Text(hint)
             }
         }
-        .onAppear { focused = true }
+        // Not in a screenshot (ui/docs/shots.md): a shot that types taps it.
+        .onAppear { if !Shots.on { focused = true } }
     }
 }
 
