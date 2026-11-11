@@ -105,6 +105,8 @@ pub use handle::{dev, Authenticate, Handle};
 pub use hub::{Called, ConnId, Deliver};
 pub use instance::{Fold, Instance};
 pub use link::{Event, Pumped, Wake};
+#[cfg(not(target_arch = "wasm32"))]
+pub use local::LoginsBefore;
 pub use local::{Local, Logins, Shared};
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use serve::{Running, Server};

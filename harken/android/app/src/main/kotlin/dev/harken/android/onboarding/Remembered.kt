@@ -1,17 +1,20 @@
 // What the onboarding remembers, so that it is asked once: the server, the
 // login, and which permissions have been asked for.
 //
-// Over a [Shelf], a key/value store of strings: the app's private
-// `SharedPreferences` on a phone (`PrefsShelf`), a map in a test. The login
-// is kept whole as `ark_auth::Login`'s JSON (`loginJson`, the bridge's), so
-// a restart reuses the token; one that no longer parses is forgotten rather
-// than trusted. Nothing here touches the replica, which lives in a
-// directory of its own per server.
+// The server and the permissions over a [Shelf], a key/value store of
+// strings: the app's private `SharedPreferences` on a phone (`PrefsShelf`), a
+// map in a test. The login in the secure store (ark-secure-store: the Android
+// keystore), through the bridge's `LoginKeep` (`ark_auth::keep`), kept whole
+// as `ark_auth::Login`'s JSON so a restart reuses the token; one that no
+// longer parses is forgotten rather than trusted, and one an older build kept
+// on the shelf under `ark.login` is moved there once and deleted. Nothing
+// here touches the replica, which lives in a directory of its own per server.
 package dev.harken.android.onboarding
 
 import dev.arkdb.auth.Remembered
-import dev.arkdb.auth.loginJson
-import dev.arkdb.auth.loginParse
+import dev.arkdb.ffi.LoginKeep
+import dev.arkdb.ffi.OldShelf
+import uniffi.ark_secure_store.SecureStore
 
 /** A key/value store of strings; `null` removes. */
 public interface Shelf {
@@ -31,13 +34,15 @@ public class MemoryShelf : Shelf {
     }
 }
 
-public class Kept(private val shelf: Shelf) {
+public class Kept(private val shelf: Shelf, store: SecureStore?) {
+    private val login = LoginKeep(store, OldKeys(shelf), LOGIN)
+
     /** The server's base URL and the login there, as the sign-in machine last asked them written. */
     public var remembered: Remembered
-        get() = Remembered(shelf.get(SERVER), shelf.get(LOGIN)?.let { loginParse(it) }, false)
+        get() = Remembered(shelf.get(SERVER), login.recall(), false)
         set(r) {
             shelf.put(SERVER, r.server)
-            shelf.put(LOGIN, r.login?.let { loginJson(it) })
+            login.keep(r.login)
         }
 
     /** The permissions already asked for, by [Permission.key], whatever the answer was. */
@@ -50,7 +55,15 @@ public class Kept(private val shelf: Shelf) {
 
     private companion object {
         const val SERVER = "ark.server"
+        /** Where an older build kept the login, moved from once. */
         const val LOGIN = "ark.login"
         const val ASKED = "ark.asked"
     }
+}
+
+/** A [Shelf] as where a login used to be kept: read once, then removed. */
+public class OldKeys(private val shelf: Shelf) : OldShelf {
+    override fun get(key: String): String? = shelf.get(key)
+
+    override fun remove(key: String): Unit = shelf.put(key, null)
 }

@@ -11,6 +11,10 @@ ark-peer = { path = "../ark-peer", default-features = false }
 ark-auth = { path = "../ark-auth", default-features = false, features = ["ffi"] }
 # The first run's pages (`first_run_app!`): ark-app's records.
 ark-app = { path = "../../ui/rust/app" }
+# The login kept in the secure store (`keep`): the port, and the phones'
+# foreign trait the keychain and the Android keystore implement.
+ark-module = { path = "../../ui/rust/module" }
+ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }

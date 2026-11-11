@@ -42,6 +42,8 @@ targets:
       # The media player (modules/ark-media-player): AVPlayer, the audio
       # session, the lock screen's now playing and its commands.
       - path: ../../modules/ark-media-player/swift
+      # The secure store (modules/ark-secure-store): the login, in the keychain.
+      - path: ../../modules/ark-secure-store/swift
     dependencies:
       - package: ArkUI
         product: ArkUI

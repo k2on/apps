@@ -30,6 +30,7 @@ import dev.arkdb.auth.Said
 import dev.arkdb.auth.Step
 import dev.arkdb.ffi.exchange
 import dev.arkdb.ffi.redeem
+import dev.arkui.modules.PhoneSecureStore
 import dev.arkui.server.Probe
 import dev.harken.ffi.harkenDomain
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +58,7 @@ public class ArkHost(app: Application) : AndroidViewModel(app) {
     private var permissions: List<Permission> = emptyList()
     private var sessions: Sessions? = null
     private var hold: Hold? = null
-    private val kept = Kept(PrefsShelf(app))
+    private val kept = Kept(PrefsShelf(app), PhoneSecureStore(app))
 
     private val _step = MutableStateFlow<Step>(Step.Server("", false, null))
     public val step: StateFlow<Step> = _step.asStateFlow()

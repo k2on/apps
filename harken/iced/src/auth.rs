@@ -24,6 +24,7 @@
 //! the code comes back to: a loopback port the desktop listens on, or this
 //! page's own address.
 use ark::peer::Who;
+use ark_auth::keep::ServerLogins;
 use ark_auth::Login;
 use ark_peer::Logins;
 
@@ -39,10 +40,23 @@ pub const DEFAULT_SERVER: &str = "http://127.0.0.1:8787";
 #[cfg_attr(feature = "demo", allow(dead_code))]
 pub const LOCAL: &str = "local";
 
-/// The logins this device remembers, one per server.
+/// The logins this device keeps, one per server: in the secure store
+/// (ark-secure-store: the Secret Service on Linux), each moved there once
+/// from the logins directory they were kept in before. With no Secret
+/// Service, a login lasts the run, and the next launch signs in again.
+/// Made once a run, so what is held for the run is the same everywhere.
 #[cfg_attr(feature = "demo", allow(dead_code))]
-pub fn logins() -> Logins {
-    Logins::new("harken")
+pub fn logins() -> ServerLogins {
+    static LOGINS: std::sync::OnceLock<ServerLogins> = std::sync::OnceLock::new();
+    LOGINS
+        .get_or_init(|| {
+            #[allow(unused_mut)]
+            let mut m = ark_auth::keep::Modules::new();
+            #[cfg(target_os = "linux")]
+            m.register::<dyn ark_secure_store::SecureStore>(std::sync::Arc::new(ark_secure_store::SecretService::new("harken")));
+            Logins::new("harken").secured(m)
+        })
+        .clone()
 }
 
 /// Where the server is, if anybody said, and a name to offer a dev server.

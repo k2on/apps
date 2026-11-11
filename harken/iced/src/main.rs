@@ -825,7 +825,7 @@ pub struct App {
     pub login: Option<Login>,
     /// Where logins are remembered — `None` in a test, which must not write
     /// into the config directory of whoever runs it.
-    pub logins: Option<ark_peer::Logins>,
+    pub logins: Option<ark_auth::keep::ServerLogins>,
     /// Signing in, as every app's shell walks it (`ark_auth::onboarding`):
     /// this load goes to sign in once by itself, and a sign-in that came
     /// back refused or empty is said, not tried again.

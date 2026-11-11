@@ -26,7 +26,7 @@
 //!   [`ModuleError::Unavailable`].
 //!
 //! - The ports an app's update asks through ([`haptics`], [`clipboard`],
-//!   [`share`], [`scanner`], [`media_player`]): each module's trait, its operations and their outputs,
+//!   [`share`], [`scanner`], [`media_player`], [`secure_store`]): each module's trait, its operations and their outputs,
 //!   here in the runtime, so an app reaches a module only through these
 //!   typed operations and never depends on the module's crate (layers.toml).
 //!   The module's crate implements the port (its fake, the desktop's, the
@@ -53,6 +53,7 @@ pub mod clipboard;
 pub mod haptics;
 pub mod media_player;
 pub mod scanner;
+pub mod secure_store;
 pub mod share;
 
 // * What came of an operation

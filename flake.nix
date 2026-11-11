@@ -811,8 +811,8 @@
             appid = "dev.harken.android";
             # ArkUI's Kotlin linked prebuilt (`arkui-kotlin`), not compiled.
             flags = [ "-PharkenLib=${harken-android-lib}" "-ParkuiLib=${arkui-kotlin}" ];
-            # The media player's Kotlin (modules/ark-media-player), compiled with the app.
-            shared = [ "modules/ark-media-player/kotlin" ];
+            # The media player's and the secure store's Kotlin (modules/), compiled with the app.
+            shared = [ "modules/ark-media-player/kotlin" "modules/ark-secure-store/kotlin" ];
             title = "Harken";
             note = "Rendered on the JVM by Paparazzi from a fixed library, at a Pixel 5's size; light beside dark. Covers are the derived squares: nothing here talks to a server.";
           };
@@ -1632,7 +1632,7 @@
           # would otherwise compile the generator's Rust (money-gen and
           # its crates) itself, which nothing builds ahead on Linux.
           moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = outputs.x86_64-linux.arkOf.money; };
-          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; shared = [ "modules/ark-media-player/swift" ]; };
+          harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; shared = [ "modules/ark-media-player/swift" "modules/ark-secure-store/swift" ]; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
           # derivation, so built once.

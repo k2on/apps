@@ -1304,6 +1304,10 @@ rec {
             packageId = "ark-app";
           }
           {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
             name = "axum";
             packageId = "axum";
             optional = true;
@@ -1423,6 +1427,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+          }
+          {
             name = "base64";
             packageId = "base64 0.22.1";
           }
@@ -1541,9 +1549,18 @@ rec {
             features = [ "ffi" ];
           }
           {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "ffi" ];
           }
           {
             name = "serde_json";
@@ -1990,11 +2007,20 @@ rec {
             optional = true;
             usesDefaultFeatures = false;
           }
+          {
+            name = "zbus";
+            packageId = "zbus";
+            optional = true;
+            usesDefaultFeatures = false;
+            target = { target, features }: ("linux" == target."os" or null);
+            features = [ "blocking-api" "async-io" ];
+          }
         ];
         features = {
+          "desktop" = [ "dep:zbus" ];
           "ffi" = [ "dep:uniffi" ];
         };
-        resolvedDefaultFeatures = [ "ffi" ];
+        resolvedDefaultFeatures = [ "desktop" "ffi" ];
       };
       "ark-share" = rec {
         crateName = "ark-share";
@@ -9667,6 +9693,11 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "desktop" ];
+          }
+          {
             name = "arkui";
             packageId = "arkui";
           }
@@ -14949,6 +14980,11 @@ rec {
             packageId = "ark-scanner";
           }
           {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-share";
             packageId = "ark-share";
             features = [ "ffi" ];
@@ -15049,6 +15085,11 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-secure-store";
+            packageId = "ark-secure-store";
+            features = [ "desktop" ];
           }
           {
             name = "arkui";

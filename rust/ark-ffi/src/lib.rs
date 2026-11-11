@@ -34,8 +34,10 @@ use ark_peer::{monotonic_ms, Config, Files, Update, Watched};
 
 uniffi::setup_scaffolding!();
 
+pub mod keep;
 pub mod session;
 pub mod typed;
+pub use keep::{LoginKeep, OldShelf};
 pub use session::{Hold, Session};
 pub use typed::{FileRefFfi, Op, RowId, Taken, Twin, Typed};
 

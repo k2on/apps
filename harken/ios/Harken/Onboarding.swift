@@ -16,19 +16,25 @@ extension AppInfo {
 }
 
 /// What this phone remembers, on a shelf (`UserDefaults`), under the keys it
-/// always had: the server and the login kept whole as `ark_auth::Login`'s
-/// JSON, so a restart reuses the token (one that no longer reads is
-/// forgotten rather than trusted); and what is nobody else's business: the
-/// last few searches, and whether diagnostics have been unlocked.
+/// always had: the server; and what is nobody else's business: the last few
+/// searches, and whether diagnostics have been unlocked. The login is in the
+/// secure store (ark-secure-store: the keychain), through the bridge's
+/// `LoginKeep` (`ark_auth::keep`), which moves a login kept on the shelf
+/// under `ark.login` there once and deletes it. With no `secure` store, the
+/// login lasts this `Kept`.
 final class Kept {
     private let shelf: Shelf
-    init(_ shelf: Shelf) { self.shelf = shelf }
+    private let login: LoginKeep
+    init(_ shelf: Shelf, secure: SecureStore?) {
+        self.shelf = shelf
+        login = LoginKeep(store: secure, shelf: OldKeys(shelf), oldKey: "ark.login")
+    }
 
     var remembered: Remembered {
-        get { Remembered(server: shelf.get("ark.server"), login: shelf.get("ark.login").flatMap { loginParse(json: $0) }, demo: false) }
+        get { Remembered(server: shelf.get("ark.server"), login: login.recall(), demo: false) }
         set {
             shelf.put("ark.server", newValue.server)
-            shelf.put("ark.login", newValue.login.map { loginJson(login: $0) })
+            login.keep(login: newValue.login)
         }
     }
 
@@ -41,6 +47,14 @@ final class Kept {
         get { shelf.get("harken.diagnostics") == "1" }
         set { shelf.put("harken.diagnostics", newValue ? "1" : nil) }
     }
+}
+
+/// A shelf as where a login used to be kept: read once, then removed.
+final class OldKeys: OldShelf, @unchecked Sendable {
+    private let shelf: Shelf
+    init(_ shelf: Shelf) { self.shelf = shelf }
+    func get(key: String) -> String? { shelf.get(key) }
+    func remove(key: String) { shelf.put(key, nil) }
 }
 
 extension Found {

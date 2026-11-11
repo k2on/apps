@@ -12,7 +12,7 @@ version = "0.1"
 accent = "green"
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
 # The device modules money's update asks of (modules/<name>).
-modules = ["ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner"]
+modules = ["ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner", "ark-secure-store"]
 # The scheme the server's sign-in sends the code back on (money://auth),
 # and a route opened by a link (money://account/…).
 scheme = "money"

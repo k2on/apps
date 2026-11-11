@@ -8,6 +8,14 @@ import ArkUICore
 import Foundation
 import XCTest
 
+/// The secure store as a map, for a test.
+final class MemoryStore: SecureStore, @unchecked Sendable {
+    var map = [String: String]()
+    func get(key: String) throws -> String? { map[key] }
+    func put(key: String, value: String) throws { map[key] = value }
+    func remove(key: String) throws { map[key] = nil }
+}
+
 final class OnboardingTests: XCTestCase {
     func testHealth() {
         let ours = "0a0b 0.1.0"
@@ -37,14 +45,22 @@ final class OnboardingTests: XCTestCase {
 
     func testTheLoginIsKeptWholeAndAForgottenOneIsNone() {
         let shelf = MemoryShelf()
-        let k = Kept(shelf)
+        let store = MemoryStore()
+        let k = Kept(shelf, secure: store)
         var pictured = Fx.login
         pictured.picture = "https://pictures.example.invalid/ana.png"
         k.remembered = Remembered(server: "https://h", login: pictured, demo: false)
-        XCTAssertEqual(Kept(shelf).remembered.login, pictured)
+        XCTAssertEqual(Kept(shelf, secure: store).remembered.login, pictured)
         XCTAssertEqual(shelf.get("ark.server"), "https://h")
-        shelf.put("ark.login", "{not json")
+        // The login in the secure store alone.
+        XCTAssertNil(shelf.get("ark.login"))
+        store.map["login"] = "{not json"
         XCTAssertNil(k.remembered.login)
+        // One an older build kept in `UserDefaults` is moved once, and deleted there.
+        shelf.put("ark.login", loginJson(login: pictured))
+        XCTAssertEqual(Kept(shelf, secure: store).remembered.login, pictured)
+        XCTAssertNil(shelf.get("ark.login"))
+        XCTAssertEqual(store.map["login"], loginJson(login: pictured))
         XCTAssertEqual(Model.code(URL(string: "harken://auth?code=abc")!), "abc")
         XCTAssertNil(Model.code(URL(string: "harken://auth?code=")!))
         XCTAssertNil(Model.code(URL(string: "other://auth?code=abc")!))

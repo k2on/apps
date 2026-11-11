@@ -23,6 +23,8 @@ harken-seed = { path = "../demo", default-features = false, optional = true }
 harken-player = { path = "../player" }
 # This window's player: the sound card and MPRIS (`player.rs`).
 ark-media-player = { path = "../../modules/ark-media-player", features = ["desktop"] }
+# The login, kept in the desktop's keyring (the Secret Service).
+ark-secure-store = { path = "../../modules/ark-secure-store", features = ["desktop"] }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the system's browser; and the logins
 # a device remembers.

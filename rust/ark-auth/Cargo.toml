@@ -12,6 +12,9 @@ percent-encoding = "2"
 ark = { path = "../ark" }
 # The first run's pages, any app's (`first_run`): ark-app's records and view.
 ark-app = { path = "../../ui/rust/app" }
+# A login kept in the secure store (`keep`), through its port: the module's
+# plumbing and ports, no module.
+ark-module = { path = "../../ui/rust/module" }
 # The sign-in machine (`onboarding`) through UniFFI, for a phone's bridge
 # (`ark-ffi`, which turns it on): its types, the machine and its helpers.
 uniffi = { version = "0.32.2", default-features = false, optional = true }
@@ -53,6 +56,8 @@ server = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:rustls", "dep:rustls-n
 ffi = ["dep:uniffi"]
 
 [dev-dependencies]
+# The secure store's fake, which `tests/keep.rs` keeps a login in.
+ark-secure-store = { path = "../../modules/ark-secure-store" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 ureq = { version = "2", default-features = false }
 # A provider in `tests/oidc.rs`: its ID tokens signed HS256 with the client secret.

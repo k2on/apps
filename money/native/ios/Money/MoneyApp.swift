@@ -31,7 +31,7 @@ struct MoneyApp: App {
         // screenshots': the Mac's, which no browser signs in for, and the
         // iPhone's and the iPad's reference screens, on the reference's day).
         let demo = UserDefaults.standard.string(forKey: "demo")
-        let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
+        let model = Model(shelf: DefaultsShelf(), secure: PhoneSecureStore(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
                           demoLaunch: demo != nil, scan: QrScanner.available, intro: !Shots.on)
         let camera = PhoneCamera()
         camera.answered = { [weak model] in model?.receipts?.answered() }

@@ -67,10 +67,11 @@ final class Model: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(ms)), execute: f)
     }) { [weak self] of, level in self?.bridge?.press(.loud(of, .to(level))) }
 
-    /// The model over `shelf` (the app's `UserDefaults`), replicas under
-    /// `root`, this phone called `deviceName`, playing through `media`.
-    init(shelf: Shelf, root: URL, deviceName: String, media: NativeMediaPlayer) {
-        remembered = Kept(shelf)
+    /// The model over `shelf` (the app's `UserDefaults`) and `secure` (the
+    /// keychain, where the login is), replicas under `root`, this phone
+    /// called `deviceName`, playing through `media`.
+    init(shelf: Shelf, secure: SecureStore?, root: URL, deviceName: String, media: NativeMediaPlayer) {
+        remembered = Kept(shelf, secure: secure)
         self.root = root
         self.deviceName = deviceName
         self.media = media

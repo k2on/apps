@@ -1,9 +1,10 @@
-# What an app takes on when its modules.toml lists secure-store (ui/docs/app.md,
+# What an app takes on when its app.toml lists ark-secure-store (ui/docs/app.md,
 # The Device; README.md says why each is asked). ui/prebuild.py reads it.
 crate = "ark-secure-store"
 
 # Its operations, each with the type of what comes of it (ark_module::Op):
-# ui/prebuild.py checks each is an `impl Op` in the crate with this Output.
+# ui/prebuild.py checks each is an `impl Op` in the crate or its port with
+# this Output.
 [ops]
 SecureStoreOp = "Option<String>"
 
@@ -11,3 +12,10 @@ SecureStoreOp = "Option<String>"
 
 [android]
 permissions = []
+# Kept out of every backup and device-to-device transfer: the preferences
+# file the ciphertext is in (PhoneSecureStore.kt). Its key is the Android
+# keystore's and never leaves the device, so a copy elsewhere could not be
+# read anyway; the file is kept on this device alone all the same.
+# ui/prebuild.py writes these into the app's data-extraction and backup
+# rules.
+backup-exclude = [{ domain = "sharedpref", path = "ark-secure-store.xml" }]

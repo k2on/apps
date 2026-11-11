@@ -26,6 +26,8 @@ ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"] }
 ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"] }
 ark-share = { path = "../../modules/ark-share", features = ["ffi"] }
 ark-camera = { path = "../../modules/ark-camera", features = ["ffi"] }
+# The login's keychain and keystore (ark-ffi's `LoginKeep` takes them).
+ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
 # A receipt's page scanned over the camera: its eyes and warp in Rust.
 ark-scanner = { path = "../../modules/ark-scanner" }
 money-core = { path = "../core", features = ["demo"] }

@@ -23,7 +23,7 @@ struct HarkenApp: App {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         // The phone's media player (modules/ark-media-player): AVPlayer, the audio session, and
         // the lock screen's, Control Center's and a headset's, which the session's player drives.
-        let m = Model(shelf: DefaultsShelf(), root: support, deviceName: UIDevice.current.name, media: PhoneMediaPlayer(squares: .harken))
+        let m = Model(shelf: DefaultsShelf(), secure: PhoneSecureStore(), root: support, deviceName: UIDevice.current.name, media: PhoneMediaPlayer(squares: .harken))
         _model = StateObject(wrappedValue: m)
     }
 

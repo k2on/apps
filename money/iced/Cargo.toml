@@ -29,6 +29,8 @@ money-app = { path = "../app" }
 ark-app = { path = "../../ui/rust/app" }
 # The desktop's modules (money/app.toml): the clipboard, queued for iced's own task.
 ark-clipboard = { path = "../../modules/ark-clipboard", features = ["desktop"] }
+# The login, kept in the desktop's keyring (the Secret Service).
+ark-secure-store = { path = "../../modules/ark-secure-store", features = ["desktop"] }
 
 # `smol` gives iced an executor; `svg` is every glyph, `image` a
 # receipt's photo, `advanced` the focus operation a form's first field is given

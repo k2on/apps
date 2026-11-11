@@ -84,12 +84,13 @@ final class Model: ObservableObject {
     /// When this phone asked for a Plaid page it has not opened yet.
     private var awaiting: Id?? = nil
 
-    /// The model over `shelf` (the app's `UserDefaults`), replicas under
-    /// `root`; on the demo for this launch alone when `demoLaunch`.
-    init(shelf: Shelf, root: URL, demoDay: String? = nil, demoLaunch: Bool = false, scan: Bool = false, intro: Bool = true,
+    /// The model over `shelf` (the app's `UserDefaults`) and `secure` (the
+    /// keychain, where the login is), replicas under `root`; on the demo for
+    /// this launch alone when `demoLaunch`.
+    init(shelf: Shelf, secure: SecureStore?, root: URL, demoDay: String? = nil, demoLaunch: Bool = false, scan: Bool = false, intro: Bool = true,
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
         machine = FirstRunApp(app: .money, scan: scan, demo: true)
-        kept = Kept(shelf)
+        kept = Kept(shelf, secure: secure)
         self.root = root
         self.demoDay = demoDay
         self.demoLaunch = demoLaunch

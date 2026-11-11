@@ -6,7 +6,7 @@
 // code it sends back to `money://auth` exchanged for a login, a join link's
 // code redeemed — or no server at all, the demo's household in memory. What
 // is remembered is kept on the phone so it is asked once: the server, the
-// login, and whether this phone runs the demo.
+// login (in the secure store), and whether this phone runs the demo.
 //
 // `Start` is the ViewModel that holds the machine — under the first run's
 // pages every Ark app shares (`FirstRunApp`: ark_auth::first_run over
@@ -27,14 +27,16 @@ import dev.arkdb.auth.Login
 import dev.arkdb.auth.Remembered
 import dev.arkdb.auth.Said
 import dev.arkdb.auth.Step
-import dev.arkdb.auth.loginJson
-import dev.arkdb.auth.loginParse
 import dev.arkdb.ffi.deviceLink
+import dev.arkdb.ffi.LoginKeep
+import dev.arkdb.ffi.OldShelf
 import dev.arkdb.ffi.exchange
 import dev.arkdb.ffi.redeem
 import dev.arkdb.ffi.socketUrl
 import dev.arkui.DeviceLinkShown
+import dev.arkui.modules.PhoneSecureStore
 import dev.arkui.server.Probe
+import uniffi.ark_secure_store.SecureStore
 import uniffi.money_bridge.FirstRunApp
 import uniffi.money_bridge.WelcomeMsg
 import uniffi.money_bridge.WelcomePage
@@ -71,21 +73,32 @@ class MemoryShelf : Shelf {
 }
 
 /**
- * What the start remembers, under the keys it always had: the server, the login kept whole as
- * `ark_auth::Login`'s JSON (one that no longer reads is none), and whether this phone runs the demo.
+ * What the start remembers: the server and whether this phone runs the demo on the shelf, under the
+ * keys it always had, and the login in the secure store (ark-secure-store: the Android keystore),
+ * through the bridge's [LoginKeep] (`ark_auth::keep`), which moves a login kept on the shelf under
+ * `money.login` there once and deletes it. With no [store], the login lasts this [Kept].
  */
-class Kept(private val shelf: Shelf) {
+class Kept(private val shelf: Shelf, store: SecureStore?) {
+    private val login = LoginKeep(store, OldKeys(shelf), "money.login")
+
     var remembered: Remembered
         get() =
             Remembered(
                 server = shelf.get("money.server"),
-                login = shelf.get("money.login")?.let { loginParse(it) },
+                login = login.recall(),
                 demo = shelf.get("money.demo") == "1")
         set(r) {
             shelf.put("money.server", r.server)
-            shelf.put("money.login", r.login?.let { loginJson(it) })
+            login.keep(r.login)
             shelf.put("money.demo", if (r.demo) "1" else null)
         }
+}
+
+/** A [Shelf] as where a login used to be kept: read once, then removed. */
+class OldKeys(private val shelf: Shelf) : OldShelf {
+    override fun get(key: String): String? = shelf.get(key)
+
+    override fun remove(key: String) = shelf.put(key, null)
 }
 
 /** The app's private `SharedPreferences`, as a [Shelf]. */
@@ -103,7 +116,7 @@ class PrefsShelf(context: Context) : Shelf {
 class Start(app: Application) : AndroidViewModel(app) {
     // No code is scanned here yet: ark-camera has no QR decoder on Android.
     private val machine = FirstRunApp(MONEY, scan = false, demo = true)
-    private val kept = Kept(PrefsShelf(app))
+    private val kept = Kept(PrefsShelf(app), PhoneSecureStore(app))
 
     private val _step = MutableStateFlow(machine.step())
     val step: StateFlow<Step> = _step.asStateFlow()

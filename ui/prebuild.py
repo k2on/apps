@@ -597,6 +597,37 @@ tasks.withType<Test>().configureEach {{
 '''
 
 
+def backup_excluded(root, a):
+    """What the app's modules keep out of every backup and device-to-device
+    transfer (their module.toml's [android] `backup-exclude`)."""
+    out = []
+    for _, m in modules_of(root, a):
+        out += [e for e in m.get("android", {}).get("backup-exclude", []) if e not in out]
+    return out
+
+
+def backup_rules(head, excluded):
+    """The data-extraction rules (Android 12 and later) and the full-backup
+    rules (before) that leave `excluded` out."""
+    lines = "".join(f'\n        <exclude domain="{e["domain"]}" path="{e["path"]}" />' for e in excluded)
+    extraction = f'''<?xml version="1.0" encoding="utf-8"?>
+{head}
+<data-extraction-rules>
+    <cloud-backup>{lines}
+    </cloud-backup>
+    <device-transfer>{lines}
+    </device-transfer>
+</data-extraction-rules>
+'''
+    full = "".join(f'\n    <exclude domain="{e["domain"]}" path="{e["path"]}" />' for e in excluded)
+    backup = f'''<?xml version="1.0" encoding="utf-8"?>
+{head}
+<full-backup-content>{full}
+</full-backup-content>
+'''
+    return {"xml/data_extraction_rules.xml": extraction, "xml/backup_rules.xml": backup}
+
+
 def android_manifest(root, a):
     andr = a["android"]
     perms = list(andr.get("permissions", []))
@@ -643,6 +674,13 @@ def android_manifest(root, a):
     for d in meta:
         extra += f'\n        <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />'
     theme = andr.get("theme")
+    # Kept out of backups (allowBackup is false) and, on Android 12 and
+    # later, out of a device-to-device transfer, which allowBackup alone
+    # does not stop: what a module keeps on this device only.
+    rules = ""
+    if backup_excluded(root, a):
+        rules = ('\n        android:dataExtractionRules="@xml/data_extraction_rules"'
+                 '\n        android:fullBackupContent="@xml/backup_rules"')
     # A server at home often speaks plain http://, and the person typed its
     # address: only for an app that reaches one.
     clear = '\n        android:usesCleartextTraffic="true"' if "android.permission.INTERNET" in perms else ""
@@ -661,7 +699,7 @@ def android_manifest(root, a):
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:allowBackup="false"{clear}
+        android:allowBackup="false"{clear}{rules}
         android:enableOnBackInvokedCallback="true"
         android:theme="{theme or "@android:style/Theme.DeviceDefault.NoActionBar"}">
         <activity
@@ -728,6 +766,8 @@ def android_resources(root, a, out):
         # native/android/res): no splash of ArkUI's.
         for k in ("values/themes.xml", "values/colors.xml", "values-night/colors.xml", "drawable/splash.xml"):
             files.pop(k)
+    if backup_excluded(root, a):
+        files.update(backup_rules(head, backup_excluded(root, a)))
     for p, text in files.items():
         if os.path.exists(native_dir(root, a, "res", p)):
             raise SystemExit(f"{a['dir']}/native/android/res/{p} is generated (ui/prebuild.py): leave it out")

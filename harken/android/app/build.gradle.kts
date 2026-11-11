@@ -125,6 +125,9 @@ android {
             // The media player, ark-media-player's Kotlin (modules/ark-media-player): the ExoPlayer,
             // its media session service and what the system shows, over the port in the library.
             kotlin.srcDir(rootProject.file("../../modules/ark-media-player/kotlin"))
+            // The secure store, ark-secure-store's Kotlin (modules/ark-secure-store): the login, kept
+            // encrypted by the Android keystore.
+            kotlin.srcDir(rootProject.file("../../modules/ark-secure-store/kotlin"))
             // arkui from its sources, where it is not linked prebuilt (`arkuiLib`).
             if (arkuiLib == null) {
                 kotlin.srcDir(rootProject.file("../../ui/kotlin/src"))

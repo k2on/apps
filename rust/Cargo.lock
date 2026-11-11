@@ -290,6 +290,8 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-app",
+ "ark-module",
+ "ark-secure-store",
  "axum",
  "base64 0.22.1",
  "getrandom 0.2.17",
@@ -337,7 +339,9 @@ dependencies = [
  "ark",
  "ark-app",
  "ark-auth",
+ "ark-module",
  "ark-peer",
+ "ark-secure-store",
  "arkdb",
  "serde",
  "serde_json",
@@ -460,6 +464,7 @@ version = "0.1.0"
 dependencies = [
  "ark-module",
  "uniffi",
+ "zbus",
 ]
 
 [[package]]
@@ -2950,6 +2955,7 @@ dependencies = [
  "ark-auth",
  "ark-media-player",
  "ark-peer",
+ "ark-secure-store",
  "arkui",
  "arkui-shots",
  "harken-app",
@@ -4573,6 +4579,7 @@ dependencies = [
  "ark-module",
  "ark-peer",
  "ark-scanner",
+ "ark-secure-store",
  "ark-share",
  "money-app",
  "money-core",
@@ -4600,6 +4607,7 @@ dependencies = [
  "ark-auth",
  "ark-clipboard",
  "ark-peer",
+ "ark-secure-store",
  "arkui",
  "arkui-shots",
  "iced",

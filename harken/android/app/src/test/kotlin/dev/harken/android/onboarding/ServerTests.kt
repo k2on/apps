@@ -20,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import uniffi.ark_secure_store.SecureStore
 
 class ServerTests {
     private fun urls(typed: String): List<String> =
@@ -133,17 +134,21 @@ class ServerTests {
     @Test
     fun remembered() {
         val shelf = MemoryShelf()
-        val k = Kept(shelf)
+        val store = MemoryStore()
+        val k = Kept(shelf, store)
         assertNull(k.remembered.server)
         assertNull(k.remembered.login)
         assertEquals(emptySet<String>(), k.asked)
         val login =
-            testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com").copy(token = "tok", expiresMs = 1234, picture = "https://pictures.example.invalid/ana.png")
+            testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com").copy(token = "placeholder", expiresMs = 1234, picture = "https://pictures.example.invalid/ana.png")
         k.remembered = Remembered("https://music.example.com", login, false)
-        // A second store over the same shelf reads it back whole.
-        val again = Kept(shelf)
+        // A second store over the same shelf reads it back whole; the login is in the secure store
+        // alone.
+        val again = Kept(shelf, store)
         assertEquals("https://music.example.com", again.remembered.server)
         assertEquals(login, again.remembered.login)
+        assertNull(shelf.get("ark.login"))
+        assertEquals(setOf("login"), store.map.keys)
         again.markAsked("notifications")
         again.markAsked("notifications")
         again.markAsked("contacts")
@@ -151,10 +156,40 @@ class ServerTests {
         // Signing out forgets the login and nothing else.
         k.remembered = k.remembered.copy(login = null)
         assertNull(again.remembered.login)
+        assertTrue(store.map.isEmpty())
         assertEquals("https://music.example.com", again.remembered.server)
         assertEquals(setOf("notifications", "contacts"), again.asked)
         // A login that no longer parses is forgotten rather than trusted.
-        shelf.put("ark.login", "{\"token\":")
+        store.map["login"] = "{\"token\":"
         assertNull(again.remembered.login)
+    }
+
+    /** A login an older build kept on the shelf is moved to the secure store once, and deleted there. */
+    @Test
+    fun anOldLoginIsMovedOnce() {
+        val shelf = MemoryShelf()
+        val store = MemoryStore()
+        val login = testLogin("ana", "s1", listOf("library"), "Ana", "ana@example.com")
+        shelf.put("ark.server", "https://music.example.com")
+        shelf.put("ark.login", dev.arkdb.auth.loginJson(login))
+        assertEquals(login, Kept(shelf, store).remembered.login)
+        assertNull(shelf.get("ark.login"))
+        assertEquals("https://music.example.com", shelf.get("ark.server"))
+        assertEquals(login, Kept(shelf, store).remembered.login)
+    }
+}
+
+/** The secure store as a map, for a test. */
+class MemoryStore : SecureStore {
+    val map: MutableMap<String, String> = LinkedHashMap()
+
+    override fun get(key: String): String? = map[key]
+
+    override fun put(key: String, value: String) {
+        map[key] = value
+    }
+
+    override fun remove(key: String) {
+        map.remove(key)
     }
 }

@@ -196,7 +196,7 @@ type of what comes of it (`Output`: `()` for a haptic, `Option<String>`
 for a scan, `Option<Vec<u8>>` for a photo). Effects and Ports, below,
 says how it is carried. **A module an app's update asks is a port of the
 runtime's**: its trait, its operations and their outputs are in
-`ark-module` (`ark_module::haptics`, `clipboard`, `share`; re-exported
+`ark-module` (`ark_module::haptics`, `clipboard`, `share`, `secure_store`; re-exported
 as `ark_app::modules`), so the app's crate depends on no module crate
 (layers.toml), and the module's crate implements the port — its fake,
 the desktop's and the browser's, and the phones' foreign trait. A test
@@ -228,7 +228,7 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-scanner | `ark-scanner` | over the camera (`over_camera`: the eyes, the warp in Rust) | over the camera, with the corner model (`model`) | `Chosen` (feature `desktop`): a file the window's chooser gives | `Browser` (feature `web`): the page's file input |
 | ark-media-player | `ark-media-player` | `PhoneMediaPlayer` (AVPlayer, the playback audio session, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`) | `PhoneMediaPlayer` in `ArkMediaService` (Media3's ExoPlayer in a `MediaLibraryService`) | `Desktop` (feature `desktop`: rodio and MPRIS) | `Browser` (feature `web`: `<audio>` and the Media Session API) |
 | ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
-| ark-secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
+| ark-secure-store | `ark-secure-store` | `PhoneSecureStore` (the keychain: the bundle id's generic passwords, this device only) | `PhoneSecureStore` (an Android keystore AES-GCM key; the ciphertext in private preferences kept out of backups) | `SecretService` (feature `desktop`: the Secret Service over D-Bus; Unavailable without one) | Unavailable |
 
 **MediaPlayer** is one sound at a time, what the system shows of it, its
 controls as events (`Remote`) the app decides, and a browse tree for a car
@@ -1007,8 +1007,8 @@ ui/docs/apps/money.md for money):
    perceptual diff, a row's context menu open among the shots.
 6. **Modules' native implementations**: Camera QR on iOS (wrapping
    `QrScanner`) and Android (a decoder dependency and deps.json
-   regenerated), Share on Android, and media-player, notifications and
-   secure-store everywhere.
+   regenerated), Share on Android, and media-player and notifications
+   everywhere; secure-store's shared scope (its README).
 7. **Primitives**: the hand-written layer shrinks to primitives (layout,
    content, token-only surfaces, interaction, the native containers and
    controls, motion), and ArkUI's components become `#[view]`s emitted into
