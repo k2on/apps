@@ -188,7 +188,8 @@ struct Shell: View {
             case "accounts.register":
                 // The account the shell shows (its place's tag, `accounts/<id>`).
                 if let id = model.snapshot.accounts.first(where: { "accounts/\($0.id.hex)" == model.shell.page.section })?.id {
-                    RegisterView(account: id)
+                    // Under the shell's own search field (WithSearch).
+                    RegisterView(account: id, shellSearch: model.shell.page.search)
                 } else {
                     ContentUnavailableView("No Account Selected", systemImage: "building.columns")
                 }

@@ -14,6 +14,10 @@ import SwiftUI
 struct RegisterView: View {
     /// The account; none is every account's.
     let account: Id?
+    /// What the shell's own search field holds, when the shell hosts the
+    /// register under it (one search field to a page, not two): none when
+    /// the register is pushed on its own and searches itself.
+    var shellSearch: String? = nil
     @EnvironmentObject private var model: Model
     @Environment(\.present) private var present
     @State private var needle = ""
@@ -22,7 +26,7 @@ struct RegisterView: View {
     var body: some View {
         let a = model.snapshot.account(account)
         // A search is the core's (`MoneyView.search`: payee, the bank's words, memo, category, account or amount), held while typed.
-        let searched = needle.trimmingCharacters(in: .whitespaces)
+        let searched = (shellSearch ?? needle).trimmingCharacters(in: .whitespaces)
         let all = model.register(account) ?? []
         let rows = searched.isEmpty ? all : model.search(account, searched) ?? []
         List {
@@ -36,9 +40,9 @@ struct RegisterView: View {
             if model.register(account) == nil {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }.listRowBackground(Color.clear)
             } else if rows.isEmpty {
-                ContentUnavailableView(needle.isEmpty ? "No Transactions" : "No Results",
-                                       systemImage: needle.isEmpty ? "list.bullet.rectangle" : "magnifyingglass",
-                                       description: Text(needle.isEmpty ? "Add one with the + button." : "Nothing matches \u{201C}\(needle)\u{201D}."))
+                ContentUnavailableView(searched.isEmpty ? "No Transactions" : "No Results",
+                                       systemImage: searched.isEmpty ? "list.bullet.rectangle" : "magnifyingglass",
+                                       description: Text(searched.isEmpty ? "Add one with the + button." : "Nothing matches \u{201C}\(searched)\u{201D}."))
                     .listRowBackground(Color.clear)
             }
             ForEach(Registers.days(rows)) { day in
@@ -73,7 +77,7 @@ struct RegisterView: View {
         .holding(searched.isEmpty ? nil : MoneyView.search(account: account, text: searched))
         .navigationTitle(a?.name ?? "All Accounts")
         .navigationSubtitle(a.map { $0.subtitle() } ?? "Every transaction in the household")
-        .searchable(text: $needle, prompt: "Payee, category, memo or amount")
+        .searchable(when: shellSearch == nil, text: $needle, prompt: "Payee, category, memo or amount")
         .refreshable { await model.refresh() }
         .sensoryFeedback(.selection, trigger: cleared)
         .holding(MoneyView.register(account: account))
@@ -223,5 +227,13 @@ struct TxnRow: View {
         case .cleared: return "cleared"
         case .reconciled: return "reconciled"
         }
+    }
+}
+
+private extension View {
+    /// `searchable` while `on`: a page has one search field, the shell's
+    /// when the shell hosts it.
+    @ViewBuilder func searchable(when on: Bool, text: Binding<String>, prompt: String) -> some View {
+        if on { searchable(text: text, prompt: prompt) } else { self }
     }
 }

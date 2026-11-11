@@ -330,11 +330,18 @@ public struct WithInspector<Content: View, Inspector: View>: View {
     public var body: some View {
         content
             .inspector(isPresented: Binding(get: { isShown }, set: onToggle)) {
-                // Its title in a stack of its own: a title set here never
-                // reaches the section's bar (an account's register read
-                // "Transaction Details" on the iPhone).
-                NavigationStack {
-                    inspector.navigationTitle(title)
+                // Its title is a heading inside it, never a navigation
+                // title: a stack nested in the section's is folded into it,
+                // and its title then named the page (an account's register
+                // read "Transaction Details" on the iPhone, the iPad's
+                // Budget "Category Details" with nothing inspected).
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.horizontal, Space.l)
+                        .padding(.vertical, Space.s)
+                    inspector.frame(maxHeight: .infinity)
                 }
                 .inspectorColumnWidth(min: LayoutTokens.inspectorWidth, ideal: LayoutTokens.inspectorWidth + 40)
             }

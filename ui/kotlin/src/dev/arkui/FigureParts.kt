@@ -15,6 +15,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -125,10 +127,13 @@ public fun FigureStrip(items: List<StripFigure>) {
         items.forEach { i ->
             Column(Modifier.semantics(mergeDescendants = true) {}) {
                 Text(i.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // A figure never wraps.
                 Text(
                     i.figure,
                     style = MaterialTheme.typography.titleMedium,
                     color = if (i.tint == Tint.Neutral) MaterialTheme.colorScheme.onSurface else tintInk(i.tint),
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -241,6 +246,7 @@ public fun Sparkline(points: List<Long>) {
 }
 
 /** The page's figure in a card, made of what is owned and what is owed, with a sparkline of how it went. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 public fun SummaryCard(label: String, cents: Long, first: String, firstCents: Long, second: String, secondCents: Long, trend: List<Long>) {
     val a = LocalAmounts.current
@@ -254,14 +260,19 @@ public fun SummaryCard(label: String, cents: Long, first: String, firstCents: Lo
             style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
             color = if (cents < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
-        Row(verticalAlignment = Alignment.Bottom) {
+        // A figure never wraps: the figures and the sparkline side by side
+        // while they fit, else the sparkline on a line of its own under them.
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
             FigureStrip(
                 listOf(
                     StripFigure(first, a.format(firstCents), if (firstCents < 0) Tint.Negative else Tint.Neutral),
                     StripFigure(second, a.format(secondCents), if (secondCents < 0) Tint.Negative else Tint.Neutral),
                 ),
             )
-            Spacer(Modifier.weight(1f))
             Sparkline(trend)
         }
     }

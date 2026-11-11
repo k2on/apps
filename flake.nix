@@ -1123,7 +1123,7 @@
           # (laid out by hand, as xcodebuild lays one out, which is only
           # files) and UniFFI's Swift, read from the library built for this
           # machine.
-          appleKernel = { name, crate, so, framework, targets }:
+          appleKernel = { name, crate, so, framework, targets, ... }:
             let llvm = pkgs.llvmPackages.bintools-unwrapped; in
             pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" { } ''
               ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}

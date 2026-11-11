@@ -113,11 +113,19 @@ public struct SummaryCard: View {
                     .contentTransition(.numericText(value: Double(cents)))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
-                HStack(alignment: .bottom, spacing: Space.l) {
-                    fact(first, firstCents)
-                    fact(second, secondCents)
-                    Spacer(minLength: Space.s)
-                    Sparkline(trend).frame(width: 140, height: 34)
+                // A figure never wraps: the facts and the sparkline side by
+                // side while they fit, else the sparkline under the facts;
+                // each figure is as wide as it is written.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom, spacing: Space.l) {
+                        facts
+                        Spacer(minLength: Space.s)
+                        Sparkline(trend).frame(width: 140, height: 34)
+                    }
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        facts
+                        Sparkline(trend).frame(maxWidth: .infinity).frame(height: 34)
+                    }
                 }
             }
             .padding(.vertical, Space.xs)
@@ -125,10 +133,19 @@ public struct SummaryCard: View {
         }
     }
 
+    private var facts: some View {
+        HStack(alignment: .bottom, spacing: Space.l) {
+            fact(first, firstCents)
+            fact(second, secondCents)
+        }
+    }
+
     private func fact(_ title: String, _ c: Int64) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption).foregroundStyle(.quiet)
+            Text(title).font(.caption).foregroundStyle(.quiet).lineLimit(1)
             CentsText(c).font(.footnote.weight(.semibold)).foregroundStyle(c < 0 ? Color.error : Color.ink)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
