@@ -335,8 +335,10 @@ waited an hour for a Mac), then does nothing, and nothing is compared.
   moved, and updates its comment: after a Mac's run failed, or to try the
   workflow as a branch has it. Run by hand on a branch with `dry`, it
   takes every app as by hand, with that branch's workflow and scripts and
-  its commit's iPhone apps (and its commit's APKs, those its PR's `build`
-  made, awaited if it is making them; the rest F-Droid's), and publishes nothing (no `screens` branch, no
+  its commit's iPhone apps (and its commit's APKs, those `build` made at
+  that commit, awaited if it is making them: a build there that is missing,
+  cancelled or failed fails the run; only an app whose APK build was
+  skipped as already built takes F-Droid's), and publishes nothing (no `screens` branch, no
   cache): its artifacts are what it took. A `workflow_run` always runs
   main's file, so a change to it is tried this way before it is merged.
 
