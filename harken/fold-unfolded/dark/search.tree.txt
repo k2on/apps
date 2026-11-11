@@ -1,0 +1,14 @@
+    #content
+              'Search' [text]
+              [button] pressable
+                'Signed in as alex'
+                [button]
+              [field] pressable
+                'Songs, albums, artists' [text]
+              'Search your library' [text]
+              'Find a song by its title, or everything by somebody, as you type.' [text]
+                [button] pressable
+                  'Home' [text]
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]

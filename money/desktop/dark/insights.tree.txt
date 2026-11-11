@@ -1,0 +1,37 @@
+"Budget" at 41,23 47x17
+"Reflect" at 41,51 45x17
+"All Accounts" at 41,79 80x17
+"5" at 217,81 6x13
+"Settings" at 41,107 53x17
+"On Budget" at 20,138 53x13
+"Checking" at 41,165 60x17
+"$14,166.90" at 160,165 69x16
+"Savings" at 41,192 51x17
+"$6,900.00" at 168,193 61x16
+"Cash" at 41,220 32x17
+"$50.18" at 187,221 42x16
+"Chase Sapphire ••4417" at 41,248 122x17
+"-$669.04" at 175,249 54x16
+"Tracking" at 20,279 43x13
+"Mortgage" at 41,306 62x17
+"-$312,450.00" at 148,307 81x16
+"Retirement" at 41,334 73x17
+"$64,300.00" at 160,335 69x16
+"Spending in November 2026" at 297,18 344x29
+"Income" at 282,77 40x14
+"$5,390.00" at 282,95 113x26
+"Spent" at 574,77 32x14
+"$2,773.02" at 574,95 113x26
+"Net" at 865,77 19x14
+"$2,616.98" at 865,95 113x26
+"Card debt not covered" at 1156,77 124x14
+"$0.00" at 1156,95 63x26
+"Bills" at 284,167 160x17
+"$2,080.00" at 1236,167 110x17
+"75%" at 1358,168 48x16
+"Everyday" at 284,194 160x17
+"$661.02" at 1236,194 110x17
+"24%" at 1358,194 48x16
+"Quality of Life" at 284,221 160x17
+"$32.00" at 1236,221 110x17
+"1%" at 1358,221 48x16
