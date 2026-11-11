@@ -381,19 +381,20 @@ build, the same driver, the same shots.json, light and dark.
 - **The iPad**: in the iPhone's job, on the same Mac. Once the apps are
   built, `ios-family.sh` reads each one's `UIDeviceFamily`; when none
   takes the iPad (main's apps today are the iPhone's alone), nothing is
-  booted and nothing more is done. Else, once the iPhone's shots are
-  taken, the iPhone is shut down and an iPad booted (not under the
-  iPhone's shots: a second simulator booted beside them could make them
-  flaky), and each app that takes it is taken upright and then on its side
+  booted and nothing more is done. Else an iPad is booted while the
+  iPhone's shots are taken, so it is ready when they end; then the iPhone
+  is shut down, the iPad's servers started afresh, and each app that takes
+  it is taken upright and then on its side
   (the driver's `XCUIDevice` orientation, `APP_ORIENTATION`; a screenshot
   XCUITest gives in the screen's portrait frame is turned a quarter
   counter-clockwise), signed in once. An app whose iPad shots fail keeps
   no hash (`<app>/ios/inputs`), so it is taken whole again.
-- **The Mac**: in the same job, after the iPad. The commit's Mac packages
-  are listed by name (nothing evaluated); an app with `<app>-macos` is
-  built by `nix-xcode.sh` as the iPhone's are, opened with `--server
-  <URL> --user <name>` (what the desktop window is given; an app that takes
-  them opens signed in to the same sample-data server), and its window
+- **The Mac**: in the same job, taken while the iPhone's and the iPad's
+  shots are (it needs no simulator). An app with `<app>-macos` is built
+  with the iPhone's by `ios-build.sh`, opened with `--server <URL> --user
+  <name>` (what the desktop window is given; an app that takes them opens
+  signed in to sample data), on a server of its own, the app's shots.json
+  port plus 100 (`PORT_OFFSET`), so nothing it does is the phones', and its window
   taken with `screencapture -l` in light and dark (System Events' dark
   mode) as one shot, `window`; then each of shots.json's `screens` that is
   `on` "mac", the app opened afresh with `launch.mac` and its arguments. No app has a Mac build yet, so every app is
