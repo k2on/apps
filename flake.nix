@@ -288,9 +288,12 @@
           # client, whose build it carries (MONEY_WEB, unless the
           # environment names another).
           money-server-bin = crate { packageId = "money-server"; };
+          # Its browser client is static files, the same from any machine:
+          # on a Mac, Linux's (built ahead there and fetched), rather than
+          # the Mac compiling the client's wasm itself.
           money-server = pkgs.runCommand "money-server-${money-server-bin.version or "0"}" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
             mkdir -p $out/bin
-            makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${money-web}
+            makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${if pkgs.stdenv.hostPlatform.isDarwin then outputs.x86_64-linux.packages.money-web else money-web}
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
           # that app's server boots seeded from; money's is money/seed.
@@ -1345,7 +1348,11 @@
               passthru = { inherit bundle; };
               meta.platforms = [ "aarch64-darwin" ];
             };
-          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = arkOf.money; };
+          # money's generated project is Linux's (`arkOf` there): what the
+          # generator writes is text, the same on any machine, and a Mac
+          # would otherwise compile the generator's Rust (money-gen and
+          # its crates) itself, which nothing builds ahead on Linux.
+          moneyIos = { name = "money"; App = "Money"; ffi = moneyFfi; framework = "MoneyFFI"; ark = outputs.x86_64-linux.arkOf.money; };
           harkenIos = { name = "harken"; App = "Harken"; ffi = harkenFfi; framework = "HarkenFFI"; };
           # Both slices; and the simulator's alone, which the tests link
           # (ios.yaml) and the screenshots' app is built over: the same
@@ -1530,8 +1537,9 @@
           '';
         in
         {
-          # For the Mac's apps (`iosKernel`): every Apple kernel is Linux's.
-          inherit appleKernel;
+          # For the Mac's apps (`iosKernel`): every Apple kernel is Linux's;
+          # and so is every Ark app's generated project (`moneyIos`).
+          inherit appleKernel arkOf;
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the

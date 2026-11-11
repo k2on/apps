@@ -321,7 +321,9 @@ jobs:
           if [ -f "$APP/app.toml" ]; then
             # An Ark app's project is generated (ui/prebuild.py): written
             # into <app>/.native, its kernel where it looks (.native/ffi/ios).
-            native=$(nix build --no-link --print-out-paths ".#$APP-native")
+            # Linux's, as the app's build takes it (flake.nix, `moneyIos`):
+            # the kernels job built it, and the Mac only fetches it.
+            native=$(nix build --no-link --print-out-paths ".#packages.x86_64-linux.$APP-native")
             mkdir -p "$APP/.native" && cp -R "$native/$APP/.native/." "$APP/.native/" && chmod -R u+w "$APP/.native"
             dir="$APP/.native"
           else

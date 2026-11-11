@@ -18,7 +18,29 @@ env:
     extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
 
 jobs:
+  # What of the Mac's builds is Linux's (each kernel, money's generated
+  # project: ../apple-ahead.sh), built here first, so the Mac only fetches
+  # it: a Mac cannot build a Linux derivation. By hand only, so this
+  # repository's own code.
+  kernels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "macOS-SDK"
+      - run: bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" money-ios-simulator money-macos
+
   compile:
+    needs: kernels
     runs-on: macos-15
     timeout-minutes: 90
     steps:

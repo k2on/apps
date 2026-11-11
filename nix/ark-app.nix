@@ -118,7 +118,13 @@ rec {
       '' else null;
       native = pkgs.runCommand "${a.id}-native" {
         nativeBuildInputs = [ pkgs.python3 pkgs.librsvg ];
-        src = only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules" dir ];
+        # Of the app's directory, only what ui/prebuild.py's `write` reads:
+        # its app.toml, its icon, its native/ (each phone's own code and
+        # resources) and its own modules; not its Rust, its server or its
+        # seed, an edit to which would otherwise write the same projects
+        # again and build every phone's app over them.
+        src = only [ "ui/prebuild.py" "ui/theme.py" "ui/theme.toml" "modules"
+          "${dir}/app.toml" "${dir}/${a.icon.svg or "icon.svg"}" "${dir}/native" "${dir}/modules" ];
       } ''
         cd $src
         python3 ui/prebuild.py write ${dir} ${lib.optionalString (ui != null) "--views ${ui}"} --bundle-prefix ${bundlePrefix} --out $out/${dir}/.native
