@@ -325,7 +325,6 @@ pub fn qr_svg(size: usize, dark: &[bool]) -> AnyView {
         .into_any()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
