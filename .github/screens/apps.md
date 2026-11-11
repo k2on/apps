@@ -340,6 +340,10 @@ build, the same driver, the same shots.json, light and dark.
   from), and, as GitHub's headless `7.6in Foldable` takes both and still
   draws its one inner screen whole, the Pixel Fold's outer screen's size
   and density given to Android (`wm size 1080x2092`, `wm density 420`).
+  The `pixel_fold` profile has two displays, and folded it turns the
+  outer one on while `screencap` still draws the first: then the display
+  whose picture changed size is the one photographed (SCREENCAP_DISPLAY,
+  apps-android.sh), every shot of the folded Fold taken from it.
   So the folded shots are the app laid out for the outer screen, in the
   folded posture; the launcher's taskbar, there since the inner screen,
   can stay at the foot. A Fold whose screen does not change at all is

@@ -338,8 +338,8 @@ phone's file system are adapters of one trait, is left for later.
 ## Layers
 
 Which crate may depend on which is a table, `layers.toml` at the root,
-and `checks.layers` holds it (run with `checks.clippy`, so build.yaml's
-existing list runs it): `tools/layers.py` reads `cargo metadata
+and `checks.layers` holds it (build.yaml's lint group runs it):
+`tools/layers.py` reads `cargo metadata
 --no-deps` and fails on a workspace member in no layer, on a dependency
 (normal or build, optional or not; never a dev-dependency) its layer may
 not use, and on an `[allow]` line that is no longer a violation. The

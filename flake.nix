@@ -170,6 +170,9 @@
             , out ? "touch $out"
               # The workspace the crates are of.
             , build ? crate
+              # Its crates' features as cargo's `--workspace` resolves them
+              # (`checksUnified`), or each test build's own (null).
+            , unified ? checksUnified
             }:
             let
               src = only dirs;
@@ -179,7 +182,7 @@
               built = { packageId, member, features ? [ "default" ], doctests ? false }:
                 let name' = lib.replaceStrings [ "-" ] [ "_" ] packageId; in
                 build {
-                  inherit packageId features;
+                  inherit packageId features unified;
                   tests = true;
                   root = { src = only [ member ]; workspace_member = member; };
                   # rustdoc compiles and runs the doctests against the
@@ -206,7 +209,12 @@
                 done
               '';
             in
-            pkgs.runCommand "test-${name}" ({ inherit nativeBuildInputs; } // env) ''
+            pkgs.runCommand "test-${name}" ({
+              inherit nativeBuildInputs;
+              # The crates' test builds, whose dependencies `checks-crates`
+              # builds ahead (`rootsOf`).
+              passthru.roots = map built crates;
+            } // env) ''
               # The build's directory, where the tests were compiled from.
               cp -r ${src} "$NIX_BUILD_TOP/source"
               chmod -R u+w "$NIX_BUILD_TOP/source"
@@ -797,9 +805,12 @@
           # The same library for iOS — `aarch64-apple-ios` for a phone and
           # `aarch64-apple-ios-sim` for the simulator on an Apple-silicon Mac —
           # as `<Framework>.xcframework` (`HarkenFFI`, `MoneyFFI`), with
-          # UniFFI's Swift and the typed half under `swift/`. Linking for iOS
-          # needs Apple's SDK, which only a macOS builder has: on Linux these
-          # derivations evaluate and are not built (meta.platforms).
+          # UniFFI's Swift and the typed half under `swift/`. This one is
+          # `harken-ios-xcframework` and `money-ios-xcframework`, a Mac's own
+          # build with whatever Xcode it has selected, for working in Xcode;
+          # what the pinned apps link (`iosKernel`) is built on Linux
+          # (`appleKernel`, below), and on Linux these evaluate and are not
+          # built (meta.platforms).
           # It is cargo's build, over the lockfile's crates vendored, and not
           # a derivation per crate: nixpkgs has no iOS package set that
           # compiles with the builder's Xcode (the workflow, ios.yaml, builds
@@ -1039,6 +1050,130 @@
           harken-ios-xcframework = iosPhone (harkenFfi // { framework = "HarkenFFI"; });
           money-ios-xcframework = iosPhone (moneyFfi // { framework = "MoneyFFI"; });
 
+          # **The Apple kernels, built on Linux.** Each slice of a kernel (the
+          # phone's, the simulator's, the Mac's) is a static library, which
+          # needs no linker: rustc writes objects and an archive. So it is
+          # cross-compiled on Linux, a derivation per crate (nix/rust.nix) as
+          # Android's is, and a Mac only fetches it from the cache and links
+          # it into the app with Xcode. The one C in a kernel is ring's (its
+          # crypto, for rustls): compiled by LLVM's clang for the Apple
+          # target against the headers of Apple's macOS SDK, which nixpkgs
+          # fetches from Apple (`appleSdk`, substituted from cache.nixos.org)
+          # and whose TargetConditionals.h says iOS or the simulator by the
+          # compiler's target, so the same headers serve every slice. No
+          # bindgen, and nothing that links. A change to one app's crates
+          # rebuilds those crates and the library, and every crate the two
+          # kernels share (ark, ark-ffi, rustls, …) is the same derivation
+          # in both and comes from the cache.
+          appleSdk =
+            let
+              dir = "${nixpkgs}/pkgs/by-name/ap/apple-sdk";
+              v = (builtins.fromJSON (builtins.readFile "${dir}/metadata/versions.json"))."15";
+            in
+            (pkgs.callPackage "${dir}/common/fetch-sdk.nix" { }) v;
+          # Each target: nixpkgs' platform for it, and clang's triple, with
+          # the deployment version the apps have (ios.yaml's, the Mac
+          # destination's).
+          appleTargets = {
+            aarch64-apple-ios = { config = "aarch64-apple-ios"; clang = "arm64-apple-ios17.0"; env = "IPHONEOS_DEPLOYMENT_TARGET"; version = "17.0"; };
+            aarch64-apple-ios-sim = { config = "aarch64-apple-ios"; clang = "arm64-apple-ios17.0-simulator"; env = "IPHONEOS_DEPLOYMENT_TARGET"; version = "17.0"; };
+            aarch64-apple-darwin = { config = "aarch64-apple-darwin"; clang = "arm64-apple-macos15.0"; env = "MACOSX_DEPLOYMENT_TARGET"; version = "15.0"; };
+          };
+          # nixpkgs for the target, with no C toolchain of its own (none
+          # builds for Apple on Linux, and none is needed): buildRustCrate
+          # on its stdenvNoCC, which passes rustc no linker.
+          applePkgs = t:
+            let
+              p = importPkgs {
+                localSystem = pkgs.stdenv.buildPlatform.system;
+                # The Mac's version as nixpkgs' own (its darwin setup sets
+                # MACOSX_DEPLOYMENT_TARGET from it, 11.0 unless told).
+                crossSystem = { inherit (appleTargets.${t}) config; rust.rustcTarget = t; }
+                  // lib.optionalAttrs (appleTargets.${t}.env == "MACOSX_DEPLOYMENT_TARGET") { darwinMinVersion = appleTargets.${t}.version; };
+                config = { allowUnfree = true; allowUnsupportedSystem = true; };
+              };
+            in
+            p // { buildRustCrate = p.buildRustCrate.override { stdenv = p.stdenvNoCC; libiconv = null; }; };
+          # clang for the target, as cc-rs runs it (ring's build script): the
+          # SDK's headers named, as nixpkgs' clang searches no sysroot itself.
+          appleCc = t: pkgs.writeShellScript "cc-${t}" ''
+            exec ${pkgs.llvmPackages.clang-unwrapped}/bin/clang -target ${appleTargets.${t}.clang} \
+              -isysroot ${appleSdk} -resource-dir ${pkgs.llvmPackages.clang}/resource-root \
+              -idirafter ${appleSdk}/usr/include "$@"
+          '';
+          # One crate's static library for one Apple target: the crate's
+          # library as `staticlib` alone (cargo's `--lib --no-default-features`).
+          appleLib = { crate, target }:
+            let tt = appleTargets.${target}; l = lib.replaceStrings [ "-" ] [ "_" ] target; in
+            rustCrates.build {
+              pkgs = applePkgs target;
+              rust = rust.override { targets = [ target ]; };
+              packageId = crate;
+              features = [ ];
+              root = { type = [ "staticlib" ]; };
+              overrides.ring = _: {
+                "CC_${l}" = appleCc target;
+                "AR_${l}" = "${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-ar";
+                SDKROOT = appleSdk;
+              };
+              targetAttrs = _: { ${tt.env} = tt.version; };
+            };
+          # One app's kernel as the Mac links it, from Linux: its
+          # `<Framework>.xcframework` of the `targets`' static libraries
+          # (laid out by hand, as xcodebuild lays one out, which is only
+          # files) and UniFFI's Swift, read from the library built for this
+          # machine.
+          appleKernel = { name, crate, so, framework, targets }:
+            let llvm = pkgs.llvmPackages.bintools-unwrapped; in
+            pkgs.runCommand "${name}-ios-kernel-${lib.concatMapStringsSep "-" (t: iosSlice.${t}.id) targets}" { } ''
+              ${ffiBindings { lib = ffiHostLib { inherit crate so; features = [ ]; }; language = "swift"; }}
+              mkdir -p headers
+              cp $TMPDIR/bindings/swift/*.h headers/
+              cat $TMPDIR/bindings/swift/*.modulemap > headers/module.modulemap
+              x=$out/${framework}.xcframework
+              # The archive as Apple's linker reads it. rustc on Linux writes
+              # the static library in GNU's format (a `//` name table), and
+              # copies ring's own symbol table in as a member (`__.SYMDEF`):
+              # ld64 refuses both ("archive member '//' not a mach-o file",
+              # app-screens 42897443933). So its members are taken out and
+              # put in again in Darwin's format, with a symbol table of its
+              # own; two members of one name would be lost, and stop it.
+              darwin() {
+                local from=$1 to=$2 dir
+                dir=$(mktemp -d)
+                names=$(${llvm}/bin/llvm-ar t "$from" | grep -v '^__\.SYMDEF')
+                if [ -n "$(sort <<< "$names" | uniq -d)" ]; then echo "$from: members of one name" >&2; exit 1; fi
+                (cd "$dir" && ${llvm}/bin/llvm-ar x "$from")
+                (cd "$dir" && ${llvm}/bin/llvm-ar --format=darwin rcs "$to" $names)
+                rm -rf "$dir"
+              }
+              ${lib.concatMapStrings (t: ''
+                mkdir -p $x/${iosSlice.${t}.id}
+                darwin ${(appleLib { inherit crate; target = t; }).lib}/lib/lib${so}*.a $x/${iosSlice.${t}.id}/lib${so}.a
+                cp -r headers $x/${iosSlice.${t}.id}/Headers
+              '') targets}
+              slice() {
+                echo "<dict><key>BinaryPath</key><string>lib${so}.a</string><key>HeadersPath</key><string>Headers</string>"
+                echo "<key>LibraryIdentifier</key><string>$1</string><key>LibraryPath</key><string>lib${so}.a</string>"
+                echo "<key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>$3</string>"
+                [ -z "$2" ] || echo "<key>SupportedPlatformVariant</key><string>$2</string>"
+                echo "</dict>"
+              }
+              {
+                echo '<?xml version="1.0" encoding="UTF-8"?>'
+                echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                echo '<plist version="1.0"><dict><key>AvailableLibraries</key><array>'
+                ${lib.concatMapStrings (t: ''
+                  slice ${iosSlice.${t}.id} "${iosSlice.${t}.variant}" ${iosSlice.${t}.platform}
+                '') targets}
+                echo '</array><key>CFBundlePackageType</key><string>XFWK</string>'
+                echo '<key>XCFrameworkFormatVersion</key><string>1.0</string></dict></plist>'
+              } > $x/Info.plist
+              mkdir -p $out/swift
+              cp $TMPDIR/bindings/swift/*.swift $out/swift/
+              cp ${./rust/ark-ffi/swift/Typed.swift} $out/swift/Typed.swift
+            '';
+
           # **The iPhone apps, built by nix** (what app-screens.yaml takes
           # their iOS screenshots from: .github/screens/apps.md).
           #
@@ -1099,9 +1234,13 @@
               fi
             '';
           };
-          # One app's kernel, from the pinned Xcode, under the strict sandbox:
-          # of `targets`, both slices unless told.
-          iosKernel = { ffi, framework, targets ? iosTargets }: iosPhone (ffi // { inherit framework xcode targets; });
+          # One app's kernel: of `targets`, both slices unless told. Built on
+          # x86_64 Linux (`appleKernel`) on every system, the Mac's too, so
+          # a Mac fetches it from the cache (app-screens.yaml and ios.yaml
+          # build it on Linux first) and only links it, with Xcode, into
+          # the app. It needs no Xcode, and a new Xcode builds no kernel.
+          iosKernel = { ffi, framework, targets ? iosTargets }:
+            outputs.x86_64-linux.appleKernel (ffi // { inherit framework targets; });
           # One app, as Release: `name` its directory (<name>/ios, its
           # XcodeGen project), `App` its scheme and product, `ffi` and
           # `framework` its kernel's; `kind` "simulator" (the .app, for its
@@ -1281,6 +1420,7 @@
           # feature), run from a tree that is what any of them reads.
           memberTests = m: crateTests {
             name = m.packageId + lib.optionalString (m ? features) "-demo";
+            unified = if m ? features then demoUnified else checksUnified;
             crates = [ m ];
             dirs = rustDirs ++ genDirs ++ [ "spec/vectors" "spec/README.md" "spec/AUTHORING.md" ];
             # What makes a speaker's copy of a hi-res file (harken/server/tests/speaker.rs).
@@ -1296,7 +1436,20 @@
             features = m.features or [ "default" ];
             inherit tests;
             rootAttrs = rustcHook { inherit (m) packageId; clippy = true; };
+            unified = if m ? features then demoUnified else checksUnified;
           }) [ false true ];
+          # The checks' crates resolved as one `cargo test --workspace`
+          # resolves them: every member's tests and libraries at once, each
+          # crate built with the union of what they ask of it, and so built
+          # once for all of them. Without it each test and lint build
+          # resolved its own graph, and a crate reached with different
+          # features was a build of its own, with everything over it: ark-peer
+          # was thirteen builds, and a change to it thirteen recompiles of it
+          # and of every crate above each. The demos are resolved with the
+          # demo feature beside them, which moves only the crates it reaches.
+          workspaceRoots = ms: lib.concatMap (m: map (tests: { inherit (m) packageId; features = m.features or [ "default" ]; inherit tests; }) [ false true ]) ms;
+          checksUnified = rustCrates.unify { inherit pkgs; roots = workspaceRoots members; };
+          demoUnified = rustCrates.unify { inherit pkgs; roots = workspaceRoots (members ++ demos); };
           # Every `.rs` under `dir` formatted as the rustfmt.toml nearest it says.
           rustfmtCheck = name: dir: pkgs.runCommand "check-${name}-fmt" { nativeBuildInputs = [ rust ]; } ''
             cd ${dir}
@@ -1304,7 +1457,21 @@
             touch $out
           '';
           # Derivations as one, for a check that is many.
-          allOf = name: drvs: pkgs.linkFarm name (lib.imap0 (i: d: { name = "${toString i}-${d.name}"; path = d; }) drvs);
+          allOf = name: drvs: (pkgs.linkFarm name (lib.imap0 (i: d: { name = "${toString i}-${d.name}"; path = d; }) drvs))
+            // { roots = lib.concatMap rootsOf drvs; };
+          # The crate builds a check is made of at its top (each test build,
+          # each lint-clean build), whose dependencies are what checks share.
+          rootsOf = d: d.roots or (if d ? completeDeps then [ d ] else [ ]);
+          # Every crate the named checks' top builds depend on, once: what
+          # build.yaml's `crates` job builds and pushes before the checks
+          # fan out, so that two checks never compile the same crate at once.
+          checksCrates = names:
+            let
+              roots = lib.concatMap (n: rootsOf self.checks.${system}.${n}) names;
+              deps = lib.concatMap (r: r.completeDeps ++ r.completeBuildDeps) roots;
+              key = d: builtins.unsafeDiscardStringContext (baseNameOf d.drvPath);
+            in
+            allOf "checks-crates" (lib.attrValues (lib.listToAttrs (map (d: lib.nameValuePair (key d) d) deps)));
 
           # The pinned previous revisions (nix/versions.nix), each its
           # `harken-server` package as that revision's own flake builds it:
@@ -1363,6 +1530,8 @@
           '';
         in
         {
+          # For the Mac's apps (`iosKernel`): every Apple kernel is Linux's.
+          inherit appleKernel;
           packages = {
             inherit ark vectors fuzz harken-domain trace-corpus harken-android-lib harken-ios-xcframework;
             # The iPhone apps from the pinned Xcode: for the simulator (the
@@ -1415,6 +1584,12 @@
             harken-fdroid = fdroid.apps-fdroid;
           } // lib.listToAttrs (map (v: lib.nameValuePair "harken-server-${v.name}" v.server) versions)
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            # The crates build.yaml's checks share, built once before they
+            # fan out (`checksCrates`): of every check its `checks` jobs run.
+            checks-crates = checksCrates [
+              "fmt" "clippy" "rust" "ffi" "traces" "vectors" "fuzz-smoke" "versions"
+              "harken-domain" "harken-module" "docs" "theme" "theme-contrast"
+            ];
             # The fleet on three NixOS machines (docs/plan-fleet.md §3): an
             # interface down, the service restarted, the server crashed, the
             # scanner over a bound directory. A package and not a check: it
@@ -1545,18 +1720,18 @@
             rust = allOf "arkdb-rust" (map memberTests (members ++ demos));
             # The workspace lint-clean, the demo feature too, a build per
             # member.
-            # And the layers held (`layers`, above), which is lint too.
-            clippy = allOf "arkdb-clippy" ((lib.concatMap (memberClippy crate) (members ++ demos)) ++ [ self.checks.${system}.layers ]);
+            clippy = allOf "arkdb-clippy" (lib.concatMap (memberClippy crate) (members ++ demos));
             # The docs' crate formatted, lint-clean and its tests passing.
             docs = allOf "docs-checks" ([
               (rustfmtCheck "docs" (only [ "docs/site" ]))
               (crateTests {
                 name = "docs";
                 build = docsCrate;
+                unified = null;
                 crates = [ { packageId = "docs"; member = "docs/site"; } ];
                 dirs = [ "docs/site" "ui/rust/arkui" "ui/rust/glyphs" "ui/rust/web" "rust/Cargo.toml" ];
               })
-            ] ++ memberClippy docsCrate { packageId = "docs"; });
+            ] ++ memberClippy (args: docsCrate (removeAttrs args [ "unified" ])) { packageId = "docs"; });
             # The workspace formatted as each crate's rustfmt.toml says.
             fmt = rustfmtCheck "arkdb" (only (rustDirs ++ [ "ui/rustfmt.toml" ]));
             # harken's domain crate builds, and its schema's hash is the one

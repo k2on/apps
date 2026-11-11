@@ -604,10 +604,19 @@ where
                 Some(other) => return Err(format!("no mouse button {other:?}")),
             };
             match self.wait_for(label, bottom, if optional { OPTIONAL } else { PATIENCE }) {
-                Some(at) => self.interact(Interaction::Mouse(Mouse::Click {
-                    button,
-                    target: Some(Target::Point(at)),
-                })),
+                // The pointer brought there first and the window let answer
+                // it, then the press, as a hand does: a click with no move
+                // before it was lost on a window just opened (money's
+                // Budget, Reflect and All Accounts in screens-pr-100: one
+                // picture three times, the click on Reflect never taken).
+                Some(at) => {
+                    self.interact(Interaction::Mouse(Mouse::Move(Target::Point(at))));
+                    self.settle(Duration::from_millis(100), Duration::from_secs(5));
+                    self.interact(Interaction::Mouse(Mouse::Click {
+                        button,
+                        target: Some(Target::Point(at)),
+                    }))
+                }
                 None if optional => {}
                 None => return Err(format!("nothing on the screen says {label:?}")),
             }

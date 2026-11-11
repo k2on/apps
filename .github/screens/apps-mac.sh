@@ -9,7 +9,9 @@
 #   apps-mac.sh <out> <checkout> <app>...
 #
 # $XCODE as xcode-pinned.sh sets it. Writes <out>/<app>/mac/; each app any
-# of whose shots failed is added to $PARTIAL, as apps-ios.sh's.
+# of whose shots failed is added to $PARTIAL, as apps-ios.sh's. With $BUILT
+# (ios-build.sh's <out>), the app it built there, macos-<app>/<App>.app:
+# nothing is built here then, and an app with none there has no Mac build.
 set -uo pipefail
 out=$1
 src=$(cd "$2" && pwd)
@@ -23,6 +25,14 @@ names=$(nix eval --json "git+file://$src#packages.aarch64-darwin" --apply builti
 }
 failed=0
 for a in "$@"; do
+  if [ -n "${BUILT:-}" ]; then
+    app=$(find "$BUILT/macos-$a" -maxdepth 1 -name '*.app' 2> /dev/null | head -1)
+    [ -n "$app" ] || { echo "$a: no Mac build ($BUILT/macos-$a); no Mac window"; continue; }
+    server=$(jq -r '.server.port // empty | "http://127.0.0.1:\(.)"' "$a/screens/shots.json")
+    bash "$here/app-mac.sh" "$out/$a/mac" "$app" "$a" "$server" ||
+      { echo "::error::$a's Mac screenshots failed"; echo "$a" >> "$partial"; failed=1; }
+    continue
+  fi
   if ! jq -e --arg p "$a-macos" 'index($p) != null' <<< "$names" > /dev/null; then
     echo "$a: the commit has no $a-macos; no Mac window"
     continue

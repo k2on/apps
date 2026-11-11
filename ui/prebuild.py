@@ -562,6 +562,9 @@ tasks.withType<Test>().configureEach {{
     systemProperty("dev.arkdb.ui.strict", "true")
     systemProperty("jna.library.path", "$arkLib/host")''' if ark else ""}{f'''
     maxHeapSize = "{andr["test-heap"]}"''' if andr.get("test-heap") else ""}
+    // The suites side by side, a JVM each, over the machine's cores: one
+    // JVM ran them in turn, every time the kernel moved.
+    maxParallelForks = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 }}
 
 // The screenshots are `recordPaparazziDebug`'s; the APK's build runs every

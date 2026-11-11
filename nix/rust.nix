@@ -133,6 +133,13 @@ let
       # derivation (`overrideAttrs`).
     , root ? { }
     , rootAttrs ? (_: { })
+      # Every crate's features as `unify` resolved them for many roots at
+      # once, in place of this root's own: cargo's `--workspace`.
+    , unified ? null
+      # Applied to every crate the target links (`overrideAttrs`), not to
+      # what runs on the build machine: an Apple target's deployment
+      # version, which rustc writes into each object it compiles.
+    , targetAttrs ? (_: { })
     }:
     let
       split = pkgs.stdenv.buildPlatform != pkgs.stdenv.hostPlatform;
@@ -140,9 +147,9 @@ let
         target = targetOf pkgs.stdenv.hostPlatform;
         build = targetOf pkgs.stdenv.buildPlatform;
       };
-      resolved = resolve { inherit packageId features tests split targets; };
+      resolved = if unified != null then unified.resolved else resolve { inherit packageId features tests split targets; };
       builders = {
-        target = builderFor { inherit rust overrides; } pkgs;
+        target = args: (builderFor { inherit rust overrides; } pkgs args).overrideAttrs targetAttrs;
         build = builderFor { inherit rust overrides; } pkgs.buildPackages;
       };
       fetch = p: config: p.fetchurl {
@@ -187,5 +194,19 @@ let
         } // lib.optionalAttrs isRoot ({ buildTests = tests; } // root));
     in
     (crate "target" packageId true).overrideAttrs rootAttrs;
+
+  # The features of every crate as one cargo invocation over all of `roots`
+  # resolves them (`cargo test --workspace`): each crate the union of what
+  # each root's graph asks of it, so a crate is one build whichever root
+  # reaches it. Each root `{ packageId; features ? [ "default" ]; tests ? false; }`,
+  # for the host. Passed to `build` as `unified`.
+  unify = { pkgs, roots }:
+    let
+      targets = { target = targetOf pkgs.stdenv.hostPlatform; build = targetOf pkgs.stdenv.hostPlatform; };
+      each = map (r: resolve { inherit (r) packageId; features = r.features or [ "default" ]; tests = r.tests or false; split = false; inherit targets; }) roots;
+    in
+    {
+      resolved = lib.zipAttrsWith (_: lib.foldl' (a: b: a // b) { }) each;
+    };
 in
-{ inherit build targetOf; }
+{ inherit build targetOf unify; }

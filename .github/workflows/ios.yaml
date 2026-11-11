@@ -11,10 +11,10 @@
 # app with it where the image installs it, or takes it from the cache when
 # nothing it is built from moved. Xcode itself is never put in the store, so
 # it is never fetched from or pushed to Cachix (Apple's licence). The kernel
-# is built under nix's strict sandbox, with only the Xcode directory let in;
-# the app's own xcodebuild is the one step that cannot be (flake.nix says
-# why), so the runner's nix is relaxed, where every other build is still
-# sandboxed. This repository's builds go to Cachix (main's, by hand, and a
+# is not built on the Mac at all: the `kernels` job cross-compiles it on
+# Linux (flake.nix, `appleKernel`) and the Mac fetches it; the app's own
+# xcodebuild cannot be sandboxed (flake.nix says why), so the runner's nix
+# is relaxed, where every other build is still sandboxed. This repository's builds go to Cachix (main's, by hand, and a
 # pull request's from a branch here); a fork's never.
 #
 # **The archive is unsigned on purpose**, and given its build number after it
@@ -89,6 +89,7 @@ on:
       - ".github/ios-upload.sh"
       - ".github/ios-archive.sh"
       - ".github/nix-xcode.sh"
+      - ".github/apple-ahead.sh"
       - ".github/xcode-pinned.sh"
       # What the archives are built by.
       - "flake.nix"
@@ -135,8 +136,52 @@ jobs:
           jq . ios.json
           echo "ios=$(jq -c . ios.json)" >> "$GITHUB_OUTPUT"
 
-  app:
+  # Each app's kernel (and every other part of its Mac build that is
+  # built on Linux: flake.nix, `appleKernel`), cross-compiled here before
+  # any Mac is asked for, so the Mac only fetches it, links and runs Xcode:
+  # a Mac cannot build a Linux derivation. Pushed to the cache for this
+  # repository's own code only (the head repository's), and for every run,
+  # a fork's too, handed to the Mac as an artifact (unsigned store paths,
+  # which only that run's Mac imports).
+  kernels:
     needs: plan
+    if: needs.plan.outputs.ios != '[]'
+    runs-on: ubuntu-latest
+    env:
+      APPS: ${{ join(fromJSON(needs.plan.outputs.ios).*.name, ' ') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Apple's SDK headers that ring's C is compiled against are
+          # cache.nixos.org's (nixpkgs fetches them from Apple); never ours.
+          pushFilter: "macOS-SDK"
+      - name: Build the kernels
+        run: |
+          attrs=()
+          for a in $APPS; do
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then attrs+=("$a-ios-simulator" "$a-ios-kernel-simulator")
+            else attrs+=("$a-ios-archive" "$a-ios-kernel-simulator"); fi
+          done
+          bash .github/apple-ahead.sh . "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
+          nix copy --to "file://$RUNNER_TEMP/kernels" $(cat "$RUNNER_TEMP/kernels.txt")
+          cp "$RUNNER_TEMP/kernels.txt" "$RUNNER_TEMP/kernels/paths.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apple-kernels
+          path: ${{ runner.temp }}/kernels
+          retention-days: 3
+
+  app:
+    needs: [plan, kernels]
     if: needs.plan.outputs.ios != '[]'
     strategy:
       fail-fast: false
@@ -203,6 +248,16 @@ jobs:
 
       # What the next step builds, evaluated with nothing beside it; the
       # build then finds it in nix's evaluation cache.
+      # The kernels the Linux job built (`kernels`), into this Mac's store:
+      # from the cache for this repository's code, and from the job's
+      # artifact for any (a fork's, which nothing here pushes).
+      - uses: actions/download-artifact@v4
+        with:
+          name: apple-kernels
+          path: ${{ runner.temp }}/kernels
+      - name: The kernels, from Linux
+        run: nix copy --no-check-sigs --from "file://$RUNNER_TEMP/kernels" $(cat "$RUNNER_TEMP/kernels/paths.txt")
+
       - name: The packages, evaluated
         env:
           APP: ${{ matrix.app.name }}

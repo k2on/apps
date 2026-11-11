@@ -472,8 +472,12 @@ jobs:
       # Each app in turn (app-android.sh); one that fails is said, and the
       # others still taken. One line: the action runs each line of `script`
       # as its own command.
+      # Each capture with a limit of its own (a hang fails in minutes, and
+      # the uploads after still keep what was taken): about three times the
+      # longest seen.
       - name: Capture
         if: matrix.device == 'phone'
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -490,6 +494,7 @@ jobs:
       # (<app>/fold-unfolded/, <app>/fold-folded/), each its own job.
       - name: Capture (tablet)
         if: matrix.device == 'tablet'
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -518,6 +523,7 @@ jobs:
           cat "$GITHUB_OUTPUT"
       - name: Capture (Fold)
         if: matrix.device == 'fold' && steps.fold.outputs.profile != ''
+        timeout-minutes: 45
         uses: reactivecircus/android-emulator-runner@v2
         env:
           FOLD_NAME: ${{ steps.fold.outputs.name }}
@@ -559,8 +565,48 @@ jobs:
   # or to be taken is said, the others still taken and kept, and the job
   # fails at its end. Each app's shots are its own <app>/ios/ in the
   # artifact, as a job each had them.
-  ios:
+  # What of the Mac's builds is built on Linux (each app's kernel: flake.nix,
+  # `appleKernel`), built at the run's commit and pushed before the Mac is
+  # asked for: the Mac only fetches it. After ios.yaml (a workflow_run) it
+  # is that run's already, and this is a minute of finding it so; by hand
+  # (a dry run, a PR's number) it is built here.
+  kernels:
     needs: which
+    if: >-
+      needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      APPS: ${{ needs.which.outputs.ios }}
+      SOURCE: ${{ needs.which.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE }}
+          path: src
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://k2on.cachix.org
+            extra-trusted-public-keys = k2on.cachix.org-1:oI4Db0uW5ER+s4Te/MrXSmjWUWkOc9rmKdzsgUDxQP8=
+      - if: env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
+        uses: cachix/cachix-action@v15
+        with:
+          name: ${{ vars.CACHIX_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          pushFilter: "macOS-SDK"
+      - name: Build the kernels
+        run: |
+          attrs=()
+          for a in $APPS; do attrs+=("$a-ios-simulator" "$a-macos"); done
+          bash .github/apple-ahead.sh "$PWD/src" "$RUNNER_TEMP/kernels.txt" "${attrs[@]}"
+
+  ios:
+    needs: [which, kernels]
     # Built from the run's own commit, so only a run of this repository's.
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
@@ -659,6 +705,16 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           pushFilter: "[Xx]code([^Gg]|$)"
 
+      # The driver (driver-ios.sh), built in the background for any
+      # simulator, under the apps' build and the simulator's boot: the
+      # captures only run it. XcodeGen from the flake (the cache's), as every
+      # other tool here: no Homebrew.
+      - if: steps.open.outputs.open == 'true'
+        name: Start building the driver
+        run: |
+          bash .github/screens/tools.sh get xcodegen
+          PATH="$(tail -n 1 "$RUNNER_TEMP/tools")/bin:$PATH" bash .github/screens/meanwhile.sh start driver bash .github/screens/driver-ios.sh "$DRIVER"
+
       # The servers' packages (each server.sh's `.#<name>`) and the apps
       # (ios-build.sh's), evaluated once, with nothing beside them: under a
       # booting simulator and the servers' build, each evaluating a flake at
@@ -731,12 +787,14 @@ jobs:
           echo "IPAD_APPS=${ipad% }" >> "$GITHUB_ENV"
           if [ -z "${ipad// /}" ]; then echo "no app's build takes the iPad: none will be booted"; else echo "the iPad's: $ipad"; fi
 
+      # Everything the captures run, there before any starts: the servers
+      # (built under the apps' build) and the driver. No capture step
+      # builds or fetches anything.
       - if: steps.open.outputs.open == 'true'
-        name: The servers, and the driver's tools
+        name: The servers, and the driver
         run: |
-          # XcodeGen from the flake (the cache's), as every other tool here: no Homebrew.
-          bash .github/screens/tools.sh get xcodegen
           bash .github/screens/meanwhile.sh wait servers
+          bash .github/screens/meanwhile.sh wait driver
 
       - if: steps.open.outputs.open == 'true'
         name: The simulator, booted
@@ -744,11 +802,21 @@ jobs:
 
       # Each app in turn on the one simulator (apps-ios.sh); one that fails
       # is said, and the others still taken.
+      # Each capture step has a limit of its own, so one that hangs fails in
+      # minutes, not at the job's; and each device's shots are uploaded as
+      # soon as it is done (`always()`), whatever came of the others.
       - if: steps.open.outputs.open == 'true'
         name: Capture
+        timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
         run: bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$(cat "$RUNNER_TEMP/device")" $APPS
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.open.outputs.open == 'true'
+        with:
+          name: app-screens-ios
+          path: ${{ runner.temp }}/out/*/ios/
+          if-no-files-found: ignore
 
       # The iPad's, after the iPhone's: the iPhone shut down and only then
       # the iPad booted (not under the iPhone's shots, which a second
@@ -758,6 +826,7 @@ jobs:
       # (apps-ios.sh, FAMILY=ipad).
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' && env.IPAD_APPS != '' }}
         name: Capture (iPad)
+        timeout-minutes: 40
         env:
           RESULTS: ${{ runner.temp }}/results
           FAMILY: ipad
@@ -775,13 +844,28 @@ jobs:
           xcrun simctl bootstatus "$udid" -b > /dev/null
           echo "booted in $(( $(date +%s) - start ))s"
           bash .github/screens/apps-ios.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apps" "$name" $IPAD_APPS
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.open.outputs.open == 'true' && env.IPAD_APPS != ''
+        with:
+          name: app-screens-ipad
+          path: ${{ runner.temp }}/out/*/ipad-*/
+          if-no-files-found: ignore
 
       # The Mac's own window, of each app whose commit has a Mac build
-      # (`<app>-macos`, apps-mac.sh): on this Mac, signed in to the same
-      # server. None has one yet, and each is passed over in seconds.
+      # (`<app>-macos`, built with the iPhone's by ios-build.sh: BUILT): on
+      # this Mac, signed in to the same server.
       - if: ${{ !cancelled() && steps.open.outputs.open == 'true' }}
         name: Capture (Mac)
+        timeout-minutes: 15
+        env:
+          BUILT: ${{ runner.temp }}/apps
         run: bash .github/screens/apps-mac.sh "$RUNNER_TEMP/out" src $APPS
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.open.outputs.open == 'true'
+        with:
+          name: app-screens-mac
+          path: ${{ runner.temp }}/out/*/mac/
+          if-no-files-found: ignore
 
       # Beside each app's shots, taken whole, the hash of what they were
       # taken from (`which`, ios-inputs.sh): the next run that has the same
@@ -816,14 +900,16 @@ jobs:
         name: The servers' logs
         run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
 
-      # Every app's in one artifact, each its own <app>/ios/: compare and
-      # publish lay the app-screens-* artifacts over each other as one tree.
+      # The iPhone's again, now with each app's hash beside its shots (the
+      # step above): compare and publish lay the app-screens-* artifacts
+      # over each other as one tree, each app its own <app>/<device>/.
       - uses: actions/upload-artifact@v4
         if: always() && steps.open.outputs.open == 'true'
         with:
           name: app-screens-ios
-          path: ${{ runner.temp }}/out
+          path: ${{ runner.temp }}/out/*/ios/
           if-no-files-found: ignore
+          overwrite: true
 
       # The build of one app failed, and the others were taken: the job fails
       # now that they are kept.
@@ -904,6 +990,7 @@ jobs:
 
       # With no window and no GPU: wgpu on Mesa's lavapipe (app-desktop.sh).
       - name: Capture
+        timeout-minutes: 20
         run: bash .github/screens/apps-desktop.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/windows" $APPS
 
       - name: The servers' logs

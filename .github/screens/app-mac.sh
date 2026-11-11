@@ -21,7 +21,8 @@ app=$3
 server=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
 user=$(jq -r '.server.user // empty' "$app/screens/shots.json")
-exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Info.plist")"
+# A Mac app's Info.plist is under Contents/ (an iPhone app's at its root).
+exe="$bundle_app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle_app/Contents/Info.plist")"
 tmp=$(mktemp -d)
 mkdir -p "$out"
 # The window of a process, by its pid (window.swift).
