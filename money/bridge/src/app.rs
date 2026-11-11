@@ -21,6 +21,7 @@ use ark_haptics::phone::Haptics;
 use ark_share::phone::Share;
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
+use money_app::insights::{Insights, InsightsMsg};
 use money_app::receipts::{Receipts, ReceiptsMsg};
 use money_app::register::{Register, RegisterMsg};
 use money_app::routes::Route;
@@ -266,6 +267,10 @@ screen!(
     /// The Transactions tab, running (money/app/src/transactions): To
     /// Review and All, approving and categorizing.
     TransactionsApp, Transactions, TransactionsMsg, TransactionsMsgFfi, TransactionsPageFfi
+);
+screen!(
+    /// Insights, running (money/app/src/insights): where the month's money went.
+    InsightsApp, Insights, InsightsMsg, InsightsMsgFfi, InsightsPageFfi
 );
 screen!(
     /// A register, running (money/app/src/register): an account's

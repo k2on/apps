@@ -60,6 +60,8 @@ final class Model: ObservableObject {
     private(set) var receipts: ReceiptsScreen? = nil
     /// The Transactions tab, running in Rust (money/app/src/transactions).
     @Published private(set) var transactions: TransactionsScreen? = nil
+    /// Insights, running in Rust (money/app/src/insights).
+    @Published private(set) var insights: InsightsScreen? = nil
     /// The sheets over the app, running in Rust (money/app/src/sheets).
     @Published private(set) var sheets: SheetsScreen? = nil
     /// Told which views moved, on the main queue: the app's `Watched`.
@@ -235,6 +237,7 @@ final class Model: ObservableObject {
                             self?.budget?.reload()
                             self?.transactions?.reload()
                             self?.sheets?.reload()
+                            self?.insights?.reload()
                             self?.shell.reload()
                             self?.onMoved(views)
                         })
@@ -257,6 +260,9 @@ final class Model: ObservableObject {
         transactions = TransactionsScreen(session: s, devices: devices, month: month,
                                           refresh: { [weak self] in Task { await self?.refresh() } },
                                           today: { [weak self] in self?.today ?? moneyToday() })
+        insights = InsightsScreen(session: s, month: month,
+                                  refresh: { [weak self] in Task { await self?.refresh() } },
+                                  today: { [weak self] in self?.today ?? moneyToday() })
         sheets = SheetsScreen(session: s, devices: devices, month: month,
                               refresh: { [weak self] in Task { await self?.refresh() } },
                               today: { [weak self] in self?.today ?? moneyToday() })
@@ -272,6 +278,7 @@ final class Model: ObservableObject {
         budget = nil
         transactions = nil
         sheets = nil
+        insights = nil
         receipts = nil
         shell.disconnect()
         session = nil
@@ -336,6 +343,7 @@ final class Model: ObservableObject {
         budget?.send(.month(month: m))
         transactions?.send(.month(month: m))
         sheets?.send(.month(month: m, today: today))
+        insights?.send(.month(month: m))
     }
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }

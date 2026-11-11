@@ -52,6 +52,17 @@ pub fn screens() -> ark_ui_gen::app::App {
                 },
             ),
             Generated::view(
+                money_app::insights::view::insights::record,
+                Names {
+                    swift: "InsightsView",
+                    swift_holder: "InsightsScreen",
+                    kotlin: "InsightsScreen",
+                    kotlin_holder: "InsightsHolder",
+                    source: "money/app/src/insights/view.rs",
+                    msg: "InsightsMsg",
+                },
+            ),
+            Generated::view(
                 money_app::register::view::register::record,
                 Names {
                     swift: "RegisterView",

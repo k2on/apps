@@ -30,6 +30,7 @@ use ark_peer::Peer as Replica;
 use arkui_web::{AnyView, WebApp};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
+use money_app::insights::{Insights, InsightsMsg};
 use money_app::register::{Register, RegisterMsg};
 use money_app::sheets::{Sheets, SheetsMsg};
 use money_app::shell::view::{commands, money_shell};
@@ -51,6 +52,8 @@ pub enum Msg {
     Budget(BudgetMsg),
     /// The Transactions tab's (`money_app::transactions`).
     Transactions(TransactionsMsg),
+    /// Insights' (`money_app::insights`).
+    Insights(InsightsMsg),
     /// The register's (`money_app::register`).
     Register(RegisterMsg),
     /// The sheets' (`money_app::sheets`).
@@ -85,6 +88,7 @@ pub struct MoneyWeb {
     pub accounts: Runtime<Accounts>,
     pub budget: Runtime<Budget>,
     pub transactions: Runtime<Transactions>,
+    pub insights: Runtime<Insights>,
     /// The register the shell shows: the shown account's.
     pub register: Runtime<Register>,
     pub sheets: Runtime<Sheets>,
@@ -157,6 +161,7 @@ impl MoneyWeb {
             accounts: Runtime::new(),
             budget: Runtime::new(),
             transactions: Runtime::new(),
+            insights: Runtime::new(),
             register: Runtime::new(),
             sheets: Runtime::new(),
             wanted: vec![],
@@ -272,6 +277,9 @@ impl MoneyWeb {
         if self.transactions.state().search != search {
             self.step(|a| &mut a.transactions, TransactionsMsg::Search { text: search });
         }
+        if self.insights.state().month != month {
+            self.step(|a| &mut a.insights, InsightsMsg::Month { month: month.clone() });
+        }
         if self.transactions.state().month != month {
             self.step(|a| &mut a.transactions, TransactionsMsg::Month { month: month.clone() });
         }
@@ -289,6 +297,7 @@ impl MoneyWeb {
             self.budget.holds(),
             self.accounts.holds(),
             self.transactions.holds(),
+            self.insights.holds(),
             self.register.holds(),
             self.sheets.holds(),
         ]
@@ -408,6 +417,7 @@ impl MoneyWeb {
             && self.budget.is_idle(st)
             && self.accounts.is_idle(st)
             && self.transactions.is_idle(st)
+            && self.insights.is_idle(st)
             && self.register.is_idle(st)
             && self.sheets.is_idle(st)
     }
@@ -418,6 +428,7 @@ impl MoneyWeb {
             + self.budget.version()
             + self.accounts.version()
             + self.transactions.version()
+            + self.insights.version()
             + self.register.version()
             + self.sheets.version()
     }
@@ -628,6 +639,7 @@ impl WebApp for MoneyWeb {
             Msg::Accounts(m) => self.accounts_step(m),
             Msg::Budget(m) => self.budget_step(m),
             Msg::Transactions(m) => self.step(|a| &mut a.transactions, m),
+            Msg::Insights(m) => self.step(|a| &mut a.insights, m),
             Msg::Register(m) => self.step(|a| &mut a.register, m),
             Msg::Sheets(m) => self.step(|a| &mut a.sheets, m),
             Msg::Category(c) => {
@@ -748,6 +760,7 @@ impl WebApp for MoneyWeb {
         self.accounts = Runtime::new();
         self.budget = Runtime::new();
         self.transactions = Runtime::new();
+        self.insights = Runtime::new();
         self.register = Runtime::new();
         self.sheets = Runtime::new();
         let month = self.month.clone();

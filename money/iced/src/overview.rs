@@ -12,6 +12,7 @@ use ark_clipboard::{Clipboard, Queued};
 use iced::{Element, Task};
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
+use money_app::insights::{Insights, InsightsMsg};
 use money_core::dates::{days_from_civil, parse_day};
 use money_core::{MoneyChange, MoneyView};
 
@@ -107,7 +108,51 @@ impl Host<Budget> for Desk<'_> {
     }
 }
 
+impl Host<Insights> for Desk<'_> {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
+        f(&self.app.peer.store)
+    }
+    fn now_ms(&self) -> i64 {
+        now_ms(&self.app.today)
+    }
+    fn send(&mut self, change: MoneyChange) -> Result<(), String> {
+        <Self as Host<Accounts>>::send(self, change)
+    }
+    fn open(&mut self, _: Route) {}
+    fn request(&mut self, r: money_app::MoneyRequest) {
+        self.natives.extend(self.app.requested(r));
+    }
+    fn ask(&mut self, _: Ticket, ask: Ask<InsightsMsg>) {
+        // Insights asks no module.
+        ask.run(&Modules::new(), |_| {})
+    }
+}
+
 impl App {
+    /// A message of Insights taken.
+    pub(crate) fn insights_step(&mut self, msg: InsightsMsg) -> Task<Message> {
+        let mut rt = std::mem::take(&mut self.insights);
+        let mut desk = Desk::new(self);
+        rt.dispatch(msg, &mut desk);
+        let tasks: Vec<Task<Message>> = std::mem::take(&mut desk.natives).into_iter().map(Task::done).collect();
+        self.insights = rt;
+        Task::batch(tasks)
+    }
+
+    /// Insights told the window's month, when it moved.
+    pub(crate) fn insights_month(&mut self) {
+        if self.insights.state().month != self.peer.month {
+            let month = self.peer.month.clone();
+            let _ = self.insights_step(InsightsMsg::Month { month });
+        }
+    }
+
+    /// Insights.
+    pub(crate) fn view_insights(&self) -> Element<'_, Message> {
+        let page = self.insights.screen_of(&self.peer.store, now_ms(&self.today));
+        arkui::view::element(money_app::insights::view::insights::view(&page)).map(Message::Insights)
+    }
+
     /// A message of the Budget page taken.
     pub(crate) fn budget_step(&mut self, msg: BudgetMsg) -> Task<Message> {
         let mut rt = std::mem::take(&mut self.budget);

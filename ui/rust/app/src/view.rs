@@ -417,6 +417,13 @@ pub enum Part<M> {
         enabled: Val<bool>,
         tap: M,
     },
+    /// Bars against the largest, each its label over it and its figure said
+    /// at its end, in the chart's first colour (ArkUI's `LabelledBars`).
+    BarChart {
+        labels: Val<Vec<String>>,
+        values: Val<Vec<i64>>,
+        said: Val<Vec<String>>,
+    },
     /// A day chosen (`2026-11-11`): the system's date picker in a form's
     /// row on the phones, a date field on the desktop and in the browser.
     DateField {
@@ -1532,6 +1539,17 @@ pub fn form_button<M>(title: &'static str, enabled: impl Into<Val<bool>>, tap: M
     .into()
 }
 
+/// Bars of `values` against the largest, each `labels`' over it and
+/// `said`'s at its end ([`Part::BarChart`]).
+pub fn bar_chart<M>(labels: impl Into<Val<Vec<String>>>, values: impl Into<Val<Vec<i64>>>, said: impl Into<Val<Vec<String>>>) -> View<M> {
+    Part::BarChart {
+        labels: labels.into(),
+        values: values.into(),
+        said: said.into(),
+    }
+    .into()
+}
+
 /// A day chosen, as `2026-11-11` ([`Part::DateField`]).
 pub fn date_field<M: 'static>(label: &'static str, day: impl Into<Val<String>>, typed: fn(String) -> M) -> View<M> {
     Part::DateField {
@@ -2347,6 +2365,12 @@ impl<M> Part<M> {
                 vec![],
             ),
             Part::CodeImage { size, dark } => c("CodeImage", Some(G::Val(lit(size))), vec![("dark", G::Val(lit(dark)))], vec![]),
+            Part::BarChart { labels, values, said } => c(
+                "BarChart",
+                Some(G::Val(lit(labels))),
+                vec![("values", G::Val(lit(values))), ("said", G::Val(lit(said)))],
+                vec![],
+            ),
             Part::DateField { label, day, typed } => c(
                 "DateField",
                 Some(G::Text(label)),
@@ -2370,7 +2394,13 @@ impl<M> Part<M> {
                                     name: "DataColumn",
                                     first: Some(G::Text(k.heading)),
                                     args: vec![
-                                        ("width", G::Case { of: "ColumnWidth", case: k.width.case() }),
+                                        (
+                                            "width",
+                                            G::Case {
+                                                of: "ColumnWidth",
+                                                case: k.width.case(),
+                                            },
+                                        ),
                                         ("share", G::Val(share.to_string())),
                                         (
                                             "align",
@@ -2870,6 +2900,7 @@ impl<M: 'static> Part<M> {
             },
             Part::StatusLine { text, busy, problem } => Part::StatusLine { text, busy, problem },
             Part::CodeImage { size, dark } => Part::CodeImage { size, dark },
+            Part::BarChart { labels, values, said } => Part::BarChart { labels, values, said },
             Part::DateField { label, day, typed } => Part::DateField {
                 label,
                 day,

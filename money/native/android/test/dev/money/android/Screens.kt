@@ -99,7 +99,11 @@ class Screens {
             ScreenFrame { TransactionsScreen(holder) }
         }
 
-    @Test fun insights() = shot("insights") { InsightsScreen(book.state.value) }
+    @Test fun insights() {
+        val holder = InsightsHolder(book.session, {}, { book.state.value.today })
+        holder.send(uniffi.money_bridge.InsightsMsg.Month(month = book.state.value.month))
+        shot("insights") { ScreenFrame { InsightsScreen(holder) } }
+    }
 
     @Test fun register() {
         val card = book.state.value.accounts.first { it.kind == "credit" }

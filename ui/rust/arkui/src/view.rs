@@ -303,6 +303,7 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
         .spacing(4)
         .into(),
         Part::Table { columns, rows } => data_table(columns, *rows),
+        Part::BarChart { labels, values, said } => crate::figures::labelled_bars(&bars(labels.get(), values.get(), said.get())),
         // A table's rows are its own (`data_table`): alone, as a list's.
         Part::TableRow(r) => table_row(&[], *r, 0),
         Part::TableHeading { title } => crate::table::section(title.get(), 0.0),
@@ -1424,4 +1425,14 @@ fn table_row<M: Clone + 'static>(columns: &[TableColumn], r: TableRow<M>, odd: u
         true => b.into(),
         false => context_menu::context_menu(b, title, items),
     }
+}
+
+/// A bar chart's three lists as its bars.
+fn bars(labels: Vec<String>, values: Vec<i64>, said: Vec<String>) -> Vec<crate::figures::Bar> {
+    labels
+        .into_iter()
+        .zip(values)
+        .zip(said)
+        .map(|((label, value), said)| crate::figures::Bar { label, value, said })
+        .collect()
 }

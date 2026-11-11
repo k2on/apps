@@ -197,6 +197,13 @@ pub struct TxnSheet {
     /// A new one: "New Transaction"; else "Transaction".
     pub adding: bool,
     pub editing: bool,
+    /// The one corrected's hex id, its receipt (the receipt's id, or empty)
+    /// and its signed amount: what its receipt's section is about. The
+    /// section is the host's own (`receipt`), until receipts move here.
+    pub id: String,
+    pub receipt: String,
+    pub signed: i64,
+    pub has_receipt: bool,
     /// "outflow" or "inflow".
     pub way: String,
     pub ways: Vec<SheetChoice>,
@@ -675,6 +682,10 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
     TxnSheet {
         adding: d.editing.is_none(),
         editing: d.editing.is_some(),
+        id: d.editing.map(|i| i.hex()).unwrap_or_default(),
+        receipt: editing.map(|t| t.receipt.clone()).unwrap_or_default(),
+        signed: editing.map(|t| t.amount).unwrap_or(0),
+        has_receipt: editing.is_some() && !f.transfer,
         way: if f.inflow { "inflow" } else { "outflow" }.into(),
         ways: vec![
             SheetChoice {

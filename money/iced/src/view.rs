@@ -8,7 +8,6 @@ use arkui::{format, glyphs, icon, layer, menu, panel, style, table};
 use iced::widget::{button, column, container, mouse_area, progress_bar, row, rule, scrollable, stack, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 use money_core::budget::ready_to_assign;
-use money_core::dates::add_months;
 use money_core::*;
 
 use crate::amount::money;
@@ -1009,112 +1008,6 @@ impl App {
     }
 
     // * Settings
-
-    // * Insights
-
-    pub(crate) fn view_reflect(&self) -> Element<'_, Message> {
-        use arkui::figures::{chart_card, column_chart, grid, labelled_bars, line_chart, stat_tile, Bar, Series};
-        let all: &[TxnLine] = self.peer.store.rows(&MoneyView::Register { account: None });
-        let month = self.peer.month.clone();
-        // What came in to be budgeted, and what was spent from categories,
-        // in a month: transfers between accounts are neither.
-        let income = |m: &str| -> i64 {
-            all.iter()
-                .filter(|t| t.date.starts_with(m) && !t.transfer && t.category_id == Some(ready_to_assign()) && t.amount > 0)
-                .map(|t| t.amount)
-                .sum()
-        };
-        let spent_in = |m: &str| -> Vec<&TxnLine> {
-            all.iter()
-                .filter(|t| t.date.starts_with(m) && !t.transfer && t.category_id.is_some_and(|c| c != ready_to_assign()))
-                .collect()
-        };
-        let spending = |m: &str| -> i64 { -spent_in(m).iter().map(|t| t.amount).sum::<i64>() };
-        let (came, went) = (income(&month), spending(&month));
-        let kept = match came {
-            0 => "\u{2014}".to_string(),
-            c => format!("{}%", ((c - went) * 100 / c).max(0)),
-        };
-        let compact = arkui::shell::SizeClass::of(self.window.width) == arkui::shell::SizeClass::Compact;
-        let tiles: Vec<Element<'_, Message>> = vec![
-            stat_tile("Income", money(came), None),
-            stat_tile("Spending", money(went), None),
-            stat_tile("Kept", kept, Some("of income not spent")),
-        ];
-
-        // Spending by category, largest first: the top eight and Other.
-        let mut by: Vec<(String, i64)> = vec![];
-        for t in spent_in(&month) {
-            match by.iter_mut().find(|(n, _)| *n == t.category) {
-                Some((_, v)) => *v -= t.amount,
-                None => by.push((t.category.clone(), -t.amount)),
-            }
-        }
-        by.retain(|(_, v)| *v > 0);
-        by.sort_by_key(|b| std::cmp::Reverse(b.1));
-        let mut bars: Vec<Bar> = by
-            .iter()
-            .take(8)
-            .map(|(n, v)| Bar {
-                label: n.clone(),
-                value: *v,
-                said: money(*v),
-            })
-            .collect();
-        let other: i64 = by.iter().skip(8).map(|(_, v)| v).sum();
-        if other > 0 {
-            bars.push(Bar {
-                label: "Other".into(),
-                value: other,
-                said: money(other),
-            });
-        }
-        let by_category: Element<'_, Message> = match bars.is_empty() {
-            true => dim("Nothing spent this month yet.", 12).into(),
-            false => labelled_bars(&bars),
-        };
-
-        // Income beside spending, the month and the two before it.
-        let months: Vec<String> = (-2..=0).map(|d| add_months(&month, d)).collect();
-        let groups: Vec<(String, Vec<i64>)> = months.iter().map(|m| (format::month_alone(m), vec![income(m), spending(m)])).collect();
-        let series = [Series { name: "Income".into() }, Series { name: "Spending".into() }];
-        let in_out = column_chart(&series, &groups, 180.0);
-
-        // What the household is worth, now and how it went.
-        let page = self.accounts.screen_of(&self.peer.store, crate::overview::now_ms(&self.today));
-        let first = page.trend.first().copied().unwrap_or(page.net_worth);
-        let worth = column![
-            bold(money(page.net_worth), 16),
-            dim(format!("{} over twelve weeks", crate::amount::signed(page.net_worth - first)), 11),
-            line_chart(&page.trend, 150.0, true),
-        ]
-        .spacing(4);
-
-        let cards: Vec<Element<'_, Message>> = vec![
-            chart_card("Spending by Category", by_category),
-            chart_card("Income vs Spending", in_out),
-            chart_card("Net Worth", worth),
-        ];
-        // As many columns as fit: three on a wide window, one on a phone.
-        let columns = match (compact, self.window.width) {
-            (true, _) => 1,
-            (false, w) if w >= arkui::layout_tokens::SIDEBAR_MIN_WIDTH => 3,
-            _ => 2,
-        };
-        let page = column![grid(tiles, if compact { 1 } else { 3 }, 14.0), grid(cards, columns, 14.0)]
-            .spacing(16)
-            .padding(PAD)
-            .width(Length::Fill);
-        arkui::scroll::elastic(
-            scrollable(page)
-                .id(look::PAGE_TOP)
-                .on_scroll(|v| Message::TopScrolled(v.absolute_offset().y))
-                .height(Length::Fill)
-                .style(style::bars),
-        )
-    }
-
-    // * Panels
 
     fn view_modal<'a>(&'a self, m: &'a Modal) -> Element<'a, Message> {
         if let Modal::Photo(_) = m {

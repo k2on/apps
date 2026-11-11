@@ -357,7 +357,7 @@ impl App {
             ("transactions", Page::Ledger(l)) => self.view_ledger(l),
             ("transactions", _) => self.view_ledger(Ledger::All),
             ("transactions.inspector", _) => self.view_receipt_side(),
-            ("insights", _) => self.view_reflect(),
+            ("insights", _) => self.view_insights(),
             ("household", _) => self.view_household(),
             ("settings.general", _) => self.view_settings(),
             ("settings.banks", _) => self.view_banks_pane(),

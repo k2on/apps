@@ -227,6 +227,12 @@ public fun DataTableRow(
     }
 }
 
+/** Bars against the largest ([LabelledBars]), from a view's three lists. */
+@Composable
+public fun BarChart(labels: List<String>, values: List<Long>, said: List<String>) {
+    LabelledBars(labels.zip(values).zip(said).map { (lv, s) -> LabelledBar(lv.first, lv.second, s) })
+}
+
 private val DAY = DateTimeFormatter.ISO_LOCAL_DATE
 private val SHOWN = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
 

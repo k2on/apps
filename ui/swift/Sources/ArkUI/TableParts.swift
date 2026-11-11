@@ -222,6 +222,17 @@ public struct DataTableRow: View {
     }
 }
 
+/// Bars against the largest (`LabelledBars`), from a view's three lists.
+public struct BarChart: View {
+    let bars: [LabelledBar]
+
+    public init(_ labels: [String], values: [Int64], said: [String]) {
+        bars = zip(zip(labels, values), said).map { LabelledBar($0.0, value: $0.1, said: $1) }
+    }
+
+    public var body: some View { LabelledBars(bars) }
+}
+
 /// A day picked: the system's date picker in a form's row, over the day as
 /// the domain writes one (`2026-11-11`).
 public struct DateField: View {

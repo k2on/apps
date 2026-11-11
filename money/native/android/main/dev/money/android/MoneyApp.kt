@@ -273,7 +273,7 @@ fun MoneyApp(
     }
     // The month is the budget's title in the shell's top bar.
     LaunchedEffect(ledger.month) { sections.send(uniffi.money_bridge.ShellMsg.Month(month = ledger.month)) }
-    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget, accounts, transactions, carry) }
+    val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget, accounts, transactions, sheets, carry) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
         // The camera's page, while a module asks for it (a receipt scanned).
@@ -532,6 +532,7 @@ private fun Hosted(
     budget: BudgetHolder,
     accounts: AccountsHolder,
     transactions: TransactionsHolder,
+    sheets: SheetsHolder,
     carry: (MoneyRequest) -> Unit,
 ) {
     when (name) {
@@ -561,7 +562,18 @@ private fun Hosted(
             LaunchedEffect(page.search) { holder.send(uniffi.money_bridge.TransactionsMsg.Search(text = page.search)) }
             ScreenFrame { TransactionsScreen(holder) }
         }
-        "insights" -> InsightsScreen(ledger)
+        // A transaction's receipt, in its sheet: this app's own until receipts move into Rust.
+        "transaction.receipt" -> {
+            val t = sheets.page.collectAsStateWithLifecycle().value.transaction
+            if (t != null && t.hasReceipt) ReceiptSection(ledger, Id(t.id), t.receipt, t.signed, t.day)
+        }
+        "insights" -> {
+            // Written from Rust (generated/InsightsScreen.kt), over its runtime: its month the book's.
+            val holder = remember(book) { InsightsHolder(book.session, { book.sync() }, { book.state.value.today }) }
+            LaunchedEffect(ledger) { holder.reload() }
+            LaunchedEffect(ledger.month) { holder.send(uniffi.money_bridge.InsightsMsg.Month(month = ledger.month)) }
+            ScreenFrame { InsightsScreen(holder) }
+        }
         "accounts.register" -> {
             // The account the shell shows (its place's tag, `accounts/<id>`), under the shell's search.
             val page by sections.page.collectAsStateWithLifecycle()

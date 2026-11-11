@@ -303,6 +303,16 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
         Part::Writing { markdown } => crate::writing::markdown(&markdown.get()),
         Part::DateField { label, day, typed } => crate::fields::date_field(label, label, day.get(), Rc::new(move |s| send(typed.call(s)))),
         Part::Table { columns, rows } => data_table(columns, *rows),
+        Part::BarChart { labels, values, said } => {
+            let bars: Vec<crate::figures::Bar> = labels
+                .get()
+                .into_iter()
+                .zip(values.get())
+                .zip(said.get())
+                .map(|((label, value), said)| crate::figures::Bar { label, value, said })
+                .collect();
+            crate::figures::labelled_bars(&bars)
+        }
         Part::TableRow(r) => data_table(vec![], View::Part(Part::TableRow(r))),
         Part::TableHeading { title } => html::div().class("ark-caption").child(title.get()).into_any(),
         p @ (Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. }) => dialog(p),

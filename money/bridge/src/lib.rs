@@ -58,6 +58,7 @@ ark::twins!(
     money_app::{
         MoneyRequest,
         accounts::{AccountItem, AccountsMsg, AccountsPage, AccountsShelf, AddForm, KindChoice, RenameForm},
+        insights::{InsightsMsg, InsightsPage, PlanRow, SpentGroup},
         budget::{AmountForm, BudgetChoice, BudgetMsg, BudgetPage, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm},
         receipts::{ReceiptsMsg, ReceiptsPage},
         register::{RegisterDay, RegisterMsg, RegisterPage, RegisterRow},
@@ -86,7 +87,7 @@ pub mod core;
 mod demo;
 mod hall;
 mod session;
-pub use app::{AccountsApp, AppShell, BudgetApp, Devices, ReceiptsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
+pub use app::{AccountsApp, AppShell, BudgetApp, Devices, InsightsApp, ReceiptsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 pub use session::{Budget, Changed, Holding, MoneyView, Session};

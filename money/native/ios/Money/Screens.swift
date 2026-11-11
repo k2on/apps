@@ -168,6 +168,35 @@ final class RegisterScreen: ObservableObject {
     }
 }
 
+/// Insights, running in Rust (money/app/src/insights): its month the model's.
+@MainActor
+final class InsightsScreen: ObservableObject {
+    @Published private(set) var page: InsightsPage
+
+    private let app: InsightsApp
+    private let shell: ScreenShell
+
+    init(session: Session, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = InsightsApp(session: session, shell: shell)
+        app.send(msg: .month(month: month))
+        page = app.page()
+    }
+
+    func send(_ msg: InsightsMsg) {
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
+
+    func reload() {
+        page = app.page()
+    }
+}
+
 /// The sheets over the app, running in Rust (money/app/src/sheets): a
 /// transaction's form, a category given, an account reconciled — whoever
 /// raised it (`MoneyRequest.sheet`).

@@ -15,11 +15,6 @@ pub fn money(cents: i64) -> String {
     format::amount(cents, &STYLE)
 }
 
-/// [`money`] with its sign always: `+$12.00`, `-$12.00`.
-pub fn signed(cents: i64) -> String {
-    format::amount_signed(cents, &STYLE)
-}
-
 /// What somebody typed as an amount, in cents; nothing typed is nothing.
 pub fn parse(typed: &str) -> Option<i64> {
     format::parse_amount(typed, &STYLE)

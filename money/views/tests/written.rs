@@ -16,6 +16,8 @@ fn every_screen_is_written_with_the_first_run_among_them() {
         "RegisterScreen.kt",
         "SheetsView.swift",
         "SheetsScreen.kt",
+        "InsightsView.swift",
+        "InsightsScreen.kt",
     ] {
         assert!(names.contains(&n), "{n} in {names:?}");
     }

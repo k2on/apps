@@ -28,6 +28,9 @@ import uniffi.money_bridge.Devices
 import uniffi.money_bridge.ReceiptsApp
 import uniffi.money_bridge.ReceiptsMsg
 import uniffi.money_bridge.ReceiptsPage
+import uniffi.money_bridge.InsightsApp
+import uniffi.money_bridge.InsightsMsg
+import uniffi.money_bridge.InsightsPage
 import uniffi.money_bridge.RegisterApp
 import uniffi.money_bridge.RegisterMsg
 import uniffi.money_bridge.RegisterPage
@@ -256,6 +259,34 @@ class RegisterHolder(session: Session, refresh: () -> Unit, today: () -> String,
     }
 
     fun send(msg: RegisterMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/** Insights, running in Rust (money/app/src/insights): its month the book's. */
+class InsightsHolder(session: Session, refresh: () -> Unit, today: () -> String) {
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun request(request: MoneyRequest) {
+                if (request is MoneyRequest.Refresh) refresh()
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = InsightsApp(session, shell)
+    private val _page = MutableStateFlow(app.page())
+    val page: StateFlow<InsightsPage> = _page
+
+    fun send(msg: InsightsMsg) {
         app.send(msg)
         _page.value = app.page()
     }

@@ -7,14 +7,11 @@
 
 use std::rc::Rc;
 
-use arkui_web::figures::{self, Bar, Series};
-use arkui_web::{amount, fields, glyph, money, parts, quiet, send, AnyView};
+use arkui_web::{amount, fields, glyph, parts, quiet, send, AnyView};
 use leptos::html;
 use leptos::prelude::*;
 use money_app::shell::view::money_settings;
 use money_app::shell::{tagged_account, ShellPage};
-use money_core::budget::ready_to_assign;
-use money_core::dates::add_months;
 use money_core::*;
 
 use crate::{MoneyWeb, Msg};
@@ -28,10 +25,6 @@ pub fn summary(app: &MoneyWeb) -> Summary {
         .first::<Summary>(&MoneyView::Summary { month: app.month.clone() })
         .cloned()
         .unwrap_or_default()
-}
-
-pub fn all_txns(app: &MoneyWeb) -> &[TxnLine] {
-    app.store.rows(&MoneyView::Register { account: None })
 }
 
 /// A screen the shell hosts, by name.
@@ -66,7 +59,11 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
             money_app::transactions::view::transactions::view(&app.transactions.screen_of(&app.store, app.now_ms())).map(Msg::Transactions),
         ),
         "transactions.inspector" => quiet("No Transaction Selected"),
-        "insights" => insights(app),
+        // A transaction's receipt in its sheet: the browser's is still to come.
+        "transaction.receipt" => ().into_any(),
+        "insights" => {
+            arkui_web::render(money_app::insights::view::insights::view(&app.insights.screen_of(&app.store, app.now_ms())).map(Msg::Insights))
+        }
         "household" => household(),
         "settings.general" => settings_general(),
         "settings.household" => settings_household(),
@@ -133,105 +130,6 @@ fn quiet_button(label: &str, m: Msg) -> AnyView {
         .child(label.to_string())
         .into_any()
 }
-
-// * Insights
-
-fn insights(app: &MoneyWeb) -> AnyView {
-    let all = all_txns(app);
-    let month = app.month.clone();
-    let income = |m: &str| -> i64 {
-        all.iter()
-            .filter(|t| t.date.starts_with(m) && !t.transfer && t.category_id == Some(ready_to_assign()) && t.amount > 0)
-            .map(|t| t.amount)
-            .sum()
-    };
-    let spent_in = |m: &str| -> Vec<&TxnLine> {
-        all.iter()
-            .filter(|t| t.date.starts_with(m) && !t.transfer && t.category_id.is_some_and(|c| c != ready_to_assign()))
-            .collect()
-    };
-    let spending = |m: &str| -> i64 { -spent_in(m).iter().map(|t| t.amount).sum::<i64>() };
-    let (came, went) = (income(&month), spending(&month));
-    let kept = match came {
-        0 => "\u{2014}".to_string(),
-        c => format!("{}%", ((c - went) * 100 / c).max(0)),
-    };
-    let compact = arkui_web::shell::size_class() == arkui_web::shell::SizeClass::Compact;
-    let tiles = vec![
-        figures::stat_tile("Income", money(came), None),
-        figures::stat_tile("Spending", money(went), None),
-        figures::stat_tile("Kept", kept, Some("of income not spent")),
-    ];
-    let mut by: Vec<(String, i64)> = vec![];
-    for t in spent_in(&month) {
-        match by.iter_mut().find(|(n, _)| *n == t.category) {
-            Some((_, v)) => *v -= t.amount,
-            None => by.push((t.category.clone(), -t.amount)),
-        }
-    }
-    by.retain(|(_, v)| *v > 0);
-    by.sort_by_key(|b| std::cmp::Reverse(b.1));
-    let mut bars: Vec<Bar> = by
-        .iter()
-        .take(8)
-        .map(|(n, v)| Bar {
-            label: n.clone(),
-            value: *v,
-            said: money(*v),
-        })
-        .collect();
-    let other: i64 = by.iter().skip(8).map(|(_, v)| v).sum();
-    if other > 0 {
-        bars.push(Bar {
-            label: "Other".into(),
-            value: other,
-            said: money(other),
-        });
-    }
-    let by_category = match bars.is_empty() {
-        true => html::div().class("ark-caption").child("Nothing spent this month yet.").into_any(),
-        false => figures::labelled_bars(&bars),
-    };
-    let months: Vec<String> = (-2..=0).map(|d| add_months(&month, d)).collect();
-    let groups: Vec<(String, Vec<i64>)> = months
-        .iter()
-        .map(|m| (ark_format::month_alone(m), vec![income(m), spending(m)]))
-        .collect();
-    let series = [Series { name: "Income".into() }, Series { name: "Spending".into() }];
-    let in_out = figures::column_chart(&series, &groups, 180.0);
-    let page = app.accounts.screen_of(&app.store, app.now_ms());
-    let first = page.trend.first().copied().unwrap_or(page.net_worth);
-    let change = page.net_worth - first;
-    let worth = html::div()
-        .class("ark-column")
-        .child((
-            html::div().class("money-worth").child(money(page.net_worth)),
-            html::div()
-                .class("ark-caption")
-                .child(format!("{}{} over twelve weeks", if change >= 0 { "+" } else { "" }, money(change))),
-            figures::line_chart(&page.trend, 150.0, true),
-        ))
-        .into_any();
-    let cards = vec![
-        figures::chart_card("Spending by Category", by_category),
-        figures::chart_card("Income vs Spending", in_out),
-        figures::chart_card("Net Worth", worth),
-    ];
-    let columns = match (compact, arkui_web::shell::sections()) {
-        (true, _) => 1,
-        (false, arkui_web::shell::Sections::Sidebar) => 3,
-        _ => 2,
-    };
-    html::div()
-        .class("ark-page")
-        .child(html::div().class("money-insights").child((
-            figures::grid(tiles, if compact { 1 } else { 3 }, 14.0),
-            figures::grid(cards, columns, 14.0),
-        )))
-        .into_any()
-}
-
-// * The sidebar's foot, and Settings
 
 fn household() -> AnyView {
     html::div()
