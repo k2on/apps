@@ -745,7 +745,11 @@ jobs:
       # here and a run by hand alike (the job's `if` already refuses a fork's;
       # SAME_REPO says so again where the token is): the next run on any
       # branch fetches what has not moved rather than spend most of an hour
-      # compiling it. Xcode never (Apple's licence).
+      # compiling it. That includes what the pinned Xcode compiles of this
+      # repository's own code (the apps, unsigned, and ArkUI's Swift): the
+      # repository is public, and nothing signed is ever in the store
+      # (ios-upload.sh signs outside nix). Xcode itself never (Apple's
+      # licence), nor the macOS SDK.
       - if: steps.open.outputs.open == 'true' && env.SAME_REPO == 'true' && vars.CACHIX_NAME != ''
         uses: cachix/cachix-action@v15
         with:

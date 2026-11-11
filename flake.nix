@@ -1268,10 +1268,13 @@
           # module is read only by the compiler that wrote it, which the pin
           # (`xcode`) holds every build to.
           #
-          # Xcode's compiler built it, so it is named for Xcode: the Mac's
-          # push filter (`[Xx]code([^Gg]|$)`) keeps it off the public cache,
-          # and each app copies it into its own build directory before
-          # linking, so no app's output refers to it. `__noChroot` as the
+          # This repository's own code, compiled by the pinned Xcode: pushed
+          # to the cache like the apps (the push filter keeps only Xcode
+          # itself and the macOS SDK off it), so a run whose ui/swift has not
+          # moved fetches it. Named for the Xcode build (`xcode.build`), not
+          # "xcode", which the filter would take for Xcode. Each app copies
+          # it into its own build directory before linking, so no app's
+          # output refers to it. `__noChroot` as the
           # app's own build, for xcrun and the SDKs.
           arkuiSwift = kind:
             let
@@ -1283,7 +1286,7 @@
               dev = xcode.developer;
             in
             pkgs.stdenv.mkDerivation {
-              name = "arkui-swift-${kind}-xcode${xcode.version}";
+              name = "arkui-swift-${kind}-${xcode.build}";
               src = only [ "ui/swift" ];
               __noChroot = true;
               dontConfigure = true;
