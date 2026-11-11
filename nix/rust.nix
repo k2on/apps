@@ -130,6 +130,10 @@ let
       # Every crate's features as `unify` resolved them for many roots at
       # once, in place of this root's own: cargo's `--workspace`.
     , unified ? null
+      # Applied to every crate the target links (`overrideAttrs`), not to
+      # what runs on the build machine: an Apple target's deployment
+      # version, which rustc writes into each object it compiles.
+    , targetAttrs ? (_: { })
     }:
     let
       split = pkgs.stdenv.buildPlatform != pkgs.stdenv.hostPlatform;
@@ -139,7 +143,7 @@ let
       };
       resolved = if unified != null then unified.resolved else resolve { inherit packageId features tests split targets; };
       builders = {
-        target = builderFor { inherit rust overrides; } pkgs;
+        target = args: (builderFor { inherit rust overrides; } pkgs args).overrideAttrs targetAttrs;
         build = builderFor { inherit rust overrides; } pkgs.buildPackages;
       };
       fetch = p: config: p.fetchurl {
