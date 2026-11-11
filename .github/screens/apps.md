@@ -219,8 +219,10 @@ which nix builds at the commit (see below).
 - **`ios-inputs.sh`**: the hash of what an iPhone app's shots are taken
   from, said on Linux ([when it runs](#when-it-runs)).
 - **`published.sh`**: each APK as the F-Droid repository offers it, for a
-  run that builds nothing; **`await-apk.sh`**: an APK from a `build` run
-  still going, as soon as it is uploaded.
+  run that builds nothing (a dry run: `build`'s at the commit), fetched
+  once by the workflow's `apks` job and handed to every emulator's job;
+  **`await-apk.sh`**: an APK from a `build` run still going, as soon as it
+  is uploaded.
 - **`ios-build.sh`**: each iPhone app as nix builds it at the commit:
   the cache's when its inputs have not moved, or built with the runner's
   own Xcode where it is installed. **`desktop-build.sh`**:
