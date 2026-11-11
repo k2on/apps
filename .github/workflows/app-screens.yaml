@@ -419,8 +419,13 @@ jobs:
           path: ${{ runner.temp }}/apk
           run-id: ${{ env.RUN }}
           github-token: ${{ github.token }}
+      # In the background: a dry run's waits for build's APK at the commit,
+      # which takes most of the job; the nix install, the server, the
+      # system image and the emulator's boot go on under it, and the
+      # capture waits for it only once the emulator is up.
       - if: env.RUN == ''
-        run: bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
+        name: Start fetching the APKs
+        run: bash .github/screens/meanwhile.sh start apk bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
         env:
           GH_TOKEN: ${{ github.token }}
           # A dry run: the APKs build made at the branch's commit, where it made any.
@@ -474,10 +479,11 @@ jobs:
       # as its own command.
       # Each capture with a limit of its own (a hang fails in minutes, and
       # the uploads after still keep what was taken): about three times the
-      # longest seen.
+      # longest seen, and room for a dry run's wait for build's APK
+      # (twenty minutes at most seen), which is in it now.
       - name: Capture
         if: matrix.device == 'phone'
-        timeout-minutes: 30
+        timeout-minutes: 50
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -487,14 +493,14 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # The emulator boots first, under the APK's build; then the APK,
           # if the run is still making it (none: apps-android.sh skips it).
-          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          script: bash .github/screens/meanwhile.sh wait servers && { [ -n "$RUN" ] || bash .github/screens/meanwhile.sh wait apk; } && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
       # The larger screens: the same, on a Pixel Tablet held in landscape
       # (<app>/android-tablet/), or on a Pixel Fold, open and then folded
       # (<app>/fold-unfolded/, <app>/fold-folded/), each its own job.
       - name: Capture (tablet)
         if: matrix.device == 'tablet'
-        timeout-minutes: 30
+        timeout-minutes: 50
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -504,7 +510,7 @@ jobs:
           avd-name: tablet
           # Not saved at the end: nothing boots it again, and saving took fourteen seconds.
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
-          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=tablet RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          script: bash .github/screens/meanwhile.sh wait servers && { [ -n "$RUN" ] || bash .github/screens/meanwhile.sh wait apk; } && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=tablet RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
       # The Fold's hardware profile, as this runner's avdmanager has it: the
       # Pixel Fold's own where it is listed, else the emulator's 7.6-inch
       # foldable, the Pixel Fold's inner screen, which folds the same way
@@ -523,7 +529,7 @@ jobs:
           cat "$GITHUB_OUTPUT"
       - name: Capture (Fold)
         if: matrix.device == 'fold' && steps.fold.outputs.profile != ''
-        timeout-minutes: 45
+        timeout-minutes: 60
         uses: reactivecircus/android-emulator-runner@v2
         env:
           FOLD_NAME: ${{ steps.fold.outputs.name }}
@@ -534,7 +540,7 @@ jobs:
           profile: ${{ steps.fold.outputs.profile }}
           avd-name: fold
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
-          script: bash .github/screens/meanwhile.sh wait servers && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
+          script: bash .github/screens/meanwhile.sh wait servers && { [ -n "$RUN" ] || bash .github/screens/meanwhile.sh wait apk; } && { [ "$EARLY" != true ] || bash .github/screens/await-apk.sh "$RUN" "$APPS" "$RUNNER_TEMP/apk" || [ $? = 3 ]; } && DEVICE=fold RESULTS="$RUNNER_TEMP/steps" bash .github/screens/apps-android.sh "$RUNNER_TEMP/out" "$RUNNER_TEMP/apk" $APPS
 
       - name: The servers' logs
         if: always()
