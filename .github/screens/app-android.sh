@@ -261,12 +261,14 @@ theme_set() {
 # brought up, and its screen read until it reads the same twice running.
 launcher_settled() {
   local h prev="" now
-  h=$(resolve android.intent.category.HOME)
+  h=$(resolve android.intent.category.HOME || true)
   [ -n "$h" ] || return 0
   adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME > /dev/null 2>&1 || true
   front "${h%%/*}" 30 || true
   for _ in $(seq 1 30); do
-    now=$(dump | python3 -I "$here/ui.py" --tree 2> /dev/null | md5sum)
+    # Never fatal (pipefail, set -e): a screen ui.py cannot read (the
+    # Fold's two displays) is only a screen that reads as nothing.
+    now=$( { dump | python3 -I "$here/ui.py" --tree 2> /dev/null || true; } | md5sum)
     [ "$now" = "$prev" ] && return 0
     prev=$now
     sleep 1
