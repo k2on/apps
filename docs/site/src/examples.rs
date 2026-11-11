@@ -111,6 +111,7 @@ pub const GLYPHS: &[(&str, &[u8])] = &[
     ("ARROW_UP", glyphs::ARROW_UP),
     ("ARROW_DOWN", glyphs::ARROW_DOWN),
     ("TRASH", glyphs::TRASH),
+    ("LOCK", glyphs::LOCK),
     ("CROSSHAIR", glyphs::CROSSHAIR),
     ("FOLDER", glyphs::FOLDER),
 ];
