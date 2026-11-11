@@ -11,7 +11,6 @@
 
 /// How a place writes money, read once from the platform's formatter.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct NumberStyle {
     /// The currency's ISO code, `USD`: what a field also accepts typed.
     pub currency: String,

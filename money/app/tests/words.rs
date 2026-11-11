@@ -9,6 +9,7 @@
 
 use ark::row::Id;
 use ark_format::NumberStyle;
+use money_app::words::{BankWords, LineWords};
 use money_core::accounts::{self, AccountKind, Shelving};
 use money_core::banks::{follow, Follow};
 use money_core::transactions::{suggest, Draft};
@@ -120,7 +121,7 @@ fn a_lines_words() {
     assert_eq!(l.story(&s), "$50.00 more needed this month");
     assert_eq!(
         l.captions(&s),
-        words::Captions {
+        money_app::words::Captions {
             left: "$50.00 of $100.00".into(),
             right: "Spent $25.00".into()
         }
@@ -482,6 +483,6 @@ fn receipts_offered_for_a_transaction() {
     assert_eq!(offered[0].id, "near");
     assert!(offered.iter().all(|r| r.id != "paid"));
     assert_eq!(words::store_name("amazon"), "Amazon");
-    assert_eq!(words::quantity(2_000, "ea"), "\u{00d7}2");
-    assert_eq!(words::quantity(11_482, "gal"), "11.482 gal");
+    assert_eq!(money_app::words::quantity(2_000, "ea"), "\u{00d7}2");
+    assert_eq!(money_app::words::quantity(11_482, "gal"), "11.482 gal");
 }

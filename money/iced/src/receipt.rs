@@ -324,7 +324,7 @@ impl App {
                     match i.quantity {
                         // One, or none said (a coupon is -1): no count.
                         q if q == 1000 || q <= 0 => format!("  {filed}"),
-                        q => format!("  {} \u{b7} {filed}", money_core::words::quantity(q, &i.unit)),
+                        q => format!("  {} \u{b7} {filed}", money_app::words::quantity(q, &i.unit)),
                     },
                     10,
                     tint

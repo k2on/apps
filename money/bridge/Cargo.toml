@@ -17,7 +17,8 @@ ark-ffi = { path = "../../rust/ark-ffi" }
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Every number, day and length as the apps write them, in the library
 # (its bindings are `ark_format`'s).
-ark-format = { path = "../../rust/ark-format", features = ["ffi"] }
+ark-format = { path = "../../rust/ark-format" }
+ark-format-ffi = { path = "../../rust/ark-format-ffi" }
 # The module plumbing, and the modules money lists (money/app.toml) as the
 # phones implement them.
 ark-module = { path = "../../ui/rust/module", features = ["ffi"] }

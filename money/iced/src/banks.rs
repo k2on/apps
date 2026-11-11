@@ -21,6 +21,7 @@ use arkui::text::{self, text};
 use arkui::{glyphs, icon, menu, style};
 use iced::widget::{button, column, container, row, Column};
 use iced::{Alignment, Element, Length, Padding};
+use money_app::words::BankWords;
 use money_core::*;
 
 use crate::amount::money;

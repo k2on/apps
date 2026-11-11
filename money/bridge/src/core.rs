@@ -1,14 +1,17 @@
-//! The rows' methods and the domain's rules as the phones call them
-//! (the `ffi` feature): each is the Rust one of [`crate::words`],
-//! [`crate::accounts`], [`crate::transactions`], [`crate::banks`] and
-//! [`crate::changes`] on the rows' UniFFI twins, so that a phone asks
+//! The rows' methods and the domain's rules as the phones call them: each
+//! is the Rust one of `money_core::words`, `money_app::words`,
+//! `money_core::accounts`, `transactions`, `banks` and `changes` on the
+//! rows' UniFFI twins (written in this crate, `crate::twins`), so that a phone asks
 //! `line.tone()`, `ask.said(now)`, `draft.problem()` and never works them
 //! out itself.
 
 use ark_ffi::{RowId, Twin};
 use ark_format::NumberStyle;
 
+uniffi::use_remote_type!(ark_format_ffi::NumberStyle);
+
 use crate::*;
+use money_app::words::{BankWords, ItemWords, LineWords};
 use money_core::accounts::{self, AccountKind};
 use money_core::changes::MoneyChange;
 use money_core::transactions::Draft;

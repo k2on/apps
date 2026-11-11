@@ -107,6 +107,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-format-ffi" = rec {
+      packageId = "ark-format-ffi";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-format-ffi";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-haptics" = rec {
       packageId = "ark-haptics";
       build = internal.buildRustCrateWithFeatures {
@@ -1477,18 +1487,26 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format; };
         libName = "ark_format";
+
+      };
+      "ark-format-ffi" = rec {
+        crateName = "ark-format-ffi";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./ark-format-ffi; };
+        libName = "ark_format_ffi";
         dependencies = [
+          {
+            name = "ark-format";
+            packageId = "ark-format";
+          }
           {
             name = "uniffi";
             packageId = "uniffi";
-            optional = true;
             usesDefaultFeatures = false;
           }
         ];
-        features = {
-          "ffi" = [ "dep:uniffi" ];
-        };
-        resolvedDefaultFeatures = [ "ffi" ];
+
       };
       "ark-haptics" = rec {
         crateName = "ark-haptics";
@@ -8918,7 +8936,10 @@ rec {
           {
             name = "ark-format";
             packageId = "ark-format";
-            features = [ "ffi" ];
+          }
+          {
+            name = "ark-format-ffi";
+            packageId = "ark-format-ffi";
           }
           {
             name = "ark-peer";
@@ -14183,7 +14204,10 @@ rec {
           {
             name = "ark-format";
             packageId = "ark-format";
-            features = [ "ffi" ];
+          }
+          {
+            name = "ark-format-ffi";
+            packageId = "ark-format-ffi";
           }
           {
             name = "ark-haptics";
@@ -14261,10 +14285,6 @@ rec {
           {
             name = "ark";
             packageId = "ark";
-          }
-          {
-            name = "ark-format";
-            packageId = "ark-format";
           }
           {
             name = "serde";

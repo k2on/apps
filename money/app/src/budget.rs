@@ -24,6 +24,8 @@ use ark_app::{App, Command, Data};
 use ark_format::{amount, NumberStyle};
 use ark_haptics::{perform, Haptic};
 use money_core::words::Tone;
+
+use crate::words::LineWords;
 use money_core::*;
 
 use crate::accounts::Style;

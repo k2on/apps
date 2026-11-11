@@ -11,8 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 ark = { path = "../../rust/ark" }
-# What the rows say, in words: amounts and days as every client writes them.
-ark-format = { path = "../../rust/ark-format" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

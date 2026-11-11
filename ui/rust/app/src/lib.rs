@@ -43,8 +43,8 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex};
 
-pub use ark_module::{self as modules, Answer, ModuleError, Modules, Op, Reply};
 pub use ark::views::{ViewKey, Views};
+pub use ark_module::{self as modules, Answer, ModuleError, Modules, Op, Reply};
 
 /// An app: its state, its messages, how one changes the other, and what
 /// its screen shows.

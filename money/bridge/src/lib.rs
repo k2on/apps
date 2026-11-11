@@ -53,7 +53,7 @@ ark::twins!(
             SaveFilter, SetCleared, SetFormula, SetRule, SetTarget, SpendingLine, SplitPart, SplitTxn,
             StoreCharge, StoreItem, StoreReceipt, Summary, TxnLine, Txns, WriteReceipt,
         },
-        words::{BankStatus, Captions, Meter, Tone},
+        words::{Meter, Tone},
     },
     money_app::{
         MoneyRequest,
@@ -62,13 +62,14 @@ ark::twins!(
         routes::Route,
         shell::{AccountPlace, Appearance, ShellMsg, ShellPage},
         shell::inspect::{CategoryInspector, DetailLine, TransactionInspector},
+        words::{BankStatus, Captions},
     },
 );
 
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
 /// come with the app's, and the phones print what the desktop prints.
-pub use ark_format;
+pub use ark_format_ffi;
 
 mod app;
 pub mod core;

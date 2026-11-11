@@ -16,6 +16,7 @@ pub mod budget;
 pub mod look;
 pub mod routes;
 pub mod shell;
+pub mod words;
 
 pub use money_core::{MoneyChange, MoneyView};
 pub use routes::Route;

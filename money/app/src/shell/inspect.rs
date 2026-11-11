@@ -10,6 +10,8 @@
 
 use ark_format::{amount, day_long, month, NumberStyle};
 use money_core::words::Tone;
+
+use crate::words::LineWords;
 use money_core::{BudgetLine, Cleared, TxnLine};
 
 /// One line of an inspector's list: a transaction, an item.

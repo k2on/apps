@@ -47,8 +47,20 @@ pub struct Words<'a> {
 
 /// How an amount is written where a filter's text looks for it: as the
 /// United States writes money (`-$1,234.56`), what the phones searched by.
+/// A filter's own spelling, the same in every place, so it is the
+/// domain's and not a client's number style.
 fn written(cents: i64) -> String {
-    ark_format::amount(cents, &ark_format::NumberStyle::us())
+    let c = cents.unsigned_abs();
+    let whole = (c / 100).to_string();
+    let mut grouped = String::new();
+    for (i, d) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(d);
+    }
+    let sign = if cents < 0 { "-" } else { "" };
+    format!("{sign}${grouped}.{:02}", c % 100)
 }
 
 impl Filter {
@@ -510,6 +522,17 @@ pub fn filtered_total(_: &Ctx, db: &Db<Money>, input: Filtered) -> Result<Plan<F
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Falsified by grouping from the left (`1,23,4.56`) or a minus after
+    /// the symbol: the text a filter searched by was not the phones'.
+    #[test]
+    fn an_amount_is_written_as_a_filter_searches_it() {
+        assert_eq!(written(0), "$0.00");
+        assert_eq!(written(-5), "-$0.05");
+        assert_eq!(written(123_456), "$1,234.56");
+        assert_eq!(written(-100_000_000), "-$1,000,000.00");
+        assert_eq!(written(99_999), "$999.99");
+    }
 
     fn id<T>(n: u8) -> Id<T> {
         Id::new([n; 16])

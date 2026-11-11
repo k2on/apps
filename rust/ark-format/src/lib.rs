@@ -19,19 +19,13 @@
 //! - **Words** ([`plural`], [`count`], [`names`], [`facts`], [`span`]).
 //!
 //! The phones call the same functions prefixed `format_` (`formatAmount`,
-//! `formatLength` …; the [`ffi`] module), since their names land in one
-//! namespace with everything else of the app's library.
+//! `formatLength` …; ark-format-ffi, an adapter), since their names land in
+//! one namespace with everything else of the app's library.
 
 mod days;
 mod lengths;
 mod numbers;
 mod words;
-
-#[cfg(feature = "ffi")]
-pub mod ffi;
-
-#[cfg(feature = "ffi")]
-uniffi::setup_scaffolding!();
 
 pub use days::{ago, ago_alone, day_heading, day_long, month, month_alone, published};
 pub use lengths::{clock, clock_secs, length};

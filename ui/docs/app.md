@@ -388,14 +388,14 @@ fixes one deletes its line, or the check fails. In order:
 Done: who is signed in (`ark::auth`), the view keys and what an app
 reads of them (`ark::views`), harken's routes (harken/app), the phones'
 records (generated in the bridges), the phones' bridge (money/bridge) and
-the demo's peer (money/seed) are out of the core and the app. Left, in
-order:
+the demo's peer (money/seed) are out of the core and the app; display
+text with a figure in it is the app's (`money_app::words`), and
+ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
+`ark_format`). Left, in order:
 
-1. money-core's `ark-format` (display text moves to the app crate), and
-   ark-format's `uniffi` (its exports into an adapter of its own).
-2. ark-module into the runtime, and each module's operations ports of
+1. ark-module into the runtime, and each module's operations ports of
    it, so money-app depends on no module crate.
-3. money-app's views behind features — iced, the browser and
+2. money-app's views behind features — iced, the browser and
    `screens()` — into adapter crates of their own.
 
 ## Generated, Not Committed

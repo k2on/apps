@@ -41,7 +41,7 @@ external = ["serde_json"]
 # bridge to the phones, the toolkits, the device modules, the servers, the
 # shells and what generates code. They may use anything below them.
 crates = [
-  "ark-peer", "arkdb", "ark-auth", "ark-ffi",
+  "ark-peer", "arkdb", "ark-auth", "ark-ffi", "ark-format-ffi",
   "ark-module", "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
   "ark-media-player", "ark-notifications", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
@@ -55,8 +55,6 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"money-core -> ark-format" = "display text moves to money-app"
-"ark-format -> uniffi" = "the FFI records are generated in the adapter"
 "ark-app -> ark-module" = "the operations' plumbing (ark-module) is the runtime's own"
 "money-app -> ark-haptics" = "the modules' operations are ports of the runtime's layer"
 "money-app -> ark-clipboard" = "the modules' operations are ports of the runtime's layer"

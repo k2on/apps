@@ -28,7 +28,7 @@ pub use routes::route_from_url;
 /// Numbers, days and lengths as every client writes them: in this library,
 /// so its bindings (`uniffi.ark_format`; `formatAmount`, `formatLength` …)
 /// come with the app's, and the phones print what the desktop prints.
-pub use ark_format;
+pub use ark_format_ffi;
 
 mod player;
 mod session;

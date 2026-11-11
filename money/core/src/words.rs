@@ -1,12 +1,11 @@
 //! What the views' rows say, decided once for every client: a budget
-//! line's tone and the words under it, the month's, a transaction's, a
-//! bank's and an ask's. The phones read these through their records'
-//! methods (`money/core`'s `ffi` feature), the window calls them as they
-//! are; no client works them out again. Amounts are written in the
-//! client's own number style (`ark_format`).
+//! line's tone, the month's, a transaction's, a bank's and an ask's. The
+//! phones read these through their twins' methods (money/bridge), the
+//! window calls them as they are; no client works them out again. What is
+//! said with a figure in it — an amount in the client's own number style,
+//! a time ago — is display text, the app's (`money_app::words`).
 
 use ark::prelude::*;
-use ark_format::{ago, amount, NumberStyle};
 
 use crate::accounts::capitalized;
 use crate::schema::AskState;
@@ -54,17 +53,6 @@ impl Tone {
             Tone::OnCard => "overspent on a card",
         }
     }
-}
-
-/// The two ends of the line under a category's bar: what it was given (of
-/// its target, when it has one) and what it spent; for a card's payment,
-/// whether the debt is covered and what the card owes. Blank where there
-/// is nothing to say.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
-#[ark(ffi)]
-pub struct Captions {
-    pub left: String,
-    pub right: String,
 }
 
 /// How far along a category is, as its bar draws it: a share from 0 to
@@ -157,67 +145,6 @@ impl BudgetLine {
         Some(Meter { thousandths: t, tone })
     }
 
-    /// The line under its name: what is happening to it, in words.
-    pub fn story(&self, s: &NumberStyle) -> String {
-        let a = |c: i64| amount(c, s);
-        let had = self.carried + self.assigned;
-        match () {
-            _ if self.on_card() => format!("{} on a card, not covered", a(self.credit_overspent)),
-            _ if self.available < 0 && self.credit_overspent > 0 => {
-                format!("Overspent by {}, {} of it on a card", a(-self.available), a(self.credit_overspent))
-            }
-            _ if self.available < 0 => format!("Overspent by {}", a(-self.available)),
-            _ if self.is_payment() && self.underfunded > 0 => format!("{} short of the {} owed", a(self.underfunded), a(self.debt)),
-            _ if self.is_payment() && self.debt > 0 => format!("Covered: {} owed", a(self.debt)),
-            _ if self.is_payment() => "Nothing owed on the card".into(),
-            _ if self.target > 0 && self.assigned < self.target => format!("{} more needed this month", a(self.target - self.assigned)),
-            _ if self.activity < 0 && had > 0 => format!("Spent {} of {}", a(-self.activity), a(had)),
-            _ if self.activity < 0 => format!("Spent {}", a(-self.activity)),
-            _ if self.target > 0 => "Funded".into(),
-            _ if self.ruled => "Assigned by rule".into(),
-            _ => String::new(),
-        }
-    }
-
-    /// The two ends of the line under its bar ([`Captions`]).
-    pub fn captions(&self, s: &NumberStyle) -> Captions {
-        let a = |c: i64| amount(c, s);
-        let spent = match self.activity {
-            0 => String::new(),
-            n => format!("Spent {}", a(-n)),
-        };
-        let (left, right) = match () {
-            _ if self.is_payment() && self.debt <= 0 => ("Nothing owed".into(), String::new()),
-            _ if self.is_payment() => (
-                match self.underfunded {
-                    u if u > 0 => format!("{} short", a(u)),
-                    _ => "Covered".into(),
-                },
-                format!("Owed {}", a(self.debt)),
-            ),
-            _ if self.target > 0 => (format!("{} of {}", a(self.assigned), a(self.target)), spent),
-            _ if self.activity != 0 || self.assigned != 0 || self.ruled => (format!("Assigned {}", a(self.assigned)), spent),
-            _ => (String::new(), String::new()),
-        };
-        Captions { left, right }
-    }
-
-    /// How far along it is, in a word or two, as a table's narrow column
-    /// says it: a card's shortfall or "Covered", what was spent on a card,
-    /// the share of its target given, or of what it had that was spent.
-    pub fn progress(&self, s: &NumberStyle) -> String {
-        let had = self.carried + self.assigned;
-        match () {
-            _ if self.is_payment() && self.underfunded > 0 => format!("{} short", amount(self.underfunded, s)),
-            _ if self.is_payment() && self.debt > 0 => "Covered".into(),
-            _ if self.is_payment() => String::new(),
-            _ if self.credit_overspent > 0 => format!("{} on card", amount(self.credit_overspent, s)),
-            _ if self.target > 0 => format!("{}% goal", (self.assigned.max(0) * 100 / self.target).min(999)),
-            _ if self.activity < 0 && had > 0 => format!("{}% used", (-self.activity * 100 / had).min(999)),
-            _ => String::new(),
-        }
-    }
-
     /// What the formula its month follows assigns, said where it would be
     /// assigned by hand ("Assigned by rule: 10% × …"); none when it is
     /// assigned by hand.
@@ -243,29 +170,6 @@ impl BudgetLine {
             true => 0,
             false => (self.target - self.assigned).max(0),
         }
-    }
-
-    /// What a screen reader says of it, after its name.
-    pub fn spoken(&self, s: &NumberStyle) -> String {
-        let a = |c: i64| amount(c, s);
-        if self.is_payment() {
-            let mut w = format!("{} set aside for the card, which owes {}", a(self.available), a(self.debt));
-            if self.underfunded > 0 {
-                w += &format!(". {} not covered", a(self.underfunded));
-            }
-            return w;
-        }
-        let mut w = format!("{} available, {}. Assigned {}", a(self.available), self.tone().words(), a(self.assigned));
-        if self.target > 0 {
-            w += &format!(" of a {} target", a(self.target));
-        }
-        if self.ruled {
-            w += ", by its rule";
-        }
-        if self.credit_overspent > 0 {
-            w += &format!(". {} spent on a card beyond what it had", a(self.credit_overspent));
-        }
-        w
     }
 }
 
@@ -390,15 +294,6 @@ pub fn ask_shown(asks: &[AskLine], dismissed: Option<Id<crate::schema::BankAsk>>
     (Some(a.id) != dismissed && (a.is_open() || now - a.answered_ms < ASK_SHOWN_MS)).then(|| a.clone())
 }
 
-/// How a connected bank is doing, in a sentence; `alarm` when it wants
-/// somebody.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Describe)]
-#[ark(ffi)]
-pub struct BankStatus {
-    pub words: String,
-    pub alarm: bool,
-}
-
 impl BankLine {
     /// What it is called: the institution's name, or the name the server
     /// keeps it under.
@@ -407,30 +302,6 @@ impl BankLine {
             true => capitalized(&self.name),
             false => self.institution.clone(),
         }
-    }
-
-    /// How it is doing at `now`.
-    pub fn status(&self, now: i64) -> BankStatus {
-        let alarm = |words: String| BankStatus { words, alarm: true };
-        if self.needs_login {
-            return alarm("The bank wants its login again. Reconnect it.".into());
-        }
-        if !self.error.is_empty() {
-            return alarm(format!("The last import failed {}: {}", ago(self.failed_ms, now), self.error));
-        }
-        let mut words = match self.synced_ms {
-            0 => "Waiting for its first import".to_string(),
-            t => format!("Synced {} \u{00b7} {} new, {} changed", ago(t, now), self.added, self.updated),
-        };
-        if self.locked > 0 {
-            words += &format!(", {} left alone (reconciled)", self.locked);
-        }
-        match self.waiting {
-            0 => {}
-            1 => words += " \u{00b7} 1 account to choose for",
-            n => words += &format!(" \u{00b7} {n} accounts to choose for"),
-        }
-        BankStatus { words, alarm: false }
     }
 }
 
@@ -477,22 +348,6 @@ pub fn store_name(store: &str) -> String {
         "costco" => "Costco".into(),
         crate::stores::PAPER => "Receipt".into(),
         s => s.into(),
-    }
-}
-
-/// How many of an item, as its line says it: `×2`, `11.482 gal`.
-pub fn quantity(thousandths: i64, unit: &str) -> String {
-    let n = ark_format::quantity(thousandths);
-    match unit {
-        "" | "ea" => format!("\u{00d7}{n}"),
-        u => format!("{n} {u}"),
-    }
-}
-
-impl ItemLine {
-    /// How many of it, said ([`quantity`]).
-    pub fn quantity_words(&self) -> String {
-        quantity(self.quantity, &self.unit)
     }
 }
 

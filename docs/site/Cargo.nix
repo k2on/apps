@@ -768,9 +768,7 @@ rec {
         edition = "2021";
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../../rust/ark-format; };
         libName = "ark_format";
-        features = {
-          "ffi" = [ "dep:uniffi" ];
-        };
+
       };
       "ark-macros" = rec {
         crateName = "ark-macros";

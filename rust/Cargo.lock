@@ -322,7 +322,12 @@ dependencies = [
 [[package]]
 name = "ark-format"
 version = "0.1.0"
+
+[[package]]
+name = "ark-format-ffi"
+version = "0.1.0"
 dependencies = [
+ "ark-format",
  "uniffi",
 ]
 
@@ -2760,6 +2765,7 @@ dependencies = [
  "ark",
  "ark-ffi",
  "ark-format",
+ "ark-format-ffi",
  "ark-peer",
  "arkdb",
  "harken-app",
@@ -4369,6 +4375,7 @@ dependencies = [
  "ark-clipboard",
  "ark-ffi",
  "ark-format",
+ "ark-format-ffi",
  "ark-haptics",
  "ark-module",
  "ark-peer",
@@ -4388,7 +4395,6 @@ name = "money-core"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-format",
  "serde",
  "serde_json",
 ]
