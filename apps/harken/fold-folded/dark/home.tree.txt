@@ -1,0 +1,45 @@
+    #content
+              'Home' [text]
+              [button] pressable
+                'Signed in as alex'
+                [button]
+              'Last Played' [text]
+              [button] pressable
+                'Für Elise' [text]
+                'Ludwig van Beethoven' [text]
+                'From your library' [text]
+                [button] pressable
+                  'Play again'
+                  [button]
+              'Recently Added' [text]
+              [button] pressable
+                'All Songs' [text]
+                [button]
+                [button] pressable
+                  'Für Elise' [text]
+                  'Ludwig van Beethoven' [text]
+                [button] pressable
+                  'Gigue' [text]
+                  'George Frideric Handel' [text]
+                [button] pressable
+                  'Menuet' [text]
+                  'George Frideric Handel' [text]
+              'Your Playlists' [text]
+              [button] pressable
+                'New' [text]
+                [button]
+                [button] pressable
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                [button] pressable
+                  'Library' [text]
+          [button] pressable
+            'Für Elise' [text]
+            'Ludwig van Beethoven' [text]
+            [button] pressable
+              'Play'
+              [button]
+            [button] pressable
+              'Next'
+              [button]

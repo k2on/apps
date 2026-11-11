@@ -1,0 +1,30 @@
+    #content
+          [button] pressable
+            [button] pressable
+              'Close the player'
+            'Bagatelles' [text]
+            [button] pressable
+              'More'
+            'Für Elise' [button] pressable
+            'Ludwig van Beethoven' [button] pressable
+            'Position'
+            '1:28' [text]
+            '-1:28' [text]
+            [button] pressable
+              [button]
+            [button] pressable
+              [button]
+            [button] pressable
+              [button]
+              'Playing On' [text]
+              [button] pressable
+                'Done' [text]
+                [button]
+              [button] pressable
+                'Pixel Fold' [text]
+                'this phone' [text]
+                'Playing here'
+              [button] pressable
+                'Mute Pixel Fold'
+                [button]
+              'Pixel Fold'

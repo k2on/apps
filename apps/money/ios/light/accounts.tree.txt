@@ -1,0 +1,202 @@
+Attributes: Application, 0x101b454e0, pid: 25603, label: 'Money'
+Element subtree:
+ →Application, 0x101b454e0, pid: 25603, label: 'Money'
+    Window (Main), 0x101b47020, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x101b4a490, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x101b45bb0, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x101b21380, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x101b4a0f0, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x101b45830, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x101b49d80, {{0.0, 0.0}, {402.0, 874.0}}
+                  Other, 0x101b47df0, {{0.0, 0.0}, {402.0, 874.0}}
+                    Other, 0x101b48150, {{0.0, 0.0}, {402.0, 874.0}}
+                      Other, 0x101b45f30, {{0.0, 0.0}, {402.0, 874.0}}
+                        Other, 0x101b4c090, {{0.0, 0.0}, {402.0, 874.0}}
+                          Other, 0x101b44a90, {{0.0, 0.0}, {402.0, 874.0}}
+                            NavigationBar, 0x101b476e0, {{0.0, 62.0}, {402.0, 54.0}}, identifier: 'Accounts'
+                              StaticText, 0x101b46cc0, {{163.3, 73.7}, {75.0, 20.7}}, label: 'Accounts'
+                                Other, 0x101b47a50, {{163.3, 73.7}, {75.0, 20.7}}
+                                  StaticText, 0x101b44390, {{163.3, 82.0}, {75.0, 20.3}}, label: 'Accounts'
+                            Other, 0x101b46280, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x101b3ae80, {{0.0, 0.0}, {402.0, 874.0}}
+                                Other, 0x101b4d150, {{0.0, 0.0}, {402.0, 874.0}}
+                                  Other, 0x101b4d810, {{0.0, 0.0}, {402.0, 874.0}}
+                                    CollectionView, 0x101b4ca90, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x101b41d50, {{-16.0, -1632.0}, {434.0, 1984.0}}
+                                      Other, 0x101b420d0, {{0.0, 0.0}, {402.0, 874.0}}
+                                      Other, 0x101b4c720, {{0.0, 0.0}, {402.0, 874.0}}
+                                        Other, 0x101b41670, {{0.0, 726.2}, {402.0, 147.8}}
+                                          Image, 0x101b4c3d0, {{-120.0, 731.0}, {642.0, 286.0}}, identifier: 'AdditionalDimmingOverlay'
+                                          Other, 0x101b4e5d0, {{0.0, 726.2}, {402.0, 147.8}}
+                                            Other, 0x101b4db70, {{0.0, 726.2}, {402.0, 147.8}}
+                                          Other, 0x101b4f070, {{0.0, 726.2}, {402.0, 147.8}}
+                                            Other, 0x101b4ecf0, {{0.0, 726.2}, {402.0, 147.8}}
+                                            Other, 0x101b4f780, {{0.0, 726.2}, {402.0, 147.8}}
+                                      Cell, 0x101b4e970, {{16.0, 116.0}, {370.0, 218.3}}
+                                        Other, 0x101b4f3e0, {{16.0, 116.0}, {370.0, 218.3}}
+                                        Other, 0x101b4faf0, {{16.0, 116.0}, {370.0, 218.3}}
+                                          Other, 0x101b42b50, {{16.0, 116.0}, {370.0, 218.3}}
+                                            Other, 0x101b4fe50, {{16.0, 116.0}, {370.0, 218.3}}
+                                              StaticText, 0x101b42440, {{16.0, 117.7}, {151.3, 40.7}}, label: 'Accounts'
+                                              Button, 0x101b43950, {{354.0, 122.0}, {32.0, 32.0}}, label: 'Signed in as alex'
+                                                StaticText, 0x101b42ea0, {{354.0, 122.0}, {32.0, 32.0}}, label: 'A'
+                                                Image, 0x101b48f80, {{354.0, 122.0}, {32.0, 32.0}}
+                                              StaticText, 0x101b43240, {{16.0, 192.0}, {370.0, 142.3}}, label: 'Net Worth', value: -$227,701.96, Ever...
+                                                StaticText, 0x101b4b9d0, {{40.0, 216.0}, {73.0, 18.0}}, label: 'Net Worth'
+                                                StaticText, 0x101b4bd20, {{40.0, 238.0}, {304.7, 52.7}}, label: '-$227,701.96'
+                                                StaticText, 0x101b49680, {{40.0, 294.7}, {230.7, 15.7}}, label: 'Every open account, less what's owed'
+                                      Other, 0x101b49a00, {{-16.0, 352.0}, {434.0, 87.0}}
+                                      Cell, 0x101b49320, {{16.0, 369.3}, {370.0, 52.0}}
+                                        Other, 0x101b4a810, {{16.0, 369.3}, {370.0, 52.0}}
+                                          Other, 0x101b4ab70, {{16.0, 369.3}, {370.0, 52.0}}
+                                        Other, 0x101b4aec0, {{16.0, 369.3}, {370.0, 52.0}}
+                                          Other, 0x101b43cb0, {{16.0, 369.3}, {370.0, 52.0}}
+                                            Other, 0x101b44020, {{16.0, 369.3}, {370.0, 52.0}}
+                                              Button, 0x101b484d0, {{16.0, 369.3}, {370.0, 52.0}}, label: 'All Accounts, $20,448.04'
+                                                Image, 0x101b48860, {{28.0, 379.3}, {32.0, 32.0}}, identifier: 'tray.full.fill', label: 'Inbox Full'
+                                                StaticText, 0x101b48c00, {{72.0, 385.2}, {94.7, 20.3}}, label: 'All Accounts'
+                                                StaticText, 0x101b3d660, {{28.0, 379.3}, {320.0, 32.0}}, label: 'All Accounts, $20,448.04'
+                                                Image, 0x101b329a0, {{360.7, 389.3}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Other, 0x101b419d0, {{-16.0, 439.0}, {434.0, 324.7}}
+                                      Cell, 0x101b427c0, {{16.0, 439.0}, {370.0, 40.3}}
+                                        Other, 0x101b1dd30, {{16.0, 439.0}, {370.0, 40.3}}
+                                        Other, 0x101b41310, {{16.0, 439.0}, {370.0, 40.3}}
+                                          Other, 0x101b26fe0, {{16.0, 439.0}, {370.0, 40.3}}
+                                            Other, 0x101b24760, {{16.0, 439.0}, {370.0, 40.3}}
+                                              StaticText, 0x101b37ab0, {{32.0, 449.0}, {58.0, 20.3}}, label: 'Budget'
+                                              StaticText, 0x101b2c400, {{273.7, 449.0}, {96.3, 20.3}}, label: '$20,448.04'
+                                      Cell, 0x101b2e0a0, {{16.0, 479.3}, {370.0, 66.7}}
+                                        Other, 0x101b3a760, {{16.0, 479.3}, {370.0, 66.7}}
+                                          Other, 0x101b4e230, {{16.0, 479.3}, {370.0, 66.7}}
+                                        Other, 0x101b38330, {{16.0, 479.3}, {370.0, 66.7}}
+                                          Other, 0x101b4d4b0, {{16.0, 479.3}, {370.0, 66.7}}
+                                            Other, 0x101b4ce00, {{16.0, 479.3}, {370.0, 66.7}}
+                                              Button, 0x101b37360, {{16.0, 479.3}, {370.0, 66.7}}, label: 'Checking, Checking, $14,166.90'
+                                                StaticText, 0x101b4ded0, {{32.0, 494.3}, {316.0, 36.7}}, label: 'Checking, Checking, $14,166.90'
+                                                  Image, 0x101b47390, {{32.0, 496.7}, {32.0, 32.0}}, identifier: 'building.columns.fill', label: 'Building'
+                                                  StaticText, 0x101b46960, {{76.0, 494.3}, {71.7, 20.3}}, label: 'Checking'
+                                                  StaticText, 0x101b30df0, {{76.0, 516.7}, {53.3, 14.3}}, label: 'Checking'
+                                                  StaticText, 0x101b2b2c0, {{256.3, 502.5}, {91.7, 20.3}}, label: '$14,166.90'
+                                                Image, 0x101b27520, {{360.7, 506.7}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Cell, 0x101b04400, {{16.0, 546.0}, {370.0, 66.7}}
+                                        Other, 0x101b501b0, {{16.0, 546.0}, {370.0, 66.7}}
+                                          Other, 0x101b50520, {{16.0, 546.0}, {370.0, 66.7}}
+                                        Other, 0x101b508a0, {{16.0, 546.0}, {370.0, 66.7}}
+                                          Other, 0x101b50c30, {{16.0, 546.0}, {370.0, 66.7}}
+                                            Other, 0x101b50fb0, {{16.0, 546.0}, {370.0, 66.7}}
+                                              Button, 0x101b51320, {{16.0, 546.0}, {370.0, 66.7}}, label: 'Savings, Savings, $6,900.00'
+                                                StaticText, 0x101b516a0, {{32.0, 561.0}, {316.0, 36.7}}, label: 'Savings, Savings, $6,900.00'
+                                                  Image, 0x101b51a20, {{32.0, 563.3}, {32.0, 32.0}}, identifier: 'dollarsign.circle.fill', label: 'dollarsign.circle.fill'
+                                                  StaticText, 0x101b51d90, {{76.0, 561.0}, {59.7, 20.3}}, label: 'Savings'
+                                                  StaticText, 0x101b52110, {{76.0, 583.3}, {44.3, 14.3}}, label: 'Savings'
+                                                  StaticText, 0x101b524b0, {{266.7, 569.2}, {81.3, 20.3}}, label: '$6,900.00'
+                                                Image, 0x101b52800, {{360.7, 573.3}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Other, 0x101b52b60, {{76.0, 545.0}, {294.0, 1.0}}
+                                      Cell, 0x101b52ee0, {{16.0, 612.7}, {370.0, 66.7}}
+                                        Other, 0x101b53250, {{16.0, 612.7}, {370.0, 66.7}}
+                                          Other, 0x101b535b0, {{16.0, 612.7}, {370.0, 66.7}}
+                                        Other, 0x101b53910, {{16.0, 612.7}, {370.0, 66.7}}
+                                          Other, 0x101b53c60, {{16.0, 612.7}, {370.0, 66.7}}
+                                            Other, 0x101b53fe0, {{16.0, 612.7}, {370.0, 66.7}}
+                                              Button, 0x101a5be30, {{16.0, 612.7}, {370.0, 66.7}}, label: 'Cash, Cash, $50.18'
+                                                StaticText, 0x101a591f0, {{32.0, 627.7}, {316.0, 36.7}}, label: 'Cash, Cash, $50.18'
+                                                  Image, 0x101a5b170, {{32.0, 630.0}, {32.0, 32.0}}, identifier: 'banknote.fill', label: 'banknote.fill'
+                                                  StaticText, 0x101a5df70, {{76.0, 627.7}, {39.0, 20.3}}, label: 'Cash'
+                                                  StaticText, 0x101a5f250, {{76.0, 650.0}, {28.7, 14.3}}, label: 'Cash'
+                                                  StaticText, 0x101a5ee30, {{292.0, 635.8}, {56.0, 20.3}}, label: '$50.18'
+                                                Image, 0x101a5db50, {{360.7, 640.0}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Other, 0x101a60dd0, {{76.0, 611.7}, {294.0, 1.0}}
+                                      Cell, 0x101a60ef0, {{16.0, 679.3}, {370.0, 66.7}}
+                                        Other, 0x101a61010, {{16.0, 679.3}, {370.0, 66.7}}
+                                          Other, 0x101a61130, {{16.0, 679.3}, {370.0, 66.7}}
+                                        Other, 0x101a61250, {{16.0, 679.3}, {370.0, 66.7}}
+                                          Other, 0x101a61370, {{16.0, 679.3}, {370.0, 66.7}}
+                                            Other, 0x101a61490, {{16.0, 679.3}, {370.0, 66.7}}
+                                              Button, 0x101a615b0, {{16.0, 679.3}, {370.0, 66.7}}, label: 'Chase Sapphire, Chase ••4417, 5 to review, -$669.04'
+                                                StaticText, 0x101a616d0, {{32.0, 694.3}, {316.0, 36.7}}, label: 'Chase Sapphire, Chase ••4417, 5 to review, -$669.04'
+                                                  Image, 0x101a617f0, {{32.0, 696.7}, {32.0, 32.0}}, identifier: 'creditcard.fill', label: 'Card'
+                                                  StaticText, 0x101a61910, {{76.0, 694.3}, {120.3, 20.3}}, label: 'Chase Sapphire'
+                                                  StaticText, 0x101a61a30, {{76.0, 716.7}, {78.0, 14.3}}, label: 'Chase ••4417'
+                                                  StaticText, 0x101c444f0, {{240.0, 703.7}, {22.0, 18.3}}, label: '5 to review'
+                                                  StaticText, 0x101c4f8d0, {{274.0, 702.5}, {74.0, 20.3}}, label: '-$669.04'
+                                                Image, 0x101c252d0, {{360.7, 706.7}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Other, 0x101c36500, {{76.0, 678.3}, {294.0, 1.0}}
+                                      Other, 0x101c55a00, {{-16.0, 763.3}, {434.0, 191.3}}
+                                      Cell, 0x101c4f4b0, {{16.0, 763.3}, {370.0, 40.3}}
+                                        Other, 0x101c4df90, {{16.0, 763.3}, {370.0, 40.3}}
+                                        Other, 0x101c360e0, {{16.0, 763.3}, {370.0, 40.3}}
+                                          Other, 0x101c555e0, {{16.0, 763.3}, {370.0, 40.3}}
+                                            Other, 0x101c4c140, {{16.0, 763.3}, {370.0, 40.3}}
+                                              StaticText, 0x101c58720, {{32.0, 773.3}, {69.0, 20.3}}, label: 'Tracking'
+                                              StaticText, 0x101c58840, {{255.3, 773.3}, {114.7, 20.3}}, label: '-$248,150.00'
+                                      Cell, 0x101c58960, {{16.0, 803.7}, {370.0, 66.7}}
+                                        Other, 0x101c58a80, {{16.0, 803.7}, {370.0, 66.7}}
+                                          Other, 0x101c58ba0, {{16.0, 803.7}, {370.0, 66.7}}
+                                        Other, 0x101c58cc0, {{16.0, 803.7}, {370.0, 66.7}}
+                                          Other, 0x101c58de0, {{16.0, 803.7}, {370.0, 66.7}}
+                                            Other, 0x101c58f00, {{16.0, 803.7}, {370.0, 66.7}}
+                                              Button, 0x101c59020, {{16.0, 803.7}, {370.0, 66.7}}, label: 'Mortgage, Loan or Mortgage, -$312,450.00'
+                                                StaticText, 0x101c59140, {{32.0, 818.7}, {316.0, 36.7}}, label: 'Mortgage, Loan or Mortgage, -$312,450.00'
+                                                  Image, 0x101c59260, {{32.0, 821.0}, {32.0, 32.0}}, identifier: 'house.fill', label: 'Home'
+                                                  StaticText, 0x101c59380, {{76.0, 818.7}, {74.0, 20.3}}, label: 'Mortgage'
+                                                  StaticText, 0x101c594a0, {{76.0, 841.0}, {100.3, 14.3}}, label: 'Loan or Mortgage'
+                                                  StaticText, 0x101c595c0, {{238.7, 826.8}, {109.3, 20.3}}, label: '-$312,450.00'
+                                                Image, 0x101c596e0, {{360.7, 831.0}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Cell, 0x101c59800, {{16.0, 870.3}, {370.0, 66.7}}
+                                        Other, 0x101c59920, {{16.0, 870.3}, {370.0, 66.7}}
+                                          Other, 0x101c59a40, {{16.0, 870.3}, {370.0, 66.7}}
+                                        Other, 0x101c59b60, {{16.0, 870.3}, {370.0, 66.7}}
+                                          Other, 0x101c59c80, {{16.0, 870.3}, {370.0, 66.7}}
+                                            Other, 0x101c59da0, {{16.0, 870.3}, {370.0, 66.7}}
+                                              Button, 0x101c59ec0, {{16.0, 870.3}, {370.0, 66.7}}, label: 'Retirement, Investment, $64,300.00'
+                                                StaticText, 0x101c59fe0, {{32.0, 885.3}, {316.0, 36.7}}, label: 'Retirement, Investment, $64,300.00'
+                                                  Image, 0x101c5a100, {{32.0, 887.7}, {32.0, 32.0}}, identifier: 'chart.line.uptrend.xyaxis', label: 'Chart Line'
+                                                  StaticText, 0x101c5a220, {{76.0, 885.3}, {83.3, 20.3}}, label: 'Retirement'
+                                                  StaticText, 0x101c5a340, {{76.0, 907.7}, {62.7, 14.3}}, label: 'Investment'
+                                                  StaticText, 0x101c5a460, {{256.3, 893.5}, {91.7, 20.3}}, label: '$64,300.00'
+                                                Image, 0x101c5a580, {{360.7, 897.7}, {7.0, 12.0}}, identifier: 'chevron.forward'
+                                      Other, 0x101c5a6a0, {{76.0, 869.3}, {294.0, 1.0}}
+                                      Other, 0x101c5a7c0, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0%
+                                        Other, 0x101c5a8e0, {{396.0, 781.0}, {3.0, 7.0}}
+                                      Other, 0x101c5aa00, {{369.0, 116.0}, {30.0, 675.0}}, label: 'Vertical scroll bar, 2 pages', value: 0%
+                                        Other, 0x101c5ab20, {{396.0, 781.0}, {3.0, 7.0}}
+                            Other, 0x101c5ac40, {{0.0, 0.0}, {402.0, 874.0}}
+                              Other, 0x101c5ad60, {{0.0, 0.0}, {402.0, 874.0}}
+                Other, 0x101c5ae80, {{0.0, 791.0}, {402.0, 83.0}}
+                  Other, 0x101c5afa0, {{0.0, 0.0}, {402.0, 874.0}}
+                    TabBar, 0x101c5b0c0, {{0.0, 791.0}, {402.0, 83.0}}, label: 'Tab Bar'
+                      Other, 0x101c5b1e0, {{21.0, 791.0}, {360.0, 62.0}}
+                        Other, 0x101c5b300, {{21.0, 791.0}, {103.7, 54.0}}
+                        Other, 0x101c5b420, {{21.0, 791.0}, {360.0, 62.0}}
+                          Button, 0x101c5b540, {{25.0, 795.0}, {103.7, 54.0}}, identifier: 'dollarsign.circle.fill', label: 'Budget'
+                            Image, 0x101c5b660, {{63.0, 801.3}, {27.3, 27.3}}, identifier: 'dollarsign.circle.fill', label: 'dollarsign.circle.fill'
+                          Button, 0x101c5b780, {{107.8, 795.0}, {103.7, 54.0}}, identifier: 'building.columns.fill', label: 'Accounts', Selected
+                            Image, 0x101c5b8a0, {{143.8, 800.7}, {31.7, 28.7}}, identifier: 'building.columns.fill', label: 'Building'
+                          Button, 0x101c5b9c0, {{190.6, 795.0}, {103.7, 54.0}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'Transactions'
+                            Image, 0x101c5bae0, {{229.6, 800.7}, {25.3, 28.7}}, identifier: 'list.bullet.rectangle.portrait.fill', label: 'list.bullet.rectangle.portrait.fill'
+                          Button, 0x101c5bc00, {{273.3, 795.0}, {103.7, 54.0}}, identifier: 'chart.pie.fill', label: 'Insights'
+                            Image, 0x101c5bfe0, {{311.3, 801.3}, {27.3, 27.3}}, identifier: 'chart.pie.fill', label: 'chart pie'
+                        Other, 0x101c5c100, {{107.8, 795.0}, {103.7, 54.0}}
+                          Other, 0x101c5c220, {{107.8, 795.0}, {103.7, 54.0}}
+                            Other, 0x101c5c340, {{107.8, 795.0}, {103.7, 54.0}}
+                            Other, 0x101c5c460, {{107.8, 795.0}, {103.7, 54.0}}
+                              Other, 0x101c5c580, {{107.8, 795.0}, {103.7, 54.0}}
+                                Other, 0x101c5c6a0, {{107.8, 795.0}, {103.7, 54.0}}
+                                  Other, 0x101c5c7c0, {{107.8, 795.0}, {103.7, 54.0}}
+                                Other, 0x101c5c8e0, {{107.8, 795.0}, {103.7, 54.0}}
+                              Other, 0x101c5ca00, {{107.8, 795.0}, {103.7, 54.0}}
+                  Other, 0x101c5cb20, {{0.0, 791.0}, {402.0, 83.0}}
+                    Other, 0x101c5cc40, {{0.0, 791.0}, {402.0, 83.0}}
+                      Other, 0x101c5cd60, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x101c5ce80, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x101c5cfa0, {{0.0, 791.0}, {402.0, 83.0}}
+                            Other, 0x101c5d0c0, {{0.0, 791.0}, {402.0, 83.0}}
+                        Other, 0x101c5d1e0, {{0.0, 791.0}, {402.0, 83.0}}
+                          Other, 0x101c5d300, {{0.0, 791.0}, {402.0, 83.0}}
+Path to element:
+ →Application, 0x101b454e0, pid: 25603, label: 'Money'
+Query chain:
+ →Find: Application 'us.koon.money'
+  Output: {
+    Application, 0x101a38be0, pid: 25603, label: 'Money'
+  }

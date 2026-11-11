@@ -1,0 +1,34 @@
+    #content
+            'Library' [text]
+            [button] pressable
+              'Signed in as alex'
+              [button]
+              [button] pressable
+                'Playlists' [text]
+              [button] pressable
+                'Albums' [text]
+              [button] pressable
+                'Artists' [text]
+              [button] pressable
+                'Songs' [text]
+              [button] pressable
+                'Podcasts' [text]
+              [button] pressable
+                'New Playlist' [text]
+              [button] pressable
+                'Favorites' [text]
+                'Playlist' [text]
+                [button] pressable
+                  'Home' [text]
+                [button] pressable
+                  'Search' [text]
+                  'Library' [text]
+          [button] pressable
+            'Für Elise' [text]
+            'Ludwig van Beethoven' [text]
+            [button] pressable
+              'Play'
+              [button]
+            [button] pressable
+              'Next'
+              [button]

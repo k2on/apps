@@ -1,0 +1,60 @@
+    #content
+                  [field] pressable
+                    'Payee, category, memo or amount' [text]
+                    [button] pressable
+                      'All' [text]
+                      [button]
+                      'To Review (5)' [text]
+                      [button]
+                  '5 to Review' [text]
+                  [button] pressable
+                    'Approve All' [text]
+                    [button]
+                    [button] pressable
+                      'Thai Basil, -$59.19, Dining Out, waiting for review, uncleared'
+                      'Thai Basil' [text]
+                      'Dining Out' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$59.19' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Spotify, -$17.00, Subscriptions, waiting for review, cleared'
+                      'Spotify' [text]
+                      'Subscriptions' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$17.00' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Target, -$50.87, Split (3), waiting for review, has a receipt, cleared'
+                      'Target' [text]
+                      'Split (3)' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$50.87' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Costco, -$161.15, Split (2), waiting for review, has a receipt, cleared'
+                      'Costco' [text]
+                      'Split (2)' [text]
+                      ' · Chase Sapphire' [text]
+                      '-$161.15' [text]
+                      [button] pressable
+                    [button] pressable
+                      'Chevron, -$51.82, Gas & Transit, waiting for review, cleared'
+                      'Chevron' [text]
+                      'Gas & Transit' [text]
+                      ' · Chase Sapphire' [text]
+                      [button] pressable
+                  'Swipe right to approve. Tap one to choose its category or change it.' [text]
+                'Transactions' [text]
+                [button] pressable
+                  'Signed in as Alex'
+                  [button]
+                [button] pressable
+                  [button]
+                  [button] pressable
+                    'Budget' [text]
+                  [button] pressable
+                    'Accounts' [text]
+                    'Transactions' [text]
+                  [button] pressable
+                    'Insights' [text]

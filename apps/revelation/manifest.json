@@ -1,0 +1,87 @@
+{
+ "version": "42941617073",
+ "commit": "7a4f563470aef906e358c701b35cb81823c09f55",
+ "made": "2026-11-11 01:59 UTC",
+ "platforms": {
+  "android": {
+   "device": {
+    "name": "Pixel 7",
+    "width": 1080,
+    "height": 2400,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "android-tablet": {
+   "device": {
+    "name": "Pixel Tablet",
+    "width": 2560,
+    "height": 1600,
+    "corner": 60,
+    "cutout": "none"
+   },
+   "shots": [
+    {
+     "id": "open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "fold-folded": {
+   "device": {
+    "name": "Pixel Fold",
+    "width": 1080,
+    "height": 2092,
+    "corner": 110,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  },
+  "fold-unfolded": {
+   "device": {
+    "name": "Pixel Fold",
+    "width": 2208,
+    "height": 1840,
+    "corner": 60,
+    "cutout": "hole"
+   },
+   "shots": [
+    {
+     "id": "open",
+     "kind": "screenshot",
+     "themes": [
+      "light",
+      "dark"
+     ],
+     "fps": 0
+    }
+   ]
+  }
+ }
+}
