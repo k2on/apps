@@ -17,6 +17,7 @@ pub mod look;
 pub mod receipts;
 pub mod routes;
 pub mod shell;
+pub mod transactions;
 pub mod welcome;
 pub mod words;
 

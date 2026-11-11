@@ -28,6 +28,9 @@ import uniffi.money_bridge.Devices
 import uniffi.money_bridge.ReceiptsApp
 import uniffi.money_bridge.ReceiptsMsg
 import uniffi.money_bridge.ReceiptsPage
+import uniffi.money_bridge.TransactionsApp
+import uniffi.money_bridge.TransactionsMsg
+import uniffi.money_bridge.TransactionsPage
 import uniffi.money_bridge.AccountsMsg
 import uniffi.money_bridge.AccountsPage
 import uniffi.money_bridge.ShellMsg
@@ -160,6 +163,58 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, d
     fun version(): ULong = app.version()
 
     /** The page read again: the book moved. */
+    fun reload() {
+        _page.value = app.page()
+    }
+}
+
+/** The Transactions tab, running in Rust (money/app/src/transactions): To Review and All. */
+class TransactionsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
+    /** What only the app's own screens do: a transaction's form, by its hex id. */
+    var opened: (String) -> Unit = {}
+
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun request(request: MoneyRequest) {
+                when (request) {
+                    is MoneyRequest.Refresh -> refresh()
+                    is MoneyRequest.OpenTransaction -> opened(request.key)
+                    else -> {}
+                }
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = TransactionsApp(session, shell)
+    private val _page = MutableStateFlow(app.page())
+    val page: StateFlow<TransactionsPage> = _page
+
+    private var seen = ULong.MAX_VALUE
+
+    private fun quiet(): Boolean {
+        val v = app.version()
+        if (v != seen) {
+            seen = v
+            dev.arkui.Ready.changed()
+            return false
+        }
+        return app.isIdle()
+    }
+
+    init {
+        dev.arkui.Ready.probe("transactions") { quiet() }
+        devices?.let { app.useDevices(it) }
+    }
+
+    fun send(msg: TransactionsMsg) {
+        app.send(msg)
+        _page.value = app.page()
+    }
+
     fun reload() {
         _page.value = app.page()
     }

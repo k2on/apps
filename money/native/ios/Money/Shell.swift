@@ -197,7 +197,14 @@ struct Shell: View {
                             a.reconcile = { id in present(.reconcile(id)) }
                         }
                 }
-            case "transactions": TransactionsView()
+            case "transactions":
+                if let t = model.transactions {
+                    // Written from Rust (Generated/TransactionsView.swift), over its runtime.
+                    TransactionsView()
+                        .environmentObject(t)
+                        .onAppear { t.request = { r in run(r) } }
+                        .onChange(of: model.shell.page.search, initial: true) { _, q in t.send(.search(text: q)) }
+                }
             case "insights": InsightsView()
             case "accounts.register":
                 // The account the shell shows (its place's tag, `accounts/<id>`).
@@ -273,6 +280,7 @@ struct Shell: View {
         case "review": return all.first { !$0.approved }
         case "transfer": return all.first { $0.transfer }
         default:
+            if let t = all.first(where: { $0.id.hex == k }) { return t }
             if let n = Int(k), n >= 1, n <= all.count { return all.reversed()[n - 1] }
             return all.first { $0.payee.lowercased().contains(k) }
         }

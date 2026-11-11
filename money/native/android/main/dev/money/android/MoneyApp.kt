@@ -505,9 +505,15 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
             }
         }
         "transactions" -> {
-            // The shell's search bar is the list's search.
+            // Written from Rust (generated/TransactionsScreen.kt), over its runtime: the shell's
+            // search bar is its search, the book's month its categories'.
+            val holder = remember(book) { TransactionsHolder(book.session, { book.sync() }, { book.state.value.today }, shell.devices) }
             val page by sections.page.collectAsStateWithLifecycle()
-            ActivityScreen(ledger, searched = page.search)
+            holder.opened = { hex -> book.session.register(null).firstOrNull { it.id.hex == hex }?.let(shell.onEdit) }
+            LaunchedEffect(ledger) { holder.reload() }
+            LaunchedEffect(ledger.month) { holder.send(uniffi.money_bridge.TransactionsMsg.Month(month = ledger.month)) }
+            LaunchedEffect(page.search) { holder.send(uniffi.money_bridge.TransactionsMsg.Search(text = page.search)) }
+            ScreenFrame { TransactionsScreen(holder) }
         }
         "insights" -> InsightsScreen(ledger)
         "accounts.register" -> {

@@ -92,7 +92,12 @@ class Screens {
 
     @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today }, null)) } }
 
-    @Test fun review() = shot("transactions") { ActivityScreen(book.state.value) }
+    @Test fun review() =
+        shot("transactions") {
+            val holder = TransactionsHolder(book.session, {}, { book.state.value.today }, null)
+            holder.send(uniffi.money_bridge.TransactionsMsg.Month(month = book.state.value.month))
+            ScreenFrame { TransactionsScreen(holder) }
+        }
 
     @Test fun insights() = shot("insights") { InsightsScreen(book.state.value) }
 

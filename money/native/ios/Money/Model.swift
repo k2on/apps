@@ -56,6 +56,8 @@ final class Model: ObservableObject {
     var devices: Devices? = nil
     /// A receipt being given, in Rust, while a session is open.
     private(set) var receipts: ReceiptsScreen? = nil
+    /// The Transactions tab, running in Rust (money/app/src/transactions).
+    @Published private(set) var transactions: TransactionsScreen? = nil
     /// Told which views moved, on the main queue: the app's `Watched`.
     var onMoved: ([MoneyView]) -> Void = { _ in }
 
@@ -212,6 +214,7 @@ final class Model: ObservableObject {
                             self?.moves += 1
                             self?.accounts?.reload()
                             self?.budget?.reload()
+                            self?.transactions?.reload()
                             self?.shell.reload()
                             self?.onMoved(views)
                         })
@@ -231,6 +234,9 @@ final class Model: ObservableObject {
         r.keep = { [weak self] jpeg, txn in self?.addPhoto(jpeg, txn: txn) }
         r.say = { [weak self] why in self?.notice = why }
         receipts = r
+        transactions = TransactionsScreen(session: s, devices: devices, month: month,
+                                          refresh: { [weak self] in Task { await self?.refresh() } },
+                                          today: { [weak self] in self?.today ?? moneyToday() })
         shell.connect(session: s,
                       refresh: { [weak self] in Task { await self?.refresh() } },
                       today: { [weak self] in self?.today ?? moneyToday() })
@@ -241,6 +247,8 @@ final class Model: ObservableObject {
         bridge = nil
         accounts = nil
         budget = nil
+        transactions = nil
+        receipts = nil
         shell.disconnect()
         session = nil
         snapshot = Snapshot()
@@ -302,6 +310,7 @@ final class Model: ObservableObject {
         month = m
         bridge?.show(month: m)
         budget?.send(.month(month: m))
+        transactions?.send(.month(month: m))
     }
 
     func stepMonth(_ n: Int64) { showMonth(moneyAddMonths(month: month, n: n)) }

@@ -24,6 +24,7 @@ use money_app::budget::{Budget, BudgetMsg};
 use money_app::receipts::{Receipts, ReceiptsMsg};
 use money_app::routes::Route;
 use money_app::shell::{MoneyShell, ShellMsg};
+use money_app::transactions::{Transactions, TransactionsMsg};
 use money_core::{self as domain, MoneyChange};
 
 use crate::*;
@@ -258,6 +259,11 @@ screen!(
     /// page and send it messages; a command only a hosted screen can carry
     /// out goes to the [`AppShell`]'s `request`, typed.
     ShellApp, MoneyShell, ShellMsg, ShellMsgFfi, ShellPageFfi
+);
+screen!(
+    /// The Transactions tab, running (money/app/src/transactions): To
+    /// Review and All, approving and categorizing.
+    TransactionsApp, Transactions, TransactionsMsg, TransactionsMsgFfi, TransactionsPageFfi
 );
 screen!(
     /// A transaction's receipt, being given (money/app/src/receipts): a

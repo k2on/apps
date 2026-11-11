@@ -40,6 +40,17 @@ pub fn screens() -> ark_ui_gen::app::App {
         screens: vec![
             Generated::view(money_app::accounts::view::accounts::record, accounts),
             Generated::view(money_app::budget::view::budget::record, budget),
+            Generated::view(
+                money_app::transactions::view::transactions::record,
+                Names {
+                    swift: "TransactionsView",
+                    swift_holder: "TransactionsScreen",
+                    kotlin: "TransactionsScreen",
+                    kotlin_holder: "TransactionsHolder",
+                    source: "money/app/src/transactions/view.rs",
+                    msg: "TransactionsMsg",
+                },
+            ),
             Generated::view(money_app::shell::view::money_shell::record, shell),
             // The first run's pages, every Ark app's (ark_app::welcome),
             // over the model's FirstRunApp.

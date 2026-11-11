@@ -100,6 +100,40 @@ final class BudgetScreen: ObservableObject {
     }
 }
 
+/// The Transactions tab, running in Rust (money/app/src/transactions): To
+/// Review and All, its month and search the model's and the shell's.
+@MainActor
+final class TransactionsScreen: ObservableObject {
+    @Published private(set) var page: TransactionsPage
+    /// What only the shell does: a transaction's details or its form.
+    var request: (MoneyRequest) -> Void = { _ in }
+
+    private let app: TransactionsApp
+    private let shell: ScreenShell
+
+    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = TransactionsApp(session: session, shell: shell)
+        if let devices { app.useDevices(devices: devices) }
+        app.send(msg: .month(month: month))
+        page = app.page()
+        shell.requested = { [weak self] r in self?.request(r) }
+    }
+
+    func send(_ msg: TransactionsMsg) {
+        app.send(msg: msg)
+        page = app.page()
+    }
+
+    var isIdle: Bool { app.isIdle() }
+    var version: UInt64 { app.version() }
+
+    func reload() {
+        page = app.page()
+    }
+}
+
 /// A receipt being given, in Rust (money/app/src/receipts): a page scanned
 /// (the scanner over the camera: its eyes and warp Rust's, its page
 /// ark-camera's `PhoneCamera`) and kept by the model, which sends it to the
