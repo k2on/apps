@@ -439,6 +439,22 @@ class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> Strin
     fun send(msg: ShellMsg) {
         app.send(msg)
         _page.value = app.page()
+        afterDraw()
+    }
+
+    /**
+     * What waits for the page to be drawn (`Command::AfterDraw`: the inspector put away before a
+     * launch moves the section), taken once the next frame is: a frame's callback, then the turn
+     * after it, when what it drew is on the screen.
+     */
+    private fun afterDraw() {
+        if (!app.awaitsDraw()) return
+        android.view.Choreographer.getInstance().postFrameCallback {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (app.drawn()) _page.value = app.page()
+                afterDraw()
+            }
+        }
     }
 
     /** Nothing left to come (`Runtime::is_idle`), and the number that grows with every message. */

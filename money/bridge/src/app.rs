@@ -132,6 +132,11 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
     fn request(&mut self, r: MoneyRequest) {
         self.app.shell.request(r.ffi())
     }
+    /// SwiftUI and Compose draw the page after they read it: what waits
+    /// on a draw waits for `drawn`.
+    fn draws_between(&self) -> bool {
+        true
+    }
 }
 
 impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Running<A> {
@@ -189,6 +194,16 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         rt.version() != before
     }
 
+    /// The page drawn: what waited on it taken ([`Runtime::drawn`]);
+    /// whether any did, so the page is read again.
+    fn drawn(&self) -> bool {
+        let mut rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        let ran = rt.drawn(&mut Phone { app: self });
+        self.inbox.drain(&mut rt, &mut Phone { app: self });
+        self.hold(&rt);
+        ran
+    }
+
     fn use_devices(&self, devices: &Devices) {
         *self.modules.lock().unwrap_or_else(|e| e.into_inner()) = devices.modules.clone();
     }
@@ -237,6 +252,18 @@ macro_rules! screen {
             /// done) taken; whether the page moved.
             pub fn drain(&self) -> bool {
                 self.0.drain()
+            }
+
+            /// The page as last read has been drawn: what waited on that
+            /// (`Command::AfterDraw`) taken; whether any did, so the page
+            /// is read again. Asked while `awaits_draw`.
+            pub fn drawn(&self) -> bool {
+                self.0.drawn()
+            }
+
+            /// Whether something waits for the page to be drawn.
+            pub fn awaits_draw(&self) -> bool {
+                self.0.runtime.lock().unwrap_or_else(|e| e.into_inner()).awaits_draw()
             }
 
             /// The phone's device modules, registered once at startup.

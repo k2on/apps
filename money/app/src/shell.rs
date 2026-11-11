@@ -257,6 +257,15 @@ impl App for MoneyShell {
                 }
                 vec![]
             }
+            // The inspector put away first, the launch once the screen
+            // without it is drawn: on the iPhone it is a sheet of the
+            // section's tab, which a tab switched from in the same update
+            // never puts away (dry run 43083062235: Category Details over
+            // 03-accounts, 04-account-visa and 05-review).
+            ShellMsg::Launch { args } if s.inspector && !Launch::parse(&args).is_empty() => {
+                s.inspector = false;
+                vec![Command::AfterDraw(ShellMsg::Launch { args })]
+            }
             ShellMsg::Launch { args } => launch(s, Launch::parse(&args), data),
             ShellMsg::InspectCategory { id } => {
                 s.category = id;

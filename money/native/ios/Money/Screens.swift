@@ -307,6 +307,7 @@ final class MoneyShellScreen: ObservableObject {
         early = []
         for msg in waiting { app.send(msg: msg) }
         page = app.page()
+        afterDraw()
     }
 
     /// The session closed: back to Budget, taking nothing.
@@ -320,6 +321,19 @@ final class MoneyShellScreen: ObservableObject {
         guard let app else { return early.append(msg) }
         app.send(msg: msg)
         page = app.page()
+        afterDraw()
+    }
+
+    /// What waits for the page to be drawn (`Command::AfterDraw`: the
+    /// inspector put away before a launch moves the section), taken on the
+    /// turn after SwiftUI has drawn the page just read.
+    private func afterDraw() {
+        guard let app, app.awaitsDraw() else { return }
+        Task { @MainActor in
+            await Task.yield()
+            if app.drawn() { page = app.page() }
+            afterDraw()
+        }
     }
 
     /// Nothing left to come, and the number that grows with every message.

@@ -51,7 +51,11 @@ An app is a state, its messages and one update over them (`ark_app::App`):
   A `Command` is data: `Send` a typed change (`MoneyChange`), `Open` a
   `Route`, `Back`, `Ask` a module's typed operation, `Request` something
   only the host can do (the app's own typed `App::Request`), `Then`
-  another message. What became of a change or an operation comes back as
+  another message, `AfterDraw` one once the screen as it is now has been
+  drawn (a presentation put away while the place under it still shows,
+  before a route moves somewhere else: a phone's host, `draws_between`,
+  calls `Runtime::drawn` after it draws, and is not idle until then; the
+  desktop and the browser run it next). What became of a change or an operation comes back as
   a message when the update asked for one (`then: fn(..) -> Msg`, a plain
   function pointer, never a closure). Effects and Ports, below, says how.
 - `screen(&State, &Data) -> Screen` — the record the screen draws, every

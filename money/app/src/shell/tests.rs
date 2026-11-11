@@ -303,3 +303,63 @@ fn review_opens_what_waits_for_a_look() {
     assert_eq!(demo.requests, vec![MoneyRequest::Review]);
     assert!(rt.screen(&demo).transaction.is_some(), "Transaction Details shows it");
 }
+
+/// A phone: the screen drawn between messages.
+struct Phone(Demo);
+
+impl Host<MoneyShell> for Phone {
+    fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
+        self.0.read(f)
+    }
+    fn now_ms(&self) -> i64 {
+        NOW
+    }
+    fn send(&mut self, c: MoneyChange) -> Result<(), String> {
+        self.0.send(c)
+    }
+    fn open(&mut self, _: Route) {}
+    fn ask(&mut self, t: Ticket, ask: Ask<ShellMsg>) {
+        self.0.ask(t, ask)
+    }
+    fn request(&mut self, r: MoneyRequest) {
+        self.0.request(r)
+    }
+    fn draws_between(&self) -> bool {
+        true
+    }
+}
+
+/// A launch link while the inspector is up puts it away where it is, and
+/// opens its place only once the screen without it has been drawn; idle
+/// only then. Falsified by a launch that switched the section in the same
+/// update that put the inspector away (the iPhone's sheet left over
+/// another tab), or by one that waited where nothing was up.
+#[test]
+fn a_launch_puts_the_inspector_away_before_it_moves() {
+    let args = |a: &[&str]| ShellMsg::Launch {
+        args: a.iter().map(|s| s.to_string()).collect(),
+    };
+    let mut phone = Phone(Demo::new());
+    let mut rt = Runtime::<MoneyShell>::new();
+    rt.dispatch(args(&["-screen", "category:Dining Out", "-inspector", "1"]), &mut phone);
+    assert_eq!((rt.screen(&phone).section.as_str(), rt.screen(&phone).inspector), ("budget", true));
+    assert!(!rt.awaits_draw(), "nothing was up: it opened at once");
+
+    rt.dispatch(args(&["-screen", "accounts"]), &mut phone);
+    let page = rt.screen(&phone);
+    assert_eq!((page.section.as_str(), page.inspector), ("budget", false), "put away where it is");
+    assert!(rt.awaits_draw());
+    assert!(!phone.read(|st| rt.is_idle(st)));
+    assert!(rt.drawn(&mut phone));
+    let page = rt.screen(&phone);
+    assert_eq!((page.section.as_str(), page.inspector), ("accounts", false));
+    assert!(phone.read(|st| rt.is_idle(st)));
+
+    // An iced window or the browser draws what the last message left: at once.
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    rt.dispatch(args(&["-screen", "category:Dining Out", "-inspector", "1"]), &mut demo);
+    rt.dispatch(args(&["-screen", "insights"]), &mut demo);
+    let page = rt.screen(&demo);
+    assert_eq!((page.section.as_str(), page.inspector), ("insights", false));
+}

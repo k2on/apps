@@ -225,6 +225,14 @@ pub enum Command<A: App + ?Sized> {
     Request(A::Request),
     /// A message to run next, after this one's commands.
     Then(A::Msg),
+    /// A message to run once the screen as this one leaves it has been
+    /// drawn: what must be seen to go before what comes next — a sheet or
+    /// an inspector put away while the place it is over still shows,
+    /// before a route opens somewhere else (SwiftUI never puts away a sheet
+    /// of a tab switched from in the same update). A host that draws
+    /// nothing in between ([`Host::draws_between`] false) runs it next, as
+    /// [`Command::Then`].
+    AfterDraw(A::Msg),
 }
 
 impl<A: App + ?Sized> Command<A> {
@@ -254,6 +262,7 @@ impl<A: App + ?Sized> Debug for Command<A> {
             Command::Ask(a) => write!(f, "Ask({a:?})"),
             Command::Request(r) => write!(f, "Request({r:?})"),
             Command::Then(m) => write!(f, "Then({m:?})"),
+            Command::AfterDraw(m) => write!(f, "AfterDraw({m:?})"),
         }
     }
 }
@@ -279,6 +288,7 @@ where
             (Command::Ask(a), Command::Ask(b)) => a == b,
             (Command::Request(a), Command::Request(b)) => a == b,
             (Command::Then(a), Command::Then(b)) => a == b,
+            (Command::AfterDraw(a), Command::AfterDraw(b)) => a == b,
             _ => false,
         }
     }
@@ -309,6 +319,13 @@ pub trait Host<A: App + ?Sized> {
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>);
     /// What only the host can do ([`App::Request`]).
     fn request(&mut self, _request: A::Request) {}
+    /// Whether the screen is drawn between one message and the next one
+    /// sent: a phone's toolkit, which draws a page after it reads it and
+    /// then tells [`Runtime::drawn`]. An iced window or the browser draws
+    /// what the last message left, so what waits on a draw runs at once.
+    fn draws_between(&self) -> bool {
+        false
+    }
 }
 
 /// An app running: its state, the answers it waits for, and the number
@@ -320,6 +337,8 @@ pub struct Runtime<A: App> {
     tickets: Ticket,
     /// Answers that came while a message was running, taken after it.
     answers: VecDeque<(Ticket, Option<A::Msg>)>,
+    /// What waits for the screen to be drawn ([`Command::AfterDraw`]).
+    after_draw: VecDeque<A::Msg>,
     running: bool,
 }
 
@@ -331,6 +350,7 @@ impl<A: App> Default for Runtime<A> {
             waiting: BTreeSet::new(),
             tickets: 0,
             answers: VecDeque::new(),
+            after_draw: VecDeque::new(),
             running: false,
         }
     }
@@ -362,7 +382,29 @@ impl<A: App> Runtime<A> {
     /// What a screenshot driver waits for, with [`Runtime::version`]
     /// unchanged since it last looked (ui/docs/app.md, Effects and Ports).
     pub fn is_idle(&self, store: &dyn Views<A::Key>) -> bool {
-        !self.running && self.waiting.is_empty() && self.answers.is_empty() && self.holds().iter().all(|k| store.holds(k))
+        !self.running
+            && self.waiting.is_empty()
+            && self.answers.is_empty()
+            && self.after_draw.is_empty()
+            && self.holds().iter().all(|k| store.holds(k))
+    }
+
+    /// Whether a message waits for the screen to be drawn
+    /// ([`Command::AfterDraw`]): a host that draws between messages calls
+    /// [`Runtime::drawn`] once it has.
+    pub fn awaits_draw(&self) -> bool {
+        !self.after_draw.is_empty()
+    }
+
+    /// The screen drawn: what waited for it taken, in order (what they ask
+    /// to wait for a draw waits for the next one); whether any did.
+    pub fn drawn(&mut self, host: &mut impl Host<A>) -> bool {
+        let waiting = std::mem::take(&mut self.after_draw);
+        let any = !waiting.is_empty();
+        for m in waiting {
+            self.dispatch(m, host);
+        }
+        any
     }
 
     /// What the screen shows now.
@@ -443,6 +485,8 @@ impl<A: App> Runtime<A> {
             }
             Command::Request(r) => host.request(r),
             Command::Then(m) => queue.push_back(m),
+            Command::AfterDraw(m) if host.draws_between() => self.after_draw.push_back(m),
+            Command::AfterDraw(m) => queue.push_back(m),
         }
     }
 }

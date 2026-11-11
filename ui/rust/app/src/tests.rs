@@ -21,6 +21,8 @@ enum Msg {
     Scan,
     Scanned(Answer<Option<String>>),
     Go,
+    /// What is shown put away, `Add` once the screen without it is drawn.
+    Away,
 }
 
 #[derive(Default)]
@@ -62,6 +64,10 @@ impl App for Counter {
                 vec![Command::Then(Msg::Add)]
             }
             Msg::Go => vec![Command::Open("settings"), Command::Back, Command::Request("sync")],
+            Msg::Away => {
+                s.said.push("away".into());
+                vec![Command::AfterDraw(Msg::Add)]
+            }
         }
     }
 
@@ -79,6 +85,8 @@ struct Here {
     inbox: Inbox<Msg>,
     sent: Vec<i64>,
     opened: Vec<String>,
+    /// A phone's: the screen drawn between messages.
+    draws: bool,
 }
 
 impl Here {
@@ -96,6 +104,7 @@ impl Here {
             inbox: Inbox::default(),
             sent: vec![],
             opened: vec![],
+            draws: false,
         }
     }
 }
@@ -126,6 +135,9 @@ impl Host<Counter> for Here {
     }
     fn request(&mut self, r: &'static str) {
         self.opened.push(r.into())
+    }
+    fn draws_between(&self) -> bool {
+        self.draws
     }
 }
 
@@ -246,4 +258,34 @@ fn launch_arguments_are_read_as_pairs() {
     assert!(Launch::parse(&["money-iced", "--server", "http://x", "--user", "alex"]).is_empty());
     let s = Launch::parse(&["-screen", "settings", "-settingsTab", "banks"]);
     assert_eq!((s.screen.as_deref(), s.pane.as_deref()), (Some("settings"), Some("banks")));
+}
+
+/// On a host that draws between messages, what waits on a draw runs only
+/// once the screen without what was put away has been drawn, and the
+/// runtime is not idle until then (a screenshot never taken between); on
+/// one that does not, it runs at once. Falsified by a launch that switched
+/// the section in the same update that put the inspector away.
+#[test]
+fn what_waits_on_a_draw_runs_once_the_screen_is_drawn() {
+    let mut rt = Runtime::<Counter>::new();
+    let mut h = Here::new();
+    h.draws = true;
+    rt.dispatch(Msg::Away, &mut h);
+    assert_eq!(rt.screen(&h), "0 away", "drawn without it first");
+    assert!(rt.awaits_draw());
+    assert!(!rt.is_idle(&h.store), "a draw awaited is not idle");
+    assert!(rt.drawn(&mut h));
+    assert_eq!(rt.screen(&h), "1 away");
+    // The haptic `Add` asks for, answered.
+    let inbox = h.inbox.clone();
+    inbox.drain(&mut rt, &mut h);
+    assert!(!rt.awaits_draw() && rt.is_idle(&h.store));
+    assert!(!rt.drawn(&mut h), "nothing more waits");
+
+    let mut rt = Runtime::<Counter>::new();
+    let mut h = Here::new();
+    rt.dispatch(Msg::Away, &mut h);
+    assert_eq!(rt.screen(&h), "1 away", "a host that draws nothing between runs it next");
+    assert!(!rt.awaits_draw());
+    assert_eq!(format!("{:?}", Command::<Counter>::AfterDraw(Msg::Add)), "AfterDraw(Add)");
 }
