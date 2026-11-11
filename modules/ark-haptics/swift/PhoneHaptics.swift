@@ -1,7 +1,9 @@
 // ark-haptics on the iPhone and the Mac (modules/ark-haptics/README.md): the
 // foreign trait UniFFI writes as the `Haptics` protocol, implemented over
-// the system's feedback generators. An app that lists `haptics` in its
-// modules.toml compiles this file in and registers one at launch.
+// the system's feedback generators. An app that lists `ark-haptics` in its
+// app.toml links it (under nix a module of its own, `ArkHaptics`, over the
+// app's bindings; in Xcode compiled into the app) and registers one at
+// launch.
 import Foundation
 // The app's bindings, where nix compiles this as a module of its own over
 // them (flake.nix, `iosApp`); an app's own Xcode project compiles it beside
