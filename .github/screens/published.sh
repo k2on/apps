@@ -35,7 +35,22 @@ case $phone in
     # run is making them (await-apk.sh). An app it built none of (its
     # inputs had not moved from main's) keeps what F-Droid offers.
     if [ -n "${COMMIT:-}" ]; then
-      run=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/workflows/build.yaml/runs?head_sha=$COMMIT&per_page=1" --jq '.workflow_runs[0].id // empty')
+      # Asked until it answers (a refusal, "API rate limit exceeded", is
+      # no answer: in app-screens 42965705977 its text was taken for the
+      # run's id, and that run waited for for an hour).
+      run=
+      for try in 1 2 3 4 5 6 7 8 9 10; do
+        if said=$(gh api "repos/${GITHUB_REPOSITORY:?}/actions/workflows/build.yaml/runs?head_sha=$COMMIT&per_page=1" --jq '.workflow_runs[0].id // empty' 2> /dev/null); then
+          run=$said
+          break
+        fi
+        echo "the API did not answer for build's run at ${COMMIT:0:7} (try $try)"
+        sleep $((try * 30))
+      done
+      if [ -n "$run" ] && ! [[ $run =~ ^[0-9]+$ ]]; then
+        echo "::error::build's run at ${COMMIT:0:7}: the API said '$run'"
+        exit 1
+      fi
       if [ -z "$run" ]; then
         echo "no build run at ${COMMIT:0:7}: the published APKs"
       else
