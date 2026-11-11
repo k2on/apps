@@ -440,8 +440,11 @@ fun Page(
     Scaffold(
         modifier = modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
+        // Under the shell's top bar the bar has taken the status bar's inset: the page
+        // takes none again (an account's register drew an empty band over its title).
         contentWindowInsets =
-            if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+            if (hosted) WindowInsets(0)
+            else if (onBack == null) WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             else WindowInsets.systemBars,
         topBar = {
             if (hosted) {

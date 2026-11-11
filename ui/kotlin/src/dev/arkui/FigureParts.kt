@@ -167,7 +167,9 @@ public class LabelledBar(public val label: String, public val value: Long, publi
 public fun LabelledBars(bars: List<LabelledBar>) {
     val most = (bars.maxOfOrNull { it.value } ?: 1L).coerceAtLeast(1L).toFloat()
     val colour = chartPalette().first()
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    // The width it is given: the bars are shares of it, so a column as wide
+    // as its longest label drew them a few points long, the labels crowded.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         bars.forEach { b ->
             Text(b.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {

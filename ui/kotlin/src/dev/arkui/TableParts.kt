@@ -230,7 +230,10 @@ public fun DataTableRow(
 /** Bars against the largest ([LabelledBars]), from a view's three lists. */
 @Composable
 public fun BarChart(labels: List<String>, values: List<Long>, said: List<String>) {
-    LabelledBars(labels.zip(values).zip(said).map { (lv, s) -> LabelledBar(lv.first, lv.second, s) })
+    // In a card, inset as its rows are.
+    Box(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m)) {
+        LabelledBars(labels.zip(values).zip(said).map { (lv, s) -> LabelledBar(lv.first, lv.second, s) })
+    }
 }
 
 private val DAY = DateTimeFormatter.ISO_LOCAL_DATE
