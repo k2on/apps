@@ -197,7 +197,6 @@ impl FirstRun {
         let none = WelcomePage::none();
         match self.machine.step() {
             _ if self.asked && self.intro < c.pages.len() => self.intro_page(),
-            Step::Server { .. } if self.intro < c.pages.len() => self.intro_page(),
             Step::Server { typed, checking, error } => WelcomePage {
                 server: Some(ServerPage {
                     glyph: c.glyph.clone(),
@@ -331,13 +330,17 @@ mod tests {
         })
     }
 
-    /// The app's pages, then its server's: Continue walks them, Get
-    /// Started ends them, Skip leaves them. Falsified by showing the
-    /// server's page first.
+    /// The first page is the server's, Welcome to the app; the app's pages
+    /// never stand before it. Asked for (a launch with none to ask, their
+    /// route), Continue walks them, Get Started ends them, Skip leaves them.
+    /// Falsified by the pages before the server's: the phones' first page
+    /// was the app's, not its Welcome.
     #[test]
-    fn the_apps_pages_come_before_its_server() {
+    fn the_first_page_is_the_apps_welcome() {
         let mut f = FirstRun::new(app(), copy(2));
         launched(&mut f, Remembered::default());
+        assert_eq!(f.page().server.unwrap().title, "Welcome to Money");
+        f.show_intro();
         let i = f.page().intro.unwrap();
         assert_eq!(
             (i.title.as_str(), i.place.as_deref(), i.next.as_str(), i.skippable),
@@ -352,6 +355,7 @@ mod tests {
         assert!(s.demo && s.scan && !s.can_continue);
         let mut f = FirstRun::new(app(), copy(3));
         launched(&mut f, Remembered::default());
+        f.show_intro();
         f.send(WelcomeMsg::Skip);
         assert!(f.page().server.is_some());
     }
@@ -406,7 +410,7 @@ mod tests {
         launched(&mut f, Remembered::default());
         assert!(f.send(WelcomeMsg::ScanCode).scan);
         assert!(f.scanned(Some("hello".into())).is_empty());
-        assert!(f.page().intro.is_some(), "nothing happened");
+        assert!(f.page().server.is_some(), "nothing happened");
         f.scanned(Some("money://join?server=https%3A%2F%2Fmoney.example.com&code=K1".into()));
         let c = f.page().confirm.unwrap();
         assert_eq!(c.title, "Join money.example.com?");
@@ -450,6 +454,7 @@ mod tests {
     fn a_link_that_comes_during_the_first_run_waits_for_the_app() {
         let mut f = FirstRun::new(app(), copy(2));
         launched(&mut f, Remembered::default());
+        f.show_intro();
         assert!(f.page().intro.is_some(), "the pages show");
         f.open_link("money://budget/".into());
         assert!(f.page().intro.is_none() && f.page().server.is_some(), "the pages put away");

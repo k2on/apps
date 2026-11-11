@@ -473,9 +473,15 @@ fn launch(s: &mut ShellState, l: Launch, data: &Data<'_, MoneyView>) -> Vec<Comm
                 out.push(Command::Request(MoneyRequest::OpenTransaction { key: item }));
             }
         }
+        // To Review, with the newest waiting for a look open: Transaction
+        // Details in the inspector when it is shown, its sheet otherwise.
         Some("review") => {
             select(s, SECTIONS[2].into(), data);
+            s.transaction = Some("review".into());
             out.push(Command::Request(MoneyRequest::Review));
+            if !s.inspector {
+                out.push(Command::Request(MoneyRequest::OpenTransaction { key: "review".into() }));
+            }
         }
         Some("add-transaction") => {
             select(s, SECTIONS[2].into(), data);

@@ -290,13 +290,16 @@ after twinning the records; money's iPhone, iPad, Mac and Android draw the
 generated `WelcomeView` / `WelcomeScreen` over it, the browser
 `arkui_web::render(welcome::view(..))`, the desktop walks the same machine
 under its window (the window is the app from the start, over its replica:
-what the machine says is its note). The app's pages of what it is show on
-every platform at a first launch (`FirstRun::launch`): until they are walked
-or skipped (`Asked::seen`, which the shell remembers its own way — the
-desktop's app data, the browser's local storage), never on a screenshot's,
-the demo's or a link's launch, and by their own route (`/welcome/`) always; a
-link that comes while they show is kept for the app (`open_link`,
-`take_link`). harken's bridge exports it; its phones still draw their own
+what the machine says is its note). The first page is the app's Welcome on
+every platform: the server's page where there is one to choose (the phones),
+the app's own page where the server is the platform's (the desktop, the
+browser), shown at a first launch (`FirstRun::launch`) until it is passed
+(`Asked::seen`, which the shell remembers its own way — the desktop's app
+data, the browser's local storage), never on a screenshot's, the demo's or a
+link's launch, and by its route (`/welcome/`) always. The app's pages never
+stand before the server's. The demo is a launch's (`-demo`, `?demo`), never
+offered by the first run. A link that comes while a page shows is kept for
+the app (`open_link`, `take_link`). harken's bridge exports it; its phones still draw their own
 first run until harken is ported.
 
 ## Effects and Ports

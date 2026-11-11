@@ -281,3 +281,25 @@ fn the_category_inspector() {
     hosted(&money_shell::view(&rt.screen(&demo)), &mut names);
     assert_eq!(names[1], "budget.inspector", "nothing inspected: the platform's own");
 }
+
+/// Review is To Review with the newest waiting for a look open: its sheet
+/// when the inspector is not shown, Transaction Details when it is.
+/// Falsified by Review alone: its shot was Transactions' own.
+#[test]
+fn review_opens_what_waits_for_a_look() {
+    let mut demo = Demo::new();
+    let mut rt = Runtime::<MoneyShell>::new();
+    let launch = |a: &[&str]| ShellMsg::Launch {
+        args: a.iter().map(|s| s.to_string()).collect(),
+    };
+    rt.dispatch(launch(&["-screen", "review"]), &mut demo);
+    assert_eq!(rt.screen(&demo).section, "transactions");
+    assert_eq!(
+        demo.requests,
+        vec![MoneyRequest::Review, MoneyRequest::OpenTransaction { key: "review".into() }]
+    );
+    demo.requests.clear();
+    rt.dispatch(launch(&["-screen", "review", "-inspector", "1"]), &mut demo);
+    assert_eq!(demo.requests, vec![MoneyRequest::Review]);
+    assert!(rt.screen(&demo).transaction.is_some(), "Transaction Details shows it");
+}
