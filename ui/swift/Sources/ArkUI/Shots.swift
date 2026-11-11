@@ -70,9 +70,16 @@ private final class Signal: ObservableObject {
     private static func moving() -> String? {
         #if canImport(UIKit)
         func any(_ l: CALayer) -> String? {
+            let now = l.convertTime(CACurrentMediaTime(), from: nil)
             for key in l.animationKeys() ?? [] {
                 guard let a = l.animation(forKey: key) else { continue }
-                if a.repeatCount.isInfinite || a.repeatCount >= .greatestFiniteMagnitude || a.repeatDuration.isInfinite { continue }
+                // No end to wait for: repeating for ever, or lasting for ever
+                // (Liquid Glass's lens following what it sits on).
+                if a.repeatCount.isInfinite || a.repeatCount >= .greatestFiniteMagnitude || a.repeatDuration.isInfinite || a.duration.isInfinite { continue }
+                // Ended, and only kept on the layer (not removed on completion):
+                // at its end already.
+                let runs = Double(max(a.repeatCount, 1)) * a.duration
+                if a.beginTime > 0, now >= a.beginTime + runs + a.timeOffset { continue }
                 // Named, for the busy reason: what, on which layer, for how long.
                 return "\(type(of: l)).\(key) \(type(of: a)) \(a.duration)s"
             }
