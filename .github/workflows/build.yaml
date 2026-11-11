@@ -68,8 +68,14 @@ permissions:
   actions: write
 
 # A newer push supersedes a run still building; deploys are serialised below.
+# A run by hand on a branch is keyed by its commit too: two dispatches at
+# two commits (two agents' pushes to one branch) both finish, so a dry run
+# of app-screens waiting on one for its APKs (published.sh) is never left
+# with a cancelled run (43069089760, cancelled by 43070587909); a second
+# dispatch at the same commit still supersedes the first. main's and a
+# PR's runs are as they were.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: true
 
 jobs:

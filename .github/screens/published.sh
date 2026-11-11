@@ -30,10 +30,16 @@ case $phone in
         { echo "::warning::$a: $name would not download"; rm -rf "${dir:?}/apk-$a"; }
     done
     # COMMIT (a dry run, app-screens.yaml): the APKs build built at that
-    # commit (its pull request's run), in place of the published ones, as
-    # the iPhone's and the desktop's are the commit's; waited for while that
-    # run is making them (await-apk.sh). An app it built none of (its
-    # inputs had not moved from main's) keeps what F-Droid offers.
+    # commit, in place of the published ones, as the iPhone's and the
+    # desktop's are the commit's; waited for while that run is making them
+    # (await-apk.sh). A dry run never falls back to F-Droid's silently:
+    # with no build run at the commit, or one that was cancelled or failed
+    # before an app's APK, it fails, saying so (app-screens 43069095661 took
+    # F-Droid's APKs, which have no ready signal, when another dispatch had
+    # cancelled its build, and every Android job then failed waiting). Only
+    # an app whose `apk` job succeeded and built nothing — its APK's inputs
+    # seen built before (build.yaml's `apk-seen`), unmoved — keeps
+    # F-Droid's, with a warning.
     if [ -n "${COMMIT:-}" ]; then
       # Asked until it answers (a refusal, "API rate limit exceeded", is
       # no answer: in app-screens 42965705977 its text was taken for the
@@ -52,22 +58,33 @@ case $phone in
         exit 1
       fi
       if [ -z "$run" ]; then
-        echo "no build run at ${COMMIT:0:7}: the published APKs"
-      else
-        for a in "$@"; do
-          got=$(mktemp -d)
-          code=0
-          bash "$(dirname "$0")/await-apk.sh" "$run" "$a" "$got" || code=$?
-          if [ "$code" = 0 ]; then
-            rm -rf "${dir:?}/apk-$a"
-            mv "$got/apk-$a" "$dir/apk-$a"
-            echo "$a: build's APK at ${COMMIT:0:7} (run $run)"
-          elif [ "$code" != 3 ]; then
-            echo "::error::$a: build's APK at ${COMMIT:0:7} (run $run) would not come"
+        echo "::error::no build run at ${COMMIT:0:7}: a dry run takes that commit's APKs, so dispatch build.yaml on the branch at that commit first"
+        exit 1
+      fi
+      for a in "$@"; do
+        got=$(mktemp -d)
+        code=0
+        bash "$(dirname "$0")/await-apk.sh" "$run" "$a" "$got" || code=$?
+        if [ "$code" = 0 ]; then
+          rm -rf "${dir:?}/apk-$a"
+          mv "$got/apk-$a" "$dir/apk-$a"
+          echo "$a: build's APK at ${COMMIT:0:7} (run $run)"
+        elif [ "$code" = 3 ]; then
+          # Why none: the run cancelled or failed, or the app's job skipped
+          # its build as seen before.
+          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .conclusion)
+          job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" --paginate --jq ".jobs[] | select(.name == \"apk ($a)\") | .conclusion" | head -1)
+          if [ "$job" = success ]; then
+            echo "::warning::$a: build's run $run at ${COMMIT:0:7} built no APK (its inputs seen built before); F-Droid's is taken"
+          else
+            echo "::error::$a: build's run $run at ${COMMIT:0:7} ended ${conclusion:-unfinished} with no APK (its apk job: ${job:-none}); not taking F-Droid's in its place. Dispatch build.yaml again at that commit, then this run."
             exit 1
           fi
-        done
-      fi
+        else
+          echo "::error::$a: build's APK at ${COMMIT:0:7} (run $run) would not come"
+          exit 1
+        fi
+      done
     fi
     ;;
   *) echo "usage: published.sh android <dir> <app>..."; exit 1 ;;
