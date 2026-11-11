@@ -26,7 +26,7 @@
 //!   [`ModuleError::Unavailable`].
 //!
 //! - The ports an app's update asks through ([`haptics`], [`clipboard`],
-//!   [`share`], [`scanner`], [`media_player`], [`notifications`],
+//!   [`share`], [`scanner`], [`media_player`], [`notifications`], [`background`],
 //!   [`secure_store`]): each module's trait, its operations and their outputs,
 //!   here in the runtime, so an app reaches a module only through these
 //!   typed operations and never depends on the module's crate (layers.toml).
@@ -51,6 +51,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex};
 
+pub mod background;
 pub mod clipboard;
 pub mod haptics;
 pub mod media_player;

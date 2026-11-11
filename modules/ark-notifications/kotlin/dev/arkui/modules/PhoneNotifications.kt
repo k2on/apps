@@ -6,8 +6,8 @@
 //   the app's settings); its buttons each a broadcast to [ArkNoticeReceiver], so pressing one
 //   never opens the app;
 // - `AlarmManager` for a later time (inexact and allowed while idle: no exact-alarm permission),
-//   the notice kept in the module's private preferences until it is shown, so [ArkNoticeBoot]
-//   sets its alarm again after a restart;
+//   the notice kept in the module's private preferences until it is shown (set again after a
+//   restart only in an app that declares `[background]`: ark-background's boot receiver);
 // - UnifiedPush ([ArkPush], ArkPush.kt), the receiver protocol implemented directly.
 //
 // A tap opens the notice's route through the app's links: a VIEW of `<scheme>://<path>` at the
@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import dev.arkdb.ffi.ArkProcess
+import dev.arkdb.ffi.WakeDone
 import uniffi.ark_notifications.AuthorizeReply
 import uniffi.ark_notifications.NativeNotifications
 import uniffi.ark_notifications.Notice
@@ -64,9 +66,14 @@ object ArkNotices {
 
     /**
      * How the process's runtime says it is done with a wake-up: called with the most it may take,
-     * in milliseconds, and what to do then. Until the process sets it, a wake-up is done at once.
+     * in milliseconds, and what to do then — the process's own (`ArkProcess.settle`), unless a test
+     * sets another.
      */
-    @Volatile var settle: (budgetMs: Long, done: () -> Unit) -> Unit = { _, done -> done() }
+    @Volatile var settle: (budgetMs: Long, done: () -> Unit) -> Unit = { budget, done ->
+        ArkProcess.shared().settle(budget.toULong(), object : WakeDone {
+            override fun finished(idle: Boolean) = done()
+        })
+    }
 
     fun listen(l: NotificationListener?) {
         val told = synchronized(early) {
@@ -76,10 +83,15 @@ object ArkNotices {
         told.forEach { l?.heard(it) }
     }
 
-    /** `e` told to the process; kept until there is a listener (a tap that started the process). */
+    /**
+     * `e` told to the listener the app's runtime set; with none, to the process itself
+     * (`ArkProcess.notices`: a push or a button a wake, an endpoint the session's push row), and a
+     * tap kept until there is one.
+     */
     fun tell(e: NotificationEvent) {
-        val l = synchronized(early) { listener ?: run { early.add(e); null } }
-        l?.heard(e)
+        val l = synchronized(early) { listener ?: run { if (e is NotificationEvent.Opened) early.add(e); null } }
+        if (l != null) return l.heard(e)
+        if (e !is NotificationEvent.Opened) ArkProcess.shared().notices().heard(e)
     }
 
     /** An intent the app's activity was started or resumed with: a tap on a notice, said. */

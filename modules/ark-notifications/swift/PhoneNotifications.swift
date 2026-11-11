@@ -45,9 +45,11 @@ public final class PhoneNotifications: NSObject, NativeNotifications, UNUserNoti
     private var categories = Set<String>()
 
     /// How the process's runtime says it is done with a wake-up: called with
-    /// the most it may take and what to do then. Until the process sets it,
-    /// a wake-up is done at once.
-    public var settle: (_ budget: TimeInterval, _ done: @escaping () -> Void) -> Void = { _, done in done() }
+    /// the most it may take and what to do then — the process's own
+    /// (`ArkProcess.settle`), unless a test sets another.
+    public var settle: (_ budget: TimeInterval, _ done: @escaping () -> Void) -> Void = { budget, done in
+        ArkProcess.shared().settle(budgetMs: UInt64(budget * 1000), done: Settled(done))
+    }
 
     override private init() {
         super.init()
@@ -111,6 +113,7 @@ public final class PhoneNotifications: NSObject, NativeNotifications, UNUserNoti
             NSApplication.shared.unregisterForRemoteNotifications()
             #endif
         }
+        tell(.unregistered)
     }
 
     public func setListener(listener: NotificationListener?) {
@@ -173,12 +176,18 @@ public final class PhoneNotifications: NSObject, NativeNotifications, UNUserNoti
 
     // MARK: Inside
 
+    /// `e` told to the listener the app's runtime set; with none, to the
+    /// process itself (`ArkProcess.notices`: a push or a button a wake, an
+    /// endpoint the session's push row), and a tap kept until there is one.
     private func tell(_ e: NotificationEvent) {
         lock.lock()
         let l = listener
-        if l == nil { early.append(e) }
+        var opened = false
+        if case .opened = e { opened = true }
+        if l == nil && opened { early.append(e) }
         lock.unlock()
-        l?.heard(event: e)
+        if let l { return l.heard(event: e) }
+        if !opened { ArkProcess.shared().notices().heard(event: e) }
     }
 
     /// The category of a notice's buttons: one per set, registered once.
@@ -234,4 +243,11 @@ public final class PhoneNotifications: NSObject, NativeNotifications, UNUserNoti
               let key = text.range(of: "aps-environment</key>") else { return false }
         return text[key.upperBound...].prefix(80).contains("development")
     }()
+}
+
+/// A settle's end handed to a closure.
+final class Settled: WakeDone, @unchecked Sendable {
+    private let then: () -> Void
+    init(_ then: @escaping () -> Void) { self.then = then }
+    func finished(idle: Bool) { then() }
 }

@@ -3,8 +3,8 @@
 // - [ArkNoticeReceiver], reached by its name alone: a notice's alarm going off (shown), and a
 //   button pressed on one (told to the process, which wakes its runtime for it; the receiver is
 //   held until the runtime is done or the system's time is nearly up).
-// - [ArkNoticeBoot], the system's BOOT_COMPLETED: each notice still to come set again, since a
-//   restart clears every alarm.
+// A restart clears every alarm: ark-background's boot receiver sets each notice still to come
+// again, written only for an app whose app.toml declares `[background]`.
 package dev.arkui.modules
 
 import android.content.BroadcastReceiver
@@ -31,11 +31,5 @@ class ArkNoticeReceiver : BroadcastReceiver() {
 
     companion object {
         const val BUDGET_MS = 8_000L
-    }
-}
-
-class ArkNoticeBoot : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) ArkNotices.rearm(context)
     }
 }

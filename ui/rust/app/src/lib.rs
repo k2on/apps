@@ -640,6 +640,7 @@ impl<M: Send + 'static> Inbox<M> {
     }
 }
 
+pub mod background;
 pub mod shell;
 pub mod view;
 pub mod welcome;

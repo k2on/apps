@@ -63,6 +63,7 @@ pub mod phone {
         Opened { id: String, opens: Option<String> },
         Action { notice: String, action: String },
         Registered { endpoint: PushEndpoint },
+        Unregistered,
         Failed { why: String },
         Pushed,
     }
@@ -254,7 +255,8 @@ mod tests {
                 NotificationEvent::Failed {
                     why: "no distributor".into()
                 },
-                NotificationEvent::Registered { endpoint }
+                NotificationEvent::Registered { endpoint },
+                NotificationEvent::Unregistered
             ]
         );
     }

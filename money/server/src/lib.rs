@@ -273,16 +273,6 @@ pub async fn start(config: Config) -> Result<Server> {
         auth = auth.trust_picture_host(host);
     }
     let auth = Arc::new(auth);
-    // The household's devices that are not connected woken when its rows
-    // change (ark_peer's push): Apple's through APNs when the server has its
-    // key (MONEY_APNS_*), Android's UnifiedPush endpoints always. A wake
-    // says nothing of the rows; an iPhone shows money's own words, and the
-    // device syncs and says what came from its own replica.
-    let sender = Arc::new(ark_peer::Apns::sender(config.apns.as_ref()).context("APNs' key")?);
-    match &config.apns {
-        Some(a) => eprintln!("money-server: pushing to Apple's devices as team {}", a.team_id),
-        None => eprintln!("money-server: no APNs key: set MONEY_APNS_KEY_FILE, _KEY_ID and _TEAM_ID to push to iPhones"),
-    }
 
     // The receipts folder anybody's exports wait in: the server's own
     // unless told another.
@@ -304,8 +294,7 @@ pub async fn start(config: Config) -> Result<Server> {
     if config.scoped {
         hub.feed = Arc::new(|_| ark::peer::Feed::Scoped("session.feed".into()));
     }
-    let wake = ark_push::Wake::of("money").shown("Money", "New activity in Money");
-    let mut server = ark_peer::Server::new(hub).auth(auth.clone()).push(sender, wake);
+    let mut server = ark_peer::Server::new(hub).auth(auth.clone());
     (server.data, server.keepalive) = (Some(config.data.clone()), config.keepalive.every);
     // One process: the browser client's files beside the socket and
     // sign-in (the build the package embeds unless told another), and
@@ -346,8 +335,8 @@ pub async fn start(config: Config) -> Result<Server> {
                 roles: vec![money_core::BANK.into()],
                 ..Account::default()
             };
-            let own = auth.clone();
-            let login = tokio::task::spawn_blocking(move || own.own(&account, importer::DEVICE))
+            let auth = auth.clone();
+            let login = tokio::task::spawn_blocking(move || auth.own(&account, importer::DEVICE))
                 .await?
                 .map_err(|e| anyhow!("signing the importer in: {e}"))?;
             Some(Importer::start(

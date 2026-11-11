@@ -81,9 +81,10 @@ object ArkPush {
     }
 
     fun unregister(context: Context) {
-        val d = prefs(context).getString("push.distributor", null) ?: return
+        val d = prefs(context).getString("push.distributor", null) ?: return ArkNotices.tell(NotificationEvent.Unregistered)
         context.sendBroadcast(Intent(UNREGISTER).setPackage(d).putExtra("token", token(context)).putExtra("pi", proof(context)))
         prefs(context).edit().remove("push.endpoint").apply()
+        ArkNotices.tell(NotificationEvent.Unregistered)
     }
 
     /** This device's Web Push keys: made once, kept. */

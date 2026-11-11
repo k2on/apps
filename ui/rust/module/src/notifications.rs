@@ -81,6 +81,9 @@ pub enum NotificationEvent {
     Action { notice: String, action: String },
     /// The device is registered for push, here.
     Registered { endpoint: PushEndpoint },
+    /// The device was unregistered (`unregister_push`): its session's push
+    /// row is to be taken away.
+    Unregistered,
     /// It could not register, in the platform's words (no distributor, no
     /// network, the person said no).
     Failed { why: String },

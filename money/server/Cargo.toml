@@ -25,9 +25,6 @@ ark-format = { path = "../../rust/ark-format" }
 # that reaches it through its handle, never a socket.
 ark-peer = { path = "../../rust/ark-peer", features = ["server"] }
 ark-auth = { path = "../../rust/ark-auth" }
-# The wake the household's devices that are not connected are sent
-# (ark_peer's push): money's own words, nothing of the rows.
-ark-push = { path = "../../rust/ark-push" }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 serde = { workspace = true }

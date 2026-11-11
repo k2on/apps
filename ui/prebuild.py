@@ -222,6 +222,40 @@ def scalar(v):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+# ------------------------------------------------------------- Background
+
+
+# What app.toml's `[background]` may say (ui/docs/app.md, Background And
+# Notifications). Off by default: an app that says none of it has none of
+# what follows in its projects — no background mode, no task, no job, no
+# boot receiver, no push, no extension (`selftest` holds it).
+BACKGROUND = {
+    # A periodic wake to sync (`Woken::Sync`), as `"30m"` or `"2h"`: the
+    # OS's at least fifteen minutes apart. Needs ark-background.
+    "sync": str,
+    # Woken by a push (`Woken::Push`). Needs ark-notifications.
+    "push": bool,
+    # Android: woken when the device starts (`Woken::Boot`). Needs ark-background.
+    "boot": bool,
+    # iPhone: the Notification Service Extension (push's words swapped for
+    # the device's own). Needs push.
+    "service-extension": bool,
+}
+
+UNIFIEDPUSH = ["org.unifiedpush.android.connector.NEW_ENDPOINT", "org.unifiedpush.android.connector.REGISTRATION_FAILED",
+               "org.unifiedpush.android.connector.UNREGISTERED", "org.unifiedpush.android.connector.MESSAGE"]
+
+
+def background(a):
+    """What the app declares of the background: `[background]`, or nothing."""
+    return a.get("background", {})
+
+
+def sync_seconds(text):
+    m = re.fullmatch(r"(\d+)(m|h)", str(text).strip())
+    return int(m.group(1)) * (60 if m.group(2) == "m" else 3600) if m else None
+
+
 def apple_info(root, a, bundle):
     """The Info.plist's keys: the app's own, its modules' (the app's win),
     and what every Ark app has."""
@@ -257,6 +291,12 @@ def apple_info(root, a, bundle):
             info.setdefault(k, v)
         modes += [x for x in ios.get("background-modes", []) if x not in modes]
     info.update(a["apple"].get("info", {}))
+    bg = background(a)
+    if bg.get("sync"):
+        modes.append("fetch")
+        info["BGTaskSchedulerPermittedIdentifiers"] = ["$(PRODUCT_BUNDLE_IDENTIFIER).sync"]
+    if bg.get("push"):
+        modes.append("remote-notification")
     if modes:
         info["UIBackgroundModes"] = modes
     del product
@@ -268,6 +308,12 @@ def apple_entitlements(root, a):
     for _, m in modules_of(root, a):
         out.update(m.get("ios", {}).get("entitlements", {}))
     out.update(a["apple"].get("entitlements", {}))
+    bg = background(a)
+    if bg.get("push"):
+        # The development environment's; an App Store export makes it production's.
+        out["aps-environment"] = "development"
+    if bg.get("service-extension"):
+        out["com.apple.security.application-groups"] = ["group.$(PRODUCT_BUNDLE_IDENTIFIER)"]
     return out
 
 
@@ -331,6 +377,26 @@ def apple_project(root, a, prefix):
     if entitlements:
         target["entitlements"] = {"path": "Resources/App.entitlements", "properties": entitlements}
     targets = {product: target}
+    if background(a).get("service-extension"):
+        # The Notification Service Extension, a process of its own by
+        # Apple's design (modules/ark-notifications/README.md): its own
+        # target, embedded in the iPhone's app, sharing an App Group.
+        notices = f"{product}Notices"
+        targets[notices] = {
+            "type": "app-extension",
+            "platform": "iOS",
+            "sources": [{"path": f"{TO_REPO}/modules/ark-notifications/swift-extension", "createIntermediateGroups": False}],
+            "info": {"path": "Resources/Notices-Info.plist", "properties": {
+                "CFBundleDisplayName": a["name"],
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+                "NSExtension": {"NSExtensionPointIdentifier": "com.apple.usernotifications.service",
+                                "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).NotificationService"}}},
+            "entitlements": {"path": "Resources/Notices.entitlements",
+                             "properties": {"com.apple.security.application-groups": [f"group.{bundle}"]}},
+            "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": f"{bundle}.notices", "GENERATE_INFOPLIST_FILE": False}},
+        }
+        target["dependencies"].append({"target": notices, "embed": True, "platformFilter": "ios"})
     tests = os.path.join(root, app, "native", "ios", f"{product}Tests")
     if os.path.isdir(tests):
         targets[f"{product}Tests"] = {
@@ -664,6 +730,8 @@ def android_manifest(root, a):
         services += ma.get("services", [])
         receivers += ma.get("receivers", [])
         meta += ma.get("meta-data", [])
+    if background(a).get("sync") or background(a).get("boot"):
+        perms += [p for p in ["android.permission.RECEIVE_BOOT_COMPLETED"] if p not in perms]
     scheme = a.get("scheme")
     lines = ['<?xml version="1.0" encoding="utf-8"?>', f"<!-- {HEADER.format(app=a['dir'])} -->",
              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">']
@@ -705,6 +773,18 @@ def android_manifest(root, a):
         extra += f'\n        <receiver android:name="{r["name"]}" android:exported="{str(r.get("exported", False)).lower()}">{body}</receiver>'
     for d in meta:
         extra += f'\n        <meta-data android:name="{d["name"]}" android:resource="{d["resource"]}" />'
+    bg = background(a)
+    if bg.get("sync"):
+        # A persisted periodic job (ark-background's ArkSyncJob).
+        extra += ('\n        <service android:name="dev.arkui.modules.ArkSyncJob"'
+                  ' android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />')
+    if bg.get("boot"):
+        acts = '\n                <action android:name="android.intent.action.BOOT_COMPLETED" />'
+        extra += f'\n        <receiver android:name="dev.arkui.modules.ArkBootReceiver" android:exported="true">\n            <intent-filter>{acts}\n            </intent-filter>\n        </receiver>'
+    if bg.get("push"):
+        # The UnifiedPush receiver: exported, as a distributor is another app.
+        acts = "".join(f'\n                <action android:name="{x}" />' for x in UNIFIEDPUSH)
+        extra += f'\n        <receiver android:name="dev.arkui.modules.ArkPushReceiver" android:exported="true">\n            <intent-filter>{acts}\n            </intent-filter>\n        </receiver>'
     if scheme:
         # The scheme, for what opens a route through the app's links from
         # outside an activity (a notice's tap: ark-notifications).
@@ -965,6 +1045,20 @@ def check(root):
         for n in a.get("modules", []):
             if n not in every:
                 problems.append(f"{app}/app.toml lists {n}, which is no module (modules/{n}/module.toml)")
+        bg = background(a)
+        for k, v in bg.items():
+            if k not in BACKGROUND:
+                problems.append(f"{app}/app.toml's [background] says `{k}`, which is none of {', '.join(BACKGROUND)}")
+            elif not isinstance(v, BACKGROUND[k]):
+                problems.append(f"{app}/app.toml's [background] `{k}` is a {BACKGROUND[k].__name__}")
+        if bg.get("sync") and (sync_seconds(bg["sync"]) or 0) < 900:
+            problems.append(f"{app}/app.toml's [background] sync is \"30m\" or \"2h\", at least 15m")
+        needs = {"sync": "ark-background", "boot": "ark-background", "push": "ark-notifications"}
+        for k, n in needs.items():
+            if bg.get(k) and n not in a.get("modules", []):
+                problems.append(f"{app}/app.toml's [background] {k} needs {n} in its modules")
+        if bg.get("service-extension") and not bg.get("push"):
+            problems.append(f"{app}/app.toml's [background] service-extension needs push")
         if apple_targets(a) and "apple" not in a:
             problems.append(f"{app}/app.toml has Apple platforms and no [apple]")
         if has(a, "android") and "android" not in a:
@@ -991,9 +1085,49 @@ def check(root):
                 committed = subprocess.run(["git", "-C", root, "ls-files", f"{app}/{d}"], capture_output=True, text=True).stdout.strip()
                 if committed:
                     problems.append(f"{app}/{d} is committed: an Ark app's native projects and phones' library are generated (ui/prebuild.py, nix/ark-app.nix)")
+    problems += selftest(root)
     for p in problems:
         print(p, file=sys.stderr)
     return not problems
+
+
+# What only `[background]` writes: none of it in an app that declares none.
+BACKGROUND_MARKS = ["ArkSyncJob", "ArkBootReceiver", "ArkPushReceiver", "BOOT_COMPLETED", "BIND_JOB_SERVICE",
+                    "fetch", "remote-notification", "BGTaskSchedulerPermittedIdentifiers", "aps-environment",
+                    "application-groups", "app-extension", "usernotifications"]
+
+
+def projects_text(root, a):
+    """Everything the generator writes that says what runs in the background."""
+    bundle = f"{BUNDLE_PREFIX}.{a['id']}"
+    out = ""
+    if apple_targets(a):
+        out += json.dumps(apple_info(root, a, bundle)) + json.dumps(apple_entitlements(root, a)) + apple_project(root, a, BUNDLE_PREFIX)
+    if has(a, "android"):
+        out += android_manifest(root, a)
+    return out
+
+
+def selftest(root):
+    """Off by default: every app that declares no `[background]` has none
+    of it in its projects, and a fixture that declares all of it has each."""
+    problems = []
+    for app in apps(root):
+        a = app_of(root, app)
+        if background(a):
+            continue
+        text = projects_text(root, a)
+        for mark in BACKGROUND_MARKS:
+            if re.search(r"\b" + re.escape(mark) + r"\b", text):
+                problems.append(f"{app} declares no [background], and its projects say {mark}")
+    fixture = app_of(root, "money")
+    fixture["modules"] = list(fixture.get("modules", [])) + ["ark-notifications", "ark-background"]
+    fixture["background"] = {"sync": "30m", "push": True, "boot": True, "service-extension": True}
+    text = projects_text(root, fixture)
+    for mark in BACKGROUND_MARKS:
+        if mark not in text:
+            problems.append(f"a fixture declaring every [background] has no {mark} in its projects")
+    return problems
 
 
 def main(argv):

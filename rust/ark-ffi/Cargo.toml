@@ -15,6 +15,10 @@ ark-app = { path = "../../ui/rust/app" }
 # foreign trait the keychain and the Android keystore implement.
 ark-module = { path = "../../ui/rust/module" }
 ark-secure-store = { path = "../../modules/ark-secure-store", features = ["ffi"] }
+# A wake from the notifications (a push, a notice's button) and the
+# endpoint they hand out written as the session's push row (`wake`).
+ark-notifications = { path = "../../modules/ark-notifications", features = ["ffi"] }
+ark-push = { path = "../ark-push" }
 serde_json = { workspace = true }
 uniffi = { version = "0.32.2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }

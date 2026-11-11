@@ -277,6 +277,7 @@ name = "ark-app"
 version = "0.1.0"
 dependencies = [
  "ark",
+ "ark-background",
  "ark-camera",
  "ark-haptics",
  "ark-module",
@@ -314,6 +315,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-background"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
 name = "ark-camera"
 version = "0.1.0"
 dependencies = [
@@ -338,7 +347,9 @@ dependencies = [
  "ark-app",
  "ark-auth",
  "ark-module",
+ "ark-notifications",
  "ark-peer",
+ "ark-push",
  "ark-secure-store",
  "arkdb",
  "serde",
@@ -4683,7 +4694,6 @@ dependencies = [
  "ark-auth",
  "ark-format",
  "ark-peer",
- "ark-push",
  "axum",
  "base64 0.22.1",
  "chrono",

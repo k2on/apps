@@ -20,11 +20,9 @@ Authorize = "bool"
 permissions = [
   # Android 13 and later: asked at run time (`NotificationsPermission`).
   "android.permission.POST_NOTIFICATIONS",
-  # A notice for a later time outlives a restart: its alarm is set again.
-  "android.permission.RECEIVE_BOOT_COMPLETED",
 ]
-# The notices still to come (their alarms are set again after a restart)
-# and the UnifiedPush keys and endpoint: this device's alone.
+# The notices still to come and the UnifiedPush keys and endpoint: this
+# device's alone.
 backup-exclude = [{ domain = "sharedpref", path = "ark-notifications.xml" }]
 
 # A notice's alarm going off and a button pressed on one: the module's own
@@ -32,9 +30,7 @@ backup-exclude = [{ domain = "sharedpref", path = "ark-notifications.xml" }]
 [[android.receivers]]
 name = "dev.arkui.modules.ArkNoticeReceiver"
 
-# The device started again: each notice still to come set again. Exported
-# for the system's broadcast, which no other app may send.
-[[android.receivers]]
-name = "dev.arkui.modules.ArkNoticeBoot"
-exported = true
-actions = ["android.intent.action.BOOT_COMPLETED"]
+# Nothing runs at boot unless the app's app.toml declares `[background]`
+# (ui/prebuild.py then adds ark-background's boot receiver, which sets each
+# notice still to come again); without it, a notice for later is lost to a
+# restart.

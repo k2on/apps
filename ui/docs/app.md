@@ -231,7 +231,8 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-camera | `ark-camera` | `PhoneCamera` (a QR code by VisionKit's data scanner, a photo, a watched photo by AVFoundation; the Mac fails, said) | `PhoneCamera` (a watched photo by Camera2, its page `CameraPage`; no QR decoder yet) | Unavailable | Unavailable |
 | ark-scanner | `ark-scanner` | over the camera (`over_camera`: the eyes, the warp in Rust) | over the camera, with the corner model (`model`) | `Chosen` (feature `desktop`): a file the window's chooser gives | `Browser` (feature `web`): the page's file input |
 | ark-media-player | `ark-media-player` | `PhoneMediaPlayer` (AVPlayer, the playback audio session, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`) | `PhoneMediaPlayer` in `ArkMediaService` (Media3's ExoPlayer in a `MediaLibraryService`) | `Desktop` (feature `desktop`: rodio and MPRIS) | `Browser` (feature `web`: `<audio>` and the Media Session API) |
-| ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
+| ark-notifications | `ark-notifications` | `PhoneNotifications` (UNUserNotificationCenter; APNs) | `PhoneNotifications` (NotificationManager, AlarmManager; UnifiedPush) | Unavailable | Unavailable |
+| ark-background | `ark-background` | `PhoneBackground` (BGTaskScheduler; NSBackgroundActivityScheduler) | `PhoneBackground` (JobScheduler) | Unavailable | Unavailable |
 | ark-secure-store | `ark-secure-store` | `PhoneSecureStore` (the keychain: the bundle id's generic passwords, this device only) | `PhoneSecureStore` (an Android keystore AES-GCM key; the ciphertext in private preferences kept out of backups) | `SecretService` (feature `desktop`: the Secret Service over D-Bus; Unavailable without one) | Unavailable |
 
 **MediaPlayer** is one sound at a time, what the system shows of it, its
@@ -438,6 +439,111 @@ it last looked. Each shell exposes them:
 **Ports not yet typed.** The peer's disk (`ark_peer::disk::Disk`) is
 synchronous; an async `Disk` port, so a browser's IndexedDB and a
 phone's file system are adapters of one trait, is left for later.
+
+## Background And Notifications
+
+**Off by default, opt-in per app and per person.** An app runs nothing in
+the background unless its app.toml says so, and even then nothing until
+the person turns it on in the app.
+
+- *Per app:* only an app whose app.toml has a `[background]` gets any of
+  it in its projects. With none, ui/prebuild.py writes no background mode
+  (`fetch`, `remote-notification`), no `BGTaskSchedulerPermittedIdentifiers`,
+  no `aps-environment`, no job service, no `BOOT_COMPLETED` receiver, no
+  UnifiedPush receiver and no Notification Service Extension;
+  `checks.prebuild` holds it (`prebuild.py selftest`: every app without
+  one, and a fixture with all of it).
+- *Per person:* an app that declares it embeds the shared "Notify Me"
+  setting (`ark_app::background`: `Notify`, `NotifyMsg`, `update`, the
+  `notify_me` view over ArkUI's switch row). Off until they turn it on:
+  then they are asked whether the app may notify them, the device is
+  registered for push and the periodic sync scheduled; turned off, the
+  device is unregistered (its session's push row taken away) and the sync
+  stopped. What they chose is read back at launch.
+- Local notices (`ark_app::modules::notifications::schedule`, `cancel`)
+  are any app's that lists ark-notifications, as before; they run nothing
+  in the background.
+
+```toml
+[background]
+sync = "30m"               # a periodic Woken::Sync (needs ark-background)
+push = true                # Woken::Push (needs ark-notifications)
+boot = true                # Android: Woken::Boot when the device starts
+service-extension = true   # iPhone: the Notification Service Extension (needs push)
+```
+
+**One runtime, woken.** The OS may start the process with no screen: a
+periodic sync, a push, a button on a notice, the device started. Each is
+a message into the process's one runtime — `ark_app::Woken` (`Sync`,
+`Push`, `Action { notice, action }`, `Boot`), which the app takes as its
+own (`App::woken`) and answers with commands like any other. The
+component the OS woke (Android's `ArkSyncJob`, `ArkBootReceiver`,
+`ArkPushReceiver`, `ArkNoticeReceiver`; the iPhone's `BGAppRefreshTask`
+and the app delegate's remote-notification callback) calls
+`ArkProcess::wake(reason, budget, done)` and finishes when it is told:
+once the runtime is idle — `Command::Sync` answered, every module's
+answer in — or its time is nearly up. A wake is work
+(`ArkProcess::work`): the runtime is online for it, and offline again
+after when no UI is attached. There is no second runtime of a platform's.
+
+**A push is only a wake-up.** It carries nothing of the app's data: no
+name, amount or word from a row, only that there is something, for which
+app. What the person is told is built on the device from its own replica
+after it syncs, so it is the same whether it came by push, by the
+periodic sync or by opening the app.
+
+```
+ a device writes ─► session.push (ark::auth::Push: its session's endpoint,
+ its endpoint         over its signed-in connection; revoked with the session)
+        │
+ an entry lands on the hub ─► rows of the app changed?   (sign-in's own wake nobody)
+        │                       each live session with a push row,
+        │                       NOT connected now (a connected one gets the rows
+        │                       over its socket), not woken in the last minute
+        ▼
+ PushSender (ark_push's port) ── APNs (alert with the app's generic words,
+        │                        "New activity in Money"; silent ones are throttled)
+        │                     └─ UnifiedPush (sealed to the device, Urgency high,
+        │                        shows nothing)
+        ▼
+ the device: Woken(Push) ─► update: Command::Sync { then }
+        │                     the runtime dials, syncs as always
+        ▼
+ then ─► update reads its replica ─► Command::Ask(notifications::schedule(Notice { … }))
+        ▼
+ idle ─► the woken component finishes; the runtime goes offline
+```
+
+A periodic `Woken::Sync` takes the same path from `Command::Sync` on. On
+the iPhone a push is visible by default, with the app's own generic
+words, since Apple throttles silent pushes and may drop them; an app with
+the Notification Service Extension shows the device's own words in their
+place (the last notice its runtime worked out, left in their App Group).
+On Android a UnifiedPush wake is sent at high urgency and shows nothing:
+the runtime builds the notice.
+
+| Platform | Periodic sync | Push | Local notices |
+|---|---|---|---|
+| iPhone, iPad | `BGAppRefreshTask` `<bundle id>.sync` | APNs (`aps-environment`, `remote-notification`) | `UNUserNotificationCenter` |
+| Mac | `NSBackgroundActivityScheduler` | APNs (its entitlement is not generated yet) | `UNUserNotificationCenter` |
+| Android | a persisted `JobScheduler` job (WorkManager is not in the offline Maven graph; it runs on JobScheduler itself) | UnifiedPush, the receiver protocol implemented directly; the person's distributor (FCM through one, if they choose) | `NotificationManager`, `AlarmManager` |
+| Desktop, browser | none | none (`Unavailable`) | none (`Unavailable`) |
+
+The server's side is any app's: `ark_peer::Server::push(sender, wake)`,
+with `ark_peer::Apns::sender` reading `_APNS_KEY_FILE`, `_APNS_KEY_ID` and
+`_APNS_TEAM_ID` (a file and two ids: the key is never in the repository
+or the store). An app's server opts in by calling it; neither money nor
+harken does. money is the worked example it is written for: its server
+would wake with `Wake::of("money").shown("Money", "New activity in
+Money")`, and its shell, on `Woken::Sync`/`Push`, would `Command::Sync`
+then schedule "N to review" from the accounts' `unapproved` counts,
+opening `/inbox`.
+
+**Why the Notification Service Extension is separate.** Apple runs it as
+a process of its own for each alert push marked `mutable-content`, with
+about 30 seconds and about 24 MB, and shows what it hands back. It cannot
+reach the app's process, runtime or replica, so it never runs the app's
+`update`; it only swaps words (modules/ark-notifications/README.md).
 
 ## Layers
 

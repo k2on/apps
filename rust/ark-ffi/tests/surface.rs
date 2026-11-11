@@ -418,3 +418,60 @@ fn two_attaches_share_one_runtime_and_detaching_leaves_it_running() {
         "one a process"
     );
 }
+
+/// A wake: the app's runtime hears it, the process is online for it, and
+/// the woken component is told to finish once the runtime is idle — not
+/// before — then the process goes offline again with no UI attached.
+/// Falsified by `woken` not waiting on `idle`: `done` was told while the
+/// runtime still synced.
+#[test]
+fn a_wake_is_work_until_the_runtime_is_idle() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    struct App {
+        heard: Mutex<Vec<ark_app::Woken>>,
+        busy: AtomicBool,
+    }
+    impl ark_ffi::Wakeful for App {
+        fn woken(&self, reason: ark_app::Woken) -> bool {
+            self.heard.lock().unwrap().push(reason);
+            self.busy.store(true, Ordering::SeqCst);
+            true
+        }
+        fn idle(&self) -> bool {
+            !self.busy.load(Ordering::SeqCst)
+        }
+    }
+    struct Done(std::sync::mpsc::Sender<bool>);
+    impl ark_ffi::WakeDone for Done {
+        fn finished(&self, idle: bool) {
+            let _ = self.0.send(idle);
+        }
+    }
+
+    let process = ark_ffi::ArkProcess::apart();
+    let online = Arc::new(Mutex::new(vec![]));
+    let o = online.clone();
+    process.with_link(move |on| o.lock().unwrap().push(on));
+    let app = Arc::new(App {
+        heard: Mutex::new(vec![]),
+        busy: AtomicBool::new(false),
+    });
+    process.set_wakeful(Some(app.clone()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    process.clone().wake(ark_ffi::WakeReason::Sync, 5_000, Arc::new(Done(tx)));
+    assert_eq!(*app.heard.lock().unwrap(), vec![ark_app::Woken::Sync]);
+    assert!(process.online(), "online for the wake");
+    assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "not done while it syncs");
+    app.busy.store(false, Ordering::SeqCst);
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(true));
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(!process.online(), "offline again: no UI, no work");
+    assert_eq!(*online.lock().unwrap(), vec![true, false]);
+    // Out of time: told so.
+    app.busy.store(true, Ordering::SeqCst);
+    let (tx, rx) = std::sync::mpsc::channel();
+    process.clone().settle(100, Arc::new(Done(tx)));
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(2)), Ok(false));
+}

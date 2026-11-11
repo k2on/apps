@@ -43,7 +43,7 @@ external = ["serde_json"]
 crates = [
   "ark-peer", "arkdb", "ark-auth", "ark-push", "ark-ffi", "ark-format-ffi",
   "ark-haptics", "ark-clipboard", "ark-share", "ark-camera", "ark-scanner",
-  "ark-media-player", "ark-notifications", "ark-secure-store",
+  "ark-media-player", "ark-notifications", "ark-background", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
   "money-iced", "money-server", "money-web", "money-seed", "money-bridge", "money-views",
   "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",

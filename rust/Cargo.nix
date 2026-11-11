@@ -67,6 +67,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-background" = rec {
+      packageId = "ark-background";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-background";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-camera" = rec {
       packageId = "ark-camera";
       build = internal.buildRustCrateWithFeatures {
@@ -1283,6 +1293,10 @@ rec {
         ];
         devDependencies = [
           {
+            name = "ark-background";
+            packageId = "ark-background";
+          }
+          {
             name = "ark-camera";
             packageId = "ark-camera";
           }
@@ -1465,6 +1479,29 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "ffi" "server" ];
       };
+      "ark-background" = rec {
+        crateName = "ark-background";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-background; };
+        libName = "ark_background";
+        dependencies = [
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "uniffi";
+            packageId = "uniffi";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "ffi" = [ "dep:uniffi" ];
+        };
+        resolvedDefaultFeatures = [ "ffi" ];
+      };
       "ark-camera" = rec {
         crateName = "ark-camera";
         version = "0.1.0";
@@ -1552,9 +1589,18 @@ rec {
             packageId = "ark-module";
           }
           {
+            name = "ark-notifications";
+            packageId = "ark-notifications";
+            features = [ "ffi" ];
+          }
+          {
             name = "ark-peer";
             packageId = "ark-peer";
             usesDefaultFeatures = false;
+          }
+          {
+            name = "ark-push";
+            packageId = "ark-push";
           }
           {
             name = "ark-secure-store";
@@ -15406,10 +15452,6 @@ rec {
             name = "ark-peer";
             packageId = "ark-peer";
             features = [ "server" ];
-          }
-          {
-            name = "ark-push";
-            packageId = "ark-push";
           }
           {
             name = "axum";

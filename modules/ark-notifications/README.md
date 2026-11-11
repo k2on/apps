@@ -33,6 +33,12 @@ process's runtime turns an `Action` and a `Pushed` into a wake-up
 
 ## Push
 
+Off by default, opt-in per app and per person: only an app whose app.toml
+says `[background] push = true` has any of it in its projects, and that
+app registers only once the person turns it on (`ark_app::background`'s
+"Notify Me"); turning it off unregisters and takes the session's push row
+away. Local notices are every listing app's, as before.
+
 **A push is only a wake-up.** The server never puts the app's data in one:
 no name, amount or word from a row. Its hub wakes the devices of the
 sessions that are not connected when the app's rows change (`ark_peer`'s
@@ -87,7 +93,7 @@ sync.
 | | Local notices | Push | Permission |
 |---|---|---|---|
 | iPhone, iPad, Mac | `UNUserNotificationCenter`: a time trigger for later, a category per set of buttons, a thread per channel | APNs | asked at run time (`requestAuthorization`) |
-| Android | `NotificationManager`, a channel per kind, an `AlarmManager` alarm for later (set again after a restart) | UnifiedPush | `POST_NOTIFICATIONS`, asked at run time on Android 13 and later (`NotificationsPermission`, put once at the app's root) |
+| Android | `NotificationManager`, a channel per kind, an `AlarmManager` alarm for later | UnifiedPush | `POST_NOTIFICATIONS`, asked at run time on Android 13 and later (`NotificationsPermission`, put once at the app's root) |
 | Desktop, browser | Unavailable | Unavailable | — |
 
 ## Permissions
@@ -96,8 +102,10 @@ sync.
   (`authorize`) before its first notice. Push: the `aps-environment`
   entitlement and the `remote-notification` background mode, written only
   for an app whose app.toml says `[background] push = true`.
-- Android: `POST_NOTIFICATIONS` (Android 13 and later, asked at run time),
-  `RECEIVE_BOOT_COMPLETED` (a notice's alarm set again after a restart).
+- Android: `POST_NOTIFICATIONS` (Android 13 and later, asked at run time).
+  Nothing runs at boot: a notice for later is set again after a restart
+  only in an app that declares `[background]` (ark-background's boot
+  receiver, with `RECEIVE_BOOT_COMPLETED`).
   Push adds the UnifiedPush receiver (`ArkPushReceiver`, exported: a
   distributor is another app; it takes only what names this install's
   token), only for an app that declares it.

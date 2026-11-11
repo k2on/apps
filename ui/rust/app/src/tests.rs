@@ -429,3 +429,119 @@ mod woken {
         assert!(rt.is_idle(&host.store));
     }
 }
+
+/// The person's say: a fixture app that embeds "Notify Me" and declares a
+/// background sync, over the fakes. Nothing is asked of the device until
+/// the person turns it on, and turning it off takes everything back.
+mod notify_me {
+    use super::*;
+    use crate::background::{self, Notify, NotifyApp, NotifyMsg};
+
+    struct Fixture;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Msg {
+        Notify(NotifyMsg),
+    }
+
+    impl App for Fixture {
+        type Key = NoView;
+        type State = Notify;
+        type Msg = Msg;
+        type Change = ();
+        type Route = ();
+        type Request = ();
+        type Screen = background::NotifyPage;
+
+        fn holds(_: &Notify) -> Vec<NoView> {
+            vec![]
+        }
+        fn update(s: &mut Notify, msg: Msg, _: &Data<'_, NoView>) -> Vec<Command<Self>> {
+            match msg {
+                Msg::Notify(m) => background::update::<Self>(s, m, 1800),
+            }
+        }
+        fn screen(s: &Notify, _: &Data<'_, NoView>) -> background::NotifyPage {
+            background::page(s, "New activity")
+        }
+    }
+
+    impl NotifyApp for Fixture {
+        fn notify(m: NotifyMsg) -> Msg {
+            Msg::Notify(m)
+        }
+    }
+
+    struct Device {
+        store: Store<NoView>,
+        modules: Modules,
+        inbox: super::Inbox<Msg>,
+    }
+
+    impl Host<Fixture> for Device {
+        fn read<R>(&self, f: impl FnOnce(&dyn Views<NoView>) -> R) -> R {
+            f(&self.store)
+        }
+        fn now_ms(&self) -> i64 {
+            0
+        }
+        fn send(&mut self, _: ()) -> Result<(), String> {
+            Ok(())
+        }
+        fn open(&mut self, _: ()) {}
+        fn ask(&mut self, ticket: Ticket, ask: Ask<Msg>) {
+            self.inbox.ask(&self.modules, ticket, ask)
+        }
+    }
+
+    /// Falsified by registering at `Load` whatever was set: a first launch
+    /// registered for push before the person said anything.
+    #[test]
+    fn off_until_the_person_turns_it_on_and_off_again_when_they_turn_it_off() {
+        let (notices, sync) = (ark_notifications::Fake::new(), ark_background::Fake::new());
+        notices.hand_out(Some(ark_app::modules::notifications::PushEndpoint::Apns {
+            token: "ab".into(),
+            topic: "fixture".into(),
+            sandbox: true,
+        }));
+        let mut modules = Modules::new();
+        notices.register(&mut modules);
+        sync.register(&mut modules);
+        let mut d = Device {
+            store: Store::new(),
+            modules,
+            inbox: super::Inbox::default(),
+        };
+        let mut rt = Runtime::<Fixture>::new();
+        let step = |rt: &mut Runtime<Fixture>, d: &mut Device, m: NotifyMsg| {
+            rt.dispatch(Msg::Notify(m), d);
+            d.inbox.clone().drain(rt, d);
+        };
+
+        // A first launch: off, nothing asked of the device.
+        step(&mut rt, &mut d, NotifyMsg::Load);
+        assert!(!rt.state().on && !notices.registered() && sync.every().is_none());
+        assert_eq!(notices.asked(), 0, "the person was not asked");
+
+        // The person says no in the system's dialog: still off, and why.
+        notices.allow(false);
+        step(&mut rt, &mut d, NotifyMsg::Turn(true));
+        assert!(!rt.state().on && !notices.registered() && sync.every().is_none());
+        assert!(rt.screen(&d).note.contains("Settings"));
+
+        // Yes: registered for push, the sync scheduled.
+        notices.allow(true);
+        step(&mut rt, &mut d, NotifyMsg::Turn(true));
+        assert!(rt.state().on && notices.registered());
+        assert_eq!(sync.every(), Some(1800));
+
+        // The next launch reads it back, on.
+        let mut again = Runtime::<Fixture>::new();
+        step(&mut again, &mut d, NotifyMsg::Load);
+        assert!(again.state().on);
+
+        // Off: unregistered and the sync stopped.
+        step(&mut rt, &mut d, NotifyMsg::Turn(false));
+        assert!(!rt.state().on && !notices.registered() && sync.every().is_none());
+    }
+}

@@ -117,7 +117,8 @@ impl Notifications for Fake {
     }
 
     fn unregister_push(&self) {
-        self.seen().registered = false
+        self.seen().registered = false;
+        self.hear(NotificationEvent::Unregistered)
     }
 
     fn set_listener(&self, listener: Option<Arc<dyn NotificationListener>>) {
