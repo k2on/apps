@@ -61,5 +61,3 @@ hmac = "0.12"
 sha2 = { workspace = true }
 base64 = "0.22"
 serde_json = { workspace = true }
-# The provider's ES256 key in `tests/oidc.rs`, as Kanidm signs.
-p256 = { version = "0.13", features = ["ecdsa"] }

@@ -1424,11 +1424,6 @@ rec {
             packageId = "hmac";
           }
           {
-            name = "p256";
-            packageId = "p256";
-            features = [ "ecdsa" ];
-          }
-          {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "raw_value" ];

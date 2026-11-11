@@ -298,7 +298,6 @@ dependencies = [
  "hmac",
  "js-sys",
  "openidconnect",
- "p256",
  "percent-encoding",
  "qrcode",
  "serde",
