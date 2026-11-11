@@ -30,7 +30,12 @@ for attr in "$@"; do
   # as it is, with nothing evaluated again (each had evaluated the flake,
   # which under a busy runner was minutes). Its time said, so that it shows.
   start=$(date +%s)
-  if ! drv=$(nix eval --raw "$ref.drvPath" 2> "${TMPDIR:-/tmp}/nix-xcode.err"); then
+  # Evaluated already (NIX_XCODE_DRVS: `<attr> <drv>` lines, app-screens'
+  # warm-up), and still in the store: taken as it is.
+  drv=$(awk -v a="$attr" '$1 == a {print $2}' "${NIX_XCODE_DRVS:-/dev/null}" 2> /dev/null | head -1)
+  if [ -n "$drv" ] && [ -e "$drv" ]; then
+    echo "$attr: evaluated before, $drv" >&2
+  elif ! drv=$(nix eval --raw "$ref.drvPath" 2> "${TMPDIR:-/tmp}/nix-xcode.err"); then
     if grep -q "does not provide attribute" "${TMPDIR:-/tmp}/nix-xcode.err"; then
       echo "$attr: the checkout has no such package" >&2
       status=2
@@ -40,8 +45,9 @@ for attr in "$@"; do
       status=1
     fi
     continue
+  else
+    echo "$attr: evaluated in $(( $(date +%s) - start ))s, $drv" >&2
   fi
-  echo "$attr: evaluated in $(( $(date +%s) - start ))s, $drv" >&2
   # Taken whole, then searched: `nix … | grep -q` under pipefail reads a
   # match as a failure when grep leaves before nix has said everything.
   plan=$(nix build --dry-run "$drv^*" 2>&1)

@@ -788,12 +788,23 @@ jobs:
           # too, so that one is the evaluation cache's: money's, asked after
           # a warm-up of the package alone, took 196 seconds under the
           # servers' build and the simulator's boot (app-screens 42959400546).
+          # Each derivation is written down (`<attr> <drv>`, NIX_XCODE_DRVS),
+          # and nix-xcode.sh takes it from there rather than evaluate again:
+          # money's was evaluated again in 156s in 42965705977 all the same.
           start=$(date +%s)
+          : > "$RUNNER_TEMP/drvs"
           for a in $APPS; do
             for p in "$a-ios-simulator" "$a-macos"; do
-              nix eval --raw "git+file://$PWD/src#packages.aarch64-darwin.$p.drvPath" > /dev/null 2>&1 || true
+              t=$(date +%s)
+              if drv=$(nix eval --raw "git+file://$PWD/src#packages.aarch64-darwin.$p.drvPath" 2> "$RUNNER_TEMP/eval.err"); then
+                echo "$p $drv" >> "$RUNNER_TEMP/drvs"
+                echo "$p: $(( $(date +%s) - t ))s"
+              else
+                echo "$p: not evaluated ($(( $(date +%s) - t ))s): $(tail -n 1 "$RUNNER_TEMP/eval.err")"
+              fi
             done
           done
+          echo "NIX_XCODE_DRVS=$RUNNER_TEMP/drvs" >> "$GITHUB_ENV"
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
       # As screens.yaml: the newest iPhone Pro of the pinned Xcode's iOS
