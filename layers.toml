@@ -45,7 +45,7 @@ crates = [
   "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
   "ark-media-player", "ark-notifications", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
-  "money-iced", "money-server", "money-web", "money-seed", "money-bridge",
+  "money-iced", "money-server", "money-web", "money-seed", "money-bridge", "money-views",
   "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",
 ]
 uses = ["kernel", "core", "runtime", "app"]
@@ -55,6 +55,3 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"money-app -> ark-ui-gen" = "screens() (feature gen) moves to an adapter crate"
-"money-app -> arkui" = "the iced views (feature iced) move to an adapter crate"
-"money-app -> arkui-web" = "the browser's views (feature web) move to an adapter crate"

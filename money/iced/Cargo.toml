@@ -22,10 +22,10 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 # Signing in: a loopback listener and the system's browser; and the logins
 # a device remembers.
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
-arkui = { path = "../../ui/rust/arkui" }
+arkui = { path = "../../ui/rust/arkui", features = ["app"] }
 # The screens run in Rust once for every platform (ui/docs/app.md), and
 # their runtime.
-money-app = { path = "../app", features = ["iced"] }
+money-app = { path = "../app" }
 ark-app = { path = "../../ui/rust/app" }
 # The desktop's modules (money/app.toml): the clipboard, queued for iced's own task.
 ark-clipboard = { path = "../../modules/clipboard", features = ["desktop"] }

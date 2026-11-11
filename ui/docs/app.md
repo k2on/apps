@@ -110,8 +110,6 @@ names and writes its entry points beside it, in a module of the same name:
 | Entry point | Backend | What it is |
 |---|---|---|
 | `accounts::view(&page)` | `Real` | the `View` of this record: `for` makes a row per item, `if` takes its branch |
-| `accounts::iced(&page)` | `Real`, drawn by `arkui::view` | an `Element<'static, Msg>` (crate feature `iced`) |
-| `accounts::web(&page)` | `Real`, drawn by `arkui-web` | Leptos over the DOM (feature `web`) |
 | `accounts::record()` | `Recorder` | the view over paths: `for` walked once with a symbolic item, `if` both ways |
 
 What it rewrites, and only that: a read of the record's fields (`p.f.g`,
@@ -130,12 +128,13 @@ the phones get generated code.
 
 ### The Phones' Code: `ark-ui-gen`
 
-An app hands its screens over once, as a registry its crate exports
-under its `gen` feature (`money_app::screens()`: each `#[view]`'s
-recording and its names in Swift and Kotlin, and the menu bar's
-`commands()`). An app has no generator of its own: nix writes a tiny
-main for it (`fn main() { ark_ui_gen::app::main(money_app::screens()) }`,
-nix/ark-app.nix), links it with the app's crate and runs it while it
+An app hands its screens over once, as a registry an adapter crate of
+its own exports (app.toml's `[gen] crate`; money's is money/views,
+`money_views::screens()`: each `#[view]`'s recording and its names in
+Swift and Kotlin, and the menu bar's `commands()`). An app has no
+generator of its own: nix writes a tiny main for it (`fn main() {
+ark_ui_gen::app::main(money_views::screens()) }`, nix/ark-app.nix),
+links it with that crate and runs it while it
 builds the app's native projects, which then hold
 
 - `<Name>.swift` (`AccountsView`, `MoneyShellView`, `MoneySettingsView`,
@@ -402,8 +401,10 @@ the demo's peer (money/seed) are out of the core and the app; display
 text with a figure in it is the app's (`money_app::words`), and
 ark-format's UniFFI exports are an adapter's (ark-format-ffi, namespace
 `ark_format`); ark-module is the runtime's, and the modules money asks
-are ports of it. Left: money-app's views behind features — iced, the
-browser and `screens()` — into adapter crates of their own.
+are ports of it; a view is drawn by the adapter that draws it
+(`arkui::view::element(accounts::view(&page))` in money/iced,
+`arkui_web::render(…)` in money/web) and recorded for the phones by
+money/views. The allowlist is empty.
 
 ## Generated, Not Committed
 
@@ -414,7 +415,9 @@ Nothing native of an app is committed. An app is
 ├── app.toml      what it is: name, id, accent, platforms, modules, what it asks of each platform
 ├── icon.svg      its icon, every platform's
 ├── core/         its domain, and (`demo`) its demo's household
-├── app/          ark-app: its state, messages, update, #[view]s, `screens()` and `commands()`
+├── app/          ark-app: its state, messages, update, #[view]s and `commands()`
+├── views/        `screens()`: its #[view]s recorded for the phones' generator
+├── bridge/       the phones' bridge: the UniFFI twins, the exports
 ├── server/       when it has one
 ├── screens/      shots.json, server.sh
 └── native/       what is not written in Rust yet (shrinking: see below)
@@ -452,7 +455,9 @@ accent = "green"               # ui/theme.toml's [accent.<name>]
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
 modules = ["haptics", "clipboard", "share"]
 scheme = "money"               # money://auth (the sign-in's return), money://<route>
-crate = "money-app"            # the app's crate: its screens(), its UniFFI namespace
+crate = "money-app"            # the app's crate
+[gen]
+crate = "money-views"          # its screens(), which the phones' generator writes from
 
 [icon]
 svg = "icon.svg"               # its full-canvas rectangle the ground, the rest the mark

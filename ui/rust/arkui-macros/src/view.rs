@@ -15,8 +15,10 @@
 //! What it cannot follow is a compile error that says so: a method called
 //! on the record, `match` over it, a binding that is not one name, `while`
 //! and `loop`. It writes the function's entry points into a module of the
-//! same name: `view(&record)`, `record()`, and, under the calling crate's
-//! features, `iced(&record)` and `web(&record)`.
+//! same name: `view(&record)` and `record()`. Drawing it is a toolkit's,
+//! an adapter's: `arkui::view::element(view(&record))` in iced,
+//! `arkui_web::render(view(&record))` in the browser; the app's crate
+//! depends on neither.
 
 use std::collections::BTreeSet;
 
@@ -34,7 +36,8 @@ pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
         ReturnType::Type(_, t) => t.clone(),
         ReturnType::Default => return Err(Error::new(item.sig.span(), "a view returns a View<Msg>")),
     };
-    let msg = view_msg(&ret)?;
+    // It returns a `View<Msg>`, or says so.
+    view_msg(&ret)?;
     if !item.sig.generics.params.is_empty() {
         return Err(Error::new(
             item.sig.generics.span(),
@@ -95,17 +98,6 @@ pub fn expand(item: ItemFn) -> syn::Result<TokenStream> {
                 super::#name::<::ark_app::view::Recorder>(#(#roots),*)
             }
 
-            /// The view as iced draws it.
-            #[cfg(feature = "iced")]
-            pub fn iced(#(#plain_params),*) -> ::arkui::view::Element<'static, #msg> {
-                ::arkui::view::element(view(#(#names),*))
-            }
-
-            /// The view as the browser draws it: Leptos over the real DOM.
-            #[cfg(feature = "web")]
-            pub fn web(#(#plain_params),*) -> ::arkui_web::AnyView {
-                ::arkui_web::render(view(#(#names),*))
-            }
         }
     })
 }

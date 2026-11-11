@@ -17,17 +17,6 @@ ark-format = { path = "../../rust/ark-format" }
 money-core = { path = "../core" }
 # Where money can be, spelled as paths (`src/routes.rs`).
 ark-router = { path = "../../ui/rust/router" }
-ark-ui-gen = { path = "../../ui/rust/gen", optional = true }
-arkui = { path = "../../ui/rust/arkui", optional = true }
-arkui-web = { path = "../../ui/rust/web", optional = true, default-features = false }
-
-[features]
-# `screens()`: the views as the phones' generator takes them.
-gen = ["dep:ark-ui-gen"]
-# `accounts::iced(&page)`: the views as iced draws them.
-iced = ["dep:arkui", "arkui/app"]
-# `accounts::web(&page)`: the views as the browser draws them.
-web = ["dep:arkui-web"]
 
 [dev-dependencies]
 # The fakes of the device modules money lists (money/app.toml), whose ports

@@ -133,7 +133,7 @@ impl App {
     /// The Budget page.
     pub(crate) fn view_budget(&self) -> Element<'_, Message> {
         let page = self.budget.screen_of(&self.peer.store, now_ms(&self.today));
-        money_app::budget::view::budget::iced(&page).map(Message::Budget)
+        arkui::view::element(money_app::budget::view::budget::view(&page)).map(Message::Budget)
     }
 
     /// A message of the Accounts page taken.
@@ -153,6 +153,6 @@ impl App {
     /// The Accounts page.
     pub(crate) fn view_accounts(&self) -> Element<'_, Message> {
         let page = self.accounts.screen_of(&self.peer.store, now_ms(&self.today));
-        money_app::accounts::view::accounts::iced(&page).map(Message::Accounts)
+        arkui::view::element(money_app::accounts::view::accounts::view(&page)).map(Message::Accounts)
     }
 }

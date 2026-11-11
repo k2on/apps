@@ -4356,9 +4356,6 @@ dependencies = [
  "ark-peer",
  "ark-router",
  "ark-share",
- "ark-ui-gen",
- "arkui",
- "arkui-web",
  "money-core",
  "money-seed",
 ]
@@ -4445,6 +4442,14 @@ dependencies = [
  "tokio",
  "tungstenite",
  "ureq",
+]
+
+[[package]]
+name = "money-views"
+version = "0.1.0"
+dependencies = [
+ "ark-ui-gen",
+ "money-app",
 ]
 
 [[package]]

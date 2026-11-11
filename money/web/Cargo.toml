@@ -21,7 +21,7 @@ ark-peer = { path = "../../rust/ark-peer", default-features = false }
 ark-format = { path = "../../rust/ark-format" }
 arkui-web = { path = "../../ui/rust/web", default-features = false }
 leptos = { version = "0.8", default-features = false }
-money-app = { path = "../app", features = ["web"] }
+money-app = { path = "../app" }
 # The domain, and (`demo`) its household: three months of a family's budget up to today.
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (money/seed).

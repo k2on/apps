@@ -21,8 +21,8 @@
 //! the author never names, rewriting what reads the record — `p.net_worth`,
 //! `for shelf in p.shelves`, `if a.closed`, `if let Some(f) = p.adding` —
 //! into the backend's calls, and writes its entry points beside it
-//! (`accounts::view(&page)`, `accounts::record()`, and under the crate's
-//! features `accounts::iced(&page)` and `accounts::web(&page)`). There are
+//! (`accounts::view(&page)`, `accounts::record()`; a toolkit draws the
+//! view, `arkui::view::element` and `arkui_web::render`). There are
 //! two backends:
 //!
 //! - [`Real`]: the record itself. A `for` makes a row for each item, an

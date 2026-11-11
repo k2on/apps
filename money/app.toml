@@ -87,6 +87,11 @@ It needs a money server to sign in to; there is no account anywhere else. The se
 This is a release build signed with a key committed to that repository, so anyone could sign an APK as this app. It is for the household running the server.
 """
 
+[gen]
+# The screens the phones' generator writes (`screens()`): an adapter crate,
+# which nix's generated money-gen links with ark-ui-gen.
+crate = "money-views"
+
 [ffi]
 # The phones' bridge (an adapter crate: the UniFFI twins of money-core's
 # and money-app's types, and the exports over them), which nix's
