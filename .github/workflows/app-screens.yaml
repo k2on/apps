@@ -433,10 +433,16 @@ jobs:
           persist-credentials: false
       # What was fetched listed beside it, so the artifact is there even
       # when F-Droid offers none of the apps.
+      # A dry run whose build failed or was cancelled for an app fails here
+      # (published.sh), after the others are fetched and uploaded: their
+      # shots are still taken.
       - run: |
-          bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS
+          status=0
+          bash .github/screens/published.sh android "$RUNNER_TEMP/apk" $APPS || status=$?
           mkdir -p "$RUNNER_TEMP/apk" && ls "$RUNNER_TEMP/apk" > "$RUNNER_TEMP/apk/fetched.txt"
+          exit $status
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apks-published
           path: ${{ runner.temp }}/apk
@@ -447,7 +453,7 @@ jobs:
     needs: [which, apks, servers]
     if: >-
       !cancelled() && needs.which.outputs.mode != '' && needs.which.outputs.android != '' &&
-      (needs.apks.result == 'success' || needs.apks.result == 'skipped')
+      (needs.apks.result == 'success' || needs.apks.result == 'skipped' || needs.apks.result == 'failure')
     strategy:
       fail-fast: false
       matrix:

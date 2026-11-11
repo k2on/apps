@@ -39,7 +39,8 @@ case $phone in
     # cancelled its build, and every Android job then failed waiting). Only
     # an app whose `apk` job succeeded and built nothing — its APK's inputs
     # seen built before (build.yaml's `apk-seen`), unmoved — keeps
-    # F-Droid's, with a warning.
+    # F-Droid's, with a warning. An app that fails so is left out (no APK of
+    # it at all), the others fetched, and the script fails at its end.
     if [ -n "${COMMIT:-}" ]; then
       # Asked until it answers (a refusal, "API rate limit exceeded", is
       # no answer: in app-screens 42965705977 its text was taken for the
@@ -55,10 +56,12 @@ case $phone in
       done
       if [ -n "$run" ] && ! [[ $run =~ ^[0-9]+$ ]]; then
         echo "::error::build's run at ${COMMIT:0:7}: the API said '$run'"
+        rm -rf "${dir:?}"/apk-*
         exit 1
       fi
       if [ -z "$run" ]; then
         echo "::error::no build run at ${COMMIT:0:7}: a dry run takes that commit's APKs, so dispatch build.yaml on the branch at that commit first"
+        rm -rf "${dir:?}"/apk-*
         exit 1
       fi
       for a in "$@"; do
@@ -77,15 +80,20 @@ case $phone in
           if [ "$job" = success ]; then
             echo "::warning::$a: build's run $run at ${COMMIT:0:7} built no APK (its inputs seen built before); F-Droid's is taken"
           else
-            echo "::error::$a: build's run $run at ${COMMIT:0:7} ended ${conclusion:-unfinished} with no APK (its apk job: ${job:-none}); not taking F-Droid's in its place. Dispatch build.yaml again at that commit, then this run."
-            exit 1
+            echo "::error::$a: build's run $run at ${COMMIT:0:7} ended ${conclusion:-unfinished} with no APK (its apk job: ${job:-none}); not taking F-Droid's in its place, so its Android shots are not taken. Dispatch build.yaml again at that commit, then this run."
+            rm -rf "${dir:?}/apk-$a"
+            bad=1
           fi
         else
-          echo "::error::$a: build's APK at ${COMMIT:0:7} (run $run) would not come"
-          exit 1
+          echo "::error::$a: build's APK at ${COMMIT:0:7} (run $run) would not come; its Android shots are not taken"
+          rm -rf "${dir:?}/apk-$a"
+          bad=1
         fi
       done
     fi
+    # The other apps' shots are still taken (the emulators' jobs run on
+    # what was fetched), and this fails once they are listed.
+    exit "${bad:-0}"
     ;;
   *) echo "usage: published.sh android <dir> <app>..."; exit 1 ;;
 esac
