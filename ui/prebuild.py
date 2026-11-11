@@ -581,6 +581,12 @@ tasks.withType<Test>().configureEach {{
     maxParallelForks = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 }}
 
+// ArkUI's `internal`s stay the app's to see, as when it was compiled as part
+// of the app (a test may read one). A friend of each jar (`arkuiLib`).
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {{
+    if (arkuiLib != null) friendPaths.from(fileTree(arkuiLib) {{ include("*.jar") }})
+}}
+
 // The screenshots are `recordPaparazziDebug`'s; the APK's build runs every
 // other test, so a layoutlib that cannot draw a page holds back the
 // screenshots and not the app.

@@ -173,6 +173,12 @@ dependencies {
     testImplementation("org.json:json:20240303")
 }
 
+// arkui's `internal`s stay the app's to see, as when it was compiled as part of the app: its
+// tests read ExpandingCardState's (ReducedMotionTests). A friend of each jar (`arkuiLib`).
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (arkuiLib != null) friendPaths.from(fileTree(arkuiLib) { include("*.jar") })
+}
+
 // The look's guards against a mistake in how a screen uses it throw here
 // (`ui.Strict`), as in a debuggable build; a release says them once in the
 // log and keeps working.
