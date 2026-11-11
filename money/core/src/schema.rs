@@ -523,8 +523,8 @@ pub struct Money {
     pub bank: Bank,
     pub linked: Linked,
     pub asked: Asked,
-    pub sign_in: ark_auth::SignIn,
-    pub role: ark_auth::Role,
+    pub sign_in: ark::auth::SignIn,
+    pub role: ark::auth::Role,
     pub bank_ask: BankAsk,
     /// No longer read: assignment by rule became formulas.
     pub rule: Rule,
@@ -537,4 +537,4 @@ pub struct Money {
     pub photo: Photo,
 }
 
-ark_auth::install!(Money);
+ark::auth_tables!(Money);

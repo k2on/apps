@@ -952,7 +952,7 @@ fn the_whole_library_onto_a_playlist() {
 #[test]
 fn the_welcome_is_the_servers_and_makes_one_favorites() {
     let mut c = Lib::new();
-    let alice = ark_auth::Welcome {
+    let alice = ark::auth::Welcome {
         user: "alice".into(),
         name: "Alice".into(),
     };

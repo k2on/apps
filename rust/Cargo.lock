@@ -2738,7 +2738,6 @@ name = "harken-domain"
 version = "0.1.0"
 dependencies = [
  "ark",
- "ark-auth",
  "ark-ffi",
  "ark-peer",
  "ark-router",
@@ -4363,9 +4362,7 @@ dependencies = [
 name = "money-core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ark",
- "ark-auth",
  "ark-ffi",
  "ark-format",
  "ark-peer",
@@ -4392,6 +4389,14 @@ dependencies = [
  "money-server",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "money-seed"
+version = "0.1.0"
+dependencies = [
+ "ark-peer",
+ "money-core",
 ]
 
 [[package]]

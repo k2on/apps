@@ -377,6 +377,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "money-seed" = rec {
+      packageId = "money-seed";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "money-seed";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "money-server" = rec {
       packageId = "money-server";
       build = internal.buildRustCrateWithFeatures {
@@ -8825,11 +8835,6 @@ rec {
             packageId = "ark";
           }
           {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
-          }
-          {
             name = "ark-ffi";
             packageId = "ark-ffi";
             optional = true;
@@ -14164,29 +14169,12 @@ rec {
         crateName = "money-core";
         version = "0.1.0";
         edition = "2021";
-        crateBin = [
-          {
-            name = "money-seed";
-            path = "src/bin/money-seed.rs";
-            requiredFeatures = [ "cli" ];
-          }
-        ];
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/core; };
         libName = "money_core";
         dependencies = [
           {
-            name = "anyhow";
-            packageId = "anyhow";
-            optional = true;
-          }
-          {
             name = "ark";
             packageId = "ark";
-          }
-          {
-            name = "ark-auth";
-            packageId = "ark-auth";
-            usesDefaultFeatures = false;
           }
           {
             name = "ark-ffi";
@@ -14220,10 +14208,9 @@ rec {
           }
         ];
         features = {
-          "cli" = [ "demo" "dep:anyhow" ];
           "ffi" = [ "dep:uniffi" "dep:ark-ffi" "ark-format/ffi" ];
         };
-        resolvedDefaultFeatures = [ "cli" "demo" "ffi" ];
+        resolvedDefaultFeatures = [ "demo" "ffi" ];
       };
       "money-iced" = rec {
         crateName = "money-iced";
@@ -14308,6 +14295,32 @@ rec {
         features = {
         };
         resolvedDefaultFeatures = [ "demo" ];
+      };
+      "money-seed" = rec {
+        crateName = "money-seed";
+        version = "0.1.0";
+        edition = "2021";
+        crateBin = [
+          {
+            name = "money-seed";
+            path = "src/main.rs";
+            requiredFeatures = [ ];
+          }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../money/seed; };
+        dependencies = [
+          {
+            name = "ark-peer";
+            packageId = "ark-peer";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "money-core";
+            packageId = "money-core";
+            features = [ "demo" ];
+          }
+        ];
+
       };
       "money-server" = rec {
         crateName = "money-server";

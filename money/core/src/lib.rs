@@ -8,12 +8,11 @@
 //! them ([`transfers`]), and the banks, through Plaid ([`plaid`]), connected
 //! from the app ([`banks`]) — one file
 //! per part; every view an app opens, and what a page is made of
-//! ([`views`]). Who is signed in is `ark-auth`'s two tables and functions, and
+//! ([`views`]). Who is signed in is the kernel's two tables and functions (`ark::auth`), and
 //! [`feed`]. [`domain`] registers every function by its name. Behind a
 //! feature: the rows the phones read typed as UniFFI records (`ffi`, for
-//! the phones' library), and the demo's household ([`demo`], `demo`; and
-//! `money-seed`, which writes it into a server's data directory, `cli`),
-//! which an app or a server carries only when it asks for it.
+//! the phones' library), and the demo's household ([`demo`], `demo`; money/seed's
+//! `money-seed` writes it into a server's data directory), which an app or a server carries only when it asks for it.
 //!
 //! **One budget, the household's.** Everybody a server lets in — the
 //! people its OpenID provider knows as the household — reads and writes the
@@ -88,7 +87,7 @@ pub fn domain() -> Domain {
         receipts::add_charges, receipts::pay_charge, receipts::charges, receipts::candidates, receipts::add_photo, receipts::photos, receipts::write_receipt, receipts::for_txn,
         plaid::import, plaid::link, plaid::open, plaid::ignore, plaid::sync, plaid::banks, plaid::linked, plaid::retired,
         banks::connect, banks::reconnect, banks::add_accounts, banks::disconnect, banks::answer, banks::failed, banks::asks, feed)
-    .with(ark_auth::register::<Money>)
+    .with(ark::auth::register::<Money>)
     .with(<Photo as ark::effect::Effect>::register::<Money>)
     .with(|d| migrations::all().into_iter().fold(d, Domain::migration))
 }
@@ -100,7 +99,7 @@ pub fn feed() -> Scope<Money> {
     fn all<R>(_: &Ctx, _: &R) -> bool {
         true
     }
-    ark_auth::feed(
+    ark::auth::feed(
         Scope::new()
             .on::<Account>(all)
             .on::<Category>(all)

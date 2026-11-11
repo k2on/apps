@@ -431,8 +431,8 @@ pub struct Harken {
     pub listening: Listening,
     pub listening_device: ListeningDevice,
     pub listening_scrub: ListeningScrub,
-    pub sign_in: ark_auth::SignIn,
-    pub role: ark_auth::Role,
+    pub sign_in: ark::auth::SignIn,
+    pub role: ark::auth::Role,
     pub look: Look,
     pub show: Show,
     pub episode: Episode,
@@ -446,4 +446,4 @@ pub struct Harken {
     pub voice_name: VoiceName,
 }
 
-ark_auth::install!(Harken);
+ark::auth_tables!(Harken);

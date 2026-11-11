@@ -2,8 +2,14 @@
 //! S1): a sign-in is a [`SignIn`] row and a granted role a [`Role`] row,
 //! two tables every app that signs people in puts in its schema.
 //!
+//! They are the kernel's, beside the log and the domain they are rows of:
+//! every peer judges a `Hello` by them and a domain embeds them in its
+//! schema, while how a person comes to sign in (the provider, the tokens,
+//! the browser's round trip) is `ark-auth`'s, an adapter's. A domain names
+//! these tables and registers these functions; it never reaches for sign-in.
+//!
 //! The server writes a sign-in as an entry it authors itself — a raw write
-//! no client's intent can name (`server::Auth::issue`) — and judges every
+//! no client's intent can name (`ark_auth::server::Auth::issue`) — and judges every
 //! token by it: the token is the row's id and the server's HMAC of it, so
 //! the row holds no secret and syncs like any other. A device reads who it
 //! is with [`current`], lists its person's sign-ins with [`mine`] and ends
@@ -17,8 +23,8 @@
 //! ([`AuthTables`], which [`install!`] implements) and registered by
 //! [`register`].
 
-use ark::db::Tab;
-use ark::prelude::*;
+use crate::db::Tab;
+use crate::prelude::*;
 
 /// The role that grants roles.
 pub const ADMIN: &str = "admin";
@@ -49,7 +55,7 @@ pub struct SignIn {
     /// server's own peer's.
     pub roles: Vec<String>,
     /// The person's picture as the provider said it at this sign-in
-    /// ([`crate::Account::picture`]). Defaulted: a row written before it
+    /// (`ark_auth::Account::picture`). Defaulted: a row written before it
     /// was added has none, and without a default it cannot be read at all.
     #[serde(default)]
     pub picture: String,
@@ -70,7 +76,7 @@ pub struct Revoke {
     pub id: String,
 }
 
-/// Who signed in for the first time, as [`server::Auth::welcome`] hands it
+/// Who signed in for the first time, as `ark_auth::server::Auth::welcome` hands it
 /// to the function an app names: authored by the server's authority, once a
 /// person's first sign-in row is written.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, Input)]
@@ -96,23 +102,23 @@ pub trait AuthTables: Tables + Sized {
     fn role_mut<'a, 't>(db: &'a mut Db<'t, Self>) -> &'a mut Tab<'t, Role>;
 }
 
-/// `install!(App)`: [`AuthTables`] for a schema whose tables `sign_in` and
-/// `role` are [`SignIn`] and [`Role`]. The app registers the functions
-/// with `.with(ark_auth::register::<App>)`.
+/// `auth_tables!(App)`: [`AuthTables`] for a schema whose tables `sign_in`
+/// and `role` are [`SignIn`] and [`Role`]. The app registers the functions
+/// with `.with(ark::auth::register::<App>)`.
 #[macro_export]
-macro_rules! install {
+macro_rules! auth_tables {
     ($s:ty) => {
-        impl $crate::AuthTables for $s {
-            fn sign_in<'a, 't>(db: &'a ::ark::db::Db<'t, Self>) -> &'a ::ark::db::Tab<'t, $crate::SignIn> {
+        impl $crate::auth::AuthTables for $s {
+            fn sign_in<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> &'a $crate::db::Tab<'t, $crate::auth::SignIn> {
                 &db.sign_in
             }
-            fn sign_in_mut<'a, 't>(db: &'a mut ::ark::db::Db<'t, Self>) -> &'a mut ::ark::db::Tab<'t, $crate::SignIn> {
+            fn sign_in_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::SignIn> {
                 &mut db.sign_in
             }
-            fn role<'a, 't>(db: &'a ::ark::db::Db<'t, Self>) -> &'a ::ark::db::Tab<'t, $crate::Role> {
+            fn role<'a, 't>(db: &'a $crate::db::Db<'t, Self>) -> &'a $crate::db::Tab<'t, $crate::auth::Role> {
                 &db.role
             }
-            fn role_mut<'a, 't>(db: &'a mut ::ark::db::Db<'t, Self>) -> &'a mut ::ark::db::Tab<'t, $crate::Role> {
+            fn role_mut<'a, 't>(db: &'a mut $crate::db::Db<'t, Self>) -> &'a mut $crate::db::Tab<'t, $crate::auth::Role> {
                 &mut db.role
             }
         }

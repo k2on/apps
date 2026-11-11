@@ -44,7 +44,7 @@ crates = [
   "ark-module", "ark-haptics", "ark-clipboard", "ark-share", "ark-camera",
   "ark-media-player", "ark-notifications", "ark-secure-store",
   "ark-ui-gen", "arkui", "arkui-glyphs", "arkui-web", "arkui-serve", "arkui-shots",
-  "money-iced", "money-server", "money-web",
+  "money-iced", "money-server", "money-web", "money-seed",
   "harken-server", "harken-player", "harken-iced", "harken-seed", "harken-ffi",
 ]
 uses = ["kernel", "core", "runtime", "app"]
@@ -54,13 +54,10 @@ external = ["*"]
 # it. The check fails on a violation not listed here, and on a line here
 # that is no longer a violation: delete the line in the change that fixes it.
 [allow]
-"money-core -> ark-auth" = "the household's roles are the domain's; sign-in is an adapter's"
 "money-core -> ark-peer" = "the view keys (ark_peer::store::ViewKey) move to the kernel, or the keys to money-app"
 "money-core -> ark-format" = "display text moves to money-app"
 "money-core -> ark-ffi" = "the FFI records are generated in the adapter"
 "money-core -> uniffi" = "the FFI records are generated in the adapter"
-"money-core -> anyhow" = "money-seed's command line (feature cli) moves to an adapter crate"
-"harken-domain -> ark-auth" = "the roles are the domain's; sign-in is an adapter's"
 "harken-domain -> ark-peer" = "the view keys move to the kernel, or the keys to the adapter"
 "harken-domain -> ark-router" = "routes move to the adapter that draws them"
 "harken-domain -> ark-ffi" = "the FFI records are generated in the adapter"

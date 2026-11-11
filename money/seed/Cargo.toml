@@ -1,0 +1,16 @@
+[package]
+name = "money-seed"
+version = "0.1.0"
+workspace = "../../rust"
+edition.workspace = true
+license.workspace = true
+description = "`money-seed DATA`: money's demo household (the core's `demo`) written into a money server's data directory, as the log it boots on."
+
+[[bin]]
+name = "money-seed"
+path = "src/main.rs"
+
+[dependencies]
+money-core = { path = "../core", features = ["demo"] }
+# The log on disk, and the clock.
+ark-peer = { path = "../../rust/ark-peer", default-features = false }

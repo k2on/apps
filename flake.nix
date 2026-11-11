@@ -285,8 +285,8 @@
             makeWrapper ${money-server-bin}/bin/money-server $out/bin/money-server --set-default MONEY_WEB ${money-web}
           '';
           # Each app's demo data (docs/seed.md): `<app>-seed DATA` writes what
-          # that app's server boots seeded from; money's is its core's `cli`.
-          money-seed = crate { packageId = "money-core"; features = [ "cli" ]; };
+          # that app's server boots seeded from; money's is money/seed.
+          money-seed = crate { packageId = "money-seed"; };
           # Each Ark app's generated pieces (nix/ark-app.nix): its
           # generator, the SwiftUI and Compose of its #[view]s (`<app>-ui`),
           # its native projects (`<app>-native`) and its prebuild.

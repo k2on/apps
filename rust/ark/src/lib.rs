@@ -23,6 +23,7 @@ extern crate self as ark;
 
 pub use domain::{effect, Domain};
 
+pub mod auth;
 pub mod db;
 pub mod domain;
 pub mod dynamic;

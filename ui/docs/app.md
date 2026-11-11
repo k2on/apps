@@ -345,9 +345,21 @@ the core is a `clippy.toml` whose `disallowed-methods` and
 `std::env`, `std::thread::spawn`, `SystemTime::now` and `Instant::now`:
 what such a crate needs of the world it is handed (the time is `Data::now_ms`'s,
 a file's bytes are its caller's). Their integration tests read fixtures
-and are allowed to (an `#![allow]` at each test's top); money-core's
-`money-seed` command line is the one piece of library code allowed,
-until it moves out (below).
+and are allowed to (an `#![allow]` at each test's top); no library code
+is. `money-seed`'s command line, which writes the demo's household to
+disk, is a crate of its own (money/seed), an adapter.
+
+**Who is signed in is the kernel's.** A domain's schema embeds two
+tables, `sign_in` and `role`, and registers the functions over them
+(revoke a session, grant a role, who am I); every peer judges a `Hello`
+by those rows. They are domain-agnostic and pure — rows and functions over
+`ark::db`, no I/O — so they are a kernel extension (`ark::auth`:
+`SignIn`, `Role`, `register`, `feed`, `ark::auth_tables!`) rather than a
+port: a port would make each domain restate the same two tables to stay
+off an adapter, and what varies between hosts is not the rows but how a
+person comes to sign in. That part — the provider, the tokens, the
+browser's round trip, the server's routes — is `ark-auth`'s, an adapter,
+which re-exports the rows as `ark_auth::rows` for its own code.
 
 **The allowlist.** `layers.toml`'s `[allow]` lists today's violations,
 each `"<crate> -> <dependency>"` with what removes it; a change that

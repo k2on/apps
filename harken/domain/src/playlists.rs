@@ -62,12 +62,12 @@ pub fn create_playlist(ctx: &Ctx, db: &mut Db<Harken>, input: CreatePlaylist) ->
 /// What everybody starts with: "Favorites".
 pub const FAVORITES: &str = "Favorites";
 
-/// A person's first sign-in (`ark_auth::server::Auth::welcome`): their
+/// A person's first sign-in (`ark::auth::server::Auth::welcome`): their
 /// Favorites, made by the server so that no device has to guess whether
 /// another already has. Its id is the person's, so two first sign-ins at
 /// once make one. Only the server's authority runs it.
 #[mutator("playlists.welcome")]
-pub fn welcome(ctx: &Ctx, db: &mut Db<Harken>, input: ark_auth::Welcome) -> Result<(), Refusal> {
+pub fn welcome(ctx: &Ctx, db: &mut Db<Harken>, input: ark::auth::Welcome) -> Result<(), Refusal> {
     if ctx.user() != "authority" {
         return Err(Refusal::new("only the server welcomes"));
     }

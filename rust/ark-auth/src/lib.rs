@@ -62,7 +62,10 @@ pub mod client;
 pub mod oidc;
 pub mod onboarding;
 pub mod remember;
-pub mod rows;
+/// The two tables and the functions over them are the kernel's
+/// (`ark::auth`): a domain embeds them without depending on sign-in.
+pub use ark::auth as rows;
+pub use ark::auth_tables as install;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 #[cfg(target_arch = "wasm32")]
