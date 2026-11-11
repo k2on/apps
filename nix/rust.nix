@@ -21,7 +21,14 @@
 # nix, in crate2nix's form beside its own (`crates`): an Ark app's generated
 # crates (nix/ark-app.nix), its generator's main and its phones' library,
 # resolved and built as any crate of the workspace is, for any target.
-{ lib, cargoNix, extraCrates ? { } }:
+#
+# `buildRust` is the toolchain every build machine's crate is compiled with
+# (a cross build's build scripts and proc macros), whatever the target's
+# toolchain: the plain one, with no target added, so that those crates are
+# one derivation for every target rather than one per toolchain. A target's
+# toolchain is that same toolchain with the target's std added (rustc's
+# `targets`), so the proc macros it compiles are the ones its rustc loads.
+{ lib, cargoNix, extraCrates ? { }, buildRust ? null }:
 let
   inherit (cargoNix.internal)
     expandFeatures enableFeatures dependencyFeatures filterEnabledDependencies sortedUnique;
@@ -150,7 +157,7 @@ let
       resolved = if unified != null then unified.resolved else resolve { inherit packageId features tests split targets; };
       builders = {
         target = args: (builderFor { inherit rust overrides; } pkgs args).overrideAttrs targetAttrs;
-        build = builderFor { inherit rust overrides; } pkgs.buildPackages;
+        build = builderFor { rust = if buildRust != null then buildRust else rust; inherit overrides; } pkgs.buildPackages;
       };
       fetch = p: config: p.fetchurl {
         name = "${config.crateName}-${config.version}.tar.gz";
@@ -199,11 +206,13 @@ let
   # resolves them (`cargo test --workspace`): each crate the union of what
   # each root's graph asks of it, so a crate is one build whichever root
   # reaches it. Each root `{ packageId; features ? [ "default" ]; tests ? false; }`,
-  # for the host. Passed to `build` as `unified`.
+  # for `pkgs`' host, and for a cross build its two graphs apart, as `build`
+  # has them. Passed to `build` as `unified`, with the same `pkgs`.
   unify = { pkgs, roots }:
     let
-      targets = { target = targetOf pkgs.stdenv.hostPlatform; build = targetOf pkgs.stdenv.hostPlatform; };
-      each = map (r: resolve { inherit (r) packageId; features = r.features or [ "default" ]; tests = r.tests or false; split = false; inherit targets; }) roots;
+      split = pkgs.stdenv.buildPlatform != pkgs.stdenv.hostPlatform;
+      targets = { target = targetOf pkgs.stdenv.hostPlatform; build = targetOf pkgs.stdenv.buildPlatform; };
+      each = map (r: resolve { inherit (r) packageId; features = r.features or [ "default" ]; tests = r.tests or false; inherit split targets; }) roots;
     in
     {
       resolved = lib.zipAttrsWith (_: lib.foldl' (a: b: a // b) { }) each;

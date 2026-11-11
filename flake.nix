@@ -122,6 +122,10 @@
           rustCrates = import ./nix/rust.nix {
             inherit lib;
             cargoNix = import ./rust/Cargo.nix { inherit pkgs; };
+            # A cross build's build scripts and proc macros by the plain
+            # toolchain, whichever target's it is (nix/rust.nix): one
+            # derivation each for every Android ABI, Apple slice and wasm.
+            buildRust = rust;
             # Each Ark app's generated crates (its generator's main).
             extraCrates = lib.foldl' (acc: dir: acc // arkApp.crates pkgs dir) { } arkApps;
           };
@@ -240,6 +244,7 @@
           docsCrates = import ./nix/rust.nix {
             inherit lib;
             cargoNix = import ./docs/site/Cargo.nix { inherit pkgs; };
+            buildRust = rust;
           };
           docsCrate = args: docsCrates.build ({ inherit pkgs rust; packageId = "docs"; overrides = desktopOverrides; } // args);
           # The site, an ArkUI app written as static HTML (ui/docs/app.md,
@@ -539,6 +544,16 @@
               };
             };
           };
+          androidPkgs = lib.mapAttrs (_: a: crossPkgs (a.platform // { androidSdkVersion = "26"; })) androidTargets;
+          # Every app's phone library resolved together for each ABI, as one
+          # `cargo build -p harken-ffi -p money-ffi` would: a crate both reach
+          # is one build with the union of what they ask of it (memchr's
+          # `default`, rand's `small_rng`, …, nothing either app does
+          # differently by), not one for each app with everything over it.
+          androidUnified = lib.mapAttrs (t: _: rustCrates.unify {
+            pkgs = androidPkgs.${t};
+            roots = map (f: { packageId = f.crate; }) [ harkenFfi moneyFfi ];
+          }) androidTargets;
           # An app's library for its phones (`harken/ffi`; money's the
           # generated shim over money/app) as the
           # APK carries it: `name` the app, `crate` its ffi crate, `so` the
@@ -546,15 +561,16 @@
           androidPhone = { name, crate, so, ark ? null }:
             let
               hostLib = ffiHostLib { inherit crate so; };
+              # The crate for one Android ABI.
+              androidCrate = t: rustCrates.build {
+                pkgs = androidPkgs.${t};
+                rust = rust.override { targets = [ t ]; };
+                packageId = crate;
+                unified = androidUnified.${t};
+              };
               # `so` for one Android ABI, stripped, as `jniLibs/<abi>/lib<so>.so`.
               androidLib = t: a:
-                let
-                  built = rustCrates.build {
-                    pkgs = crossPkgs (a.platform // { androidSdkVersion = "26"; });
-                    rust = rust.override { targets = [ t ]; };
-                    packageId = crate;
-                  };
-                in
+                let built = androidCrate t; in
                 pkgs.runCommand "${name}-android-${a.abi}" { } ''
                   mkdir -p $out/jniLibs/${a.abi}
                   ${pkgs.llvmPackages.bintools-unwrapped}/bin/llvm-strip \
