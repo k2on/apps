@@ -1489,14 +1489,20 @@
                 src = "${kernel}/swift";
                 sources = "*.swift";
               };
+              # Whether any Swift file in `dir` imports ArkUI (or ArkUICore).
+              swiftImportsArkUI = dir:
+                lib.any (f: lib.hasSuffix ".swift" f && builtins.match "(.*\n)?import ArkUI.*" (builtins.readFile (./. + "/${dir}/${f}")) != null)
+                  (builtins.attrNames (builtins.readDir (./. + "/${dir}")));
               deviceModules = lib.optionals (ark != null) (map (m: swiftModule {
                 name = "${name}-ios-${m}"; inherit kind headers;
                 module = "Ark" + lib.concatMapStrings (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w) (lib.splitString "-" (lib.removePrefix "ark-" m));
                 src = only [ "modules/${m}/swift" ];
                 sources = "modules/${m}/swift/*.swift";
-                # ArkUI too: a module with a page of its own (ark-camera's)
-                # draws it in ArkUI's parts and springs.
-                deps = [ bindings ] ++ arkuiSwift kind;
+                # ArkUI too where the module imports it: one with a page of
+                # its own (ark-camera's) draws it in ArkUI's parts and
+                # springs. Only there, so an edit to ArkUI rebuilds no module
+                # that does not draw with it.
+                deps = [ bindings ] ++ lib.optionals (swiftImportsArkUI "modules/${m}/swift") (arkuiSwift kind);
               }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (ark.a.modules or [ ])));
               # What the app links prebuilt: ArkUI (`arkuiSwift`), and an Ark
               # app's bindings and modules.
