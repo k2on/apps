@@ -260,6 +260,35 @@ fn launch_arguments_are_read_as_pairs() {
     assert_eq!((s.screen.as_deref(), s.pane.as_deref()), (Some("settings"), Some("banks")));
 }
 
+/// An address is the launch it names: its path the content (a section, a
+/// row by a word of its name or its id), its query the UI's state. Each
+/// is what the screenshots' `-screen` arguments said. Falsified by reading
+/// a route's slug as the row.
+#[test]
+fn an_address_is_a_launch() {
+    use crate::shell::Launch;
+    let args = |a: &[&str]| Launch::parse(a);
+    assert_eq!(Launch::address("/budget"), args(&["-screen", "budget"]));
+    assert_eq!(Launch::address("money://account/sapphire"), args(&["-screen", "account:sapphire"]));
+    assert_eq!(Launch::address("/account/0a1b/rewards-visa"), args(&["-screen", "account:0a1b"]));
+    assert_eq!(
+        Launch::address("/category/dining?inspector=1&appearance=Dark"),
+        args(&["-screen", "category:dining", "-inspector", "1", "-appearance", "dark"])
+    );
+    assert_eq!(
+        Launch::address("/transaction/receipt?inspector=1"),
+        args(&["-screen", "transaction:receipt", "-inspector", "1"])
+    );
+    assert_eq!(Launch::address("/inbox"), args(&["-screen", "review"]));
+    assert_eq!(
+        Launch::address("/transactions?sheet=new-transaction"),
+        args(&["-screen", "add-transaction"])
+    );
+    assert_eq!(Launch::address("/settings?pane=banks"), args(&["-screen", "settings", "-pane", "banks"]));
+    assert_eq!(Launch::address("/account/Rewards%20Visa").item.as_deref(), Some("Rewards Visa"));
+    assert!(Launch::address("").is_empty());
+}
+
 /// On a host that draws between messages, what waits on a draw runs only
 /// once the screen without what was put away has been drawn, and the
 /// runtime is not idle until then (a screenshot never taken between); on

@@ -513,4 +513,70 @@ impl Launch {
     pub fn is_empty(&self) -> bool {
         *self == Launch::default()
     }
+
+    /// Where an address opens (ui/docs/app.md, Address: the path names the
+    /// content, the query holds the UI's state), as a launch: what a
+    /// screenshot's `route` or a link names. The path is a section
+    /// (`/budget`, `/accounts`, `/transactions`, `/insights`, `/settings`),
+    /// `/inbox` (To Review), or a row by its id or a word of its name
+    /// (`/account/sapphire`, `/category/dining`, `/transaction/receipt`;
+    /// a route's own `/account/<id>/<slug>` reads its id). The query is
+    /// `inspector=1`, `appearance=dark`, `pane=banks` (Settings'), and
+    /// `sheet=new-transaction` (the form over Transactions). A scheme and
+    /// a host before the path (`money://account/x`) are passed over.
+    pub fn address(address: &str) -> Launch {
+        let rest = address.split_once("://").map_or(address, |(_, r)| r);
+        let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+        let mut l = Launch::default();
+        match parts.as_slice() {
+            [] => {}
+            ["inbox", ..] => l.screen = Some("review".into()),
+            [place] => l.screen = Some(place.to_lowercase()),
+            [place, item, ..] => {
+                l.screen = Some(place.to_lowercase());
+                l.item = Some(unescape(item));
+            }
+        }
+        for pair in query.split('&').filter(|p| !p.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let v = unescape(v);
+            match k {
+                "inspector" => l.inspector = Some(matches!(v.as_str(), "1" | "true" | "yes")),
+                "appearance" => l.appearance = Some(v.to_lowercase()),
+                "pane" => l.pane = Some(v),
+                "sheet" if v == "new-transaction" => l.screen = Some("add-transaction".into()),
+                _ => {}
+            }
+        }
+        l
+    }
+}
+
+/// An address's escapes (`%20`, `+`) undone.
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = b
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (b[i], hex) {
+            (b'%', Some(v)) => {
+                out.push(v);
+                i += 3;
+            }
+            (b'+', _) => {
+                out.push(b' ');
+                i += 1;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
