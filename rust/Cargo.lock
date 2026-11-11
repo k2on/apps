@@ -331,6 +331,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-dpc"
+version = "0.1.0"
+dependencies = [
+ "ark-module",
+ "uniffi",
+]
+
+[[package]]
 name = "ark-ffi"
 version = "0.1.0"
 dependencies = [

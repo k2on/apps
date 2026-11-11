@@ -229,6 +229,7 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-media-player | `ark-media-player` | `PhoneMediaPlayer` (AVPlayer, the playback audio session, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`) | `PhoneMediaPlayer` in `ArkMediaService` (Media3's ExoPlayer in a `MediaLibraryService`) | `Desktop` (feature `desktop`: rodio and MPRIS) | `Browser` (feature `web`: `<audio>` and the Media Session API) |
 | ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
 | ark-secure-store | `ark-secure-store` | `PhoneSecureStore` (the keychain: the bundle id's generic passwords, this device only) | `PhoneSecureStore` (an Android keystore AES-GCM key; the ciphertext in private preferences kept out of backups) | `SecretService` (feature `desktop`: the Secret Service over D-Bus; Unavailable without one) | Unavailable |
+| ark-dpc | `ark-dpc` | Unavailable: no app manages an iPhone or a Mac | `PhoneDpc` (DevicePolicyManager, as the device owner `ArkDpcAdmin`) | Unavailable | — |
 
 **MediaPlayer** is one sound at a time, what the system shows of it, its
 controls as events (`Remote`) the app decides, and a browse tree for a car
@@ -244,7 +245,9 @@ projects (below): each listed module's `swift/` and `kotlin/` among the
 sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
 and `background-modes` (`UIBackgroundModes`); its `[android]`
 `permissions`, `services` (a `<service>` with its actions and
-foreground type), `meta-data` and Maven `dependencies`. The app's crate
+foreground type), `receivers` (a `<receiver>` with the permission a
+sender must hold, its actions and its own meta-data), `meta-data` and
+Maven `dependencies`; and its `res/`. The app's crate
 depends on each listed module's crate (`checks.prebuild` holds it), and
 the phones' library carries their UniFFI traits; the shell registers what
 it built (`PhoneModules(haptics: PhoneHaptics(), …)` in `MoneyApp.swift`,
@@ -579,6 +582,7 @@ permissions = ["android.permission.INTERNET"]
 features = [{ name = "android.hardware.camera", required = false }]
 hosts = ["auth", "join"]       # the scheme's hosts
 dependencies = []              # Maven coordinates its own Kotlin needs
+launcher = true                # false: no icon in the launcher (a device owner's, ark-dpc)
 
 [ffi]
 crate = "money-bridge"         # the phones' bridge: the UniFFI twins and the exports
@@ -609,8 +613,14 @@ NSMicrophoneUsageDescription = "…"
 permissions = ["android.permission.FOREGROUND_SERVICE"]
 dependencies = ["androidx.media3:media3-session:1.5.1"]
 services = [{ name = "dev.arkui.modules.PlayerService", foreground = "mediaPlayback", actions = ["androidx.media3.session.MediaSessionService"] }]
+receivers = [{ name = "dev.arkui.modules.ArkDpcAdmin", exported = true, permission = "android.permission.BIND_DEVICE_ADMIN", actions = ["android.app.action.DEVICE_ADMIN_ENABLED"], meta-data = [{ name = "android.app.device_admin", resource = "@xml/ark_dpc_admin" }] }]
 meta-data = [{ name = "com.google.android.gms.car.application", resource = "@xml/automotive_app_desc" }]
 ```
+
+A module's own Android resources are its `res/` (ark-dpc's
+`res/xml/ark_dpc_admin.xml`), compiled into every app that lists it; each is
+named for the module (`ark_dpc_…`), which `checks.prebuild` holds, as it
+holds each receiver's meta-data to a resource the module has.
 
 `checks.prebuild` holds every app.toml to what it must say, every module
 it lists to one that exists, and its crate to the modules' crates; in a

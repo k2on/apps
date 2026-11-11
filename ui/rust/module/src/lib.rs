@@ -1,7 +1,7 @@
 //! What every device module shares: the plumbing, and no module. Each
 //! module is a package of its own under `modules/<name>` (`ark-haptics`,
 //! `ark-clipboard`, `ark-share`, `ark-camera`, `ark-media-player`,
-//! `ark-notifications`, `ark-secure-store`, `ark-scanner`): its trait, its operations, its
+//! `ark-notifications`, `ark-secure-store`, `ark-scanner`, `ark-dpc`): its trait, its operations, its
 //! fake, its desktop and web implementations in Rust, its Swift and Kotlin
 //! ones beside the crate, and a README of what it does on each platform and
 //! the permissions it needs (ui/docs/app.md, Effects and Ports).

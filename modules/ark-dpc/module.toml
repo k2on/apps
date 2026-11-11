@@ -1,0 +1,31 @@
+# What an app takes on when its app.toml lists ark-dpc (ui/docs/app.md,
+# The Device; README.md says why each is asked). ui/prebuild.py reads it.
+crate = "ark-dpc"
+
+# Its operations, each with the type of what comes of it (ark_module::Op):
+# ui/prebuild.py checks each is an `impl Op` in the crate with this Output.
+[ops]
+Apply = "()"
+Read = "State"
+
+# Nothing on Apple's: no app manages an iPhone or a Mac; an MDM server does.
+[ios.info]
+
+[android]
+# A device owner's powers are its admin's, not permissions it asks.
+permissions = []
+
+# The device admin (kotlin/.../ArkDpcAdmin.kt) the app is made the device
+# owner as: only the system may send to it (BIND_DEVICE_ADMIN), and its
+# policies are res/xml/ark_dpc_admin.xml.
+[[android.receivers]]
+name = "dev.arkui.modules.ArkDpcAdmin"
+exported = true
+permission = "android.permission.BIND_DEVICE_ADMIN"
+actions = [
+  "android.app.action.DEVICE_ADMIN_ENABLED",
+  "android.app.action.PROFILE_PROVISIONING_COMPLETE",
+]
+meta-data = [
+  { name = "android.app.device_admin", resource = "@xml/ark_dpc_admin" },
+]
