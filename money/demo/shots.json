@@ -133,7 +133,6 @@
         "-screen",
         "budget"
       ],
-      "route": "/budget",
       "on": [
         "ios",
         "ipad-portrait"
@@ -145,7 +144,6 @@
         "-screen",
         "category:dining"
       ],
-      "route": "/category/dining",
       "on": [
         "ios"
       ]
@@ -156,7 +154,6 @@
         "-screen",
         "accounts"
       ],
-      "route": "/accounts",
       "on": [
         "ios"
       ]
@@ -167,7 +164,6 @@
         "-screen",
         "account:sapphire"
       ],
-      "route": "/account/sapphire",
       "on": [
         "ios"
       ]
@@ -178,7 +174,6 @@
         "-screen",
         "review"
       ],
-      "route": "/inbox",
       "on": [
         "ios"
       ]
@@ -189,7 +184,6 @@
         "-screen",
         "transaction:receipt"
       ],
-      "route": "/transaction/receipt",
       "on": [
         "ios"
       ]
@@ -200,7 +194,6 @@
         "-screen",
         "add-transaction"
       ],
-      "route": "/transactions?sheet=new-transaction",
       "on": [
         "ios",
         "mac"
@@ -212,7 +205,6 @@
         "-screen",
         "insights"
       ],
-      "route": "/insights",
       "on": [
         "ios"
       ]
@@ -223,7 +215,6 @@
         "-screen",
         "transactions"
       ],
-      "route": "/transactions",
       "on": [
         "ipad-portrait",
         "mac"
@@ -237,7 +228,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/category/dining?inspector=1",
       "on": [
         "ipad-portrait"
       ]
@@ -248,7 +238,6 @@
         "-screen",
         "review"
       ],
-      "route": "/inbox",
       "on": [
         "ipad-portrait"
       ]
@@ -261,7 +250,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/category/vacation?inspector=1",
       "on": [
         "ipad-landscape",
         "mac"
@@ -275,7 +263,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/transaction/receipt?inspector=1",
       "on": [
         "ipad-landscape"
       ]
@@ -286,7 +273,6 @@
         "-screen",
         "account:checking"
       ],
-      "route": "/account/checking",
       "on": [
         "ipad-landscape"
       ]
@@ -297,7 +283,6 @@
         "-screen",
         "insights"
       ],
-      "route": "/insights",
       "on": [
         "ipad-landscape"
       ]
@@ -310,7 +295,6 @@
         "-settingsTab",
         "household"
       ],
-      "route": "/settings?pane=household",
       "on": [
         "ipad-landscape"
       ]
@@ -323,7 +307,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/transaction/receipt?inspector=1",
       "on": [
         "mac"
       ]
@@ -334,7 +317,6 @@
         "-screen",
         "account:checking"
       ],
-      "route": "/account/checking",
       "on": [
         "mac"
       ]
@@ -345,7 +327,6 @@
         "-screen",
         "review"
       ],
-      "route": "/inbox",
       "on": [
         "mac"
       ]
@@ -356,7 +337,6 @@
         "-screen",
         "insights"
       ],
-      "route": "/insights",
       "on": [
         "mac"
       ]
@@ -369,7 +349,6 @@
         "-settingsTab",
         "banks"
       ],
-      "route": "/settings?pane=banks",
       "on": [
         "mac"
       ]
@@ -382,7 +361,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/category/vacation?inspector=1",
       "on": [
         "android",
         "android-tablet",
@@ -398,7 +376,6 @@
         "-inspector",
         "1"
       ],
-      "route": "/transaction/receipt?inspector=1",
       "on": [
         "android",
         "android-tablet",
@@ -412,7 +389,6 @@
         "-screen",
         "account:checking"
       ],
-      "route": "/account/checking",
       "on": [
         "android",
         "android-tablet",
@@ -426,7 +402,6 @@
         "-screen",
         "settings"
       ],
-      "route": "/settings",
       "on": [
         "android",
         "android-tablet",
@@ -440,7 +415,6 @@
         "-screen",
         "budget"
       ],
-      "route": "/budget",
       "steps": [
         {
           "tap": "Auto-Assign",
