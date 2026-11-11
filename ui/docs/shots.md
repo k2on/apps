@@ -91,7 +91,11 @@ desktop); and a cover decoded for each size it is drawn at (harken's
 `Covers`, ArkUI's `CoverLoader.cached(url, side)`: the full player drew
 whichever size of its cover was decoded first, the mini player's blurred
 or its own sharp one). Not held still: one to three levels of antialiasing
-at rounded edges and in the status bar's icons, the emulator's GPU.
+at rounded edges and in the status bar's icons, the emulator's GPU, and
+where SystemUI puts the status bar's clock (a few pixels to the side, one
+run to the next). Two runs are held to each other by
+`.github/screens/same.py`: byte-identical, the same within three levels
+(the antialiasing), or different, and where.
 - The caret: clear in shots mode.
 - Where a list is scrolled: where a shot's steps put it, or its top.
 
