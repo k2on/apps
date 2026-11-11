@@ -80,7 +80,8 @@ async function main() {
     }
     return q.length ? `${path}?${q.join('&')}` : path;
   };
-  const screens = (all.screens || []).map(s => ({ id: s.id, query: query(s.args), path: routePath(s.args), sizes: s.on }));
+  // A screen the phones open by a route alone (money's `welcome`) is not the browser's: its screens are their launch arguments.
+  const screens = (all.screens || []).filter(s => s.args).map(s => ({ id: s.id, query: query(s.args), path: routePath(s.args), sizes: s.on }));
   const shots = mode === 'spa' ? screens.concat(web.shots || []) : screens;
   const browser = await chromium.launch({ args: ['--font-render-hinting=none', '--disable-lcd-text', '--force-color-profile=srgb'] });
   let failed = 0;

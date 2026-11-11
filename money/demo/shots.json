@@ -1,5 +1,5 @@
 {
-  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order: the shots' steps from where the last left it, then each of `screens` by its launch arguments as a launch link (`links`: the shell puts back what it showed, then opens that screen, as a launch would). `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'.",
+  "_": "money's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order: the shots' steps from where the last left it, then each of `screens` by its launch arguments as a launch link (`links`: the shell puts back what it showed, then opens that screen, as a launch would). `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking what a text on the screen says, in one window. Its accounts are Checking's register, its transactions all accounts'. `welcome`, the first run's pages (its route, welcome/), is the last of `screens`, `fresh`: what it leaves up is no place for a launch link (taken before the screens, on Android the next link was lost under the pages and `a-category-vacation-inspector` came out as `budget`).",
   "server": {
     "port": 8788,
     "user": "alex",
@@ -42,11 +42,6 @@
           "role": "tab"
         }
       ]
-    },
-    {
-      "id": "welcome",
-      "fresh": true,
-      "route": "welcome/"
     }
   ],
   "desktop": {
@@ -436,6 +431,20 @@
         "ipad-portrait",
         "android",
         "android-tablet"
+      ]
+    },
+    {
+      "id": "welcome",
+      "fresh": true,
+      "route": "welcome/",
+      "on": [
+        "ios",
+        "ipad-portrait",
+        "ipad-landscape",
+        "android",
+        "android-tablet",
+        "fold-unfolded",
+        "fold-folded"
       ]
     }
   ],
