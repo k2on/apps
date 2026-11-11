@@ -27,7 +27,7 @@ demo with them until its Leptos client exists. What has no UI stays wasm-capable
  money/seed           the demo's household on a peer and a disk, and `money-seed`
    └ ark-app          the runtime (App, Runtime, Host, Command) and the view vocabulary (ui/rust/app)
    └ ark-module       the device's plumbing (ui/rust/module)
-   └ ark-<name>       a device module each: modules/haptics, clipboard, share, camera, …
+   └ ark-<name>       a device module each: modules/ark-haptics, clipboard, share, camera, …
  ui/rust/arkui        iced: draws a View (feature `app`) — the desktop
  ui/swift             SwiftUI: the parts a generated view calls, by hand
  ui/kotlin            Compose: the same parts, by hand
@@ -220,22 +220,22 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 
 | Module | Crate | iPhone, iPad, Mac | Android | Desktop (iced) | Browser (DOM) |
 |---|---|---|---|---|---|
-| haptics | `ark-haptics` | `PhoneHaptics` (UIFeedbackGenerator; NSHapticFeedbackManager) | `PhoneHaptics` (ArkUI's `View.perform`) | Unavailable | Unavailable |
-| clipboard | `ark-clipboard` | `PhoneClipboard` (UIPasteboard; NSPasteboard) | `PhoneClipboard` (ClipboardManager) | `Queued` (feature `desktop`), written by `iced::clipboard::write` | `Browser` (feature `web`) |
-| share | `ark-share` | `PhoneShare` (UIActivityViewController; NSSharingServicePicker) | not yet | Unavailable | Unavailable |
-| camera | `ark-camera` | not yet (`QrScanner` stays hand-written) | not yet | Unavailable | Unavailable |
-| media-player | `ark-media-player` | not yet | not yet | not yet (`harken_player`) | — |
-| notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
-| secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
+| ark-haptics | `ark-haptics` | `PhoneHaptics` (UIFeedbackGenerator; NSHapticFeedbackManager) | `PhoneHaptics` (ArkUI's `View.perform`) | Unavailable | Unavailable |
+| ark-clipboard | `ark-clipboard` | `PhoneClipboard` (UIPasteboard; NSPasteboard) | `PhoneClipboard` (ClipboardManager) | `Queued` (feature `desktop`), written by `iced::clipboard::write` | `Browser` (feature `web`) |
+| ark-share | `ark-share` | `PhoneShare` (UIActivityViewController; NSSharingServicePicker) | not yet | Unavailable | Unavailable |
+| ark-camera | `ark-camera` | not yet (`QrScanner` stays hand-written) | not yet | Unavailable | Unavailable |
+| ark-media-player | `ark-media-player` | not yet | not yet | not yet (`harken_player`) | — |
+| ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
+| ark-secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
 
 **MediaPlayer** generalises harken's `PhoneSound` and
-`harken_player::Sound` (modules/media-player/README.md says how harken
+`harken_player::Sound` (modules/ark-media-player/README.md says how harken
 moves onto it).
 
 #### How an App Opts In
 
-An app lists its modules in its app.toml (`modules = ["haptics",
-"clipboard", "share"]`), and a module says in its `module.toml` what it
+An app lists its modules in its app.toml (`modules = ["ark-haptics",
+"ark-clipboard", "ark-share"]`), and a module says in its `module.toml` what it
 takes on each platform. ui/prebuild.py writes them into the generated
 projects (below): each listed module's `swift/` and `kotlin/` among the
 sources; its `[ios.info]` keys (the app's own win), `[ios] entitlements`
@@ -453,7 +453,7 @@ id = "money"                   # us.koon.<id>: the bundle id and the application
 version = "0.1"
 accent = "green"               # ui/theme.toml's [accent.<name>]
 platforms = ["iphone", "ipad", "mac", "android", "desktop", "web"]
-modules = ["haptics", "clipboard", "share"]
+modules = ["ark-haptics", "ark-clipboard", "ark-share"]
 scheme = "money"               # money://auth (the sign-in's return), money://<route>
 crate = "money-app"            # the app's crate
 [gen]

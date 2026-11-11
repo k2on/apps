@@ -166,7 +166,7 @@ impl<M: 'static> Ask<M> {
         }
     }
 
-    /// The module it is for (`"haptics"`).
+    /// The module it is for (`"ark-haptics"`).
     pub fn module(&self) -> &'static str {
         self.asking.module()
     }

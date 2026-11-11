@@ -22,9 +22,9 @@ ark-format-ffi = { path = "../../rust/ark-format-ffi" }
 # The module plumbing, and the modules money lists (money/app.toml) as the
 # phones implement them.
 ark-module = { path = "../../ui/rust/module" }
-ark-haptics = { path = "../../modules/haptics", features = ["ffi"] }
-ark-clipboard = { path = "../../modules/clipboard", features = ["ffi"] }
-ark-share = { path = "../../modules/share", features = ["ffi"] }
+ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"] }
+ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"] }
+ark-share = { path = "../../modules/ark-share", features = ["ffi"] }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (`money_demo`).
 money-seed = { path = "../seed" }

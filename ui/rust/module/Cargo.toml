@@ -8,7 +8,7 @@ description = "What every Ark device module shares: an operation as data with it
 
 # No platform and no UniFFI (the runtime's layer, layers.toml): the ports an
 # app asks through (haptics, clipboard, share) are here; each module crate
-# (modules/haptics, …) implements its port — its fake, the desktop's, the
+# (modules/ark-haptics, …) implements its port — its fake, the desktop's, the
 # browser's, the phones' foreign trait — and a shell registers what it has.
 
 [dependencies]

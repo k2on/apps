@@ -21,9 +21,9 @@ ark-router = { path = "../../ui/rust/router" }
 [dev-dependencies]
 # The fakes of the device modules money lists (money/app.toml), whose ports
 # (ark_app::modules) its updates ask through.
-ark-haptics = { path = "../../modules/haptics" }
-ark-clipboard = { path = "../../modules/clipboard" }
-ark-share = { path = "../../modules/share" }
+ark-haptics = { path = "../../modules/ark-haptics" }
+ark-clipboard = { path = "../../modules/ark-clipboard" }
+ark-share = { path = "../../modules/ark-share" }
 # The tests' store, a peer's, over the demo's household.
 ark-peer = { path = "../../rust/ark-peer", default-features = false }
 money-core = { path = "../core", features = ["demo"] }

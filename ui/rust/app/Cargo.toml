@@ -19,5 +19,5 @@ arkui-macros = { path = "../arkui-macros" }
 # The tests' store, a peer's.
 ark-peer = { path = "../../../rust/ark-peer", default-features = false }
 # The tests' counter asks for a haptic and a scan.
-ark-haptics = { path = "../../../modules/haptics" }
-ark-camera = { path = "../../../modules/camera" }
+ark-haptics = { path = "../../../modules/ark-haptics" }
+ark-camera = { path = "../../../modules/ark-camera" }

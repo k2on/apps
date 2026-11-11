@@ -860,8 +860,9 @@ def check(root):
             problems.append(f"modules/{n}/module.toml lists no [ops]")
         # The operations are the module's port, in its crate or (a port
         # an app's update asks through) the runtime's, ark-module's
-        # `src/<name>.rs`.
-        srcs = [os.path.join(root, "modules", n, "src", "lib.rs"), os.path.join(root, "ui", "rust", "module", "src", f"{n}.rs")]
+        # `src/<port>.rs`: `ark-haptics`'s is `ark_module::haptics`.
+        port = n.removeprefix("ark-").replace("-", "_")
+        srcs = [os.path.join(root, "modules", n, "src", "lib.rs"), os.path.join(root, "ui", "rust", "module", "src", f"{port}.rs")]
         text = "".join(open(src).read() for src in srcs if os.path.exists(src))
         for op, output in ops.items():
             found = re.search(r"impl Op for " + re.escape(op) + r" \{\s*type Module = [^;]+;\s*type Output = ([^;]+);", text)

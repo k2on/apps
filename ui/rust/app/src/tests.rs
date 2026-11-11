@@ -193,7 +193,7 @@ fn an_ask_compares_and_prints_as_its_operation() {
     assert_eq!(format!("{a:?}"), "Ask(Perform(Selection))");
     assert_eq!(format!("{scan:?}"), "Ask(ScanQr, then)");
     let Command::Ask(ask) = scan else { unreachable!() };
-    assert_eq!(ask.module(), "camera");
+    assert_eq!(ask.module(), "ark-camera");
     assert_eq!(ask.op::<ark_camera::ScanQr>(), Some(&ark_camera::ScanQr));
     assert!(ask.op::<ark_camera::TakePhoto>().is_none());
 }

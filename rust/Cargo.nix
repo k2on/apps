@@ -1375,7 +1375,7 @@ rec {
         crateName = "ark-camera";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/camera; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-camera; };
         libName = "ark_camera";
         dependencies = [
           {
@@ -1398,7 +1398,7 @@ rec {
         crateName = "ark-clipboard";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/clipboard; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-clipboard; };
         libName = "ark_clipboard";
         dependencies = [
           {
@@ -1522,7 +1522,7 @@ rec {
         crateName = "ark-haptics";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/haptics; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-haptics; };
         libName = "ark_haptics";
         dependencies = [
           {
@@ -1570,7 +1570,7 @@ rec {
         crateName = "ark-media-player";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/media-player; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-media-player; };
         libName = "ark_media_player";
         dependencies = [
           {
@@ -1601,7 +1601,7 @@ rec {
         crateName = "ark-notifications";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/notifications; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-notifications; };
         libName = "ark_notifications";
         dependencies = [
           {
@@ -1775,7 +1775,7 @@ rec {
         crateName = "ark-secure-store";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/secure-store; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-secure-store; };
         libName = "ark_secure_store";
         dependencies = [
           {
@@ -1798,7 +1798,7 @@ rec {
         crateName = "ark-share";
         version = "0.1.0";
         edition = "2021";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/share; };
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-share; };
         libName = "ark_share";
         dependencies = [
           {

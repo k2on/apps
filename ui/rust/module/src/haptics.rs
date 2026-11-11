@@ -3,7 +3,7 @@
 //! nothing. An update asks with [`perform`], a [`HapticsOp`] whose output
 //! is `()` (nothing says whether it was felt), or `Unavailable` where there
 //! is none (the desktop, the browser). Its implementations, its fake and
-//! the phones' are the module's (modules/haptics, `ark-haptics`).
+//! the phones' are the module's (modules/ark-haptics, `ark-haptics`).
 
 use crate::{Op, Reply};
 
@@ -32,7 +32,7 @@ pub enum HapticsOp {
 impl Op for HapticsOp {
     type Module = dyn Haptics;
     type Output = ();
-    const MODULE: &'static str = "haptics";
+    const MODULE: &'static str = "ark-haptics";
     fn run(&self, m: &dyn Haptics, reply: Reply<()>) {
         match *self {
             HapticsOp::Perform(h) => m.perform(h),
