@@ -123,6 +123,8 @@ fun StartScreens(
     send: (Event) -> Unit,
     onSignOut: () -> Unit,
     addDevice: suspend () -> DeviceLinkShown = { DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
+    links: kotlinx.coroutines.flow.StateFlow<Int> = kotlinx.coroutines.flow.MutableStateFlow(0),
+    takeLink: () -> String? = { null },
 ) {
     val page by first.page.collectAsStateWithLifecycle()
     // money's pages over the app itself when their route asked for them.
@@ -132,7 +134,7 @@ fun StartScreens(
             val b = book ?: return
             val ledger by b.state.collectAsStateWithLifecycle()
             LaunchedEffect(ledger.denied) { ledger.denied?.let { send(Event.Denied(it)) } }
-            MoneyApp(b, onSignOut = onSignOut, addDevice = addDevice)
+            MoneyApp(b, onSignOut = onSignOut, addDevice = addDevice, links = links, takeLink = takeLink)
         }
         else -> {
             WelcomeScreen(first)
