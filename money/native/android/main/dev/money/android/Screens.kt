@@ -61,7 +61,26 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
     private val _page = MutableStateFlow(app.page())
     val page: StateFlow<AccountsPage> = _page
 
+    /** The version last seen by a screenshot's ready signal ([quiet]). */
+    private var seen = ULong.MAX_VALUE
+
+    /**
+     * For a screenshot's ready signal (ArkUI's `Ready`, ui/docs/shots.md): idle at the version last
+     * seen (`Runtime::is_idle`, `Runtime::version`); a newer version is a newer screen, waited for
+     * again.
+     */
+    private fun quiet(): Boolean {
+        val v = app.version()
+        if (v != seen) {
+            seen = v
+            dev.arkui.Ready.changed()
+            return false
+        }
+        return app.isIdle()
+    }
+
     init {
+        dev.arkui.Ready.probe("accounts") { quiet() }
         // money's modules (money/app.toml): no share sheet on Android yet.
         app.useModules(haptics, clipboard, null)
     }
@@ -104,7 +123,26 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
     private val _page = MutableStateFlow(app.page())
     val page: StateFlow<BudgetPage> = _page
 
+    /** The version last seen by a screenshot's ready signal ([quiet]). */
+    private var seen = ULong.MAX_VALUE
+
+    /**
+     * For a screenshot's ready signal (ArkUI's `Ready`, ui/docs/shots.md): idle at the version last
+     * seen (`Runtime::is_idle`, `Runtime::version`); a newer version is a newer screen, waited for
+     * again.
+     */
+    private fun quiet(): Boolean {
+        val v = app.version()
+        if (v != seen) {
+            seen = v
+            dev.arkui.Ready.changed()
+            return false
+        }
+        return app.isIdle()
+    }
+
     init {
+        dev.arkui.Ready.probe("budget") { quiet() }
         app.useModules(haptics, null, null)
     }
 
@@ -149,6 +187,28 @@ class MoneyShellHolder(session: Session, refresh: () -> Unit, today: () -> Strin
     private val app = ShellApp(session, shell)
     private val _page = MutableStateFlow(app.page())
     val page: StateFlow<ShellPage> = _page
+
+    /** The version last seen by a screenshot's ready signal ([quiet]). */
+    private var seen = ULong.MAX_VALUE
+
+    /**
+     * For a screenshot's ready signal (ArkUI's `Ready`, ui/docs/shots.md): idle at the version last
+     * seen (`Runtime::is_idle`, `Runtime::version`); a newer version is a newer screen, waited for
+     * again.
+     */
+    private fun quiet(): Boolean {
+        val v = app.version()
+        if (v != seen) {
+            seen = v
+            dev.arkui.Ready.changed()
+            return false
+        }
+        return app.isIdle()
+    }
+
+    init {
+        dev.arkui.Ready.probe("shell") { quiet() }
+    }
 
     /** `msg` taken by the shell; the page read again. */
     fun send(msg: ShellMsg) {

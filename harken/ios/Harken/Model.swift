@@ -194,6 +194,8 @@ final class Model: ObservableObject {
     }
 
     private func took(_ s: Snapshot) {
+        // What is drawn may have moved: a screenshot waits again (ArkUI's `Ready`).
+        Ready.shared.changed()
         if s.albums.count != snapshot.albums.count || s.albums != snapshot.albums {
             var byId = [String: AlbumsEntry](minimumCapacity: s.albums.count)
             var byName = [String: AlbumsEntry](minimumCapacity: s.albums.count)

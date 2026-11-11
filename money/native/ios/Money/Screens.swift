@@ -6,6 +6,7 @@
 // anything: a message goes to Rust, and Rust says what the page is now,
 // which route to open, and what to ask of the phone (the device modules
 // money lists in modules.toml).
+import ArkUICore
 import Combine
 import Foundation
 
@@ -101,6 +102,10 @@ final class BudgetScreen: ObservableObject {
 @MainActor
 final class MoneyShellScreen: ObservableObject {
     @Published private(set) var page = ShellPage(section: "budget", inspector: false, search: "", showing: false, monthTitle: "", accountTitle: "", pane: "General", appearance: nil, category: nil, transaction: nil, toReview: nil, budgetAccounts: [], trackingAccounts: [])
+    {
+        // Where the app is, for a screenshot's ready signal: the section.
+        didSet { Ready.shared.at(route: page.section) }
+    }
     /// What the hosted screens carry out (`MoneyRequest`): a new
     /// transaction, the month moved, a message for the Budget's runtime…
     var request: (MoneyRequest) -> Void = { _ in }
@@ -139,6 +144,9 @@ final class MoneyShellScreen: ObservableObject {
     /// Nothing left to come, and the number that grows with every message.
     var isIdle: Bool { app?.isIdle() ?? false }
     var version: UInt64 { app?.version() ?? 0 }
+    /// For a screenshot's ready signal (ArkUI's `Ready`): idle, or not
+    /// running at all (signed out: nothing of its own to come).
+    var quiet: Bool { app == nil || isIdle }
 
     /// The page read again: a view it holds moved.
     func reload() {

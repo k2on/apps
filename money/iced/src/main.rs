@@ -2623,8 +2623,10 @@ pub fn main() -> iced::Result {
         .font(arkui::fonts::FIRA_MONO);
     // The screenshots' run (.github/screens/apps.md): this application, its
     // shots taken headless, and no window. Only when `ARK_SHOTS` asks.
+    // Each shot taken once the window's runtimes are idle at one version
+    // (`App::is_idle`, `App::version`): its ready signal.
     if let Some(shots) = arkui_shots::asked() {
-        shots.run(app);
+        shots.run_ready(app, |app: &App| app.is_idle().then(|| app.version()));
     }
     app.run()
 }

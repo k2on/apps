@@ -75,6 +75,9 @@ struct Snapshot {
     /// The episodes a held person is on, newest first, by their name.
     var appearances = [String: [LibraryEntry]]()
     var status: Status? = nil
+    /// Nothing the phone asked for still on its way (`Peer.settled`): what a
+    /// screenshot waits for (ArkUI's `Ready`).
+    var settled = false
     var heard = Heard()
     /// How many changes the peer has reported: what the diagnostics read again on.
     var moved = 0
@@ -352,6 +355,7 @@ final class Bridge {
         splice()
         let st = h.peer.status()
         snap.status = st
+        snap.settled = h.peer.settled()
         if let d = st.denied, !deniedSaid {
             deniedSaid = true
             main { self.denied(d) }

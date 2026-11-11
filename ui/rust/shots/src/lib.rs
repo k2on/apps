@@ -30,8 +30,13 @@
 //! a Linux desktop's usual). Not tiny-skia, iced's fallback: its 0.14 draws
 //! an image whole where a widget clips it (every album cover spills out of
 //! its card). With no driver this says so rather than draw with tiny-skia.
-//! A shot is taken once nothing has happened for two seconds: the sync
-//! done, the pictures fetched, an animation ended.
+//! With `ARK_SHOTS` set every shared spring is at its end at once
+//! (`arkui::motion::shots`), and a shot is taken when the app says it is
+//! ready: an app that hands over its ready signal ([`Asked::run_ready`]:
+//! its runtimes' `is_idle`, at their `version`) is taken once that holds,
+//! at the same version, over two frames drawn with nothing else to do
+//! (ui/docs/shots.md); one that hands none, once nothing has happened for
+//! two seconds.
 //!
 //! **Each shot** is the app opened afresh at the window's size, its steps
 //! done in order, and the screen drawn in light and in dark. The steps
@@ -86,8 +91,14 @@ const OPTIONAL: Duration = Duration::from_secs(5);
 /// How long nothing must happen before a shot is taken.
 const QUIET: Duration = Duration::from_secs(2);
 /// The longest a shot waits for that, before it is taken anyway (a clock
-/// that never stops).
+/// that never stops); with the app's ready signal, the longest it waits for
+/// that, which fails the shot.
 const SETTLE: Duration = Duration::from_secs(30);
+
+/// An app's ready signal ([`Asked::run_ready`]): its version when nothing
+/// is left to come (its runtimes' `Runtime::is_idle` and `version`), None
+/// while something is.
+pub type Ready<S> = fn(&S) -> Option<u64>;
 /// A frame, for a widget that asks for the next one.
 const FRAME: Duration = Duration::from_millis(16);
 
@@ -116,7 +127,23 @@ impl Asked {
     where
         P: Program<Theme = Theme> + 'static,
     {
-        let code = match self.take(&program) {
+        self.run_with(program, None)
+    }
+
+    /// As [`Asked::run`], each shot taken when `ready` says so rather than
+    /// after a quiet time: the app's own signal (ui/docs/shots.md).
+    pub fn run_ready<P>(self, program: P, ready: Ready<P::State>) -> !
+    where
+        P: Program<Theme = Theme> + 'static,
+    {
+        self.run_with(program, Some(ready))
+    }
+
+    fn run_with<P>(self, program: P, ready: Option<Ready<P::State>>) -> !
+    where
+        P: Program<Theme = Theme> + 'static,
+    {
+        let code = match self.take(&program, ready) {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("shots: {e}");
@@ -126,7 +153,7 @@ impl Asked {
         std::process::exit(code)
     }
 
-    fn take<P>(&self, program: &P) -> Result<(), String>
+    fn take<P>(&self, program: &P, ready: Option<Ready<P::State>>) -> Result<(), String>
     where
         P: Program<Theme = Theme> + 'static,
     {
@@ -180,9 +207,17 @@ impl Asked {
                     break;
                 }
             }
+            // Ready: the app's signal where it gives one (a guard's
+            // limit fails the shot), else a quiet time.
+            let done = done.and_then(|()| match ready {
+                Some(ready) => window.until_ready(ready, SETTLE),
+                None => {
+                    window.settle(QUIET, SETTLE);
+                    Ok(())
+                }
+            });
             match done {
                 Ok(()) => {
-                    window.settle(QUIET, SETTLE);
                     let tree = window.tree();
                     for (theme, name) in [(Theme::Light, "light"), (Theme::Dark, "dark")] {
                         window.write(&theme, &self.out.join(name).join(format!("{id}.png")))?;
@@ -525,6 +560,45 @@ where
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Run what the app has to do, as [`Window::settle`], until `ready`
+    /// says it is idle at one version over two frames drawn running out of
+    /// anything else to do: what is drawn then is what it will stay. Only
+    /// `most` is a time, and reaching it fails.
+    fn until_ready(&mut self, ready: Ready<P::State>, most: Duration) -> Result<(), String> {
+        let start = Instant::now();
+        let mut at: Option<u64> = None;
+        let mut frames = 0;
+        loop {
+            if let Ok(action) = self.actions.try_recv() {
+                self.perform(action);
+                frames = 0;
+                continue;
+            }
+            let now = Instant::now();
+            if self.redraw.is_some_and(|at| at <= now) {
+                self.redraw = None;
+                self.events(vec![Event::Window(window::Event::RedrawRequested(now))]);
+                frames = 0;
+                continue;
+            }
+            let said = ready(&self.state);
+            match said {
+                Some(v) if at == Some(v) => frames += 1,
+                _ => frames = 0,
+            }
+            at = said;
+            if frames >= 2 {
+                return Ok(());
+            }
+            if now - start >= most {
+                return Err(format!("not ready within {}s (version {at:?})", most.as_secs()));
+            }
+            // A frame drawn, as a window draws its next.
+            self.events(vec![Event::Window(window::Event::RedrawRequested(now))]);
+            std::thread::sleep(FRAME);
         }
     }
 

@@ -34,7 +34,9 @@ struct HarkenApp: App {
                 .tint(Color.accent)
                 // The derived square in harken's colours (ArkUI's are neutral).
                 .environment(\.squares, .harken)
-                .onOpenURL { model.open(url: $0) }
+                .onOpenURL { Ready.shared.changed(); model.open(url: $0) }
+                // A screenshot's motion and ready signal (ArkUI's `Shots`).
+                .arkShots()
         }
         .onChange(of: phase) { _, now in
             if now == .background { wasAway = true }

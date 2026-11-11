@@ -38,6 +38,21 @@ struct MoneyApp: App {
         model.onMoved = { [weak watched] views in watched?.moved(views) }
         _model = StateObject(wrappedValue: model)
         _watched = StateObject(wrappedValue: watched)
+        // A screenshot's (`-shots YES`): ready only once the session has
+        // nothing on its way and the shell's runtime nothing left to come
+        // (`Runtime::is_idle`), at the version drawn: a newer one
+        // (`Runtime::version`) is a newer screen, and waited for again.
+        var drawn: UInt64 = 0
+        Ready.shared.probe { [weak model] in
+            guard let model else { return true }
+            let now = model.shell.version
+            if now != drawn {
+                drawn = now
+                Ready.shared.changed()
+                return false
+            }
+            return model.settled && model.shell.quiet
+        }
     }
 
     var body: some Scene {
@@ -48,7 +63,9 @@ struct MoneyApp: App {
                 .tint(Color.accent)
                 // The derived square in the green (ArkUI's are neutral).
                 .environment(\.squares, .green)
-                .onOpenURL { model.open(url: $0) }
+                .onOpenURL { Ready.shared.changed(); model.open(url: $0) }
+                // A screenshot's motion and ready signal (ArkUI's `Shots`).
+                .arkShots()
         }
         // The size the launch asks for (the Mac's screenshots: 1440×900).
         .launchWindowSize()

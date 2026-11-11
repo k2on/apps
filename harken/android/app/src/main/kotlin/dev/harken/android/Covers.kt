@@ -104,6 +104,8 @@ class Covers(context: Context, private val server: String) : CoverLoader {
         val shared =
             loading.computeIfAbsent(url) {
                 scope.async(start = CoroutineStart.LAZY) {
+                    // A screenshot waits for the cover (ArkUI's `Ready`, ui/docs/shots.md).
+                    dev.arkui.Ready.waiting("cover", true)
                     try {
                         // Asked again here, where it is the one in the map: a row that missed
                         // both before the last load ended must not start another.
@@ -116,6 +118,7 @@ class Covers(context: Context, private val server: String) : CoverLoader {
                         bitmap
                     } finally {
                         loading.remove(url)
+                        dev.arkui.Ready.waiting("cover", false)
                     }
                 }
             }

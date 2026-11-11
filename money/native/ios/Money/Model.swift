@@ -206,6 +206,8 @@ final class Model: ObservableObject {
 
     private func took(_ s: Snapshot) {
         snapshot = s
+        // What is drawn may have moved: a screenshot waits again (ArkUI's `Ready`).
+        Ready.shared.changed()
         followAsk()
         // Signed in just now: opening, until the replica has what the server had —
         // or the server cannot be reached, and there is nothing more to wait for.
@@ -216,6 +218,10 @@ final class Model: ObservableObject {
 
     /// Wait for the session to have done everything asked of it: a test's.
     func settle() { bridge?.settle() }
+
+    /// Nothing the session asked for still on its way (no session: nothing
+    /// to wait for): what a screenshot's ready signal asks.
+    var settled: Bool { bridge == nil || snapshot.settled }
 
     // MARK: who and where
 

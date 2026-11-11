@@ -219,17 +219,14 @@ impl App {
     /// Whether nothing is left to come in the window's runtimes (the
     /// shell's, the Budget's, the Accounts'): no operation's answer awaited
     /// and every view they need held (`Runtime::is_idle`). With
-    /// [`App::version`] unchanged, what a screenshot driver waits for.
-    /// (Read by the drivers, which the screenshots' run wires; the tests
-    /// hold it meanwhile.)
-    #[allow(dead_code)]
+    /// [`App::version`] unchanged, what a screenshot driver waits for
+    /// (main.rs hands both to arkui-shots).
     pub fn is_idle(&self) -> bool {
         let store = &self.peer.store;
         self.shell.is_idle(store) && self.budget.is_idle(store) && self.accounts.is_idle(store)
     }
 
     /// The runtimes' versions summed: grows with every message any took.
-    #[allow(dead_code)]
     pub fn version(&self) -> u64 {
         self.shell.version() + self.budget.version() + self.accounts.version()
     }
