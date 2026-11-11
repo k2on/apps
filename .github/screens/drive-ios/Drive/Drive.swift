@@ -268,6 +268,10 @@ final class Drive: XCTestCase {
     /// mode, and ready.
     private func launch(_ app: XCUIApplication, _ entry: Entry, launch: [String], args: [String]) {
         app.terminate()
+        // From the home screen, so the status bar has no way back to the app
+        // that was in front before (a "◂ Money" over harken's shots, run
+        // 43083062235's dark pass, and over each app's first in 42977527249).
+        XCUIDevice.shared.press(.home)
         app.launchArguments = ["-shots", "YES"] + launch + args
         app.launch()
         launched[entry.bundle] = launch

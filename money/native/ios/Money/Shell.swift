@@ -115,7 +115,19 @@ struct Shell: View {
             paths = [:]
             settings = false
             pending = []
-            model.shell.send(.launch(args: args))
+            // The inspector put away first, while the section it is in is
+            // still the one shown, and the launch only on the next turn: on
+            // the iPhone it is a sheet of that section's tab, and a tab
+            // switched away from in the same update never dismisses it
+            // (dry run 43083062235: Category Details, "Nothing Selected",
+            // over 03-accounts, 04-account-visa and 05-review). The screen is
+            // not ready meanwhile.
+            Ready.shared.begin("launch link")
+            model.shell.send(.inspector(shown: false))
+            Task { @MainActor in
+                model.shell.send(.launch(args: args))
+                Ready.shared.end("launch link")
+            }
             return
         }
         let tag = model.shell.page.section
