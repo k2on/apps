@@ -325,14 +325,16 @@ final class MoneyShellScreen: ObservableObject {
     }
 
     /// What waits for the page to be drawn (`Command::AfterDraw`: the
-    /// inspector put away before a launch moves the section), taken on the
-    /// turn after SwiftUI has drawn the page just read.
+    /// inspector put away before a launch moves the section), taken once
+    /// SwiftUI has drawn the page just read: a few frames on, as a task on
+    /// the main actor may run before the update it follows is committed.
     private func afterDraw() {
         guard let app, app.awaitsDraw() else { return }
-        Task { @MainActor in
-            await Task.yield()
-            if app.drawn() { page = app.page() }
-            afterDraw()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let self, let app = self.app else { return }
+            if app.drawn() { self.page = app.page() }
+            self.afterDraw()
         }
     }
 
