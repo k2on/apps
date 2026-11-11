@@ -70,6 +70,9 @@ private final class Signal: ObservableObject {
     private static func moving() -> String? {
         #if canImport(UIKit)
         func any(_ l: CALayer) -> String? {
+            // What is not drawn moves nothing on the screen: a hidden or
+            // clear layer, and all under it.
+            if l.isHidden || l.opacity == 0 { return nil }
             let now = l.convertTime(CACurrentMediaTime(), from: nil)
             for key in l.animationKeys() ?? [] {
                 guard let a = l.animation(forKey: key) else { continue }
@@ -80,8 +83,11 @@ private final class Signal: ObservableObject {
                 // at its end already.
                 let runs = Double(max(a.repeatCount, 1)) * a.duration
                 if a.beginTime > 0, now >= a.beginTime + runs + a.timeOffset { continue }
-                // Named, for the busy reason: what, on which layer, for how long.
-                return "\(type(of: l)).\(key) \(type(of: a)) \(a.duration)s"
+                // Named, for the busy reason: what, on which layer (and the
+                // view it draws, and that view's parent), for how long.
+                let view = l.delegate as? UIView
+                let whose = [view, view?.superview].compactMap { $0 }.map { "\(type(of: $0))" }.joined(separator: " in ")
+                return "\(type(of: l)).\(key) of \(whose.isEmpty ? "-" : whose) \(type(of: a)) \(a.duration)s repeat \(a.repeatCount) begin \(a.beginTime) now \(now)"
             }
             for s in l.sublayers ?? [] { if let m = any(s) { return m } }
             return nil
