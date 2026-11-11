@@ -116,7 +116,9 @@ tap() {
     done
     [ -n "${SHOTS:-}" ] || sleep 1
   done
-  [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; return 0; }
+  # Passed over, nothing was done, and the screen is as ready as it was:
+  # its step waits for no newer generation (`passed`).
+  [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; passed=1; return 0; }
   echo "::error::$app: nothing on the screen says '$text'"
   adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
@@ -146,12 +148,13 @@ step() {
   elif jq -e 'has("tap")' <<< "$s" > /dev/null; then
     local hold
     hold=$(jq -r 'if .hold == true then "hold" else "" end' <<< "$s")
+    passed=
     if jq -e '.optional == true' <<< "$s" > /dev/null; then
       tap "$(jq -r .tap <<< "$s")" 3 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" optional "$hold"
     else
       tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" "" "$hold"
     fi
-    ready
+    [ -n "$passed" ] || ready
   elif jq -e 'has("press")' <<< "$s" > /dev/null; then
     HOLD=1 tap "$(jq -r .press <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
     ready

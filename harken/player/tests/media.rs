@@ -456,3 +456,35 @@ fn a_car_s_asks_are_kept_for_the_shell() {
         ]
     );
 }
+
+/// A paused player is idle: once the pause has landed, looking again and
+/// again says nothing, asks the player nothing, shows the system nothing
+/// new and asks for no step later — nothing keeps a screen that waits for
+/// quiet (the screenshots' ready signal) from being quiet.
+#[test]
+fn a_paused_player_is_idle() {
+    let mut rig = Rig::new();
+    rig.sounding(1, 0);
+    rig.at(NOW + 7_000);
+    let paused = session(1, 0, Clock::Paused { at_ms: 7_000 });
+    rig.look(&paused);
+    assert_eq!(rig.fake.take(), ["pause"]);
+    rig.fake.hear(MediaEvent::Paused);
+    let info = NowPlaying {
+        title: "Track 0".into(),
+        duration_ms: 60_000,
+        position_ms: 7_000,
+        rate: 0.0,
+        ..NowPlaying::default()
+    };
+    rig.sound.show(Some(info.clone()), MediaControls::default());
+    rig.wakes.lock().unwrap().clear();
+    for s in 1..=10 {
+        rig.at(NOW + 7_000 + s * 1_000);
+        assert!(rig.look(&paused).is_empty(), "nothing said");
+        rig.sound.show(Some(info.clone()), MediaControls::default());
+    }
+    assert_eq!(rig.fake.take(), Vec::<String>::new(), "nothing asked of the player");
+    assert_eq!(*rig.wakes.lock().unwrap(), Vec::<i64>::new(), "no step asked for");
+    assert_eq!(rig.sound.heard().place.ms(), Some(7_000), "and it stands where it paused");
+}

@@ -7,9 +7,9 @@
 //!
 //! - iPhone, iPad and Mac: `PhoneMediaPlayer` (swift/: AVPlayer, the
 //!   playback audio session, `MPNowPlayingInfoCenter` and
-//!   `MPRemoteCommandCenter`), through [`phone`].
+//!   `MPRemoteCommandCenter`), through `phone` (feature `ffi`).
 //! - Android: `PhoneMediaPlayer` (kotlin/: Media3's ExoPlayer in
-//!   `ArkMediaService`, a `MediaLibraryService`), through [`phone`].
+//!   `ArkMediaService`, a `MediaLibraryService`), through `phone` (feature `ffi`).
 //! - The browser (feature `web`, wasm32): `Browser`, an `<audio>` element
 //!   and the Media Session API.
 //! - The Linux desktop (feature `desktop`): `Desktop`, a decoder and the
