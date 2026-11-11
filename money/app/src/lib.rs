@@ -14,9 +14,13 @@
 pub mod accounts;
 pub mod budget;
 pub mod look;
+pub mod receipts;
 pub mod routes;
 pub mod shell;
 pub mod words;
+
+#[cfg(test)]
+pub(crate) mod testing;
 
 pub use money_core::{MoneyChange, MoneyView};
 pub use routes::Route;
@@ -46,6 +50,10 @@ pub enum MoneyRequest {
     NewTransaction,
     /// A receipt imported from a file.
     ImportReceipt,
+    /// A receipt's photo (a page scanned) kept: put on the device and sent
+    /// to the server with `AddPhoto`, for the transaction of this hex id
+    /// when it is for one. The server reads it.
+    KeepPhoto { jpeg: Vec<u8>, txn: Option<String> },
     /// A register's filter bar shown or put away.
     Filter,
     /// A category's month, named by a launch (its name or a word of it):
@@ -58,4 +66,13 @@ pub enum MoneyRequest {
     Review,
     /// Settings, on the pane of this title.
     Settings { pane: String },
+}
+
+/// The id a route or a message carries (`Id::hex`), as a row's.
+pub fn id_of<T>(hex: &str) -> Option<ark::row::Id<T>> {
+    let b: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
+        .collect::<Option<_>>()?;
+    Some(ark::row::Id::new(b.try_into().ok()?))
 }

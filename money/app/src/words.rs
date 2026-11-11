@@ -184,3 +184,8 @@ impl ItemWords for ItemLine {
         quantity(self.quantity, &self.unit)
     }
 }
+
+/// A scan that failed, in the scanner's words.
+pub fn scan_failed(why: &str) -> String {
+    format!("Couldn't scan the receipt: {}.", why.trim_end_matches('.'))
+}

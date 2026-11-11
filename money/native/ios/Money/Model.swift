@@ -46,8 +46,10 @@ final class Model: ObservableObject {
     /// The shell's runtime (Screens.swift): the app's for its life, running
     /// while a session is open.
     let shell = MoneyShellScreen()
-    /// The phone's modules, given every screen run in Rust (Modules.swift).
-    var modules = PhoneModules()
+    /// The phone's device modules (money/app.toml), given every screen run in Rust.
+    var devices: Devices? = nil
+    /// A receipt being given, in Rust, while a session is open.
+    private(set) var receipts: ReceiptsScreen? = nil
     /// Told which views moved, on the main queue: the app's `Watched`.
     var onMoved: ([MoneyView]) -> Void = { _ in }
 
@@ -188,12 +190,18 @@ final class Model: ObservableObject {
 
     private func opened(_ s: Session) {
         session = s
-        accounts = AccountsScreen(session: s, modules: modules,
+        accounts = AccountsScreen(session: s, devices: devices,
                                   refresh: { [weak self] in Task { await self?.refresh() } },
                                   today: { [weak self] in self?.today ?? moneyToday() })
-        budget = BudgetScreen(session: s, modules: modules, month: month,
+        budget = BudgetScreen(session: s, devices: devices, month: month,
                               refresh: { [weak self] in Task { await self?.refresh() } },
                               today: { [weak self] in self?.today ?? moneyToday() })
+        let r = ReceiptsScreen(session: s, devices: devices,
+                               refresh: { [weak self] in Task { await self?.refresh() } },
+                               today: { [weak self] in self?.today ?? moneyToday() })
+        r.keep = { [weak self] jpeg, txn in self?.addPhoto(jpeg, txn: txn) }
+        r.say = { [weak self] why in self?.notice = why }
+        receipts = r
         shell.connect(session: s,
                       refresh: { [weak self] in Task { await self?.refresh() } },
                       today: { [weak self] in self?.today ?? moneyToday() })

@@ -408,6 +408,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-scanner"
+version = "0.1.0"
+dependencies = [
+ "ark-camera",
+ "ark-module",
+ "image",
+ "js-sys",
+ "tract-onnx",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "ark-secure-store"
 version = "0.1.0"
 dependencies = [
@@ -4355,6 +4369,7 @@ dependencies = [
  "ark-haptics",
  "ark-peer",
  "ark-router",
+ "ark-scanner",
  "ark-share",
  "money-core",
  "money-seed",
@@ -4366,6 +4381,7 @@ version = "0.1.0"
 dependencies = [
  "ark",
  "ark-app",
+ "ark-camera",
  "ark-clipboard",
  "ark-ffi",
  "ark-format",
@@ -4373,14 +4389,13 @@ dependencies = [
  "ark-haptics",
  "ark-module",
  "ark-peer",
+ "ark-scanner",
  "ark-share",
- "image",
  "money-app",
  "money-core",
  "money-seed",
  "serde_json",
  "tempfile",
- "tract-onnx",
  "uniffi",
 ]
 

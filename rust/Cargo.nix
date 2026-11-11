@@ -197,6 +197,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "ark-scanner" = rec {
+      packageId = "ark-scanner";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "ark-scanner";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "ark-secure-store" = rec {
       packageId = "ark-secure-store";
       build = internal.buildRustCrateWithFeatures {
@@ -1770,6 +1780,72 @@ rec {
           }
         ];
 
+      };
+      "ark-scanner" = rec {
+        crateName = "ark-scanner";
+        version = "0.1.0";
+        edition = "2021";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ../modules/ark-scanner; };
+        libName = "ark_scanner";
+        dependencies = [
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+          }
+          {
+            name = "ark-module";
+            packageId = "ark-module";
+          }
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "jpeg" ];
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "tract-onnx";
+            packageId = "tract-onnx";
+            optional = true;
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "wasm-bindgen-futures";
+            packageId = "wasm-bindgen-futures";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
+            name = "web-sys";
+            packageId = "web-sys";
+            optional = true;
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "Window" "Document" "Element" "HtmlInputElement" "FileList" "File" "Blob" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "image";
+            packageId = "image";
+            usesDefaultFeatures = false;
+            features = [ "png" "jpeg" ];
+          }
+        ];
+        features = {
+          "model" = [ "dep:tract-onnx" ];
+          "web" = [ "dep:web-sys" "dep:wasm-bindgen" "dep:wasm-bindgen-futures" "dep:js-sys" ];
+        };
+        resolvedDefaultFeatures = [ "desktop" "model" "web" ];
       };
       "ark-secure-store" = rec {
         crateName = "ark-secure-store";
@@ -14140,6 +14216,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+          }
+          {
             name = "ark-share";
             packageId = "ark-share";
           }
@@ -14169,6 +14249,11 @@ rec {
           {
             name = "ark-app";
             packageId = "ark-app";
+          }
+          {
+            name = "ark-camera";
+            packageId = "ark-camera";
+            features = [ "ffi" ];
           }
           {
             name = "ark-clipboard";
@@ -14202,6 +14287,10 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+          }
+          {
             name = "ark-share";
             packageId = "ark-share";
             features = [ "ffi" ];
@@ -14225,11 +14314,6 @@ rec {
             features = [ "raw_value" ];
           }
           {
-            name = "tract-onnx";
-            packageId = "tract-onnx";
-            optional = true;
-          }
-          {
             name = "uniffi";
             packageId = "uniffi";
             usesDefaultFeatures = false;
@@ -14237,20 +14321,14 @@ rec {
         ];
         devDependencies = [
           {
-            name = "image";
-            packageId = "image";
-            usesDefaultFeatures = false;
-            features = [ "png" ];
-          }
-          {
             name = "tempfile";
             packageId = "tempfile";
           }
         ];
         features = {
-          "page" = [ "dep:tract-onnx" ];
+          "model" = [ "ark-scanner/model" ];
         };
-        resolvedDefaultFeatures = [ "page" ];
+        resolvedDefaultFeatures = [ "model" ];
       };
       "money-core" = rec {
         crateName = "money-core";
@@ -29404,7 +29482,7 @@ rec {
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AngleInstancedArrays" "AnimationEvent" "BeforeUnloadEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "CssStyleDeclaration" "CustomEvent" "DeviceMotionEvent" "DeviceOrientationEvent" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringMap" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "FileReader" "FocusEvent" "FormData" "GamepadEvent" "HashChangeEvent" "Headers" "History" "HtmlAnchorElement" "HtmlAreaElement" "HtmlAudioElement" "HtmlBaseElement" "HtmlBodyElement" "HtmlBrElement" "HtmlButtonElement" "HtmlCanvasElement" "HtmlCollection" "HtmlDListElement" "HtmlDataElement" "HtmlDataListElement" "HtmlDetailsElement" "HtmlDialogElement" "HtmlDivElement" "HtmlDocument" "HtmlElement" "HtmlEmbedElement" "HtmlFieldSetElement" "HtmlFormElement" "HtmlHeadElement" "HtmlHeadingElement" "HtmlHrElement" "HtmlHtmlElement" "HtmlIFrameElement" "HtmlImageElement" "HtmlInputElement" "HtmlLabelElement" "HtmlLegendElement" "HtmlLiElement" "HtmlLinkElement" "HtmlMapElement" "HtmlMediaElement" "HtmlMenuElement" "HtmlMetaElement" "HtmlMeterElement" "HtmlModElement" "HtmlOListElement" "HtmlObjectElement" "HtmlOptGroupElement" "HtmlOptionElement" "HtmlOutputElement" "HtmlParagraphElement" "HtmlParamElement" "HtmlPictureElement" "HtmlPreElement" "HtmlProgressElement" "HtmlQuoteElement" "HtmlScriptElement" "HtmlSelectElement" "HtmlSlotElement" "HtmlSourceElement" "HtmlSpanElement" "HtmlStyleElement" "HtmlTableCaptionElement" "HtmlTableCellElement" "HtmlTableColElement" "HtmlTableElement" "HtmlTableRowElement" "HtmlTableSectionElement" "HtmlTemplateElement" "HtmlTextAreaElement" "HtmlTimeElement" "HtmlTitleElement" "HtmlTrackElement" "HtmlUListElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "InputEvent" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessageEvent" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PopStateEvent" "PremultiplyAlpha" "ProgressEvent" "PromiseRejectionEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "Screen" "ScreenOrientation" "ScrollIntoViewOptions" "ScrollLogicalPosition" "SecurityPolicyViolationEvent" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StorageEvent" "StreamPipeOptions" "SubmitEvent" "SvgElement" "Text" "TouchEvent" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AngleInstancedArrays" "AnimationEvent" "BeforeUnloadEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "CssStyleDeclaration" "CustomEvent" "DeviceMotionEvent" "DeviceOrientationEvent" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringMap" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtBlendMinmax" "ExtColorBufferFloat" "ExtColorBufferHalfFloat" "ExtDisjointTimerQuery" "ExtFragDepth" "ExtSRgb" "ExtShaderTextureLod" "ExtTextureFilterAnisotropic" "File" "FileList" "FileReader" "FocusEvent" "FormData" "GamepadEvent" "HashChangeEvent" "Headers" "History" "HtmlAnchorElement" "HtmlAreaElement" "HtmlAudioElement" "HtmlBaseElement" "HtmlBodyElement" "HtmlBrElement" "HtmlButtonElement" "HtmlCanvasElement" "HtmlCollection" "HtmlDListElement" "HtmlDataElement" "HtmlDataListElement" "HtmlDetailsElement" "HtmlDialogElement" "HtmlDivElement" "HtmlDocument" "HtmlElement" "HtmlEmbedElement" "HtmlFieldSetElement" "HtmlFormElement" "HtmlHeadElement" "HtmlHeadingElement" "HtmlHrElement" "HtmlHtmlElement" "HtmlIFrameElement" "HtmlImageElement" "HtmlInputElement" "HtmlLabelElement" "HtmlLegendElement" "HtmlLiElement" "HtmlLinkElement" "HtmlMapElement" "HtmlMediaElement" "HtmlMenuElement" "HtmlMetaElement" "HtmlMeterElement" "HtmlModElement" "HtmlOListElement" "HtmlObjectElement" "HtmlOptGroupElement" "HtmlOptionElement" "HtmlOutputElement" "HtmlParagraphElement" "HtmlParamElement" "HtmlPictureElement" "HtmlPreElement" "HtmlProgressElement" "HtmlQuoteElement" "HtmlScriptElement" "HtmlSelectElement" "HtmlSlotElement" "HtmlSourceElement" "HtmlSpanElement" "HtmlStyleElement" "HtmlTableCaptionElement" "HtmlTableCellElement" "HtmlTableColElement" "HtmlTableElement" "HtmlTableRowElement" "HtmlTableSectionElement" "HtmlTemplateElement" "HtmlTextAreaElement" "HtmlTimeElement" "HtmlTitleElement" "HtmlTrackElement" "HtmlUListElement" "HtmlVideoElement" "ImageBitmap" "ImageBitmapOptions" "ImageBitmapRenderingContext" "ImageData" "InputEvent" "IntersectionObserver" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MediaQueryListEvent" "MessageChannel" "MessageEvent" "MessagePort" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "OesElementIndexUint" "OesStandardDerivatives" "OesTextureFloat" "OesTextureFloatLinear" "OesTextureHalfFloat" "OesTextureHalfFloatLinear" "OesVertexArrayObject" "OffscreenCanvas" "OffscreenCanvasRenderingContext2d" "OrientationLockType" "OrientationType" "OvrMultiview2" "PageTransitionEvent" "PermissionState" "PermissionStatus" "Permissions" "PointerEvent" "PopStateEvent" "PremultiplyAlpha" "ProgressEvent" "PromiseRejectionEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserver" "ResizeObserverBoxOptions" "ResizeObserverEntry" "ResizeObserverOptions" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "Screen" "ScreenOrientation" "ScrollIntoViewOptions" "ScrollLogicalPosition" "SecurityPolicyViolationEvent" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StorageEvent" "StreamPipeOptions" "SubmitEvent" "SvgElement" "Text" "TouchEvent" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "VideoFrame" "VisibilityState" "WebGl2RenderingContext" "WebGlActiveInfo" "WebGlBuffer" "WebGlFramebuffer" "WebGlProgram" "WebGlQuery" "WebGlRenderbuffer" "WebGlRenderingContext" "WebGlSampler" "WebGlShader" "WebGlShaderPrecisionFormat" "WebGlSync" "WebGlTexture" "WebGlTransformFeedback" "WebGlUniformLocation" "WebGlVertexArrayObject" "WebSocket" "WebglColorBufferFloat" "WebglCompressedTextureAstc" "WebglCompressedTextureEtc" "WebglCompressedTextureEtc1" "WebglCompressedTexturePvrtc" "WebglCompressedTextureS3tc" "WebglCompressedTextureS3tcSrgb" "WebglDebugRendererInfo" "WebglDebugShaders" "WebglDepthTexture" "WebglDrawBuffers" "WebglLoseContext" "WheelEvent" "Window" "Worker" "WorkerGlobalScope" "WorkerNavigator" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";

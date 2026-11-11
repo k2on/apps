@@ -1,0 +1,16 @@
+# What an app takes on when its app.toml lists ark-scanner (ui/docs/app.md,
+# The Device; README.md says why each is asked). ui/prebuild.py reads it.
+# It asks nothing of a platform itself: its frames and its shutter are
+# ark-camera's, which an app that scans lists beside it.
+crate = "ark-scanner"
+
+# Its operations, each with the type of what comes of it (ark_module::Op):
+# ui/prebuild.py checks each is an `impl Op` in the crate or its port with
+# this Output.
+[ops]
+ScanPage = "Option<Vec<u8>>"
+
+[ios.info]
+
+[android]
+permissions = []

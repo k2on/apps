@@ -1,7 +1,7 @@
 // A transaction's receipt, in its sheet: whatever paid for it drawn as the
 // paper it came on — monospace on white, in light and dark alike — with how
 // sure its reading is; the photos taken for it, still being read or failed;
-// and the ways to give it one: scan it (Scanner.kt), choose a photo, type it,
+// and the ways to give it one: scan it (money_app's receipts, over the scanner module), choose a photo, type it,
 // or attach one that arrived on its own (an Amazon order, a Costco
 // receipt) and found nothing that paid for it. A receipt can be typed again
 // (a reading put right), shown as its photo, or taken off.
@@ -103,6 +103,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.ark_format.formatQuantity
 import uniffi.ark_format.formatDayLong
+import uniffi.money_bridge.ReceiptsMsg
 
 /** The paper's colours: a receipt is white whatever the phone's theme, so the light side's. */
 private val Paper = Tokens.Light.surface
@@ -119,7 +120,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
     val scope = rememberCoroutineScope()
     val receipts = ledger.receiptsOf(txn, receipt)
     val reading = ledger.photosOf(txn).filter { it.receiptId.isEmpty() }
-    var scanning by remember { mutableStateOf(false) }
+    val giving = LocalShell.current.receipts
     var typing by remember { mutableStateOf<ReceiptDraft?>(null) }
     var attaching by remember { mutableStateOf(false) }
     var showing by remember { mutableStateOf<FileRef?>(null) }
@@ -155,7 +156,7 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             AssistChip(
-                onClick = { scanning = true },
+                onClick = { giving?.send(ReceiptsMsg.Scan(txn = txn.hex)) },
                 label = { Text("Scan") },
                 leadingIcon = { Icon(Glyphs.Scan, contentDescription = null, Modifier.size(AssistChipDefaults.IconSize)) })
             AssistChip(
@@ -175,14 +176,6 @@ fun ReceiptSection(ledger: Ledger, txn: Id, receipt: String, amount: Long, date:
         }
     }
 
-    if (scanning) {
-        Scanner(
-            onPage = { jpeg ->
-                scanning = false
-                book.addPhoto(jpeg, txn)
-            },
-            onDismiss = { scanning = false })
-    }
     typing?.let { d -> ReceiptEditor(d, onDismiss = { typing = null }) }
     if (attaching) {
         AttachDialog(ledger.unmatched(amount, date), onPick = { r ->

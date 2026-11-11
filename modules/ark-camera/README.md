@@ -2,30 +2,60 @@
 
 `ark-camera` (`modules/ark-camera`): a device module, one package with its crate,
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
-listing `camera` in its `modules.toml` and depending on `ark-camera`.
+listing `ark-camera` in its app.toml and depending on `ark-camera`.
 
-A QR code scanned, a photo taken: each shows the platform's own camera
-page and answers when it closes, through a typed reply (`ScanReply`, `PhotoReply`) the platform answers
-once — a scan as `Text` (none when the person backed out), a photo as its
-JPEG's `Bytes`.
+A QR code scanned, a photo taken, or a photo taken while eyes in Rust watch
+the frames: each shows the platform's own camera page and answers when it
+closes, through a typed reply (`ScanReply`, `PhotoReply`) the platform
+answers once — a scan as `Text` (none when the person backed out), a photo
+as its JPEG's `Bytes`.
 
 ## API
 
 ```rust
-ark_camera::scan_qr()    // -> ScanQr, output Option<String>, later
-ark_camera::take_photo() // -> TakePhoto, output Option<Vec<u8>>, later
-trait Camera { fn scan_qr(&self, reply: Arc<ScanReply>); fn take_photo(&self, reply: Arc<PhotoReply>); }
+ark_camera::scan_qr()      // -> ScanQr, output Option<String>, later
+ark_camera::take_photo()   // -> TakePhoto, output Option<Vec<u8>>, later
+ark_camera::watch(eyes)    // -> Watch, output Option<Vec<u8>>, later
+trait Camera {
+    fn scan_qr(&self, reply: Arc<ScanReply>);
+    fn take_photo(&self, reply: Arc<PhotoReply>);
+    fn watch(&self, eyes: Arc<Eyes>, reply: Arc<PhotoReply>);
+}
 // ScanReply.scanned(code) / PhotoReply.taken(jpeg), or .failed(why)
-ark_camera::Fake // .scanned(code), .photographed(jpeg)
+trait See { fn look(&self, frame: &Frame) -> Look; }   // Rust's eyes: Eyes::new(Arc<dyn See>)
+struct Frame { width, height, luma, rgb /* SQUARE² RGB or empty */, turns, at_ms }
+struct Look { outline /* 8 floats, upright, 0..1 */, held, words, take }
+ark_camera::Fake // .scanned(code), .photographed(jpeg), .show(frame) -> Look, .watched(jpeg)
 ```
+
+**Watched.** The camera's page hands each frame of its analysis stream to
+the eyes it was given and draws what they answer: their outline, gliding
+to where they last saw it on `Springs.move` (fading on `Springs.fade`),
+drawn fuller once it has `held`; their `words` above; and the photo taken
+when they say `take`, or at the shutter at once. The photo is handed back
+as the sensor took it, unturned: the frames' `turns` stand both upright.
+The camera knows nothing of what the eyes look for: ark-scanner's page
+finder is such eyes (modules/ark-scanner).
 
 ## Per Platform
 
-No native implementation yet: money's join sheet keeps its hand-written
-`QrScanner` until a screen that scans moves to Rust. The plan: VisionKit's
-`DataScannerViewController` (iPhone), `AVCaptureSession` (Mac), CameraX
-with a QR decoder (Android, a new dependency: deps.json regenerated). The
-desktop and the browser answer `Unavailable`.
+| | QR code | Photo | Watched |
+|---|---|---|---|
+| iPhone, iPad (`PhoneCamera`, swift/) | VisionKit's data scanner (ArkUI's `QrScanner`) | `UIImagePickerController` | AVFoundation: the back camera's 4:3 photo preset, its frames' luminance (about 640 wide) to the eyes, a JPEG from `AVCapturePhotoOutput`; the overlay in SwiftUI over ArkUI's parts |
+| Mac | fails, said: no camera to hold over a page | fails | fails |
+| Android (`PhoneCamera`, kotlin/; its page `CameraPage`, put once at the app's root) | fails, said: no decoder yet (one is a new dependency, deps.json regenerated) | the watched page with no eyes | Camera2 (no library): a preview, a YUV stream about 640 wide whose luminance and a 256-pixel colour square go to the eyes on a thread of their own, a frame at a time, and the full JPEG |
+| Desktop, browser | `Unavailable` | `Unavailable` | `Unavailable` (ark-scanner chooses a file there) |
+
+An app's runtimes take what came of a page once it answers: the phone's
+`PhoneCamera` says so (`answered`, `onAnswered`), and the app drains its
+runtimes' inboxes (money: `ReceiptsApp.drain`).
+
+## Motion
+
+The outline's glide is `Springs.move` (critically damped: nothing threw
+it), its coming and going `Springs.fade`; the shutter is `.press` /
+`pressable`; the flash on Android dies away on `Springs.size`, softer under
+reduced motion. Not seen on a device.
 
 ## Permissions
 

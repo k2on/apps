@@ -24,8 +24,10 @@ import uniffi.money_bridge.Session
 import uniffi.money_bridge.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import uniffi.ark_clipboard.Clipboard
-import uniffi.ark_haptics.Haptics
+import uniffi.money_bridge.Devices
+import uniffi.money_bridge.ReceiptsApp
+import uniffi.money_bridge.ReceiptsMsg
+import uniffi.money_bridge.ReceiptsPage
 import uniffi.money_bridge.AccountsMsg
 import uniffi.money_bridge.AccountsPage
 import uniffi.money_bridge.ShellMsg
@@ -33,7 +35,7 @@ import uniffi.money_bridge.ShellPage
 import uniffi.money_bridge.Route
 
 /** The Accounts tab, running in Rust. */
-class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?, clipboard: Clipboard?) {
+class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
     /** Opens a route: the app's navigator. */
     var opened: (Route) -> Unit = {}
 
@@ -82,7 +84,7 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
     init {
         dev.arkui.Ready.probe("accounts") { quiet() }
         // money's modules (money/app.toml): no share sheet on Android yet.
-        app.useModules(haptics, clipboard, null)
+        devices?.let { app.useDevices(it) }
     }
 
     /** `msg` taken by the app; the page read again. */
@@ -103,7 +105,7 @@ class AccountsHolder(session: Session, refresh: () -> Unit, today: () -> String,
 }
 
 /** The Budget tab, running in Rust (money/app/src/budget): its month the book's, told as it pages. */
-class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, haptics: Haptics?) {
+class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
     /** Opens a route: a category's month. */
     var opened: (Route) -> Unit = {}
 
@@ -143,7 +145,7 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
 
     init {
         dev.arkui.Ready.probe("budget") { quiet() }
-        app.useModules(haptics, null, null)
+        devices?.let { app.useDevices(it) }
     }
 
     /** `msg` taken by the app; the page read again. */
@@ -160,6 +162,53 @@ class BudgetHolder(session: Session, refresh: () -> Unit, today: () -> String, h
     /** The page read again: the book moved. */
     fun reload() {
         _page.value = app.page()
+    }
+}
+
+/**
+ * A receipt being given, in Rust (money/app/src/receipts): a page scanned (the scanner over the
+ * camera: its eyes and warp Rust's, its page [dev.arkui.modules.CameraPage]) and kept by the book,
+ * which sends it to the server to read. What went wrong is said in the snackbar, once.
+ */
+class ReceiptsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices, private val book: Book) {
+    private val shell =
+        object : AppShell {
+            override fun openRoute(route: Route) {}
+
+            override fun request(request: MoneyRequest) {
+                when (request) {
+                    is MoneyRequest.Refresh -> refresh()
+                    is MoneyRequest.KeepPhoto -> book.addPhoto(request.jpeg, request.txn?.let(::Id))
+                    else -> {}
+                }
+            }
+
+            override fun nowMs(): Long = System.currentTimeMillis()
+
+            override fun today(): String = today()
+        }
+    private val app = ReceiptsApp(session, shell)
+
+    init {
+        app.useDevices(devices)
+    }
+
+    /** `msg` taken; what came of the camera later, taken as it comes ([answered]). */
+    fun send(msg: ReceiptsMsg) {
+        app.send(msg)
+        said(app.page())
+    }
+
+    /** The camera answered: its message taken, and what went wrong said. */
+    fun answered() {
+        if (app.drain()) said(app.page())
+    }
+
+    private fun said(p: ReceiptsPage) {
+        p.problem?.let {
+            book.tell(it)
+            app.send(ReceiptsMsg.Dismiss)
+        }
     }
 }
 

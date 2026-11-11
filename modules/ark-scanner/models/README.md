@@ -1,7 +1,7 @@
 # corners.onnx
 
-Where a receipt is in a camera frame, for the Android scanner
-(`../src/page.rs`): DocAligner's `lcnet100` heatmap model
+Where a receipt is in a camera frame, for the scanner's eyes
+(`../src/model.rs`, feature `model`): DocAligner's `lcnet100` heatmap model
 (`lcnet100_h_e_bifpn_256_fp32.onnx`, sha256 `f4117b78…594e`, Apache-2.0,
 <https://github.com/DocsaidLab/DocAligner>), as its package downloads it.
 

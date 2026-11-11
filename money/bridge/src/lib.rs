@@ -59,6 +59,7 @@ ark::twins!(
         MoneyRequest,
         accounts::{AccountItem, AccountsMsg, AccountsPage, AccountsShelf, AddForm, KindChoice, RenameForm},
         budget::{AmountForm, BudgetChoice, BudgetMsg, BudgetPage, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm},
+        receipts::{ReceiptsMsg, ReceiptsPage},
         routes::Route,
         shell::{AccountPlace, Appearance, ShellMsg, ShellPage},
         shell::inspect::{CategoryInspector, DetailLine, TransactionInspector},
@@ -75,14 +76,10 @@ mod app;
 pub mod core;
 mod demo;
 mod hall;
-#[cfg(feature = "page")]
-mod page;
 mod session;
-pub use app::{AccountsApp, AppShell, ShellApp};
+pub use app::{AccountsApp, AppShell, BudgetApp, Devices, ReceiptsApp, ShellApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
-#[cfg(feature = "page")]
-pub use page::money_page_corners;
 pub use session::{Budget, Changed, Holding, MoneyView, Session};
 
 mod routes;

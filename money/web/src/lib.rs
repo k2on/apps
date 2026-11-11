@@ -326,7 +326,7 @@ impl MoneyWeb {
             MoneyRequest::Filter => self.review = !self.review,
             MoneyRequest::Review => self.review = true,
             // The browser's reconcile and receipt import are still to come.
-            MoneyRequest::Reconcile { .. } | MoneyRequest::ImportReceipt => {}
+            MoneyRequest::Reconcile { .. } | MoneyRequest::ImportReceipt | MoneyRequest::KeepPhoto { .. } => {}
             MoneyRequest::OpenCategory { key } => {
                 let n = key.to_lowercase();
                 let found = screens::lines(self)

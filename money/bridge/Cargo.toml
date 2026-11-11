@@ -25,23 +25,22 @@ ark-module = { path = "../../ui/rust/module" }
 ark-haptics = { path = "../../modules/ark-haptics", features = ["ffi"] }
 ark-clipboard = { path = "../../modules/ark-clipboard", features = ["ffi"] }
 ark-share = { path = "../../modules/ark-share", features = ["ffi"] }
+ark-camera = { path = "../../modules/ark-camera", features = ["ffi"] }
+# A receipt's page scanned over the camera: its eyes and warp in Rust.
+ark-scanner = { path = "../../modules/ark-scanner" }
 money-core = { path = "../core", features = ["demo"] }
 # The demo's household on a peer (`money_demo`).
 money-seed = { path = "../seed" }
 money-app = { path = "../app" }
 uniffi = { version = "0.32.2", default-features = false }
 serde_json = { workspace = true }
-# Where a receipt is in a camera frame (`page`, src/page.rs).
-tract-onnx = { version = "0.22", optional = true }
 
 [features]
-# Where a receipt is in a camera frame: the corner model on a runtime in
-# Rust (src/page.rs), so the phone links none of its own. Android's
-# (money/app.toml's `[ffi]`): the iPhone's build leaves it out, as
-# VisionKit finds the page there.
-page = ["dep:tract-onnx"]
+# Where a receipt is in a camera frame: the scanner's corner model on a
+# runtime in Rust (ark-scanner's `model`), so the phone links none of its
+# own. Android's (money/app.toml's `[ffi]`), whose camera gives the eyes a
+# colour square; the iPhone's finds the page by its bright region.
+model = ["ark-scanner/model"]
 
 [dev-dependencies]
 tempfile = "3"
-# The scanner's pages, read (tests/page.rs).
-image = { version = "0.25", default-features = false, features = ["png"] }

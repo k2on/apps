@@ -1474,7 +1474,9 @@
                 module = "Ark" + lib.concatMapStrings (w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w) (lib.splitString "-" (lib.removePrefix "ark-" m));
                 src = only [ "modules/${m}/swift" ];
                 sources = "modules/${m}/swift/*.swift";
-                deps = [ bindings ];
+                # ArkUI too: a module with a page of its own (ark-camera's)
+                # draws it in ArkUI's parts and springs.
+                deps = [ bindings ] ++ arkuiSwift kind;
               }) (lib.filter (m: builtins.pathExists (./modules + "/${m}/swift")) (ark.a.modules or [ ])));
               # What the app links prebuilt: ArkUI (`arkuiSwift`), and an Ark
               # app's bindings and modules.
@@ -2021,7 +2023,9 @@
                 crates = [
                   { packageId = "ark-ffi"; member = "rust/ark-ffi"; }
                   { packageId = "harken-ffi"; member = "harken/ffi"; }
-                  { packageId = "money-bridge"; member = "money/bridge"; features = [ "default" "page" ]; }
+                  { packageId = "money-bridge"; member = "money/bridge"; features = [ "default" "model" ]; }
+                  # The scanner's corner model (modules/ark-scanner/tests/model.rs).
+                  { packageId = "ark-scanner"; member = "modules/ark-scanner"; features = [ "default" "model" ]; }
                 ];
                 dirs = rustDirs ++ genDirs;
                 postCheck = ''

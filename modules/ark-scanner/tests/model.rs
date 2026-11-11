@@ -1,10 +1,9 @@
-#![cfg(feature = "page")]
-//! Where a receipt is in a camera frame (src/page.rs): pages drawn on a
-//! table, a counter and clutter (as the scanner's bench drew them: a
-//! printed receipt warped into the scene), each found at the corners it was
-//! drawn at.
+#![cfg(feature = "model")]
+//! Where a page is in a camera frame by the corner model (src/model.rs):
+//! pages drawn on a table, a counter and clutter (a printed receipt warped
+//! into the scene), each found at the corners it was drawn at.
 
-use money_bridge::money_page_corners;
+use ark_scanner::model::corners;
 
 /// Each scene, and the corners its receipt was drawn at, x then y from 0
 /// to 1, clockwise from the top left.
@@ -25,7 +24,7 @@ fn rgb(file: &str) -> Vec<u8> {
 #[test]
 fn a_receipt_is_found_at_its_corners_on_a_table_a_counter_and_clutter() {
     for ((kind, drawn), file) in PAGES.iter().zip(FILES) {
-        let got = money_page_corners(rgb(file)).unwrap_or_else(|| panic!("{kind}: no page found"));
+        let got = corners(&rgb(file)).unwrap_or_else(|| panic!("{kind}: no page found"));
         for (i, (x, y)) in drawn.iter().enumerate() {
             let (gx, gy) = (got[2 * i], got[2 * i + 1]);
             assert!(
@@ -38,5 +37,5 @@ fn a_receipt_is_found_at_its_corners_on_a_table_a_counter_and_clutter() {
 
 #[test]
 fn a_picture_of_another_size_is_no_page() {
-    assert_eq!(money_page_corners(vec![0; 10]), None);
+    assert_eq!(corners(&[0; 10]), None);
 }

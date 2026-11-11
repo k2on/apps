@@ -148,6 +148,7 @@ impl App {
             MoneyRequest::ThisMonth => Some(Message::ThisMonth),
             MoneyRequest::NewTransaction => Some(Message::AddTxn),
             MoneyRequest::ImportReceipt => None,
+            MoneyRequest::KeepPhoto { jpeg, txn } => Some(Message::KeepPhoto(jpeg, txn)),
             MoneyRequest::Filter => Some(Message::ShowFilter(!self.show_filter)),
             MoneyRequest::OpenCategory { key } => self.category_named(&key).map(|c| Message::Select(Some(c))),
             MoneyRequest::OpenTransaction { key } => self.txn_named(&key).map(Message::EditTxn),

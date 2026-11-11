@@ -223,7 +223,8 @@ library, so its Kotlin package is `uniffi.ark_<name>`.
 | ark-haptics | `ark-haptics` | `PhoneHaptics` (UIFeedbackGenerator; NSHapticFeedbackManager) | `PhoneHaptics` (ArkUI's `View.perform`) | Unavailable | Unavailable |
 | ark-clipboard | `ark-clipboard` | `PhoneClipboard` (UIPasteboard; NSPasteboard) | `PhoneClipboard` (ClipboardManager) | `Queued` (feature `desktop`), written by `iced::clipboard::write` | `Browser` (feature `web`) |
 | ark-share | `ark-share` | `PhoneShare` (UIActivityViewController; NSSharingServicePicker) | not yet | Unavailable | Unavailable |
-| ark-camera | `ark-camera` | not yet (`QrScanner` stays hand-written) | not yet | Unavailable | Unavailable |
+| ark-camera | `ark-camera` | `PhoneCamera` (a QR code by VisionKit's data scanner, a photo, a watched photo by AVFoundation; the Mac fails, said) | `PhoneCamera` (a watched photo by Camera2, its page `CameraPage`; no QR decoder yet) | Unavailable | Unavailable |
+| ark-scanner | `ark-scanner` | over the camera (`over_camera`: the eyes, the warp in Rust) | over the camera, with the corner model (`model`) | `Chosen` (feature `desktop`): a file the window's chooser gives | `Browser` (feature `web`): the page's file input |
 | ark-media-player | `ark-media-player` | not yet | not yet | not yet (`harken_player`) | — |
 | ark-notifications | `ark-notifications` | not yet | not yet | Unavailable | — |
 | ark-secure-store | `ark-secure-store` | not yet | not yet | Unavailable | — |
@@ -482,7 +483,7 @@ dependencies = []              # Maven coordinates its own Kotlin needs
 [ffi]
 crate = "money-bridge"         # the phones' bridge: the UniFFI twins and the exports
 dir = "bridge"                 # where it is, beside app.toml
-android = ["page"]             # the bridge's features each phone's library links
+android = ["model"]            # the bridge's features each phone's library links
 apple = []
 
 [store]                        # what a store lists: F-Droid's .yml is written from it
@@ -950,7 +951,7 @@ ui/docs/apps/money.md for money):
    `supportedDestinations`), its kernel's Mac slice and `money-macos`
    (flake.nix) built by nix; ArkUI builds for the Mac (its colours
    through `Color.dynamic`, what only the iPhone has behind
-   `Platform.swift`'s shims, the document scanner in ArkUI). Never built
+   `Platform.swift`'s shims). Never built
    here: no Mac. money's and harken's
    iPhone targets take the iPad (`TARGETED_DEVICE_FAMILY` 1,2, every
    orientation on an iPad, no `UIRequiresFullScreen`), not yet built on a

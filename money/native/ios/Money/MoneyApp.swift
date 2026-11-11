@@ -33,7 +33,9 @@ struct MoneyApp: App {
         let demo = UserDefaults.standard.string(forKey: "demo")
         let model = Model(shelf: DefaultsShelf(), root: support, demoDay: demo.flatMap { $0.count == 10 ? $0 : nil },
                           demoLaunch: demo != nil)
-        model.modules = PhoneModules(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare())
+        let camera = PhoneCamera()
+        camera.answered = { [weak model] in model?.receipts?.answered() }
+        model.devices = Devices(haptics: PhoneHaptics(), clipboard: PhoneClipboard(), share: PhoneShare(), camera: camera)
         let watched = Watched<MoneyView> { [weak model] v in model?.hold(v) }
         model.onMoved = { [weak watched] views in watched?.moved(views) }
         _model = StateObject(wrappedValue: model)

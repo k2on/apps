@@ -75,6 +75,21 @@ impl App {
         self.peer.register().iter().find(|t| t.id == id)
     }
 
+    /// A receipt's JPEG kept and sent to the server, which reads it: for
+    /// `txn`, or for the server to match.
+    pub fn keep_photo(&mut self, jpeg: &[u8], txn: Option<Id<Txn>>) {
+        self.keep_with(jpeg, "image/jpeg", txn)
+    }
+
+    fn keep_with(&mut self, bytes: &[u8], media: &str, txn_id: Option<Id<Txn>>) {
+        match self.peer.client.put_file(bytes, media) {
+            Ok(file) => {
+                self.author("add the photo", "add_photo", &AddPhoto { file, txn_id });
+            }
+            Err(e) => self.note = format!("could not keep the photo: {e}"),
+        }
+    }
+
     pub fn receipt(&mut self, m: Msg) -> Task<Message> {
         let txn = self.open_txn().map(|t| t.id);
         match m {
@@ -93,12 +108,7 @@ impl App {
                     self.note = format!("{} is not a photo", p.name);
                     return Task::none();
                 };
-                match self.peer.client.put_file(&p.bytes, &media) {
-                    Ok(file) => {
-                        self.author("add the photo", "add_photo", &AddPhoto { file, txn_id: Some(txn_id) });
-                    }
-                    Err(e) => self.note = format!("could not keep the photo: {e}"),
-                }
+                self.keep_with(&p.bytes, &media, Some(txn_id));
             }
             Msg::Attach(receipt_id) => {
                 self.author("attach the receipt", "pay", &MatchReceipt { receipt_id, txn_id: txn });

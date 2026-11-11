@@ -1,7 +1,7 @@
 //! What every device module shares: the plumbing, and no module. Each
 //! module is a package of its own under `modules/<name>` (`ark-haptics`,
 //! `ark-clipboard`, `ark-share`, `ark-camera`, `ark-media-player`,
-//! `ark-notifications`, `ark-secure-store`): its trait, its operations, its
+//! `ark-notifications`, `ark-secure-store`, `ark-scanner`): its trait, its operations, its
 //! fake, its desktop and web implementations in Rust, its Swift and Kotlin
 //! ones beside the crate, and a README of what it does on each platform and
 //! the permissions it needs (ui/docs/app.md, Effects and Ports).
@@ -26,7 +26,7 @@
 //!   [`ModuleError::Unavailable`].
 //!
 //! - The ports an app's update asks through ([`haptics`], [`clipboard`],
-//!   [`share`]): each module's trait, its operations and their outputs,
+//!   [`share`], [`scanner`]): each module's trait, its operations and their outputs,
 //!   here in the runtime, so an app reaches a module only through these
 //!   typed operations and never depends on the module's crate (layers.toml).
 //!   The module's crate implements the port (its fake, the desktop's, the
@@ -51,6 +51,7 @@ use std::sync::{Arc, Mutex};
 
 pub mod clipboard;
 pub mod haptics;
+pub mod scanner;
 pub mod share;
 
 // * What came of an operation

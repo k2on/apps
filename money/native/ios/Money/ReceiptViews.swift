@@ -1,9 +1,9 @@
 // A transaction's receipt, in its form: the receipt drawn as the paper is —
 // monospace on white, whatever the phone's appearance — with a word when
 // its reading did not add up, its photo a tap away, and what can be done
-// with it (put it right, take it off). With none: scan one as Notes scans a
-// document (VisionKit's camera, which finds the page's edges, takes it when
-// it is steady and squares it up), choose a photo of one, type one, or
+// with it (put it right, take it off). With none: scan one (money_app's
+// receipts over the scanner module: the camera's page, the page found, held
+// still and squared up in Rust), choose a photo of one, type one, or
 // match one nobody has. A photo goes to the phone's files and the server
 // reads it (Bridge.addPhoto); until it has, the section says it is reading.
 // The rules are Receipts.swift's.
@@ -15,12 +15,11 @@ extension ReceiptDraft: Identifiable {
     var id: String { receiptId.isEmpty ? "new" : receiptId }
 }
 
-/// What a transaction's form has asked of its receipt: the scanner up, a
-/// photo chosen, or the receipt form over a receipt typed or put right.
+/// What a transaction's form has asked of its receipt: a photo chosen, or
+/// the receipt form over a receipt typed or put right.
 /// The form holds it, so that each is presented once, from the form and
 /// not from a row of it.
 struct ReceiptActs {
-    var scanning = false
     var picked: PhotosPickerItem? = nil
     var typing: ReceiptDraft? = nil
     var kept = 0
@@ -28,7 +27,7 @@ struct ReceiptActs {
 
 /// On a transaction's form: what paid for it and each receipt's items held
 /// while the form is up, and what its receipt section asks for presented —
-/// the scanner, the library's photo sent, the receipt form.
+/// the library's photo sent, the receipt form.
 struct ReceiptSheets: ViewModifier {
     let txn: Id?
     @Binding var acts: ReceiptActs
@@ -37,13 +36,6 @@ struct ReceiptSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .holding(txn.map { MoneyView.paid(txn: $0) })
-            .sheet(isPresented: $acts.scanning) {
-                DocumentScanner { jpeg in
-                    acts.scanning = false
-                    if let jpeg { keep(jpeg) }
-                }
-                .ignoresSafeArea()
-            }
             .onChange(of: acts.picked) { _, item in
                 guard let item else { return }
                 acts.picked = nil
@@ -120,8 +112,8 @@ struct ReceiptSection: View {
 
     /// The ways to give a transaction its receipt.
     @ViewBuilder private func adding(_ s: Snapshot) -> some View {
-        if DocumentScanner.isSupported {
-            Button { acts.scanning = true } label: { Label("Scan Receipt", systemImage: "doc.viewfinder") }
+        if PhoneCamera.canWatch {
+            Button { model.receipts?.send(.scan(txn: txn.hex)) } label: { Label("Scan Receipt", systemImage: "doc.viewfinder") }
         }
         PhotosPicker(selection: $acts.picked, matching: .images) { Label("Choose Photo", systemImage: "photo.on.rectangle") }
         Button { acts.typing = ReceiptDraft(txn: txn, place: payee, date: day) } label: { Label("Type Receipt", systemImage: "keyboard") }

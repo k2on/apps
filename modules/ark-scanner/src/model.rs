@@ -1,16 +1,16 @@
-//! Where a receipt is in a camera frame, for the Android scanner: DocAligner's
-//! corner model (`models/README.md`) on tract, in this library so the
-//! phone needs no runtime of its own. The model gives four heatmaps, one a
-//! corner; each corner is the middle of its largest blob where the model is
-//! sure (0.3 and over), and a frame with a corner nowhere is no page. The
-//! `page` feature's: the iPhone, which scans with VisionKit, leaves it out.
+//! Where a page is in a camera frame, by DocAligner's corner model
+//! (`models/README.md`) on tract, in the app's own library so the phone
+//! needs no runtime of its own (feature `model`). The model gives four
+//! heatmaps, one a corner; each corner is the middle of its largest blob
+//! where the model is sure (0.3 and over), and a frame with a corner
+//! nowhere is no page.
 
 use std::sync::OnceLock;
 
 use tract_onnx::prelude::*;
 
-/// The side of the square the model looks at.
-pub const SIDE: usize = 256;
+/// The side of the square the model looks at: ark-camera's colour square.
+pub const SIDE: usize = ark_camera::SQUARE as usize;
 /// The side of its heatmaps.
 const HEAT: usize = 128;
 
@@ -34,8 +34,7 @@ fn model() -> Option<&'static Model> {
 /// A page's corners in a picture `SIDE` by `SIDE`, RGB, row by row:
 /// clockwise from the top left, each x then y from 0 to 1 across the
 /// picture; none when the model sees no page.
-#[uniffi::export]
-pub fn money_page_corners(rgb: Vec<u8>) -> Option<Vec<f32>> {
+pub fn corners(rgb: &[u8]) -> Option<[f32; 8]> {
     if rgb.len() != SIDE * SIDE * 3 {
         return None;
     }
@@ -43,12 +42,12 @@ pub fn money_page_corners(rgb: Vec<u8>) -> Option<Vec<f32>> {
     let x: Tensor = tract_ndarray::Array4::from_shape_fn((1, 3, SIDE, SIDE), |(_, c, y, x)| rgb[(y * SIDE + x) * 3 + (2 - c)] as f32 / 255.0).into();
     let out = model()?.run(tvec!(x.into())).ok()?;
     let heat = out[0].to_array_view::<f32>().ok()?;
-    let mut corners = Vec::with_capacity(8);
+    let mut corners = [0f32; 8];
     for c in 0..4 {
         let sure: Vec<bool> = (0..HEAT * HEAT).map(|i| heat[[0, c, i / HEAT, i % HEAT]] >= 0.3).collect();
         let (x, y) = middle_of_largest(&sure)?;
-        corners.push((x + 0.5) / HEAT as f32);
-        corners.push((y + 0.5) / HEAT as f32);
+        corners[2 * c] = (x + 0.5) / HEAT as f32;
+        corners[2 * c + 1] = (y + 0.5) / HEAT as f32;
     }
     Some(corners)
 }

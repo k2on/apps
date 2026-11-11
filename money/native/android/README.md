@@ -189,19 +189,14 @@ does.
   shown as its photo, or taken off. A photo is kept on the phone at once
   (`putFile`, docs/plan-files.md) and read by the server when it gets
   there, so a receipt scanned offline is read once the phone is online.
-- **The scanner** (`Scanner.kt`, `Vision.kt`) — as Notes scans a document:
-  the camera full screen (Camera2, no library), a translucent blue quad
-  gliding to the paper's edges, and the picture taking itself once the page
-  has held still and sharp for a second — a flash, the page made flat (a
-  homography from its corners), and it shrinks away. The eyes are
-  DocAligner's corner model in money's library (`PageModel.kt`,
-  `../ffi/src/page.rs`, on tract), each frame shrunk to its 256-pixel square
-  in colour, on a thread of its own as fast as it answers; how sharp a frame
-  is (the Laplacian's variance) and, until the model's first answer or on a
-  library without it, the page itself, are plain Kotlin over each frame's
-  luminance (`Vision.kt`, held to drawn frames by `VisionTests`). The model
-  found the page in 94% of 200 generated scenes where the bright region
-  found 49%: a white counter, glare, clutter and shadow are where it wins.
+- **The scanner** — money_app's receipts (money/app/src/receipts) asks
+  the scanner module (modules/ark-scanner) for a page, and keeps it
+  (`ReceiptsHolder`, Screens.kt). The camera's page is ark-camera's
+  (modules/ark-camera/kotlin, `CameraPage` at the app's root: Camera2, no
+  library); the eyes — DocAligner's corner model on tract, the bright
+  region, the sharpness, held still for a second — and the warp are Rust's,
+  in ark-scanner, tested there on the drawn frames the old JVM tests
+  drew.
 
 **Motion.** Between tabs, Material's fade through; into a register or the
 bank's page and back, the shared X axis, which the system's back gesture

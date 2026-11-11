@@ -92,8 +92,11 @@ import dev.arkui.RouteArg
 import dev.arkui.SensoryFeedback
 import dev.arkui.Transitions
 import dev.arkui.reducedMotion
+import dev.arkui.modules.CameraPage
+import dev.arkui.modules.PhoneCamera
 import dev.arkui.modules.PhoneClipboard
 import dev.arkui.modules.PhoneHaptics
+import uniffi.money_bridge.Devices
 import uniffi.money_bridge.Auto
 import uniffi.money_bridge.Route
 import uniffi.money_bridge.TxnLine
@@ -123,6 +126,10 @@ class Shell(
     val onAccountSheet: () -> Unit = {},
     /** "Add a Device": the join link another phone signs in with, made as this login. */
     val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
+    /** The device modules money lists (money/app.toml), registered with every screen. */
+    val devices: Devices? = null,
+    /** A receipt being given, in Rust (money/app/src/receipts): a page scanned and kept. */
+    val receipts: ReceiptsHolder? = null,
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
@@ -151,6 +158,12 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
 
     val sections =
         remember(book) { MoneyShellHolder(book.session, { book.sync() }, { book.state.value.today }) }
+    // The device modules (money/app.toml): the camera's page is drawn at the root, below.
+    val hapticView = androidx.compose.ui.platform.LocalView.current
+    val camera = remember { PhoneCamera() }
+    val devices = remember(hapticView) { Devices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
+    val receipts = remember(book, devices) { ReceiptsHolder(book.session, { book.sync() }, { book.state.value.today }, devices, book) }
+    camera.onAnswered = { receipts.answered() }
     val shell =
         remember(book, nav) {
             Shell(
@@ -164,6 +177,8 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
                 onSignOut = onSignOut,
                 onAccountSheet = { account = true },
                 addDevice = addDevice,
+                devices = devices,
+                receipts = receipts,
             )
         }
 
@@ -207,8 +222,7 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     // window's width — each its top bar, search and inspector, hosting money's own screens.
     LaunchedEffect(ledger) { sections.reload() }
     // Budget, written from Rust (generated/BudgetScreen.kt), over its runtime: its month the book's.
-    val hapticView = androidx.compose.ui.platform.LocalView.current
-    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(hapticView)) }
+    val budget = remember(book) { BudgetHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
     LaunchedEffect(budget, ledger.month) { budget.send(uniffi.money_bridge.BudgetMsg.Month(month = ledger.month)) }
     LaunchedEffect(ledger) { budget.reload() }
     sections.request = { r ->
@@ -234,6 +248,8 @@ fun MoneyApp(book: Book, onSignOut: () -> Unit, addDevice: suspend () -> dev.ark
     val hosted: @Composable (String) -> Unit = { name -> Hosted(name, book, ledger, shell, nav, sections, budget) }
 
     CompositionLocalProvider(LocalShell provides shell, LocalHostedScreens provides hosted) {
+        // The camera's page, while a module asks for it (a receipt scanned).
+        CameraPage(camera)
         NavHost(
             nav,
             startDestination = "shell",
@@ -474,9 +490,8 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
         }
         "accounts" -> {
             // Written from Rust (generated/AccountsScreen.kt), over its runtime.
-            val view = androidx.compose.ui.platform.LocalView.current
             val holder = remember(book) {
-                AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, PhoneHaptics(view), PhoneClipboard(view.context))
+                AccountsHolder(book.session, { book.sync() }, { book.state.value.today }, shell.devices)
             }
             var reconciling by remember { mutableStateOf<Id?>(null) }
             holder.opened = { r -> if (r is Route.Banks) shell.onSettings() else nav.navigate(register(r)) }

@@ -67,7 +67,7 @@ class Screens {
         shot("budget") { ScreenFrame { BudgetScreen(holder) } }
     }
 
-    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today }, null, null)) } }
+    @Test fun accounts() = shot("accounts") { ScreenFrame { AccountsScreen(AccountsHolder(book.session, {}, { book.state.value.today }, null)) } }
 
     @Test fun review() = shot("transactions") { ActivityScreen(book.state.value) }
 

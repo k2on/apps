@@ -352,6 +352,9 @@ pub enum Message {
     ChoosePayer(PaidFor),
     /// The open transaction's receipt.
     Receipt(receipt::Msg),
+    /// A receipt's page (scanned, as money_app's receipts asks) kept for
+    /// the transaction of this hex id, or none.
+    KeepPhoto(Vec<u8>, Option<String>),
 }
 
 pub struct App {
@@ -1428,6 +1431,7 @@ impl App {
             }
             Message::Stores(m) => self.stores(m),
             Message::Receipt(m) => return self.receipt(m),
+            Message::KeepPhoto(jpeg, txn) => self.keep_photo(&jpeg, txn.as_deref().and_then(money_app::id_of)),
             Message::ChoosePayer(of) => {
                 self.peer.set_candidates(Some(of.clone()));
                 return self.open_dropdown(Choosing::Payer(of), (self.pointer, false));

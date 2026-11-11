@@ -25,11 +25,11 @@ final class AccountsScreen: ObservableObject {
 
     /// The tab over `session`; `refresh` asks the bank, `today` is the
     /// session's day (the demo's in the demo).
-    init(session: Session, modules: PhoneModules, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, devices: Devices?, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = AccountsApp(session: session, shell: shell)
-        app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
+        if let devices { app.useDevices(devices: devices) }
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
         shell.requested = { [weak self] r in if case let .reconcile(account) = r { self?.reconcile(Id(account)) } }
@@ -63,11 +63,11 @@ final class BudgetScreen: ObservableObject {
     private let app: BudgetApp
     private let shell: ScreenShell
 
-    init(session: Session, modules: PhoneModules, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
+    init(session: Session, devices: Devices?, month: String, refresh: @escaping () -> Void, today: @escaping () -> String) {
         let shell = ScreenShell(refresh: refresh, today: today)
         self.shell = shell
         app = BudgetApp(session: session, shell: shell)
-        app.useModules(haptics: modules.haptics, clipboard: modules.clipboard, share: modules.share)
+        if let devices { app.useDevices(devices: devices) }
         app.send(msg: .month(month: month))
         page = app.page()
         shell.opened = { [weak self] r in self?.open(r) }
@@ -87,6 +87,48 @@ final class BudgetScreen: ObservableObject {
     /// The page read again: a view it holds moved.
     func reload() {
         page = app.page()
+    }
+}
+
+/// A receipt being given, in Rust (money/app/src/receipts): a page scanned
+/// (the scanner over the camera: its eyes and warp Rust's, its page
+/// ark-camera's `PhoneCamera`) and kept by the model, which sends it to the
+/// server to read. What went wrong is said once, as the model says notices.
+@MainActor
+final class ReceiptsScreen {
+    private let app: ReceiptsApp
+    private let shell: ScreenShell
+    /// Keeps a page's photo for a transaction (`Model.addPhoto`).
+    var keep: (Data, Id?) -> Void = { _, _ in }
+    /// Says what went wrong (`Model.notice`).
+    var say: (String) -> Void = { _ in }
+
+    init(session: Session, devices: Devices?, refresh: @escaping () -> Void, today: @escaping () -> String) {
+        let shell = ScreenShell(refresh: refresh, today: today)
+        self.shell = shell
+        app = ReceiptsApp(session: session, shell: shell)
+        if let devices { app.useDevices(devices: devices) }
+        shell.requested = { [weak self] r in
+            if case let .keepPhoto(jpeg, txn) = r { self?.keep(jpeg, txn.map(Id.init)) }
+        }
+    }
+
+    /// `msg` taken; what went wrong said.
+    func send(_ msg: ReceiptsMsg) {
+        app.send(msg: msg)
+        said()
+    }
+
+    /// The camera answered: what came of it taken.
+    func answered() {
+        if app.drain() { said() }
+    }
+
+    private func said() {
+        if let p = app.page().problem {
+            say(p)
+            app.send(msg: .dismiss)
+        }
     }
 }
 
@@ -186,11 +228,3 @@ final class ScreenShell: AppShell, @unchecked Sendable {
     func today() -> String { day() }
 }
 
-/// The device modules the phone registers with every screen: the ones
-/// money lists in money/app.toml, whose Swift (modules/<name>/swift)
-/// the project compiles in (modules.yml).
-struct PhoneModules {
-    var haptics: Haptics? = nil
-    var clipboard: Clipboard? = nil
-    var share: Share? = nil
-}
