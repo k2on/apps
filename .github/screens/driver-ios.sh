@@ -2,7 +2,7 @@
 # The iPhone's and the iPad's driver (drive-ios/: the UI test that takes
 # the shots), built for any simulator into <derived>, once for every app
 # and device: the workflow builds it in the background while the apps
-# build and the simulator boots, and app-ios.sh only runs it. Needs Xcode
+# build and the simulator boots, and apps-ios.sh only runs it. Needs Xcode
 # and XcodeGen on the PATH.
 #
 #   driver-ios.sh <derived>

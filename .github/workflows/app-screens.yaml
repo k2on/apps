@@ -624,7 +624,12 @@ jobs:
     if: >-
       needs.which.outputs.mode != '' && needs.which.outputs.ios != '' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: macos-15
+    # macOS 26: the Mac's window is an app for macOS 26 (its deployment
+    # target), which macos-15's macOS 15 cannot open (dyld: SwiftUI's
+    # `ButtonRole.confirm` not found, #102's dry run 42929213705). The same
+    # pinned Xcode is on both images, and the simulators are the pinned
+    # Xcode's iOS on either (ios-runtime.sh).
+    runs-on: macos-26
     # One at a time on a branch: a newer commit's (or the same commit's
     # again, from another event: on main a push that moves the scripts and
     # starts ios) takes over from the one going, rather than a second Mac.
@@ -671,7 +676,7 @@ jobs:
             fi
           fi
           echo "open=$open" >> "$GITHUB_OUTPUT"
-          # The driver, built once for the iPhone and the iPad (app-ios.sh);
+          # The driver, built once for the iPhone and the iPad (driver-ios.sh);
           # and each app any of whose shots failed (apps-ios.sh,
           # apps-mac.sh), for which no hash is kept.
           { echo "DRIVER=$RUNNER_TEMP/driver"; echo "PARTIAL=$RUNNER_TEMP/partial"; } >> "$GITHUB_ENV"
@@ -755,26 +760,42 @@ jobs:
           done
           echo "evaluated the apps in $(( $(date +%s) - start ))s"
 
-      # As screens.yaml: the newest iPhone Pro, booting under the rest. One
-      # for every app: each is installed on it in turn.
+      # As screens.yaml: the newest iPhone Pro of the pinned Xcode's iOS
+      # (ios-runtime.sh), booting under the rest. One for every app: each is
+      # installed on it in turn.
       - if: steps.open.outputs.open == 'true'
         name: Start booting a simulator
         run: |
           bash .github/screens/meanwhile.sh start boot bash -c '
-            device=$(xcrun simctl list devices available -j | jq -r "
-              .devices | to_entries | map(select(.key | test(\"iOS\"))) | sort_by(.key) | last | .value
-              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .name")
+            rt=$(bash .github/screens/ios-runtime.sh)
+            device=$(xcrun simctl list devices available -j | jq -r --arg rt "$rt" "
+              .devices[\$rt]
+              | map(select(.name | test(\"^iPhone [0-9]+ Pro$\"))) | sort_by(.name) | last | .udid + \" \" + .name")
+            udid=${device%% *} device=${device#* }
             echo "Booting $device"
             echo "$device" > "$RUNNER_TEMP/device"
-            xcrun simctl boot "$device" && xcrun simctl bootstatus "$device" -b'
+            xcrun simctl boot "$udid" && xcrun simctl bootstatus "$udid" -b'
 
       # Each app's server, as nix builds it (its server.sh), all at once, each
       # on its own port: the cache's once main's run has pushed it, or else
       # built, under the apps' build.
+      # Every server's packages built by one `nix build` first, so what
+      # they do not share compiles side by side (harken's and then money's,
+      # one after the other, took until seven minutes after the apps in
+      # app-screens 42949637068); then each started.
       - if: steps.open.outputs.open == 'true'
         name: Start the servers
         run: |
           bash .github/screens/meanwhile.sh start servers bash -c '
+            refs=()
+            for a in $APPS; do
+              if [ -f "$a/screens/server.sh" ]; then
+                while read -r p; do refs+=(".#$p"); done < <(grep -o "\.#[A-Za-z0-9_-]*" "$a/screens/server.sh" | cut -c3- | sort -u)
+              fi
+            done
+            start=$(date +%s)
+            if [ ${#refs[@]} -gt 0 ]; then nix build --no-link --keep-going "${refs[@]}" || true; fi
+            echo "the servers built or fetched in $(( $(date +%s) - start ))s"
             for a in $APPS; do
               if [ -f "$a/screens/server.sh" ]; then bash .github/screens/app-server.sh "$a" "$RUNNER_TEMP/server/$a"; fi
             done'
@@ -845,9 +866,27 @@ jobs:
           FAMILY: ipad
         run: |
           xcrun simctl shutdown all || true
-          # Of the newest iOS's simulators, the first kind there is.
-          read -r udid name < <(xcrun simctl list devices available -j | jq -r '
-            .devices | to_entries | map(select(.key | test("iOS"))) | sort_by(.key) | last | .value as $d
+          # Each iPad app's server afresh, as the iPhone's had it: what the
+          # iPhone's pass left on it is not the iPad's (harken's playback,
+          # held by the iPhone just shut down: its iPad's devices shot said
+          # "iPhone 17 Pro (not answering)"). The iPhone's log kept beside.
+          for a in $IPAD_APPS; do
+            [ -f "$a/screens/server.sh" ] || continue
+            d=$RUNNER_TEMP/server/$a
+            pid=$(cat "$d/pid" 2> /dev/null || true)
+            if [ -n "$pid" ]; then
+              kill "$pid" 2> /dev/null || true
+              for _ in $(seq 1 30); do kill -0 "$pid" 2> /dev/null || break; sleep 1; done
+            fi
+            mv "$d/server.log" "$RUNNER_TEMP/server/$a-iphone.log" 2> /dev/null || true
+            rm -rf "$d"
+            bash .github/screens/app-server.sh "$a" "$d"
+          done
+          # Of the pinned Xcode's iOS's simulators (ios-runtime.sh), the first
+          # kind there is.
+          rt=$(bash .github/screens/ios-runtime.sh)
+          read -r udid name < <(xcrun simctl list devices available -j | jq -r --arg rt "$rt" '
+            .devices[$rt] as $d
             | ["^iPad Pro 13-inch", "^iPad Air 13-inch", "^iPad"]
             | map(. as $p | $d | map(select(.name | test($p))) | sort_by(.name) | last) | map(select(. != null)) | first
             | "\(.udid) \(.name)"')
@@ -911,7 +950,7 @@ jobs:
 
       - if: always() && steps.open.outputs.open == 'true'
         name: The servers' logs
-        run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log || true
+        run: tail -n 40 "$RUNNER_TEMP"/server/*/server.log "$RUNNER_TEMP"/server/*-iphone.log || true
 
       # The iPhone's again, now with each app's hash beside its shots (the
       # step above): compare and publish lay the app-screens-* artifacts

@@ -53,7 +53,8 @@ screens=$(jq -c '[.screens // [] | .[] | select((.on // []) | index("mac"))]' "$
 shoot() {
   local theme=$1 name=$2
   shift 2
-  "$exe" "$@" > "$tmp/$theme-$name.log" 2>&1 &
+  # In shots mode (ArkUI's `Shots`, ui/docs/shots.md): every move at its end at once.
+  "$exe" -shots YES "$@" > "$tmp/$theme-$name.log" 2>&1 &
   local pid=$! wid=""
   for _ in $(seq 1 60); do
     wid=$("$tmp/window" "$pid" 2> /dev/null) && break

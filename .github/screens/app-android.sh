@@ -57,6 +57,36 @@ resolve() {
 # The screen as uiautomator reads it.
 dump() { adb exec-out uiautomator dump /dev/tty 2>/dev/null || true; }
 
+# The app's ready signal (ArkUI's `Ready`, ui/docs/shots.md): launched with
+# `-shots 1`, it says `ready <generation> <route>` in the log once its
+# screen is what it will stay, and `busy ...` whenever it may change. Read
+# as it comes, on a descriptor of its own: nothing here waits for a time,
+# and each wait's limit only fails it.
+logcat_fd=
+gen=-1
+listen() {
+  adb logcat -c
+  exec {logcat_fd}< <(adb logcat -v raw -s ArkReady:I)
+}
+# What the log said since, passed over: the app was stopped, and what its
+# last process said is not the next one's.
+forget() {
+  local line
+  while read -r -t 0.01 line <&"$logcat_fd"; do :; done
+  gen=-1
+}
+# Until the app says it is ready at a generation after `gen` (up to a
+# minute, which fails): `gen` is then that one.
+ready() {
+  local word g rest until=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$until" ]; do
+    IFS=' ' read -r -t $((until - SECONDS)) word g rest <&"$logcat_fd" || break
+    if [ "$word" = ready ] && [ "${g:-0}" -gt "$gen" ]; then gen=$g; return 0; fi
+  done
+  echo "::error::$app: not ready (after generation $gen) within a minute"
+  return 1
+}
+
 # Tap what says `text` (or, as `--field`, the first text field), waiting
 # up to `seconds` for it to be there; of several, the `role` one.
 # `a|b`: whichever is there. `optional`: nothing there is no failure.
@@ -65,6 +95,10 @@ tap() {
   local text=$1 seconds=${2:-20} role=${3:-} where=${4:-} optional=${5:-} hold=${6:-} at one screen
   local -a each
   IFS='|' read -ra each <<< "$text"
+  # In a shot the screen is ready when a tap is looked for: what it shows
+  # is all there is, so it is read once (SHOTS). Signing in, the browser's
+  # pages are not the app's, and are looked at until they come.
+  [ -z "${SHOTS:-}" ] || seconds=1
   for _ in $(seq 1 "$seconds"); do
     screen=$(dump)
     for one in "${each[@]}"; do
@@ -80,27 +114,13 @@ tap() {
         return 0
       fi
     done
-    sleep 1
+    [ -n "${SHOTS:-}" ] || sleep 1
   done
   [ -z "$optional" ] || { echo "$app: nothing says '$text'; an optional tap, passed over"; return 0; }
   echo "::error::$app: nothing on the screen says '$text'"
   adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
   dump | python3 -I "$here/ui.py" --tree > "$out/stuck.tree.txt" || true
   return 1
-}
-
-# The screen, once it stands still, into `$1`: the same picture twice in a
-# row half a second apart, or what it is after five seconds.
-still() {
-  local prev="" now
-  for _ in $(seq 1 10); do
-    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$1.next"
-    now=$(md5sum < "$1.next")
-    [ "$now" = "$prev" ] && break
-    prev=$now
-    sleep 0.5
-  done
-  mv "$1.next" "$1"
 }
 
 # Whether something on the screen says `text`, now.
@@ -116,11 +136,11 @@ step() {
   elif jq -e 'has("await")' <<< "$s" > /dev/null; then
     local label one
     label=$(jq -r '.await' <<< "$s")
-    # `a|b`: either will do.
+    # `a|b`: either will do; looked for each time the app is ready again.
     for _ in $(seq 1 20); do
       IFS='|' read -ra each <<< "$label"
       for one in "${each[@]}"; do says "$one" && return 0; done
-      sleep 1
+      ready || break
     done
     echo "::error::$app: '$label' never came"; return 1
   elif jq -e 'has("tap")' <<< "$s" > /dev/null; then
@@ -131,10 +151,15 @@ step() {
     else
       tap "$(jq -r .tap <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")" "" "$hold"
     fi
+    ready
   elif jq -e 'has("press")' <<< "$s" > /dev/null; then
     HOLD=1 tap "$(jq -r .press <<< "$s")" 20 "$(jq -r '.role // ""' <<< "$s")" "$(jq -r '.where // ""' <<< "$s")"
-  elif jq -e 'has("type")' <<< "$s" > /dev/null; then adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
-  elif jq -e 'has("wait")' <<< "$s" > /dev/null; then sleep "$(jq -r .wait <<< "$s")"
+    ready
+  elif jq -e 'has("type")' <<< "$s" > /dev/null; then
+    adb shell input text "$(jq -r .type <<< "$s" | sed 's/ /%s/g')"
+    ready
+  # Not slept: every step is followed by the app's ready signal instead.
+  elif jq -e 'has("wait")' <<< "$s" > /dev/null; then :
   else echo "::error::$app: no such step: $s"; return 1
   fi
 }
@@ -183,8 +208,10 @@ why() {
 extras=()
 open_app() {
   local said extra=()
-  if [ -n "${1:-}" ]; then extra=(--esa ark.args "$1"); fi
+  # `-shots 1` first: no motion, and the ready signal (ArkUI's Shots.kt).
+  extra=(--esa ark.args "-shots,1${1:+,$1}")
   adb shell am force-stop "$pkg"
+  forget
   adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null
   said=$(adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n "$activity" ${extra[@]+"${extra[@]}"} ${extras[@]+"${extras[@]}"} 2>&1 | tr -d '\r')
   if ! front "$pkg" 30; then
@@ -193,8 +220,19 @@ open_app() {
     adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/stuck.png" || true
     return 1
   fi
-  # What it shows first (a list, a cover) a moment to draw.
-  sleep 2
+  # What it shows first (a list, a cover), drawn: its ready signal.
+  ready
+}
+
+# How a shot's `route` reaches the app: the one place that says it, so a
+# router's own spelling (a whole URL) is a change here alone. A link to the
+# running app (VIEW, its package), no relaunch, then its ready signal.
+scheme=$(jq -r '.scheme // empty' "$shots")
+open_route() {
+  local url=$1
+  case $url in *://*) ;; *) url="${scheme:-$app}://$url" ;; esac
+  adb shell am start -a android.intent.action.VIEW -d "'$url'" "$pkg" > /dev/null
+  ready
 }
 
 # The system in theme `$1` (light, dark) with the app stopped, and settled
@@ -216,7 +254,28 @@ theme_set() {
   front "${home%%/*}" 30 || echo "$app: the launcher not in front after the night mode ($want): $(focus)"
 }
 
+# The launcher's home laid out before the app is installed: an app
+# installed while a fresh emulator's launcher still lays out its default
+# home took its place in the taskbar before or after Messages as it fell
+# (the tablet's shots of two runs, the same but for that). Its home
+# brought up, and its screen read until it reads the same twice running.
+launcher_settled() {
+  local h prev="" now
+  h=$(resolve android.intent.category.HOME)
+  [ -n "$h" ] || return 0
+  adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME > /dev/null 2>&1 || true
+  front "${h%%/*}" 30 || true
+  for _ in $(seq 1 30); do
+    now=$(dump | python3 -I "$here/ui.py" --tree 2> /dev/null | md5sum)
+    [ "$now" = "$prev" ] && return 0
+    prev=$now
+    sleep 1
+  done
+  echo "$app: the launcher's home still moving after 30 seconds; installing anyway"
+}
+
 if [ -z "$signed_in" ]; then
+  launcher_settled
   adb install -r "$apk" >/dev/null
   adb shell pm clear "$pkg" >/dev/null
 fi
@@ -237,6 +296,14 @@ fi
 
 # As android.sh: no "isn't responding" dialog, a quiet status bar.
 adb shell settings put global hide_error_dialogs 1
+# The system's own motion off too (the app's is, in shots mode): the status
+# bar's icons recoloured for a new theme and the gesture bar's shade, each
+# eased in by SystemUI, were drawn part way in a dark run's shots and not in
+# another's (dry runs 42897638770 and 42909207650: rows 51-83 and the
+# handle differed, the app's own pixels the same).
+for scale in animator_duration_scale transition_animation_scale window_animation_scale; do
+  adb shell settings put global "$scale" 0
+done
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null; }
 demo enter
@@ -244,9 +311,17 @@ demo clock -e hhmm 1200
 demo battery -e level 100 -e plugged false
 demo network -e wifi show -e level 4
 demo notifications -e visible false
+# Every icon of the status bar said, so none changes under a shot (two runs'
+# shots differed in the Wi-Fi and the clock's corner, rows 51-83).
+demo network -e mobile hide -e wifi show -e level 4 -e fully true
+demo status -e volume hide -e bluetooth hide -e location hide -e alarm hide -e sync hide -e tty hide -e eri hide -e mute hide -e speakerphone hide -e zen hide
+
+# The app's ready signal, read from here on.
+listen
 
 # Signed in once, through arkui's onboarding; the login is kept for every
-# shot after.
+# shot after. Its waits are the browser's and the system's, which are not
+# the app's to say; no shot is taken from them.
 if [ -n "$server" ] && [ -z "$signed_in" ]; then
   # Chrome straight to the page: no first run, no sign-in to Google.
   adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
@@ -284,13 +359,16 @@ if [ -n "$server" ] && [ -z "$signed_in" ]; then
     says "a name" || says "Server address" || says Allow || break
     sleep 1
   done
-  sleep 3
 fi
+# Every shot from here on: a tap is looked for once, on a ready screen.
+SHOTS=1
 
 # Both themes, or the one THEMES names: CI takes each on an emulator of
 # its own, at once (app-screens.yaml).
 for theme in ${THEMES:-light dark}; do
   theme_set "$theme"
+  # Stopped by the theme: the next shot launches it.
+  running=
   mkdir -p "$out/$theme"
   while read -r shot <&3; do
     id=$(jq -r .id <<< "$shot")
@@ -304,7 +382,15 @@ for theme in ${THEMES:-light dark}; do
     while read -r k v; do
       [ -n "$k" ] && extras+=(--es "'${k#-}'" "'$v'")
     done < <(jq -r '(.args // []) as $a | range(0; $a | length; 2) as $i | "\($a[$i]) \($a[$i + 1] // "")"' <<< "$shot")
-    open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+    route=$(jq -r '.route // empty' <<< "$shot")
+    if [ -n "$route" ] && [ -n "${running:-}" ]; then
+      # Where the router can take it: in the app as it runs, no relaunch.
+      open_route "$route" || exit 1
+    else
+      open_app "$(jq -r '.args // [] | join(",")' <<< "$shot")" || { cp "$out/stuck.why.txt" "$steps/0-failed.txt" 2>/dev/null || true; exit 1; }
+      running=1
+      [ -z "$route" ] || open_route "$route" || exit 1
+    fi
     n=0
     # The steps on a descriptor of their own: `adb shell` reads standard
     # input, and on it would take every step after the first (a shot of
@@ -317,7 +403,7 @@ for theme in ${THEMES:-light dark}; do
       step "$s" || { echo "::error::$app $(basename "$out") $theme $id: step $s failed"; { dump | python3 -I "$here/ui.py" --tree; why; } > "$steps/$n-failed.txt" 2>&1 || true; exit 1; }
       { echo "$s"; dump | python3 -I "$here/ui.py" --tree; } > "$steps/$n.txt" 2>&1 || true
     done 4< <(jq -c '.steps[]?' <<< "$shot")
-    sleep 3
+    # The screen is ready: each step, and the launch, waited for it.
     # The tree the picture is taken from, read once: the run's results'
     # "before the picture" and the shot's own <id>.tree.txt (each was a
     # dump of its own, two seconds apiece on the emulator).
@@ -325,18 +411,8 @@ for theme in ${THEMES:-light dark}; do
       dump | python3 -I "$here/ui.py" --tree > "$out/$theme/$id.tree.txt" || true
       { echo "before the picture"; cat "$out/$theme/$id.tree.txt"; } > "$steps/shot.txt"
     }
-    # A shot that opens something that animates in (a held tap's context
-    # menu, a press step, or one that says "settle": true: a dropdown, a
-    # sheet) is taken once the screen stands still: the same picture twice
-    # running, half a second apart, up to five seconds more, and its tree
-    # read then. Every other as before.
-    if jq -e '.settle == true or any(.steps[]?; .hold == true or has("press"))' <<< "$shot" > /dev/null; then
-      still "$out/$theme/$id.png"
-      tree
-    else
-      tree
-      adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/$theme/$id.png"
-    fi
+    tree
+    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/$theme/$id.png"
     # A picture, or the capture fails: a warning written in front of one
     # (screencap on two displays, none named) is no PNG.
     if [ "$(head -c 8 "$out/$theme/$id.png" | od -An -tx1 | tr -d ' \n')" != 89504e470d0a1a0a ]; then

@@ -1,32 +1,47 @@
-// An installed app driven as a person would, for its screenshots
-// (../../apps.md, ../../app-ios.sh), the same for every app: signed in
-// through arkui's onboarding to the server CI started, if it is not
-// already, then each shot: the app opened, its steps done, the screen
-// written as a PNG. What to do comes from the environment, as app-ios.sh
-// passes it (`TEST_RUNNER_<NAME>` to xcodebuild):
+// Every app on one simulator, both themes, in one run of the test, driven
+// as a person would (../../apps.md, ../../apps-ios.sh): what to do is a plan,
+// a JSON file on the Mac (`TEST_RUNNER_APP_PLAN`, apps-ios.sh writes it):
 //
-//   APP_BUNDLE  the app's bundle id
-//   APP_SERVER  the server's address, typed into the first page; unset, none
-//   APP_USER    the name the server's dev sign-in page is given
-//   APP_SHOTS   the shots, as the app's screens/shots.json has them:
-//               [{"id": …, "args"?: [launch arguments], "steps": [{"tap": label, "role"?: …} | {"type": text} | {"wait": seconds}]}]
-//               A tap's label is what the element says or its accessibility
-//               identifier; `role` ("tab", "button", "field", "text") says
-//               which kind it is when several say it; `press` holds it
-//               instead (a row's context menu), as does "hold": true;
-//               `a|b` is whichever is there, and "optional": true passes
-//               over a tap with nothing to tap. A shot's "args" are its
-//               launch arguments (`-screen budget`, `-menu sort`: the
-//               app's own deep links, read from UserDefaults' argument
-//               domain), given each time it is opened for that shot;
-//               signing in opens it with none.
-//   APP_OUT     the directory the PNGs are written to, on the Mac; beside each,
-//               the app's accessibility tree as it was taken (<id>.tree.txt),
-//               which is what a step can name
-//   APP_ORIENTATION  "landscape": the device on its side (landscape left) for
-//               every shot; "portrait": upright; unset, as it is
+//   [{"bundle": …, "server"?: …, "user"?: …, "scheme"?: …, "out": <dir>,
+//     "orientation"?: "portrait"|"landscape", "signedIn"?: true,
+//     "shots": [{"id": …, "args"?: [launch arguments], "route"?: <path>,
+//                "steps": [{"tap": label, "role"?: …} | {"type": text} | {"await": label} | …]}]}]
+//
+// For each theme (the simulator's own appearance, set from here), each
+// app in turn: launched with `-shots YES` (ArkUI's `Shots`: no motion, and
+// the ready signal), signed in through arkui's onboarding to the server CI
+// started, if it is not already, then each shot. **Nothing waits for a
+// time.** The app says when its screen is ready (`ark.ready`, labelled
+// `ready <generation> <route>`, ui/docs/shots.md); after anything the driver
+// does it waits for a newer generation, then takes the screen. A shot is
+// opened by its `route` as a link (`<scheme>://<route>`) in the running app
+// where it has one, by its launch arguments with a fresh launch where it
+// has those, and otherwise from where the last left it; `relaunch` starts
+// it again. Every wait has a limit, which only fails the shot.
+//
+// A tap's label is what the element says or its accessibility identifier;
+// `role` ("tab", "button", "field", "text") says which kind when several
+// say it; `press` holds it instead (a row's context menu), as does "hold":
+// true; `a|b` is whichever is there, and "optional": true passes over a tap
+// with nothing to tap. A `wait` is not slept: the step after it, or the
+// shot, waits for the app to be ready, as every step does.
+//
+// Writes <out>/<theme>/<id>.png, and beside each the app's accessibility
+// tree as it was taken (<id>.tree.txt), which is what a step can name.
 import UIKit
 import XCTest
+
+/// One app's part of the plan.
+struct Entry: Decodable {
+    var bundle: String
+    var server: String?
+    var user: String?
+    var scheme: String?
+    var out: String
+    var orientation: String?
+    var signedIn: Bool?
+    var shots: [Shot]
+}
 
 /// A shot, as shots.json has it.
 struct Shot: Decodable {
@@ -42,7 +57,7 @@ struct Shot: Decodable {
         var type: String?
         var wait: Double?
         var relaunch: Bool?
-        /// A tap with nothing to tap passed over, a few seconds on.
+        /// A tap with nothing to tap passed over.
         var optional: Bool?
         /// A long press, not a tap: what opens a context menu.
         var hold: Bool?
@@ -55,132 +70,191 @@ struct Shot: Decodable {
 
     var id: String
     var steps: [Step] = []
-    /// The app's launch arguments for this shot (shots.json's `screens`:
-    /// `-screen budget`, …), none for the rest.
+    /// The app's launch arguments for this shot (shots.json's `screens`).
     var args: [String] = []
+    /// Where it is, as the app's router spells it: opened as a link.
+    var route: String?
 
-    enum CodingKeys: String, CodingKey { case id, steps, args }
+    enum CodingKeys: String, CodingKey { case id, steps, args, route }
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         steps = try c.decodeIfPresent([Step].self, forKey: .steps) ?? []
         args = try c.decodeIfPresent([String].self, forKey: .args) ?? []
+        route = try c.decodeIfPresent(String.self, forKey: .route)
     }
 }
+
+/// The longest a screen may take to say it is ready: a guard, never a pace.
+private let readyLimit: TimeInterval = 60
 
 final class Drive: XCTestCase {
     private let env = ProcessInfo.processInfo.environment
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    /// The launch arguments each running app was launched with.
+    private var launched: [String: [String]] = [:]
 
     func testShots() throws {
-        continueAfterFailure = false
-        let app = XCUIApplication(bundleIdentifier: try value("APP_BUNDLE"))
-        let out = URL(fileURLWithPath: try value("APP_OUT"))
-        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let shots = try JSONDecoder().decode([Shot].self, from: Data(try value("APP_SHOTS").utf8))
+        let plan = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: URL(fileURLWithPath: try value("APP_PLAN"))))
+        var failed: [String] = []
+        for (theme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            for entry in plan {
+                do {
+                    try take(entry, theme: theme)
+                } catch {
+                    failed.append("\(entry.bundle) (\(theme)): \(error.localizedDescription)")
+                }
+            }
+        }
+        XCTAssertTrue(failed.isEmpty, failed.joined(separator: "\n"))
+    }
 
-        // Turned before the app opens, and so for every launch after.
-        switch env["APP_ORIENTATION"] {
+    /// One app's shots in `theme`, each written to `entry.out/theme/`.
+    private func take(_ entry: Entry, theme: String) throws {
+        let app = XCUIApplication(bundleIdentifier: entry.bundle)
+        let out = URL(fileURLWithPath: entry.out).appendingPathComponent(theme)
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        switch entry.orientation {
         case "landscape"?: XCUIDevice.shared.orientation = .landscapeLeft
         case "portrait"?: XCUIDevice.shared.orientation = .portrait
         default: break
         }
-        app.terminate()
-        app.launch()
-        if let server = env["APP_SERVER"], !server.isEmpty {
-            // The server's page: its one text field, whatever an app labels it.
-            let field = app.textFields.firstMatch
-            if field.waitForExistence(timeout: 20) {
-                do {
-                    try signIn(app, field: field, server: server, user: try value("APP_USER"))
-                } catch {
-                    // What the app and the system showed instead, to see why.
-                    let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
-                    try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
-                    throw error
-                }
-                // Signed in only once the app is past both the server's page and
-                // its "Sign In" page (both apps title it so), the system's
-                // "wants to use … to sign in" allowed again if it asks: the
-                // server's page goes as soon as the sign-in starts, and
-                // stopping the app then leaves it waiting for a sign-in that
-                // never comes (harken's first run).
-                let signing = app.staticTexts["Sign In"]
-                let allow = springboard.buttons["Continue"]
-                let until = Date().addingTimeInterval(90)
-                while Date() < until && (field.exists || signing.exists) {
-                    if allow.exists { allow.tap() }
-                    sleep(1)
-                }
-                if field.exists || signing.exists {
-                    let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
-                    try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
-                    XCTFail("not signed in after 90 seconds; stuck.tree.txt is what was there")
-                    return
-                }
-                sleep(3)
-            }
+        // Signed in once, in the first theme, from a launch with no arguments.
+        if theme == "light", entry.signedIn != true, let server = entry.server, !server.isEmpty {
+            launch(app, entry, args: [])
+            try signedIn(app, server: server, user: entry.user ?? "", out: out)
         }
-
-        for shot in shots {
-            app.terminate()
-            app.launchArguments = shot.args
-            app.launch()
-            // Up, not a fixed two seconds: each step waits for what it names.
-            _ = app.wait(for: .runningForeground, timeout: 10)
-            for step in shot.steps {
-                // A step that is done already: what it opens is on the screen.
-                if let done = step.unless, app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", done, done)).firstMatch.waitForExistence(timeout: 2) {
-                    continue
-                }
-                // `a|b`: either will do.
-                if let label = step.waitFor {
-                    let each = label.split(separator: "|").map(String.init)
-                    let there = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier IN %@", each, each)).firstMatch
-                    XCTAssertTrue(there.waitForExistence(timeout: 20), "\(label) came, for \(shot.id)")
-                }
-                if let label = step.tap ?? step.press {
-                    let c = find(app, label, step: step, timeout: step.optional == true ? 3 : 30)
-                    if step.optional == true && !c.exists { continue }
-                    if !c.exists {
-                        try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
-                        XCTFail("\(label) is not there for \(shot.id); stuck.tree.txt is what was")
-                        return
-                    }
-                    if step.press != nil || step.hold == true { c.press(forDuration: 1.2) } else { c.tap() }
-                }
-                if step.relaunch == true {
-                    app.terminate()
-                    app.launch()
-                    _ = app.wait(for: .runningForeground, timeout: 10)
-                }
-                if let text = step.type { app.typeText(text) }
-                if let seconds = step.wait { sleep(UInt32(seconds)) }
+        for shot in entry.shots {
+            do {
+                try open(shot, in: app, entry: entry, out: out)
+                try ready(app)
+                try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
+                try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
+            } catch {
+                try? app.debugDescription.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+                try? app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("stuck.png"))
+                throw error
             }
-            try settled().pngRepresentation.write(to: out.appendingPathComponent("\(shot.id).png"))
-            try app.debugDescription.write(to: out.appendingPathComponent("\(shot.id).tree.txt"), atomically: true, encoding: .utf8)
         }
     }
 
-    /// The screen once it has stopped moving, in place of a fixed three
-    /// seconds after a fixed two (the app's launch): two seconds for what
-    /// loads (a cover, a chart) to start drawing, then the same picture three
-    /// times, half a second apart; or, for a screen that never stands
-    /// still, what it is after `limit`.
-    private func settled(limit: Double = 6) -> XCUIScreenshot {
-        sleep(2)
-        var last = XCUIScreen.main.screenshot()
-        var same = 0
-        let until = Date().addingTimeInterval(limit - 2)
-        while Date() < until {
-            usleep(500_000)
-            let now = XCUIScreen.main.screenshot()
-            same = now.pngRepresentation == last.pngRepresentation ? same + 1 : 0
-            last = now
-            if same == 2 { break }
+    /// The app at `shot`: by its launch arguments (a fresh launch), by its
+    /// route (a link, in the running app), or from where it is; then each
+    /// step, each followed by the app's next ready moment.
+    private func open(_ shot: Shot, in app: XCUIApplication, entry: Entry, out: URL) throws {
+        if let route = shot.route, let url = link(route, scheme: entry.scheme) {
+            // Where the router can take it: in the app as it runs, no relaunch.
+            if launched[entry.bundle] != shot.args || app.state != .runningForeground { launch(app, entry, args: shot.args) }
+            let g = try ready(app)
+            app.open(url)
+            try ready(app, after: g)
+        } else {
+            // Opened afresh, as every shot is that names no route: a clean start.
+            launch(app, entry, args: shot.args)
         }
-        return last
+        for step in shot.steps {
+            let g = try ready(app)
+            // A step that is done already: what it opens is on the screen.
+            if let done = step.unless, there(app, done).exists { continue }
+            if let label = step.waitFor {
+                XCTAssertTrue(there(app, label).waitForExistence(timeout: readyLimit), "\(label) came, for \(shot.id)")
+            }
+            if let label = step.tap ?? step.press {
+                let c = find(app, label, step: step)
+                if step.optional == true && !c.exists { continue }
+                guard c.exists else {
+                    throw NSError(domain: "Drive", code: 2, userInfo: [NSLocalizedDescriptionKey: "\(label) is not there for \(shot.id); stuck.tree.txt is what was"])
+                }
+                if step.press != nil || step.hold == true { c.press(forDuration: 1.2) } else { c.tap() }
+                try ready(app, after: g)
+            }
+            if step.relaunch == true {
+                launch(app, entry, args: launched[entry.bundle] ?? [])
+            }
+            if let text = step.type {
+                app.typeText(text)
+                try ready(app, after: g)
+            }
+        }
+    }
+
+    /// How a shot's `route` is handed to the app: the one place that says
+    /// it, so a router's own spelling (a whole URL, `ark_router::Address`)
+    /// is a change here alone. A route that is a URL already is taken as it
+    /// is; a path is the app's scheme's.
+    private func link(_ route: String, scheme: String?) -> URL? {
+        if route.contains("://") { return URL(string: route) }
+        guard let scheme, !scheme.isEmpty else { return nil }
+        return URL(string: "\(scheme)://\(route)")
+    }
+
+    /// `app` launched afresh with `args`, in screenshot mode, and ready.
+    private func launch(_ app: XCUIApplication, _ entry: Entry, args: [String]) {
+        app.terminate()
+        app.launchArguments = ["-shots", "YES"] + args
+        app.launch()
+        launched[entry.bundle] = args
+        _ = try? ready(app)
+    }
+
+    /// The app's ready signal at a generation after `after` (any, if nil),
+    /// once it is there: its generation. Waited for as XCUITest waits for an
+    /// element, up to `readyLimit`, which only fails.
+    @discardableResult
+    private func ready(_ app: XCUIApplication, after: Int? = nil) throws -> Int {
+        let signal = app.descendants(matching: .any)["ark.ready"]
+        let until = Date().addingTimeInterval(readyLimit)
+        while Date() < until {
+            guard signal.waitForExistence(timeout: until.timeIntervalSinceNow) else { break }
+            let label = signal.label
+            let g = Int(label.split(separator: " ").dropFirst().first ?? "") ?? -1
+            if g > (after ?? -1) { return g }
+            // Ready, but at the generation before: wait for it to change.
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false OR label != %@", label), object: signal)
+            _ = XCTWaiter.wait(for: [changed], timeout: max(until.timeIntervalSinceNow, 0))
+        }
+        throw NSError(domain: "Drive", code: 3, userInfo: [NSLocalizedDescriptionKey: "the app did not say it was ready (after generation \(after ?? -1)) within \(Int(readyLimit)) s"])
+    }
+
+    /// What says `label` (`a|b`: either), or has it as its identifier.
+    private func there(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        let each = label.split(separator: "|").map(String.init)
+        return app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier IN %@", each, each)).firstMatch
+    }
+
+    /// Signed in through the server's page, if the app shows it, and past
+    /// arkui's "Sign In".
+    private func signedIn(_ app: XCUIApplication, server: String, user: String, out: URL) throws {
+        // The server's page: its one text field, whatever an app labels it.
+        let field = app.textFields.firstMatch
+        guard field.waitForExistence(timeout: 20) else { return }
+        do {
+            try signIn(app, field: field, server: server, user: user)
+        } catch {
+            let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
+            try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+            throw error
+        }
+        // Signed in once the app is past both the server's page and its
+        // "Sign In" page, the system's "wants to use … to sign in" allowed
+        // again if it asks.
+        let signing = app.staticTexts["Sign In"]
+        let allow = springboard.buttons["Continue"]
+        let until = Date().addingTimeInterval(90)
+        while Date() < until && (field.exists || signing.exists) {
+            if allow.exists { allow.tap() }
+            // An expectation is waited on once: a new one each time round.
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: field)
+            _ = XCTWaiter.wait(for: [gone], timeout: 1)
+        }
+        if field.exists || signing.exists {
+            let seen = "== the app\n\(app.debugDescription)\n\n== SpringBoard\n\(springboard.debugDescription)"
+            try? seen.write(to: out.appendingPathComponent("stuck.tree.txt"), atomically: true, encoding: .utf8)
+            throw NSError(domain: "Drive", code: 4, userInfo: [NSLocalizedDescriptionKey: "not signed in after 90 seconds; stuck.tree.txt is what was there"])
+        }
+        try ready(app)
     }
 
     /// The address typed and checked; the system's "wants to use … to sign
@@ -229,42 +303,34 @@ final class Drive: XCTestCase {
         // then sent with Go; a field the app's own hierarchy shows is tapped
         // first.
         let name = app.webViews.textFields.firstMatch
-        if name.exists && name.isHittable { name.tap() }
+        guard name.waitForExistence(timeout: 10) else {
+            throw NSError(domain: "Drive", code: 5, userInfo: [NSLocalizedDescriptionKey: "the server's page did not go, and no page asking for a name came"])
+        }
+        if name.isHittable { name.tap() }
         app.typeText(user + "\n")
     }
 
-    /// What a tap names, once it is there (up to `timeout` seconds): `a|b`,
-    /// whichever of them is there first.
-    private func find(_ app: XCUIApplication, _ label: String, step: Shot.Step, timeout: Double) -> XCUIElement {
+    /// What a tap names on the screen as it is, ready (`a|b`: whichever is
+    /// there): one that can be touched first, else one that is there, for
+    /// XCUITest's tap to scroll to as it would. Not waited for: the screen
+    /// said it was ready, so what it shows is all there is.
+    private func find(_ app: XCUIApplication, _ label: String, step: Shot.Step) -> XCUIElement {
         let each = label.split(separator: "|").map(String.init)
-        let until = Date().addingTimeInterval(timeout)
-        var c = app.descendants(matching: .any)[each[0]].firstMatch
-        // One that is there but cannot yet be touched (still being laid
-        // out, sliding in, its frame not yet on the screen) is waited on
-        // until it can: tapped at once, XCUITest fails it ("Failed to
-        // determine hittability … Activation point invalid", harken's
-        // Für Elise in app-screens 42660995429). Only at the end is one
-        // that is there and never hittable handed back, for XCUITest's tap
-        // to scroll to as it would.
         var there: XCUIElement?
-        repeat {
-            for one in each {
-                c = step.where == "bottom" ? lowest(app, one, timeout: 0) : control(app, one, role: step.role)
-                if c.exists {
-                    if c.isHittable { return c }
-                    there = there ?? c
-                }
+        for one in each {
+            let c = step.where == "bottom" ? lowest(app, one) : control(app, one, role: step.role)
+            if c.exists {
+                if c.isHittable { return c }
+                there = there ?? c
             }
-            sleep(1)
-        } while Date() < until
-        return there ?? c
+        }
+        return there ?? app.descendants(matching: .any)[each[0]].firstMatch
     }
 
     /// Of every element that says `label`, the lowest on the screen, once
     /// one is there: a mini player saying the title a row above it says.
-    private func lowest(_ app: XCUIApplication, _ label: String, timeout: Double = 30) -> XCUIElement {
+    private func lowest(_ app: XCUIApplication, _ label: String) -> XCUIElement {
         let all = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR identifier == %@", label, label))
-        if timeout > 0 { _ = all.firstMatch.waitForExistence(timeout: timeout) }
         return all.allElementsBoundByIndex.filter { $0.isHittable }.max { $0.frame.maxY < $1.frame.maxY } ?? all.firstMatch
     }
 

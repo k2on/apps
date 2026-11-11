@@ -23,6 +23,34 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
+// The page ready to be taken (ui/docs/shots.md): the app's own signal where
+// it has one (`data-ark-idle` = 1: every runtime's `Runtime::is_idle`), at a
+// version (`data-ark-version`: the runtimes' `version`) that held for two
+// frames; and the page's own: its fonts loaded, every image decoded, no
+// animation with an end still running. No time is waited for: the limit
+// only fails a page that never says so.
+async function ready(page) {
+  const said = await page.evaluate(() => new Promise(done => {
+    const until = performance.now() + 20000;
+    let last = null, frames = 0;
+    const check = async () => {
+      await document.fonts.ready;
+      const root = document.documentElement;
+      const idle = !root.hasAttribute('data-ark-idle') || root.getAttribute('data-ark-idle') === '1';
+      const version = root.getAttribute('data-ark-version');
+      const moving = document.getAnimations().some(a => a.playState === 'running' && a.effect && a.effect.getComputedTiming().iterations !== Infinity);
+      const quiet = idle && !moving && [...document.images].every(i => i.complete);
+      frames = quiet && version === last ? frames + 1 : 0;
+      last = version;
+      if (frames >= 2) return done(null);
+      if (performance.now() > until) return done(`not ready: idle ${root.getAttribute('data-ark-idle')}, version ${version}, moving ${moving}`);
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  }));
+  if (said) throw new Error(said);
+}
+
 async function main() {
   const [shotsFile, base, out] = process.argv.slice(2);
   const all = JSON.parse(fs.readFileSync(shotsFile, 'utf8'));
@@ -68,13 +96,18 @@ async function main() {
         });
         // `web.query`: what every shot's address says first, the app's own
         // (money's `demo`: the household in the page, no server).
-        const q = [web.query || '', `today=${web.today}`, `theme=${theme}`, 'reduce-motion=1', shot.query || ''].filter(Boolean).join('&');
+        // `shots=1`: nothing on the page moves, a fade included, and the
+        // caret is clear (arkui-web's `data-motion="shots"`, ui/docs/shots.md).
+        const q = [web.query || '', `today=${web.today}`, `theme=${theme}`, 'shots=1', shot.query || ''].filter(Boolean).join('&');
+        // How a shot's `route` is put in the address: the one place that says
+        // it (a router's URL is its fragment, as the address bar shows it).
+        const at = route => (route ? `#${route.replace(/^[a-z]+:\/\//, '')}` : '');
         try {
-          await page.goto(mode === 'spa' ? `${base}/?${q}` : `${base}${shot.path}`);
+          await page.goto(mode === 'spa' ? `${base}/?${q}${at(shot.route)}` : `${base}${shot.path}`);
           // The written page is the browser's once its module has run.
           if (mode !== 'spa' && js) await page.waitForSelector('html[data-ark-js]', { timeout: 20000 });
           await page.waitForSelector('.ark-window', { timeout: 20000 });
-          await page.waitForTimeout(300);
+          await ready(page);
           for (const step of shot.steps || []) {
             if (step.click) await page.getByText(step.click, { exact: true }).first().click({ button: step.button || 'left' });
             if (step.context) await page.getByText(step.context, { exact: true }).first().click({ button: 'right' });
@@ -83,9 +116,8 @@ async function main() {
             if (step.type) await page.keyboard.type(step.type);
             if (step.await) await page.getByText(step.await).first().waitFor({ timeout: 10000 });
             if (step.wait) await page.waitForTimeout(step.wait * 1000);
-            await page.waitForTimeout(80);
+            await ready(page);
           }
-          await page.waitForTimeout(250);
           const dir = path.join(out, size, theme);
           fs.mkdirSync(dir, { recursive: true });
           await page.screenshot({ path: path.join(dir, `${shot.id}.png`) });
