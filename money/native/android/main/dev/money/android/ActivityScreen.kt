@@ -84,11 +84,13 @@ fun search(rows: List<TxnLine>, needle: String): List<TxnLine> {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityScreen(ledger: Ledger) {
+fun ActivityScreen(ledger: Ledger, searched: String? = null) {
     val shell = LocalShell.current
     val book = shell.book
     var all by rememberSaveable { mutableStateOf(false) }
-    var needle by rememberSaveable { mutableStateOf("") }
+    // Under the shell, what is typed in its search bar (ShellPage.search): one search field.
+    var typed by rememberSaveable { mutableStateOf("") }
+    val needle = searched ?: typed
     var filing by remember { mutableStateOf<List<Id>?>(null) }
     val list = rememberLazyListState()
     val expanded by remember { derivedStateOf { list.firstVisibleItemIndex == 0 } }
@@ -107,9 +109,11 @@ fun ActivityScreen(ledger: Ledger) {
         },
     ) { pad, _ ->
         LazyColumn(state = list, contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp)) {
-            item(key = "search") {
-                // The page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
-                SearchField(needle, { needle = it }, "Payee, category, memo or amount", Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs))
+            if (searched == null) {
+                item(key = "search") {
+                    // The page's first content, so nothing over it but the title's own gap (`TabTitle.BELOW`, `Page`'s).
+                    SearchField(needle, { typed = it }, "Payee, category, memo or amount", Modifier.fillMaxWidth().padding(start = Space.page, end = Space.page, bottom = Space.xs))
+                }
             }
             item(key = "segments") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = Space.s)) {

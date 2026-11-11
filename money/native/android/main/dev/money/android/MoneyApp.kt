@@ -361,8 +361,9 @@ fun Page(
     val shell = LocalShell.current
     val ledger by shell.book.state.collectAsStateWithLifecycle()
     val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    // Under the shell's top bar (ArkUI's): the bar has the title, the actions and the add button.
-    val hosted = dev.arkui.LocalUnderToolbar.current && onBack == null
+    // Under the shell's top bar (ArkUI's): the bar has the title, the back button and the
+    // actions — a pushed page's too, whose bar replaces its section's — so the page draws none.
+    val hosted = dev.arkui.LocalUnderToolbar.current
     Scaffold(
         modifier = modifier.nestedScroll(bar.nestedScrollConnection),
         // The navigation bar below keeps the bottom clear; a pushed page has none, and keeps it itself.
@@ -478,7 +479,11 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
                 }
             }
         }
-        "transactions" -> ActivityScreen(ledger)
+        "transactions" -> {
+            // The shell's search bar is the list's search.
+            val page by sections.page.collectAsStateWithLifecycle()
+            ActivityScreen(ledger, searched = page.search)
+        }
         "insights" -> InsightsScreen(ledger)
         "accounts.register" -> {
             // The account the shell shows: its place's tag, `accounts/<id>`.
@@ -486,8 +491,13 @@ private fun Hosted(name: String, book: Book, ledger: Ledger, shell: Shell, nav: 
             val id = ledger.accounts.firstOrNull { "accounts/${it.id.hex}" == page.section }?.id
             if (id != null) RegisterScreen(ledger, id, onBack = { sections.send(uniffi.money_app.ShellMsg.Back) }) else Text("No Account Selected", modifier = Modifier.padding(16.dp))
         }
-        // Who is signed in, at the drawer's foot (or the top bar's end): the account sheet.
-        "household" -> androidx.compose.material3.TextButton(onClick = shell.onAccountSheet) { Text(ledger.who) }
+        // Who is signed in: their face, as the tabs' own title rows draw it.
+        "household" -> AccountFace(
+            ledger.who,
+            ledger.picture,
+            onClick = shell.onAccountSheet,
+            attention = if (ledger.banksWanting > 0) "Banks need a look" else null,
+        )
         "settings.general" -> SettingsScreen(ledger, onBack = {})
         else -> Text("Nothing Selected", modifier = Modifier.padding(16.dp))
     }

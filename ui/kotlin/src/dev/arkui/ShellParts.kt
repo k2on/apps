@@ -54,11 +54,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -202,7 +205,8 @@ public fun AdaptiveTabs(selection: String, onSelect: (String) -> Unit, footer: @
                                 }
                                 heading = t.group
                                 NavigationDrawerItem(
-                                    label = { Text(t.title) },
+                                    // One line, cut short beside a badge rather than broken in two.
+                                    label = { Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     icon = { Icon(shellGlyph(t.glyph, lookup), contentDescription = null) },
                                     badge = { t.badge?.let { Text(it.toString()) } },
                                     selected = t.tag == shown.tag,
@@ -239,7 +243,7 @@ public fun SplitColumns(showing: Boolean, onBack: () -> Unit, detail: @Composabl
         }
     } else if (showing) {
         BackHandler(onBack = onBack)
-        detail()
+        Pushed(onBack, detail)
     } else {
         content()
     }
@@ -250,11 +254,30 @@ public fun SplitColumns(showing: Boolean, onBack: () -> Unit, detail: @Composabl
 public fun PushedDetail(showing: Boolean, onBack: () -> Unit, detail: @Composable () -> Unit, content: @Composable () -> Unit) {
     if (showing) {
         BackHandler(onBack = onBack)
-        detail()
+        Pushed(onBack, detail)
     } else {
         content()
     }
 }
+
+/**
+ * A page pushed over its section: the first `WithToolbar` inside it is the
+ * page's bar, with the back button at its start, in place of the section's.
+ */
+@Composable
+private fun Pushed(onBack: () -> Unit, detail: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalPushedBack provides onBack) { detail() }
+}
+
+/** The back of the page pushed around a toolbar, for its bar's back button. */
+private val LocalPushedBack = compositionLocalOf<(() -> Unit)?> { null }
+
+/** A section's bar, hidden while a bar inside it (a pushed page's) is up. */
+private class BarHost {
+    var inner by mutableStateOf(0)
+}
+
+private val LocalBarHost = compositionLocalOf<BarHost?> { null }
 
 // * The toolbar
 
@@ -296,11 +319,24 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
     val all = ToolbarScope().apply(items).items
     val lookup = LocalGlyphs.current
     var overflow by remember { mutableStateOf(false) }
+    // One bar at a time: a bar inside this one's content (a pushed page's) is
+    // the only one up, with a back button, and this one gives way.
+    val outer = LocalBarHost.current
+    val back = LocalPushedBack.current
+    // Only a pushed page's bar replaces its section's: side by side (a split
+    // view's detail), both are up.
+    if (outer != null && back != null) {
+        DisposableEffect(outer) {
+            outer.inner += 1
+            onDispose { outer.inner -= 1 }
+        }
+    }
+    val host = remember { BarHost() }
     val button: @Composable (BarItem) -> Unit = { b ->
         IconButton(onClick = b.onTap, enabled = b.enabled) { Icon(shellGlyph(b.glyph, lookup), contentDescription = b.title) }
     }
     Scaffold(topBar = {
-        TopAppBar(
+        if (host.inner == 0) TopAppBar(
             title = {
                 val principal = all.filter { it.placement == BarPlacement.Principal }
                 if (principal.isEmpty()) {
@@ -310,7 +346,12 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                 }
             },
             // Side by side: the slot is a box, where two would lie one over the other.
-            navigationIcon = { Row { all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) } } },
+            navigationIcon = {
+                Row {
+                    back?.let { IconButton(onClick = it) { Icon(ArkGlyphs.Back, contentDescription = "Back") } }
+                    all.filter { it.placement == BarPlacement.Navigation }.forEach { button(it) }
+                }
+            },
             actions = {
                 all.filter { it.placement == BarPlacement.Primary }.forEach { button(it) }
                 LocalInspectorToggle.current?.let { t ->
@@ -331,7 +372,11 @@ public fun WithToolbar(title: String, items: ToolbarScope.() -> Unit, content: @
                 }
             },
         )
-    }) { pad -> Box(Modifier.padding(pad)) { CompositionLocalProvider(LocalUnderToolbar provides true) { content() } } }
+    }) { pad ->
+        Box(Modifier.padding(pad)) {
+            CompositionLocalProvider(LocalUnderToolbar provides true, LocalBarHost provides host, LocalPushedBack provides null) { content() }
+        }
+    }
 }
 
 // * Search and the inspector
@@ -405,16 +450,19 @@ public fun ConfirmDialog(title: String, message: String, actions: List<DialogAct
         onDismissRequest = onCancel,
         title = { Text(title) },
         text = { Text(message) },
+        // The actions stacked, Cancel last, each on a line of its own at the
+        // trailing edge: Material's stacked buttons, so long titles never
+        // overflow a row and the dialog is as tall as what it holds.
         confirmButton = {
-            Row {
+            Column(horizontalAlignment = Alignment.End) {
                 actions.forEach { a ->
                     TextButton(onClick = a.onTap) {
                         Text(a.title, color = if (a.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
                     }
                 }
+                TextButton(onClick = onCancel) { Text("Cancel") }
             }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
 }
 
