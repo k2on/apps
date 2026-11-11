@@ -1,5 +1,5 @@
 {
-  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order, each its steps done from where the last left it. `player` is `fresh`: it plays a song (from Home's Recently added, which the shot before it is not on), and the app is opened again for it; it is paused and put halfway before it is taken, so that what it shows is the same each run. `devices` goes on from it, the player open, and opens its device picker. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says, in one window; `keys` is `fresh`, as `search` leaves the command box open. It has no player shot: nothing on the desktop can play.",
+  "_": "harken's screenshots (.github/screens/apps.md; which phones it is on is flake.nix's list, `publish`): its server is server.sh, signed in to as `user`; the app opened once for each device and theme and every shot taken in that one launch, in order, each its steps done from where the last left it. `player` is `fresh`: it plays a song (from Home's Recently added, which the shot before it is not on), and the app is opened again for it; it is paused and put halfway before it is taken, so that what it shows is the same each run. `devices` goes on from it, the player open, and opens its device picker. `desktop` is the iced window's (ui/rust/shots): its size, and its shots, each clicking or typing what a text on the screen says, in one window, each shot opening its own section first (`search` its command box over Songs, as it was taken in a window of its own); `keys` is `fresh`, as `search` leaves the command box open. It has no player shot: nothing on the desktop can play.",
   "server": {
     "port": 8787,
     "user": "alex",
@@ -105,6 +105,9 @@
       {
         "id": "search",
         "steps": [
+          {
+            "click": "Songs"
+          },
           {
             "key": "ctrl+k"
           },

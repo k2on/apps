@@ -330,16 +330,26 @@ listen
 
 # Signed in once, through arkui's onboarding; the login is kept for every
 # shot after. Its waits are the browser's and the system's, which are not
-# the app's to say; no shot is taken from them.
-if [ -n "$server" ] && [ -z "$signed_in" ]; then
-  # Chrome straight to the page: no first run, no sign-in to Google.
-  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
-  adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1 || true
+# the app's to say; no shot is taken from them. The address typed (cleared
+# and typed again until the field says it: a tablet's first tap could land before the
+# field took the keys, and Continue then went with nothing, app-screens
+# 42977527249's money and 43052816932's harken, both on the tablet), Continue,
+# Sign in, the server's page if it asks, a permission allowed. Each phase
+# said with its time.
+sign_in() {
+  local t=$SECONDS
   open_app
-  tap --field
-  sleep 1
-  adb shell input text "$server"
+  for try in 1 2 3; do
+    tap --field
+    sleep 1
+    # What a try before left in it, gone (a backspace for each character).
+    [ "$try" = 1 ] || adb shell input keyevent KEYCODE_MOVE_END $(printf '67 %.0s' $(seq 1 64))
+    adb shell input text "$server"
+    says "$server" && break
+    echo "$app: the address did not reach the field (try $try)"
+  done
   tap Continue
+  echo "  sign-in: the address sent ($((SECONDS - t))s)"
   # The server checked, then its sign-in: an app may open the browser by
   # itself, or wait for the button.
   for _ in $(seq 1 20); do
@@ -347,6 +357,7 @@ if [ -n "$server" ] && [ -z "$signed_in" ]; then
     says "a name" && break
     sleep 1
   done
+  echo "  sign-in: to the server's page ($((SECONDS - t))s)"
   # The server signs in its own user (ARK_DEV_USER, app-server.sh), and the
   # browser comes straight back; a server that asks instead shows its page,
   # which is given the name.
@@ -368,6 +379,21 @@ if [ -n "$server" ] && [ -z "$signed_in" ]; then
     says "a name" || says "Server address" || says Allow || break
     sleep 1
   done
+  echo "  sign-in: back in the app ($((SECONDS - t))s)"
+}
+
+if [ -n "$server" ] && [ -z "$signed_in" ]; then
+  # Chrome straight to the page: no first run, no sign-in to Google.
+  adb shell 'echo "_ --disable-fre --no-default-browser-check --no-first-run" > /data/local/tmp/chrome-command-line'
+  adb shell am set-debug-app --persistent com.android.chrome >/dev/null 2>&1 || true
+  sign_in
+  # Still at the onboarding's first page: what it showed kept, and once more.
+  if says "Server address"; then
+    echo "::warning::$app: still not signed in; signing in once more (signin-stuck.png is what was there)"
+    adb exec-out screencap ${SCREENCAP_DISPLAY:+-d "$SCREENCAP_DISPLAY"} -p > "$out/signin-stuck.png" || true
+    dump | python3 -I "$here/ui.py" --tree > "$out/signin-stuck.tree.txt" || true
+    sign_in
+  fi
 fi
 # Every shot from here on: a tap is looked for once, on a ready screen.
 SHOTS=1
