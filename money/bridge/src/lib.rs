@@ -60,7 +60,7 @@ ark::twins!(
         accounts::{AccountItem, AccountsMsg, AccountsPage, AccountsShelf, AddForm, KindChoice, RenameForm},
         insights::{InsightsMsg, InsightsPage, PlanRow, SpentGroup},
         budget::{AmountForm, BudgetChoice, BudgetMsg, BudgetPage, CategoryForm, CategoryItem, GroupItem, MoveForm, NameForm},
-        receipts::{ReceiptsMsg, ReceiptsPage},
+        receipts::{FormItem, MatchRow, MatchSheet, PhotoSheet, ReadingPhoto, ReceiptForm, ReceiptSection},
         register::{RegisterDay, RegisterMsg, RegisterPage, RegisterRow},
         sheets::{CategorizeSheet, PayeeChoice, ReconcileSheet, SheetChoice, SheetsMsg, SheetsPage, TxnSheet},
         transactions::{CategorizeForm, CategoryChoice, DeleteQuestion, TransactionsMsg, TransactionsPage, TxnDay, TxnItem},
@@ -87,7 +87,7 @@ pub mod core;
 mod demo;
 mod hall;
 mod session;
-pub use app::{AccountsApp, AppShell, BudgetApp, Devices, InsightsApp, ReceiptsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
+pub use app::{AccountsApp, AppShell, BudgetApp, Devices, InsightsApp, RegisterApp, SheetsApp, ShellApp, TransactionsApp};
 pub use demo::{money_demo, DemoBank, DemoSync};
 pub use hall::Hall;
 pub use session::{Budget, Changed, Holding, MoneyView, Session};

@@ -56,8 +56,6 @@ final class Model: ObservableObject {
     let shell = MoneyShellScreen()
     /// The phone's device modules (money/app.toml), given every screen run in Rust.
     var devices: Devices? = nil
-    /// A receipt being given, in Rust, while a session is open.
-    private(set) var receipts: ReceiptsScreen? = nil
     /// The Transactions tab, running in Rust (money/app/src/transactions).
     @Published private(set) var transactions: TransactionsScreen? = nil
     /// Insights, running in Rust (money/app/src/insights).
@@ -252,12 +250,6 @@ final class Model: ObservableObject {
         budget = BudgetScreen(session: s, devices: devices, month: month,
                               refresh: { [weak self] in Task { await self?.refresh() } },
                               today: { [weak self] in self?.today ?? moneyToday() })
-        let r = ReceiptsScreen(session: s, devices: devices,
-                               refresh: { [weak self] in Task { await self?.refresh() } },
-                               today: { [weak self] in self?.today ?? moneyToday() })
-        r.keep = { [weak self] jpeg, txn in self?.addPhoto(jpeg, txn: txn) }
-        r.say = { [weak self] why in self?.notice = why }
-        receipts = r
         transactions = TransactionsScreen(session: s, devices: devices, month: month,
                                           refresh: { [weak self] in Task { await self?.refresh() } },
                                           today: { [weak self] in self?.today ?? moneyToday() })
@@ -280,7 +272,6 @@ final class Model: ObservableObject {
         transactions = nil
         sheets = nil
         insights = nil
-        receipts = nil
         shell.disconnect()
         session = nil
         snapshot = Snapshot()
@@ -361,56 +352,11 @@ final class Model: ObservableObject {
         return h
     }
 
-    /// `f` of the session's `view`, once something holds it.
-    private func read<T>(_ view: MoneyView, _ f: (Session) -> T) -> T? {
-        guard let s = session, s.version(view: view) > 0 else { return nil }
-        return f(s)
-    }
-
-    /// What paid for `txn`, while a screen holds it.
-    func paid(_ txn: Id) -> [ReceiptLine] {
-        read(.paid(txn: txn)) { $0.paid(txn: txn) } ?? []
-    }
-
-    /// A receipt's items, while a screen holds them.
-    func items(_ receipt: String) -> [ItemLine] {
-        read(.items(receipt: receipt)) { $0.items(receipt: receipt) } ?? []
-    }
-
     // MARK: what is written
 
     private func write(_ what: String, _ change: MoneyChange, done: @escaping (Bool) -> Void = { _ in }) {
         guard let b = bridge else { return done(false) }
         b.write(what, change, done: done)
-    }
-
-    // MARK: receipts
-
-    /// A file's bytes, once the phone has them; asked for when it does not.
-    func file(_ f: FileRef) -> Data? {
-        if let d = snapshot.files[f.hash] { return d }
-        bridge?.want(file: f)
-        return nil
-    }
-
-    /// A photo of a receipt kept and sent to be read, for `txn` when it was taken for one.
-    func addPhoto(_ jpeg: Data, txn: Id?, done: @escaping (Bool) -> Void = { _ in }) {
-        guard let b = bridge else { return done(false) }
-        b.addPhoto(jpeg, txn: txn, done: done)
-    }
-
-    /// A receipt typed by hand, or one read put right.
-    func save(_ r: ReceiptDraft, done: @escaping (Bool) -> Void = { _ in }) {
-        if let problem = r.problem {
-            notice = problem
-            return done(false)
-        }
-        write("save the receipt", .writeReceipt(value: r.write), done: done)
-    }
-
-    /// A receipt said to be what paid for `txn`; none, for nothing.
-    func pay(receipt: String, with txn: Id?) {
-        write(txn == nil ? "take the receipt off" : "match the receipt", .pay(value: MatchReceipt(receiptId: receipt, txnId: txn)))
     }
 
     // MARK: the bank

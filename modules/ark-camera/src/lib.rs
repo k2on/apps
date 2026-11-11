@@ -1,5 +1,5 @@
-//! The camera: a QR code read, a photo taken, or a photo taken while eyes
-//! in Rust watch the frames. Each shows the platform's own camera page and
+//! The camera: a QR code read, a photo taken, a photo taken while eyes in
+//! Rust watch the frames, or a photo chosen from the library. Each shows the platform's own camera page and
 //! answers when it closes, through a typed reply the platform is handed: a
 //! scan's [`ScanReply`] answers the code read (none when the person backed
 //! out), a photo's [`PhotoReply`] its JPEG. An update or another module
@@ -37,6 +37,10 @@ pub trait Camera: Send + Sync {
     /// photo taken when they say so, or at the shutter, its JPEG to `reply`
     /// (none when the person backed out).
     fn watch(&self, eyes: Arc<Eyes>, reply: Arc<PhotoReply>);
+    /// A photo chosen from the device's library (PHPicker, Android's Photo
+    /// Picker), as a JPEG, to `reply`; none when the person backed out.
+    /// What ark-scanner's `PickPhoto` is on the phones.
+    fn pick_photo(&self, reply: Arc<PhotoReply>);
 }
 
 /// One frame of the camera's analysis stream, as the sensor sees it.
@@ -277,6 +281,11 @@ impl Camera for Fake {
 
     fn watch(&self, eyes: Arc<Eyes>, reply: Arc<PhotoReply>) {
         self.watched.lock().unwrap_or_else(|e| e.into_inner()).push((eyes, reply))
+    }
+
+    /// Waits with the photos taken: [`Fake::photographed`] answers it.
+    fn pick_photo(&self, reply: Arc<PhotoReply>) {
+        self.photos.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
     }
 }
 

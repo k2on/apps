@@ -4,8 +4,8 @@
 its Swift and its Kotlin (ui/docs/app.md, The Device). An app opts in by
 listing `ark-camera` in its app.toml and depending on `ark-camera`.
 
-A QR code scanned, a photo taken, or a photo taken while eyes in Rust watch
-the frames: each shows the platform's own camera page and answers when it
+A QR code scanned, a photo taken, a photo taken while eyes in Rust watch
+the frames, or a photo chosen from the library: each shows the platform's own camera page and answers when it
 closes, through a typed reply (`ScanReply`, `PhotoReply`) the platform
 answers once — a scan as `Text` (none when the person backed out), a photo
 as its JPEG's `Bytes`.
@@ -20,12 +20,13 @@ trait Camera {
     fn scan_qr(&self, reply: Arc<ScanReply>);
     fn take_photo(&self, reply: Arc<PhotoReply>);
     fn watch(&self, eyes: Arc<Eyes>, reply: Arc<PhotoReply>);
+    fn pick_photo(&self, reply: Arc<PhotoReply>);   // ark-scanner's PickPhoto, on the phones
 }
 // ScanReply.scanned(code) / PhotoReply.taken(jpeg), or .failed(why)
 trait See { fn look(&self, frame: &Frame) -> Look; }   // Rust's eyes: Eyes::new(Arc<dyn See>)
 struct Frame { width, height, luma, rgb /* SQUARE² RGB or empty */, turns, at_ms }
 struct Look { outline /* 8 floats, upright, 0..1 */, held, words, take }
-ark_camera::Fake // .scanned(code), .photographed(jpeg), .show(frame) -> Look, .watched(jpeg)
+ark_camera::Fake // .scanned(code), .photographed(jpeg) (a photo taken or picked), .show(frame) -> Look, .watched(jpeg)
 ```
 
 **Watched.** The camera's page hands each frame of its analysis stream to
@@ -39,16 +40,16 @@ finder is such eyes (modules/ark-scanner).
 
 ## Per Platform
 
-| | QR code | Photo | Watched |
-|---|---|---|---|
-| iPhone, iPad (`PhoneCamera`, swift/) | VisionKit's data scanner (ArkUI's `QrScanner`) | `UIImagePickerController` | AVFoundation: the back camera's 4:3 photo preset, its frames' luminance (about 640 wide) to the eyes, a JPEG from `AVCapturePhotoOutput`; the overlay in SwiftUI over ArkUI's parts |
-| Mac | fails, said: no camera to hold over a page | fails | fails |
-| Android (`PhoneCamera`, kotlin/; its page `CameraPage`, put once at the app's root) | fails, said: no decoder yet (one is a new dependency, deps.json regenerated) | the watched page with no eyes | Camera2 (no library): a preview, a YUV stream about 640 wide whose luminance and a 256-pixel colour square go to the eyes on a thread of their own, a frame at a time, and the full JPEG |
-| Desktop, browser | `Unavailable` | `Unavailable` | `Unavailable` (ark-scanner chooses a file there) |
+| | QR code | Photo | Watched | Picked |
+|---|---|---|---|---|
+| iPhone, iPad (`PhoneCamera`, swift/) | VisionKit's data scanner (ArkUI's `QrScanner`) | `UIImagePickerController` | AVFoundation: the back camera's 4:3 photo preset, its frames' luminance (about 640 wide) to the eyes, a JPEG from `AVCapturePhotoOutput`; the overlay in SwiftUI over ArkUI's parts | `PHPickerViewController`, one image, as a JPEG at most 3000 on its long side |
+| Mac | fails, said: no camera to hold over a page | fails | fails | `NSOpenPanel` of images, as a JPEG |
+| Android (`PhoneCamera`, kotlin/; its page `CameraPage`, put once at the app's root) | fails, said: no decoder yet (one is a new dependency, deps.json regenerated) | the watched page with no eyes | Camera2 (no library): a preview, a YUV stream about 640 wide whose luminance and a 256-pixel colour square go to the eyes on a thread of their own, a frame at a time, and the full JPEG | the system's Photo Picker (`PickVisualMedia`, no permission), stood upright by its EXIF, a JPEG at most 3000 on its long side |
+| Desktop, browser | `Unavailable` | `Unavailable` | `Unavailable` (ark-scanner chooses a file there) | `Unavailable` (ark-scanner chooses a file there) |
 
 An app's runtimes take what came of a page once it answers: the phone's
 `PhoneCamera` says so (`answered`, `onAnswered`), and the app drains its
-runtimes' inboxes (money: `ReceiptsApp.drain`).
+runtimes' inboxes (money: `SheetsApp.drain`, a receipt scanned or picked).
 
 ## Motion
 

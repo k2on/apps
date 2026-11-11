@@ -36,6 +36,10 @@ pub const ENTER_SCALE: f32 = 0.95;
 pub const RUBBER_BAND: f32 = 0.55;
 /// How large a row held to be dragged grows.
 pub const LIFT: f32 = 1.02;
+/// The most a pinched photo grows, as a multiple of the size it is fitted at.
+pub const ZOOM_MAX: f32 = 4.0;
+/// What a double tap zooms a photo to.
+pub const ZOOM_TAP: f32 = 2.5;
 /// How far a page or a step slides as it comes or goes, as a share of its width.
 pub const SHIFT: f32 = 0.2;
 /// How small a cover is drawn while what it plays is paused.

@@ -3,7 +3,9 @@
 //! with the payees offered, its category or the account a transfer goes
 //! to, its account, day, cleared mark and memo; deleted, asked first);
 //! transactions given a category, and approved with it; and an account
-//! reconciled with the bank. One runtime of their own, so a register, the
+//! reconciled with the bank; and, in a transaction's form, its receipt
+//! ([`crate::receipts`]: the section, the receipt form, the receipts nobody
+//! matched, the photo whole). One runtime of their own, so a register, the
 //! Transactions tab, the shell's toolbar and a launch all raise the same
 //! one ([`MoneyRequest::Sheet`]).
 //!
@@ -82,6 +84,11 @@ pub struct State {
     /// The session's day (`2026-11-11`): a new transaction's, and a reconciling's.
     pub today: String,
     pub style: Style,
+    /// The transaction's receipt being given, put right or shown.
+    pub receipt: crate::receipts::State,
+    /// The receipt that paid for the transaction in the form, as last read:
+    /// its items held.
+    pub paid: Option<String>,
 }
 
 /// Everything the sheets can be told. Ids are rows' `Id::hex`.
@@ -173,6 +180,60 @@ pub enum SheetsMsg {
     Done {
         refused: Option<String>,
     },
+    // The transaction's receipt (crate::receipts).
+    /// A paper receipt scanned for it.
+    ScanReceipt,
+    /// A photo of one chosen from the library.
+    ChoosePhoto,
+    /// What the scanner or the picker gave: the photo's JPEG, none when
+    /// backed out, or why it failed.
+    Photographed {
+        page: Option<Vec<u8>>,
+        failed: Option<String>,
+    },
+    /// The receipt form, for one typed by hand.
+    TypeReceipt,
+    /// The receipt form, over the one that paid for it.
+    EditReceipt,
+    ReceiptPlace {
+        place: String,
+    },
+    ReceiptDay {
+        day: String,
+    },
+    /// The form's item of this place (`FormItem::key`) typed.
+    PickItem {
+        key: String,
+    },
+    /// The item being typed's name and amount.
+    ItemName {
+        name: String,
+    },
+    ItemAmount {
+        typed: String,
+    },
+    AddItem,
+    RemoveItem,
+    SaveReceipt,
+    CloseReceipt,
+    /// The receipts nobody has matched, offered.
+    MatchReceipt,
+    /// One of them chosen: it paid for the transaction.
+    Matched {
+        id: String,
+    },
+    CloseMatch,
+    /// The receipt that paid for it, paid for by nothing.
+    TakeReceiptOff,
+    /// A photo, by its file's hash, shown whole.
+    ShowPhoto {
+        hash: String,
+    },
+    ClosePhoto,
+    /// What became of a receipt written, matched or taken off.
+    ReceiptDone {
+        refused: Option<String>,
+    },
 }
 
 /// One payee offered under the payee field.
@@ -197,13 +258,10 @@ pub struct TxnSheet {
     /// A new one: "New Transaction"; else "Transaction".
     pub adding: bool,
     pub editing: bool,
-    /// The one corrected's hex id, its receipt (the receipt's id, or empty)
-    /// and its signed amount: what its receipt's section is about. The
-    /// section is the host's own (`receipt`), until receipts move here.
+    /// The one corrected's hex id.
     pub id: String,
-    pub receipt: String,
-    pub signed: i64,
-    pub has_receipt: bool,
+    /// Its receipt, for one already there and not a transfer.
+    pub receipt: Option<crate::receipts::ReceiptSection>,
     /// "outflow" or "inflow".
     pub way: String,
     pub ways: Vec<SheetChoice>,
@@ -357,8 +415,9 @@ impl App for Sheets {
 
     fn holds(s: &State) -> Vec<MoneyView> {
         let mut v = vec![MoneyView::Register { account: None }, MoneyView::Accounts];
-        if matches!(s.up, Some(Up::Txn(_))) {
+        if let Some(Up::Txn(f)) = &s.up {
             v.push(MoneyView::Payees);
+            v.extend(crate::receipts::holds(&s.receipt, f.draft.editing, s.paid.as_deref()));
         }
         if !s.month.is_empty() {
             v.push(MoneyView::Lines { month: s.month.clone() });
@@ -368,6 +427,22 @@ impl App for Sheets {
     }
 
     fn update(s: &mut State, msg: SheetsMsg, data: &Data<'_, MoneyView>) -> Vec<Command<Self>> {
+        let out = Sheets::take(s, msg, data);
+        // The receipt that paid for the one in the form, as it now reads: its items held.
+        s.paid = match &s.up {
+            Some(Up::Txn(f)) => crate::receipts::paid_id(data, f.draft.editing),
+            _ => None,
+        };
+        out
+    }
+
+    fn screen(s: &State, data: &Data<'_, MoneyView>) -> SheetsPage {
+        Sheets::page(s, data)
+    }
+}
+
+impl Sheets {
+    fn take(s: &mut State, msg: SheetsMsg, data: &Data<'_, MoneyView>) -> Vec<Command<Sheets>> {
         use SheetsMsg as M;
         match msg {
             M::Month { month, today } => {
@@ -376,6 +451,7 @@ impl App for Sheets {
                 vec![]
             }
             M::New { account } => {
+                s.receipt = Default::default();
                 let account = account.as_deref().and_then(crate::id_of);
                 s.up = Some(Up::Txn(Box::new(TxnForm {
                     draft: Draft::new(accounts(data), account, &s.today),
@@ -388,6 +464,7 @@ impl App for Sheets {
                 vec![]
             }
             M::Open { key } => {
+                s.receipt = Default::default();
                 if let Some(t) = transaction_named(all(data), &key) {
                     s.up = Some(Up::Txn(Box::new(form_of(t, us(s)))));
                 }
@@ -518,6 +595,7 @@ impl App for Sheets {
             M::SaveReconcile => reconcile(s, data, false),
             M::Dismiss => {
                 s.up = None;
+                s.receipt = Default::default();
                 vec![]
             }
             M::Sent { .. } => vec![],
@@ -533,10 +611,22 @@ impl App for Sheets {
                     vec![]
                 }
             },
+            receipt => {
+                let style = us(s).clone();
+                let Some(Up::Txn(f)) = &s.up else { return vec![] };
+                let t = found(data, &f.draft.editing.map(|i| i.hex()).unwrap_or_default());
+                let about = crate::receipts::About {
+                    txn: f.draft.editing,
+                    amount: t.map_or(0, |t| t.amount),
+                    payee: &f.draft.payee,
+                    day: &f.draft.date,
+                };
+                crate::receipts::update(&mut s.receipt, receipt, about, data, &style)
+            }
         }
     }
 
-    fn screen(s: &State, data: &Data<'_, MoneyView>) -> SheetsPage {
+    fn page(s: &State, data: &Data<'_, MoneyView>) -> SheetsPage {
         let style = us(s);
         SheetsPage {
             transaction: match &s.up {
@@ -683,9 +773,19 @@ fn txn_sheet(s: &State, f: &TxnForm, data: &Data<'_, MoneyView>) -> TxnSheet {
         adding: d.editing.is_none(),
         editing: d.editing.is_some(),
         id: d.editing.map(|i| i.hex()).unwrap_or_default(),
-        receipt: editing.map(|t| t.receipt.clone()).unwrap_or_default(),
-        signed: editing.map(|t| t.amount).unwrap_or(0),
-        has_receipt: editing.is_some() && !f.transfer,
+        receipt: (editing.is_some() && !f.transfer).then(|| {
+            crate::receipts::section(
+                &s.receipt,
+                crate::receipts::About {
+                    txn: d.editing,
+                    amount: editing.map_or(0, |t| t.amount),
+                    payee: &d.payee,
+                    day: &d.date,
+                },
+                data,
+                style,
+            )
+        }),
         way: if f.inflow { "inflow" } else { "outflow" }.into(),
         ways: vec![
             SheetChoice {

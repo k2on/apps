@@ -293,6 +293,63 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<AnyView> {
             ))
             .into_any(),
         Part::CodeImage { size, dark } => crate::figures::qr_svg(size.get().max(0) as usize, &dark.get()),
+        Part::Photo { url, label, zoom } => {
+            let url = url.get();
+            match url.is_empty() {
+                // Still being fetched: its label, waiting.
+                true => html::p()
+                    .class("ark-caption ark-photo-waiting")
+                    .attr("role", "status")
+                    .attr("aria-busy", "true")
+                    .child(label.get())
+                    .into_any(),
+                false => html::img()
+                    .class(if zoom { "ark-photo ark-photo-zoom" } else { "ark-photo" })
+                    .attr("src", url)
+                    .attr("alt", label.get())
+                    .into_any(),
+            }
+        }
+        Part::Paper {
+            heading,
+            date,
+            names,
+            figures,
+            notes,
+            total,
+        } => {
+            let (figures, notes) = (figures.get(), notes.get());
+            let lines: Vec<AnyView> = names
+                .get()
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let note = notes.get(i).filter(|n| !n.is_empty()).cloned();
+                    html::div()
+                        .class("ark-paper-item")
+                        .child((
+                            html::div()
+                                .class("ark-paper-line")
+                                .child((html::span().child(name), html::span().child(figures.get(i).cloned().unwrap_or_default()))),
+                            note.map(|n| html::div().class("ark-paper-note").child(n)),
+                        ))
+                        .into_any()
+                })
+                .collect();
+            html::div()
+                .class("ark-paper")
+                .child((
+                    html::div().class("ark-paper-heading").child(heading.get()),
+                    html::div().class("ark-paper-date").child(date.get()),
+                    html::hr().class("ark-paper-rule"),
+                    lines,
+                    html::hr().class("ark-paper-rule"),
+                    html::div()
+                        .class("ark-paper-line ark-paper-total")
+                        .child((html::span().child("TOTAL"), html::span().child(total.get()))),
+                ))
+                .into_any()
+        }
         Part::BarItem {
             title,
             glyph: g,
@@ -657,6 +714,21 @@ pub(crate) fn dialog<M: Clone + 'static>(p: Part<M>) -> AnyView {
             confirm,
             content,
         } => {
+            // A sheet over this one (a receipt typed over its transaction), or
+            // a question it asks: the page draws the top one alone, and this
+            // one again once it is put away, as the desktop does.
+            let mut parts = flatten(*content);
+            if let Some(i) = parts.iter().position(|v| {
+                matches!(
+                    v,
+                    View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. })
+                )
+            }) {
+                if let View::Part(over) = parts.swap_remove(i) {
+                    return dialog(over);
+                }
+            }
+            let content = Box::new(View::List(parts));
             let mut b = vec![push_button("Cancel", true, false, dismiss.clone())];
             if let Some(Confirm { title, enabled, tap }) = confirm {
                 b.push(push_button(title, enabled.get(), true, tap));

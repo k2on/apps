@@ -233,6 +233,10 @@ pub enum Command<A: App + ?Sized> {
     /// nothing in between ([`Host::draws_between`] false) runs it next, as
     /// [`Command::Then`].
     AfterDraw(A::Msg),
+    /// A file a row names, fetched when this device does not hold it: what a
+    /// screen about to show it asks ([`Views::file_url`] says where it is
+    /// read once it is here; the views are rung when it arrives).
+    Want(ark::file::FileRef),
 }
 
 impl<A: App + ?Sized> Command<A> {
@@ -263,6 +267,7 @@ impl<A: App + ?Sized> Debug for Command<A> {
             Command::Request(r) => write!(f, "Request({r:?})"),
             Command::Then(m) => write!(f, "Then({m:?})"),
             Command::AfterDraw(m) => write!(f, "AfterDraw({m:?})"),
+            Command::Want(file) => write!(f, "Want({})", file.hash),
         }
     }
 }
@@ -289,6 +294,7 @@ where
             (Command::Request(a), Command::Request(b)) => a == b,
             (Command::Then(a), Command::Then(b)) => a == b,
             (Command::AfterDraw(a), Command::AfterDraw(b)) => a == b,
+            (Command::Want(a), Command::Want(b)) => a == b,
             _ => false,
         }
     }
@@ -319,6 +325,10 @@ pub trait Host<A: App + ?Sized> {
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>);
     /// What only the host can do ([`App::Request`]).
     fn request(&mut self, _request: A::Request) {}
+    /// `file` fetched from the server when this device does not hold it
+    /// ([`Command::Want`]): a peer's `open_file`. A host that keeps no
+    /// files does nothing.
+    fn want(&mut self, _file: ark::file::FileRef) {}
     /// Whether the screen is drawn between one message and the next one
     /// sent: a phone's toolkit, which draws a page after it reads it and
     /// then tells [`Runtime::drawn`]. An iced window or the browser draws
@@ -484,6 +494,7 @@ impl<A: App> Runtime<A> {
                 host.ask(ticket, ask)
             }
             Command::Request(r) => host.request(r),
+            Command::Want(file) => host.want(file),
             Command::Then(m) => queue.push_back(m),
             Command::AfterDraw(m) if host.draws_between() => self.after_draw.push_back(m),
             Command::AfterDraw(m) => queue.push_back(m),

@@ -16,6 +16,7 @@
 use std::any::Any;
 use std::fmt::Debug;
 
+use crate::file::FileRef;
 use crate::format::Encode;
 use crate::plan::Patch;
 
@@ -142,6 +143,38 @@ pub trait Views<K: ViewKey> {
     fn version(&self, key: &K) -> u64;
     /// Why the last change sent was refused, while it is the last.
     fn refusal(&self) -> Option<&str>;
+    /// Where a file a row names can be read while this device holds it (a
+    /// `file:` URL on a device with a disk, a `data:` one without); none
+    /// while it is not here, and from a store that keeps no files.
+    fn file_url(&self, _file: &FileRef) -> Option<String> {
+        None
+    }
+}
+
+/// Views read beside the files the device holds: [`Views::file_url`]
+/// answered by `url` (a peer's `ark_peer::Peer::file_url`), everything
+/// else by `views`. What a host hands an app's screen.
+pub struct WithFiles<'a, K: ViewKey, F: Fn(&FileRef) -> Option<String>> {
+    pub views: &'a dyn Views<K>,
+    pub url: F,
+}
+
+impl<K: ViewKey, F: Fn(&FileRef) -> Option<String>> Views<K> for WithFiles<'_, K, F> {
+    fn rows_of(&self, key: &K) -> Option<&dyn Any> {
+        self.views.rows_of(key)
+    }
+    fn holds(&self, key: &K) -> bool {
+        self.views.holds(key)
+    }
+    fn version(&self, key: &K) -> u64 {
+        self.views.version(key)
+    }
+    fn refusal(&self) -> Option<&str> {
+        self.views.refusal()
+    }
+    fn file_url(&self, file: &FileRef) -> Option<String> {
+        (self.url)(file)
+    }
 }
 
 impl<K: ViewKey> dyn Views<K> + '_ {

@@ -12,13 +12,7 @@ package dev.money.android
 
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.Modifier
-import dev.arkui.Space
-import uniffi.money_bridge.StoreItem
-import uniffi.money_bridge.WriteReceipt
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import dev.arkdb.auth.Event
@@ -139,19 +133,4 @@ class Screens {
     }
 
     @Test fun settings() = shot("settings") { SettingsScreen(book.state.value, onBack = none) }
-
-    /** A transaction's receipt as its sheet draws it: the paper, white in light and dark. */
-    @Test fun receipt() {
-        val acc = book.state.value.accounts.first { it.onBudget && !it.closed }.id
-        book.holdRegister(acc)
-        val t = book.register(acc).first { it.amount < -2_000 && !it.transfer && it.receipt.isEmpty() }
-        val item = { name: String, cents: Long -> StoreItem(name, "", 1000, "ea", -cents) }
-        val tax = 83L
-        val items =
-            listOf(item("KS ORGANIC EGGS 24CT", 899), item("BANANAS 3LB", 149), item("SPARKLING WATER", -t.amount - 899 - 149 - tax), item("TAX", tax))
-        book.writeReceipt(WriteReceipt("", t.id, "Corner Shop", t.date, null, items))
-        val line = book.register(acc).first { it.id == t.id }
-        book.holdItems(line.receipt)
-        shot("receipt") { Column(Modifier.padding(Space.xl)) { ReceiptSection(book.state.value, t.id, line.receipt, t.amount, t.date) } }
-    }
 }

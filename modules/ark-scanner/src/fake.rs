@@ -1,4 +1,5 @@
-//! The scanner, faked for tests: a scan waits until the test answers it.
+//! The scanner, faked for tests: a scan or a photo picked waits until the
+//! test answers it, oldest first, the two in one queue.
 
 use std::sync::{Arc, Mutex};
 
@@ -44,6 +45,10 @@ impl Fake {
 
 impl super::Scanner for Fake {
     fn scan_page(&self, reply: Reply<Option<Vec<u8>>>) {
+        self.waiting.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
+    }
+
+    fn pick_photo(&self, reply: Reply<Option<Vec<u8>>>) {
         self.waiting.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
     }
 }

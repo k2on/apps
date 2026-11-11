@@ -334,6 +334,19 @@ button.ark-sidebar-heading:hover, button.ark-sidebar-heading.ark-on { color: var
 .ark-code-ground { fill: #ffffff; }
 .ark-code-ink { fill: #000000; }
 
+/* A photo (`photo`): fitted to its width; zoomed (`zoom_photo`), the room it is given, scrolled at its own size once wider. */
+.ark-photo { display: block; max-width: 100%; height: auto; border-radius: var(--ark-corner); }
+.ark-photo-zoom { width: 100%; max-height: 80vh; object-fit: contain; }
+.ark-photo-waiting { text-align: center; padding: var(--ark-space-l); }
+/* A slip of paper (`paper`): a receipt as it was printed, dark on white in every theme as the paper is. */
+.ark-paper { background: #ffffff; color: #1c1c1c; font-family: "SF Mono", ui-monospace, "Fira Mono", monospace; font-size: 13px; padding: var(--ark-space-l); border-radius: var(--ark-corner); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18); display: flex; flex-direction: column; gap: var(--ark-space-xs); }
+.ark-paper-heading { font-weight: 700; text-align: center; }
+.ark-paper-date { text-align: center; }
+.ark-paper-rule { border: none; border-top: 1px dashed rgba(0, 0, 0, 0.5); margin: var(--ark-space-xs) 0; width: 100%; }
+.ark-paper-line { display: flex; justify-content: space-between; gap: var(--ark-space-m); }
+.ark-paper-note { color: rgba(0, 0, 0, 0.55); padding-left: 2ch; }
+.ark-paper-total { font-weight: 700; }
+
 /* An inspector's page of cards (`detail_page`) and the card at its top (`header_card`), as iced draws them */
 .ark-detail { gap: 14px; }
 .ark-header-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }

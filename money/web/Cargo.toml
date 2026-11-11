@@ -34,6 +34,8 @@ ark = { path = "../../rust/ark" }
 ark-auth = { path = "../../rust/ark-auth", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# The page's own file input, as the scanner: a receipt scanned or its photo chosen.
+ark-scanner = { path = "../../modules/ark-scanner", features = ["web"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 

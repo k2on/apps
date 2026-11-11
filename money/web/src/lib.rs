@@ -72,6 +72,9 @@ pub enum Msg {
     /// The socket has something to say, or the peer's deadline came
     /// (`live`): it is pumped.
     Wake,
+    /// A device's operation answered after its message (a file chosen):
+    /// its runtime takes it.
+    Answered,
     /// What came of one of the sign-in machine's effects, or a press on
     /// the sign-in page (`live`).
     Onboard(ark_auth::onboarding::Event),
@@ -103,6 +106,10 @@ pub struct MoneyWeb {
     pub dry: bool,
     /// The page on its server, signed in there; none for the demo.
     pub live: Option<live::Live>,
+    /// What the device's operations became, each its runtime's message,
+    /// until a runtime takes it: one answered later (a file chosen) wakes
+    /// the page with [`Msg::Answered`].
+    answered: Arc<Mutex<Answered>>,
 }
 
 /// The views the page holds as long as it is open.
@@ -171,6 +178,7 @@ impl MoneyWeb {
             changes: 0,
             dry: false,
             live: None,
+            answered: Arc::default(),
         };
         app.shell_step(ShellMsg::Month { month });
         app.follow();
@@ -241,6 +249,31 @@ impl MoneyWeb {
     }
 
     /// `msg` taken by the runtime `at` names, what it asked carried out after.
+    /// What the device's operations answered since, each taken by its runtime.
+    fn answers(&mut self) {
+        self.take_answers(|a| &mut a.sheets);
+        self.take_answers(|a| &mut a.shell);
+        self.take_answers(|a| &mut a.accounts);
+        self.take_answers(|a| &mut a.budget);
+        self.take_answers(|a| &mut a.transactions);
+        self.take_answers(|a| &mut a.insights);
+        self.take_answers(|a| &mut a.register);
+    }
+
+    fn take_answers<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>>(
+        &mut self,
+        at: fn(&mut MoneyWeb) -> &mut Runtime<A>,
+    ) {
+        let mut rt = std::mem::take(at(self));
+        let mut desk = Desk::new(self);
+        desk.answer(&mut rt);
+        let natives = std::mem::take(&mut desk.natives);
+        *at(self) = rt;
+        for n in natives {
+            self.carry(n);
+        }
+    }
+
     fn step<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>>(
         &mut self,
         at: fn(&mut MoneyWeb) -> &mut Runtime<A>,
@@ -380,8 +413,16 @@ impl MoneyWeb {
                 self.shell_step(ShellMsg::Select { tag: "transactions".into() });
                 self.step(|a| &mut a.transactions, TransactionsMsg::Show { review: true })
             }
+            // A receipt's photo kept: on the page's replica, and sent to the
+            // server (which reads it) on this connection or the next.
+            MoneyRequest::KeepPhoto { jpeg, txn } => {
+                if let Ok(file) = self.peer.put_file(&jpeg, money_app::receipts::JPEG) {
+                    let txn_id = txn.as_deref().and_then(money_app::id_of);
+                    let _ = self.change(MoneyChange::AddPhoto(money_core::AddPhoto { file, txn_id }));
+                }
+            }
             // The browser's filter bar and receipt import are still to come.
-            MoneyRequest::Filter | MoneyRequest::ImportReceipt | MoneyRequest::KeepPhoto { .. } => {}
+            MoneyRequest::Filter | MoneyRequest::ImportReceipt => {}
             MoneyRequest::OpenCategory { key } => {
                 let n = key.to_lowercase();
                 let found = screens::lines(self)
@@ -547,9 +588,9 @@ type Answered = Vec<(Ticket, Box<dyn Any + Send>)>;
 impl<'a> Desk<'a> {
     fn new(app: &'a mut MoneyWeb) -> Desk<'a> {
         Desk {
+            answered: app.answered.clone(),
             app,
             natives: vec![],
-            answered: Arc::default(),
         }
     }
 
@@ -558,23 +599,32 @@ impl<'a> Desk<'a> {
         &mut self,
         rt: &mut Runtime<A>,
     ) {
+        // Another runtime's answers are kept for it.
+        let mut others = vec![];
         loop {
             let answered = std::mem::take(&mut *self.answered.lock().unwrap_or_else(|e| e.into_inner()));
             if answered.is_empty() {
-                return;
+                break;
             }
             for (t, m) in answered {
-                if let Ok(m) = m.downcast::<Option<A::Msg>>() {
-                    rt.answer(t, *m, self);
+                match m.downcast::<Option<A::Msg>>() {
+                    Ok(m) => rt.answer(t, *m, self),
+                    Err(m) => others.push((t, m)),
                 }
             }
         }
+        self.answered.lock().unwrap_or_else(|e| e.into_inner()).extend(others);
     }
 }
 
 impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::Route, Request = MoneyRequest>> Host<A> for Desk<'_> {
     fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
-        f(&self.app.store)
+        // A file a row names is read from the replica's memory (`data:`).
+        let peer = &self.app.peer;
+        f(&ark::views::WithFiles {
+            views: &self.app.store,
+            url: |file: &ark::file::FileRef| peer.file_url(file),
+        })
     }
     fn now_ms(&self) -> i64 {
         self.app.now_ms()
@@ -607,11 +657,27 @@ impl<A: ark_app::App<Key = MoneyView, Change = MoneyChange, Route = money_app::R
         }
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
-        // The page registers no module yet: answered Unavailable.
+        // The page's own file input is its scanner (a scan and a photo
+        // chosen); any other module answers Unavailable.
+        #[allow(unused_mut)]
+        let mut modules = Modules::new();
+        #[cfg(target_arch = "wasm32")]
+        modules.register::<dyn ark_app::modules::scanner::Scanner>(Arc::new(ark_scanner::Browser));
         let answered = self.answered.clone();
-        ask.run(&Modules::new(), move |m| {
-            answered.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, Box::new(m)))
-        })
+        // Answered at once, it is taken after this message; answered later,
+        // the page is woken to take it.
+        let now = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let asking = now.clone();
+        ask.run(&modules, move |m| {
+            answered.lock().unwrap_or_else(|e| e.into_inner()).push((ticket, Box::new(m)));
+            if !asking.load(std::sync::atomic::Ordering::Relaxed) {
+                arkui_web::send(Msg::Answered);
+            }
+        });
+        now.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn want(&mut self, file: ark::file::FileRef) {
+        let _ = self.app.peer.open_file(&file);
     }
     fn request(&mut self, r: MoneyRequest) {
         self.natives.push(Pending::Request(r));
@@ -671,6 +737,7 @@ impl WebApp for MoneyWeb {
             Msg::Settings(on) => self.settings = on,
             Msg::At(k, v) => self.at(&k, v),
             Msg::Wake => self.wake(),
+            Msg::Answered => self.answers(),
             Msg::Onboard(e) => self.onboard(e),
             Msg::Welcome(m) => self.first_run(m),
         }

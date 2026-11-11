@@ -125,8 +125,6 @@ class Shell(
     val addDevice: suspend () -> dev.arkui.DeviceLinkShown = { dev.arkui.DeviceLinkShown(null, 0, emptyList(), "Sign in first.") },
     /** The device modules money lists (money/app.toml), registered with every screen. */
     val devices: Devices? = null,
-    /** A receipt being given, in Rust (money/app/src/receipts): a page scanned and kept. */
-    val receipts: ReceiptsHolder? = null,
 )
 
 val LocalShell = staticCompositionLocalOf<Shell> { error("no shell") }
@@ -166,8 +164,7 @@ fun MoneyApp(
     val devices = remember(hapticView) { Devices(PhoneHaptics(hapticView), PhoneClipboard(hapticView.context), null, camera) }
     // The sheets over the app, written from Rust (generated/SheetsScreen.kt): its month the book's.
     val sheets = remember(book, devices) { SheetsHolder(book.session, { book.sync() }, { book.state.value.today }, devices) }
-    val receipts = remember(book, devices) { ReceiptsHolder(book.session, { book.sync() }, { book.state.value.today }, devices, book) }
-    camera.onAnswered = { receipts.answered() }
+    camera.onAnswered = { sheets.answered() }
     val shell =
         remember(book, nav) {
             Shell(
@@ -180,7 +177,6 @@ fun MoneyApp(
                 onAccountSheet = { account = true },
                 addDevice = addDevice,
                 devices = devices,
-                receipts = receipts,
             )
         }
 
@@ -566,11 +562,6 @@ private fun Hosted(
             LaunchedEffect(ledger.month) { holder.send(uniffi.money_bridge.TransactionsMsg.Month(month = ledger.month)) }
             LaunchedEffect(page.search) { holder.send(uniffi.money_bridge.TransactionsMsg.Search(text = page.search)) }
             ScreenFrame { TransactionsScreen(holder) }
-        }
-        // A transaction's receipt, in its sheet: this app's own until receipts move into Rust.
-        "transaction.receipt" -> {
-            val t = sheets.page.collectAsStateWithLifecycle().value.transaction
-            if (t != null && t.hasReceipt) ReceiptSection(ledger, Id(t.id), t.receipt, t.signed, t.day)
         }
         "insights" -> {
             // Written from Rust (generated/InsightsScreen.kt), over its runtime: its month the book's.

@@ -25,6 +25,3 @@ fun Book.releaseRegister(account: Id?) = release(MoneyView.Register(account))
 
 /** A register as a screen holding it reads it. */
 fun Book.register(account: Id?): List<TxnLine> = session.register(account)
-
-/** A receipt's items held, as its paper holds them. */
-fun Book.holdItems(receipt: String) = hold(MoneyView.Items(receipt))

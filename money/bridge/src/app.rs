@@ -22,7 +22,6 @@ use ark_share::phone::Share;
 use money_app::accounts::{Accounts, AccountsMsg};
 use money_app::budget::{Budget, BudgetMsg};
 use money_app::insights::{Insights, InsightsMsg};
-use money_app::receipts::{Receipts, ReceiptsMsg};
 use money_app::register::{Register, RegisterMsg};
 use money_app::routes::Route;
 use money_app::sheets::{Sheets, SheetsMsg};
@@ -111,7 +110,13 @@ struct Phone<'a, A: App<Key = domain::MoneyView, Change = MoneyChange, Route = R
 
 impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Host<A> for Phone<'_, A> {
     fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<domain::MoneyView>) -> R) -> R {
-        self.app.session.read(|st, _| f(st))
+        // A file a row names is read where the phone keeps it (`file:`).
+        self.app.session.read(|st, peer| {
+            f(&ark::views::WithFiles {
+                views: st,
+                url: |file: &ark::file::FileRef| peer.file_url(file),
+            })
+        })
     }
     fn now_ms(&self) -> i64 {
         session_now(self.app.shell.now_ms(), &self.app.shell.today())
@@ -130,7 +135,26 @@ impl<A: App<Key = domain::MoneyView, Change = MoneyChange, Route = Route, Reques
         self.app.inbox.ask(&modules, ticket, ask)
     }
     fn request(&mut self, r: MoneyRequest) {
-        self.app.shell.request(r.ffi())
+        match r {
+            // A receipt's photo kept: on the phone at once, and sent to the
+            // server (which reads it) on this connection or the next.
+            MoneyRequest::KeepPhoto { jpeg, txn } => {
+                let peer = self.app.session.peer().clone();
+                // A phone whose files cannot be written keeps nothing; the
+                // section stays as it was, the ways to give one still there.
+                if peer.put_file(jpeg.clone(), money_app::receipts::JPEG.into()).is_ok() {
+                    let file = ark::file::FileRef::of(&jpeg, money_app::receipts::JPEG);
+                    let txn_id = txn.as_deref().and_then(money_app::id_of);
+                    let _ = Host::<A>::send(self, MoneyChange::AddPhoto(domain::AddPhoto { file, txn_id }));
+                }
+            }
+            r => self.app.shell.request(r.ffi()),
+        }
+    }
+    /// A file a screen is about to show, fetched from the server when the
+    /// phone does not hold it; the views are rung when it arrives.
+    fn want(&mut self, file: ark::file::FileRef) {
+        let _ = self.app.session.peer().file(file.hash, file.size, file.media);
     }
     /// SwiftUI and Compose draw the page after they read it: what waits
     /// on a draw waits for `drawn`.
@@ -306,14 +330,9 @@ screen!(
 );
 screen!(
     /// The sheets over the app, running (money/app/src/sheets): a
-    /// transaction's form, a category given, an account reconciled.
+    /// transaction's form and its receipt, a category given, an account
+    /// reconciled.
     SheetsApp, Sheets, SheetsMsg, SheetsMsgFfi, SheetsPageFfi
-);
-screen!(
-    /// A transaction's receipt, being given (money/app/src/receipts): a
-    /// page scanned or a photo chosen, kept and sent to the server, which
-    /// reads it.
-    ReceiptsApp, Receipts, ReceiptsMsg, ReceiptsMsgFfi, ReceiptsPageFfi
 );
 
 #[cfg(test)]

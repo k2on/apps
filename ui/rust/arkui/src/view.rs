@@ -292,6 +292,34 @@ fn part<M: Clone + 'static>(v: View<M>) -> Option<Element<'static, M>> {
             c.into()
         }
         Part::CodeImage { size, dark } => crate::qr::qr_code(size.get().max(0) as usize, dark.get(), 220.0),
+        Part::Photo { url, label, zoom } => {
+            let url = url.get();
+            match crate::images::local(&url) {
+                // A window zooms by its own size: the photo fills what it is given.
+                Some(h) => iced::widget::image(h)
+                    .content_fit(iced::ContentFit::Contain)
+                    .width(Length::Fill)
+                    .height(if zoom { Length::Fill } else { Length::Shrink })
+                    .into(),
+                None => container(
+                    row![]
+                        .push_maybe(url.is_empty().then(|| icon::plain(shape("refresh-cw"), true)))
+                        .push(text(label.get()).size(13).style(style::dim))
+                        .spacing(6),
+                )
+                .center_x(Length::Fill)
+                .padding(PAD)
+                .into(),
+            }
+        }
+        Part::Paper {
+            heading,
+            date,
+            names,
+            figures,
+            notes,
+            total,
+        } => paper(heading.get(), date.get(), names.get(), figures.get(), notes.get(), total.get()),
         Part::Button { title, enabled, tap } => button(text(title)).on_press_maybe(enabled.get().then_some(tap)).into(),
         Part::DateField { label, day, typed } => column![
             text(label).size(12).style(style::dim),
@@ -968,7 +996,20 @@ fn dialog<M: Clone + 'static>(v: View<M>) -> Option<(M, Element<'static, M>)> {
             confirm,
             content,
         } => {
-            let mut c = column![text(title).size(18).font(crate::hero::BOLD)].extend(nodes(*content));
+            // A sheet over this one (a receipt typed over its transaction), or
+            // a question it asks: a window draws the top one alone, over the
+            // page, and this one again once it is put away.
+            let mut parts = flatten(*content);
+            if let Some(i) = parts.iter().position(|v| {
+                matches!(
+                    v,
+                    View::Part(Part::Sheet { .. } | Part::Prompt { .. } | Part::Confirm { .. } | Part::Alert { .. })
+                )
+            }) {
+                let View::Part(over) = parts.swap_remove(i) else { return None };
+                return notice(over);
+            }
+            let mut c = column![text(title).size(18).font(crate::hero::BOLD)].extend(parts.into_iter().flat_map(nodes));
             if let Some(Confirm { title, enabled, tap }) = confirm {
                 c = c.push(
                     row![
@@ -1435,4 +1476,67 @@ fn bars(labels: Vec<String>, values: Vec<i64>, said: Vec<String>) -> Vec<crate::
         .zip(said)
         .map(|((label, value), said)| crate::figures::Bar { label, value, said })
         .collect()
+}
+
+/// A slip of paper ([`Part::Paper`]): white whatever the theme, so drawn in
+/// the light side's colours — the theme's text colour is the page's, light
+/// on a dark one, which white paper would hide.
+fn paper<M: 'static>(
+    heading: String,
+    date: String,
+    names: Vec<String>,
+    figures: Vec<String>,
+    notes: Vec<String>,
+    total: String,
+) -> Element<'static, M> {
+    use crate::tokens::light;
+    let mono = |s: String, size: u32, c: iced::Color, bold: bool| {
+        text(s)
+            .font(iced::Font {
+                weight: if bold { iced::font::Weight::Bold } else { iced::font::Weight::Normal },
+                ..crate::fonts::MONO
+            })
+            .size(size)
+            .style(move |_| iced::widget::text::Style {
+                color: Some(c),
+                ..Default::default()
+            })
+    };
+    let rule = || mono("-".repeat(36), 12, light::QUIET, false);
+    let mut slip: Column<'static, M> = column![
+        container(mono(heading, 13, light::INK, true)).center_x(Length::Fill),
+        container(mono(date, 12, light::INK, false)).center_x(Length::Fill),
+        rule(),
+    ]
+    .spacing(3);
+    for (i, name) in names.into_iter().enumerate() {
+        let figure = figures.get(i).cloned().unwrap_or_default();
+        slip = slip.push(row![mono(name, 12, light::INK, false).width(Length::Fill), mono(figure, 12, light::INK, false)].spacing(8));
+        if let Some(n) = notes.get(i).filter(|n| !n.is_empty()) {
+            slip = slip.push(mono(format!("  {n}"), 11, light::QUIET, false));
+        }
+    }
+    slip = slip.push(rule()).push(row![
+        mono("TOTAL".into(), 12, light::INK, true).width(Length::Fill),
+        mono(total, 12, light::INK, true)
+    ]);
+    container(slip)
+        .padding(14)
+        .width(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(iced::Background::Color(light::SURFACE)),
+            text_color: Some(light::INK),
+            border: iced::Border {
+                color: light::HAIRLINE,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: iced::Color::from_rgba8(0, 0, 0, 0.18),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            },
+            ..Default::default()
+        })
+        .into()
 }

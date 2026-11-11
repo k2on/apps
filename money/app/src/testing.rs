@@ -23,6 +23,8 @@ pub struct Demo<A: App> {
     pub inbox: Inbox<A::Msg>,
     pub opened: Vec<Route>,
     pub requests: Vec<MoneyRequest>,
+    /// The files a screen asked to be fetched.
+    pub wanted: Vec<ark::file::FileRef>,
 }
 
 impl<A: App<Key = MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Demo<A> {
@@ -44,6 +46,7 @@ impl<A: App<Key = MoneyView, Change = MoneyChange, Route = Route, Request = Mone
             inbox: Inbox::default(),
             opened: vec![],
             requests: vec![],
+            wanted: vec![],
         };
         let mut d = d;
         d.hold(A::holds(&A::State::default()));
@@ -80,7 +83,11 @@ impl<A: App<Key = MoneyView, Change = MoneyChange, Route = Route, Request = Mone
 
 impl<A: App<Key = MoneyView, Change = MoneyChange, Route = Route, Request = MoneyRequest>> Host<A> for Demo<A> {
     fn read<R>(&self, f: impl FnOnce(&dyn ark::views::Views<MoneyView>) -> R) -> R {
-        f(&self.store)
+        let peer = &self.peer;
+        f(&ark::views::WithFiles {
+            views: &self.store,
+            url: |file: &ark::file::FileRef| peer.file_url(file),
+        })
     }
     fn now_ms(&self) -> i64 {
         NOW
@@ -95,6 +102,9 @@ impl<A: App<Key = MoneyView, Change = MoneyChange, Route = Route, Request = Mone
     }
     fn ask(&mut self, ticket: Ticket, ask: Ask<A::Msg>) {
         self.inbox.ask(&self.modules, ticket, ask)
+    }
+    fn want(&mut self, file: ark::file::FileRef) {
+        self.wanted.push(file)
     }
     fn request(&mut self, r: MoneyRequest) {
         if let MoneyRequest::KeepPhoto { jpeg, txn } = &r {

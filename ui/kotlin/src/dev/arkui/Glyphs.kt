@@ -258,6 +258,18 @@ public object ArkGlyphs {
     /** `folder`, Lucide's. */
     public val Folder: ImageVector = glyph("folder", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z")
 
+    /** `scan-line`, Lucide's. */
+    public val ScanLine: ImageVector = glyph("scan-line", "M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", "M7 12h10")
+
+    /** `image`, Lucide's. */
+    public val Picture: ImageVector = glyph("image", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M7 9a2 2 0 1 0 4 0a2 2 0 1 0-4 0", "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21")
+
+    /** `keyboard`, Lucide's. */
+    public val Keyboard: ImageVector = glyph("keyboard", "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M6 8h.01", "M10 8h.01", "M14 8h.01", "M18 8h.01", "M8 12h.01", "M12 12h.01", "M16 12h.01", "M7 16h10")
+
+    /** `circle-minus`, Lucide's. */
+    public val CircleMinus: ImageVector = glyph("circle-minus", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "M8 12h8")
+
     /** Every glyph here by its Lucide name, the name the other toolkits know it by. */
     private val byName: Map<String, ImageVector> by lazy {
         listOf(
@@ -265,6 +277,7 @@ public object ArkGlyphs {
             Untick, Down, Offline, Rename, Copy, Archive, Reopen, Reconcile, Add,
             PanelRight, Wand, Sync, Filter, Mail, Chart, Rows, Inbox, Alert, Clock, Dollar, Banknote, Target, Arrows, Users, House,
             Landmark, Card, Trending, Eye, EyeOff, ArrowUp, ArrowDown, Trash, Lock, Receipt, Crosshair, Folder,
+            ScanLine, Picture, Keyboard, CircleMinus,
         )
             .associateBy { it.name } + ("ellipsis-vertical" to More)
     }

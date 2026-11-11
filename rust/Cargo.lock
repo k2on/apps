@@ -4665,6 +4665,7 @@ dependencies = [
  "ark-auth",
  "ark-format",
  "ark-peer",
+ "ark-scanner",
  "arkui-web",
  "leptos",
  "money-app",

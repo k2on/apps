@@ -119,18 +119,20 @@ selection on the chart. Amounts are the locale's currency format, every
 row has an accessibility label and value, and Dynamic Type and dark mode
 are the system's.
 
-**Receipts** are in a transaction's form (`ReceiptViews.swift`, the
-rules `Receipts.swift`). One that paid for it is drawn as the paper is,
-black monospace on a white slip in light and dark alike, its photo a tap
-away, with "Check this" when its reading did not add up; it can be put
-right or taken off. With none, it can be scanned as Notes scans a
-document (VisionKit's camera: the page's edges found live, taken when
-steady, squared up), chosen from the photo library, typed, or matched
-to one of the receipts nobody has, the nearest in amount and then in days
-first. A photo goes to the phone's files and is sent beside the rows when
-there is a connection (`docs/plan-files.md`); the server reads it and the
-section says it is reading until then. A register row whose transaction
-has a receipt, or a photo of one, carries the receipt mark.
+**Receipts** are in a transaction's form, written in Rust
+(money/app/src/receipts, generated into the sheets' SwiftUI): one that
+paid for it is drawn as the paper is (ArkUI's `Paper`, black monospace on
+a white slip in light and dark alike), its photo a tap away (ArkUI's
+`Photo`, pinched to zoom), with "Check This" when its reading did not add
+up; it can be put right or taken off. With none, it can be scanned
+(ark-scanner over ark-camera: the page's edges found live in Rust, taken
+when steady, squared up), chosen from the photo library (PHPicker,
+ark-scanner's `PickPhoto`), typed, or matched to one of the receipts
+nobody has, the nearest in amount and then in days first. A photo is kept
+by the bridge on the phone and sent beside the rows when there is a
+connection (`docs/plan-files.md`); the server reads it and the section
+says it is reading until then. A register row whose transaction has a
+receipt, or a photo of one, carries the receipt mark.
 
 **Pull to refresh** on any list asks the bank for anything new: on a server,
 `banks.sync` (any household member may ask the importer to sync now) with

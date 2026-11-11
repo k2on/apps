@@ -9,6 +9,7 @@ crate = "ark-scanner"
 # this Output.
 [ops]
 ScanPage = "Option<Vec<u8>>"
+PickPhoto = "Option<Vec<u8>>"
 
 [ios.info]
 

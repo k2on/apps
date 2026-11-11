@@ -15,15 +15,10 @@
 // budget for a month is its lines, summary and spending. The session holds
 // what every screen draws from (the accounts, the groups, the month's
 // budget, what needs a look, the payees, the banks, what their accounts
-// feed, the reader's asks, every receipt and photo) and reads again into
-// the snapshot what moved; a screen holds the rest while it shows it
-// (ArkUI's `.holding(view)`: a register, what paid for a transaction, a
-// receipt's items) and reads it from the session.
-//
-// **Files** (docs/plan-files.md) are the peer's: a photo taken is kept on
-// the phone and sent when there is a connection, and one a screen wants is
-// fetched; each drain looks for what is still wanted, and the bytes go into
-// the snapshot by hash.
+// feed, the reader's asks) and reads again into the snapshot what moved;
+// a screen holds the rest while it shows it (ArkUI's `.holding(view)`, or
+// its runtime's holds in Rust) and reads it from the session. A receipt's
+// photo is kept, fetched and read where it is by money/bridge, in Rust.
 //
 // What the screens see goes to `deliver` (the main queue in the app) as a
 // [Snapshot] after a drain that moved something.
@@ -46,11 +41,6 @@ struct Snapshot {
     var linked = [LinkedLine]()
     /// The reader's own asks about banks, newest first.
     var asks = [AskLine]()
-    /// Every receipt, and every photo of one with where reading it stands.
-    var receipts = [ReceiptLine]()
-    var photos = [PhotoLine]()
-    /// The files a screen asked for, by hash, once they are on the phone.
-    var files = [String: Data]()
     var status: Status? = nil
     /// How many changes the peer has reported.
     var moved = 0
@@ -111,9 +101,6 @@ final class Bridge {
     private var budget: Holding? = nil
     /// Each view's version when it was last read into the snapshot.
     private var seen = [MoneyView: UInt64]()
-    /// The files asked for and not on the phone yet: the peer fetches them,
-    /// and each drain looks again.
-    private var wanted = [String: FileRef]()
 
     /// The session `opening` says, showing `month`; what it sees told
     /// through `deliver` — the main queue unless a test says otherwise.
@@ -135,7 +122,7 @@ final class Bridge {
     }
 
     /// What every screen draws from, held as long as the session is open.
-    private static let always: [MoneyView] = [.accounts, .groups, .inbox, .payees, .banks, .linked, .asks, .receipts, .photos]
+    private static let always: [MoneyView] = [.accounts, .groups, .inbox, .payees, .banks, .linked, .asks]
 
     /// The replica's directory for `server` under `root`: one per server, not
     /// per person — the household's log is the server's and everyone in it
@@ -208,8 +195,6 @@ final class Bridge {
         if fresh(.banks) { snap.banks = s.banks() }
         if fresh(.linked) { snap.linked = s.linked() }
         if fresh(.asks) { snap.asks = s.asks() }
-        if fresh(.receipts) { snap.receipts = s.receipts() }
-        if fresh(.photos) { snap.photos = s.photos() }
     }
 
     private func drainSoon() {
@@ -226,10 +211,9 @@ final class Bridge {
         guard !closed, let p = peer else { return }
         snap.moved += 1
         read()
-        fetch()
         let st = p.status()
         snap.status = st
-        snap.settled = p.settled() && wanted.isEmpty
+        snap.settled = p.settled()
         if let d = st.denied, !deniedSaid {
             deniedSaid = true
             main { self.denied(d) }
@@ -239,18 +223,6 @@ final class Bridge {
             main { self.notice("Not saved: \(w)") }
         }
         show()
-    }
-
-    // On `queue`: every file still wanted looked for again — one arrived rings
-    // the listener, so a drain follows it.
-    private func fetch() {
-        guard let p = peer else { return }
-        for (h, f) in wanted {
-            if let d = p.file(hash: f.hash, size: f.size, media: f.media) {
-                snap.files[h] = d
-                wanted[h] = nil
-            }
-        }
     }
 
     private func show() {
@@ -278,36 +250,6 @@ final class Bridge {
             self.budget = s.hold(view: .budget(month: month))
             self.read()
             self.show()
-        }
-    }
-
-    /// A file's bytes for a screen: in the snapshot once the peer has them,
-    /// fetched from the server when this phone does not.
-    func want(file f: FileRef) {
-        queue.async {
-            guard self.snap.files[f.hash] == nil, self.wanted[f.hash] == nil else { return }
-            self.wanted[f.hash] = f
-            self.fetch()
-            self.show()
-        }
-    }
-
-    /// A photo of a receipt, taken or chosen: kept on the phone and sent to
-    /// the server on this connection or the next, and read there, for
-    /// `txn` when it was taken for one.
-    func addPhoto(_ jpeg: Data, txn: Id?, done: @escaping (Bool) -> Void = { _ in }) {
-        onPeer { p, s in
-            do {
-                let hash = try p.putFile(bytes: jpeg, media: Receipts.jpeg)
-                self.snap.files[hash] = jpeg
-                self.sent("keep the photo", s.send(change: .addPhoto(value: AddPhoto(file: FileRef(hash: hash, size: Int64(jpeg.count), media: Receipts.jpeg), txnId: txn))), done)
-            } catch {
-                let w = why(error)
-                self.main {
-                    self.notice("Couldn't keep the photo: \(w)")
-                    done(false)
-                }
-            }
         }
     }
 
@@ -388,7 +330,6 @@ final class Bridge {
             self.always = []
             self.budget = nil
             self.session = nil
-            self.wanted = [:]
             self.peer = nil
             self.bank = nil
         }

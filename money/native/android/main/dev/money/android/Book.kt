@@ -9,8 +9,7 @@
 // budget for a month is its lines, summary and spending. The book holds
 // what every screen draws from as long as it is open, and the month's
 // budget for the month on screen; a screen holds the rest while it shows
-// them (`watched.watch(view) { read }`, arkui's): a register, a receipt's
-// items.
+// them (`watched.watch(view) { read }`, arkui's): a register.
 //
 // **Everything else runs on one thread** (`run`): every mutation, and the
 // drain after it or after the core said something moved, which reads again
@@ -27,7 +26,6 @@
 // ([check]) and says the sentence under its field.
 package dev.money.android
 
-import dev.arkdb.ffi.FileRef
 import dev.arkdb.ffi.Id
 import dev.arkdb.ffi.Listener
 import dev.arkdb.ffi.Peer
@@ -55,7 +53,6 @@ import uniffi.money_bridge.AccountKind
 import uniffi.money_bridge.AccountLine
 import uniffi.money_bridge.AddCategory
 import uniffi.money_bridge.AddGroup
-import uniffi.money_bridge.AddPhoto
 import uniffi.money_bridge.AskLine
 import uniffi.money_bridge.Assign
 import uniffi.money_bridge.Auto
@@ -70,10 +67,8 @@ import uniffi.money_bridge.Follow
 import uniffi.money_bridge.GroupLine
 import uniffi.money_bridge.HideCategory
 import uniffi.money_bridge.IgnoreLinked
-import uniffi.money_bridge.ItemLine
 import uniffi.money_bridge.LinkAccount
 import uniffi.money_bridge.LinkedLine
-import uniffi.money_bridge.MatchReceipt
 import uniffi.money_bridge.MoneyChange
 import uniffi.money_bridge.MoveCategory
 import uniffi.money_bridge.MoveGroup
@@ -81,8 +76,6 @@ import uniffi.money_bridge.MoveMoney
 import uniffi.money_bridge.OpenAccount
 import uniffi.money_bridge.OpenLinked
 import uniffi.money_bridge.PayeeLine
-import uniffi.money_bridge.PhotoLine
-import uniffi.money_bridge.ReceiptLine
 import uniffi.money_bridge.Reconcile
 import uniffi.money_bridge.RenameCategory
 import uniffi.money_bridge.SetCleared
@@ -91,11 +84,9 @@ import uniffi.money_bridge.SpendingLine
 import uniffi.money_bridge.Summary
 import uniffi.money_bridge.TxnLine
 import uniffi.money_bridge.Txns
-import uniffi.money_bridge.WriteReceipt
 import uniffi.money_bridge.banksWanting
 import uniffi.money_bridge.follow
 import uniffi.money_bridge.uncovered
-import uniffi.money_bridge.unmatchedReceipts
 import dev.arkui.Feedback
 import dev.arkui.Watched
 import kotlinx.coroutines.flow.update
@@ -142,32 +133,10 @@ data class Ledger(
     val ready: Boolean = false,
     /** Why the server turned this login away, when it did. */
     val denied: String? = null,
-    /** Every receipt photo, the newest first, and where reading it stands. */
-    val photos: List<PhotoLine> = emptyList(),
-    /** Every receipt, the newest first. */
-    val receipts: List<ReceiptLine> = emptyList(),
 ) {
     fun line(category: Id): BudgetLine? = lines.firstOrNull { it.categoryId == category }
 
     fun account(id: Id): AccountLine? = accounts.firstOrNull { it.id == id }
-
-    /**
-     * The receipts that paid for `txn` (`receipt` the one its line names) — whole, or by one of their
-     * charges — and those read from its photos.
-     */
-    fun receiptsOf(txn: Id, receipt: String): List<ReceiptLine> {
-        val read = photos.filter { it.txnId == txn && it.receiptId.isNotEmpty() }.map { it.receiptId }.toSet()
-        return receipts.filter { it.txnId == txn || (receipt.isNotEmpty() && it.id == receipt) || it.id in read }
-    }
-
-    /** The photos taken for `txn`, the newest first. */
-    fun photosOf(txn: Id): List<PhotoLine> = photos.filter { it.txnId == txn }
-
-    /** The photo a receipt was read from, when it was. */
-    fun photoOf(receipt: String): PhotoLine? = photos.firstOrNull { it.receiptId == receipt }
-
-    /** The receipts nothing pays for yet a transaction of `amount` on `day` is offered (the core's). */
-    fun unmatched(amount: Long, day: String): List<ReceiptLine> = unmatchedReceipts(receipts, amount, day)
 
     /** The month's categories, by group in the budget's order, the hidden left out unless `hidden`. */
     fun byGroup(hidden: Boolean = false): List<Pair<GroupLine, List<BudgetLine>>> =
@@ -347,8 +316,6 @@ private constructor(
                 syncing = syncing,
                 ready = true,
                 denied = s.denied,
-                photos = if (fresh(MoneyView.Photos)) session.photos() else was.photos,
-                receipts = if (fresh(MoneyView.Receipts)) session.receipts() else was.receipts,
             )
         // A screenshot waits while the peer has anything on its way, and again for what this drew.
         dev.arkui.Ready.still("peer", !peer.settled())
@@ -558,40 +525,6 @@ private constructor(
         }
     }
 
-    // * Receipts
-
-    /** A receipt's items, as far as a screen holds them (`MoneyView.Items`). */
-    fun itemsOf(receipt: String): List<ItemLine> = session.items(receipt)
-
-    /**
-     * A photo of a receipt, for `txn` when it was taken for one: kept on this phone at once, sent to the
-     * server now or on its next connection, where it is read.
-     */
-    fun addPhoto(jpeg: ByteArray, txn: Id?, media: String = "image/jpeg") = post {
-        val hash =
-            try {
-                peer.putFile(jpeg, media)
-            } catch (e: Refusal) {
-                return@post say("Couldn't keep the photo: ${why(e)}")
-            }
-        if (send("keep the photo", Feedback.Success, MoneyChange.AddPhoto(AddPhoto(FileRef(hash, jpeg.size.toLong(), media), txn)))) {
-            say(if (state.value.link.linked) "Photo kept: reading it" else "Photo kept: it's read once you're online")
-        }
-    }
-
-    /** A receipt typed by hand, or one already read put right. */
-    fun writeReceipt(w: WriteReceipt) = act("save the receipt") { MoneyChange.WriteReceipt(w) }
-
-    /** `receipt` paid for by `txn`, or (none) by nothing. */
-    fun pay(receipt: String, txn: Id?) =
-        act(if (txn == null) "take the receipt off" else "attach the receipt") { MoneyChange.Pay(MatchReceipt(receipt, txn)) }
-
-    /**
-     * A photo's bytes when this phone holds them; when not, fetched from the server, and the state moves
-     * when they arrive. Safe from any thread: the peer guards itself.
-     */
-    fun photo(f: FileRef): ByteArray? = if (closed) null else peer.file(f.hash, f.size, f.media)
-
     /** Dial the server now: the app came to the front. */
     fun dialNow() {
         if (!demo) post { peer.dialNow() }
@@ -635,8 +568,6 @@ private constructor(
                 MoneyView.Banks,
                 MoneyView.Linked,
                 MoneyView.Asks,
-                MoneyView.Photos,
-                MoneyView.Receipts,
             )
 
         /** The domain's sentence in a refusal. */

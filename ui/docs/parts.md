@@ -114,6 +114,8 @@ by the generated views by these names.
 | WideButton | title, prominent, enabled, busy, onTap | `Button` / `OutlinedButton`, a spinner while busy | `.glassProminent` in the accent / `.glass`, a `ProgressView` while busy | `style::action` / `style::quiet`; the browser's `.ark-push` (`.ark-default`) |
 | StatusLine | text?, busy, problem? | a polite / assertive live region | the footnote quiet, the problem in `Color.error` | dim words, the problem in the danger colour; `role=status` / `alert` |
 | CodeImage | size, dark | `QrCode` | `QrCode` | `arkui::qr::qr_code`; the browser's inline SVG |
+| Photo (`photo`, `zoom_photo`) | url (`file:`, `data:`, `https:`; empty while fetched), label, zoom | `Image` decoded off the main thread (upright by its EXIF, at most 2400 a side); zoomed, `transformable` and a double tap, rubber-banded past 1 and `zoom-max` (`Springs.band`), settling on `Springs.move` (`Springs.fade` when reduced) | `Image` from the URL's bytes (`AsyncImage` for `https:`); zoomed, `MagnifyGesture`, a pan while larger, a double tap to `zoom-tap`, banded by `Momentum.band`, settling on `Springs.move` | `arkui::images::local`, fitted; zoomed, the room it is given (a window zooms by its size); the browser's `<img>` |
+| Paper | heading, date, names, figures, notes, total | white, monospace, the light side's ink in either theme; its shadow and `corner` | the same, `.environment(\.colorScheme, .light)` | the light tokens on `SURFACE`, Fira Mono; the browser's `.ark-paper` |
 
 ## Tables
 

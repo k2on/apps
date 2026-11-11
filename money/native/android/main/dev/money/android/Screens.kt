@@ -25,9 +25,6 @@ import uniffi.money_bridge.ShellApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import uniffi.money_bridge.Devices
-import uniffi.money_bridge.ReceiptsApp
-import uniffi.money_bridge.ReceiptsMsg
-import uniffi.money_bridge.ReceiptsPage
 import uniffi.money_bridge.InsightsApp
 import uniffi.money_bridge.InsightsMsg
 import uniffi.money_bridge.InsightsPage
@@ -296,7 +293,10 @@ class InsightsHolder(session: Session, refresh: () -> Unit, today: () -> String)
     }
 }
 
-/** The sheets over the app, running in Rust (money/app/src/sheets): a transaction's form, a category given, an account reconciled. */
+/**
+ * The sheets over the app, running in Rust (money/app/src/sheets): a transaction's form and its
+ * receipt, a category given, an account reconciled.
+ */
 class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices?) {
     private val shell =
         object : AppShell {
@@ -339,52 +339,10 @@ class SheetsHolder(session: Session, refresh: () -> Unit, today: () -> String, d
     fun reload() {
         _page.value = app.page()
     }
-}
 
-/**
- * A receipt being given, in Rust (money/app/src/receipts): a page scanned (the scanner over the
- * camera: its eyes and warp Rust's, its page [dev.arkui.modules.CameraPage]) and kept by the book,
- * which sends it to the server to read. What went wrong is said in the snackbar, once.
- */
-class ReceiptsHolder(session: Session, refresh: () -> Unit, today: () -> String, devices: Devices, private val book: Book) {
-    private val shell =
-        object : AppShell {
-            override fun openRoute(route: Route) {}
-
-            override fun request(request: MoneyRequest) {
-                when (request) {
-                    is MoneyRequest.Refresh -> refresh()
-                    is MoneyRequest.KeepPhoto -> book.addPhoto(request.jpeg, request.txn?.let(::Id))
-                    else -> {}
-                }
-            }
-
-            override fun nowMs(): Long = System.currentTimeMillis()
-
-            override fun today(): String = today()
-        }
-    private val app = ReceiptsApp(session, shell)
-
-    init {
-        app.useDevices(devices)
-    }
-
-    /** `msg` taken; what came of the camera later, taken as it comes ([answered]). */
-    fun send(msg: ReceiptsMsg) {
-        app.send(msg)
-        said(app.page())
-    }
-
-    /** The camera answered: its message taken, and what went wrong said. */
+    /** The camera or the photo picker answered (a receipt's page): what came of it taken. */
     fun answered() {
-        if (app.drain()) said(app.page())
-    }
-
-    private fun said(p: ReceiptsPage) {
-        p.problem?.let {
-            book.tell(it)
-            app.send(ReceiptsMsg.Dismiss)
-        }
+        if (app.drain()) _page.value = app.page()
     }
 }
 

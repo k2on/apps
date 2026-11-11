@@ -5,8 +5,10 @@
 // luminance shown to the eyes in Rust (`Eyes.look`), what they answer drawn
 // over the preview — their outline gliding on `Springs.move`, their words —
 // and the photo taken when they say, or at the shutter, as the sensor took
-// it (unturned: the frames' `turns` stand both upright). The Mac has no
-// camera to hold over a page: every operation there fails, said.
+// it (unturned: the frames' `turns` stand both upright). A photo picked is
+// PHPicker's, one image, as a JPEG. The Mac has no camera to hold over a
+// page: every operation there but a pick (an open panel of images) fails,
+// said.
 import Foundation
 #if canImport(ArkBindings)
 import ArkBindings
@@ -14,8 +16,12 @@ import ArkBindings
 #if os(iOS)
 import ArkUI
 import AVFoundation
+import PhotosUI
 import SwiftUI
 import UIKit
+#elseif os(macOS)
+import AppKit
+import UniformTypeIdentifiers
 #endif
 
 /// The phone's camera, presented over whatever is in front.
@@ -82,8 +88,43 @@ public final class PhoneCamera: Camera, @unchecked Sendable {
         #endif
     }
 
+    public func pickPhoto(reply: PhotoReply) {
+        #if os(iOS)
+        DispatchQueue.main.async {
+            var config = PHPickerConfiguration()
+            config.filter = .images
+            config.selectionLimit = 1
+            let picker = PHPickerViewController(configuration: config)
+            let picked = Picked(reply)
+            picker.delegate = picked
+            picker.presentationController?.delegate = Dismissed { reply.taken(jpeg: nil) }.kept(by: picker)
+            objc_setAssociatedObject(picker, &PhoneCamera.picked, picked, .OBJC_ASSOCIATION_RETAIN)
+            PhoneCamera.top()?.present(picker, animated: true)
+        }
+        #elseif os(macOS)
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.image]
+            panel.allowsMultipleSelection = false
+            panel.message = "A photo of the receipt"
+            guard panel.runModal() == .OK, let url = panel.url else { return reply.taken(jpeg: nil) }
+            guard let image = NSImage(contentsOf: url), let tiff = image.tiffRepresentation,
+                  let jpeg = NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [.compressionFactor: 0.9])
+            else { return reply.failed(why: "That file isn't a photo") }
+            reply.taken(jpeg: jpeg)
+        }
+        #else
+        reply.failed(why: "There are no photos to choose from here")
+        #endif
+    }
+
+    /// The longest side a photo picked is handed over at: what the server
+    /// reads a receipt from, and no more.
+    static let longest: CGFloat = 3000
+
     #if os(iOS)
     nonisolated(unsafe) static var keep = 0
+    nonisolated(unsafe) static var picked = 0
 
     /// What is in front, to present over.
     @MainActor static func top() -> UIViewController? {
@@ -118,6 +159,33 @@ private final class Taken: NSObject, UIImagePickerControllerDelegate, UINavigati
     func imagePickerControllerDidCancel(_ p: UIImagePickerController) {
         p.dismiss(animated: true)
         reply.taken(jpeg: nil)
+    }
+}
+
+/// PHPicker's photo, upright, at most `PhoneCamera.longest` on its long
+/// side, as a JPEG; none when the person backed out.
+private final class Picked: NSObject, PHPickerViewControllerDelegate {
+    let reply: PhotoReply
+    init(_ reply: PhotoReply) { self.reply = reply }
+    func picker(_ p: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        p.dismiss(animated: true)
+        guard let provider = results.first?.itemProvider, provider.canLoadObject(ofClass: UIImage.self) else {
+            return reply.taken(jpeg: nil)
+        }
+        let reply = self.reply
+        provider.loadObject(ofClass: UIImage.self) { object, error in
+            guard let image = object as? UIImage else {
+                return reply.failed(why: error?.localizedDescription ?? "That photo couldn't be read")
+            }
+            let side = max(image.size.width, image.size.height)
+            let scale = min(1, PhoneCamera.longest / max(side, 1))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            // Drawn, so it is upright whatever its orientation said.
+            let upright = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+            reply.taken(jpeg: upright.jpegData(compressionQuality: 0.9))
+        }
     }
 }
 

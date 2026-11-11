@@ -496,6 +496,31 @@ pub enum Part<M> {
         size: Val<i64>,
         dark: Val<Vec<bool>>,
     },
+    /// A photo, by its URL: `file:` (a file this device holds,
+    /// `Views::file_url`), `data:` (its bytes) or `https:`; empty while it
+    /// is being fetched, a spinner in its place. Fitted to the width it is
+    /// given, `label` said for it. With `zoom` it fills the room it is
+    /// given, and on the phones pinches and double-taps to zoom, panned
+    /// while zoomed, rubber-banded past its least and most size and
+    /// settling back on `Springs.move`.
+    Photo {
+        url: Val<String>,
+        label: Val<String>,
+        zoom: bool,
+    },
+    /// A slip of paper (a receipt as it was printed): monospace, dark on
+    /// white whatever the appearance; its heading bold and the line under
+    /// it centred, then a rule, each of `names` with its `figures` against
+    /// the right and its `notes` (empty for none) under it, a rule, and
+    /// `total` bold against the right of TOTAL.
+    Paper {
+        heading: Val<String>,
+        date: Val<String>,
+        names: Val<Vec<String>>,
+        figures: Val<Vec<String>>,
+        notes: Val<Vec<String>>,
+        total: Val<String>,
+    },
 
     // The shell (ui/docs/design.md): what a standard Mac app is made of,
     // each part adapting to the size class inside itself.
@@ -1932,6 +1957,47 @@ pub fn code_image<M>(size: impl Into<Val<i64>>, dark: impl Into<Val<Vec<bool>>>)
     .into()
 }
 
+/// A photo by its URL, fitted to its width ([`Part::Photo`]).
+pub fn photo<M>(url: impl Into<Val<String>>, label: impl Into<Val<String>>) -> View<M> {
+    Part::Photo {
+        url: url.into(),
+        label: label.into(),
+        zoom: false,
+    }
+    .into()
+}
+
+/// A photo by its URL filling the room it is given, zoomed by a pinch on
+/// the phones ([`Part::Photo`]).
+pub fn zoom_photo<M>(url: impl Into<Val<String>>, label: impl Into<Val<String>>) -> View<M> {
+    Part::Photo {
+        url: url.into(),
+        label: label.into(),
+        zoom: true,
+    }
+    .into()
+}
+
+/// A slip of paper: a receipt as it was printed ([`Part::Paper`]).
+pub fn paper<M>(
+    heading: impl Into<Val<String>>,
+    date: impl Into<Val<String>>,
+    names: impl Into<Val<Vec<String>>>,
+    figures: impl Into<Val<Vec<String>>>,
+    notes: impl Into<Val<Vec<String>>>,
+    total: impl Into<Val<String>>,
+) -> View<M> {
+    Part::Paper {
+        heading: heading.into(),
+        date: date.into(),
+        names: names.into(),
+        figures: figures.into(),
+        notes: notes.into(),
+        total: total.into(),
+    }
+    .into()
+}
+
 // * Each part's call, by rule
 
 /// What a part is handed, as the phones' code spells it.
@@ -2365,6 +2431,31 @@ impl<M> Part<M> {
                 vec![],
             ),
             Part::CodeImage { size, dark } => c("CodeImage", Some(G::Val(lit(size))), vec![("dark", G::Val(lit(dark)))], vec![]),
+            Part::Photo { url, label, zoom } => c(
+                "Photo",
+                Some(G::Val(lit(url))),
+                vec![("label", G::Val(lit(label))), ("zoom", G::Val(zoom.to_string()))],
+                vec![],
+            ),
+            Part::Paper {
+                heading,
+                date,
+                names,
+                figures,
+                notes,
+                total,
+            } => c(
+                "Paper",
+                Some(G::Val(lit(heading))),
+                vec![
+                    ("date", G::Val(lit(date))),
+                    ("names", G::Val(lit(names))),
+                    ("figures", G::Val(lit(figures))),
+                    ("notes", G::Val(lit(notes))),
+                    ("total", G::Val(lit(total))),
+                ],
+                vec![],
+            ),
             Part::BarChart { labels, values, said } => c(
                 "BarChart",
                 Some(G::Val(lit(labels))),
@@ -2900,6 +2991,22 @@ impl<M: 'static> Part<M> {
             },
             Part::StatusLine { text, busy, problem } => Part::StatusLine { text, busy, problem },
             Part::CodeImage { size, dark } => Part::CodeImage { size, dark },
+            Part::Photo { url, label, zoom } => Part::Photo { url, label, zoom },
+            Part::Paper {
+                heading,
+                date,
+                names,
+                figures,
+                notes,
+                total,
+            } => Part::Paper {
+                heading,
+                date,
+                names,
+                figures,
+                notes,
+                total,
+            },
             Part::BarChart { labels, values, said } => Part::BarChart { labels, values, said },
             Part::DateField { label, day, typed } => Part::DateField {
                 label,

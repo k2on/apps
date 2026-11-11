@@ -15319,6 +15319,12 @@ rec {
             usesDefaultFeatures = false;
           }
           {
+            name = "ark-scanner";
+            packageId = "ark-scanner";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+            features = [ "web" ];
+          }
+          {
             name = "arkui-web";
             packageId = "arkui-web";
             usesDefaultFeatures = false;

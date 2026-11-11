@@ -1,6 +1,7 @@
 //! The scanner: a page (a receipt, a letter) photographed and made flat, as
-//! a JPEG. Its port — the [`Scanner`] trait and [`scan_page`], a
-//! [`ScanPage`] whose output is `Option<Vec<u8>>` — is the runtime's
+//! a JPEG, or a photo of one already taken chosen. Its port — the
+//! [`Scanner`] trait, [`scan_page`] (a [`ScanPage`]) and [`pick_photo`] (a
+//! [`PickPhoto`]), each output `Option<Vec<u8>>` — is the runtime's
 //! (`ark_module::scanner`), which an update asks through; here is what
 //! implements it:
 //!
@@ -8,12 +9,15 @@
 //!   camera's live page ([`ark_camera::Camera::watch`]) shows each frame to
 //!   the scanner's eyes ([`eyes::PageEyes`], all in Rust: the page found,
 //!   held still and sharp, the picture taken), and the photo it hands back
-//!   is made flat here ([`page::flat`]). No camera of its own: the frames
-//!   and the shutter are the camera module's, its Swift and Kotlin.
+//!   is made flat here ([`page::flat`]). A photo picked is the system's
+//!   picker's ([`ark_camera::Camera::pick_photo`]: PHPicker, Android's
+//!   Photo Picker), as it is. No camera of its own: the frames, the
+//!   shutter and the picker are the camera module's, its Swift and Kotlin.
 //! - The desktop (feature `desktop`): [`Chosen`], a file the window asks
-//!   the person to choose (an iced window's own chooser, `arkui::files`).
+//!   the person to choose (an iced window's own chooser, `arkui::files`),
+//!   for a scan and a pick alike.
 //! - The browser (feature `web`, wasm32): [`Browser`], the page's own file
-//!   input.
+//!   input (a scan offers a phone's camera, a pick its photos).
 //! - Tests: [`fake::Fake`].
 //!
 //! The page is found by DocAligner's corner model on tract where it is
@@ -62,6 +66,10 @@ impl Scanner for OverCamera {
         });
         self.0.watch(ark_camera::Eyes::new(eyes), ark_camera::PhotoReply::new(photo))
     }
+
+    fn pick_photo(&self, reply: Reply<Option<Vec<u8>>>) {
+        self.0.pick_photo(ark_camera::PhotoReply::new(reply))
+    }
 }
 
 #[cfg(feature = "desktop")]
@@ -107,6 +115,10 @@ mod desktop {
         fn scan_page(&self, reply: Reply<Option<Vec<u8>>>) {
             self.waiting.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
         }
+
+        fn pick_photo(&self, reply: Reply<Option<Vec<u8>>>) {
+            self.waiting.lock().unwrap_or_else(|e| e.into_inner()).push(reply)
+        }
     }
 }
 
@@ -118,37 +130,49 @@ mod web {
     use ark_module::Reply;
     use wasm_bindgen::{closure::Closure, JsCast};
 
-    /// The page's own file input (`<input type=file accept=image/*
-    /// capture=environment>`): a phone's browser offers its camera, a
-    /// computer's its files; the file's bytes are the page.
+    /// The page's own file input (`<input type=file accept=image/*>`, with
+    /// `capture=environment` for a scan): a phone's browser offers its
+    /// camera for a scan and its photos for a pick, a computer's its files;
+    /// the file's bytes are the page.
     #[derive(Clone, Copy, Default)]
     pub struct Browser;
 
     impl super::Scanner for Browser {
         fn scan_page(&self, reply: Reply<Option<Vec<u8>>>) {
-            let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-                return reply.failed("There is no page to choose a file on");
-            };
-            let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else {
-                return reply.failed("The file input couldn't be made");
-            };
-            input.set_type("file");
-            input.set_accept("image/*");
-            let _ = input.set_attribute("capture", "environment");
-            let picked = input.clone();
-            let on_change = Closure::once_into_js(move || {
-                let Some(file) = picked.files().and_then(|f| f.get(0)) else {
-                    return reply.done(None);
-                };
-                wasm_bindgen_futures::spawn_local(async move {
-                    match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
-                        Ok(buf) => reply.done(Some(js_sys::Uint8Array::new(&buf).to_vec())),
-                        Err(_) => reply.failed("The file couldn't be read"),
-                    }
-                });
-            });
-            input.set_onchange(Some(on_change.unchecked_ref()));
-            input.click();
+            choose(reply, true)
         }
+
+        fn pick_photo(&self, reply: Reply<Option<Vec<u8>>>) {
+            choose(reply, false)
+        }
+    }
+
+    /// A file chosen in the page's own input; the camera offered first for a scan.
+    fn choose(reply: Reply<Option<Vec<u8>>>, scan: bool) {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return reply.failed("There is no page to choose a file on");
+        };
+        let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else {
+            return reply.failed("The file input couldn't be made");
+        };
+        input.set_type("file");
+        input.set_accept("image/*");
+        if scan {
+            let _ = input.set_attribute("capture", "environment");
+        }
+        let picked = input.clone();
+        let on_change = Closure::once_into_js(move || {
+            let Some(file) = picked.files().and_then(|f| f.get(0)) else {
+                return reply.done(None);
+            };
+            wasm_bindgen_futures::spawn_local(async move {
+                match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+                    Ok(buf) => reply.done(Some(js_sys::Uint8Array::new(&buf).to_vec())),
+                    Err(_) => reply.failed("The file couldn't be read"),
+                }
+            });
+        });
+        input.set_onchange(Some(on_change.unchecked_ref()));
+        input.click();
     }
 }

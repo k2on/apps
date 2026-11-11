@@ -117,6 +117,88 @@ impl Images {
     }
 }
 
+/// The most photos [`local`] remembers before it starts again.
+const LOCAL_KEPT: usize = 16;
+
+/// Every photo [`local`] has decoded, by its URL; `None` for one that could
+/// not be read.
+static LOCAL: std::sync::Mutex<Option<HashMap<String, Option<image::Handle>>>> = std::sync::Mutex::new(None);
+
+/// A photo this machine holds, by its `file:` or `data:` URL (what an app's
+/// screen reads a file a row names at, `ark::views::Views::file_url`),
+/// decoded once at most [`WIDE`] on its longest side and remembered: none
+/// for any other URL, or one that is not a picture. Decoded in the frame
+/// that first asks — a photo opened is one decode, once.
+pub fn local(url: &str) -> Option<image::Handle> {
+    let mut kept = LOCAL.lock().unwrap_or_else(|e| e.into_inner());
+    let kept = kept.get_or_insert_with(HashMap::new);
+    if let Some(h) = kept.get(url) {
+        return h.clone();
+    }
+    let bytes = if let Some(path) = url.strip_prefix("file://") {
+        std::fs::read(unescape(path)).ok()
+    } else if let Some((_, data)) = url.strip_prefix("data:").and_then(|d| d.split_once(";base64,")) {
+        unbase64(data)
+    } else {
+        return None;
+    };
+    let handle = bytes
+        .and_then(|b| imp::shrink(&b, WIDE).ok())
+        .map(|r| image::Handle::from_rgba(r.width, r.height, r.pixels));
+    if kept.len() >= LOCAL_KEPT {
+        kept.clear();
+    }
+    kept.insert(url.to_string(), handle.clone());
+    handle
+}
+
+/// A URL path's escapes (`%20`) undone.
+fn unescape(path: &str) -> String {
+    let b = path.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match (
+            b[i],
+            b.get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok()),
+        ) {
+            (b'%', Some(v)) => {
+                out.push(v);
+                i += 3;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Base64's bytes; none when it is not base64.
+fn unbase64(s: &str) -> Option<Vec<u8>> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0);
+    for c in s.bytes().filter(|&c| c != b'=') {
+        acc = (acc << 6) | u32::from(value(c)?);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// How many pixels a face ([`round`]) is kept at for each point it is
 /// drawn across: a HiDPI screen's two, which a 1× screen draws by
 /// averaging and a 1.5× one by filtering down. Sharper than that is past
@@ -357,6 +439,16 @@ mod tests {
     /// A cache filename has to be a function of the URL and nothing else, or
     /// two runs disagree about where a picture is and the cache never hits.
     /// Falsified by mixing the time into `key`.
+    /// A `file:` URL's escapes are undone and a `data:` URL's base64 read,
+    /// as ark's `path_url` and `data_url` write them.
+    #[test]
+    fn a_local_url_is_read_back() {
+        assert_eq!(super::unescape("/var/Application%20Support/ab"), "/var/Application Support/ab");
+        assert_eq!(super::unbase64("TWFu").unwrap(), b"Man");
+        assert_eq!(super::unbase64("TQ==").unwrap(), b"M");
+        assert!(super::local("https://example.com/a.jpg").is_none());
+    }
+
     #[test]
     fn the_key_is_the_url() {
         assert_eq!(key("https://example.com/a.jpg"), key("https://example.com/a.jpg"));

@@ -59,8 +59,6 @@ pub fn hosted(app: &MoneyWeb, name: &'static str) -> AnyView {
             money_app::transactions::view::transactions::view(&app.transactions.screen_of(&app.store, app.now_ms())).map(Msg::Transactions),
         ),
         "transactions.inspector" => quiet("No Transaction Selected"),
-        // A transaction's receipt in its sheet: the browser's is still to come.
-        "transaction.receipt" => ().into_any(),
         "insights" => {
             arkui_web::render(money_app::insights::view::insights::view(&app.insights.screen_of(&app.store, app.now_ms())).map(Msg::Insights))
         }
@@ -244,7 +242,12 @@ pub fn over(app: &MoneyWeb, page: &ShellPage) -> AnyView {
             Rc::new(|| send(Msg::Settings(false))),
         )
     });
-    let sheets = arkui_web::render(money_app::sheets::view::sheets::view(&app.sheets.screen_of(&app.store, app.now_ms())).map(Msg::Sheets));
+    // A receipt's photo is read from the replica's memory (`data:`).
+    let files = ark::views::WithFiles {
+        views: &app.store,
+        url: |file: &ark::file::FileRef| app.peer.file_url(file),
+    };
+    let sheets = arkui_web::render(money_app::sheets::view::sheets::view(&app.sheets.screen_of(&files, app.now_ms())).map(Msg::Sheets));
     (settings, sheets).into_any()
 }
 

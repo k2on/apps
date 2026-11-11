@@ -5,9 +5,11 @@
 // Rust (`Eyes.look`, on a thread of their own, a frame at a time), what they answer drawn over the
 // preview (their outline gliding on `Springs.move`, their words), and the photo taken when they say
 // or at the shutter, as the sensor took it: the frames' `turns` stand both upright. A plain photo
-// is the same page with no eyes. Reading a QR code needs a decoder Android does not have yet.
+// is the same page with no eyes. A photo picked is the system's Photo Picker's (`PickVisualMedia`:
+// no permission), stood upright by its EXIF, a JPEG at most 3000 on its long side. Reading a QR
+// code needs a decoder Android does not have yet.
 //
-// The page is drawn by `CameraPage`, which an app puts once at its root.
+// The page (and the picker) is drawn by `CameraPage`, which an app puts once at its root.
 package dev.arkui.modules
 
 import android.Manifest
@@ -17,15 +19,20 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.media.ExifInterface
 import android.media.Image
 import android.media.ImageReader
+import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -33,6 +40,7 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -89,12 +97,16 @@ import dev.arkui.Space
 import dev.arkui.Springs
 import dev.arkui.pressable
 import dev.arkui.reducedMotion
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import kotlin.math.abs
+import kotlin.math.max
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uniffi.ark_camera.Camera
 import uniffi.ark_camera.Eyes
 import uniffi.ark_camera.Frame
@@ -104,8 +116,8 @@ import uniffi.ark_camera.ScanReply
 
 /** The phone's back camera; its page is [CameraPage]'s. */
 class PhoneCamera : Camera {
-    /** A photo being taken: who watches (none for a plain photo) and where it goes. */
-    class Asked(val eyes: Eyes?, val reply: PhotoReply)
+    /** A photo being taken (or, `pick`, chosen): who watches (none for a plain photo) and where it goes. */
+    class Asked(val eyes: Eyes?, val reply: PhotoReply, val pick: Boolean = false)
 
     private val _asked = MutableStateFlow<Asked?>(null)
     val asked: StateFlow<Asked?> = _asked
@@ -118,6 +130,8 @@ class PhoneCamera : Camera {
     override fun takePhoto(reply: PhotoReply) = ask(Asked(null, reply))
 
     override fun watch(eyes: Eyes, reply: PhotoReply) = ask(Asked(eyes, reply))
+
+    override fun pickPhoto(reply: PhotoReply) = ask(Asked(null, reply, pick = true))
 
     private fun ask(a: Asked) {
         // One page at a time: one asked while another is up is backed out of.
@@ -139,11 +153,12 @@ class PhoneCamera : Camera {
     }
 }
 
-/** The camera's page, while it is asked for: put once at the app's root. */
+/** The camera's page, or the photo picker, while it is asked for: put once at the app's root. */
 @Composable
 fun CameraPage(camera: PhoneCamera) {
     val asked by camera.asked.collectAsState()
     val a = asked ?: return
+    if (a.pick) return PhotoPicker(camera)
     val context = LocalContext.current
     var allowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
@@ -184,6 +199,48 @@ fun CameraPage(camera: PhoneCamera) {
                     }
             }
         }
+}
+
+/** The system's Photo Picker, one image; what it picked handed over as [libraryPhoto] makes it. */
+@Composable
+private fun PhotoPicker(camera: PhoneCamera) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pick =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult camera.answered(null)
+            scope.launch {
+                val jpeg = withContext(Dispatchers.IO) { runCatching { libraryPhoto(context, uri) }.getOrNull() }
+                if (jpeg == null) camera.failed("That photo couldn't be read") else camera.answered(jpeg)
+            }
+        }
+    LaunchedEffect(Unit) { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+}
+
+/** A photo from the library as a server reads it: a JPEG at most 3000 on its long side, upright. */
+private fun libraryPhoto(context: Context, uri: Uri): ByteArray? {
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0) return null
+    var sample = 1
+    while (max(bounds.outWidth, bounds.outHeight) / sample > 3000) sample *= 2
+    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+    val orientation =
+        runCatching { ExifInterface(bytes.inputStream()).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+            .getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val degrees =
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    val up = if (degrees == 0f) bmp else Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(degrees) }, true)
+    return ByteArrayOutputStream().use { out ->
+        up.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        out.toByteArray()
+    }
 }
 
 @Composable

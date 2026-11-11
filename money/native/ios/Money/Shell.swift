@@ -58,10 +58,7 @@ struct Shell: View {
         // runtime: the sections, their toolbars, search and inspectors.
         MoneyShellView()
             .environmentObject(model.shell)
-            .environment(\.hostedScreens) { name in
-                // A transaction's receipt, in its sheet: this app's own until receipts move into Rust.
-                name == "transaction.receipt" ? AnyView(TransactionReceipt()) : AnyView(hosted(name))
-            }
+            .environment(\.hostedScreens) { name in AnyView(hosted(name)) }
             .environment(\.sectionPath) { tag in path(tag) }
             // The sheets any screen raises, written from Rust (Generated/SheetsView.swift).
             .background {
@@ -224,6 +221,7 @@ struct Shell: View {
         case .review:
             model.shell.send(.select(tag: "transactions"))
             model.transactions?.send(.show(review: true))
+        // A receipt's photo is kept by the bridge (money/bridge's `KeepPhoto`).
         case .filter, .importReceipt, .keepPhoto: break
         }
     }
@@ -325,20 +323,6 @@ struct AccountButton: View {
         case let .page(r)?: open(r)
         case .signOut?: model.signOut()
         case nil: break
-        }
-    }
-}
-
-/// The receipt section of the transaction the sheets' form corrects
-/// (ReceiptViews.swift), and what it raises.
-struct TransactionReceipt: View {
-    @EnvironmentObject private var model: Model
-    @State private var acts = ReceiptActs()
-
-    var body: some View {
-        if let t = model.sheets?.page.transaction, t.hasReceipt {
-            ReceiptSection(txn: Id(t.id), amount: t.signed, day: t.day, payee: t.payee, acts: $acts)
-                .modifier(ReceiptSheets(txn: Id(t.id), acts: $acts))
         }
     }
 }

@@ -179,19 +179,19 @@ does.
   correction says who entered it, can delete it, and can make it a
   transfer (`transfer_to`: paired with the matching one in the other
   account, or given its other half there).
-- **Its receipt** (`Receipts.kt`) — at the foot of a correction's sheet,
-  and a receipt glyph on its row in every register: what paid for it drawn
-  as the paper — monospace on white in light and dark, the store, the day,
-  each item and its price, the total — with "Check this" when the
-  server's reading of its photo doesn't add up. **Scan**, **Choose
-  photo**, **Type it**, and **Attach one** (a receipt nothing pays for yet,
-  the nearest in amount first); a receipt is edited (a reading put right),
-  shown as its photo, or taken off. A photo is kept on the phone at once
-  (`putFile`, docs/plan-files.md) and read by the server when it gets
-  there, so a receipt scanned offline is read once the phone is online.
-- **The scanner** — money_app's receipts (money/app/src/receipts) asks
-  the scanner module (modules/ark-scanner) for a page, and keeps it
-  (`ReceiptsHolder`, Screens.kt). The camera's page is ark-camera's
+- **Its receipt** — in Rust (money/app/src/receipts, generated into the
+  sheets' Compose), at the foot of a correction's sheet, the iPhone's
+  section: what paid for it drawn as the paper (ArkUI's `Paper`,
+  monospace on white in light and dark), with "Check This" when the
+  server's reading of its photo doesn't add up, its photo a tap away
+  (ArkUI's `Photo`, pinched to zoom); **Scan Receipt**, **Choose Photo**
+  (the system's Photo Picker, ark-scanner's `PickPhoto` over ark-camera),
+  **Type Receipt**, and **Match a Receipt** (one nothing pays for yet, the
+  nearest in amount first); a receipt is edited or taken off. A photo is
+  kept on the phone by the bridge at once (`putFile`, docs/plan-files.md)
+  and read by the server when it gets there.
+- **The scanner** — the sheets ask the scanner module (modules/ark-scanner)
+  for a page. The camera's page and the photo picker are ark-camera's
   (modules/ark-camera/kotlin, `CameraPage` at the app's root: Camera2, no
   library); the eyes — DocAligner's corner model on tract, the bright
   region, the sharpness, held still for a second — and the warp are Rust's,

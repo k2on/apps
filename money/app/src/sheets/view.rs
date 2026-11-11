@@ -6,6 +6,7 @@ use ark_app::view;
 use ark_app::view::*;
 
 use super::{ReconcileSheet, SheetsMsg, SheetsPage, TxnSheet};
+use crate::receipts::view::receipt_section;
 
 /// Whichever sheet is up: the transaction's form, a category chosen for
 /// transactions, an account reconciled.
@@ -112,10 +113,9 @@ pub fn txn_fields(t: &TxnSheet) -> View<SheetsMsg> {
             },
         )),
         form_section(name_field("Memo", t.memo, None, |memo| SheetsMsg::Memo { memo })).footer(t.note),
-        // Its receipt as the paper is, or the ways to give it one: the
-        // host's own until receipts move into Rust.
-        if t.has_receipt {
-            hosted("transaction.receipt")
+        // Its receipt as the paper is, or the ways to give it one.
+        if let Some(r) = t.receipt {
+            receipt_section(r)
         },
         if t.editing {
             form_section(list_row("Delete Transaction").glyph("trash").on_tap(SheetsMsg::Delete))

@@ -198,7 +198,8 @@ final class InsightsScreen: ObservableObject {
 }
 
 /// The sheets over the app, running in Rust (money/app/src/sheets): a
-/// transaction's form, a category given, an account reconciled — whoever
+/// transaction's form and its receipt, a category given, an account
+/// reconciled — whoever
 /// raised it (`MoneyRequest.sheet`).
 @MainActor
 final class SheetsScreen: ObservableObject {
@@ -227,47 +228,10 @@ final class SheetsScreen: ObservableObject {
     func reload() {
         page = app.page()
     }
-}
 
-/// A receipt being given, in Rust (money/app/src/receipts): a page scanned
-/// (the scanner over the camera: its eyes and warp Rust's, its page
-/// ark-camera's `PhoneCamera`) and kept by the model, which sends it to the
-/// server to read. What went wrong is said once, as the model says notices.
-@MainActor
-final class ReceiptsScreen {
-    private let app: ReceiptsApp
-    private let shell: ScreenShell
-    /// Keeps a page's photo for a transaction (`Model.addPhoto`).
-    var keep: (Data, Id?) -> Void = { _, _ in }
-    /// Says what went wrong (`Model.notice`).
-    var say: (String) -> Void = { _ in }
-
-    init(session: Session, devices: Devices?, refresh: @escaping () -> Void, today: @escaping () -> String) {
-        let shell = ScreenShell(refresh: refresh, today: today)
-        self.shell = shell
-        app = ReceiptsApp(session: session, shell: shell)
-        if let devices { app.useDevices(devices: devices) }
-        shell.requested = { [weak self] r in
-            if case let .keepPhoto(jpeg, txn) = r { self?.keep(jpeg, txn.map(Id.init)) }
-        }
-    }
-
-    /// `msg` taken; what went wrong said.
-    func send(_ msg: ReceiptsMsg) {
-        app.send(msg: msg)
-        said()
-    }
-
-    /// The camera answered: what came of it taken.
+    /// The camera or the photo picker answered (a receipt's page): what came of it taken.
     func answered() {
-        if app.drain() { said() }
-    }
-
-    private func said() {
-        if let p = app.page().problem {
-            say(p)
-            app.send(msg: .dismiss)
-        }
+        if app.drain() { page = app.page() }
     }
 }
 

@@ -37,6 +37,10 @@ public object MotionTokens {
     public const val RUBBER_BAND: Float = 0.55f
     /** How large a row held to be dragged grows. */
     public const val LIFT: Float = 1.02f
+    /** The most a pinched photo grows, as a multiple of the size it is fitted at. */
+    public const val ZOOM_MAX: Float = 4.0f
+    /** What a double tap zooms a photo to. */
+    public const val ZOOM_TAP: Float = 2.5f
     /** How far a page or a step slides as it comes or goes, as a share of its width. */
     public const val SHIFT: Float = 0.2f
     /** How small a cover is drawn while what it plays is paused. */
