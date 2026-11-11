@@ -33,6 +33,12 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # The relying party: discovery, the code exchange and the ID token's checks,
 # over the ureq agent above (its `SyncHttpClient`), never reqwest.
 openidconnect = { version = "4.0.1", default-features = false, features = ["ureq"] }
+# The provider's certificate, on a server: the public roots ureq carries
+# and the machine's own (`oidc::tls`), with ureq's TLS stack. Not on a
+# phone, which never speaks to the provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+webpki-roots = { version = "0.26", optional = true }
 
 # In a browser: the page's own address, fetch, and localStorage.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -43,7 +49,7 @@ web-sys = { version = "0.3", features = ["Headers", "History", "Location", "Requ
 
 [features]
 default = ["server"]
-server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+server = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:rustls", "dep:rustls-native-certs", "dep:webpki-roots"]
 ffi = ["dep:uniffi"]
 
 [dev-dependencies]

@@ -80,9 +80,37 @@ pub fn read_secret(path: impl AsRef<std::path::Path>) -> Result<String, String> 
 
 /// The agent every request to the provider goes through: no redirects
 /// followed (the crate's advice, against a server-side request forged by a
-/// provider's answer), fifteen seconds at most.
+/// provider's answer), fifteen seconds at most, and on a server the
+/// machine's own roots trusted too ([`tls`]).
 fn http() -> ureq::Agent {
-    ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(15)).build()
+    let agent = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(15));
+    #[cfg(feature = "server")]
+    let agent = agent.tls_config(tls());
+    agent.build()
+}
+
+/// The provider's certificate is checked against the public roots every
+/// build carries and the machine's own: a household's provider is often
+/// under its own CA, which the machine trusts and webpki's list never
+/// will (NixOS's `security.pki.certificateFiles`, a test's VM). Read once,
+/// at the first request; a CA added later is the next start's.
+#[cfg(feature = "server")]
+fn tls() -> std::sync::Arc<rustls::ClientConfig> {
+    static TLS: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    TLS.get_or_init(|| {
+        let mut roots = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        // A machine with no store of its own still has the public roots.
+        roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
+        let config = rustls::ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
+            .expect("ring's suites cover TLS 1.2 and 1.3")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        std::sync::Arc::new(config)
+    })
+    .clone()
 }
 
 type Client = CoreClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointMaybeSet, EndpointMaybeSet>;
